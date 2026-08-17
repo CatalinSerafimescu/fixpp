@@ -4,55 +4,116 @@
 # tools/bench_compare.py (what to compare). Two hand-maintained copies of a list
 # is how a gate silently stops covering something.
 #
-# Format:  <cmake target / binary name>    <baseline path, relative to bench/baselines/>
-# Blank lines and #-comments ignored. Exactly two whitespace-separated fields.
+# FORMAT — exactly three whitespace-separated fields:
+#
+#   <exe path, relative to the build dir>   <tier-3 comparand>   <tier-2>
+#
+#   tier-3 comparand : `gb-json:<path under bench/baselines/>`  — a genuine
+#                      Google-Benchmark baseline; ±5% deltas are REPORTED.
+#                      `none:<reason>` — no machine comparand exists. The reason
+#                      is PRINTED; a row is never silently skipped, because a
+#                      skipped row is how a gate reads green on nothing.
+#   tier-2           : `paired` or `no` — whether this binary is compared
+#                      base-vs-candidate on the same runner (the HARD timing
+#                      signal). See .specify/ci209-bench-gate.md §3.
+#
+# ⚠️ THE EXE PATHS ARE NOT ALL `bin/`. bench/ sets RUNTIME_OUTPUT_DIRECTORY
+# per subdirectory — wire/core/capi/codegen/dictionary/sync each get their own,
+# while tls and session land in `bin/`. A single-directory assumption would make
+# the "binary missing" cell fire on a correct tree.
 #
 # ── WHY AN EXPLICIT ALLOWLIST AND NOT `ctest -L bench` ────────────────────────
-# `ctest -L bench` resolves to the FOUR add_test registrations in bench/ —
-# compile_time_bench, vlatest_builders_compile_bench, the tls benches and
-# bench_threading — and to NONE of the Google-Benchmark executables, which are
-# bare add_executable targets invoked by path. Sweeping the label would run the
-# compile-time ceiling harness, which `v44` breaches at ~4.5 s against its flat
-# 3 s ceiling and always has (#209). That ceiling is deliberately NOT wired here;
-# see .specify/ci209-bench-gate.md §1a/§6.
+# This job invokes NO CTest at all — it runs binaries by path. That, and only
+# that, is what keeps `compile_time_bench` out: it breaches its own flat 3 s
+# ceiling at ~4.5 s for `v44` and always has (#209), so a label sweep would red
+# on main immediately. For the record, `ctest -L bench` resolves to SIX
+# configured entries, three of which ARE Google-Benchmark binaries registered
+# through the `fixpp_add_tls_bench` function — see .specify/ci209-bench-gate.md
+# §1a, where an earlier "exactly four, none of them benchmarks" claim is
+# corrected.
 #
 # ── SELECTION RULE: single-threaded, CPU-bound, no network, no disk WRITE ─────
-# Deliberately EXCLUDED under that rule, and each exclusion is a flake source,
-# not an oversight:
-#   bench/sync/*        contended async-mutex — timing is a function of scheduling
-#   bench/threading/*   ditto, explicitly a concurrency benchmark
-#   bench/session/*     FileStore does real disk I/O; baselines are even named
-#                       *_WSLUBUNTU24.04.json, i.e. host-specific by construction
-#   bench/tls/*         loopback sockets + real handshakes
-#   bench/transport/*   loopback sockets
-#   bench/log/log_spike tail-latency spike probe — a noise instrument by design
-#   placeholder_bench   its baseline is the null-`cpu_time` shape the comparator
-#                       now rejects (A5); it measures nothing
-# They can join once the timing axis has a demonstrated noise floor
-# (.specify/ci209-bench-gate.md §6) — they are the LAST things to gate on, not
-# the first.
+# Applied PER BINARY, not per directory. An earlier draft excluded whole
+# directories because one member was noisy, which dropped deterministic hot
+# paths (`bench_pinset_*`, `bench_async_mutex_uncontended`, `fix_time_bench`,
+# `bench_memory_store`) for their siblings' sins.
+#
+# Excluded, each for its own stated reason:
+#   bench_async_mutex_contended     contention is a scheduling measurement
+#   bench_threading                 explicitly a concurrency benchmark
+#   bench_file_store                real disk I/O
+#   bench_verify_peer_in_envelope   real TLS handshake
+#   bench_tls_handshake_loopback    loopback sockets
+#   bench_async_read_some_dispatch  loopback sockets
+#   bench_async_write_issue         loopback sockets
+#   log_spike                       a tail-latency noise instrument by design
+#   log_enqueue_bench               its only baseline is library_build_type=debug
+#   placeholder_bench               measures nothing; its baseline is the
+#                                   null-cpu_time shape tier 1 rejects
+#   heartbeat_bench                 an explicit SCOPE PLACEHOLDER
+#                                   (heartbeat_bench.cpp:31-38), not a measurement
+#   check_alive_bench               its measured operation compiles to a no-op in
+#                                   release (check_alive_bench.cpp:7-26), so a
+#                                   release timing lane measures nothing
+#
+# ⚠️ Every exclusion above cites a SOURCE property of that binary. An earlier
+# draft excluded whole directories because one member was noisy, which dropped
+# deterministic hot paths for their siblings' sins; `log_enqueue_bench` in
+# particular was excluded for having a debug baseline when the real reason is
+# that it runs a drain thread (log_enqueue.cpp:11-23,62-80).
 
 # ── core ─────────────────────────────────────────────────────────────────────
-decimal_bench                   decimal_baseline.json
+bench/core/decimal_bench                    gb-json:decimal_baseline.json                    no
 
 # ── dictionary ───────────────────────────────────────────────────────────────
-# xml_loader_bench is the #263 target: XmlLoader::load regressed 60-90% unseen.
-xml_loader_bench                dictionary/xml_loader.json
-table_view_footprint_bench      dictionary/table_view_footprint_bench.json
-reify_bench                     dictionary/reify_bench.json
+# xml_loader_bench is the #263 target — XmlLoader::load regressed 60-90% unseen.
+# It is the single most important `paired` row in this file.
+bench/dictionary/xml_loader_bench           gb-json:dictionary/xml_loader.json               paired
+bench/dictionary/table_view_footprint_bench none:records-footprint-in-bytes-not-timing       no
+bench/dictionary/reify_bench                none:baseline-has-zero-benchmark-rows            no
 
 # ── codegen ──────────────────────────────────────────────────────────────────
-typed_accessor_bench            codegen/typed_accessor_bench.json
+bench/codegen/typed_accessor_bench          none:baseline-has-zero-benchmark-rows            no
 
 # ── C-ABI ────────────────────────────────────────────────────────────────────
-capi_commit_group_bench         capi/capi_commit_group_bench.json
+bench/capi/capi_commit_group_bench          none:hand-authored-record-no-cpu_time-field      no
 
 # ── wire ─────────────────────────────────────────────────────────────────────
-framer_bench                    wire/framer_bench.json
-parser_bench                    wire/parser_bench.json
-offset_table_bench              wire/offset_table_bench.json
-writer_bench                    wire/writer_bench.json
-validator_bench                 wire/validator_bench.json
-validate_group_bench            wire/validate_group_bench.json
-fix42_group_parse_bench         wire/fix42_group_parse_bench.json
-typed_read_group_bench          wire/typed_read_group_bench.json
+# Every wire baseline is a hand-authored analysis record (ceiling_ns,
+# ceiling_source, measured_debug_ns, verdict, ...) with no cpu_time on any row,
+# so none of them is a machine comparand. The four hottest get `paired` instead,
+# which needs no baseline at all.
+bench/wire/framer_bench                     none:hand-authored-record-no-cpu_time-field      paired
+bench/wire/parser_bench                     none:hand-authored-record-no-cpu_time-field      paired
+bench/wire/writer_bench                     none:hand-authored-record-no-cpu_time-field      paired
+bench/wire/validator_bench                  none:hand-authored-record-no-cpu_time-field      paired
+bench/wire/offset_table_bench               none:hand-authored-record-no-cpu_time-field      no
+bench/wire/offset_table_footprint_bench     none:no-gb-baseline-recorded                     no
+bench/wire/validate_group_bench             none:hand-authored-record-no-cpu_time-field      no
+bench/wire/fix42_group_parse_bench          none:hand-authored-record-no-cpu_time-field      no
+bench/wire/typed_read_group_bench           none:hand-authored-record-no-cpu_time-field      no
+
+# ── sync (uncontended only — one coroutine, no contender) ────────────────────
+# ⚠️ `sync/async_mutex_baselines.json` HAS a `cpu_time` key, and is still NOT
+# Google-Benchmark output: its rows are `ceiling_ns` / `ceiling_source` /
+# `ceiling_tolerance_pct` / `measured_ns` / `cpu_time` / `name`, with no
+# `real_time`, no `time_unit` and no `run_type`. Presence of one familiar key is
+# not schema validation — an earlier draft classified it `gb-json` on exactly
+# that mistake (Codex round 2, F7).
+bench/sync/bench_async_mutex_uncontended    none:hand-authored-record-partial-gb-schema      no
+
+# ── tls (in-memory pinset ops; no socket, no handshake) ──────────────────────
+bin/bench_pinset_snapshot_acquire           none:no-gb-baseline-recorded                     no
+bin/bench_pinset_find                       none:no-gb-baseline-recorded                     no
+
+# ── session (in-memory / pure-format rows only) ──────────────────────────────
+bin/fix_time_bench                          gb-json:session/fix_time_baseline.json           no
+bin/bench_memory_store                      gb-json:session/bench_memory_store_WSLUBUNTU24.04.json  no
+# Added on a SOURCE reading, overriding an earlier directory-level exclusion that
+# had lumped these in with the FSM's mock-clock benches (Codex round 2, F7):
+# fsm_bench is a pure build_heartbeat() CPU loop (fsm_bench.cpp:31-64),
+# seqnum_bench uses one local io_context with no contender (seqnum_bench.cpp:34-59),
+# and bench_compid_authorize is a pure hash/string lookup (:54-105).
+bin/fsm_bench                               gb-json:session/fsm_baseline.json                no
+bin/seqnum_bench                            gb-json:session/seqnum_baseline.json             no
+bin/bench_compid_authorize                  none:no-gb-baseline-recorded                     no

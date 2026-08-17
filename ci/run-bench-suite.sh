@@ -1,96 +1,100 @@
 #!/usr/bin/env bash
-# ci/run-bench-suite.sh — run the CI benchmark allowlist and stamp provenance (#209).
+# ci/run-bench-suite.sh — run the CI benchmark allowlist (#209).
 #
 # WHY THIS EXISTS. `tier1.yml`'s `bench` job ran `placeholder_bench` — a benchmark
-# that measures nothing — under `continue-on-error: true`, and compared it with a
-# comparator that `return 0`s by construction. Three independent softnesses, so
-# no CI job has ever reported a runtime perf regression of any size. #263 is the
-# concrete cost: `XmlLoader::load` regressed 60-90% ON MAIN and nothing saw it.
+# that measures nothing — under `continue-on-error: true`, compared it with a
+# comparator that `return 0`s by construction, and was absent from
+# `tier1-required`'s `needs:`. No CI job has ever reported a runtime perf
+# regression of any size. #263 is the concrete cost: `XmlLoader::load` regressed
+# 60-90% ON MAIN and nothing saw it.
 #
-# This script is the "actually run the real benchmarks" half. `tools/bench_compare.py`
-# is the "actually assert something" half.
+# This script is the "actually run the real benchmarks" half.
+# `tools/bench_compare.py` is the "actually assert something" half.
 #
-# ⚠️ IT FAILS CLOSED, and that is the entire point. A missing binary, a crashed
+# ⚠️ IT FAILS CLOSED, and that is the whole point. A missing binary, a crashed
 # binary, or an unwritten results file is an ERROR here, not a warning — the
-# previous design treated exactly those as "bench binary may not exist yet" and
-# exited 0. See .specify/ci209-bench-gate.md §4 cells A1/A6.
+# previous design treated exactly those as "bench binary may not exist yet".
 #
-# PROVENANCE. Every emitted JSON gets `context.fixpp_provenance` stamped in.
-# `tools/bench_compare.py` uses it to decide whether a baseline is a VALID
-# comparand for a wall-clock comparison at all: every pre-#209 baseline in
-# bench/baselines/ was recorded on the WSL2 dev host (num_cpus 8 or 10, or the
-# key absent) and four wire/* baselines are `build_type: debug`. Comparing a CI
-# measurement against those is invalid at ANY band, not merely noisy — #263
-# measured the dev host drifting -35% against ITSELF across two sessions.
-#
-# Usage: ci/run-bench-suite.sh <bin-dir> <out-dir> [manifest]
-#   bin-dir   directory holding the built benchmark executables
-#             (e.g. build/linux-clang-release/bin)
-#   out-dir   where to write <target>.json (created if absent)
-#   manifest  default: bench/ci-suite.txt
+# Usage: ci/run-bench-suite.sh <build-dir> <out-dir> [--only-paired] [manifest]
+#   build-dir  the CMake build directory (e.g. build/linux-clang-release).
+#              ⚠️ NOT a `bin/` directory — bench/ sets RUNTIME_OUTPUT_DIRECTORY
+#              per subdirectory, so the manifest carries each exe's own path.
+#   out-dir    where to write <name>.json (created if absent)
+#   --only-paired  run only the rows marked `paired` (tier 2's base leg — there
+#              is no reason to run the full suite against the merge-base)
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-BIN_DIR="${1:-}"
-OUT_DIR="${2:-}"
-MANIFEST="${3:-$repo_root/bench/ci-suite.txt}"
+BUILD_DIR=""; OUT_DIR=""; ONLY_PAIRED=false; MANIFEST="$repo_root/bench/ci-suite.txt"
+for arg in "$@"; do
+    case "$arg" in
+        --only-paired) ONLY_PAIRED=true ;;
+        *) if   [ -z "$BUILD_DIR" ]; then BUILD_DIR="$arg"
+           elif [ -z "$OUT_DIR" ];   then OUT_DIR="$arg"
+           else MANIFEST="$arg"; fi ;;
+    esac
+done
 
 fail() { echo "::error::run-bench-suite: $1" >&2; exit 1; }
 
-[ -n "$BIN_DIR" ] && [ -n "$OUT_DIR" ] || fail "usage: $0 <bin-dir> <out-dir> [manifest]"
-[ -d "$BIN_DIR" ] || fail "bin-dir does not exist: $BIN_DIR"
+[ -n "$BUILD_DIR" ] && [ -n "$OUT_DIR" ] || fail "usage: $0 <build-dir> <out-dir> [--only-paired] [manifest]"
+[ -d "$BUILD_DIR" ] || fail "build-dir does not exist: $BUILD_DIR"
 [ -f "$MANIFEST" ] || fail "manifest not found: $MANIFEST"
-command -v python3 >/dev/null || fail "python3 is required (provenance stamping)"
 
 mkdir -p "$OUT_DIR"
 
-# Repetitions + aggregates-only: a single sample has no dispersion, so the
-# timing axis could never grow a defensible band from it. `_median`/`_stddev`/
-# `_cv` rows are what §6 needs to establish a noise floor before it can go hard.
-# Baselines are SEEDED BY THIS SAME SCRIPT, so baseline and current carry the
-# identical aggregate name set and the A3 name-set check compares like with like.
+# Repetitions + aggregates-only: a single sample carries no dispersion, so
+# neither the tier-2 band nor any future tightening of it could ever be grounded
+# in evidence. The `_median`/`_stddev`/`_cv` rows are what make the A-vs-A noise
+# floor in tools/bench_compare.py --paired computable at all.
 REPS="${FIXPP_BENCH_REPETITIONS:-3}"
 
-# ── AC-1: the runner's own hardware, printed. Without this there is no evidence
-# for the provenance argument at all — the pre-#209 job never printed it, which
-# is why #209's analysis had to reason about the runner class rather than read it.
+# ── AC-1: the runner's own hardware and toolchain, printed. The pre-#209 job
+# printed none of it, which is why #209's analysis had to REASON about the
+# runner class instead of reading it.
 echo "=== bench suite — runner context ==="
-echo "  nproc            : $(nproc)"
-echo "  repetitions      : ${REPS}"
-echo "  bin dir          : ${BIN_DIR}"
-echo "  manifest         : ${MANIFEST}"
-if [ -r /proc/cpuinfo ]; then
-    echo "  model name       : $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//' || echo '(unknown)')"
-fi
+echo "  nproc       : $(nproc)"
+echo "  repetitions : ${REPS}"
+echo "  build dir   : ${BUILD_DIR}"
+echo "  manifest    : ${MANIFEST}"
+echo "  only-paired : ${ONLY_PAIRED}"
+[ -r /proc/cpuinfo ] && echo "  cpu model   : $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
+command -v clang++ >/dev/null && echo "  compiler    : $(clang++ --version | head -1)"
 echo ""
 
-# `RUNNER_*` are GitHub-set; empty locally, which is itself informative — a
-# baseline seeded from a laptop must not claim CI provenance.
-PROV_SOURCE="${FIXPP_BENCH_SOURCE:-${GITHUB_WORKFLOW:+ci/${GITHUB_WORKFLOW}/bench}}"
-PROV_SOURCE="${PROV_SOURCE:-local}"
-PROV_PRESET="${FIXPP_BENCH_PRESET:-linux-clang-release}"
-PROV_RUNNER="${RUNNER_OS:+${RUNNER_OS}/${ImageOS:-unknown}}"
-PROV_RUNNER="${PROV_RUNNER:-local}"
-
 count=0
-while read -r target baseline; do
-    # Skip blanks / comments. Guard against a manifest row with the wrong arity:
-    # a one-field row would silently bind $baseline to the empty string and the
+skipped=0
+while read -r exe_rel comparand tier2; do
+    [ -z "${exe_rel:-}" ] && continue
+    case "$exe_rel" in \#*) continue ;; esac
+    # A row with the wrong arity would bind a field to the empty string and the
     # comparator would then look for a baseline named "".
-    [ -z "${target:-}" ] && continue
-    case "$target" in \#*) continue ;; esac
-    [ -n "${baseline:-}" ] || fail "manifest row for '${target}' has no baseline field (need exactly 2 fields)"
+    [ -n "${comparand:-}" ] && [ -n "${tier2:-}" ] \
+        || fail "manifest row '${exe_rel}' does not have exactly 3 fields"
+    case "$tier2" in paired|no) ;; *) fail "manifest row '${exe_rel}': tier-2 field must be 'paired' or 'no', got '${tier2}'" ;; esac
 
-    bin="${BIN_DIR}/${target}"
-    # A6 — an allowlisted binary missing from the build tree. Previously this
-    # was the `continue-on-error` case; the suite would silently shrink and the
-    # job stayed green having measured nothing.
-    [ -x "$bin" ] || fail "allowlisted benchmark '${target}' is not built or not executable at ${bin}. \
+    if [ "$ONLY_PAIRED" = true ] && [ "$tier2" != "paired" ]; then
+        skipped=$((skipped + 1)); continue
+    fi
+
+    name="$(basename "$exe_rel")"
+    bin="${BUILD_DIR}/${exe_rel}"
+    # T1-3 — an allowlisted binary missing from the build tree. Previously this
+    # was the `continue-on-error` case: the suite silently shrank and the job
+    # stayed green having measured nothing.
+    [ -x "$bin" ] || fail "allowlisted benchmark '${name}' is not built or not executable at ${bin}. \
 The suite must not silently shrink — either build it or remove its row from ${MANIFEST}."
 
-    out="${OUT_DIR}/${target}.json"
-    echo "--- ${target} ---"
+    out="${OUT_DIR}/${name}.json"
+    echo "--- ${name} ---"
+    # ⚠️ FOUND BY ci/test-bench-gate.sh CELL R-SILENT, not by review. Without
+    # this `rm -f`, the "binary exited 0 but wrote nothing" check below is
+    # satisfied by a STALE file from an earlier invocation into the same
+    # out-dir, and a benchmark that silently stopped emitting results reads as
+    # a clean measurement. The cell is deliberately left running against a
+    # populated out-dir so it keeps exercising exactly that.
+    rm -f "$out"
     # No `|| true`, no `continue-on-error`: a crashed benchmark fails the job.
     "$bin" \
         --benchmark_format=json \
@@ -99,38 +103,19 @@ The suite must not silently shrink — either build it or remove its row from ${
         --benchmark_repetitions="${REPS}" \
         --benchmark_report_aggregates_only=true \
         --benchmark_display_aggregates_only=true \
-      || fail "benchmark '${target}' exited non-zero"
+      || fail "benchmark '${name}' exited non-zero"
 
-    # A1 — the binary can exit 0 having written nothing (bad --benchmark_out
-    # path, disk full). Checked here rather than left for the comparator so the
-    # error names the producer.
-    [ -s "$out" ] || fail "benchmark '${target}' exited 0 but wrote no results to ${out}"
-
-    python3 - "$out" "$PROV_SOURCE" "$PROV_PRESET" "$PROV_RUNNER" "$REPS" <<'PY'
-import json, sys
-path, source, preset, runner, reps = sys.argv[1:6]
-with open(path) as f:
-    d = json.load(f)
-ctx = d.setdefault("context", {})
-ctx["fixpp_provenance"] = {
-    "source": source,
-    "preset": preset,
-    "runner": runner,
-    "repetitions": int(reps),
-}
-with open(path, "w") as f:
-    json.dump(d, f, indent=2)
-    f.write("\n")
-PY
+    # T1-1 — a binary can exit 0 having written nothing (bad path, disk full).
+    # Checked here as well as in the comparator so the error names the producer.
+    [ -s "$out" ] || fail "benchmark '${name}' exited 0 but wrote no results to ${out}"
 
     count=$((count + 1))
 done < "$MANIFEST"
 
-# A manifest that parsed to zero rows would leave the comparator with nothing to
-# check and every downstream assertion vacuously satisfied — the silent-empty
-# class this repo has hit three times in one gate
-# (feedback_silent_empty_recurred_three_times_including_inside_its_own_fix).
-[ "$count" -gt 0 ] || fail "manifest ${MANIFEST} yielded zero benchmark rows"
+# A manifest that parses to zero rows leaves every downstream assertion
+# vacuously satisfied — the silent-empty class this repo has hit three times in
+# one gate (feedback_silent_empty_recurred_three_times_including_inside_its_own_fix).
+[ "$count" -gt 0 ] || fail "manifest ${MANIFEST} yielded zero runnable rows (only-paired=${ONLY_PAIRED})"
 
 echo ""
-echo "bench suite: ran ${count} benchmark binaries -> ${OUT_DIR}"
+echo "bench suite: ran ${count} binaries (${skipped} skipped by --only-paired) -> ${OUT_DIR}"

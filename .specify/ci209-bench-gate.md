@@ -216,40 +216,53 @@ trail** for tightening it, and no tightening happens without those samples.
 A `none` row is **never silently skipped** — it prints its disqualifier by name. A skipped row is how
 a gate reads green on nothing.
 
-### The allowlist, enumerated here and not only in code (Codex F6)
+### The allowlist — `bench/ci-suite.txt` is the ONE source of truth
 
-Selection rule: **single-threaded, CPU-bound, no network, no disk write.** Codex was right that r1
-applied this **by directory**, excluding deterministic benchmarks because a sibling was noisy. The
-rule is now applied **per binary**, and his four counterexamples are included:
+⚠️ **An earlier revision of this record carried its own copy of the table and the
+two drifted immediately** — the record said 14 binaries in one paragraph and
+listed 19 in the next, and classified three rows `none` that the manifest called
+`gb-json` (Codex round 2, F7). A second hand-maintained copy of a list is exactly
+what the manifest's own header warns against, so the table is gone. The manifest
+carries the per-row reason inline; this section carries only the rule and the
+census, both machine-checkable against it.
 
-| binary | tier 2? | tier 3 comparand |
-|---|---|---|
-| `decimal_bench` | no | `gb-json` — `decimal_baseline.json` |
-| `xml_loader_bench` | **yes** | `gb-json` — `dictionary/xml_loader.json` |
-| `table_view_footprint_bench` | no | `none` (footprint, not timing) |
-| `reify_bench` | no | `none` (empty) |
-| `typed_accessor_bench` | no | `none` (empty) |
-| `capi_commit_group_bench` | no | `none` |
-| `framer_bench` | **yes** | `none` |
-| `parser_bench` | **yes** | `none` |
-| `offset_table_bench` | no | `none` |
-| `writer_bench` | **yes** | `none` |
-| `validator_bench` | **yes** | `none` |
-| `validate_group_bench` | no | `none` |
-| `fix42_group_parse_bench` | no | `none` |
-| `typed_read_group_bench` | no | `none` |
-| `bench_pinset_snapshot_acquire` | no | `none` — *in-memory, no socket* (Codex F6) |
-| `bench_pinset_find` | no | `none` — *in-memory, no socket* (Codex F6) |
-| `bench_async_mutex_uncontended` | no | `none` — *one coroutine, no contender* (Codex F6) |
-| `fix_time_bench` | no | `none` — *fixed-input format/parse* (Codex F6) |
-| `bench_memory_store` | no | `none` — *in-memory, distinct from `bench_file_store`* (Codex F6) |
+**Selection rule: single-threaded, CPU-bound, no network, no disk write —
+applied PER BINARY, on a reading of that binary's source.** The earlier
+directory-level application was wrong and dropped deterministic hot paths for
+their siblings' sins; `bench_pinset_snapshot_acquire`, `bench_pinset_find`,
+`bench_async_mutex_uncontended`, `fix_time_bench`, `bench_memory_store`,
+`fsm_bench`, `seqnum_bench`, `bench_compid_authorize` and
+`offset_table_footprint_bench` were all restored on that basis.
 
-Still excluded, **per binary and for a stated reason**: `bench_async_mutex_contended` (contention is
-a scheduling measurement), `bench_threading` (explicitly a concurrency benchmark),
-`bench_file_store` (real disk I/O), `bench_verify_peer_in_envelope` (real handshake),
-`bench_tls_handshake_loopback` / `bench_async_read_some_dispatch` / `bench_async_write_issue`
-(loopback sockets), `log_spike` (a noise instrument by design), `placeholder_bench` (measures
-nothing; its baseline is the null-`cpu_time` shape T1-5 rejects).
+Every exclusion now cites a source property rather than a directory:
+`bench_async_mutex_contended` (contention is a scheduling measurement),
+`bench_threading` (a concurrency benchmark), `bench_file_store` (real disk I/O),
+`bench_verify_peer_in_envelope` (real handshake), the loopback-socket transport
+benches, `log_spike` (a noise instrument by design), `log_enqueue_bench` (runs a
+drain thread — *not*, as an earlier draft said, merely because its baseline is
+debug), `heartbeat_bench` (an explicit scope placeholder), `check_alive_bench`
+(its measured operation compiles to a no-op in release), and `placeholder_bench`
+(measures nothing).
+
+**Census, as it stands (derive, do not trust this line):**
+
+```
+grep -c '^bench/\|^bin/' bench/ci-suite.txt   # 23 binaries
+awk '$3=="paired"' bench/ci-suite.txt | wc -l  # 5 tier-2 rows
+```
+
+23 binaries under tier 1; **5** under tier 2 (`xml_loader_bench`, `framer_bench`,
+`parser_bench`, `writer_bench`, `validator_bench`); **6** carry a `gb-json`
+tier-3 comparand and the remaining 17 a named `none:` disqualifier.
+
+⚠️ **A `cpu_time` key is not schema validation.** `sync/async_mutex_baselines.json`
+has one and is still a hand-authored record — its rows are `ceiling_ns` /
+`ceiling_source` / `measured_ns` with no `real_time`, `time_unit` or `run_type`.
+It was classified `gb-json` on that mistake and is now `none:`. For the same
+reason the r2 claim of "12 genuine Google-Benchmark files" in §2b is **withdrawn**:
+that count came from `has("cpu_time")`, which also admits `placeholder.json`
+(null timings) and the async-mutex record. The 10-file zero-`cpu_time` count and
+the 3 empty files are unaffected and stand.
 
 ---
 
@@ -260,7 +273,7 @@ Per `.specify/ci241-coverage-ccache.md` §3, so no band can be fitted to the num
 | # | criterion | if unmet |
 |---|---|---|
 | **AC-1** | the job prints `nproc`, CPU model, compiler version, and the Google-Benchmark `context` for every binary | **block** |
-| **AC-2** | with an allowlisted baseline blanked to `{"benchmarks": []}`, the `bench` job is **RED in a real CI run**, failing at the comparator on the cell that names the defect | **block** |
+| **AC-2** | a probe makes the `bench` job **RED in a real CI run**, failing on the cell that names the defect. The probe is a **manifest row naming a binary that is not built** (tier-1 cell T1-3) — deterministic, one line, trivially reverted | **block** |
 | **AC-3** | with the probe reverted, the same job is **GREEN** on otherwise-unmodified code | **block** |
 | **AC-4** | `ci/test-bench-gate.sh` asserts every T1-1…T1-8 cell **and** the tier-2 comparison, and **each mutant reddens the one cell that names its defect** | **block** |
 | **AC-5** | `bench` is in `tier1-required`'s `needs:` **and** its `== success` assertion loop, in the same commit | **block** |
@@ -270,6 +283,12 @@ Per `.specify/ci241-coverage-ccache.md` §3, so no band can be fitted to the num
 
 AC-2/AC-3 are the both-poles requirement, and AC-2 is proven on a **deterministic** cell — never on
 the timing band, whose RED would be unreproducible and would prove nothing about the gate.
+
+⚠️ **AC-2 was rewritten because its r2 form described the abandoned design** (Codex round 2, F6). It
+said "blank a checked-in baseline". Under the pivot a checked-in baseline feeds **tier 3, which is
+informational** — blanking one produces a printed `NOT COMPARED` line and a green job. The criterion
+was unsatisfiable as written, and had it been left there the RED proof would have been attempted,
+failed, and read as the gate being broken.
 
 AC-8 replaces r1's "record, do not block". Codex F9 is right that the old wording permitted a 35–180
 minute job (the step's `timeout-minutes: 180`) to satisfy every blocking criterion while materially
@@ -293,9 +312,26 @@ than comparing a tree with itself.
 
 ## 6. What this PR does NOT close, stated plainly
 
+### 6a. ⚠️ The residual reach, stated as a number rather than left implicit
+
+**A 49 % `xml_loader_bench` slowdown passes tier 2 by design**, and an arbitrarily large slowdown in
+any of the 18 binaries not marked `paired` passes every timing axis. That is the honest cost of a
+provisional band and a small tier-2 set. Codex round 2 (F11) is right that "provisional" becomes
+permanent unless the promotion rule is written down now, so:
+
+| promotion | criterion, fixed here | trigger |
+|---|---|---|
+| tighten the tier-2 band | after **20** `push:main` runs, set the band to `p95(observed A-vs-A and B-vs-B spread) × 2`, floored at 10 % and capped at the current 50 % — it may only ever narrow | a tracked issue filed with this PR |
+| tighten the noise band | same sample, `p95 × 1.5`, floor 5 % | same issue |
+| add a binary to tier 2 | its A-vs-A spread stays under the noise band across the same 20 runs | same issue |
+| tier 3 → hard | requires a non-circular comparand, which requires #263 fixed | blocked on #263 |
+
+The A-vs-A and B-vs-B figures the job prints every run are that evidence trail; the artifact upload
+retains them for 14 days.
+
 | left open | why | lands as |
 |---|---|---|
-| tightening the tier-2 band below 50 % | needs the A-vs-A samples the job starts producing | follow-up, gated on accumulated evidence |
+| tightening the tier-2 band below 50 % | needs the 20 samples §6a specifies | follow-up issue, criteria fixed in §6a |
 | tier 3 going hard at ±5 % | needs a non-circular comparand, which needs #263 fixed first | follow-up, blocked on #263 |
 | re-seeding the 10 hand-authored baselines as real Google-Benchmark JSON | they are cited records; converting them is a separate, reviewable act | follow-up |
 | the `compile_time_bench` 3 s ceiling and #209's per-class model | #209's own caveat — *"R² = 0.9996 on n = 4, one machine, one compiler should raise suspicion, not confidence"*; and §1b shows it is not the only pre-breached ceiling | #209 stays **open** for items 2/3/4 |
