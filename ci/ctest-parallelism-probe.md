@@ -1,8 +1,13 @@
 # `ctest` parallelism — single-lane probe (TSan)
 
 **Status:** MERGED (PR #227, squash `80ccb782`), **three measurements in — all green**.
-`linux-clang-tsan` only. Do **not** copy `execution.jobs` to any other test preset yet: acceptance
-criterion **4** (peak memory) is still unmet.
+
+⚠️ **This document has two layers and they are dated differently.** Everything below the
+*"MEASURED — 2026-08-04"* heading is the original single-lane probe record and is correct for the
+runs it cites. The **#266 section inside the acceptance table** carries the live mechanism: the
+cgroup instrument that criterion 4 depended on never produced a reading, so both the source and the
+closure condition were replaced. Read that section before acting on criterion 4 — the sentences it
+supersedes are deliberately left in place as a record of a falsified assumption, not as instructions.
 
 ## MEASURED — 2026-08-04
 
@@ -54,7 +59,363 @@ All three step-duration runs (and both `Total Test time` samples that overlap th
 | 1 | materially lower over more than one run | **MET** — 1935 / 1806 / 1859, all far below the 3300–3356 band |
 | 2 | no failures, no `exit 143` / OOM | **MET** — 346/346 on all three runs |
 | 3 | no previously-stable test turns intermittent | **MET** — identical 346 count and zero failures across three runs |
-| 4 | peak RSS / cgroup `memory.peak` captured | **UNMET** — still not measured. Closes on the first successful post-merge `linux-clang-tsan` run of the `Capture peak memory (ctest --parallel evidence, #229)` step added in PR #245 (`tier1.yml`); record that run here (URL, source path, peak bytes/GiB, runner MemTotal, Test outcome, eligible test count (`-LE packaging`), which must equal `tier1.yml`'s `expected_eligible`) when it lands. |
+| 4 | peak RSS captured, per lane | **see the #266 section below** — the source changed; the closure condition is restated there because the one written here was falsified. |
+
+### ⚠️ Criterion 4's old closure condition was FALSIFIED — #266
+
+It read: *"Closes on the first successful post-merge `linux-clang-tsan` run of the
+`Capture peak memory (ctest --parallel evidence, #229)` step added in PR #245."*
+
+**That run does not exist and never would have.** The step read cgroup v2's
+`memory.peak`, which exists only on **non-root** cgroup v2 nodes; a GitHub-hosted
+job sits in the root cgroup, so the file is absent. It failed on **8 of 8**
+post-merge runs over five days — a census, not a sample — each time emitting its
+loud `NOT MEASURED` warning rather than a silent nothing or a fabricated number.
+The probe's *refusal* was correct; its *source* did not exist on the platform it
+ran on.
+
+The sentence above is kept rather than deleted: an assumption that a criterion
+was written on, and that turned out to be false, is part of the record.
+
+#### The replacement, and what it closes on
+
+Source is now `ci/measure-peak-rss.py` — a `/proc` sampler that sums the RSS of
+`ctest`'s whole process tree at 250 ms, wrapped **around** the ctest invocation
+so the instrument's lifetime is structurally tied to the thing it measures.
+`/usr/bin/time -v` was considered and rejected: `getrusage(RUSAGE_CHILDREN)`
+reports the largest **single** child, not the concurrent **sum**, and #229's
+local sweep measures that error at **+37 %** on this very lane (1.04 GiB largest
+single ⇒ a naive ~4 GiB projection at j=4, against 2.53 GiB measured).
+
+**Criterion 4 now closes PER LANE, on a `pull_request`- or `push:main`-context
+run whose `Peak memory (ctest --parallel evidence, #266 / #229)` step renders the
+`evidence` heading — not the `DIAGNOSTIC ONLY` one — for that lane, recorded in
+the table below.** The heading is conditional on the Test step having succeeded
+*and* the run having executed exactly the count recorded for that lane in
+`ci/expected-eligible-tests.txt`, so a figure can never be labelled evidence over
+a workload that is not the recorded one.
+
+Three consequences worth stating, because each replaces something the old
+condition assumed:
+
+* **It is no longer "the first post-merge run".** That phrasing is what made the
+  criterion unfalsifiable for five days — there was no run to wait for. The
+  condition is now a *rendering* the job either produces or does not, visible on
+  the run's own summary page.
+* **It is per lane, not one number.** #267 widens `--parallel` lane by lane and
+  requires a reading for each; the pin moved out of `tier1.yml`'s single
+  `expected_eligible=350` into a per-lane file for the same reason.
+* **It measures the TEST PHASE only.** `memory.peak` was a job-wide high-water
+  mark covering `Build`, reported as a deliberate ceiling because the runner user
+  cannot reset it. Sampling around `ctest` needs no such concession — but it also
+  means the new figures are **not** comparable to a cgroup one, had any existed.
+
+#### The eligible-count basis, re-derived (#266 acceptance item 5)
+
+The old pin was `expected_eligible=350`, derived **locally** at `9e444ef5`.
+⚠️ **Local and CI trees do not agree**, which that derivation could not see: on
+`main` @ `0b51b1da` the #229 local sweep counted **376** eligible tests on
+`linux-clang-tsan` and **377** on `linux-clang-debug`, while CI on the same
+content ran **361** and **362**. Fifteen tests are registered on a workstation
+that are not registered on a runner. The per-lane values now in
+`ci/expected-eligible-tests.txt` are therefore read off **CI job logs** (run
+`31737273371`, commit `5c56a17e`), and the first CI run of this change is their
+confirmation; any lane that renders `DIAGNOSTIC ONLY` gets its line corrected
+rather than argued with.
+
+#### MEASURED — run `32003367497`, 2026-08-17
+
+`workflow_dispatch` on `probe/266-run-a` (branch `ci/266-peak-rss-instrument` plus
+a throwaway commit disabling the wheel jobs, which measure nothing here and cost
+71 runner-min). Runner `MemTotal` **15.61 GiB** on every lane.
+
+| lane | ctest jobs | peak concurrent RSS | % of MemTotal | achieved concurrency | tests executed | sanitizer reports |
+|---|---:|---:|---:|---:|---:|---:|
+| `linux-clang-release` | 1 | 0.37 GiB | 2.4 % | 1.00× | 362 / 362 ✅ | 0 |
+| `linux-clang-debug` | 1 | 0.59 GiB | 3.7 % | 1.00× | 362 / 362 ✅ | 0 |
+| `linux-clang-ubsan` | 1 | 0.68 GiB | 4.3 % | 1.00× | 361 / 361 ✅ | **1** ⚠️ |
+| `linux-clang-coverage` | 1 | 0.85 GiB | 5.5 % | 1.00× | 369 (basis unrecorded) | 0 |
+| `linux-clang-tsan` | **2** | **1.41 GiB** | **9.1 %** | **1.83×** | 361 / 361 ✅ | 0 |
+| `linux-clang-asan` | 1 | 1.84 GiB | 11.8 % | 1.00× | 361 / 361 ✅ | **1** ⚠️ |
+
+**#266 is discharged by the first row alone** — a real number, on a hosted
+runner, from an instrument that had produced none in 8 attempts.
+
+Five of six lanes matched their pin on first contact. `linux-clang-coverage` had
+no pin (#229's lane table does not cover it), rendered `DIAGNOSTIC ONLY` as
+designed, and its basis (369 — it runs the packaging tier the other five exclude)
+is now recorded from this run rather than guessed from a sibling.
+
+##### ⛔ REPEATABILITY — MEMORY IS SOLID, TIMING IS NOT, AND THE DIFFERENCE DECIDES WHAT THIS DOCUMENT MAY CLAIM
+
+Runs A/B/C re-ran several lanes at **unchanged configuration** on the same C++
+tree. Each matrix leg gets its **own VM**, so this spread is what any comparison
+of two separate runs must clear:
+
+| lane (unchanged config) | samples | wall spread | peak RSS spread |
+|---|---:|---:|---:|
+| `linux-gcc-release` (305–308 s) | 2 | **0.9 %** | 0.08 % |
+| `linux-clang-release` (251–258 s) | 2 | **2.9 %** | 2.8 % |
+| `linux-clang-asan` (1553–1980 s) | 2 | **27.5 %** | 1.7 % |
+| `linux-clang-tsan` @ j=2 (1376–2160 s) | 3 | **43.3 %** | 0.7 % |
+
+**Two different conclusions, and they must not be merged:**
+
+* **Peak RSS reproduces to under 2 % everywhere**, on light and heavy lanes
+  alike. #266's instrument is sound and its figures are usable as recorded.
+* **Wall-clock on the heavy lanes does not reproduce at all** — 27–43 % between
+  VMs. On those lanes a comparison of two separate CI runs measures the runner,
+  not the change.
+
+⚠️ **An earlier revision of this section claimed a "~1–3 % serial noise floor"
+and is CORRECTED, not merely extended.** That figure was taken from the two
+lightest lanes in the matrix (250–310 s) and then reasoned about as though it
+applied to serial lanes generally. `linux-clang-asan` is also serial and spreads
+**27.5 %**. Variance tracks lane WEIGHT, not the serial/parallel distinction the
+old text used to organise it — the light lanes are simply not stressed enough to
+expose the VM.
+
+⚠️ **The 6.91 % figure recorded further down this document is likewise not a
+usable floor.** It came from three runs in one sitting and is an order of
+magnitude below what three later samples of the same lane and the same `jobs`
+setting show (1903 / 2160 / 1376 s). Treat it as a historical measurement of
+three particular runs, never as a bound.
+
+##### Consequence: every UNPAIRED throughput comparison in this document is withdrawn
+
+Any A/B that compares one lane in run X against the same lane in run Y is
+confounded by the VM. The paired design that replaces it runs **both
+configurations back-to-back in ONE job on ONE VM**, driven by `--parallel N` on
+the command line (which overrides a preset's `execution.jobs` — verified by
+explicit local probe, recorded under "Two guards worth recording" in #229).
+
+⚠️ **Pass order is load-bearing: j=4 first, j=1 second.** The second pass runs
+against a warm OS page cache, so this order biases toward the SERIAL baseline and
+any surviving j=4 advantage is a **lower bound**. The opposite order would
+flatter the parallel pass — i.e. manufacture the result being tested for.
+
+##### Two independent cross-validations of the instrument
+
+Neither was arranged; both are checks against numbers measured by something else.
+
+* **Achieved concurrency 1.83× against #229's 1.84×.** #229 derived the tsan
+  lane's production efficiency at `jobs: 2` from a *different* run
+  (`31737273371`) by summing per-test durations against `Total Test time (real)`.
+  This instrument computed 1.83× on run `32003367497` without reference to it.
+  **0.5 % apart.**
+* **CI peak 1.41 GiB against the local sweep's 1.52 GiB** at the same `j`, same
+  lane. **7.2 % apart** — so the local host reproduces the effect, and its
+  *ratios* transfer even though its absolutes do not (it is ~1.38× faster, has
+  23 GB against 15.61, and registers 376 tests against CI's 361).
+
+##### ⚠️ Two sanitizer reports, UNATTRIBUTED as of this run
+
+`linux-clang-asan` and `linux-clang-ubsan` each carry **1** report in
+`LastTest.log`, on runs whose ctest was **green**. That is not a contradiction —
+a sanitizer report does not necessarily fail the test that emitted it, which is
+why this count is taken separately from the exit code.
+
+What is known: the three non-sanitizer lanes read 0, so it is sanitizer-lane
+specific; and `linux-clang-asan` does **not** enable UBSan (checked in
+`cmake/Sanitizers.cmake` — `FIXPP_ENABLE_ASAN` and `FIXPP_ENABLE_UBSAN` are
+independent options and the presets set one each), so these are two independent
+matches rather than one shared cause.
+
+What is **not** known: which lines matched. The instrument reported a bare count
+on this run — a defect since fixed; it now prints the matched lines. Per this
+repo's standing rule these are **real defects until disproven**, and they are not
+disproven. Pending re-run.
+
+#### Phase 1 — `linux-clang-tsan` `jobs: 2 → 4` (#267)
+
+The arithmetic, done from the **CI** number rather than the local one, because
+that is the constraint being reasoned about:
+
+| step | value |
+|---|---:|
+| CI peak at `j=2` (measured, above) | **1.41 GiB** |
+| local `j=2 → j=4` factor (2.53 / 1.52 GiB, #229 sweep) | ×1.664 |
+| ⇒ projected CI peak at `j=4` | **~2.35 GiB** |
+| of a 15.61 GiB runner | **~15 %** — ~6.6× headroom |
+
+Cross-checked a second way: the local **absolute** at `j=4` is 2.53 GiB, i.e.
+16.2 % of this runner. Ratio-method and absolute-method land within 1.2
+percentage points of each other, so the conclusion does not depend on which is
+used.
+
+⚠️ **A single-process figure would have said something else**, and that is the
+whole reason this is a concurrent-sum instrument: the serial run's largest single
+process is 1.04 GiB locally, which projects naively to ~4 GiB at `j=4` — **37 %
+high** against the 2.53 GiB measured.
+
+**Acceptance for phase 1 is the PAIR, not the peak alone.** `execution.jobs` is
+an intention; the achieved-concurrency figure is what says it took effect. The
+expected band at `j=4` is **2.2–2.6×** (local measured 2.39× and 2.32× on two
+runs; the greedy-LPT model's 3.16× is a ceiling and ~⅓ optimistic — do not accept
+against it). **A post-widening run reporting ~1.8× means the widening did not
+take effect, and its peak would then be a `j=2` reading mislabelled as `j=4`
+evidence** — precisely the class this PR exists to close.
+
+#### ⛔ PHASE 1 RESULT — j=4 MEASURED, REFUTED, AND REVERTED
+
+Run `32007171995`, same branch content as run A modulo CI files, same 361 tests,
+adjacent in time. **This is the controlled A/B.**
+
+| | j=2 (run `32003367497`) | j=4 (run `32007171995`) | delta |
+|---|---:|---:|---:|
+| wall — ctest `Total Test time (real)` | 2160.5 s | 2085.4 s | **−3.5 %** |
+| achieved concurrency | 1.83× | **2.73×** | the widening DID take effect |
+| summed per-test wall-time | 3954 s | **5693 s** | **+44.0 %** |
+| peak concurrent RSS | 1.41 GiB | 1.92 GiB | **+35.5 %** |
+| parallel efficiency | 92 % of j=2 | **68 % of j=4** | collapsed |
+| tests executed | 361 / 361 | 361 / 361 | unchanged |
+| sanitizer reports | 0 | 0 | unchanged |
+
+**The widening worked and was not worth having.** Concurrency rose exactly as
+intended — 2.73× is comfortably above the 2.2–2.6× acceptance band, so this is
+not a case of the field failing to take effect. What did not happen is the
+saving.
+
+⚠️ **THE ORIGINAL WORDING HERE WAS "−3.5 % sits inside this lane's own 6.91 %
+run-to-run variance". THAT IS WITHDRAWN — the true figure is far worse, and the
+conclusion survives only because it got worse.** Three samples of THIS lane at
+THIS `jobs: 2` setting, on the same tree, are **1903 / 2160 / 1376 s** —
+range/mean **43.3 %**. The two runs compared above are two different VMs. A
+−3.5 % delta against a 43 % floor does not measure anything at all; the honest
+statement is not "inside the noise band" but **"this comparison could not have
+detected an effect of any size a widening would plausibly produce"**.
+
+The costs, by contrast, are stable across VMs and remain trustworthy — peak RSS
+reproduces to 0.7 % on this lane, so **+36 % peak memory** is real. The **+44 %
+summed per-test wall-time** is an intra-run ratio, also unaffected by VM speed.
+
+So the disposition is unchanged and its warrant is stronger: measurable cost,
+**unmeasurable** benefit. Reverted to `jobs: 2`.
+
+Anything that wants to overturn this must use the paired same-VM design
+described above, not another pair of separate runs.
+
+##### The premise that failed, and it is not the memory one
+
+Every projection in #267 and #229 — the greedy-LPT model *and* the local sweep —
+assumes **per-test durations are invariant under concurrency**. Measured on a
+runner, they are not: they inflate 44 % going from 2 to 4 concurrent TSan
+processes. The memory reasoning was sound and even conservative (projected
+2.35 GiB, measured 1.92); the *throughput* reasoning was not.
+
+⚠️ **The local ratio did not transfer, and "ratios transfer, absolutes do not"
+is exactly what #229 said would hold.** It did not:
+
+| | j=2 → j=4 wall improvement |
+|---|---:|
+| local sweep (`taskset -c 0-3`, 10-CPU / 23 GB host) | 1457.4 → 1057.2 s = **1.38×** |
+| CI (4-vCPU runner) | 2160.5 → 2085.4 s = **1.04× (noise)** |
+
+The likely mechanism, stated as a hypothesis and not a measurement: `taskset`
+restricts *scheduling* to four CPUs but leaves the host's full memory bandwidth,
+L3 and idle neighbours available. TSan is shadow-memory-bound, so four concurrent
+TSan processes saturate a small runner's bandwidth in a way they never do on the
+workstation. **Pinning core count is not pinning a runner.** Nothing here
+measures bandwidth, so this explains rather than proves.
+
+##### What this means for the remaining phases
+
+Efficiency is 92 % at j=2 and 68 % at j=4 on this lane — the curve is already
+flat by 2. j=3 is **not** proposed: interpolating the same contention gives
+≈2063 s, i.e. the same wall time again, so it would cost a 35-minute run to
+re-measure noise.
+
+Phases 2–3 are **not** cancelled by this, but their justification no longer
+carries over from the local sweep and must be re-earned per lane. The lanes most
+likely to behave differently are the ones that are **not** shadow-memory-bound:
+`linux-clang-debug` above all (no sanitizer, local j=1→j=4 2.54×). The sanitizer
+lanes should be assumed to saturate near j=2 until a lane shows otherwise.
+
+⚠️ **One run per configuration.** The wall-clock conclusion is
+"no measurable improvement", NOT "it got worse" — the deltas that are large
+enough to act on are the cost ones. The decision is asymmetric on purpose:
+measurable cost against unmeasurable benefit is a revert, and buying more samples
+to defend a change with no demonstrated upside is not a good use of a 35-minute
+lane.
+
+#### ✅ PHASE 2 — `linux-clang-ubsan` `jobs: 1 → 4`, CONFIRMED
+
+Measured **paired, both passes in ONE job on ONE VM** (run `32015364279`), which
+is the only design that survives 27–43 % between-VM variance:
+
+| pass | order | wall | achieved concurrency | peak RSS | tests |
+|---|---|---:|---:|---:|---:|
+| `--parallel 4` | first | **1114.46 s** | 2.68× | 0.86 GiB | 361/361 |
+| `--parallel 1` | second | **1993.08 s** | 1.00× | 0.65 GiB | 361/361 |
+
+**1.79×**, i.e. ~880 s ≈ **14.6 min per run** off the largest Tier-1 lane.
+
+##### Why this is believed, when the earlier ubsan claim was withdrawn
+
+The withdrawn claim was **one unpaired comparison between two VMs**, which VM
+luck alone explains. This one is corroborated four ways across three VMs:
+
+| configuration | independent measurements | agreement |
+|---|---|---:|
+| ubsan `j=4` | 1136.04 s (run C, VM X) / 1114.46 s (run D, VM Y) | **1.9 %** |
+| ubsan `j=1` | 1912.90 s (run A, VM Z) / 1993.08 s (run D, VM Y) | **4.2 %** |
+
+⚠️ **The second row is the one that matters, and it kills the rival hypothesis.**
+Run D's `j=1` was a **second** pass. If second passes ran degraded — the effect
+that makes the `debug` numbers ambiguous below — it would have read ≈3800 s. It
+read 1993 s, within 4.2 % of an independent **first**-pass serial measurement on
+a different VM. So on this lane there is no meaningful position effect, and the
+pairing is trustworthy.
+
+Memory cost is modest and consistent with every other lane: 0.65 → 0.86 GiB
+(+32 %), **5.5 % of a 15.61 GiB runner**. Summed per-test wall-time inflates
+1993 → 2987 s (+50 %) — real contention, but far less than it buys.
+
+##### ✅ `linux-clang-debug` `jobs: 1 → 4`, CONFIRMED by A-B-A
+
+The 97 % disagreement between `debug`'s two serial numbers was settled by running
+**three passes on one VM**, serial-parallel-serial, with an independent machine
+witness between each (run `32018795574`):
+
+| step | wall | 1-proc calibration | 4-proc calibration | cumulative steal |
+|---|---:|---:|---:|---:|
+| — | — | 2.73 s | 5.21 s | 0 |
+| `--parallel 1` | **1142.14 s** | 2.85 s | 5.16 s | 0 |
+| `--parallel 4` | **541.53 s** | 2.82 s | 5.11 s | 0 |
+| `--parallel 1` | **1135.28 s** | 2.94 s | 5.08 s | 0 |
+
+**The two serial passes agree to 0.6 %.** There is no pass-order effect, the
+calibration drifts under 8 %, and `/proc/stat` steal is **0** throughout — the
+machine did not change under the experiment. **2.10×**, ≈597 s ≈ **10 min/run**.
+
+⚠️ **The outlier was run A, not run D.** `debug` serial reads 1142 / 1135 / 1151 s
+on three VMs and **583 s** on run A's — that one VM was roughly twice as fast.
+Every "no gain" reading for this lane came from comparing against it.
+
+##### ⚠️ `linux-clang-tsan` — the j=2-vs-j=4 question is UNRESOLVED, not settled
+
+The phase-1 comparison (run A `j=2`, run B `j=4`) was **also unpaired**, on the
+lane with the worst measured spread of all (**43.3 %**). It resolves nothing, and
+the earlier wording *"measured no gain at j=4"* is **withdrawn** — the same error
+as the withdrawn `debug` and `ubsan` claims, and it survived longer because its
+conclusion happened to be the conservative one.
+
+What is still solid, because it does not depend on VM speed:
+
+* **+36 % peak memory at j=4 is real** — peak RSS reproduces to 0.7 % on this lane.
+* Achieved concurrency 1.83× at j=2 and 2.73× at j=4 are intra-run ratios.
+
+So `jobs: 2` stays as a **conservative default with a real known cost on the
+alternative**, not as a measured optimum. Given `debug` (2.10×) and `ubsan`
+(1.79×) both gained once measured properly, this lane deserves the same A-B-A
+treatment before anyone concludes anything about it.
+
+Not widened here, and each for its own reason: `asan` is phase 2
+and are held until their two unattributed sanitizer reports are resolved;
+`coverage` needs #267 acceptance item 4 (merged coverage shown identical before
+and after) discharged first; the four `libc++` lanes are phase 3 and have no
+local sweep at all; `linux-gcc-release` is in no phase; `windows-msvc-asan` is a
+different platform and sanitizer runtime with no measurement of any kind.
 
 **Criterion 4 is what blocks widening, and it is not a formality.** Three green runs say the lane
 *did not* run out of memory; they say nothing about how close it came. Two concurrent TSan
@@ -71,6 +432,12 @@ coincidentally, so the 40 ms / 100 ms / 200 ms-slack wall-clock assertions were 
 co-runner.
 
 ### A side effect worth recording
+
+⚠️ **THE 6.91 % FIGURE BELOW IS NOT A NOISE FLOOR — see the #266 section
+above.** Three later samples of this same lane at this same `jobs: 2` setting
+measured 1903 / 2160 / 1376 s, i.e. **43.3 %** range/mean. 6.91 % describes three
+particular runs in one sitting; it is not a bound and must not be used to accept
+or reject a delta.
 
 Run-to-run variance on this lane rose from **1.69% → 6.91%** (range/mean, three runs). That is expected —
 makespan now depends on how tests happen to pack rather than on a fixed serial sum — but it has a
@@ -184,32 +551,33 @@ registered CTest `TIMEOUT` is tight enough for a 2× slowdown to trip it — the
 1. The TSan `Test` step lands materially below the 3300–3356 s band, over **more than one** run.
 2. No new failures, and no `exit 143` / OOM on the lane.
 3. No test that was previously stable becomes intermittent.
-4. **Peak memory captured, not assumed** — record peak RSS / cgroup `memory.peak` during the run,
-   ideally while `codegen_determinism_test` (1132 s) overlaps `dictionary_pure_tests` (531 s), the
+4. **Peak memory captured, not assumed** — record the peak concurrent RSS during the run, ideally
+   while `codegen_determinism_test` (1132 s) overlaps `dictionary_pure_tests` (531 s), the
    worst-case pairing. Until that number exists, "two concurrent TSan processes fit in 16 GB" is
-   untested, and widening to `jobs=3` would be compounding an unmeasured assumption. **Still UNMET**:
-   PR #245 installs the `Capture peak memory` step (`tier1.yml`) that takes this measurement;
-   criterion 4 closes on the first successful post-merge `linux-clang-tsan` run after that PR merges,
-   recorded in this document (run URL, source path, peak bytes/GiB, runner MemTotal, Test outcome,
-   eligible test count) — not on the PR's own merge.
+   untested, and widening to `jobs=3` would be compounding an unmeasured assumption.
 
-   **The eligible-count coupling (Gate B round 2, RC#6):** the peak-memory step's acceptance
-   heading ("`ctest --parallel` evidence") only renders when `eligible` (`ctest -N -LE packaging` on
-   `linux-clang-tsan`) equals a pinned `expected_eligible` in `tier1.yml` — this is the OTHER end of
-   that coupling; the two must be kept in sync by hand. **This is a designed prompt, not a bug**: if
-   the first post-merge run renders `DIAGNOSTIC ONLY` with `eligible ≠ expected_eligible`, re-record
-   the basis here and update `expected_eligible` in the same commit; criterion 4 closes on the run
-   **after** that reconciliation, not on the mismatched one. The direction is safe by construction —
-   a stale expectation degrades toward "not evidence", never toward a false acceptance.
+   ⚠️ **This item's mechanism was rewritten by #266 and its closure condition now lives in the
+   *"Criterion 4's old closure condition was FALSIFIED"* section above.** The paragraphs that stood
+   here — the `Capture peak memory` step, the cgroup source, the single `expected_eligible` in
+   `tier1.yml`, and "closes on the first successful post-merge run" — described an instrument that
+   produced a reading on 0 of 8 runs. They are superseded there rather than patched here, so there
+   is one description of the live mechanism and not two that can drift apart.
 
-   `expected_eligible` was re-derived for PR #245 Gate B round 2 at `9e444ef5` (configure-only
-   `cmake --preset linux-clang-tsan` + `ctest --preset linux-clang-tsan -N -LE packaging`) and came
-   back **350**, not the 346 this document's criteria 2 and 3 above were discharged at — #239
-   (088-firstframe-budget-timer-lifetime) landed on `main` after the three runs cited above and added
-   test files under `tests/session/` and `tests/transport/`. The 346/346 figures in criteria 2 and 3
-   are correctly measured for the runs they cite and are left as-is (add, do not correct); this line
-   records that the suite has since grown to 350, which is the value written into `tier1.yml`'s
-   `expected_eligible`.
+   The one thing worth carrying forward verbatim, because it is a design property and not an
+   implementation detail: **a mismatch between the executed test count and the recorded basis is a
+   DESIGNED PROMPT, not a bug.** It degrades the run to `DIAGNOSTIC ONLY`, i.e. toward "not
+   evidence" — never toward a false acceptance. Re-record the basis and update
+   `ci/expected-eligible-tests.txt` in the same commit; the criterion closes on the run **after**
+   that reconciliation, not on the mismatched one.
+
+   For the record of what the pin was before: `expected_eligible` was re-derived for PR #245 Gate B
+   round 2 at `9e444ef5` (configure-only `cmake --preset linux-clang-tsan` +
+   `ctest --preset linux-clang-tsan -N -LE packaging`) and came back **350**, not the 346 this
+   document's criteria 2 and 3 above were discharged at — #239 landed on `main` after the three runs
+   cited above and added test files under `tests/session/` and `tests/transport/`. The 346/346
+   figures in criteria 2 and 3 are correctly measured for the runs they cite and are left as-is
+   (add, do not correct). ⚠️ That 350 was derived **locally**, which is why it drifted from CI
+   without anyone noticing — see the re-derivation note in the #266 section above.
 
 Only then extend `execution.jobs` to `linux-clang-asan` / `linux-clang-ubsan` /
 `linux-clang-coverage`, one at a time, re-measuring each.

@@ -781,38 +781,61 @@ jobs:
       # running on all six lanes. That is the "minimal tier" FR-026a intends —
       # every lane still proves an external consumer compiles and links against
       # the installed package.
+      # ⚠️ THE ctest INVOCATION IS UNCHANGED. It is WRAPPED, not modified: the
+      # peak-RSS instrument (#266) spawns it, samples /proc while it runs, tees
+      # its output, and exits with ITS status. So this step's red/green signal is
+      # still ctest's and nothing else's — see ci/measure-peak-rss.py's fail-loud
+      # contract, and T5 of ci/test-peak-rss.sh, which pins that a non-zero ctest
+      # status is propagated rather than swallowed.
+      #
+      # The `id` was `tsan_test` while the peak probe read only the tsan lane; it
+      # now measures every lane in this matrix, and a name that says otherwise is
+      # the kind of stale anchor this repo has been bitten by. Renamed with its
+      # only two consumers, both below.
       - name: Test (minimal tier — packaging gated on linux-gcc-release)
-        id: tsan_test
+        id: minimal_tier_test
         if: matrix.preset != 'linux-gcc-release'
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging --no-tests=error
+        run: |
+          python3 ci/measure-peak-rss.py \
+            --out "/tmp/peak-rss-${{ matrix.preset }}.env" \
+            --log "/tmp/ctest-${{ matrix.preset }}.log" \
+            --label "${{ matrix.preset }}" \
+            -- ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging --no-tests=error
 
-      # ── #229: the LAST unmet criterion before `ctest --parallel` can widen ───
+      # ── #266 / #229 criterion 4: the peak-memory measurement ────────────────
       #
-      # `execution: {jobs: 2}` is set on the linux-clang-tsan TEST PRESET ONLY
-      # (CMakePresets.json). See ci/ctest-parallelism-probe.md for the measured
-      # run times (not restated here — a comment copy of a volatile measurement
-      # goes stale silently; the probe doc is the single source). That doc
-      # discharges every acceptance criterion except one: peak memory was to be
-      # CAPTURED, not assumed. Two concurrent TSan processes on a 4 vCPU / 16 GB
-      # runner is a SUSPECTED constraint, and it is the only thing still
-      # blocking the largest single CI lever available (~236 min aggregate
-      # modelled at -j4).
+      # `ctest --parallel` widening (#267) is gated on a MEASURED peak-memory
+      # figure. #245 installed a probe that read cgroup v2 `memory.peak`; it
+      # produced a reading on 0 of 8 post-merge runs, because a GitHub-hosted job
+      # sits in the ROOT cgroup and `memory.peak` exists only on non-root nodes.
+      # The source is now ci/measure-peak-rss.py, which samples /proc and sums
+      # the RSS of ctest's whole process tree — the same quantity #229's local
+      # sweep measured, so CI and local figures are comparable by construction.
       #
-      # WHAT THIS NUMBER IS: cgroup v2 `memory.peak` is the JOB-WIDE high-water
-      # mark, so it also covers Build, which is itself memory-hungry. Resetting
-      # it before the test step would isolate the test phase, but the runner user
-      # cannot write the cgroup file. So this is deliberately reported as a
-      # job-wide CEILING: comfortably under the runner's total ⇒ the constraint
-      # is discharged whatever caused the peak, and only a figure NEAR the limit
-      # would force separating Build from Test.
+      # THREE THINGS CHANGED BESIDES THE SOURCE, each narrowing what can be
+      # claimed. All the detail lives in ci/peak-memory-report.sh; the reason for
+      # each is there, not duplicated here, because a comment copy of a volatile
+      # rationale goes stale silently.
+      #
+      #  1. IT MEASURES THE TEST PHASE, NOT THE JOB. `memory.peak` was a job-wide
+      #     high-water mark that also covered Build, and was reported as a
+      #     deliberate CEILING because the runner user cannot reset it. Sampling
+      #     around the ctest invocation needs no such concession.
+      #  2. IT RUNS ON EVERY LANE IN THIS MATRIX, not just linux-clang-tsan.
+      #     #267 widens `--parallel` lane by lane and its acceptance requires a
+      #     peak reading PER LANE; a tsan-only probe cannot discharge that.
+      #  3. THE PIN IS PER-LANE AND LIVES IN ci/expected-eligible-tests.txt.
+      #     The counts genuinely differ per lane, so #245's single
+      #     `expected_eligible=350` was wrong for five of the six rather than
+      #     merely stale.
       #
       # NEVER FAILS THE LANE — it is a measurement, not a gate. But a measurement
-      # that cannot be taken must SAY SO: an unreadable cgroup file emits a
-      # warning rather than an empty summary, so "no number" can never be read as
-      # "captured, and it was fine"
+      # that cannot be taken must SAY SO: every path in the report script emits
+      # an attributed disposition, so "no number" can never be read as "captured,
+      # and it was fine"
       # (feedback_silent_empty_recurred_three_times_including_inside_its_own_fix).
-      - name: Capture peak memory (ctest --parallel evidence, #229)
-        if: always() && matrix.preset == 'linux-clang-tsan'
+      - name: Peak memory (ctest --parallel evidence, #266 / #229)
+        if: always() && matrix.preset != 'linux-gcc-release'
         continue-on-error: true
         env:
           # `|| 'unavailable'`: GitHub's steps context is documented to report
@@ -820,114 +843,18 @@ jobs:
           # an empty interpolation — a blank cell would defeat the "Test
           # outcome is on the page regardless of which branch rendered it"
           # requirement this step exists to satisfy.
-          TEST_OUTCOME: ${{ steps.tsan_test.outcome || 'unavailable' }}
+          TEST_OUTCOME: ${{ steps.minimal_tier_test.outcome || 'unavailable' }}
+        # The Test step above (id: minimal_tier_test) has no `always()`, so on a
+        # Build failure it is SKIPPED, not failed — and this step still runs.
+        # A number here would then be read as acceptance evidence for a run that
+        # measured a workload strictly smaller than "the suite ran". The report
+        # script labels accordingly rather than suppressing the number.
         run: |
-          set -uo pipefail
-          peak=""
-          src=""
-          for f in /sys/fs/cgroup/memory.peak \
-                   /sys/fs/cgroup/memory/memory.max_usage_in_bytes; do
-            if [ -r "$f" ]; then
-              peak="$(cat "$f" 2>/dev/null || true)"
-              src="$f"
-              [ -n "$peak" ] && break
-            fi
-          done
-          total_kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || true)"
-
-          # #229 criteria 2 & 3 are discharged AT 346/346 (ci/ctest-parallelism-probe.md's criteria
-          # table) — that basis predates #239's test additions. expected_eligible tracks the CURRENT
-          # suite size instead (350, re-derived for PR #245 Gate B round 2 at 9e444ef5; see the
-          # criterion 4 bullet in that doc), because the acceptance figure below must be comparable to
-          # the workload it is actually taken over, not to the smaller one criteria 2/3 were closed at.
-          # An acceptance figure taken over a mismatched workload is not comparable evidence, so the
-          # count gates the LABEL. It never fails the lane: a legitimate test addition renders
-          # DIAGNOSTIC ONLY and prompts whoever closes criterion 4 to re-record the basis (see that
-          # doc — a mismatch here is the DESIGNED prompt to do so, not a broken step).
-          # Fail-closed: an unreadable count is "unknown", which is not 350, which is not evidence.
-          expected_eligible=350
-          eligible="$(ctest --preset ${{ matrix.preset }} -N -LE packaging 2>/dev/null \
-                        | sed -n 's/^Total Tests: //p')"
-          eligible="${eligible:-unknown}"
-
-          if [ -z "$peak" ] || ! [ "$peak" -eq "$peak" ] 2>/dev/null; then
-            echo "::warning::#229 peak-memory probe FAILED — no readable cgroup peak (tried /sys/fs/cgroup/memory.peak and the v1 fallback). The ctest --parallel memory criterion remains UNMEASURED; do not read this run as evidence."
-            {
-              echo "### Peak memory (#229) — NOT MEASURED"
-              echo
-              echo "No readable cgroup peak file. The \`--parallel\` widening criterion is still open."
-              echo
-              echo "| metric | value |"
-              echo "|---|---|"
-              echo "| Test outcome | ${TEST_OUTCOME} |"
-              echo "| tests eligible (-LE packaging) | ${eligible} (expected ${expected_eligible}) |"
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          peak_gib="$(awk -v b="$peak" 'BEGIN{printf "%.2f", b/1073741824}')"
-          total_gib="$(awk -v k="${total_kb:-0}" 'BEGIN{printf "%.2f", k/1048576}')"
-          pct="n/a"
-          if [ -n "${total_kb:-}" ] && [ "${total_kb:-0}" -gt 0 ]; then
-            pct="$(awk -v b="$peak" -v k="$total_kb" 'BEGIN{printf "%.1f%%", (b/1024)/k*100}')"
-          fi
-
-          echo "peak=${peak} bytes (${peak_gib} GiB) of ${total_gib} GiB — ${pct} [source: ${src}] [test outcome: ${TEST_OUTCOME}]"
-
-          # The Test step above (id: tsan_test) has no `always()`, so on a Build
-          # failure it is SKIPPED, not failed — and this step still runs
-          # (always()) against a perfectly readable cgroup file. A number here
-          # would be read as acceptance evidence for a run that measured a
-          # workload strictly smaller than "the suite ran". Label accordingly
-          # rather than suppressing the number.
-          #
-          # The eligible-count conjunct (#245 Gate B round 2, RC#6) closes the
-          # other vacuity path: `ctest` exits 0 on a workload of ZERO tests, so
-          # `TEST_OUTCOME=success` alone does not mean "the suite ran". A
-          # mismatch here never fails the lane — it downgrades the heading to
-          # DIAGNOSTIC ONLY and is the designed prompt to re-record the basis
-          # in ci/ctest-parallelism-probe.md (see that doc's criterion 4).
-          if [ "${TEST_OUTCOME}" = "success" ] && [ "${eligible}" = "${expected_eligible}" ]; then
-            {
-              echo "### Peak memory — \`ctest --parallel\` evidence (#229)"
-              echo
-              echo "| metric | value |"
-              echo "|---|---|"
-              echo "| ctest jobs | 2 (\`linux-clang-tsan\` test preset only) |"
-              echo "| peak (job-wide) | **${peak_gib} GiB** |"
-              echo "| runner MemTotal | ${total_gib} GiB |"
-              echo "| utilisation | ${pct} |"
-              echo "| source | \`${src}\` |"
-              echo "| Test outcome | ${TEST_OUTCOME} |"
-              echo "| tests eligible (-LE packaging) | ${eligible} (expected ${expected_eligible}) |"
-              echo
-              echo "Job-wide high-water mark, so it includes \`Build\`; the runner user cannot"
-              echo "reset \`memory.peak\`, so treat this as a **ceiling** for the test phase."
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::warning::#229 peak-memory figure below is DIAGNOSTIC ONLY — the Test step's outcome was '${TEST_OUTCOME}' and/or the eligible test count (${eligible}) did not match the recorded basis (expected ${expected_eligible}), so this number does NOT discharge the ctest --parallel memory criterion."
-            {
-              echo "### Peak memory (#229) — DIAGNOSTIC ONLY, Test outcome: ${TEST_OUTCOME}, eligible: ${eligible} (expected ${expected_eligible})"
-              echo
-              echo "This figure does **not** discharge the ctest --parallel memory criterion,"
-              echo "because the Test step did not succeed (outcome: \`${TEST_OUTCOME}\`) and/or the"
-              echo "eligible test count (\`${eligible}\`) did not match the basis criterion 4 was"
-              echo "recorded against (\`${expected_eligible}\`) — either way this measures a workload"
-              echo "that is not comparable to \"the suite ran\". If only the count differs, that is"
-              echo "the designed prompt to re-record the basis in"
-              echo "\`ci/ctest-parallelism-probe.md\` and update \`expected_eligible\`, not a broken step."
-              echo
-              echo "| metric | value |"
-              echo "|---|---|"
-              echo "| ctest jobs | 2 (\`linux-clang-tsan\` test preset only) |"
-              echo "| peak (job-wide) | ${peak_gib} GiB |"
-              echo "| runner MemTotal | ${total_gib} GiB |"
-              echo "| utilisation | ${pct} |"
-              echo "| source | \`${src}\` |"
-              echo "| Test outcome | ${TEST_OUTCOME} |"
-              echo "| tests eligible (-LE packaging) | ${eligible} (expected ${expected_eligible}) |"
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+          ci/peak-memory-report.sh \
+            "${{ matrix.preset }}" \
+            "/tmp/peak-rss-${{ matrix.preset }}.env" \
+            "/tmp/ctest-${{ matrix.preset }}.log" \
+            "${TEST_OUTCOME}"
 
       # rpmbuild is NOT on ubuntu-24.04 and packaging::contents drives the
       # default generator list (DEB;RPM;TGZ), so without this the lane fails on
@@ -959,9 +886,47 @@ jobs:
       # The `ci/` regression pins used to live here, on the linux-gcc-release
       # leg. They now have their own job — see `ci-script-pins` below for why.
 
+      # Wrapped by the #266 instrument for the same reason as the minimal-tier
+      # step above, and it is NOT an afterthought: this is the ONLY lane that
+      # runs the packaging tier, and the packaging witnesses stage-install a
+      # prefix and drive a nested `cmake` + `ninja` build. That is the shape
+      # behind the largest single-process transient in #229's local sweep — 0.87
+      # GiB at t=9.3 s on `linux-clang-debug`, twelve processes, against a run
+      # body that never again exceeded 0.39 GiB. So the lane most likely to hold
+      # a memory surprise is the one a `-LE packaging` view of the matrix cannot
+      # see at all.
+      #
+      # ⚠️ It is measured, NOT a widening candidate. #267's phases name asan,
+      # ubsan, debug, coverage, the four libc++ lanes and msvc; this lane is in
+      # none of them and gains no `execution.jobs`. Nested builds inside ctest
+      # are the case where naive test-level parallelism multiplies compile jobs,
+      # and nothing here measures that.
       - name: Test (full tier incl. packaging — the SC-011/SC-012 gate)
+        id: full_tier_test
         if: matrix.preset == 'linux-gcc-release'
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure --no-tests=error
+        run: |
+          python3 ci/measure-peak-rss.py \
+            --out "/tmp/peak-rss-${{ matrix.preset }}.env" \
+            --log "/tmp/ctest-${{ matrix.preset }}.log" \
+            --label "${{ matrix.preset }}" \
+            -- ctest --preset ${{ matrix.preset }} --output-on-failure --no-tests=error
+
+      # A second report step rather than widening the one above's `if:`. The two
+      # ctest steps are 100 lines apart with the rpmbuild install and the
+      # packaging-registration assertion between them, so one combined step would
+      # sit nowhere near one of its two subjects. (Tier 3 combines its two
+      # because they are adjacent.)
+      - name: Peak memory (packaging tier, #266 / #229)
+        if: always() && matrix.preset == 'linux-gcc-release'
+        continue-on-error: true
+        env:
+          TEST_OUTCOME: ${{ steps.full_tier_test.outcome || 'unavailable' }}
+        run: |
+          ci/peak-memory-report.sh \
+            "${{ matrix.preset }}" \
+            "/tmp/peak-rss-${{ matrix.preset }}.env" \
+            "/tmp/ctest-${{ matrix.preset }}.log" \
+            "${TEST_OUTCOME}"
 
       # ── #254 — the Python binding tests, folded in from `python-bindings` ────
       #
@@ -1330,14 +1295,38 @@ jobs:
       - name: ccache statistics
         run: ci/ccache-stats.sh linux-clang-coverage '' '${{ steps.build.outcome }}'
 
+      # Wrapped by the #266 peak-RSS instrument for the same reason as the matrix
+      # legs — see the `Peak memory` step in the `linux` job. The coverage lane
+      # is measured but NOT widened in this change: it runs the FULL suite (no
+      # `-LE packaging`), so its test count is not comparable to the five lanes
+      # above, and #267's acceptance item 4 requires the merged coverage to be
+      # shown identical before and after widening rather than assumed from `%p`.
+      # Measuring it first is what makes that comparison possible later.
       - name: Test (collect profiles)
+        id: coverage_test
         env:
           # %p embeds the PID so each test binary writes its own .profraw file
           # instead of overwriting a shared one (ctest runs multiple binaries).
           LLVM_PROFILE_FILE: "${{ github.workspace }}/build/linux-clang-coverage/profiles/default-%p.profraw"
         run: |
           mkdir -p build/linux-clang-coverage/profiles
-          ctest --preset linux-clang-coverage --output-on-failure
+          python3 ci/measure-peak-rss.py \
+            --out /tmp/peak-rss-linux-clang-coverage.env \
+            --log /tmp/ctest-linux-clang-coverage.log \
+            --label linux-clang-coverage \
+            -- ctest --preset linux-clang-coverage --output-on-failure
+
+      - name: Peak memory (ctest --parallel evidence, #266 / #229)
+        if: always()
+        continue-on-error: true
+        env:
+          TEST_OUTCOME: ${{ steps.coverage_test.outcome || 'unavailable' }}
+        run: |
+          ci/peak-memory-report.sh \
+            linux-clang-coverage \
+            /tmp/peak-rss-linux-clang-coverage.env \
+            /tmp/ctest-linux-clang-coverage.log \
+            "${TEST_OUTCOME}"
 
       - name: Merge coverage profiles
         run: |
@@ -1722,6 +1711,26 @@ jobs:
         run: |
           python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
           bash ci/test-tier1-python-policy.sh
+
+      # #266 replaced a peak-memory probe that ran 8 times and measured nothing
+      # while exiting 0 every time. Its replacement gets the pre-merge signal the
+      # original never had: 40 cells plus 15 mutants, each mutant proven to redden
+      # the ONE cell that names its defect. Synthetic fixtures only — no build
+      # tree, no ctest.
+      #
+      # ⚠️ IT IS NOT FREE: measured 117 s locally, against the ~2.5 s this whole
+      # job used to take. The cost is the mutants — each re-runs the full cell
+      # suite against a broken copy, and the cells that matter need REAL resident
+      # memory (a few hundred MiB touched, held for 1-2 s) because RSS is what is
+      # being measured and a mocked workload would pin nothing. Stated rather
+      # than buried: this job used to be the cheap one and is not any more.
+      #
+      # It does NOT move the critical path: `ci-script-pins` is in
+      # `tier1-required`'s `needs:` but runs concurrently with the linux matrix
+      # (40+ min) and coverage (33 min warm), so ~2 min is absorbed. Recorded as
+      # the reason the cost was accepted, not as a claim that it is free.
+      - name: Regression pin — peak-RSS instrument dispositions (#266)
+        run: bash ci/test-peak-rss.sh
 
   check-layers:
     name: check-layers

@@ -742,9 +742,26 @@ $_expected_uses
 --- actual
 $got"
 
+  # 30 -> 31 (#266): the `linux` job gained `Peak memory (packaging tier)`, the
+  # report step for `linux-gcc-release`'s full-tier ctest. The sibling
+  # `Capture peak memory` -> `Peak memory (ctest --parallel evidence)` is a 1:1
+  # replacement and moves no count.
+  #
+  # THE DELIBERATE LOOK THIS PIN DEMANDS, done rather than asserted. The added
+  # step sits before the pytest pair, so the question is whether it can change
+  # what they execute:
+  #   * it writes NO environment — `ci/peak-memory-report.sh` writes only
+  #     $GITHUB_STEP_SUMMARY and stdout, never $GITHUB_ENV or $GITHUB_PATH
+  #     (that is separately policed by the env-writer census, M34);
+  #   * its `env:` is step-level (`TEST_OUTCOME`) and does not outlive it;
+  #   * it is `continue-on-error: true` AND the script always exits 0, so it
+  #     cannot fail the job out from under the python steps;
+  #   * it has no `id` that anything references, collides with no pinned step
+  #     name, and mentions no pytest token.
+  # Conclusion: it cannot reach the pytest pair.
   got="$(echo "$json" | jq -r '.linux_step_count')"
-  [ "$got" = "30" ] \
-    || fail "$case_id: the linux job has $got steps, expected 30. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+  [ "$got" = "31" ] \
+    || fail "$case_id: the linux job has $got steps, expected 31. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -1349,7 +1366,7 @@ open(dst, "w").write(t.replace(old, new))
   # ⚠️ The inserted step deliberately writes NOTHING. An earlier version wrote
   # $GITHUB_ENV, which tripped the writer census first and left the step count
   # with no mutant of its own — the shadowing round 5 finding 3 is about.
-  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 31 steps, expected 30" '
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 32 steps, expected 31" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
