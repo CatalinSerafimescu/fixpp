@@ -20,13 +20,22 @@ CXX=clang++-22
 CXXFLAGS=-stdlib=libc++ -fsanitize=undefined -fno-omit-frame-pointer
 # CFLAGS mirrors the SANITIZER half of CXXFLAGS only (#252) — deliberately
 # without `-stdlib=libc++`; see linux-clang-libc++-asan for why.
-CFLAGS=-fsanitize=undefined -fno-omit-frame-pointer
+#
+# -fno-sanitize=function is C-SIDE ONLY and deliberately absent from CXXFLAGS.
+# Full rationale at the sibling line in linux-clang-ubsan — do not restate it
+# there and paraphrase it here; the two must not drift.
+# ⚠️ Keep this line byte-identical to linux-clang-ubsan's. OpenSSL erases
+# compiler.libcxx from its package_id (pure C) and `-stdlib=libc++` lives in
+# CXXFLAGS, which is NOT in tools.info.package_id:confs — so these two lanes share
+# ONE OpenSSL binary, and that is why T1 reported 363 and T3 362 from the same
+# archive. Diverging this line silently forks it into two builds.
+CFLAGS=-fsanitize=undefined -fno-omit-frame-pointer -fno-sanitize=function
 LDFLAGS=-stdlib=libc++ -fsanitize=undefined
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=undefined", "-fno-omit-frame-pointer"]
-tools.build:cflags=["-fsanitize=undefined", "-fno-omit-frame-pointer"]
+tools.build:cflags=["-fsanitize=undefined", "-fno-omit-frame-pointer", "-fno-sanitize=function"]
 tools.build:sharedlinkflags=["-fsanitize=undefined"]
 tools.build:exelinkflags=["-fsanitize=undefined"]
 # compiler.libcxx=libc++ is already in [settings] so it enters package_id.
