@@ -79,15 +79,34 @@
 # is far worse. Narrowing it further needs per-test attribution in LastTest.log,
 # which CTest does not make cheap.
 #
-# ⚠️ #267 RAISED WHAT THAT GAP COSTS, AND IT IS NOW THE GATE'S ONE KNOWN HOLE.
-# When this paragraph was written the gap meant a missed WARNING. Since the
-# counter fails closed, it means a genuine stack-use-after-return ANYWHERE on
-# this lane exits 0 and merges green. Every OTHER ASan error kind on the lane
-# still reds it, TSan and UBSan are untouched, and the collision needs the same
-# error class — so the hole is narrow. But it is a hole, it is deliberate, and
-# `T19b` of ci/test-peak-rss.sh asserts the permitting behaviour as correct.
-# Closing it means per-test attribution, which is #266's by-test aggregation
-# extended to the ALLOWLIST rather than only to the report — not a bigger regex.
+# ⚠️ #267 RAISED WHAT THAT GAP COSTS — BUT THE HOLE IS NARROWER THAN IT LOOKS,
+# AND THE FIRST VERSION OF THIS PARAGRAPH OVERSTATED IT. It said a genuine
+# stack-use-after-return "ANYWHERE on this lane exits 0 and merges green". That
+# is wrong, and the correction matters, because an overstated hole invites a
+# broader allowlist or extra machinery to plug something that is not open.
+#
+# ASan's halt_on_error=1 is the DEFAULT and no ASAN_OPTIONS is set anywhere in
+# this repo, so a stack-use-after-return ABORTS its process; the abort fails that
+# ctest entry, and the LANE goes red through ctest — entirely independently of
+# what this allowlist or the report counter decide. The only way an abort does
+# not fail its entry is `WILL_FAIL TRUE`, and of the five WILL_FAIL entries in
+# tests/ exactly ONE runs instrumented code: `capi_send_recv_uaf_negative`
+# (tests/capi/CMakeLists.txt:175). The other four cannot emit a runtime ASan
+# report at all — two tls + one session are negative-COMPILE witnesses invoking
+# `cmake --build`, and tests/sync's runs a `bash` census script.
+#
+# So the merge-permitting hole is: a SECOND, different stack-use-after-return
+# arising inside the canary's own entry, where the deliberate one already masks
+# it. That is the whole of it. `T19b` of ci/test-peak-rss.sh asserts the
+# permitting behaviour as correct, and it is correct.
+#
+# ⚠️ THAT ARGUMENT HAS A LOAD-BEARING PREMISE — no ASAN_OPTIONS anywhere. If a
+# preset or workflow ever sets `halt_on_error=0` on an asan lane, reports stop
+# aborting, ctest stops reddening, and the hole widens from one entry to the
+# whole lane. Re-derive before trusting this paragraph:
+#     grep -rn 'ASAN_OPTIONS' CMakePresets.json .github/ cmake/ tests/
+# Closing even the narrow hole means per-test attribution applied to the
+# ALLOWLIST — #266's by-test aggregation extended — not a bigger regex.
 linux-clang-asan    ERROR: AddressSanitizer: stack-use-after-return
 
 # ── linux-clang-libc++-asan (Tier 3) ─────────────────────────────────────────

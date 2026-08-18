@@ -184,10 +184,13 @@ EXPECTED="${EXPECTED:-<no line>}"
 # What is left — the surface this exit code exists for — is where a report is
 # emitted and ctest is still green ANYWAY:
 #
-#   1. A `WILL_FAIL TRUE` ctest entry (5 registration sites in tests/).  The
-#      inversion turns a genuine sanitizer abort inside such a test into a PASS.
-#      That is by design for the ASan canary; it is not by design for anything
-#      else that starts aborting in the same entry.
+#   1. A `WILL_FAIL TRUE` ctest entry.  The inversion turns a genuine sanitizer
+#      abort inside such a test into a PASS.  That is by design for the ASan
+#      canary; it is not by design for a SECOND abort landing in the same entry.
+#      ⚠️ Five sites carry WILL_FAIL, but only ONE runs instrumented code
+#      (`capi_send_recv_uaf_negative`) — the other four invoke `cmake --build`
+#      (negative-compile witnesses) or `bash` (a census script) and cannot emit
+#      a runtime sanitizer report.  Counting all five overstates this surface.
 #   2. A report emitted OUTSIDE any test block — fixture setup, or ctest itself.
 #      The by-test aggregation labels these `(before first test)`.
 #   3. A SIGNATURE CHANGE on an allowlisted lane.  ci/expected-sanitizer-reports
