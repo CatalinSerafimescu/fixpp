@@ -2059,7 +2059,19 @@ jobs:
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CCACHE_COMPILERCHECK: content
       CCACHE_COMPRESSLEVEL: "5"   # see matrix `linux` job — shared 10 GB cache quota
-      CCACHE_DIR: /tmp/fixpp-ccache-bench
+      # ⚠️ THE PATH IS PART OF THE CACHE IDENTITY — it MUST equal the matrix
+      # `linux-clang-release` leg's `CCACHE_DIR` (/tmp/fixpp-ccache-${{ matrix.preset }}),
+      # not a bench-specific one. actions/cache identifies an entry by
+      # (key, VERSION), where version is a hash of the PATHS being cached. Keying
+      # this job on `tier1-linux-clang-release` while caching a differently-named
+      # directory produced a byte-identical key that still missed: run
+      # 32159716654 logged `Restore cache / No cache found.` here at 16:26:53,
+      # ninety seconds after the matrix leg restored that very entry
+      # (`Cache restored successfully`, ~96 MB) in the SAME run. Result was
+      # 15/1616 hits (0.93%) — identical to the run before the key change, i.e.
+      # the fix was a complete no-op while looking correct in the diff.
+      # Matching the key alone is not enough; match the path too.
+      CCACHE_DIR: /tmp/fixpp-ccache-linux-clang-release
 
     steps:
       - uses: actions/checkout@v6
