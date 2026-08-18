@@ -8,11 +8,33 @@
 #   ctest-log     — the teed ctest output (`--log` of the same invocation)
 #   test-outcome  — steps.<id>.outcome ('success' / 'failure' / 'skipped' / '')
 #
-# NEVER FAILS THE LANE — it is a measurement, not a gate.  But a measurement
-# that could not be taken must SAY SO: every path below emits an attributed
-# disposition, and there is none on which "no number" can be read as "captured,
-# and it was fine"
+# ── EXIT STATUS: ONE MEANING, AND IT IS NOT THE MEMORY FIGURE ────────────────
+#
+#   1  — this run produced UNEXPLAINED sanitizer report(s).  Nothing else.
+#   0  — everything else, INCLUDING every way the measurement itself can fail.
+#
+# The peak-memory half NEVER fails the lane: it is a measurement, not a gate,
+# and a lane reddened because /proc sampling hiccuped is a lane whose red means
+# nothing.  But a measurement that could not be taken must SAY SO: every path
+# below emits an attributed disposition, and there is none on which "no number"
+# can be read as "captured, and it was fine"
 # (feedback_silent_empty_recurred_three_times_including_inside_its_own_fix).
+#
+# ⚠️ THE EXIT CODE IS PRODUCED AT EXACTLY ONE PLACE — the single `exit "$RC"`
+# at the tail.  Every earlier terminal path is an explicit `exit 0`.  That shape
+# is deliberate and load-bearing: this script runs under `set -uo pipefail` with
+# a long tail of `awk`/`grep`/`printf` after the sanitizer block, and if the
+# final status were whatever the last command happened to return, the lane's
+# red/green would be decided by a `grep -c` that found nothing.  Add a terminal
+# path?  Give it an explicit `exit 0` — never fall off the end.
+#
+# ⚠️ THE `continue-on-error: true` ON THE CALLING STEPS WAS REMOVED WITH THIS
+# CHANGE, and the two edits are ONE change.  `exit 1` under `continue-on-error`
+# is inert — GitHub records the step's `outcome` as failure, sets its
+# `conclusion` to success, and the job goes green.  That is a gate that observes
+# and never asserts, which is the exact false-green shape this script's own
+# UBSan note is about.  If you ever restore `continue-on-error` on those steps,
+# you have silently reverted this file too.
 #
 # ── WHAT CHANGED FROM #245's VERSION, AND WHY ────────────────────────────────
 #
@@ -146,8 +168,35 @@ EXPECTED="${EXPECTED:-<no line>}"
 # Source is CTest's own LastTest.log, NOT the step log: the Test step runs with
 # `--output-on-failure`, so a report emitted by a test that PASSED never reaches
 # stdout.  Counting from the step log would systematically miss the interesting
-# case. REPORTED, never asserted — this script does not gate.
+# case.
 #
+# ── WHAT THIS COUNTER ACTUALLY CATCHES, MEASURED — IT IS NARROW ──────────────
+#
+# It is tempting to read `exit 1` here as "sanitizer findings now fail CI".
+# They already did, on their own, almost everywhere — and overstating this
+# would be the third fail-open in a row dressed as a fix.  Measured with
+# clang-22 on 2026-08-18: a two-thread race with NO `TSAN_OPTIONS` set at all
+# exits **66**, not 0, so TSan reddens its test without needing
+# `halt_on_error=1` (the ~60 per-test `ENVIRONMENT` entries in tests/ add a
+# stacktrace and suppressions, not the failure).  ASan halts by default.  UBSan
+# was the real hole and #268 closes it at the preset.
+#
+# What is left — the surface this exit code exists for — is where a report is
+# emitted and ctest is still green ANYWAY:
+#
+#   1. A `WILL_FAIL TRUE` ctest entry (5 registration sites in tests/).  The
+#      inversion turns a genuine sanitizer abort inside such a test into a PASS.
+#      That is by design for the ASan canary; it is not by design for anything
+#      else that starts aborting in the same entry.
+#   2. A report emitted OUTSIDE any test block — fixture setup, or ctest itself.
+#      The by-test aggregation labels these `(before first test)`.
+#   3. A SIGNATURE CHANGE on an allowlisted lane.  ci/expected-sanitizer-reports
+#      .txt pins TEXT, not a count, precisely so this case is visible: if the
+#      ASan canary's error kind changed, or a second kind appeared beside it,
+#      UNEXPLAINED goes positive while ctest stays green.
+#
+# Narrow is the point.  A backstop against INVERSION and against reports nobody
+# attributed is worth having exactly because the primary mechanism is sound.
 # ⚠️ A COUNT ALONE IS NOT ACTIONABLE, and shipping one was a defect in this
 # script. Run 32003367497 reported `sanitizer reports: 1` on BOTH the asan and
 # ubsan lanes, on green runs — and nothing on the page said WHICH line matched,
@@ -172,6 +221,12 @@ SAN_LINES=""
 SAN_BY_TEST=""
 SAN_BY_SITE=""
 UNEXPLAINED=""
+# The lane's verdict.  Set to 1 in exactly one place below; consumed by the
+# single `exit "$RC"` at the tail.  Initialised HERE rather than inside the
+# `if [ -r "$LASTTEST" ]` guard on purpose: an unreadable LastTest.log leaves
+# SAN_COUNT="unreadable" and must exit 0 (that is an instrument failure, and it
+# already has its own disposition), not inherit an unset variable under `set -u`.
+RC=0
 if [ -r "$LASTTEST" ]; then
   SAN_COUNT="$(grep -cE "$SAN_PATTERN" "$LASTTEST" 2>/dev/null || true)"
   SAN_COUNT="${SAN_COUNT:-0}"
@@ -236,7 +291,12 @@ if [ -r "$LASTTEST" ]; then
     fi
 
     if [ "$UNEXPLAINED" -gt 0 ]; then
-      echo "::warning::#267 acceptance item 5 — ${UNEXPLAINED} UNEXPLAINED sanitizer report(s) (of ${SAN_COUNT} total) in ${PRESET}'s LastTest.log, on a run whose ctest outcome was '${TEST_OUTCOME}'. A sanitizer report does NOT necessarily fail the test that emitted it — on linux-clang-ubsan it structurally CANNOT (see the UBSan note above and #268). Treat as a real defect until disproven; if it is deliberate, add it to ci/expected-sanitizer-reports.txt with the test, the mechanism and the run. Matches (line:text, capped at 5, 200 chars):"
+      # `::error::`, and RC=1.  A `::warning::` here was the state of this file
+      # for its whole life, and the 363 OpenSSL reports of #252 sat under one
+      # for four post-merge runs without anyone acting on them — which is the
+      # empirical answer to whether an advisory annotation is sufficient.
+      RC=1
+      echo "::error::#267 acceptance item 5 — ${UNEXPLAINED} UNEXPLAINED sanitizer report(s) (of ${SAN_COUNT} total) in ${PRESET}'s LastTest.log, on a run whose ctest outcome was '${TEST_OUTCOME}'. THIS STEP FAILS THE LANE. A sanitizer report does NOT necessarily fail the test that emitted it: a WILL_FAIL entry inverts it, and a report emitted outside any test belongs to no test at all — that is the gap this exit code covers. Treat as a real defect until disproven; if it is deliberate, add it to ci/expected-sanitizer-reports.txt with the test, the mechanism and the run. Matches (line:text, capped at 5, 200 chars):"
     else
       echo "notice: ${SAN_COUNT} sanitizer report(s) in ${PRESET}'s LastTest.log, all matching ci/expected-sanitizer-reports.txt. Lines below; no unexplained report."
     fi
@@ -316,4 +376,9 @@ summary "" \
   "Unlike #245's cgroup source it covers the test phase ONLY, not the build — it is a" \
   "measurement of \`ctest\`, not a job-wide ceiling. See \`ci/measure-peak-rss.py\`."
 
-exit 0
+# ⚠️ THE ONLY NON-ZERO EXIT IN THIS FILE, and the only place the status is
+# decided.  `$RC` is 1 iff the UNEXPLAINED branch above ran.  Do not replace
+# this with a bare `exit` or let the script fall off the end: the last command
+# before here is a `summary()` call whose status depends on whether
+# GITHUB_STEP_SUMMARY happens to be set, which is not a verdict about anything.
+exit "$RC"
