@@ -347,6 +347,69 @@ case "$OUT" in *"this line is not a sanitizer report"*)
       bad "T16b a NON-matching line was echoed as a sanitizer report — the excerpt is not the grep's own output";;
    *) ok "T16b only matching lines are echoed";; esac
 
+# ── T16c/T16d/T16e: WHICH test, and HOW MANY DISTINCT sites ──────────────────
+#
+# Five capped lines are not an answer either. A run reported 362 reports and
+# printed five; from that page it was impossible to tell whether that was 362
+# distinct defects or a handful of sites emitted once per test process — two
+# readings with completely different dispositions. ctest delimits every block
+# with `^N/M Test: <name>`, so each report can be attributed to its test.
+#
+# This fixture plants reports in TWO known tests and leaves a third clean, so
+# the attribution is checked against a known answer rather than self-consistency.
+cat > "$WORK/tree/build/$FAKE/Testing/Temporary/LastTest.log" <<'LOG'
+1/3 Testing: alpha_test
+1/3 Test: alpha_test
+Output:
+crypto/evp/digest.c:425:12: runtime error: call to function SHA1_Update through pointer to incorrect function type
+crypto/stack/stack.c:453:17: runtime error: call to function X509_NAME_ENTRY_free through pointer to incorrect function type
+2/3 Testing: beta_clean
+2/3 Test: beta_clean
+Output:
+nothing to see here
+3/3 Testing: otel_exporters
+3/3 Test: otel_exporters
+Output:
+WARNING: ThreadSanitizer: data race (pid=54023)
+SUMMARY: ThreadSanitizer: data race 0x7f1111111111 /x/civetweb.c:20363:2 in mg_stop
+WARNING: ThreadSanitizer: data race (pid=54034)
+SUMMARY: ThreadSanitizer: data race 0x7f2222222222 /x/civetweb.c:20363:2 in mg_stop
+LOG
+OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
+
+# T16c — attribution names the emitting test, with the right per-test counts.
+case "$OUT" in *"2  alpha_test"*)      ok "T16c reports are attributed to the emitting test (alpha_test=2)";;
+               *) bad "T16c alpha_test was not credited with its 2 reports: $OUT";; esac
+case "$OUT" in *"2  otel_exporters"*)  ok "T16c a second test is attributed independently (otel_exporters=2)";;
+               *) bad "T16c otel_exporters was not credited with its 2 reports: $OUT";; esac
+case "$OUT" in *beta_clean*)
+      bad "T16c a test that emitted NOTHING appears in the by-test breakdown — the attribution is crediting the wrong block";;
+   *) ok "T16c a clean test does not appear in the by-test breakdown";; esac
+
+# T16d — the double-count trap. TSan's COUNTED line carries no location; the
+# location is on the SUMMARY line after it. SUMMARY lines are folded in for
+# GROUPING only. If they were also counted, these 4 TSan lines would read as 4
+# reports instead of 2, and every TSan count in this repo would be doubled.
+case "$OUT" in *"sanitizer reports: 4"*) ok "T16d SUMMARY lines are not counted (4 total = 2 UBSan + 2 TSan WARNINGs)";;
+               *) bad "T16d the count is not 4 — SUMMARY lines are probably being double-counted: $OUT";; esac
+case "$OUT" in *"civetweb.c:20363:2 in mg_stop"*)
+      ok "T16d the TSan location is still surfaced, via the folded SUMMARY line";;
+   *) bad "T16d no TSan location in the output — folding SUMMARY lines for grouping is not working, and a bare 'data race' is unactionable: $OUT";; esac
+
+# T16e — ADDRESS normalisation. Without it every report is its own singleton and
+# the distinct-site count degenerates into the report count.
+#
+# ⚠️ THE FIRST VERSION OF THIS CELL WAS VACUOUS and a mutant proved it: the two
+# SUMMARY lines were byte-identical, so they grouped whether or not normalisation
+# ran, and deleting the `s/\(pid=…\)//` rule reddened nothing. The reason is worth
+# keeping: pids live on TSan's `WARNING` line, which SIG_PATTERN does NOT match,
+# so the pid rule is defensive only — it is the ADDRESS rule that does the work on
+# the lines actually grouped. The fixture above now differs ONLY by address
+# between the two SUMMARY lines, so this cell fails if `s/0x…/0xADDR/` is removed.
+case "$OUT" in *"2 SUMMARY: ThreadSanitizer: data race 0xADDR /x/civetweb.c:20363:2 in mg_stop"*)
+      ok "T16e addresses normalise, so two reports of the same site group (2x)";;
+   *) bad "T16e the two same-site TSan reports did not group — address normalisation is not applied: $OUT";; esac
+
 # ── T17: and it reads 0 on a clean log, not 'unreadable' ─────────────────────
 printf 'all quiet\n' > "$WORK/tree/build/$FAKE/Testing/Temporary/LastTest.log"
 OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
