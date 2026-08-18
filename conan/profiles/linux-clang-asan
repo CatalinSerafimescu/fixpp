@@ -15,11 +15,19 @@ compiler.cppstd=23
 CC=clang-22
 CXX=clang++-22
 CXXFLAGS=-fsanitize=address -fno-omit-frame-pointer
+# CFLAGS mirrors CXXFLAGS (#252). Without it every PURE-C dependency — openssl,
+# zlib, curl, civetweb — compiled UNINSTRUMENTED while its package id still moved,
+# because tools.build:cxxflags is in package_id:confs below and applies to no C
+# translation unit. Measured before this line existed: libcrypto.a, 50,830
+# symbols, ZERO __asan_ references. ci/assert-sanitized-deps.sh asserts it now,
+# on this lane and on linux-clang-debug's zero counterpart, every run.
+CFLAGS=-fsanitize=address -fno-omit-frame-pointer
 LDFLAGS=-fsanitize=address
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=address", "-fno-omit-frame-pointer"]
+tools.build:cflags=["-fsanitize=address", "-fno-omit-frame-pointer"]
 tools.build:sharedlinkflags=["-fsanitize=address"]
 tools.build:exelinkflags=["-fsanitize=address"]
 # Include build-flag conf in package_id so sanitizer-instrumented dependencies
