@@ -568,6 +568,27 @@ jobs:
 
       - name: Conan install
         run: |
+          # ── #278: locally-patched civetweb, exported BEFORE the install ─────
+          #
+          # civetweb 1.16 races on ctx->stop_flag: STOP_FLAG_ASSIGN seeds its
+          # compare-and-swap with a PLAIN `*f` read while the worker threads read
+          # the flag atomically. Upstream fixed it in master with
+          # `__atomic_load_n(f, __ATOMIC_SEQ_CST)`, but v1.16 (2023-04-10) is
+          # still the newest release, so there is nothing to upgrade TO. See
+          # conan/recipes/civetweb/README.md for the full trail and the
+          # retirement condition.
+          #
+          # ⚠️ THIS LINE IS INSIDE THE EXISTING STEP ON PURPOSE. A separate step
+          # would trip ci/test-tier1-python-policy.sh's deliberately brittle
+          # count of the `linux` job's steps — a pin that exists so adding a step
+          # is a deliberate act. Nothing here needs to reach the python steps, so
+          # folding it in is the honest option rather than re-pinning a guard.
+          #
+          # Export is idempotent and costs ~0.1 s (it copies two files). It must
+          # precede `conan install` so the patched recipe revision is the one the
+          # graph resolves. `conan install` is run WITHOUT `--update`, so the
+          # cache revision wins and no remote lookup can override it.
+          conan export conan/recipes/civetweb --version 1.16
           conan install . \
             -pr conan/profiles/${{ matrix.preset }} \
             --build=missing \
