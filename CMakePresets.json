@@ -263,9 +263,10 @@
     {
       "name": "linux-clang-ubsan",
       "configurePreset": "linux-clang-ubsan",
-      "description": "UBSan. jobs=4 — #267 phase 2, MEASURED 1.79x (1993 -> 1114 s, ~14.6 min/run) by a PAIRED same-VM run, cross-validated on a second VM to 1.9%/4.2%. Peak 0.65 -> 0.86 GiB, 5.5% of a 15.61 GiB runner. ⚠️ Do NOT copy to another lane without ITS OWN paired measurement: between-VM wall-clock variance is 27-43%, so only a paired same-VM run can decide a lane. debug was separately confirmed at 2.10x; tsan's j=2-vs-j=4 question is UNRESOLVED (its comparison was unpaired). See ci/ctest-parallelism-probe.md.",
+      "description": "UBSan. jobs=4 — #267 phase 2, MEASURED 1.79x (1993 -> 1114 s, ~14.6 min/run) by a PAIRED same-VM run, cross-validated on a second VM to 1.9%/4.2%. Peak 0.65 -> 0.86 GiB, 5.5% of a 15.61 GiB runner. ⚠️ Do NOT copy to another lane without ITS OWN paired measurement: between-VM wall-clock variance is 27-43%, so only a paired same-VM run can decide a lane. debug was separately confirmed at 2.10x; tsan's j=2-vs-j=4 question is UNRESOLVED (its comparison was unpaired). See ci/ctest-parallelism-probe.md. || #268 — UBSAN_OPTIONS BELONGS HERE, NOT IN THE WORKFLOW. UBSan's default mode is RECOVERABLE: a finding prints 'runtime error:', execution continues, and the process exits 0 — so this lane ran the whole suite for its entire existence and could not go red on a UBSan finding, while /speckit-verify set halt_on_error=1 BY HAND at every gate. That asymmetry between CI and local IS the defect, so the fix is put where both read it: a testPresets environment reaches ctest and ctest passes it to every test, so CI, a developer's `ctest --preset`, and /speckit-verify all now get the same behaviour from one place — where a workflow `env:` would have fixed CI and left the asymmetry intact. Proven by a paired local A/B on one binary (2026-08-18, clang-22): the same signed-overflow test PASSES with ctest exiting 0 without this environment, and FAILS with it, print_stacktrace=1 yielding a real frame list. ⚠️ A preset environment value OVERRIDES the inherited one, so a hand-set UBSAN_OPTIONS no longer composes with it — add options here rather than around the invocation.",
       "output": { "outputOnFailure": true },
-      "execution": { "jobs": 4 }
+      "execution": { "jobs": 4 },
+      "environment": { "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1" }
     },
     {
       "name": "linux-clang-tsan",
@@ -302,7 +303,9 @@
     {
       "name": "linux-clang-libc++-ubsan",
       "configurePreset": "linux-clang-libc++-ubsan",
-      "output": { "outputOnFailure": true }
+      "description": "#268 — the Tier 3 twin, and it is NOT optional. This lane reproduces the same recoverable-mode gap and the same finding as linux-clang-ubsan: run 32024674144 job 95371515603 recorded 1 report, ran 356/356, ctest green. Fixing one ubsan lane and not the other is the enumeration trap ci/expected-sanitizer-reports.txt's header already paid for once, when an allowlist named linux-clang-asan and missed linux-clang-libc++-asan. See linux-clang-ubsan's description for the full rationale.",
+      "output": { "outputOnFailure": true },
+      "environment": { "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1" }
     },
     {
       "name": "linux-clang-libc++-tsan",
