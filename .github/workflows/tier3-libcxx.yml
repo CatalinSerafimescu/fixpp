@@ -345,6 +345,26 @@ jobs:
             --build=missing \
             -of build/${{ matrix.preset }}
 
+      # ── #252, the Tier 3 half ───────────────────────────────────────────────
+      #
+      # The three `conan/profiles/linux-clang-libc++-{asan,tsan,ubsan}` carry the
+      # SAME missing-CFLAGS gap as their Tier 1 twins — checked, not assumed.
+      # Fixing one family and not the other is the one-spelling trap this repo
+      # keeps paying for; see ci/expected-sanitizer-reports.txt's header, where an
+      # allowlist enumerated `linux-clang-asan` and missed `linux-clang-libc++-asan`.
+      #
+      # ⚠️ THESE LANES CARRY `-o fixpp/*:with_otel=False`, so curl and civetweb
+      # are NOT in their closure. That is why the checker asserts on openssl (a
+      # direct `requires`, present everywhere) and merely REPORTS the others — an
+      # assertion keyed to an archive that is absent by design here would need a
+      # per-lane exception list. See the script's header.
+      #
+      # zlib is NOT in that absent set, contrary to the obvious guess: measured on
+      # run 32069887717 it is present on this lane (357 symbols) because it
+      # reaches the graph through openssl rather than through OTel.
+      - name: Assert the dependency closure is instrumented (#252)
+        run: ci/assert-sanitized-deps.sh "${{ matrix.preset }}" "build/${{ matrix.preset }}"
+
       # Self-populate on push:main after a MISS — packs ONLY the current graph
       # (with the SAME with_otel=False option) → never stale packages. Best-effort.
       #
