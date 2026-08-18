@@ -1955,9 +1955,16 @@ jobs:
 
       # #266 replaced a peak-memory probe that ran 8 times and measured nothing
       # while exiting 0 every time. Its replacement gets the pre-merge signal the
-      # original never had: 40 cells plus 15 mutants, each mutant proven to redden
+      # original never had: 54 cells plus 18 mutants, each mutant proven to redden
       # the ONE cell that names its defect. Synthetic fixtures only — no build
       # tree, no ctest.
+      #
+      # ⚠️ THIS JOB IS NOW LOAD-BEARING FOR A GATE, not just for a measurement.
+      # Since #267 acceptance item 5, ci/peak-memory-report.sh EXITS 1 on an
+      # unexplained sanitizer report and the calling steps no longer carry
+      # `continue-on-error`. T19a-g here are the only pins on that exit code —
+      # every other cell asserts on TEXT, which is what a human reads, while the
+      # exit code is what GitHub reads. Weakening this job weakens that gate.
       #
       # ⚠️ IT IS NOT FREE: measured 117 s locally, against the ~2.5 s this whole
       # job used to take. The cost is the mutants — each re-runs the full cell
