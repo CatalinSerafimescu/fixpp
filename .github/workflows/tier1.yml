@@ -2144,18 +2144,49 @@ jobs:
       # ccache MUST install BEFORE "Conan install" so the CMAKE_*_COMPILER_LAUNCHER
       # is on PATH for any conan from-source dependency build (mirrors the `linux`
       # job's ordering + exit-127 note).
-      - name: ccache (install + restore + save compiler cache)
+      # ⚠️ THIS JOB IS A PURE CONSUMER OF THE MATRIX `linux-clang-release` LEG'S
+      # ccache — it has NO cache of its own, deliberately (#273).
+      #
+      # It used to key on `tier1-bench` and save on push:main. MEASURED on PR
+      # #279's run 32146773220, where both jobs started at the same second on the
+      # same runner pool and built the SAME preset:
+      #
+      #   linux-clang-release (matrix)   8m36s   ccache 1599/1636 hits (97.74%)
+      #   bench (soft)                 2h00m37s  ccache   15/1616 hits ( 0.93%)
+      #
+      # `conan-cache HIT` on both, so dependencies were not the cause: the object
+      # counts are near-identical (1616 vs 1636) and the wall clock differs 14x
+      # purely on compiler-cache warmth. The `tier1-bench` entry had been evicted
+      # from the shared 10 GB Actions pool between merges — #273 — and because
+      # the save is push:main-only, no PR run could ever repopulate it. A cache
+      # that is cold on every PR is not a cache; it was a 2 GB reservation in a
+      # contended pool, bought with a 2-hour build.
+      #
+      # Nothing justified the separation: `FIXPP_BUILD_BENCH` appears ONLY as a
+      # gate on `add_subdirectory(bench)` (CMakeLists.txt:339, ProjectOptions
+      # .cmake:6). It changes no compile flag, so the library/test objects here
+      # are hash-identical to the matrix leg's and restore straight into them.
+      #
+      # `save: false`, not push-conditional — and that is the load-bearing half.
+      # Saving under a key the matrix leg also writes would let two jobs publish
+      # entries under one prefix, and the matrix leg would then restore whichever
+      # was newest — possibly THIS job's, which lacks whatever the matrix leg
+      # compiles and bench does not. Consuming-only cannot regress the producer.
+      # It also returns a 2 GB slot to the pool that #273 is about.
+      #
+      # Cost, stated: the bench TARGETS themselves are never cached (a handful of
+      # TUs against ~1600). Accepted.
+      - name: ccache (install + restore — CONSUMES the matrix release leg's cache)
         uses: hendrikmuhs/ccache-action@v1.2.23
         with:
-          key: tier1-bench
+          # Same string as the matrix leg's `key: tier1-${{ matrix.preset }}` for
+          # preset `linux-clang-release`. The action prefixes BOTH sides with
+          # `ccache-` and appends `-` under the default append-timestamp, so this
+          # resolves to the prefix `ccache-tier1-linux-clang-release-` and matches
+          # what that leg publishes on push:main.
+          key: tier1-linux-clang-release
           max-size: 2G
-          # Restore-only on pull requests — see the matrix `linux` job's ccache
-          # step for the measurement and the budget arithmetic. Both remaining
-          # WRITING ccache-action sites (this one and the matrix) carry it;
-          # fixing a subset would leave the other squatting the same pool.
-          # (#240 removed the third — tier3 libc++ — from the Actions pool
-          # entirely; its ccache is on GHCR and never touches this budget.)
-          save: ${{ github.event_name == 'push' }}
+          save: false
 
       - name: Conan install
         run: |
