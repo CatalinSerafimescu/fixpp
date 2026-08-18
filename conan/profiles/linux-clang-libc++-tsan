@@ -19,11 +19,15 @@ compiler.cppstd=23
 CC=clang-22
 CXX=clang++-22
 CXXFLAGS=-stdlib=libc++ -fsanitize=thread
+# CFLAGS mirrors the SANITIZER half of CXXFLAGS only (#252) — deliberately
+# without `-stdlib=libc++`; see linux-clang-libc++-asan for why.
+CFLAGS=-fsanitize=thread
 LDFLAGS=-stdlib=libc++ -fsanitize=thread
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=thread"]
+tools.build:cflags=["-fsanitize=thread"]
 tools.build:sharedlinkflags=["-fsanitize=thread"]
 tools.build:exelinkflags=["-fsanitize=thread"]
 # compiler.libcxx=libc++ is already in [settings] so it enters package_id.
