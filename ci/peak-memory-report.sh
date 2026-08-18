@@ -157,9 +157,20 @@ EXPECTED="${EXPECTED:-<no line>}"
 # repo's rule is that a sanitizer finding is a REAL DEFECT UNTIL DISPROVEN;
 # disproving one requires seeing it.
 SAN_PATTERN='WARNING: ThreadSanitizer:|ERROR: (Address|Leak|Memory)Sanitizer:|runtime error:'
+# Signature pattern is DELIBERATELY different from SAN_PATTERN. TSan's counted
+# line is `WARNING: ThreadSanitizer: data race (pid=N)`, which carries no
+# location — the location is on the SUMMARY line that follows. Aggregating the
+# WARNING lines alone would group every TSan report under the single useless key
+# "data race". SUMMARY lines are therefore folded in for GROUPING only; they are
+# NOT added to SAN_PATTERN, because counting them would double every TSan total.
+# T16d of ci/test-peak-rss.sh pins that, and is proven to redden when SUMMARY is
+# moved into SAN_PATTERN.
+SIG_PATTERN='runtime error:|SUMMARY: (Thread|Address|Leak|Memory)Sanitizer:'
 LASTTEST="build/${PRESET}/Testing/Temporary/LastTest.log"
 SAN_COUNT="unreadable"
 SAN_LINES=""
+SAN_BY_TEST=""
+SAN_BY_SITE=""
 UNEXPLAINED=""
 if [ -r "$LASTTEST" ]; then
   SAN_COUNT="$(grep -cE "$SAN_PATTERN" "$LASTTEST" 2>/dev/null || true)"
@@ -169,6 +180,36 @@ if [ -r "$LASTTEST" ]; then
     # can be followed by a 60-frame stack. The cap is stated in the output so a
     # reader is never left thinking they saw all of them.
     SAN_LINES="$(grep -nE "$SAN_PATTERN" "$LASTTEST" 2>/dev/null | head -5 | cut -c1-200)"
+
+    # ── WHICH TEST, and WHICH SITE ───────────────────────────────────────────
+    #
+    # ⚠️ FIVE CAPPED LINES ARE NOT AN ANSWER EITHER. Run 32071568839 reported 362
+    # reports on linux-clang-libc++-ubsan and printed five; from that page it was
+    # impossible to tell whether that was 362 distinct defects or a handful of
+    # sites emitted once per test process — two readings implying completely
+    # different dispositions. Telling them apart required pulling the job log by
+    # API and reasoning about a 361-tests/363-reports ratio.
+    #
+    # ctest delimits every block with `^N/M Test: <name>`, so each report can be
+    # attributed to the test that emitted it without parsing anything else. Both
+    # aggregations run over the WHOLE file: the caps below bound how many GROUPS
+    # print, never what is counted, and each total is stated so a reader knows
+    # whether the list was truncated.
+    SAN_BY_TEST="$(awk -v SP="$SAN_PATTERN" '
+      /^[0-9]+\/[0-9]+ Test: / { t = substr($0, index($0, "Test: ") + 6); next }
+      $0 ~ SP { if (t == "") t = "(before first test)"; c[t]++ }
+      END { for (k in c) printf "%8d  %s\n", c[k], k }
+    ' "$LASTTEST" 2>/dev/null | sort -rn | head -20)"
+    SAN_TEST_TOTAL="$(printf '%s\n' "$SAN_BY_TEST" | grep -c . || true)"
+
+    # Normalise the volatile fields out before grouping, or every report is its
+    # own singleton and the distinct count degenerates to the report count: pids
+    # differ per test process, addresses per run.
+    SAN_SIG_RAW="$(grep -aE "$SIG_PATTERN" "$LASTTEST" 2>/dev/null \
+      | sed -E 's/\(pid=[0-9]+\)//; s/0x[0-9a-f]+/0xADDR/g; s/[[:space:]]+$//' \
+      | cut -c1-110)"
+    SAN_BY_SITE="$(printf '%s\n' "$SAN_SIG_RAW" | sort | uniq -c | sort -rn | head -10)"
+    SAN_SITE_TOTAL="$(printf '%s\n' "$SAN_SIG_RAW" | sort -u | grep -c . || true)"
 
     # ── Expected vs UNEXPLAINED ──────────────────────────────────────────────
     #
@@ -200,6 +241,19 @@ if [ -r "$LASTTEST" ]; then
       echo "notice: ${SAN_COUNT} sanitizer report(s) in ${PRESET}'s LastTest.log, all matching ci/expected-sanitizer-reports.txt. Lines below; no unexplained report."
     fi
     printf '%s\n' "$SAN_LINES"
+
+    # These two aggregations are what make the count actionable: WHICH tests, and
+    # HOW MANY DISTINCT sites. A large count over few sites and few tests is a
+    # third-party idiom repeated per test process; the same count over many sites
+    # is a real population. The headline number cannot tell them apart.
+    if [ -n "$SAN_BY_TEST" ]; then
+      echo "  by test (${SAN_TEST_TOTAL:-?} test(s) emitted reports; showing up to 20, count first):"
+      printf '%s\n' "$SAN_BY_TEST"
+    fi
+    if [ -n "$SAN_BY_SITE" ]; then
+      echo "  by signature (${SAN_SITE_TOTAL:-?} distinct after normalising pid/addresses; showing up to 10, count first; TSan SUMMARY lines are folded in for location and are NOT part of the counts above):"
+      printf '%s\n' "$SAN_BY_SITE"
+    fi
   fi
 fi
 
