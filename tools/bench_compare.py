@@ -669,21 +669,32 @@ def check_paired_not_narrowed(manifest: str, all_rows: list[Row],
         # Discriminate on the distinction that actually holds: a pre-#209 base
         # still has a CHECKOUT; a broken path does not.
         root = _base_checkout_root(base_manifest)
+        # ⚠️ Each reason carries a STABLE MACHINE SUB-TAG, and ci/test-bench-gate.sh
+        # asserts on the sub-tag, not on the prose. Two rounds of adversarial review
+        # produced the same defect on this block twice: cells asserting only the
+        # family tag `[T2-BASEROOT]` let a mutant collapsing all three reasons pass
+        # 53/53, and then the `shape` branch — the one that catches a typo in the
+        # FILENAME rather than the directory — had no cell at all, so flipping it to
+        # take the exemption passed 55/55 while exempting a whole class of broken
+        # paths. Sub-tags give every reason an anchor that cannot drift when the
+        # wording is edited, which is what made the prose anchors brittle in turn.
         if root is None:
-            why = "the manifest path shape is unrecognised (expected .../%s)" % _BASE_MANIFEST_RELPATH
+            tag, why = "shape", ("the manifest path shape is unrecognised (expected .../%s)"
+                                 % _BASE_MANIFEST_RELPATH)
         elif not os.path.isdir(root):
-            why = "there is no directory at %s" % root
+            tag, why = "nodir", "there is no directory at %s" % root
         elif not os.path.exists(os.path.join(root, _BASE_SENTINEL)):
-            why = "%s has no %s, so it is not a checkout of this repo" % (root, _BASE_SENTINEL)
+            tag, why = "notrepo", ("%s has no %s, so it is not a checkout of this repo"
+                                   % (root, _BASE_SENTINEL))
         else:
-            why = None
+            tag = why = None
         if why is not None:
-            msg = ("[T2-BASEROOT] %s: the merge-base manifest is absent AND %s. A base "
+            msg = ("[T2-BASEROOT:%s] %s: the merge-base manifest is absent AND %s. A base "
                    "predating #209 legitimately has no manifest, but it DOES have a "
                    "checkout — so this is a wrong path, a missing base worktree or a "
                    "changed checkout step, not a pre-#209 base. Failing closed: taking "
                    "the exemption here would disable [T2-DOWNGRADE] on an accident and "
-                   "still exit 0." % (base_manifest, why))
+                   "still exit 0." % (tag, base_manifest, why))
             print(f"    ::error::{msg}")
             return [msg]
         print(f"    paired set: NOT DIFFED — the merge-base checkout at {root} exists "

@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=55
+CELLS_DECLARED=56
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -573,8 +573,21 @@ PREBASE="$TMP/prebase"            # a base that predates #209: checkout, no mani
 mkdir -p "$PREBASE/bench"
 : > "$PREBASE/.git"               # `git worktree add` writes .git as a regular FILE
 
+# ⚠️ THREE reasons, THREE cells, each asserting a STABLE MACHINE SUB-TAG rather
+# than the prose. Two review rounds produced the same defect on this block: cells
+# asserting only the family tag `[T2-BASEROOT]` let a mutant collapsing all three
+# `why` branches pass 53/53; then the `shape` branch turned out to have no cell at
+# all, so flipping it to take the exemption passed 55/55 while exempting every
+# filename-typo path. Sub-tags also stop a legitimate reword reddening a cell.
 expect_red T2-BASEROOT-MISSING "base checkout directory does not exist at all" \
-  "there is no directory at" pcb "$CMAN" "$TMP/no-such-base-root/bench/ci-suite.txt"
+  "[T2-BASEROOT:nodir]" pcb "$CMAN" "$TMP/no-such-base-root/bench/ci-suite.txt"
+
+# T2-BASEROOT-SHAPE — the third reason, the one that had no cell. It catches a typo
+# in the FILENAME rather than the directory (ci_suite.txt for ci-suite.txt), where
+# the root cannot be derived at all. $PREBASE IS a valid checkout with its .git, so
+# only the unparseable filename separates this from the G11 exemption.
+expect_red T2-BASEROOT-SHAPE "manifest filename typo leaves the root underivable" \
+  "[T2-BASEROOT:shape]" pcb "$CMAN" "$PREBASE/bench/ci_suite.txt"
 
 # T2-BASESELF — the comparand must not BE the candidate. Pointing --base-manifest
 # at --manifest makes `base_paired - cand_paired` empty by construction, so
@@ -592,7 +605,7 @@ expect_red T2-BASESELF "base manifest resolves to the candidate's own manifest" 
 
 NOTREPO="$TMP/notrepo"; mkdir -p "$NOTREPO/bench"   # exists, but has no sentinel
 expect_red T2-BASEROOT-NOTREPO "base path exists but is not a checkout of this repo" \
-  "is not a checkout" pcb "$CMAN" "$NOTREPO/bench/ci-suite.txt"
+  "[T2-BASEROOT:notrepo]" pcb "$CMAN" "$NOTREPO/bench/ci-suite.txt"
 
 # T2-BASEROOT-CMAKEONLY — REGRESSION PIN for the sentinel fail-open. The sentinel
 # was `CMakeLists.txt`, of which this repo tracks 63 (one per CMake subdirectory),
@@ -602,7 +615,7 @@ expect_red T2-BASEROOT-NOTREPO "base path exists but is not a checkout of this r
 CMAKEONLY="$TMP/cmakeonly"; mkdir -p "$CMAKEONLY/bench"
 : > "$CMAKEONLY/CMakeLists.txt"   # the OLD sentinel, and nothing else
 expect_red T2-BASEROOT-CMAKEONLY "a CMake subdirectory is not a checkout despite CMakeLists.txt" \
-  "is not a checkout" pcb "$CMAN" "$CMAKEONLY/bench/ci-suite.txt"
+  "[T2-BASEROOT:notrepo]" pcb "$CMAN" "$CMAKEONLY/bench/ci-suite.txt"
 
 # T2-BASESHAPE — os.path.exists() is true for a DIRECTORY, so it skipped the root
 # check and died with an IsADirectoryError traceback instead of a named finding.
