@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=50
+CELLS_DECLARED=52
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -559,16 +559,39 @@ manifest "$CMAN" \
   "bench/x/beta_bench    none:n/a   paired"
 expect_green G10 "a paired row ADDED by the candidate is not an error" pcb "$CMAN" "$BMAN"
 
-# G11 — a merge-base that PREDATES #209 has no manifest to diff against. That
-# must not be fatal (it is this very PR's own merge-base), and it must not be
-# silent either — a skipped check that prints nothing is how a gate reads green
-# on nothing. This cell pins that the exemption NAMES itself.
-if ! pcb "$CMAN" "$TMP/no-such-base-manifest.txt" > "$TMP/g11.out" 2>&1; then
-  fail "G11: an absent base manifest must not fail the gate — output:\n$(cat "$TMP/g11.out")"
+# ── THE EXEMPTION MUST NOT SWALLOW A BROKEN PATH ────────────────────────────
+# A merge-base that PREDATES #209 has no manifest to diff against, and that must
+# not be fatal — it is this very PR's own merge-base. But "the file is not there"
+# is ALSO what a typo'd path, a missing base worktree or a changed checkout step
+# looks like. An exemption keyed on `os.path.exists(manifest)` alone therefore
+# exits 0 on every one of those accidents, silently disabling [T2-DOWNGRADE] —
+# the fail-open class this file exists to remove, reintroduced by F1's own fix.
+#
+# The discriminator is that a pre-#209 base still has a CHECKOUT. These three
+# cells pin both directions of it.
+PREBASE="$TMP/prebase"            # a base that predates #209: checkout, no manifest
+mkdir -p "$PREBASE/bench"
+: > "$PREBASE/CMakeLists.txt"     # the revision-stable sentinel
+
+expect_red T2-BASEROOT-MISSING "base checkout directory does not exist at all" \
+  "[T2-BASEROOT]" pcb "$CMAN" "$TMP/no-such-base-root/bench/ci-suite.txt"
+
+NOTREPO="$TMP/notrepo"; mkdir -p "$NOTREPO/bench"   # exists, but has no sentinel
+expect_red T2-BASEROOT-NOTREPO "base path exists but is not a checkout of this repo" \
+  "[T2-BASEROOT]" pcb "$CMAN" "$NOTREPO/bench/ci-suite.txt"
+
+# G11 — the LEGITIMATE case, and it must not be silent either: a skipped check
+# that prints nothing is how a gate reads green on nothing. Asserts the root
+# check actually RAN (it names the sentinel it verified), not merely that some
+# line was printed.
+if ! pcb "$CMAN" "$PREBASE/bench/ci-suite.txt" > "$TMP/g11.out" 2>&1; then
+  fail "G11: a pre-#209 base (checkout present, manifest absent) must not fail the gate — output:\n$(cat "$TMP/g11.out")"
 fi
-grep -qF "NOT DIFFED — the merge-base has no" "$TMP/g11.out" \
-  || fail "G11: the absent-base-manifest exemption was taken SILENTLY:\n$(cat "$TMP/g11.out")"
-echo "GREEN (expected): G11 — an absent base manifest is exempted BY NAME, not silently"
+grep -qF "verified via CMakeLists.txt" "$TMP/g11.out" \
+  || fail "G11: the exemption was taken WITHOUT the base-checkout check running, or without naming it:\n$(cat "$TMP/g11.out")"
+grep -qF "predates #209" "$TMP/g11.out" \
+  || fail "G11: the exemption was taken SILENTLY:\n$(cat "$TMP/g11.out")"
+echo "GREEN (expected): G11 — a pre-#209 base is exempted BY NAME after its checkout is verified"
 cells_run=$((cells_run + 1))
 
 # ── THE MANDATORY PAIRED FLOOR, against the SHIPPED manifest ────────────────

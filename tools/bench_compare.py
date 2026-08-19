@@ -545,6 +545,21 @@ def run_suite(results_dir: str, baselines_dir: str, manifest: str,
 
 # ── PAIRED mode: tier 2 (hard) ──────────────────────────────────────────────
 
+# Sentinel for "is this a checkout of this repo at all?". MUST be a path that
+# exists in EVERY revision, including every base predating #209 — the root
+# CMakeLists.txt has been present since the initial commit. Picking a file that
+# #209 itself introduced would make the check tautological.
+_BASE_SENTINEL = "CMakeLists.txt"
+_BASE_MANIFEST_RELPATH = os.path.join("bench", "ci-suite.txt")
+
+
+def _base_checkout_root(base_manifest: str) -> "str | None":
+    """The repo root a base manifest sits in, or None if the shape is unrecognised."""
+    norm = os.path.normpath(base_manifest)
+    suffix = os.sep + _BASE_MANIFEST_RELPATH
+    return norm[: -len(suffix)] if norm.endswith(suffix) else None
+
+
 def check_paired_not_narrowed(manifest: str, all_rows: list[Row],
                               base_manifest: str | None) -> list[str]:
     """[T2-DOWNGRADE] — a change may ADD `paired` rows; it may not remove one.
@@ -571,10 +586,38 @@ def check_paired_not_narrowed(manifest: str, all_rows: list[Row],
               "paired set as a floor against the shipped manifest.")
         return []
     if not os.path.exists(base_manifest):
-        print(f"    paired set: NOT DIFFED — the merge-base has no {base_manifest} "
-              f"(a base predating #209 has no manifest to diff against). The "
-              f"mandatory-paired floor in ci/test-bench-gate.sh is what covers this "
-              f"case; it is stated rather than skipped.")
+        # ⚠️ A merge-base predating #209 legitimately has no manifest — including
+        # THIS PR's own base. But "the file is not there" is ALSO what a typo'd
+        # path, an unmounted/moved base worktree, or a future change to how the
+        # base is checked out looks like, and exempting all of them alike would
+        # make [T2-DOWNGRADE] exit 0 on an accident — the fail-open class this
+        # whole file exists to remove, reintroduced by its own fix.
+        #
+        # Discriminate on the distinction that actually holds: a pre-#209 base
+        # still has a CHECKOUT; a broken path does not.
+        root = _base_checkout_root(base_manifest)
+        if root is None:
+            why = "the manifest path shape is unrecognised (expected .../%s)" % _BASE_MANIFEST_RELPATH
+        elif not os.path.isdir(root):
+            why = "there is no directory at %s" % root
+        elif not os.path.exists(os.path.join(root, _BASE_SENTINEL)):
+            why = "%s has no %s, so it is not a checkout of this repo" % (root, _BASE_SENTINEL)
+        else:
+            why = None
+        if why is not None:
+            msg = ("[T2-BASEROOT] %s: the merge-base manifest is absent AND %s. A base "
+                   "predating #209 legitimately has no manifest, but it DOES have a "
+                   "checkout — so this is a wrong path, a missing base worktree or a "
+                   "changed checkout step, not a pre-#209 base. Failing closed: taking "
+                   "the exemption here would disable [T2-DOWNGRADE] on an accident and "
+                   "still exit 0." % (base_manifest, why))
+            print(f"    ::error::{msg}")
+            return [msg]
+        print(f"    paired set: NOT DIFFED — the merge-base checkout at {root} exists "
+              f"(verified via {_BASE_SENTINEL}) but carries no "
+              f"{_BASE_MANIFEST_RELPATH}, i.e. it predates #209. The mandatory-paired "
+              f"floor in ci/test-bench-gate.sh is what covers this case; it is stated "
+              f"rather than skipped.")
         return []
 
     base_paired = {r.name for r in read_manifest(base_manifest) if r.tier2 == "paired"}
