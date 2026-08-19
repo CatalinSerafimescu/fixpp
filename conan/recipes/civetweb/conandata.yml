@@ -1,0 +1,15 @@
+sources:
+  '1.16':
+    sha256: f0e471c1bf4e7804a6cfb41ea9d13e7d623b2bcc7bc1e2a4dd54951a24d60285
+    url: https://github.com/civetweb/civetweb/archive/v1.16.tar.gz
+patches:
+  '1.16':
+    - patch_file: "patches/1.16-0001-stop-flag-atomic-cas-seed.patch"
+      patch_description: >-
+        Seed the stop_flag compare-and-swap with an atomic load instead of a
+        plain dereference. Backport of the fix already present in civetweb
+        master but not in any release (v1.16, 2023-04-10, is the newest).
+        Without it STOP_FLAG_ASSIGN writes atomically but READS *f plainly,
+        which races the worker threads' atomic reads and is reported by TSan.
+      patch_type: "bugfix"
+      patch_source: "https://github.com/civetweb/civetweb/issues/861"

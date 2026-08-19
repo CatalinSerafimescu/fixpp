@@ -15,12 +15,16 @@
 //     establishes a fresh two-engine pair (both reset_on_logon=true) through the
 //     public C-ABI; verified 20/20 over loopback. BILATERAL_LENIENT is NOT required.
 //   - Error-path assertions for every new function (NULL / out-of-range).
+//     ⚠️ The set_reset_seqnum_policy OUT-OF-RANGE case is no longer here: it moved
+//     to tests/capi/reset_seqnum_policy_range_test.c (#268), because it cannot be
+//     expressed in C++ without the caller itself committing undefined behaviour.
+//     The NULL-handle and valid-value cases stay below. Re-pointed rather than
+//     left describing a witness this file no longer carries.
 
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
-#include <cstring>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -116,20 +120,25 @@ TEST(PublicRoundtrip, SetResetSeqnumPolicyNullCfg) {
         FIXPP_ERR_NULL_HANDLE);
 }
 
-TEST(PublicRoundtrip, SetResetSeqnumPolicyOutOfRange) {
-    fixpp_session_config_t* cfg = nullptr;
-    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
-    ASSERT_NE(cfg, nullptr);
-    // Construct an out-of-range enum value via memcpy (avoids -fsanitize=enum UB
-    // that a direct cast would trigger, mirroring the production memcpy guard).
-    fixpp_reset_seqnum_policy bad{};
-    int raw_val = 99;
-    static_assert(sizeof(bad) <= sizeof(raw_val), "enum wider than int");
-    std::memcpy(&bad, &raw_val, sizeof(bad));
-    EXPECT_EQ(fixpp_session_config_set_reset_seqnum_policy(cfg, bad),
-              FIXPP_ERR_CAPI_CONFIG_INVALID);
-    fixpp_session_config_destroy(cfg);
-}
+// ⚠️ THE OUT-OF-RANGE CASE MOVED TO C — tests/capi/reset_seqnum_policy_range_test.c
+// (#268). It cannot be written here without undefined behaviour: passing an
+// out-of-range enum BY VALUE is an lvalue-to-rvalue conversion of an invalid enum
+// value, so the CALLER performs the UB, whatever the callee does. This file's
+// version reported it on every run —
+//
+//     public_roundtrip_test.cpp:129:5: runtime error: load of value 99, which is
+//     not a valid value for type 'fixpp_reset_seqnum_policy'
+//
+// — and went unnoticed because the ubsan lane ran in UBSan's default RECOVERABLE
+// mode and could not fail on it. The comment that used to sit here claimed the
+// memcpy avoided the UB; it does not, because memcpy addresses only the STORE.
+//
+// The C twin covers strictly more: the memcpy form, a direct `(fixpp_reset_seqnum_policy)99`
+// cast (UB in C++, well-defined in C, and a second entry into the same guard), the
+// three valid enumerators, and the NULL-handle path. Measured with clang-22 on one
+// source compiled `-x c` vs `-x c++` under `-fsanitize=undefined`: 0 reports vs 2.
+//
+// Do NOT reinstate an out-of-range case in this file.
 
 // All three valid enumerator values should map to OK.
 TEST(PublicRoundtrip, SetResetSeqnumPolicyValidValues) {

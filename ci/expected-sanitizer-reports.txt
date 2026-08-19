@@ -6,6 +6,20 @@
 # build/<preset>/Testing/Temporary/LastTest.log separately from ctest's exit
 # code (a report does not necessarily fail the test that emitted it).
 #
+# ⚠️⚠️ SINCE #267 ACCEPTANCE ITEM 5, AN ENTRY IN THIS FILE PERMITS A MERGE.
+#
+# Read the rest of this header with that in mind, because it was written when
+# the stakes were lower. `ci/peak-memory-report.sh` used to EXIT 0 always and an
+# unexplained report raised a `::warning::`; it now EXITS 1, and the calling
+# steps no longer carry `continue-on-error`. So a line here no longer decides
+# only whether an annotation is noisy — it decides whether a sanitizer report
+# reddens the lane or merges green.
+#
+# Nothing about the mechanism changed. What changed is the cost of a wrong or
+# over-broad entry, and every accepted tradeoff recorded below should be re-read
+# as "…and that now permits a merge", not "…and that now costs us a warning".
+# The two ASan entries have exactly such a tradeoff; it is restated at each.
+#
 # ── WHY AN ALLOWLIST EXISTS AT ALL ───────────────────────────────────────────
 #
 # Because some lanes emit a report BY DESIGN, on every single run, forever.
@@ -64,6 +78,35 @@
 # `AddressSanitizer:` — would allowlist every ASan error class on the lane, which
 # is far worse. Narrowing it further needs per-test attribution in LastTest.log,
 # which CTest does not make cheap.
+#
+# ⚠️ #267 RAISED WHAT THAT GAP COSTS — BUT THE HOLE IS NARROWER THAN IT LOOKS,
+# AND THE FIRST VERSION OF THIS PARAGRAPH OVERSTATED IT. It said a genuine
+# stack-use-after-return "ANYWHERE on this lane exits 0 and merges green". That
+# is wrong, and the correction matters, because an overstated hole invites a
+# broader allowlist or extra machinery to plug something that is not open.
+#
+# ASan's halt_on_error=1 is the DEFAULT and no ASAN_OPTIONS is set anywhere in
+# this repo, so a stack-use-after-return ABORTS its process; the abort fails that
+# ctest entry, and the LANE goes red through ctest — entirely independently of
+# what this allowlist or the report counter decide. The only way an abort does
+# not fail its entry is `WILL_FAIL TRUE`, and of the five WILL_FAIL entries in
+# tests/ exactly ONE runs instrumented code: `capi_send_recv_uaf_negative`
+# (tests/capi/CMakeLists.txt:175). The other four cannot emit a runtime ASan
+# report at all — two tls + one session are negative-COMPILE witnesses invoking
+# `cmake --build`, and tests/sync's runs a `bash` census script.
+#
+# So the merge-permitting hole is: a SECOND, different stack-use-after-return
+# arising inside the canary's own entry, where the deliberate one already masks
+# it. That is the whole of it. `T19b` of ci/test-peak-rss.sh asserts the
+# permitting behaviour as correct, and it is correct.
+#
+# ⚠️ THAT ARGUMENT HAS A LOAD-BEARING PREMISE — no ASAN_OPTIONS anywhere. If a
+# preset or workflow ever sets `halt_on_error=0` on an asan lane, reports stop
+# aborting, ctest stops reddening, and the hole widens from one entry to the
+# whole lane. Re-derive before trusting this paragraph:
+#     grep -rn 'ASAN_OPTIONS' CMakePresets.json .github/ cmake/ tests/
+# Closing even the narrow hole means per-test attribution applied to the
+# ALLOWLIST — #266's by-test aggregation extended — not a bigger regex.
 linux-clang-asan    ERROR: AddressSanitizer: stack-use-after-return
 
 # ── linux-clang-libc++-asan (Tier 3) ─────────────────────────────────────────
@@ -79,10 +122,12 @@ linux-clang-asan    ERROR: AddressSanitizer: stack-use-after-return
 #   observed   run 32024674144, job 95371515426 (2026-08-17) — exactly 1,
 #              signature byte-identical to the Tier 1 lane's.
 #
-# Same accepted gap as above: anchored to the ASan error KIND, not the test name,
-# so an unrelated stack-use-after-return on this lane would also be treated as
-# expected. Same reasoning — the alternative (a bare `AddressSanitizer:`) would
-# allowlist every ASan error class on the lane.
+# Same accepted gap as above, and since #267 the same raised cost: anchored to
+# the ASan error KIND, not the test name, so an unrelated stack-use-after-return
+# on this lane would also be treated as expected — and "treated as expected" now
+# means exits 0 and merges green, not merely un-warned. Same reasoning for
+# keeping it — the alternative (a bare `AddressSanitizer:`) would allowlist every
+# ASan error class on the lane. See the Tier 1 entry for what closing it takes.
 linux-clang-libc++-asan    ERROR: AddressSanitizer: stack-use-after-return
 
 # ── No other lane has an expected report ─────────────────────────────────────

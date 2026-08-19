@@ -568,10 +568,60 @@ jobs:
 
       - name: Conan install
         run: |
+          # ── #278: locally-patched civetweb, exported BEFORE the install ─────
+          #
+          # civetweb 1.16 races on ctx->stop_flag: STOP_FLAG_ASSIGN seeds its
+          # compare-and-swap with a PLAIN `*f` read while the worker threads read
+          # the flag atomically. Upstream fixed it in master with
+          # `__atomic_load_n(f, __ATOMIC_SEQ_CST)`, but v1.16 (2023-04-10) is
+          # still the newest release, so there is nothing to upgrade TO. See
+          # conan/recipes/civetweb/README.md for the full trail and the
+          # retirement condition.
+          #
+          # ⚠️ THIS LINE IS INSIDE THE EXISTING STEP ON PURPOSE. A separate step
+          # would trip ci/test-tier1-python-policy.sh's deliberately brittle
+          # count of the `linux` job's steps — a pin that exists so adding a step
+          # is a deliberate act. Nothing here needs to reach the python steps, so
+          # folding it in is the honest option rather than re-pinning a guard.
+          #
+          # Export is idempotent and costs ~0.1 s (it copies two files). It must
+          # precede `conan install` so the patched recipe revision is the one the
+          # graph resolves. `conan install` is run WITHOUT `--update`, so the
+          # cache revision wins and no remote lookup can override it.
+          conan export conan/recipes/civetweb --version 1.16
           conan install . \
             -pr conan/profiles/${{ matrix.preset }} \
             --build=missing \
             -of build/${{ matrix.preset }}
+
+      # ── #252: the dependency closure really carries the sanitizer, or none ──
+      #
+      # The sanitizer profiles set only CXXFLAGS/tools.build:cxxflags, so every
+      # PURE-C dependency (openssl, zlib, curl, civetweb) compiled UNINSTRUMENTED
+      # while its package id still moved — `tools.build:cflags` is listed in
+      # `tools.info.package_id:confs` and never set. Measured under
+      # `linux-clang-tsan`: libcrypto.a, 50,830 symbols, ZERO `__tsan_*`.
+      #
+      # ⚠️ UNCONDITIONAL, AND TWO-SIDED. Every preset in this matrix runs it: the
+      # sanitizer legs assert NON-ZERO references, the others assert ZERO. An
+      # `if: contains(preset, 'san')` guard would be a second spelling of the
+      # polarity table (the trap ci/derive-python-sanitizer.sh's header names),
+      # and dropping the negative half would leave the "grep proven only on the
+      # fixed tree" shape #252's own scope note rules out.
+      #
+      # Placed here — after `conan install`, before configure/build — so a lane
+      # whose closure is wrong fails in seconds rather than after a full build.
+      # ci/test-sanitized-deps.sh pins the checker itself in `ci-script-pins`.
+      #
+      # ⚠️ IT ALSO SITS BEFORE THE GHCR SAVE STEPS, and that is deliberate rather
+      # than incidental: a RED here means the closure this run produced is not the
+      # one the profile asks for, and seeding it into the shared cache would hand
+      # every later run the same wrong binaries with a `HIT` to make them look
+      # earned. The cost is that a failing gate on `push:main` also forgoes that
+      # run's cache seeding — accepted, because the alternative is publishing a
+      # closure the gate has just rejected.
+      - name: Assert the dependency closure is instrumented (#252)
+        run: ci/assert-sanitized-deps.sh "${{ matrix.preset }}" "build/${{ matrix.preset }}"
 
       # Self-populate: on push:main, if the restore MISSED (conanfile bumped),
       # push the just-rebuilt cache to GHCR so the next run hits. seed packs ONLY
@@ -838,9 +888,24 @@ jobs:
       # an attributed disposition, so "no number" can never be read as "captured,
       # and it was fine"
       # (feedback_silent_empty_recurred_three_times_including_inside_its_own_fix).
-      - name: Peak memory (ctest --parallel evidence, #266 / #229)
+      # ⚠️ QUOTED. An unquoted `#` after a space starts a YAML comment, so the
+      # previous name `Peak memory (ctest --parallel evidence, #266 / #229)`
+      # actually reached GitHub as `Peak memory (ctest --parallel evidence,`.
+      # Harmless while the step was advisory; not harmless now that it can be
+      # the red one, since the name is what tells a reader WHICH gate failed.
+      - name: "Peak memory + unexplained-sanitizer gate (#266 / #229 / #267)"
         if: always() && matrix.preset != 'linux-gcc-release'
-        continue-on-error: true
+        # ⚠️ `continue-on-error: true` DELIBERATELY REMOVED (#267 acceptance item 5).
+        # It was here because this step is a MEASUREMENT and a lane must not go
+        # red over a /proc sampling hiccup — that reasoning still holds and is
+        # now enforced inside the script instead: `ci/peak-memory-report.sh`
+        # exits 0 on every instrument-failure path, and exits 1 for exactly one
+        # reason, an UNEXPLAINED sanitizer report. Leaving this line would have
+        # made that `exit 1` inert: GitHub records `outcome: failure` but sets
+        # `conclusion: success`, the job continues, and the lane reports green —
+        # a gate that observes and never asserts. Restoring it silently reverts
+        # the script's fail-closed contract, so do not, without also reverting
+        # the script.
         env:
           # `|| 'unavailable'`: GitHub's steps context is documented to report
           # `skipped` for a step that never ran, but default rather than trust
@@ -920,9 +985,20 @@ jobs:
       # packaging-registration assertion between them, so one combined step would
       # sit nowhere near one of its two subjects. (Tier 3 combines its two
       # because they are adjacent.)
-      - name: Peak memory (packaging tier, #266 / #229)
+      # Quoted — see the `linux` job's first Peak memory step for why.
+      - name: "Peak memory + unexplained-sanitizer gate (packaging tier, #266 / #229 / #267)"
         if: always() && matrix.preset == 'linux-gcc-release'
-        continue-on-error: true
+        # ⚠️ `continue-on-error: true` DELIBERATELY REMOVED (#267 acceptance item 5).
+        # It was here because this step is a MEASUREMENT and a lane must not go
+        # red over a /proc sampling hiccup — that reasoning still holds and is
+        # now enforced inside the script instead: `ci/peak-memory-report.sh`
+        # exits 0 on every instrument-failure path, and exits 1 for exactly one
+        # reason, an UNEXPLAINED sanitizer report. Leaving this line would have
+        # made that `exit 1` inert: GitHub records `outcome: failure` but sets
+        # `conclusion: success`, the job continues, and the lane reports green —
+        # a gate that observes and never asserts. Restoring it silently reverts
+        # the script's fail-closed contract, so do not, without also reverting
+        # the script.
         env:
           TEST_OUTCOME: ${{ steps.full_tier_test.outcome || 'unavailable' }}
         run: |
@@ -1320,9 +1396,20 @@ jobs:
             --label linux-clang-coverage \
             -- ctest --preset linux-clang-coverage --output-on-failure
 
-      - name: Peak memory (ctest --parallel evidence, #266 / #229)
+      # Quoted — see the `linux` job's first Peak memory step for why.
+      - name: "Peak memory + unexplained-sanitizer gate (#266 / #229 / #267)"
         if: always()
-        continue-on-error: true
+        # ⚠️ `continue-on-error: true` DELIBERATELY REMOVED (#267 acceptance item 5).
+        # It was here because this step is a MEASUREMENT and a lane must not go
+        # red over a /proc sampling hiccup — that reasoning still holds and is
+        # now enforced inside the script instead: `ci/peak-memory-report.sh`
+        # exits 0 on every instrument-failure path, and exits 1 for exactly one
+        # reason, an UNEXPLAINED sanitizer report. Leaving this line would have
+        # made that `exit 1` inert: GitHub records `outcome: failure` but sets
+        # `conclusion: success`, the job continues, and the lane reports green —
+        # a gate that observes and never asserts. Restoring it silently reverts
+        # the script's fail-closed contract, so do not, without also reverting
+        # the script.
         env:
           TEST_OUTCOME: ${{ steps.coverage_test.outcome || 'unavailable' }}
         run: |
@@ -1918,9 +2005,16 @@ jobs:
 
       # #266 replaced a peak-memory probe that ran 8 times and measured nothing
       # while exiting 0 every time. Its replacement gets the pre-merge signal the
-      # original never had: 40 cells plus 15 mutants, each mutant proven to redden
+      # original never had: 54 cells plus 18 mutants, each mutant proven to redden
       # the ONE cell that names its defect. Synthetic fixtures only — no build
       # tree, no ctest.
+      #
+      # ⚠️ THIS JOB IS NOW LOAD-BEARING FOR A GATE, not just for a measurement.
+      # Since #267 acceptance item 5, ci/peak-memory-report.sh EXITS 1 on an
+      # unexplained sanitizer report and the calling steps no longer carry
+      # `continue-on-error`. T19a-g here are the only pins on that exit code —
+      # every other cell asserts on TEXT, which is what a human reads, while the
+      # exit code is what GitHub reads. Weakening this job weakens that gate.
       #
       # ⚠️ IT IS NOT FREE: measured 117 s locally, against the ~2.5 s this whole
       # job used to take. The cost is the mutants — each re-runs the full cell
@@ -1935,6 +2029,25 @@ jobs:
       # the reason the cost was accepted, not as a claim that it is free.
       - name: Regression pin — peak-RSS instrument dispositions (#266)
         run: bash ci/test-peak-rss.sh
+
+      # #252's checker is the only thing standing between "the sanitizer legs are
+      # green" and "the sanitizer legs can see the C half of their closure", so it
+      # gets the same treatment as the instruments above: every property driven by
+      # a MUTANT that violates it, each proven to redden the one case that names
+      # it. Fixtures are REAL archives built with `cc -c -fsanitize=<x>` + `ar`
+      # (compile-only — no sanitizer runtime needed) and read with the REAL `nm`;
+      # a canned-output double would pin this harness's belief about what an
+      # instrumented archive looks like, which is the belief under test.
+      #
+      # Placed after the python-policy pin because T2 derives its preset census
+      # from tier1.yml AND tier3-libcxx.yml with PyYAML, and that step is where
+      # the bootstrap lives. The guard is repeated rather than assumed: a
+      # reordering that leaves this step first must not turn the census silently
+      # empty — and T2 fails loud on an empty census either way.
+      - name: Regression pin — sanitized-dependency checker (#252)
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
+          bash ci/test-sanitized-deps.sh
 
   check-layers:
     name: check-layers
@@ -1990,7 +2103,19 @@ jobs:
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CCACHE_COMPILERCHECK: content
       CCACHE_COMPRESSLEVEL: "5"   # see matrix `linux` job — shared 10 GB cache quota
-      CCACHE_DIR: /tmp/fixpp-ccache-bench
+      # ⚠️ THE PATH IS PART OF THE CACHE IDENTITY — it MUST equal the matrix
+      # `linux-clang-release` leg's `CCACHE_DIR` (/tmp/fixpp-ccache-${{ matrix.preset }}),
+      # not a bench-specific one. actions/cache identifies an entry by
+      # (key, VERSION), where version is a hash of the PATHS being cached. Keying
+      # this job on `tier1-linux-clang-release` while caching a differently-named
+      # directory produced a byte-identical key that still missed: run
+      # 32159716654 logged `Restore cache / No cache found.` here at 16:26:53,
+      # ninety seconds after the matrix leg restored that very entry
+      # (`Cache restored successfully`, ~96 MB) in the SAME run. Result was
+      # 15/1616 hits (0.93%) — identical to the run before the key change, i.e.
+      # the fix was a complete no-op while looking correct in the diff.
+      # Matching the key alone is not enough; match the path too.
+      CCACHE_DIR: /tmp/fixpp-ccache-linux-clang-release
 
     steps:
       - uses: actions/checkout@v6
@@ -2075,18 +2200,49 @@ jobs:
       # ccache MUST install BEFORE "Conan install" so the CMAKE_*_COMPILER_LAUNCHER
       # is on PATH for any conan from-source dependency build (mirrors the `linux`
       # job's ordering + exit-127 note).
-      - name: ccache (install + restore + save compiler cache)
+      # ⚠️ THIS JOB IS A PURE CONSUMER OF THE MATRIX `linux-clang-release` LEG'S
+      # ccache — it has NO cache of its own, deliberately (#273).
+      #
+      # It used to key on `tier1-bench` and save on push:main. MEASURED on PR
+      # #279's run 32146773220, where both jobs started at the same second on the
+      # same runner pool and built the SAME preset:
+      #
+      #   linux-clang-release (matrix)   8m36s   ccache 1599/1636 hits (97.74%)
+      #   bench (soft)                 2h00m37s  ccache   15/1616 hits ( 0.93%)
+      #
+      # `conan-cache HIT` on both, so dependencies were not the cause: the object
+      # counts are near-identical (1616 vs 1636) and the wall clock differs 14x
+      # purely on compiler-cache warmth. The `tier1-bench` entry had been evicted
+      # from the shared 10 GB Actions pool between merges — #273 — and because
+      # the save is push:main-only, no PR run could ever repopulate it. A cache
+      # that is cold on every PR is not a cache; it was a 2 GB reservation in a
+      # contended pool, bought with a 2-hour build.
+      #
+      # Nothing justified the separation: `FIXPP_BUILD_BENCH` appears ONLY as a
+      # gate on `add_subdirectory(bench)` (CMakeLists.txt:339, ProjectOptions
+      # .cmake:6). It changes no compile flag, so the library/test objects here
+      # are hash-identical to the matrix leg's and restore straight into them.
+      #
+      # `save: false`, not push-conditional — and that is the load-bearing half.
+      # Saving under a key the matrix leg also writes would let two jobs publish
+      # entries under one prefix, and the matrix leg would then restore whichever
+      # was newest — possibly THIS job's, which lacks whatever the matrix leg
+      # compiles and bench does not. Consuming-only cannot regress the producer.
+      # It also returns a 2 GB slot to the pool that #273 is about.
+      #
+      # Cost, stated: the bench TARGETS themselves are never cached (a handful of
+      # TUs against ~1600). Accepted.
+      - name: ccache (install + restore — CONSUMES the matrix release leg's cache)
         uses: hendrikmuhs/ccache-action@v1.2.23
         with:
-          key: tier1-bench
+          # Same string as the matrix leg's `key: tier1-${{ matrix.preset }}` for
+          # preset `linux-clang-release`. The action prefixes BOTH sides with
+          # `ccache-` and appends `-` under the default append-timestamp, so this
+          # resolves to the prefix `ccache-tier1-linux-clang-release-` and matches
+          # what that leg publishes on push:main.
+          key: tier1-linux-clang-release
           max-size: 2G
-          # Restore-only on pull requests — see the matrix `linux` job's ccache
-          # step for the measurement and the budget arithmetic. Both remaining
-          # WRITING ccache-action sites (this one and the matrix) carry it;
-          # fixing a subset would leave the other squatting the same pool.
-          # (#240 removed the third — tier3 libc++ — from the Actions pool
-          # entirely; its ccache is on GHCR and never touches this budget.)
-          save: ${{ github.event_name == 'push' }}
+          save: false
 
       - name: Conan install
         run: |

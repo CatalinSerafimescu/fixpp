@@ -797,9 +797,33 @@ $got"
   #   * it has no `id` that anything references, collides with no pinned step
   #     name, and mentions no pytest token.
   # Conclusion: it cannot reach the pytest pair.
+  #
+  # 31 -> 32 (#252): the `linux` job gained `Assert the dependency closure is
+  # instrumented (#252)`, which runs `ci/assert-sanitized-deps.sh` immediately
+  # after `Conan install`.
+  #
+  # THE DELIBERATE LOOK, again done rather than asserted. This step also sits
+  # before the pytest pair:
+  #   * it writes NO environment — the script's only outputs are stdout and
+  #     `::error::` on stderr; it touches neither $GITHUB_ENV nor $GITHUB_PATH
+  #     (M34's env-writer census polices that independently);
+  #   * it carries no step-level `env:` at all;
+  #   * it has no `id` that anything references, collides with no pinned step
+  #     name, and mentions no pytest token;
+  #   * it READS the tree only — `find` + `nm` over the Conan package folders —
+  #     so it cannot alter what the python steps later build or import.
+  #   * ⚠️ it is NOT `continue-on-error`, unlike the #266 step above, so unlike
+  #     that one it CAN fail the job before the pytest pair runs. That is
+  #     deliberate and is the whole point (#252 is a fail-closed gate on the
+  #     dependency closure), but it is the one property this step does not share
+  #     with its predecessor, and stating it is cheaper than rediscovering it: a
+  #     RED here means the python legs never run, and their absence on such a run
+  #     is expected rather than a second defect.
+  # Conclusion: it cannot change what the pytest pair executes; it can only
+  # prevent them from executing at all, loudly.
   got="$(echo "$json" | jq -r '.linux_step_count')"
-  [ "$got" = "31" ] \
-    || fail "$case_id: the linux job has $got steps, expected 31. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+  [ "$got" = "32" ] \
+    || fail "$case_id: the linux job has $got steps, expected 32. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -1084,6 +1108,13 @@ CI_PIN_HARNESSES=(
   "ci/test-ccache-scripts.sh"
   "ci/test-tier1-python-policy.sh"
   "ci/test-python-install-witness.sh"
+  # #252's checker pin. ⚠️ ADDED WITH ITS OWN MUTANT (M65), not just appended.
+  # M26 proves this census CAN fire, but it proves it for ONE harness — and a
+  # census that only ever reddens on the member it was written against says
+  # nothing about the member added later. A new row here without a new mutant is
+  # an assertion nobody has seen fail, which is the same shape as the defect
+  # #252's own checker exists to close.
+  "ci/test-sanitized-deps.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1128,7 +1159,13 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=49  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 + M28 (1
+# ⚠️ REBASE NOTE (#252). This is 49 + M65 = 50 ON THIS BRANCH. `ci/209-bench-gate`
+# independently takes it 49 -> 50 by adding its own M64, so after that branch
+# merges the correct value here is 51 and BOTH mutant names survive (64 and 65 do
+# not collide). Re-run the harness against the merged number rather than
+# re-deriving from either branch's local total — the failure mode this guards is
+# one side's edit silently replacing the other's, which reads as a passing count.
+MUTANTS_DECLARED=50  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M65 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -1507,6 +1544,21 @@ assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
 
+  # M65 (#252): the SAME dead-call-site shape as M26, on the census row #252
+  # added. Its own mutant because M26 only ever proves the census fires for
+  # `ci/test-python-install-witness.sh`; a row proven by a sibling's mutant is a
+  # row nobody has seen fail. Numbered 65 to leave M64 to #209's bench harness,
+  # which lands in this same file — see the rebase note at MUTANTS_DECLARED.
+  mutate_workflow M65 "the sanitized-deps harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          bash ci/test-sanitized-deps.sh\n"
+new = "          echo \"bash ci/test-sanitized-deps.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
   # M27: an `if:` added to the Configure step. NOT covered by the golden — the
   # golden compares `run:`, and a step that cannot run is not a step that does the
   # work. Round 3b raised this for `ci-script-pins`; it applies here too, and this
@@ -1587,7 +1639,13 @@ open(dst, "w").write(t.replace(old, new))
   # ⚠️ The inserted step deliberately writes NOTHING. An earlier version wrote
   # $GITHUB_ENV, which tripped the writer census first and left the step count
   # with no mutant of its own — the shadowing round 5 finding 3 is about.
-  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 32 steps, expected 31" '
+  # ⚠️ THE LITERAL TRACKS THE BASELINE. Bumped 31->32 by #252's
+  # `Assert the dependency closure is instrumented` step; the mutant inserts one
+  # more, so the message it must produce moves with it. A stale literal here does
+  # not fail open — `mutate_workflow` reports "failed the pin for the WRONG
+  # reason" — but it is the second edit the count pin demands, and forgetting it
+  # is how a deliberately brittle assertion earns a reputation for being noise.
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 33 steps, expected 32" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()

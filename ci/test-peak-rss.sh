@@ -347,6 +347,69 @@ case "$OUT" in *"this line is not a sanitizer report"*)
       bad "T16b a NON-matching line was echoed as a sanitizer report — the excerpt is not the grep's own output";;
    *) ok "T16b only matching lines are echoed";; esac
 
+# ── T16c/T16d/T16e: WHICH test, and HOW MANY DISTINCT sites ──────────────────
+#
+# Five capped lines are not an answer either. A run reported 362 reports and
+# printed five; from that page it was impossible to tell whether that was 362
+# distinct defects or a handful of sites emitted once per test process — two
+# readings with completely different dispositions. ctest delimits every block
+# with `^N/M Test: <name>`, so each report can be attributed to its test.
+#
+# This fixture plants reports in TWO known tests and leaves a third clean, so
+# the attribution is checked against a known answer rather than self-consistency.
+cat > "$WORK/tree/build/$FAKE/Testing/Temporary/LastTest.log" <<'LOG'
+1/3 Testing: alpha_test
+1/3 Test: alpha_test
+Output:
+crypto/evp/digest.c:425:12: runtime error: call to function SHA1_Update through pointer to incorrect function type
+crypto/stack/stack.c:453:17: runtime error: call to function X509_NAME_ENTRY_free through pointer to incorrect function type
+2/3 Testing: beta_clean
+2/3 Test: beta_clean
+Output:
+nothing to see here
+3/3 Testing: otel_exporters
+3/3 Test: otel_exporters
+Output:
+WARNING: ThreadSanitizer: data race (pid=54023)
+SUMMARY: ThreadSanitizer: data race 0x7f1111111111 /x/civetweb.c:20363:2 in mg_stop
+WARNING: ThreadSanitizer: data race (pid=54034)
+SUMMARY: ThreadSanitizer: data race 0x7f2222222222 /x/civetweb.c:20363:2 in mg_stop
+LOG
+OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
+
+# T16c — attribution names the emitting test, with the right per-test counts.
+case "$OUT" in *"2  alpha_test"*)      ok "T16c reports are attributed to the emitting test (alpha_test=2)";;
+               *) bad "T16c alpha_test was not credited with its 2 reports: $OUT";; esac
+case "$OUT" in *"2  otel_exporters"*)  ok "T16c a second test is attributed independently (otel_exporters=2)";;
+               *) bad "T16c otel_exporters was not credited with its 2 reports: $OUT";; esac
+case "$OUT" in *beta_clean*)
+      bad "T16c a test that emitted NOTHING appears in the by-test breakdown — the attribution is crediting the wrong block";;
+   *) ok "T16c a clean test does not appear in the by-test breakdown";; esac
+
+# T16d — the double-count trap. TSan's COUNTED line carries no location; the
+# location is on the SUMMARY line after it. SUMMARY lines are folded in for
+# GROUPING only. If they were also counted, these 4 TSan lines would read as 4
+# reports instead of 2, and every TSan count in this repo would be doubled.
+case "$OUT" in *"sanitizer reports: 4"*) ok "T16d SUMMARY lines are not counted (4 total = 2 UBSan + 2 TSan WARNINGs)";;
+               *) bad "T16d the count is not 4 — SUMMARY lines are probably being double-counted: $OUT";; esac
+case "$OUT" in *"civetweb.c:20363:2 in mg_stop"*)
+      ok "T16d the TSan location is still surfaced, via the folded SUMMARY line";;
+   *) bad "T16d no TSan location in the output — folding SUMMARY lines for grouping is not working, and a bare 'data race' is unactionable: $OUT";; esac
+
+# T16e — ADDRESS normalisation. Without it every report is its own singleton and
+# the distinct-site count degenerates into the report count.
+#
+# ⚠️ THE FIRST VERSION OF THIS CELL WAS VACUOUS and a mutant proved it: the two
+# SUMMARY lines were byte-identical, so they grouped whether or not normalisation
+# ran, and deleting the `s/\(pid=…\)//` rule reddened nothing. The reason is worth
+# keeping: pids live on TSan's `WARNING` line, which SIG_PATTERN does NOT match,
+# so the pid rule is defensive only — it is the ADDRESS rule that does the work on
+# the lines actually grouped. The fixture above now differs ONLY by address
+# between the two SUMMARY lines, so this cell fails if `s/0x…/0xADDR/` is removed.
+case "$OUT" in *"2 SUMMARY: ThreadSanitizer: data race 0xADDR /x/civetweb.c:20363:2 in mg_stop"*)
+      ok "T16e addresses normalise, so two reports of the same site group (2x)";;
+   *) bad "T16e the two same-site TSan reports did not group — address normalisation is not applied: $OUT";; esac
+
 # ── T17: and it reads 0 on a clean log, not 'unreadable' ─────────────────────
 printf 'all quiet\n' > "$WORK/tree/build/$FAKE/Testing/Temporary/LastTest.log"
 OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
@@ -369,8 +432,15 @@ printf 'ERROR: AddressSanitizer: stack-use-after-return on address 0x60200\n' \
   printf '%s %s\n' "$FAKE" 'ERROR: AddressSanitizer: stack-use-after-return'; } \
   > "$PINNED_DIR/expected-sanitizer-reports.txt"
 OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
-case "$OUT" in *"::warning::#267"*) bad "T17b an allowlisted report still raised the warning — this instrument becomes noise: $OUT";;
-               *) ok "T17b an allowlisted report does not raise the warning";; esac
+# ⚠️ SELECTED ON `::error::#267`, NOT `::warning::`. This cell was written when
+# the unexplained branch emitted a warning; #267 acceptance item 5 changed it to
+# an error, and for one revision this line still looked for the old string — so
+# it passed unconditionally, INCLUDING under the `no-allowlist` mutant it exists
+# to be killed by. The mutant is what caught it. A selector is an assertion, and
+# changing the text a selector names silently retires the assertion
+# (feedback_a_selector_is_an_assertion_so_fixing_a_class_can_move_it_one_layer_up).
+case "$OUT" in *"::error::#267"*|*"::warning::#267"*) bad "T17b an allowlisted report still raised the unexplained annotation — this instrument becomes noise: $OUT";;
+               *) ok "T17b an allowlisted report raises no unexplained annotation";; esac
 case "$OUT" in *"stack-use-after-return on address"*) ok "T17c an allowlisted report is STILL PRINTED (the allowlist gates the warning, not the output)";;
                *) bad "T17c the allowlist SUPPRESSED the report line — that is a mechanism for hiding a real finding: $OUT";; esac
 
@@ -395,6 +465,70 @@ rm -f "$WORK/tree/build/$FAKE/Testing/Temporary/LastTest.log"
 OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
 case "$OUT" in *"sanitizer reports: unreadable"*) ok "T18 a missing LastTest.log reads 'unreadable', not 0";;
                *) bad "T18 a missing LastTest.log did not report 'unreadable': $OUT";; esac
+
+echo "== the gate: the EXIT CODE, which is the only thing CI actually reads =="
+
+# ⚠️ EVERY CELL ABOVE ASSERTS ON TEXT. Text is what a human reads; the exit code
+# is what GitHub reads, and until this block existed nothing pinned it. That gap
+# is not hypothetical — this script's `::warning::` sat over 363 unexplained
+# OpenSSL reports for four post-merge runs (#252) and every lane stayed green,
+# because a warning is an annotation and an annotation gates nothing.
+#
+# The contract being pinned, in full:
+#
+#     1  — UNEXPLAINED sanitizer report(s). Nothing else.
+#     0  — everything else, INCLUDING every way the measurement itself fails.
+#
+# Both halves need pinning and the SECOND half is the one that decays quietly: a
+# gate that also reds on a /proc hiccup or a missing LastTest.log gets a
+# `continue-on-error` put back on it within a month, and that silently reverts
+# the first half too.
+LASTTEST_FAKE="$WORK/tree/build/$FAKE/Testing/Temporary/LastTest.log"
+run_rc() { OUT="$(run_pinned "$@")"; RC=$?; }
+
+# ── T19a: an UNEXPLAINED report FAILS ────────────────────────────────────────
+printf 'src/real.cpp:9:1: runtime error: signed integer overflow\n' > "$LASTTEST_FAKE"
+run_rc success "$WORK/good.env" "$WORK/ctest.log"
+check "T19a an UNEXPLAINED sanitizer report exits non-zero — the gate ASSERTS" "$RC" 1
+case "$OUT" in *"::error::#267"*) ok "T19a it is annotated ::error::, not ::warning:: (a warning is what let #252's 363 reports through)";;
+               *) bad "T19a an unexplained report was still annotated as a warning — CI's annotation and its exit code disagree: $OUT";; esac
+
+# ── T19b: an ALLOWLISTED report does NOT fail ────────────────────────────────
+#
+# The allowlist's whole purpose is that the ASan canary fires every run, forever.
+# If it reddened the lane the entry would be deleted within a day and the real
+# signal would go with it.
+printf 'ERROR: AddressSanitizer: stack-use-after-return on address 0x60200\n' > "$LASTTEST_FAKE"
+run_rc success "$WORK/good.env" "$WORK/ctest.log"
+check "T19b an allowlisted report exits 0 — the deliberate canary does not red its own lane" "$RC" 0
+
+# ── T19c: a clean log does not fail ──────────────────────────────────────────
+printf 'all quiet\n' > "$LASTTEST_FAKE"
+run_rc success "$WORK/good.env" "$WORK/ctest.log"
+check "T19c a clean log exits 0" "$RC" 0
+
+# ── T19d/T19e/T19f: an INSTRUMENT FAILURE IS NOT A DEFECT ───────────────────
+#
+# Each of these already has a cell asserting it SAYS so (T10/T11/T18). These
+# assert it does not also FAIL — the distinction that keeps this step gateable.
+rm -f "$LASTTEST_FAKE"
+run_rc success "$WORK/good.env" "$WORK/ctest.log"
+check "T19d a MISSING LastTest.log exits 0 — 'unreadable' is the absence of a result, not a finding" "$RC" 0
+
+run_rc success "$WORK/absent.env" "$WORK/ctest.log"
+check "T19e a missing instrument output file (NOT MEASURED) exits 0 — a /proc sampling failure must not red a lane" "$RC" 0
+
+run_rc success "$WORK/zero.env" "$WORK/ctest.log"
+check "T19f a zero-peak instrument failure exits 0" "$RC" 0
+
+# ── T19g: the MEMORY half never gates ────────────────────────────────────────
+#
+# DIAGNOSTIC ONLY is a statement about what the number may be cited for, not a
+# verdict on the run. If it exited non-zero, every lane whose basis had drifted
+# by one test would go red for a bookkeeping reason.
+printf 'all quiet\n' > "$LASTTEST_FAKE"
+run_rc failure "$WORK/good.env" "$WORK/ctest.log"
+check "T19g a DIAGNOSTIC-ONLY run with no sanitizer report exits 0 — the peak-memory half is a measurement, not a gate" "$RC" 0
 
 if [ -n "${PEAK_RSS_MUTANT:-}" ]; then
   echo
@@ -527,6 +661,38 @@ mutant wrong-lasttest-path report \
 mutant number-without-measurement report \
   's|^if \[ "${STATUS:-}" != "ok" \] .*$|if false; then  # MUTANT|' \
   "T11" "renders a memory figure for a run whose instrument reported it measured nothing"
+
+# ── The gate's own mutants ───────────────────────────────────────────────────
+#
+# The three ways this gate can silently become advisory again. Each is a shape
+# that has ALREADY shipped somewhere in this repo, which is why each gets a
+# mutant rather than a comment.
+
+# 1. The counter still computes UNEXPLAINED, still prints ::error::, and returns
+#    0 — a gate that observes and never asserts. This was this file's behaviour
+#    for its entire life before #267 acceptance item 5.
+mutant fail-open-counter report \
+  's|^      RC=1$|      RC=0  # MUTANT|' \
+  "T19a" "computes the unexplained count and annotates it, but still exits 0 — the observe-never-assert shape"
+
+# 2. The verdict is computed correctly and then discarded at the single exit.
+#    Equivalent to leaving `continue-on-error: true` on the calling step, which
+#    is the workflow-side half of this same change.
+mutant discard-verdict report \
+  's|^exit "\$RC"$|exit 0  # MUTANT|' \
+  "T19a" "computes the verdict and throws it away at the exit, exactly as continue-on-error would"
+
+# 3. The OVER-reach direction, and the one that gets the gate reverted rather
+#    than merely bypassed: an instrument failure reddens a lane that has no
+#    defect. `0,/re/` mutates only the FIRST `exit 0` — the unreadable-PEAK_ENV
+#    path, which T19e pins.
+# ⚠️ `^  exit 0$` — TWO LEADING SPACES. Both instrument-failure exits sit inside
+# an `if`, so the unindented form matched nothing, the copy stayed identical and
+# the mutation was a silent no-op. The `cmp -s` guard above is the only reason
+# that was visible rather than reading as a passing mutant.
+mutant gate-on-instrument-failure report \
+  '0,/^  exit 0$/s//  exit 1  # MUTANT/' \
+  "T19e" "reds the lane when the MEASUREMENT failed rather than when a sanitizer fired — the over-reach that gets a gate reverted"
 
 echo
 echo "peak-rss harness: ${PASS} passed, ${FAIL} failed"
