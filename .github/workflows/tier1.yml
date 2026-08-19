@@ -2198,13 +2198,53 @@ jobs:
             --build=missing -of build/linux-clang-release
           cmake --preset linux-clang-release -DFIXPP_BUILD_BENCH=ON
           # Only the paired targets — the base tree exists to supply a comparand,
-          # not to be tested. Derived from the manifest so the two lists cannot
-          # drift apart.
-          TARGETS=$(awk '$3=="paired" && $1 !~ /^#/ {n=split($1,p,"/"); print p[n]}' \
-                    "${GITHUB_WORKSPACE}/bench/ci-suite.txt" | tr '\n' ' ')
-          test -n "$TARGETS" || { echo "::error::no paired targets in manifest"; exit 1; }
-          echo "building base targets: $TARGETS"
-          cmake --build --preset linux-clang-release --target $TARGETS
+          # not to be tested.
+          #
+          # ⚠️ THE TWO LISTS MUST BE ALLOWED TO DIFFER, AND ASSUMING OTHERWISE WAS
+          # A P1. This block used to derive the target list from the CANDIDATE
+          # manifest and build it verbatim in the base tree, under a comment
+          # claiming "the two lists cannot drift apart" — which was precisely the
+          # defect. A PR that ADDS a paired benchmark has a target the merge-base
+          # does not, so `cmake --build --target new_bench` failed with "unknown
+          # target" and reddened a CORRECT change (Gate B round 3). That is the
+          # mirror of every fail-open found on this PR: a FALSE RED, on exactly the
+          # behaviour Article VIII §3 requires be permitted and which the
+          # comparator's own G10 cell certifies is allowed.
+          #
+          # So targets are built ONE AT A TIME and an absent one is CLASSIFIED,
+          # not fatal: an unknown-target error means a candidate-only addition and
+          # excludes it from the base legs; ANY other failure means the base build
+          # is broken and the job fails. The base runner is then handed a FILTERED
+          # manifest of what actually built, so it cannot demand an executable the
+          # merge-base never had.
+          #
+          # ⚠️ The filtered list is for the base RUNNER ONLY. The comparator's
+          # --base-manifest must stay the base's OWN bench/ci-suite.txt: the
+          # filtered list is derived from the candidate's paired rows, so a row the
+          # candidate DOWNGRADED is absent from it, and using it there would make
+          # [T2-DOWNGRADE] undetectable. Two different things that look like one.
+          BASE_RUN_MANIFEST=/tmp/fixpp-base-run-manifest.txt
+          : > "$BASE_RUN_MANIFEST"
+          ADDED=""
+          awk '$3=="paired" && $1 !~ /^#/ {print $1"\t"$2"\t"$3}' \
+              "${GITHUB_WORKSPACE}/bench/ci-suite.txt" > /tmp/cand-paired.tsv
+          test -s /tmp/cand-paired.tsv || { echo "::error::no paired rows in the candidate manifest"; exit 1; }
+          while IFS=$'\t' read -r exe c3 c4; do
+            t="${exe##*/}"
+            if cmake --build --preset linux-clang-release --target "$t" > /tmp/bt.log 2>&1; then
+              printf '%s\t%s\t%s\n' "$exe" "$c3" "$c4" >> "$BASE_RUN_MANIFEST"
+            elif grep -qiE 'unknown target|No rule to make target|do not know how to make|Cannot find source file' /tmp/bt.log; then
+              ADDED="$ADDED $t"
+              echo "::notice::merge-base has no target '$t' — candidate-only addition, excluded from the paired base legs (permitted per Article VIII §3)"
+            else
+              echo "::error::base build FAILED for target '$t', and NOT with an unknown-target error:"
+              tail -40 /tmp/bt.log
+              exit 1
+            fi
+          done < /tmp/cand-paired.tsv
+          test -s "$BASE_RUN_MANIFEST" || { echo "::error::no paired target exists in the merge-base — the paired tier would compare nothing, which is a silent pass"; exit 1; }
+          echo "BENCH_BASE_RUN_MANIFEST=$BASE_RUN_MANIFEST" >> "$GITHUB_ENV"
+          echo "base paired set: $(wc -l < "$BASE_RUN_MANIFEST") row(s) built; candidate-only additions:${ADDED:- none}"
 
       # ── A-B-A-B ────────────────────────────────────────────────────────────
       # A-vs-A is a noise floor for the CANDIDATE phase, and it is NOT enough on
@@ -2214,13 +2254,13 @@ jobs:
       # measured twice as well and B-vs-B is checked by the same rule. Worked
       # example in tools/bench_compare.py's run_paired docstring.
       - name: Run bench suite (merge-base, measurement B1)
-        run: ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired
+        run: ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired "$BENCH_BASE_RUN_MANIFEST"
 
       - name: Run bench suite (candidate again, measurement A2)
         run: ci/run-bench-suite.sh build/linux-clang-release bench-results/a2 --only-paired
 
       - name: Run bench suite (merge-base again, measurement B2)
-        run: ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b2 --only-paired
+        run: ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b2 --only-paired "$BENCH_BASE_RUN_MANIFEST"
 
       # ── The assertions. No continue-on-error. ──────────────────────────────
       - name: "Tier 1 + 3 — execution, schema, and baseline report"

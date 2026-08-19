@@ -204,6 +204,10 @@ def load_json(path: str) -> tuple[dict | None, str | None]:
 # the defect. This distinction is the reason T1-5 is split rather than uniform.
 _DURATION_AGGREGATES = (None, "mean", "median")
 _DISPERSION_AGGREGATES = ("stddev", "cv")
+# Not durations: BigO is a fitted complexity coefficient, RMS a percentage. They
+# are emitted ALONGSIDE the ordinary aggregates by a ->Complexity() family, never
+# instead of them, so grouping them cannot strand a benchmark without a median.
+_COMPLEXITY_AGGREGATES = ("BigO", "RMS")
 
 # Google Benchmark's `time_unit` vocabulary. Checked per row (T1-7): an
 # unrecognised unit means the number's scale is unknown, which is worse than a
@@ -309,6 +313,23 @@ def validate_results(name: str, data: dict) -> list[str]:
             elif agg in _DURATION_AGGREGATES or run_type == "iteration":
                 if val <= 0:
                     out.append(f"[T1-5] {name}/{rname}: duration `{key}` is not positive ({val!r})")
+            elif agg in _COMPLEXITY_AGGREGATES:
+                # BigO is a fitted coefficient and RMS a percentage; neither is a
+                # duration, so only non-negativity is meaningful.
+                if val < 0:
+                    out.append(f"[T1-5] {name}/{rname}: `{agg}` `{key}` is negative ({val!r})")
+            else:
+                # ⚠️ THIS BRANCH USED NOT TO EXIST, AND ITS ABSENCE WAS A P1.
+                # An unrecognised aggregate fell through with NO check at all, so
+                # a row with aggregate_name="p99" and cpu_time=-999 produced zero
+                # tier-1 findings (Gate B round 3). Google-Benchmark custom
+                # statistics are computed over the per-repetition TIMES, so they
+                # are durations and must be positive. Unknown means checked, not
+                # exempt — the exemption is what let a benchmark carry an invalid
+                # measurement past tier 1 and then vanish from tier 2.
+                if val <= 0:
+                    out.append(f"[T1-5] {name}/{rname}: custom aggregate `{agg}` "
+                               f"`{key}` is not positive ({val!r})")
 
     # One benchmark NAME reporting two different units within a single run is
     # still a defect (it makes that row's own aggregates incomparable) — but
@@ -423,7 +444,16 @@ def paired_series(name: str, data: dict) -> tuple[dict[str, tuple[float, str | N
         # [T1-8] without re-examining this line.
         if not isinstance(row, dict) or row.get("error_occurred"):
             continue
-        if row.get("aggregate_name") not in _STATISTIC_AGGREGATES:
+        # ⚠️ THIS USED TO SKIP ANY UNRECOGNISED AGGREGATE, AND THAT WAS A P1.
+        # Skipping before grouping meant a benchmark whose rows are ALL custom
+        # aggregates (only `p99`, say) formed no group and DISAPPEARED from the
+        # series rather than raising [T2-AGG] — while tier 1 accepted it, so a
+        # +100% regression rode through with `compared > 0` keeping the gate green
+        # (Gate B round 3, reproduced). Every aggregate row now forms its group;
+        # only `median` is eligible for the SERIES, which is the check below. A
+        # ->Complexity() family emits BigO/RMS in ADDITION to mean/median/stddev,
+        # so grouping them still yields exactly one median and cannot false-RED.
+        if row.get("aggregate_name") is None and row.get("run_type") != "iteration":
             continue
         lname = row.get("run_name") or row.get("name")
         if not isinstance(lname, str) or not lname:
@@ -512,6 +542,18 @@ def run_suite(results_dir: str, baselines_dir: str, manifest: str,
 
         cur_t, base_t = median_rows(cur), median_rows(base)
         shared = sorted(set(cur_t) & set(base_t))
+
+        # ⚠️ UNMATCHED NAMES ARE NAMED, NOT DROPPED (Gate B round 3, P3). Tier 3
+        # previously reported a binary-level skip ONLY when the intersection was
+        # completely empty, so a baseline holding BM_A and BM_B against a run
+        # holding only BM_A printed "1 compared; 0 not compared" and never
+        # mentioned BM_B. That reads as full coverage while silently measuring
+        # less, which is the one thing this tier claims not to do.
+        for nm in sorted(set(base_t) - set(cur_t)):
+            tier3_skipped.append(f"{row.name}/{nm}: in {base_rel} but absent from this run")
+        for nm in sorted(set(cur_t) - set(base_t)):
+            tier3_skipped.append(f"{row.name}/{nm}: in this run but absent from {base_rel}")
+
         if not shared:
             print(f"    tier 3: NOT COMPARED — no benchmark name is present in both "
                   f"{base_rel} and this run ({len(base_t)} baseline / {len(cur_t)} current rows)")

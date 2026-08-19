@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=56
+CELLS_DECLARED=61
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -87,6 +87,25 @@ for r in d["benchmarks"]:
             r[key] = json.loads(val)
         n += 1
 assert n > 0, f"mutation matched no row: {match}"
+json.dump(d, open(path, "w"), indent=2)
+PY
+}
+
+add_row() {
+  # add_row <file> <run_name> <aggregate_name> <numeric value>
+  # Appends ONE aggregate row. Used for the custom-aggregate cells, where the
+  # defect is precisely that an UNRECOGNISED aggregate_name is treated as exempt.
+  python3 - "$@" <<'PY'
+import json, sys
+path, run_name, agg, val = sys.argv[1:5]
+d = json.load(open(path))
+before = len(d["benchmarks"])
+d["benchmarks"].append({
+    "name": f"{run_name}_{agg}", "run_name": run_name, "run_type": "aggregate",
+    "aggregate_name": agg, "repetitions": 3, "threads": 1, "iterations": 1000,
+    "real_time": float(val), "cpu_time": float(val), "time_unit": "ns",
+})
+assert len(d["benchmarks"]) == before + 1, "add_row added no row"
 json.dump(d, open(path, "w"), indent=2)
 PY
 }
@@ -246,6 +265,34 @@ cp "$TMP/save.json" "$SUITE/alpha_bench.json"
 cp "$SUITE/alpha_bench.json" "$TMP/save.json"
 mutate "$SUITE/alpha_bench.json" BM_A time_unit '"furlongs"'
 expect_red T1-7b "unrecognised time_unit" "unrecognised time_unit" sc
+cp "$TMP/save.json" "$SUITE/alpha_bench.json"
+
+# ── CUSTOM AGGREGATES — Gate B round 3, P1 ─────────────────────────────────
+# `_STATISTIC_AGGREGATES` deliberately excludes BigO/RMS/custom statistics so a
+# future ->Complexity() cannot false-RED. That exclusion was DISCLOSED as a
+# residual and ruled LIVE: an unrecognised aggregate fell through tier 1 with no
+# check at all AND was dropped by tier 2 before grouping, so a benchmark present
+# only as `p99` rows passed tier 1 and vanished from the gate while `compared > 0`
+# kept it green. Reproduced with cpu_time=-999 yielding zero findings.
+cp "$SUITE/alpha_bench.json" "$TMP/save.json"
+add_row "$SUITE/alpha_bench.json" BM_Slow p99 -999
+expect_red T1-CUSTOM-NEG "a NEGATIVE custom aggregate is not exempt from tier 1" \
+  "custom aggregate" sc
+cp "$TMP/save.json" "$SUITE/alpha_bench.json"
+
+cp "$SUITE/alpha_bench.json" "$TMP/save.json"
+add_row "$SUITE/alpha_bench.json" BM_Slow p99 0
+expect_red T1-CUSTOM-ZERO "a ZERO custom aggregate is not exempt from tier 1" \
+  "custom aggregate" sc
+cp "$TMP/save.json" "$SUITE/alpha_bench.json"
+
+# G-COMPLEXITY — the false RED the exclusion existed to prevent MUST still be
+# prevented. A ->Complexity() family emits BigO and RMS ALONGSIDE mean/median/
+# stddev, never instead of them, so it still has exactly one median.
+cp "$SUITE/alpha_bench.json" "$TMP/save.json"
+add_row "$SUITE/alpha_bench.json" BM_A BigO 12.5
+add_row "$SUITE/alpha_bench.json" BM_A RMS 3.0
+expect_green G-COMPLEXITY "a Complexity() family (BigO+RMS beside the aggregates) is not an error" sc
 cp "$TMP/save.json" "$SUITE/alpha_bench.json"
 
 # T1-9 — a row reporting zero iterations timed nothing.
@@ -428,6 +475,19 @@ manifest "$MAN" \
 expect_red M-ALIAS "two manifest rows share a basename" "share the basename" sc
 manifest "$MAN" "bench/x/alpha_bench   gb-json:dictionary/alpha.json   no"
 
+# T3-UNMATCHED — tier 3 computed only the INTERSECTION and reported a skip only
+# when it was completely empty, so a baseline holding BM_A and BM_B against a run
+# holding only BM_A printed "1 compared; 0 not compared" and never mentioned BM_B
+# (Gate B round 3, P3). Reduced coverage that reads as full coverage.
+mkfix "$BASE/dictionary/alpha.json" BM_A=100 BM_GONE=100
+if ! sc > "$TMP/t3u.out" 2>&1; then fail "T3-UNMATCHED: an unmatched baseline row is informational, not fatal"; fi
+grep -q "BM_GONE_median: in dictionary/alpha.json but absent from this run" "$TMP/t3u.out" \
+  || fail "T3-UNMATCHED: a baseline row absent from the run was never named:\n$(cat "$TMP/t3u.out")"
+grep -q "in this run but absent from dictionary/alpha.json" "$TMP/t3u.out" \
+  || fail "T3-UNMATCHED: a RUN row absent from the baseline was never named:\n$(cat "$TMP/t3u.out")"
+echo "GREEN (expected): T3-UNMATCHED — unmatched rows are named in BOTH directions, not dropped"
+cells_run=$((cells_run + 1))
+
 # T3-ZERO — a zero baseline was silently skipped AND counted as compared, so
 # the tier-3 summary read "1 compared; 0 not compared" having compared nothing.
 mkfix "$BASE/dictionary/alpha.json" BM_A=0 BM_B=0
@@ -502,6 +562,19 @@ json.dump(d, open(p, "w"), indent=2)
 DUP
 expect_red T2-AGG-DUP "two median rows for one logical benchmark" "[T2-AGG]" pc
 setlegs 100 100 100 100
+
+# T2-CUSTOM-ONLY — the tier-2 half of the custom-aggregate P1. A benchmark whose
+# rows are ALL custom aggregates was dropped BEFORE grouping, so it formed no
+# group and disappeared from the series instead of raising [T2-AGG] — while tier 1
+# accepted it. Every row here is POSITIVE, so tier 1 is clean by construction and
+# only the tier-2 behaviour is under test.
+setlegs 100 100 100 100
+for d in "$A1" "$A2"; do add_row "$d/alpha_bench.json" BM_SLOW p99 200; done
+for d in "$B1" "$B2"; do add_row "$d/alpha_bench.json" BM_SLOW p99 100; done
+expect_red T2-CUSTOM-ONLY "a benchmark present only as custom aggregates must not vanish" \
+  "[T2-AGG]" pc
+setlegs 100 100 100 100
+
 
 # ── F1: a pre-existing `paired` row DOWNGRADED to `no` ──────────────────────
 # The manifest is part of the gate AND is editable by the change being gated.
