@@ -360,6 +360,15 @@ def median_rows(data: dict) -> dict[str, tuple[float, str | None]]:
 # today (checked: none of xml_loader/framer/parser/writer/validator_bench call
 # Complexity, ComputeStatistics or Repetitions); this is what keeps that from
 # becoming a false RED if one ever does.
+# ⚠️ DISCLOSED RESIDUAL (d). This set deliberately EXCLUDES `BigO`/`RMS` and any
+# custom statistic, so that a future `->Complexity()` or `->ComputeStatistics()`
+# cannot become a false RED on the required path. The cost is symmetric and is
+# accepted knowingly: a benchmark whose rows are ALL custom-statistic aggregates
+# (only `p99`, say) forms no group and vanishes from the paired series SILENTLY,
+# rather than raising [T2-AGG]. Trade taken because a false red on the required
+# path is the failure mode this harness exists to prevent — but it IS a trade.
+# Verified at the time: none of the five paired sources calls Complexity(),
+# ComputeStatistics() or Repetitions().
 _STATISTIC_AGGREGATES = frozenset(_DURATION_AGGREGATES) | frozenset(_DISPERSION_AGGREGATES)
 
 
@@ -382,6 +391,19 @@ def paired_series(name: str, data: dict) -> tuple[dict[str, tuple[float, str | N
     exactly one usable `median`. The set comparisons downstream then run over
     logical names, not over whatever survived a projection.
 
+    ⚠️ DISCLOSED RESIDUAL (c) — what this does NOT close. A benchmark absent
+    from BOTH base legs *entirely* is still classified as a permitted candidate
+    ADDITION. What is closed is the malformed-shape ROUTE into that state; the
+    state itself remains, and from the JSON alone it is indistinguishable from a
+    PR legitimately adding a benchmark — which Article VIII §3 requires be
+    permitted. The reason this is accepted: a base binary that genuinely does
+    not emit a benchmark does not HAVE that benchmark in the base tree, i.e. it
+    really is an addition, so reaching this state requires hand-forged JSON
+    rather than any real tree state.
+
+    That reasoning is an ARGUMENT, NOT A FIXTURE. It is deliberately left
+    untested rather than papered over with a test that would only restate it.
+
     There is deliberately NO "no aggregates at all -> fall back to plain rows"
     branch. Such a branch is itself a bypass — a leg with zero aggregates would
     silently switch projection — and tier-2 legs have exactly one producer,
@@ -391,6 +413,14 @@ def paired_series(name: str, data: dict) -> tuple[dict[str, tuple[float, str | N
     """
     groups: dict[str, list[dict]] = {}
     for row in data.get("benchmarks", []) or []:
+        # ⚠️ DISCLOSED RESIDUAL (b). Excluding error rows here means a benchmark
+        # whose ONLY rows are error rows forms no group and DISAPPEARS from the
+        # series instead of raising [T2-AGG]. That is unreachable today solely
+        # because validate_results()'s [T1-8] fires on error rows first and sets
+        # bad = True before this function is consulted. It is therefore a second
+        # guard depending on a first — the same coupling round 1's fix relied on.
+        # If you relax or reorder [T1-8], this becomes a live hole. Do not remove
+        # [T1-8] without re-examining this line.
         if not isinstance(row, dict) or row.get("error_occurred"):
             continue
         if row.get("aggregate_name") not in _STATISTIC_AGGREGATES:
