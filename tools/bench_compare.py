@@ -615,6 +615,25 @@ def check_paired_not_narrowed(manifest: str, all_rows: list[Row],
               "here. Not a silent skip: ci/test-bench-gate.sh pins the mandatory "
               "paired set as a floor against the shipped manifest.")
         return []
+    # ⚠️ [T2-BASESELF] — the comparand must not be the thing it is comparing.
+    # If --base-manifest resolves to the SAME file as --manifest then
+    # `base_paired - cand_paired` is empty by construction, so [T2-DOWNGRADE]
+    # can never fire and the check prints "OK vs merge-base" — an affirmative
+    # claim of correctness that cannot fail. Demonstrated: a row downgraded to
+    # `no` while carrying a +100% regression reported "1 pre-existing row(s) all
+    # still paired", exit 0. tier1.yml already fails closed on this shape one
+    # level up ("a base that resolves to HEAD would build the same tree twice and
+    # pass FOREVER"); this is the same guard at the manifest level.
+    if os.path.realpath(base_manifest) == os.path.realpath(manifest):
+        msg = ("[T2-BASESELF] %s: --base-manifest resolves to the same file as "
+               "--manifest, so the paired-set diff compares the change against "
+               "ITSELF. `base_paired - cand_paired` is then empty by construction "
+               "and [T2-DOWNGRADE] can never fire, while this check still reports "
+               "`OK vs merge-base`. Failing closed: a comparand identical to the "
+               "candidate is a misconfiguration, not a pass." % base_manifest)
+        print(f"    ::error::{msg}")
+        return [msg]
+
     if not os.path.exists(base_manifest):
         # ⚠️ A merge-base predating #209 legitimately has no manifest — including
         # THIS PR's own base. But "the file is not there" is ALSO what a typo'd

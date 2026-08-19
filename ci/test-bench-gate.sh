@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=52
+CELLS_DECLARED=53
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -575,6 +575,14 @@ mkdir -p "$PREBASE/bench"
 
 expect_red T2-BASEROOT-MISSING "base checkout directory does not exist at all" \
   "[T2-BASEROOT]" pcb "$CMAN" "$TMP/no-such-base-root/bench/ci-suite.txt"
+
+# T2-BASESELF — the comparand must not BE the candidate. Pointing --base-manifest
+# at --manifest makes `base_paired - cand_paired` empty by construction, so
+# [T2-DOWNGRADE] can never fire while the check still prints "OK vs merge-base".
+# Fixture carries a row downgraded to `no`, so the cell would go GREEN under the
+# tautology and only goes RED because the self-comparison is refused.
+expect_red T2-BASESELF "base manifest resolves to the candidate's own manifest" \
+  "[T2-BASESELF]" pcb "$CMAN" "$CMAN"
 
 NOTREPO="$TMP/notrepo"; mkdir -p "$NOTREPO/bench"   # exists, but has no sentinel
 expect_red T2-BASEROOT-NOTREPO "base path exists but is not a checkout of this repo" \
