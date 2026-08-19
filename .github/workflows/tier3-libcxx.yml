@@ -592,9 +592,21 @@ jobs:
       # One report step for both, because exactly one of the two Test steps runs
       # per lane. `outcome` of the SKIPPED one is `skipped`, so the two are
       # combined by taking whichever is not — never by assuming which fired.
-      - name: Peak memory (ctest --parallel evidence, #266 / #229)
+      # Quoted — an unquoted `#` after a space starts a YAML comment, which had
+      # been truncating this step's name at `#266` for its whole existence.
+      - name: "Peak memory + unexplained-sanitizer gate (#266 / #229 / #267)"
         if: always()
-        continue-on-error: true
+        # ⚠️ `continue-on-error: true` DELIBERATELY REMOVED (#267 acceptance item 5).
+        # It was here because this step is a MEASUREMENT and a lane must not go
+        # red over a /proc sampling hiccup — that reasoning still holds and is
+        # now enforced inside the script instead: `ci/peak-memory-report.sh`
+        # exits 0 on every instrument-failure path, and exits 1 for exactly one
+        # reason, an UNEXPLAINED sanitizer report. Leaving this line would have
+        # made that `exit 1` inert: GitHub records `outcome: failure` but sets
+        # `conclusion: success`, the job continues, and the lane reports green —
+        # a gate that observes and never asserts. Restoring it silently reverts
+        # the script's fail-closed contract, so do not, without also reverting
+        # the script.
         env:
           PLAIN: ${{ steps.libcxx_test.outcome || 'unavailable' }}
           TSAN: ${{ steps.libcxx_tsan_test.outcome || 'unavailable' }}
