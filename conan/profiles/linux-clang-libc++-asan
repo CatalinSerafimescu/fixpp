@@ -18,11 +18,19 @@ compiler.cppstd=23
 CC=clang-22
 CXX=clang++-22
 CXXFLAGS=-stdlib=libc++ -fsanitize=address -fno-omit-frame-pointer
+# CFLAGS mirrors the SANITIZER half of CXXFLAGS only (#252) — see
+# linux-clang-asan for the full rationale.
+# ⚠️ DELIBERATELY WITHOUT `-stdlib=libc++`. That flag selects a C++ standard
+# library and has no meaning for a C translation unit; clang accepts it and warns
+# `argument unused during compilation`, which a dependency building with -Werror
+# turns into a failure of the entire C closure. The C++ half already carries it.
+CFLAGS=-fsanitize=address -fno-omit-frame-pointer
 LDFLAGS=-stdlib=libc++ -fsanitize=address
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=address", "-fno-omit-frame-pointer"]
+tools.build:cflags=["-fsanitize=address", "-fno-omit-frame-pointer"]
 tools.build:sharedlinkflags=["-fsanitize=address"]
 tools.build:exelinkflags=["-fsanitize=address"]
 # compiler.libcxx=libc++ is already in [settings] so it enters package_id.

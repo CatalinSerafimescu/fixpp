@@ -16,15 +16,50 @@ compiler.cppstd=23
 CC=clang-22
 CXX=clang++-22
 CXXFLAGS=-fsanitize=thread
+# CFLAGS mirrors CXXFLAGS — see linux-clang-asan for the full #252 rationale.
+# This is the lane the defect was MEASURED on: libcrypto.a 50,830 symbols and
+# zero __tsan_*, likewise libz/libssl/libcurl/libcivetweb, while the two C++
+# archives (libcivetweb-cpp.a, libpugixml.a) were instrumented — which is why it
+# went unnoticed. Under TSan the gap is not merely missing coverage: the
+# sanitizer cannot see accesses OR synchronisation performed in uninstrumented
+# code, so it produces false negatives and can report false positives on
+# correctly-synchronised data.
+CFLAGS=-fsanitize=thread
 LDFLAGS=-fsanitize=thread
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=thread"]
+tools.build:cflags=["-fsanitize=thread"]
 tools.build:sharedlinkflags=["-fsanitize=thread"]
 tools.build:exelinkflags=["-fsanitize=thread"]
+
+# civetweb's stop_flag race — select UPSTREAM's race-free implementation.
+#
+# civetweb 1.16 ships two: with STOP_FLAG_NEEDS_LOCK defined, STOP_FLAG_ASSIGN is
+# an mg_atomic_compare_and_swap loop; without it, `typedef int volatile
+# stop_flag_t` and a plain `(*(f)) = (v)` store. The symbol is only ever TESTED in
+# civetweb.c, never defined — it is an external opt-in, and we were taking the
+# plain-store branch. mg_stop writes the flag with no mutex (civetweb.c:20363)
+# while consume_socket reads it holding ctx->thread_mutex (:19633), which TSan
+# reports as a data race once #252 makes the C closure visible to it. `volatile`
+# provides neither atomicity nor ordering, so this is a real race, not a TSan
+# artifact. Reachable from the shipped Prometheus exporter path:
+# MeterProvider dtor -> PrometheusExporter -> Exposer -> CivetServer -> mg_stop.
+#
+# Scoped to civetweb: the macro name is civetweb's and means nothing elsewhere,
+# and an unscoped define would enter every package's build for no reason.
+civetweb/*:tools.build:defines=["STOP_FLAG_NEEDS_LOCK"]
+
 # See linux-clang-asan for rationale on tools.info.package_id:confs.
-tools.info.package_id:confs=["tools.build:cxxflags", "tools.build:cflags", "tools.build:sharedlinkflags", "tools.build:exelinkflags"]
+#
+# ⚠️ `tools.build:defines` MUST be in this list. It is what makes the define move
+# civetweb's package_id. Without it the profile would ask for the atomic build
+# while Conan served the cached plain-store binary — the profile claiming one
+# thing and the object code being another, which is #252's defect exactly, only
+# inverted (there the id moved and the code did not; here the code would change
+# and the id would not). That failure presents as a GREEN lane that fixed nothing.
+tools.info.package_id:confs=["tools.build:cxxflags", "tools.build:cflags", "tools.build:sharedlinkflags", "tools.build:exelinkflags", "tools.build:defines"]
 
 # Disable Conan's CMakeUserPresets.json (084, 2026-08-02).
 # Conan names its generated preset from build_type ALONE -- every Release profile

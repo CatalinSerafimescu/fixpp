@@ -8,11 +8,33 @@
 #   ctest-log     — the teed ctest output (`--log` of the same invocation)
 #   test-outcome  — steps.<id>.outcome ('success' / 'failure' / 'skipped' / '')
 #
-# NEVER FAILS THE LANE — it is a measurement, not a gate.  But a measurement
-# that could not be taken must SAY SO: every path below emits an attributed
-# disposition, and there is none on which "no number" can be read as "captured,
-# and it was fine"
+# ── EXIT STATUS: ONE MEANING, AND IT IS NOT THE MEMORY FIGURE ────────────────
+#
+#   1  — this run produced UNEXPLAINED sanitizer report(s).  Nothing else.
+#   0  — everything else, INCLUDING every way the measurement itself can fail.
+#
+# The peak-memory half NEVER fails the lane: it is a measurement, not a gate,
+# and a lane reddened because /proc sampling hiccuped is a lane whose red means
+# nothing.  But a measurement that could not be taken must SAY SO: every path
+# below emits an attributed disposition, and there is none on which "no number"
+# can be read as "captured, and it was fine"
 # (feedback_silent_empty_recurred_three_times_including_inside_its_own_fix).
+#
+# ⚠️ THE EXIT CODE IS PRODUCED AT EXACTLY ONE PLACE — the single `exit "$RC"`
+# at the tail.  Every earlier terminal path is an explicit `exit 0`.  That shape
+# is deliberate and load-bearing: this script runs under `set -uo pipefail` with
+# a long tail of `awk`/`grep`/`printf` after the sanitizer block, and if the
+# final status were whatever the last command happened to return, the lane's
+# red/green would be decided by a `grep -c` that found nothing.  Add a terminal
+# path?  Give it an explicit `exit 0` — never fall off the end.
+#
+# ⚠️ THE `continue-on-error: true` ON THE CALLING STEPS WAS REMOVED WITH THIS
+# CHANGE, and the two edits are ONE change.  `exit 1` under `continue-on-error`
+# is inert — GitHub records the step's `outcome` as failure, sets its
+# `conclusion` to success, and the job goes green.  That is a gate that observes
+# and never asserts, which is the exact false-green shape this script's own
+# UBSan note is about.  If you ever restore `continue-on-error` on those steps,
+# you have silently reverted this file too.
 #
 # ── WHAT CHANGED FROM #245's VERSION, AND WHY ────────────────────────────────
 #
@@ -146,8 +168,38 @@ EXPECTED="${EXPECTED:-<no line>}"
 # Source is CTest's own LastTest.log, NOT the step log: the Test step runs with
 # `--output-on-failure`, so a report emitted by a test that PASSED never reaches
 # stdout.  Counting from the step log would systematically miss the interesting
-# case. REPORTED, never asserted — this script does not gate.
+# case.
 #
+# ── WHAT THIS COUNTER ACTUALLY CATCHES, MEASURED — IT IS NARROW ──────────────
+#
+# It is tempting to read `exit 1` here as "sanitizer findings now fail CI".
+# They already did, on their own, almost everywhere — and overstating this
+# would be the third fail-open in a row dressed as a fix.  Measured with
+# clang-22 on 2026-08-18: a two-thread race with NO `TSAN_OPTIONS` set at all
+# exits **66**, not 0, so TSan reddens its test without needing
+# `halt_on_error=1` (the ~60 per-test `ENVIRONMENT` entries in tests/ add a
+# stacktrace and suppressions, not the failure).  ASan halts by default.  UBSan
+# was the real hole and #268 closes it at the preset.
+#
+# What is left — the surface this exit code exists for — is where a report is
+# emitted and ctest is still green ANYWAY:
+#
+#   1. A `WILL_FAIL TRUE` ctest entry.  The inversion turns a genuine sanitizer
+#      abort inside such a test into a PASS.  That is by design for the ASan
+#      canary; it is not by design for a SECOND abort landing in the same entry.
+#      ⚠️ Five sites carry WILL_FAIL, but only ONE runs instrumented code
+#      (`capi_send_recv_uaf_negative`) — the other four invoke `cmake --build`
+#      (negative-compile witnesses) or `bash` (a census script) and cannot emit
+#      a runtime sanitizer report.  Counting all five overstates this surface.
+#   2. A report emitted OUTSIDE any test block — fixture setup, or ctest itself.
+#      The by-test aggregation labels these `(before first test)`.
+#   3. A SIGNATURE CHANGE on an allowlisted lane.  ci/expected-sanitizer-reports
+#      .txt pins TEXT, not a count, precisely so this case is visible: if the
+#      ASan canary's error kind changed, or a second kind appeared beside it,
+#      UNEXPLAINED goes positive while ctest stays green.
+#
+# Narrow is the point.  A backstop against INVERSION and against reports nobody
+# attributed is worth having exactly because the primary mechanism is sound.
 # ⚠️ A COUNT ALONE IS NOT ACTIONABLE, and shipping one was a defect in this
 # script. Run 32003367497 reported `sanitizer reports: 1` on BOTH the asan and
 # ubsan lanes, on green runs — and nothing on the page said WHICH line matched,
@@ -157,10 +209,27 @@ EXPECTED="${EXPECTED:-<no line>}"
 # repo's rule is that a sanitizer finding is a REAL DEFECT UNTIL DISPROVEN;
 # disproving one requires seeing it.
 SAN_PATTERN='WARNING: ThreadSanitizer:|ERROR: (Address|Leak|Memory)Sanitizer:|runtime error:'
+# Signature pattern is DELIBERATELY different from SAN_PATTERN. TSan's counted
+# line is `WARNING: ThreadSanitizer: data race (pid=N)`, which carries no
+# location — the location is on the SUMMARY line that follows. Aggregating the
+# WARNING lines alone would group every TSan report under the single useless key
+# "data race". SUMMARY lines are therefore folded in for GROUPING only; they are
+# NOT added to SAN_PATTERN, because counting them would double every TSan total.
+# T16d of ci/test-peak-rss.sh pins that, and is proven to redden when SUMMARY is
+# moved into SAN_PATTERN.
+SIG_PATTERN='runtime error:|SUMMARY: (Thread|Address|Leak|Memory)Sanitizer:'
 LASTTEST="build/${PRESET}/Testing/Temporary/LastTest.log"
 SAN_COUNT="unreadable"
 SAN_LINES=""
+SAN_BY_TEST=""
+SAN_BY_SITE=""
 UNEXPLAINED=""
+# The lane's verdict.  Set to 1 in exactly one place below; consumed by the
+# single `exit "$RC"` at the tail.  Initialised HERE rather than inside the
+# `if [ -r "$LASTTEST" ]` guard on purpose: an unreadable LastTest.log leaves
+# SAN_COUNT="unreadable" and must exit 0 (that is an instrument failure, and it
+# already has its own disposition), not inherit an unset variable under `set -u`.
+RC=0
 if [ -r "$LASTTEST" ]; then
   SAN_COUNT="$(grep -cE "$SAN_PATTERN" "$LASTTEST" 2>/dev/null || true)"
   SAN_COUNT="${SAN_COUNT:-0}"
@@ -169,6 +238,36 @@ if [ -r "$LASTTEST" ]; then
     # can be followed by a 60-frame stack. The cap is stated in the output so a
     # reader is never left thinking they saw all of them.
     SAN_LINES="$(grep -nE "$SAN_PATTERN" "$LASTTEST" 2>/dev/null | head -5 | cut -c1-200)"
+
+    # ── WHICH TEST, and WHICH SITE ───────────────────────────────────────────
+    #
+    # ⚠️ FIVE CAPPED LINES ARE NOT AN ANSWER EITHER. Run 32071568839 reported 362
+    # reports on linux-clang-libc++-ubsan and printed five; from that page it was
+    # impossible to tell whether that was 362 distinct defects or a handful of
+    # sites emitted once per test process — two readings implying completely
+    # different dispositions. Telling them apart required pulling the job log by
+    # API and reasoning about a 361-tests/363-reports ratio.
+    #
+    # ctest delimits every block with `^N/M Test: <name>`, so each report can be
+    # attributed to the test that emitted it without parsing anything else. Both
+    # aggregations run over the WHOLE file: the caps below bound how many GROUPS
+    # print, never what is counted, and each total is stated so a reader knows
+    # whether the list was truncated.
+    SAN_BY_TEST="$(awk -v SP="$SAN_PATTERN" '
+      /^[0-9]+\/[0-9]+ Test: / { t = substr($0, index($0, "Test: ") + 6); next }
+      $0 ~ SP { if (t == "") t = "(before first test)"; c[t]++ }
+      END { for (k in c) printf "%8d  %s\n", c[k], k }
+    ' "$LASTTEST" 2>/dev/null | sort -rn | head -20)"
+    SAN_TEST_TOTAL="$(printf '%s\n' "$SAN_BY_TEST" | grep -c . || true)"
+
+    # Normalise the volatile fields out before grouping, or every report is its
+    # own singleton and the distinct count degenerates to the report count: pids
+    # differ per test process, addresses per run.
+    SAN_SIG_RAW="$(grep -aE "$SIG_PATTERN" "$LASTTEST" 2>/dev/null \
+      | sed -E 's/\(pid=[0-9]+\)//; s/0x[0-9a-f]+/0xADDR/g; s/[[:space:]]+$//' \
+      | cut -c1-110)"
+    SAN_BY_SITE="$(printf '%s\n' "$SAN_SIG_RAW" | sort | uniq -c | sort -rn | head -10)"
+    SAN_SITE_TOTAL="$(printf '%s\n' "$SAN_SIG_RAW" | sort -u | grep -c . || true)"
 
     # ── Expected vs UNEXPLAINED ──────────────────────────────────────────────
     #
@@ -195,11 +294,29 @@ if [ -r "$LASTTEST" ]; then
     fi
 
     if [ "$UNEXPLAINED" -gt 0 ]; then
-      echo "::warning::#267 acceptance item 5 — ${UNEXPLAINED} UNEXPLAINED sanitizer report(s) (of ${SAN_COUNT} total) in ${PRESET}'s LastTest.log, on a run whose ctest outcome was '${TEST_OUTCOME}'. A sanitizer report does NOT necessarily fail the test that emitted it — on linux-clang-ubsan it structurally CANNOT (see the UBSan note above and #268). Treat as a real defect until disproven; if it is deliberate, add it to ci/expected-sanitizer-reports.txt with the test, the mechanism and the run. Matches (line:text, capped at 5, 200 chars):"
+      # `::error::`, and RC=1.  A `::warning::` here was the state of this file
+      # for its whole life, and the 363 OpenSSL reports of #252 sat under one
+      # for four post-merge runs without anyone acting on them — which is the
+      # empirical answer to whether an advisory annotation is sufficient.
+      RC=1
+      echo "::error::#267 acceptance item 5 — ${UNEXPLAINED} UNEXPLAINED sanitizer report(s) (of ${SAN_COUNT} total) in ${PRESET}'s LastTest.log, on a run whose ctest outcome was '${TEST_OUTCOME}'. THIS STEP FAILS THE LANE. A sanitizer report does NOT necessarily fail the test that emitted it: a WILL_FAIL entry inverts it, and a report emitted outside any test belongs to no test at all — that is the gap this exit code covers. Treat as a real defect until disproven; if it is deliberate, add it to ci/expected-sanitizer-reports.txt with the test, the mechanism and the run. Matches (line:text, capped at 5, 200 chars):"
     else
       echo "notice: ${SAN_COUNT} sanitizer report(s) in ${PRESET}'s LastTest.log, all matching ci/expected-sanitizer-reports.txt. Lines below; no unexplained report."
     fi
     printf '%s\n' "$SAN_LINES"
+
+    # These two aggregations are what make the count actionable: WHICH tests, and
+    # HOW MANY DISTINCT sites. A large count over few sites and few tests is a
+    # third-party idiom repeated per test process; the same count over many sites
+    # is a real population. The headline number cannot tell them apart.
+    if [ -n "$SAN_BY_TEST" ]; then
+      echo "  by test (${SAN_TEST_TOTAL:-?} test(s) emitted reports; showing up to 20, count first):"
+      printf '%s\n' "$SAN_BY_TEST"
+    fi
+    if [ -n "$SAN_BY_SITE" ]; then
+      echo "  by signature (${SAN_SITE_TOTAL:-?} distinct after normalising pid/addresses; showing up to 10, count first; TSan SUMMARY lines are folded in for location and are NOT part of the counts above):"
+      printf '%s\n' "$SAN_BY_SITE"
+    fi
   fi
 fi
 
@@ -262,4 +379,9 @@ summary "" \
   "Unlike #245's cgroup source it covers the test phase ONLY, not the build — it is a" \
   "measurement of \`ctest\`, not a job-wide ceiling. See \`ci/measure-peak-rss.py\`."
 
-exit 0
+# ⚠️ THE ONLY NON-ZERO EXIT IN THIS FILE, and the only place the status is
+# decided.  `$RC` is 1 iff the UNEXPLAINED branch above ran.  Do not replace
+# this with a bare `exit` or let the script fall off the end: the last command
+# before here is a `summary()` call whose status depends on whether
+# GITHUB_STEP_SUMMARY happens to be set, which is not a verdict about anything.
+exit "$RC"

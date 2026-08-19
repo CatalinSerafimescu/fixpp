@@ -15,11 +15,29 @@ compiler.cppstd=23
 CC=clang-22
 CXX=clang++-22
 CXXFLAGS=-fsanitize=undefined -fno-omit-frame-pointer
+# CFLAGS mirrors CXXFLAGS — see linux-clang-asan for the full #252 rationale.
+#
+# -fno-sanitize=function is C-SIDE ONLY and deliberately absent from CXXFLAGS.
+# The check fires on C's generic-callback idiom — a typed function called through
+# a `void (*)(void *)`, e.g. OPENSSL_sk_pop_free(sk, X509_NAME_ENTRY_free). That is
+# UB by the C standard but works on every real ABI, and OpenSSL cannot drop it
+# without an ABI change. #252 instrumented the C closure for the first time and it
+# produced 363 reports on linux-clang-ubsan / 362 on the libc++ twin, all this one
+# check. Measured with clang-22: removing it leaves 17 checks active — alignment,
+# array-bounds, bool, builtin, ENUM, float-cast-overflow, integer-divide-by-zero,
+# nonnull-attribute, null, pointer-overflow, return, returns-nonnull-attribute,
+# shift-base, shift-exponent, signed-integer-overflow, unreachable, vla-bound.
+# `enum` surviving matters: it is the check behind #268's own finding.
+# ⚠️ Keep this line byte-identical to linux-clang-libc++-ubsan's. OpenSSL erases
+# compiler.libcxx from its package_id (pure C), so the two lanes share ONE OpenSSL
+# binary only while their cflags match; diverging here silently forks the build.
+CFLAGS=-fsanitize=undefined -fno-omit-frame-pointer -fno-sanitize=function
 LDFLAGS=-fsanitize=undefined
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=undefined", "-fno-omit-frame-pointer"]
+tools.build:cflags=["-fsanitize=undefined", "-fno-omit-frame-pointer", "-fno-sanitize=function"]
 tools.build:sharedlinkflags=["-fsanitize=undefined"]
 tools.build:exelinkflags=["-fsanitize=undefined"]
 # See linux-clang-asan for rationale on tools.info.package_id:confs.

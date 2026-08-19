@@ -25,6 +25,20 @@ target_link_libraries(capi_handles_compile_test PRIVATE fixpp_capi)
 set_target_properties(capi_handles_compile_test PROPERTIES LINKER_LANGUAGE CXX)
 add_test(NAME capi_handles_compile COMMAND capi_handles_compile_test)
 
+# #268 — the out-of-range acceptance test for fixpp_session_config_set_reset_seqnum_policy.
+# ⚠️ IT IS IN C ON PURPOSE, and that is the fix rather than a packaging choice.
+# Passing an out-of-range enum by value from C++ is a load of an invalid enum
+# value — undefined behaviour in the CALLER, which UBSan reported on every run
+# while the lane was recoverable and could not fail. Measured with clang-22 on one
+# source compiled twice, `-x c` vs `-x c++`, nothing else changed: 0 reports as C,
+# 2 as C++. So the language removes the UB instead of suppressing the diagnostic.
+# Full reasoning at the top of the TU. LINKER_LANGUAGE CXX for the same reason as
+# its two siblings above.
+add_executable(capi_reset_seqnum_policy_range_test reset_seqnum_policy_range_test.c)
+target_link_libraries(capi_reset_seqnum_policy_range_test PRIVATE fixpp_capi)
+set_target_properties(capi_reset_seqnum_policy_range_test PROPERTIES LINKER_LANGUAGE CXX)
+add_test(NAME capi_reset_seqnum_policy_range COMMAND capi_reset_seqnum_policy_range_test)
+
 # T021 (US4, SC-005) — reentrancy-gate positive/negative test: the real surface
 # passes; a 0-class or 2-class symbol makes tools/check_capi_reentrancy.sh fail.
 add_test(NAME capi_reentrancy_negative
