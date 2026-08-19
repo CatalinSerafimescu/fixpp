@@ -51,7 +51,24 @@ void BM_AsyncMutex_AsyncLock_Uncontended(benchmark::State& state) {
             std::chrono::duration<double>(t1 - t0).count() / kCycles);
     }
 }
-BENCHMARK(BM_AsyncMutex_AsyncLock_Uncontended)->UseManualTime();
+// ⚠️ `->Iterations(3)` IS LOAD-BEARING, NOT A TUNING CHOICE. These benchmarks
+// report a PER-OPERATION time — `SetIterationTime(elapsed / kCycles)` — while one
+// `state` iteration really costs kCycles * that. Google-Benchmark's auto-tuner
+// grows the iteration count until the REPORTED time reaches `--benchmark_min_time`
+// (default 0.5 s), so it is told ~25 ns and concludes it needs ~2e7 iterations of
+// something that actually costs ~5 ms each: **~28 h per repetition, ~83 h at the
+// suite's --benchmark_repetitions=3.** Pinning the count disables that tuning.
+//
+// This is not theoretical. #209 made the bench suite run in CI for the first time
+// (the job previously executed only `placeholder_bench`), and the first real run
+// parked here for over an hour before being killed. It is also why this file's
+// baseline, `bench/baselines/sync/async_mutex_baselines.json`, is hand-authored
+// with a partial schema and carries `none:` in bench/ci-suite.txt — the benchmark
+// could never be machine-run, and the schema gap was the symptom.
+//
+// bench/threading/bench_threading.cpp uses the identical divisor pattern and got
+// this right from the start: all eight of its registrations carry ->Iterations(3).
+BENCHMARK(BM_AsyncMutex_AsyncLock_Uncontended)->UseManualTime()->Iterations(3);
 
 // Row 3: unlock uncontended in isolation. Acquire (fast path), disengage the
 // guard via release(), then time only the explicit unlock() on the empty LIFO.
@@ -78,7 +95,7 @@ void BM_AsyncMutex_Unlock_Uncontended(benchmark::State& state) {
         state.SetIterationTime(accum / kCycles);
     }
 }
-BENCHMARK(BM_AsyncMutex_Unlock_Uncontended)->UseManualTime();
+BENCHMARK(BM_AsyncMutex_Unlock_Uncontended)->UseManualTime()->Iterations(3);
 
 }  // namespace
 
