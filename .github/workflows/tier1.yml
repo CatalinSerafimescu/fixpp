@@ -1936,12 +1936,13 @@ jobs:
       - name: Regression pin — peak-RSS instrument dispositions (#266)
         run: bash ci/test-peak-rss.sh
 
-      # #209 — the bench gate's own harness. 29 cells over synthetic
+      # #209 — the bench gate's own harness. 50 cells over synthetic
       # Google-Benchmark JSON: every hard cell of tools/bench_compare.py and
-      # ci/run-bench-suite.sh is proven RED for its own named reason, and three
+      # ci/run-bench-suite.sh is proven RED for its own named reason, and the
       # GREEN controls pin shapes that must PASS (notably a `stddev` aggregate
       # of exactly 0.0, which an over-eager "every timing must be > 0" rule
-      # would have rejected on a correct tree).
+      # would have rejected on a correct tree, and a candidate ADDING a
+      # benchmark or a paired manifest row, which Article VIII §3 requires).
       #
       # It earned its place immediately: cell R-SILENT caught a real defect in
       # ci/run-bench-suite.sh — a stale results file from an earlier invocation
@@ -2239,10 +2240,26 @@ jobs:
       - name: "Tier 2 — paired base-vs-candidate (HARD)"
         run: |
           set -uo pipefail
+          # ⚠️ --base-manifest: THE MANIFEST IS PART OF THE GATE AND THE CHANGE
+          # BEING GATED CAN EDIT IT. Flipping one pre-existing row from `paired`
+          # to `no` removes that binary from --only-paired, from the base build's
+          # target list and from run_paired's filter at once, so the regression
+          # it was measuring stops existing rather than being reported missing;
+          # the other paired rows keep T2-VACUOUS quiet and the gate exits 0
+          # (Gate B round 2, P1, F1 — reproduced at +100%, `tier 2 PASSED`).
+          # Diffing against the merge-base's own copy makes deletions and
+          # downgrades [T2-DOWNGRADE] failures while still permitting additions.
+          #
+          # It is NOT the only defence, and deliberately so: a merge-base that
+          # PREDATES #209 has no bench/ci-suite.txt at all — including this PR's
+          # own — and that case is exempted BY NAME, not silently. The mandatory
+          # paired floor in ci/test-bench-gate.sh (cells M-PINNED / M-PINNED-RED)
+          # is what covers it, and runs unconditionally in ci-script-pins.
           cmp_paired() {
             python3 tools/bench_compare.py --paired \
               --a1 bench-results/a1 --b1 bench-results/b1 \
-              --a2 bench-results/a2 --b2 bench-results/b2
+              --a2 bench-results/a2 --b2 bench-results/b2 \
+              --base-manifest /tmp/fixpp-base/bench/ci-suite.txt
           }
           cmp_paired && exit 0
           rc=$?

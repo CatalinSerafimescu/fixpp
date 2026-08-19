@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=42
+CELLS_DECLARED=50
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -89,6 +89,24 @@ for r in d["benchmarks"]:
 assert n > 0, f"mutation matched no row: {match}"
 json.dump(d, open(path, "w"), indent=2)
 PY
+}
+
+# Remove ONE logical benchmark's `median` row, keeping its mean and stddev — the
+# shape that made tier 2 fail open in Gate B round 2 (P1, F2). The assert is the
+# point: a mutation that quietly matched nothing would make its cell vacuous.
+drop_median() {
+  # drop_median <file> <run_name>
+  python3 - "$@" <<'DM'
+import json, sys
+path, bm = sys.argv[1:3]
+d = json.load(open(path))
+before = len(d["benchmarks"])
+d["benchmarks"] = [r for r in d["benchmarks"]
+                   if not (r.get("run_name") == bm and r.get("aggregate_name") == "median")]
+assert before - len(d["benchmarks"]) == 1, \
+    f"drop_median removed {before - len(d['benchmarks'])} rows, expected exactly 1"
+json.dump(d, open(path, "w"), indent=2)
+DM
 }
 
 manifest() {
@@ -305,7 +323,11 @@ setlegs 100 100 120 120   # candidate {100,120}, base {100,120} — same distrib
 if ! pc > "$TMP/g9.out" 2>&1; then
   fail "G9: identical candidate/base distributions must not fail — output:\n$(cat "$TMP/g9.out")"
 fi
-grep -qE 'BM_A_median .* +\+?0\.0%' "$TMP/g9.out" \
+# ⚠️ `BM_A`, not `BM_A_median`: tier 2 compares LOGICAL benchmarks now
+# (paired_series), so the row it prints is the benchmark itself. Tier 3 still
+# prints `BM_A_median` — it compares the median projection — and the two tiers
+# deliberately print different shapes.
+grep -qE 'BM_A .* +\+?0\.0%' "$TMP/g9.out" \
   || fail "G9: min-per-tree is SAMPLE-SIZE BIASED — identical distributions on both trees \
 computed a non-zero delta, which means the two sides are not observed an equal number of \
 times. Output:\n$(cat "$TMP/g9.out")"
@@ -412,9 +434,16 @@ mkfix "$BASE/dictionary/alpha.json" BM_A=0 BM_B=0
 if ! sc > "$TMP/t3z.out" 2>&1; then fail "T3-ZERO: a zero baseline is informational, not fatal"; fi
 grep -q "baseline is zero; not compared" "$TMP/t3z.out" \
   || fail "T3-ZERO: the zero-baseline skip was not printed with its reason:\n$(cat "$TMP/t3z.out")"
-grep -q "0 row(s) compared" "$TMP/t3z.out" \
-  || fail "T3-ZERO: the summary counted a row as compared when no delta was computed:\n$(cat "$TMP/t3z.out")"
-echo "GREEN (expected): T3-ZERO — a zero baseline is named as skipped and not counted as compared"
+# ⚠️ ASSERTED AS THE EXACT SUMMARY, in both units, because the previous
+# `0 row(s) compared` substring was satisfied by an INCOHERENT summary: the
+# tally mixed per-measurement skips with a per-binary one and read
+# `0 compared; 3 not compared` over TWO measurements (Gate B round 2, P3).
+grep -qF "0 measurement(s) compared; 2 not compared" "$TMP/t3z.out" \
+  || fail "T3-ZERO: the measurement tally is wrong (2 measurements exist, both skipped):\n$(cat "$TMP/t3z.out")"
+grep -qF "0 binary(ies) never reached comparison" "$TMP/t3z.out" \
+  || fail "T3-ZERO: the binary tally double-counts a binary whose measurements were \
+each skipped individually:\n$(cat "$TMP/t3z.out")"
+echo "GREEN (expected): T3-ZERO — a zero baseline is named as skipped, counted once, in its own unit"
 cells_run=$((cells_run + 1))
 mkfix "$BASE/dictionary/alpha.json" BM_A=100 BM_B=200
 
@@ -435,6 +464,163 @@ setlegs 100 100 100 100
 manifest "$PMAN" "bench/x/alpha_bench   none:n/a   no"
 expect_red T2-VACUOUS "no manifest row marked paired" "no manifest row is marked" pc
 manifest "$PMAN" "bench/x/alpha_bench   none:n/a   paired"
+
+
+# ═══ Gate B round 2 (P1) — THE TWO REMAINING TIER-2 FAIL-OPENS ═══════════════
+
+# ── F2: a benchmark that vanishes into the MEDIAN PROJECTION ────────────────
+# Round 1 closed ASYMMETRIC loss between B1 and B2 ([T2-LEGSET], cell
+# T2-PARTIAL). The IDENTICAL malformed shape in BOTH base legs walked through
+# it: `validate_results()` never required a logical benchmark to HAVE a median,
+# and the comparison ran over the median projection, so a base leg keeping
+# `mean`+`stddev` and losing one benchmark's `median` dropped that benchmark
+# before any set was compared — whereupon the candidate's copy of it was
+# classified as a permitted ADDITION.
+#
+# PROVEN GREEN ON THE UNFIXED TREE with exactly this fixture: `+100% BM_SLOW`,
+# `1 benchmark row(s) compared`, `bench gate: tier 2 PASSED`, exit 0.
+mkfix "$A1/alpha_bench.json" BM_STABLE=100 BM_SLOW=200
+mkfix "$A2/alpha_bench.json" BM_STABLE=100 BM_SLOW=200
+mkfix "$B1/alpha_bench.json" BM_STABLE=100 BM_SLOW=100
+mkfix "$B2/alpha_bench.json" BM_STABLE=100 BM_SLOW=100
+drop_median "$B1/alpha_bench.json" BM_SLOW
+drop_median "$B2/alpha_bench.json" BM_SLOW
+expect_red T2-AGG "both base legs keep mean+stddev but lose one benchmark's median" "[T2-AGG]" pc
+
+# T2-AGG-DUP — the other half of "EXACTLY one". Two median rows for one logical
+# benchmark make the comparand ambiguous; a `>= 1` rule would sit green on it.
+# The duplicate carries a DIFFERENT row `name` on purpose, so [T1-6]'s identity
+# check does not fire first and this cell reddens for its own named reason.
+setlegs 100 100 100 100
+python3 - "$B1/alpha_bench.json" <<'DUP'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+src = [r for r in d["benchmarks"] if r["name"] == "BM_A_median"][0]
+extra = dict(src); extra["name"] = "BM_A_median_2"
+d["benchmarks"].append(extra)
+json.dump(d, open(p, "w"), indent=2)
+DUP
+expect_red T2-AGG-DUP "two median rows for one logical benchmark" "[T2-AGG]" pc
+setlegs 100 100 100 100
+
+# ── F1: a pre-existing `paired` row DOWNGRADED to `no` ──────────────────────
+# The manifest is part of the gate AND is editable by the change being gated.
+# Flipping one row to `no` removes that binary from `--only-paired`, from the
+# base build's target list and from run_paired's filter at once — the other
+# paired rows keep `T2-VACUOUS` quiet and the gate exits 0.
+#
+# PROVEN GREEN ON THE UNFIXED TREE: three paired rows, `slow_bench` downgraded
+# with a +100% regression in its (unbuilt, uncompared) legs — `2 benchmark
+# row(s) compared`, `bench gate: tier 2 PASSED`, exit 0.
+#
+# ⚠️ THESE FOUR CELLS COULD NOT BE RUN AGAINST THE UNFIXED COMPARATOR AT ALL:
+# `--base-manifest` did not exist there, so argparse would exit 2 on "unrecognized
+# arguments" and `expect_red` would report RED for entirely the wrong reason —
+# the false-green generator this file exists to prevent. What was proven red
+# before the fix is the MECHANISM (the transcript above), not the cell.
+BMAN="$TMP/base-manifest.txt"
+manifest "$BMAN" \
+  "bench/x/alpha_bench   none:n/a   paired" \
+  "bench/x/beta_bench    none:n/a   paired" \
+  "bench/x/gamma_bench   none:n/a   paired"
+for d in "$A1" "$B1" "$A2" "$B2"; do
+  mkfix "$d/alpha_bench.json" BM_A=100
+  mkfix "$d/beta_bench.json"  BM_B=100
+done
+
+pcb() {  # pcb <candidate-manifest> <base-manifest>
+  python3 "$CMP" --paired --a1 "$A1" --b1 "$B1" --a2 "$A2" --b2 "$B2" \
+                 --manifest "$1" --base-manifest "$2" --band 50
+}
+
+# T2-DOWNGRADE — exactly ONE of three paired rows flipped to `no`.
+CMAN="$TMP/cand-manifest.txt"
+manifest "$CMAN" \
+  "bench/x/alpha_bench   none:n/a   paired" \
+  "bench/x/beta_bench    none:n/a   paired" \
+  "bench/x/gamma_bench   none:n/a   no"
+expect_red T2-DOWNGRADE "one of three pre-existing paired rows downgraded to \`no\`" \
+  "[T2-DOWNGRADE]" pcb "$CMAN" "$BMAN"
+
+# T2-DOWNGRADE-DEL — the same narrowing spelled as a deletion. A check written
+# only over rows PRESENT in the candidate manifest would miss this one.
+manifest "$CMAN" \
+  "bench/x/alpha_bench   none:n/a   paired" \
+  "bench/x/beta_bench    none:n/a   paired"
+expect_red T2-DOWNGRADE-DEL "a pre-existing paired row deleted from the manifest" \
+  "[T2-DOWNGRADE]" pcb "$CMAN" "$BMAN"
+
+# G10 — THE ASYMMETRY, at manifest level. ADDING a paired binary is what
+# Article VIII §3 asks for; a check that reddened on it would punish the
+# behaviour the gate is supposed to encourage. Same shape as G7 one level up.
+manifest "$BMAN" "bench/x/alpha_bench   none:n/a   paired"
+manifest "$CMAN" \
+  "bench/x/alpha_bench   none:n/a   paired" \
+  "bench/x/beta_bench    none:n/a   paired"
+expect_green G10 "a paired row ADDED by the candidate is not an error" pcb "$CMAN" "$BMAN"
+
+# G11 — a merge-base that PREDATES #209 has no manifest to diff against. That
+# must not be fatal (it is this very PR's own merge-base), and it must not be
+# silent either — a skipped check that prints nothing is how a gate reads green
+# on nothing. This cell pins that the exemption NAMES itself.
+if ! pcb "$CMAN" "$TMP/no-such-base-manifest.txt" > "$TMP/g11.out" 2>&1; then
+  fail "G11: an absent base manifest must not fail the gate — output:\n$(cat "$TMP/g11.out")"
+fi
+grep -qF "NOT DIFFED — the merge-base has no" "$TMP/g11.out" \
+  || fail "G11: the absent-base-manifest exemption was taken SILENTLY:\n$(cat "$TMP/g11.out")"
+echo "GREEN (expected): G11 — an absent base manifest is exempted BY NAME, not silently"
+cells_run=$((cells_run + 1))
+
+# ── THE MANDATORY PAIRED FLOOR, against the SHIPPED manifest ────────────────
+# [T2-DOWNGRADE] above needs the merge-base's manifest, which the tier-2 job
+# supplies from the base worktree — and which does NOT exist when the base
+# predates #209 (G11). So the floor below is not belt-and-braces: for this PR's
+# own CI run it is the only thing standing between a downgraded row and a green
+# gate. It is a FLOOR (subset), not set equality, on purpose: exact equality
+# would also redden on ADDING a paired row, which G10 establishes is permitted.
+MANDATORY_PAIRED="xml_loader_bench framer_bench parser_bench writer_bench validator_bench"
+
+paired_floor() {
+  # paired_floor <manifest>
+  python3 - "$1" $MANDATORY_PAIRED <<'FLOOR'
+import os, sys
+man, pinned = sys.argv[1], sys.argv[2:]
+paired = set()
+for raw in open(man):
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    parts = line.split()
+    if len(parts) == 3 and parts[2] == "paired":
+        paired.add(os.path.basename(parts[0]))
+missing = sorted(set(pinned) - paired)
+if missing:
+    sys.exit("::error::mandatory paired floor violated in %s: %s no longer marked "
+             "`paired`. Downgrading a pre-existing paired row silently removes its "
+             "binary from the hard timing axis, so a regression in it merges GREEN."
+             % (man, missing))
+print("mandatory paired floor OK in %s — %d pinned, %d paired row(s) present"
+      % (man, len(pinned), len(paired)))
+FLOOR
+}
+
+# M-PINNED — the shipped bench/ci-suite.txt still pairs every mandatory binary,
+# `xml_loader_bench` (the #263 target, the single most important paired row)
+# included.
+expect_green M-PINNED "the shipped manifest still pairs every mandatory binary" \
+  paired_floor "$repo_root/bench/ci-suite.txt"
+
+# M-PINNED-RED — the same instrument against a copy with exactly one mandatory
+# row downgraded. Without this the cell above proves only that the checker can
+# print something.
+awk '{ if ($1 == "bench/dictionary/xml_loader_bench") $3 = "no"; print }' \
+  "$repo_root/bench/ci-suite.txt" > "$TMP/downgraded-suite.txt"
+grep -qE '^bench/dictionary/xml_loader_bench[[:space:]]+[^[:space:]]+[[:space:]]+no$' \
+  "$TMP/downgraded-suite.txt" \
+  || fail "M-PINNED-RED: the mutant matched NOTHING — the copy is byte-equivalent to the \
+shipped manifest, so the cell below would be vacuous"
+expect_red M-PINNED-RED "xml_loader_bench downgraded to \`no\` in the manifest" \
+  "mandatory paired floor violated" paired_floor "$TMP/downgraded-suite.txt"
 
 # ═══ RUNNER: ci/run-bench-suite.sh ═══════════════════════════════════════════
 

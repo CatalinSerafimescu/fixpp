@@ -351,6 +351,75 @@ def median_rows(data: dict) -> dict[str, tuple[float, str | None]]:
             and isinstance(r.get("name"), str)}
 
 
+# The aggregate rows that are a PER-REPETITION STATISTIC OF ONE BENCHMARK, and
+# therefore evidence that that benchmark ran. `BigO` and `RMS` (emitted by
+# `->Complexity()`) are deliberately NOT here: they summarise a whole FAMILY
+# under the family's `run_name`, so a group made only of them has no median BY
+# DESIGN and requiring one would redden a correct tree — the G8 failure mode
+# this gate's own harness exists to catch. No `paired` binary uses Complexity()
+# today (checked: none of xml_loader/framer/parser/writer/validator_bench call
+# Complexity, ComputeStatistics or Repetitions); this is what keeps that from
+# becoming a false RED if one ever does.
+_STATISTIC_AGGREGATES = frozenset(_DURATION_AGGREGATES) | frozenset(_DISPERSION_AGGREGATES)
+
+
+def paired_series(name: str, data: dict) -> tuple[dict[str, tuple[float, str | None]], list[str]]:
+    """{LOGICAL benchmark name: (median cpu_time, time_unit)} + findings, for tier 2.
+
+    ⚠️ KEYED ON `run_name` — THE BENCHMARK — NOT ON THE ROW'S OWN `name`, and
+    that is the whole point rather than a detail. `median_rows()` returns a
+    PROJECTION: a benchmark that emits `mean` and `stddev` but no `median` is
+    simply absent from it, and tier 2's set comparisons then never see it. Gate
+    B round 2 (P1, F2) proved that fail-open by fixture — base legs carrying
+    `mean`+`stddev` and no `median` for one benchmark dropped it before
+    `[T2-LEGSET]` compared anything, whereupon the candidate's +100% regression
+    on that same benchmark was classified as a permitted candidate ADDITION and
+    the gate exited 0. Round 1's fix rejects only ASYMMETRIC loss between B1 and
+    B2; the identical malformed shape in BOTH legs walked straight through it.
+
+    So the requirement is stated over the LOGICAL benchmark and is total:
+    every benchmark that reports any per-repetition statistic must report
+    exactly one usable `median`. The set comparisons downstream then run over
+    logical names, not over whatever survived a projection.
+
+    There is deliberately NO "no aggregates at all -> fall back to plain rows"
+    branch. Such a branch is itself a bypass — a leg with zero aggregates would
+    silently switch projection — and tier-2 legs have exactly one producer,
+    ci/run-bench-suite.sh, which always passes `--benchmark_repetitions` (>1)
+    with `--benchmark_report_aggregates_only=true`. A leg without medians is a
+    broken measurement, and it says so.
+    """
+    groups: dict[str, list[dict]] = {}
+    for row in data.get("benchmarks", []) or []:
+        if not isinstance(row, dict) or row.get("error_occurred"):
+            continue
+        if row.get("aggregate_name") not in _STATISTIC_AGGREGATES:
+            continue
+        lname = row.get("run_name") or row.get("name")
+        if not isinstance(lname, str) or not lname:
+            continue
+        groups.setdefault(lname, []).append(row)
+
+    series: dict[str, tuple[float, str | None]] = {}
+    out: list[str] = []
+    for lname in sorted(groups):
+        med = [r for r in groups[lname]
+               if r.get("aggregate_name") == "median" and _num(r.get("cpu_time"))]
+        if len(med) != 1:
+            present = sorted({str(r.get("aggregate_name")) for r in groups[lname]})
+            out.append(f"[T2-AGG] {name}/{lname}: expected exactly one usable `median` "
+                       f"row, found {len(med)} (aggregate rows present: {present}). The "
+                       f"paired comparison is over medians, so this benchmark would "
+                       f"silently disappear from the gate instead of being compared. "
+                       f"ci/run-bench-suite.sh runs every leg with "
+                       f"--benchmark_repetitions>1 --benchmark_report_aggregates_only=true, "
+                       f"which always emits exactly one median per benchmark.")
+            continue
+        r = med[0]
+        series[lname] = (r["cpu_time"], r.get("time_unit"))
+    return series, out
+
+
 # ── SUITE mode: tier 1 (hard) + tier 3 (informational) ──────────────────────
 
 def run_suite(results_dir: str, baselines_dir: str, manifest: str,
@@ -363,8 +432,15 @@ def run_suite(results_dir: str, baselines_dir: str, manifest: str,
     print(f"    baselines: {baselines_dir}")
     print()
 
-    tier3_compared = 0
-    tier3_skipped: list[str] = []
+    # ⚠️ TWO COUNTERS, TWO UNITS, and the split is the fix for Gate B round 2
+    # (P3, F3). `tier3_compared` used to count BINARIES while `tier3_skipped`
+    # accumulated a mix of per-MEASUREMENT skips and a per-BINARY line, so a
+    # binary whose every measurement was skipped was counted twice and the
+    # summary read `0 compared; 3 not compared` over two measurements. A
+    # coverage summary that cannot be added up is not a coverage summary.
+    tier3_compared = 0                       # MEASUREMENTS with a computed delta
+    tier3_skipped: list[str] = []            # MEASUREMENTS named as not compared
+    tier3_bin_skipped: list[str] = []        # BINARIES that never reached comparison
     tier3_over: list[str] = []
 
     for row in rows:
@@ -391,7 +467,7 @@ def run_suite(results_dir: str, baselines_dir: str, manifest: str,
         if row.comparand.startswith("none:"):
             reason = row.comparand.split(":", 1)[1]
             print(f"    tier 3: NOT COMPARED — {reason}")
-            tier3_skipped.append(f"{row.name}: {reason}")
+            tier3_bin_skipped.append(f"{row.name}: {reason}")
             continue
 
         base_rel = row.comparand.split(":", 1)[1]
@@ -409,7 +485,7 @@ def run_suite(results_dir: str, baselines_dir: str, manifest: str,
         if not shared:
             print(f"    tier 3: NOT COMPARED — no benchmark name is present in both "
                   f"{base_rel} and this run ({len(base_t)} baseline / {len(cur_t)} current rows)")
-            tier3_skipped.append(f"{row.name}: no shared benchmark names with {base_rel}")
+            tier3_bin_skipped.append(f"{row.name}: no shared benchmark names with {base_rel}")
             continue
 
         print(f"    tier 3: vs {base_rel} (dev-host baseline — REPORT ONLY)")
@@ -435,15 +511,20 @@ def run_suite(results_dir: str, baselines_dir: str, manifest: str,
             print(f"      {nm:<52} {bv:>12.2f} -> {cv:>12.2f}  {d:>+7.1f}%{mark}")
             if abs(d) > tolerance:
                 tier3_over.append(f"{row.name}/{nm}: {d:+.1f}%")
-        if row_deltas:
-            tier3_compared += 1
-        else:
-            tier3_skipped.append(f"{row.name}: no row against {base_rel} yielded a usable delta")
+        # Counted in MEASUREMENTS. The old per-binary "no row yielded a usable
+        # delta" line is gone: when `shared` is non-empty and no delta was
+        # computed, every one of those measurements has already been appended to
+        # `tier3_skipped` with its own named reason, so the extra line added a
+        # second unit to the same tally and named nothing new.
+        tier3_compared += row_deltas
 
     print()
     print("=== tier 3 summary (informational — [const §VIII.2] ±5%) ===")
-    print(f"  {tier3_compared} row(s) compared; {len(tier3_skipped)} not compared, each named:")
+    print(f"  {tier3_compared} measurement(s) compared; {len(tier3_skipped)} not compared, each named:")
     for s in tier3_skipped:
+        print(f"    - {s}")
+    print(f"  {len(tier3_bin_skipped)} binary(ies) never reached comparison, each named:")
+    for s in tier3_bin_skipped:
         print(f"    - {s}")
     if tier3_over:
         print(f"  {len(tier3_over)} benchmark(s) outside ±{tolerance}% vs a DEV-HOST baseline:")
@@ -464,8 +545,64 @@ def run_suite(results_dir: str, baselines_dir: str, manifest: str,
 
 # ── PAIRED mode: tier 2 (hard) ──────────────────────────────────────────────
 
+def check_paired_not_narrowed(manifest: str, all_rows: list[Row],
+                              base_manifest: str | None) -> list[str]:
+    """[T2-DOWNGRADE] — a change may ADD `paired` rows; it may not remove one.
+
+    ⚠️ THE MANIFEST IS PART OF THE GATE, AND IT IS EDITABLE BY THE CHANGE BEING
+    GATED. Gate B round 2 (P1, F1): flipping one pre-existing row from `paired`
+    to `no` removes that binary from every `--only-paired` run, from the base
+    build's target list, and from `run_paired`'s row filter at once — so the
+    regression it was measuring is not reported as missing, it simply stops
+    existing. Four other stable paired binaries keep `T2-VACUOUS` quiet and the
+    gate exits 0. Reproduced against `slow_bench`: +100%, `tier 2 PASSED`.
+
+    The asymmetry mirrors `[T2-DEL]` one level up: ADDING a paired binary is
+    what Article VIII §3 asks for and must never be an error; removing or
+    downgrading one is a narrowing of the gate by the thing being gated.
+
+    Checked BEFORE the per-binary loop, deliberately: a downgraded row produces
+    no base-leg JSON at all, so nothing inside the loop would ever look for it.
+    """
+    if not base_manifest:
+        print("    paired set: NOT DIFFED — no --base-manifest was supplied, so a "
+              "pre-existing `paired` row DOWNGRADED by this change cannot be seen "
+              "here. Not a silent skip: ci/test-bench-gate.sh pins the mandatory "
+              "paired set as a floor against the shipped manifest.")
+        return []
+    if not os.path.exists(base_manifest):
+        print(f"    paired set: NOT DIFFED — the merge-base has no {base_manifest} "
+              f"(a base predating #209 has no manifest to diff against). The "
+              f"mandatory-paired floor in ci/test-bench-gate.sh is what covers this "
+              f"case; it is stated rather than skipped.")
+        return []
+
+    base_paired = {r.name for r in read_manifest(base_manifest) if r.tier2 == "paired"}
+    cand_paired = {r.name for r in all_rows if r.tier2 == "paired"}
+    cand_all = {r.name for r in all_rows}
+
+    lost = sorted(base_paired - cand_paired)
+    if not lost:
+        print(f"    paired set: OK vs merge-base — {len(base_paired)} pre-existing "
+              f"row(s) all still paired, {len(cand_paired - base_paired)} added.")
+        return []
+
+    downgraded = [n for n in lost if n in cand_all]
+    removed = [n for n in lost if n not in cand_all]
+    msg = (f"[T2-DOWNGRADE] {manifest}: binaries that are `paired` at the merge-base "
+           f"are not paired in this change — downgraded to `no`: {downgraded or 'none'}; "
+           f"dropped from the manifest entirely: {removed or 'none'}. That removes them "
+           f"from the hard timing axis, so a regression in them merges GREEN with tier 1 "
+           f"and tier 2 both passing. Additions are permitted; deletions and downgrades "
+           f"are not.")
+    print(f"    ::error::{msg}")
+    return [msg]
+
+
+
 def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
-               manifest: str, band: float, noise_band: float) -> int:
+               manifest: str, band: float, noise_band: float,
+               base_manifest: str | None = None) -> int:
     """Candidate (A) vs merge-base (B), measured A-B-A-B on one runner.
 
     The A-vs-A delta is a noise floor for the CANDIDATE phase. ⚠️ It is NOT
@@ -482,7 +619,8 @@ def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
     same rule. A transient large enough to hide a regression has to land on both
     B legs while sparing both A legs.
     """
-    rows = [r for r in read_manifest(manifest) if r.tier2 == "paired"]
+    all_rows = read_manifest(manifest)
+    rows = [r for r in all_rows if r.tier2 == "paired"]
     if not rows:
         # Vacuity guard: `paired` disappearing from the manifest would make this
         # whole tier silently pass.
@@ -499,7 +637,8 @@ def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
     print(f"    noise band          : ±{noise_band}%  (tighter on purpose — see run_paired)")
     print()
 
-    hard: list[str] = []
+    hard: list[str] = check_paired_not_narrowed(manifest, all_rows, base_manifest)
+    print()
     uninformative: list[str] = []
     regressions: list[str] = []
     compared = 0
@@ -530,7 +669,19 @@ def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
                 hard.extend(findings)
                 bad = True
                 continue
-            loaded[tag] = median_rows(data)
+            # ⚠️ NOT median_rows(): that is a PROJECTION a benchmark can fall
+            # out of while its leg stays schema-valid (Gate B round 2, P1, F2).
+            # paired_series() keys on the LOGICAL benchmark and requires each one
+            # to carry exactly one median, so the set comparisons below run over
+            # benchmarks rather than over whatever the projection kept.
+            series, agg_findings = paired_series(f"{row.name} leg {tag}", data)
+            if agg_findings:
+                for f_ in agg_findings:
+                    print(f"    ::error::{f_}")
+                hard.extend(agg_findings)
+                bad = True
+                continue
+            loaded[tag] = series
         if bad:
             continue
 
@@ -701,6 +852,10 @@ def main(argv: list[str]) -> int:
     p.add_argument("--b1", help="tier 2: merge-base results, first measurement")
     p.add_argument("--a2", help="tier 2: candidate results, second measurement")
     p.add_argument("--b2", help="tier 2: merge-base results, second measurement")
+    p.add_argument("--base-manifest",
+                   help="tier 2: the MERGE-BASE's bench/ci-suite.txt. The candidate's "
+                        "`paired` set is diffed against it: additions are permitted, "
+                        "deletions and downgrades are [T2-DOWNGRADE] failures.")
     p.add_argument("--band", type=float, default=PAIRED_BAND_PCT)
     p.add_argument("--noise-band", type=float, default=PAIRED_NOISE_BAND_PCT,
                    help="tier 2: same-tree spread above which a run is UNINFORMATIVE")
@@ -711,7 +866,7 @@ def main(argv: list[str]) -> int:
         if not (args.a1 and args.b1 and args.a2 and args.b2):
             p.error("--paired requires --a1, --b1, --a2 and --b2 (A-B-A-B)")
         return run_paired(args.a1, args.b1, args.a2, args.b2, args.manifest,
-                          args.band, args.noise_band)
+                          args.band, args.noise_band, args.base_manifest)
     if args.suite:
         return run_suite(args.suite, args.baselines_dir, args.manifest, args.tolerance)
     p.error("one of --suite or --paired is required")
