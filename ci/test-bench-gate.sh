@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=53
+CELLS_DECLARED=55
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -571,22 +571,43 @@ expect_green G10 "a paired row ADDED by the candidate is not an error" pcb "$CMA
 # cells pin both directions of it.
 PREBASE="$TMP/prebase"            # a base that predates #209: checkout, no manifest
 mkdir -p "$PREBASE/bench"
-: > "$PREBASE/CMakeLists.txt"     # the revision-stable sentinel
+: > "$PREBASE/.git"               # `git worktree add` writes .git as a regular FILE
 
 expect_red T2-BASEROOT-MISSING "base checkout directory does not exist at all" \
-  "[T2-BASEROOT]" pcb "$CMAN" "$TMP/no-such-base-root/bench/ci-suite.txt"
+  "there is no directory at" pcb "$CMAN" "$TMP/no-such-base-root/bench/ci-suite.txt"
 
 # T2-BASESELF — the comparand must not BE the candidate. Pointing --base-manifest
 # at --manifest makes `base_paired - cand_paired` empty by construction, so
 # [T2-DOWNGRADE] can never fire while the check still prints "OK vs merge-base".
-# Fixture carries a row downgraded to `no`, so the cell would go GREEN under the
-# tautology and only goes RED because the self-comparison is refused.
+# ⚠️ The fixture is rebuilt HERE on purpose: an earlier revision claimed it
+# carried a downgraded row while $CMAN had been overwritten twice since (last by
+# G10, to two `paired` rows) — a comment asserting a property the fixture did not
+# have. With the row actually present, the cell reads GREEN under the tautology
+# and goes RED only because the self-comparison is refused.
+manifest "$CMAN" \
+  "bench/x/alpha_bench   none:n/a   paired" \
+  "bench/x/gamma_bench   none:n/a   no"
 expect_red T2-BASESELF "base manifest resolves to the candidate's own manifest" \
   "[T2-BASESELF]" pcb "$CMAN" "$CMAN"
 
 NOTREPO="$TMP/notrepo"; mkdir -p "$NOTREPO/bench"   # exists, but has no sentinel
 expect_red T2-BASEROOT-NOTREPO "base path exists but is not a checkout of this repo" \
-  "[T2-BASEROOT]" pcb "$CMAN" "$NOTREPO/bench/ci-suite.txt"
+  "is not a checkout" pcb "$CMAN" "$NOTREPO/bench/ci-suite.txt"
+
+# T2-BASEROOT-CMAKEONLY — REGRESSION PIN for the sentinel fail-open. The sentinel
+# was `CMakeLists.txt`, of which this repo tracks 63 (one per CMake subdirectory),
+# so a mistyped path whose derived root landed on one was exempted and exited 0 —
+# reproduced with a doubled path component. A directory carrying a CMakeLists.txt
+# but no .git is exactly that shape and MUST NOT be exempted.
+CMAKEONLY="$TMP/cmakeonly"; mkdir -p "$CMAKEONLY/bench"
+: > "$CMAKEONLY/CMakeLists.txt"   # the OLD sentinel, and nothing else
+expect_red T2-BASEROOT-CMAKEONLY "a CMake subdirectory is not a checkout despite CMakeLists.txt" \
+  "is not a checkout" pcb "$CMAN" "$CMAKEONLY/bench/ci-suite.txt"
+
+# T2-BASESHAPE — os.path.exists() is true for a DIRECTORY, so it skipped the root
+# check and died with an IsADirectoryError traceback instead of a named finding.
+expect_red T2-BASESHAPE "base manifest path is a directory, not a file" \
+  "[T2-BASESHAPE]" pcb "$CMAN" "$PREBASE"
 
 # G11 — the LEGITIMATE case, and it must not be silent either: a skipped check
 # that prints nothing is how a gate reads green on nothing. Asserts the root
@@ -595,7 +616,7 @@ expect_red T2-BASEROOT-NOTREPO "base path exists but is not a checkout of this r
 if ! pcb "$CMAN" "$PREBASE/bench/ci-suite.txt" > "$TMP/g11.out" 2>&1; then
   fail "G11: a pre-#209 base (checkout present, manifest absent) must not fail the gate — output:\n$(cat "$TMP/g11.out")"
 fi
-grep -qF "verified via CMakeLists.txt" "$TMP/g11.out" \
+grep -qF "verified via .git" "$TMP/g11.out" \
   || fail "G11: the exemption was taken WITHOUT the base-checkout check running, or without naming it:\n$(cat "$TMP/g11.out")"
 grep -qF "predates #209" "$TMP/g11.out" \
   || fail "G11: the exemption was taken SILENTLY:\n$(cat "$TMP/g11.out")"

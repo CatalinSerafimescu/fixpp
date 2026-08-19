@@ -575,11 +575,35 @@ def run_suite(results_dir: str, baselines_dir: str, manifest: str,
 
 # ── PAIRED mode: tier 2 (hard) ──────────────────────────────────────────────
 
-# Sentinel for "is this a checkout of this repo at all?". MUST be a path that
-# exists in EVERY revision, including every base predating #209 — the root
-# CMakeLists.txt has been present since the initial commit. Picking a file that
-# #209 itself introduced would make the check tautological.
-_BASE_SENTINEL = "CMakeLists.txt"
+# Sentinel for "is this a checkout of this repo at all?".
+#
+# ⚠️ THIS WAS `CMakeLists.txt` AND THAT WAS A FAIL-OPEN. Adversarial review found
+# it root-AMBIGUOUS: this repo tracks 63 `CMakeLists.txt` files, one per CMake
+# subdirectory, so the sentinel could not tell "a checkout of this repo" from
+# "any CMake subdirectory of one". A mistyped path whose derived root landed on
+# such a directory was exempted and exited 0 — reproduced with a doubled path
+# component (`<repo>/bench/bench/ci-suite.txt` → derived root `<repo>/bench`,
+# which HAS a CMakeLists.txt): `tier 2 PASSED`, exit 0, with a row downgraded to
+# `no`. Worse than silent — it affirmatively printed "verified via
+# CMakeLists.txt … i.e. it predates #209" about a directory that was neither a
+# checkout nor a merge-base. That is the same shape [T2-BASESELF] exists to
+# reject, reintroduced one level down by the fix for it.
+#
+# `.git` is correct where `CMakeLists.txt` was merely plausible:
+#   * ROOT-UNIQUE BY CONSTRUCTION — `git ls-files | grep -c '\.git$'` is 0, and
+#     no subdirectory can ever acquire one.
+#   * PRESENT IN THE TIER-2 BASE BY CONSTRUCTION — the base is produced by
+#     `git worktree add`, which writes `.git` as a regular FILE (a plain clone
+#     has it as a directory; `os.path.exists` accepts both).
+#   * REVISION-STABLE BY CONSTRUCTION — it is a property of the CHECKOUT, not of
+#     tree content, so it cannot have the gap the old comment wrongly denied:
+#     `CMakeLists.txt` is in fact ABSENT from the initial commit and from 25 of
+#     519 commits on main. `CMakePresets.json` has the identical 25-commit gap.
+#
+# The one case `.git` would reject and `CMakeLists.txt` would accept is an
+# exported archive with no VCS metadata. That is not this caller: the tier-2
+# base is always a worktree created in the same job, never an export.
+_BASE_SENTINEL = ".git"
 _BASE_MANIFEST_RELPATH = os.path.join("bench", "ci-suite.txt")
 
 
@@ -668,6 +692,18 @@ def check_paired_not_narrowed(manifest: str, all_rows: list[Row],
               f"floor in ci/test-bench-gate.sh is what covers this case; it is stated "
               f"rather than skipped.")
         return []
+
+    # [T2-BASESHAPE] — os.path.exists() is true for a DIRECTORY, so without this
+    # a --base-manifest pointing at one skips the root check above and reaches
+    # read_manifest(), which dies with an uncaught IsADirectoryError traceback.
+    # Fails closed either way, but every other manifest defect here exits with an
+    # ::error::-tagged named reason and this one printed a Python stack trace.
+    if os.path.isdir(base_manifest):
+        msg = ("[T2-BASESHAPE] %s: --base-manifest points at a DIRECTORY, not a "
+               "manifest file. Refusing to guess; the paired-set diff has no "
+               "comparand." % base_manifest)
+        print(f"    ::error::{msg}")
+        return [msg]
 
     base_paired = {r.name for r in read_manifest(base_manifest) if r.tier2 == "paired"}
     cand_paired = {r.name for r in all_rows if r.tier2 == "paired"}
