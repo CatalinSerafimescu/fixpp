@@ -822,24 +822,37 @@ def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
         cand_paired_names = {r.name for r in cand_paired_rows}
         rows = [r for r in cand_paired_rows if r.name in base_run_names]
         excluded = cand_paired_names - base_run_names
+        # ⚠️ CONTRACT PIN, NOT A DETECTOR. Both manifests are derived from the
+        # SAME file (${GITHUB_WORKSPACE}/bench/ci-suite.txt) by tier1.yml, so
+        # this subset holds by construction and can only fire on plumbing — a
+        # wrong path passed — never on classification logic. Cell: G-GUARD-A.
         if any(r.name not in cand_paired_names for r in base_run_rows):
             missing = sorted(r.name for r in base_run_rows if r.name not in cand_paired_names)
             print("::error::tier 2: --base-run-manifest contains rows not marked `paired` in "
                   f"--manifest: {missing}")
             return 1
-        # Contract pin, not a live detector on the shipped workflow: tier1.yml
-        # itself derives the filtered base-run manifest from the candidate's
-        # paired rows, so this subset can only fire if a future edit reintroduces
-        # an independent classifier.
+        # ⚠️ CONTRACT PIN, NOT A DETECTOR — and this is the SECOND of three.
+        # tier1.yml derives the filtered base-run manifest from the candidate's
+        # own paired rows, so the comparator holds no information independent of
+        # it: this subset can only fire if a future edit reintroduces an
+        # independent classification rule. The real detection for a misclassified
+        # base target is the base-build loop itself (a target listed in the base
+        # manifest that fails to build is fatal, full stop). Cell: G-GUARD-B.
         if base_paired:
             unexpected = sorted(excluded - (cand_paired_names - base_paired))
             if unexpected:
                 print("::error::tier 2: rows excluded from --base-run-manifest are not a subset "
                       f"of candidate paired minus base paired: {unexpected}")
                 return 1
-        # Live detector: when the merge-base has no bench/ci-suite.txt there is
-        # NO exemption path, so the filtered set must equal the candidate's own
-        # paired set.
+        # ⚠️ CONTRACT PIN, NOT A LIVE DETECTOR — the earlier "Live detector"
+        # label was wrong, and round 4's triage was wrong first (it called this
+        # "a real guard" in one section and "tautological" in another). Under
+        # the shipped classifier, exemption requires the base manifest to be
+        # PRESENT, so on the absent branch nothing is ever excluded and this is
+        # tautological. The one divergence that could reach it — --base-manifest
+        # pointed elsewhere while tier1.yml exempted a row — already reds
+        # upstream on [T2-BASEROOT:*] or [T2-BASESELF] in the same run.
+        # Cell: G-GUARD-C.
         if not have_base_manifest and excluded:
             print("::error::tier 2: --base-manifest absent or predates #209, so "
                   f"--base-run-manifest must not exclude paired rows: {sorted(excluded)}")

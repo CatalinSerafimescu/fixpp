@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=62
+CELLS_DECLARED=65
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -671,6 +671,51 @@ expect_red G10-RED "a candidate-only paired addition must still red if the compa
   "leg B1" pcbr "$CMAN" "$BMAN" "$BROM"
 PCBR_CMP="$CMP"
 
+# ⚠️ THE THREE GUARD CELLS BELOW COULD NOT BE PROVEN AGAINST THE UNFIXED
+# comparator either: `--base-run-manifest` did not exist there, so argparse
+# would exit 2 on "unrecognized arguments" and a RED result would prove nothing
+# about the guard. Each was proven by disabling ITS OWN guard in a temp copy of
+# the FIXED comparator with `assert src.count(old) == 1`, confirming the cell
+# stopped reddening, then restoring the shipped comparator and confirming it red-
+# dened again.
+#
+# Guard (a) proof: delete
+#   if any(r.name not in cand_paired_names for r in base_run_rows):
+#     ...
+#   return 1
+# Guard (b) proof: delete
+#   if base_paired:
+#     ...
+#   return 1
+# Guard (c) proof: delete
+#   if not have_base_manifest and excluded:
+#     ...
+#   return 1
+
+# G-GUARD-A — a row present in --base-run-manifest but not marked `paired` in
+# --manifest must be rejected before the comparator loop can demand its files.
+manifest "$BMAN" "bench/x/alpha_bench   none:n/a   paired"
+manifest "$CMAN" \
+  "bench/x/alpha_bench   none:n/a   paired"
+manifest "$BROM" \
+  "bench/x/alpha_bench   none:n/a   paired" \
+  "bench/x/gamma_bench   none:n/a   paired"
+expect_red G-GUARD-A "base-run manifest row absent from the candidate paired set" \
+  "contains rows not marked \`paired\`" pcbr "$CMAN" "$BMAN" "$BROM"
+
+# G-GUARD-B — the ordered twin from round 4, and guard (b)'s witness: a row
+# paired in both manifests but excluded from the base-run manifest must be
+# rejected as a classifier/plumbing disagreement, not silently dropped.
+manifest "$BMAN" \
+  "bench/x/alpha_bench   none:n/a   paired" \
+  "bench/x/beta_bench    none:n/a   paired"
+manifest "$CMAN" \
+  "bench/x/alpha_bench   none:n/a   paired" \
+  "bench/x/beta_bench    none:n/a   paired"
+manifest "$BROM" "bench/x/alpha_bench   none:n/a   paired"
+expect_red G-GUARD-B "base-run exclusions must be candidate-only paired additions" \
+  "are not a subset of candidate paired minus base paired" pcbr "$CMAN" "$BMAN" "$BROM"
+
 # ── THE EXEMPTION MUST NOT SWALLOW A BROKEN PATH ────────────────────────────
 # A merge-base that PREDATES #209 has no manifest to diff against, and that must
 # not be fatal — it is this very PR's own merge-base. But "the file is not there"
@@ -684,6 +729,16 @@ PCBR_CMP="$CMP"
 PREBASE="$TMP/prebase"            # a base that predates #209: checkout, no manifest
 mkdir -p "$PREBASE/bench"
 : > "$PREBASE/.git"               # `git worktree add` writes .git as a regular FILE
+
+# G-GUARD-C — with a pre-#209-shaped base path, an absent base manifest may
+# exempt ONLY because the merge-base predates #209; it must not also exclude a
+# candidate paired row from the base-run manifest.
+manifest "$CMAN" \
+  "bench/x/alpha_bench   none:n/a   paired" \
+  "bench/x/beta_bench    none:n/a   paired"
+manifest "$BROM" "bench/x/alpha_bench   none:n/a   paired"
+expect_red G-GUARD-C "pre-#209 exemption must not exclude candidate paired rows" \
+  "must not exclude paired rows" pcbr "$CMAN" "$PREBASE/bench/ci-suite.txt" "$BROM"
 
 # ⚠️ THREE reasons, THREE cells, each asserting a STABLE MACHINE SUB-TAG rather
 # than the prose. Two review rounds produced the same defect on this block: cells

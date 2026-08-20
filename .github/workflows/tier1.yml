@@ -2465,6 +2465,9 @@ jobs:
           }
           cmp_paired && exit 0
           rc=$?
+          # Exit 2 is also argparse's malformed-command-line code, so a broken
+          # cmp_paired definition is misdiagnosed here as runner noise and costs
+          # one full re-measurement before the real failure returns.
           if [ "$rc" -ne 2 ]; then
             echo "::error::tier 2 FAILED (exit $rc) — a regression or an integrity finding, not runner noise."
             exit "$rc"
