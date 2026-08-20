@@ -417,6 +417,12 @@ out = {
     "linux_job_keys": linux_job_keys,
     "workflow_env": workflow_env,
     "workflow_has_defaults": workflow_has_defaults,
+    "bench_base_runner_calls": [
+        line.strip()
+        for step in jobs["bench"]["steps"]
+        for line in str(step.get("run", "")).splitlines()
+        if "ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/" in line
+    ],
     "wheel_step_order": wheel_step_order,
     "wheel_identity_steps": wheel_identity_steps,
     "wheel_build_env": wheel_build_env,
@@ -1136,6 +1142,19 @@ assert_ci_pin_call_sites() {
   done
 }
 
+assert_bench_base_runner_manifest_calls() {
+  local json="$1" case_id="$2"
+  local count
+  count="$(echo "$json" | jq -r '.bench_base_runner_calls | length')"
+  [ "$count" = "4" ] \
+    || fail "$case_id: found $count base-leg run-bench-suite.sh invocation(s) in the bench job, expected exactly 4. The A-B-A-B retry path has four merge-base runner calls, and every one must carry the filtered base-run manifest."
+
+  if ! echo "$json" | jq -e '.bench_base_runner_calls[] | select(contains("$BENCH_BASE_RUN_MANIFEST") | not)' >/dev/null; then
+    return
+  fi
+  fail "$case_id: at least one bench-job base-leg run-bench-suite.sh invocation omits \$BENCH_BASE_RUN_MANIFEST: $(echo "$json" | jq -c '.bench_base_runner_calls'). All four merge-base runner calls must carry the filtered manifest or the retry path reverts to the candidate manifest and rejects a correct addition."
+}
+
 # Two mutation targets, so two parameters: M1/M2/M3 mutate the DERIVE SCRIPT
 # and leave the workflow alone; M4-M8 do the reverse.
 run_full_pin() {
@@ -1147,6 +1166,7 @@ run_full_pin() {
   assert_py_re_case_table "$json" "$case_id"
   assert_tier1_required_needs "$json" "$case_id"
   assert_ci_pin_call_sites "$json" "$case_id"
+  assert_bench_base_runner_manifest_calls "$json" "$case_id"
   assert_linux_job_context "$json" "$case_id"
   assert_wheel_build_env "$json" "$case_id"
   assert_wheel_identity_steps "$json" "$case_id"
@@ -1178,7 +1198,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=51  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 + M28 (1
+MUTANTS_DECLARED=52  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -1186,7 +1206,8 @@ MUTANTS_DECLARED=51  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M4
                      # M51-M55 added at #270 Gate B r2 (R2-F1): the substring loop those three replaced never
                      # checked a VALUE on either side of the CIBW_ENVIRONMENT / CIBW_CONTAINER_ENGINE contract.
                      # M56-M63 added at #270 Gate B r3 (R3-F1): the wheel restore/assert/seed call sites and the
-                     # seed step's main-ref guard were still unpinned at the workflow boundary.
+                     # seed step's main-ref guard were still unpinned at the workflow boundary. M66 adds the
+                     # bench job's four-invocation invariant for BENCH_BASE_RUN_MANIFEST on the merge-base legs.
 MUTANTS_RUN=0
 # GREEN controls are counted separately: a summary that calls them RED would be
 # the very over-claim MUTANTS_DECLARED exists to prevent.
@@ -1584,6 +1605,19 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "          bash ci/test-sanitized-deps.sh\n"
 new = "          echo \"bash ci/test-sanitized-deps.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M66 (#272): one of the four merge-base runner calls in the bench job loses
+  # $BENCH_BASE_RUN_MANIFEST. Without this pin, the retry path silently reverts
+  # to the candidate manifest and rejects a legitimate candidate-only addition.
+  mutate_workflow M66 "one merge-base runner call in bench loses BENCH_BASE_RUN_MANIFEST" 'at least one bench-job base-leg run-bench-suite.sh invocation omits \$BENCH_BASE_RUN_MANIFEST|expected exactly 4' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired \"$BENCH_BASE_RUN_MANIFEST\"\n"
+new = "          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '

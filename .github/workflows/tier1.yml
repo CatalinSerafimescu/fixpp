@@ -2357,22 +2357,20 @@ jobs:
           # not to be tested.
           #
           # ⚠️ THE TWO LISTS MUST BE ALLOWED TO DIFFER, AND ASSUMING OTHERWISE WAS
-          # A P1. This block used to derive the target list from the CANDIDATE
-          # manifest and build it verbatim in the base tree, under a comment
-          # claiming "the two lists cannot drift apart" — which was precisely the
-          # defect. A PR that ADDS a paired benchmark has a target the merge-base
-          # does not, so `cmake --build --target new_bench` failed with "unknown
-          # target" and reddened a CORRECT change (Gate B round 3). That is the
-          # mirror of every fail-open found on this PR: a FALSE RED, on exactly the
-          # behaviour Article VIII §3 requires be permitted and which the
-          # comparator's own G10 cell certifies is allowed.
+          # A P1. This block used to classify from build-log GREP after the fact:
+          # an "unknown target" phrase exempted the failure as a candidate-only
+          # addition. That is the wrong source of truth in both directions:
+          # wording drift turns a legitimate addition into a false red, and a real
+          # base-tree failure whose log happens to match is exempted. The fix is
+          # smaller and deletes the heuristic: decide from the merge-base's OWN
+          # bench/ci-suite.txt BEFORE building.
           #
-          # So targets are built ONE AT A TIME and an absent one is CLASSIFIED,
-          # not fatal: an unknown-target error means a candidate-only addition and
-          # excludes it from the base legs; ANY other failure means the base build
-          # is broken and the job fails. The base runner is then handed a FILTERED
-          # manifest of what actually built, so it cannot demand an executable the
-          # merge-base never had.
+          # If the merge-base HAS a manifest, a listed target must build and ANY
+          # nonzero is fatal. An unlisted target is a candidate-only addition,
+          # permitted per Article VIII §3 and excluded from the paired base legs.
+          # If the merge-base predates #209 and has no manifest, NO exemption is
+          # possible: every candidate paired target is built and any failure is
+          # fatal. The comparator's G10/G10-RED cells pin the same asymmetry.
           #
           # ⚠️ The filtered list is for the base RUNNER ONLY. The comparator's
           # --base-manifest must stay the base's OWN bench/ci-suite.txt: the
@@ -2382,18 +2380,25 @@ jobs:
           BASE_RUN_MANIFEST=/tmp/fixpp-base-run-manifest.txt
           : > "$BASE_RUN_MANIFEST"
           ADDED=""
+          BASE_BENCH_MANIFEST=/tmp/fixpp-base/bench/ci-suite.txt
+          HAVE_BASE_BENCH_MANIFEST=0
+          if [ -f "$BASE_BENCH_MANIFEST" ]; then
+            HAVE_BASE_BENCH_MANIFEST=1
+          fi
           awk '$3=="paired" && $1 !~ /^#/ {print $1"\t"$2"\t"$3}' \
               "${GITHUB_WORKSPACE}/bench/ci-suite.txt" > /tmp/cand-paired.tsv
           test -s /tmp/cand-paired.tsv || { echo "::error::no paired rows in the candidate manifest"; exit 1; }
           while IFS=$'\t' read -r exe c3 c4; do
             t="${exe##*/}"
+            if [ "$HAVE_BASE_BENCH_MANIFEST" -eq 1 ] && ! awk -v exe="$exe" '$1 == exe { found=1 } END { exit found ? 0 : 1 }' "$BASE_BENCH_MANIFEST"; then
+              ADDED="$ADDED $t"
+              echo "::notice::merge-base manifest has no row for '$t' — candidate-only addition, excluded from the paired base legs (permitted per Article VIII §3)"
+              continue
+            fi
             if cmake --build --preset linux-clang-release --target "$t" > /tmp/bt.log 2>&1; then
               printf '%s\t%s\t%s\n' "$exe" "$c3" "$c4" >> "$BASE_RUN_MANIFEST"
-            elif grep -qiE 'unknown target|No rule to make target|do not know how to make|Cannot find source file' /tmp/bt.log; then
-              ADDED="$ADDED $t"
-              echo "::notice::merge-base has no target '$t' — candidate-only addition, excluded from the paired base legs (permitted per Article VIII §3)"
             else
-              echo "::error::base build FAILED for target '$t', and NOT with an unknown-target error:"
+              echo "::error::base build FAILED for target '$t' listed by the merge-base manifest:"
               tail -40 /tmp/bt.log
               exit 1
             fi
@@ -2455,7 +2460,8 @@ jobs:
             python3 tools/bench_compare.py --paired \
               --a1 bench-results/a1 --b1 bench-results/b1 \
               --a2 bench-results/a2 --b2 bench-results/b2 \
-              --base-manifest /tmp/fixpp-base/bench/ci-suite.txt
+              --base-manifest /tmp/fixpp-base/bench/ci-suite.txt \
+              --base-run-manifest "$BENCH_BASE_RUN_MANIFEST"
           }
           cmp_paired && exit 0
           rc=$?
@@ -2465,9 +2471,9 @@ jobs:
           fi
           echo "::warning::tier 2 was UNINFORMATIVE (runner noise exceeded the noise band). Re-measuring once."
           ci/run-bench-suite.sh build/linux-clang-release bench-results/a1 --only-paired
-          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired
+          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired "$BENCH_BASE_RUN_MANIFEST"
           ci/run-bench-suite.sh build/linux-clang-release bench-results/a2 --only-paired
-          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b2 --only-paired
+          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b2 --only-paired "$BENCH_BASE_RUN_MANIFEST"
           cmp_paired && exit 0
           rc=$?
           if [ "$rc" -eq 2 ]; then

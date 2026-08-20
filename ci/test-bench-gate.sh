@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=61
+CELLS_DECLARED=62
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -623,14 +623,53 @@ manifest "$CMAN" \
 expect_red T2-DOWNGRADE-DEL "a pre-existing paired row deleted from the manifest" \
   "[T2-DOWNGRADE]" pcb "$CMAN" "$BMAN"
 
-# G10 — THE ASYMMETRY, at manifest level. ADDING a paired binary is what
-# Article VIII §3 asks for; a check that reddened on it would punish the
-# behaviour the gate is supposed to encourage. Same shape as G7 one level up.
+# ⚠️ THESE NEW CELLS COULD NOT BE PROVEN AGAINST THE UNFIXED COMPARATOR AT ALL:
+# `--base-run-manifest` did not exist there, so argparse would exit 2 on
+# "unrecognized arguments" and a RED twin would go red for entirely the wrong
+# reason — the same false-green generator recorded above for `--base-manifest`.
+# What was proven red before the fix is the MECHANISM by MUTATING THE FIXED
+# comparator: reverting `rows` to every candidate `paired` row made G10-RED fire
+# on the missing base legs, and restoring the filter returned the cell GREEN.
+BROM="$TMP/base-run-manifest.txt"
 manifest "$BMAN" "bench/x/alpha_bench   none:n/a   paired"
 manifest "$CMAN" \
   "bench/x/alpha_bench   none:n/a   paired" \
   "bench/x/beta_bench    none:n/a   paired"
-expect_green G10 "a paired row ADDED by the candidate is not an error" pcb "$CMAN" "$BMAN"
+manifest "$BROM" "bench/x/alpha_bench   none:n/a   paired"
+mkfix "$A1/alpha_bench.json" BM_A=100
+mkfix "$A2/alpha_bench.json" BM_A=100
+mkfix "$B1/alpha_bench.json" BM_A=100
+mkfix "$B2/alpha_bench.json" BM_A=100
+mkfix "$A1/beta_bench.json" BM_B=100
+mkfix "$A2/beta_bench.json" BM_B=100
+rm -f "$B1/beta_bench.json" "$B2/beta_bench.json"
+PCBR_CMP="$CMP"
+pcbr() {  # pcbr <candidate-manifest> <base-manifest> <base-run-manifest>
+  python3 "$PCBR_CMP" --paired --a1 "$A1" --b1 "$B1" --a2 "$A2" --b2 "$B2" \
+                 --manifest "$1" --base-manifest "$2" --base-run-manifest "$3" \
+                 --band 50
+}
+expect_green G10 "a paired row ADDED by the candidate is excluded from the base legs, not an error" \
+  pcbr "$CMAN" "$BMAN" "$BROM"
+
+# G10-RED — if the comparator stops intersecting with the base-run manifest and
+# goes back to all candidate paired rows, the candidate-only addition demands
+# missing B1/B2 files and reddens again. Proven by mutating the FIXED comparator
+# as recorded above, not by running against a tree that lacks the argument.
+cp "$CMP" "$TMP/bench_compare.g10red.py"
+python3 - "$TMP/bench_compare.g10red.py" <<'PY'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = '        rows = [r for r in cand_paired_rows if r.name in base_run_names]\n'
+new = '        rows = cand_paired_rows\n'
+assert src.count(old) == 1, src.count(old)
+open(path, "w").write(src.replace(old, new))
+PY
+PCBR_CMP="$TMP/bench_compare.g10red.py"
+expect_red G10-RED "a candidate-only paired addition must still red if the comparator reverts to all candidate rows" \
+  "leg B1" pcbr "$CMAN" "$BMAN" "$BROM"
+PCBR_CMP="$CMP"
 
 # ── THE EXEMPTION MUST NOT SWALLOW A BROKEN PATH ────────────────────────────
 # A merge-base that PREDATES #209 has no manifest to diff against, and that must

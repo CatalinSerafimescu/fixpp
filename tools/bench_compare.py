@@ -783,7 +783,8 @@ def check_paired_not_narrowed(manifest: str, all_rows: list[Row],
 
 def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
                manifest: str, band: float, noise_band: float,
-               base_manifest: str | None = None) -> int:
+               base_manifest: str | None = None,
+               base_run_manifest: str | None = None) -> int:
     """Candidate (A) vs merge-base (B), measured A-B-A-B on one runner.
 
     The A-vs-A delta is a noise floor for the CANDIDATE phase. ⚠️ It is NOT
@@ -801,7 +802,48 @@ def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
     B legs while sparing both A legs.
     """
     all_rows = read_manifest(manifest)
-    rows = [r for r in all_rows if r.tier2 == "paired"]
+    hard: list[str] = check_paired_not_narrowed(manifest, all_rows, base_manifest)
+    print()
+
+    cand_paired_rows = [r for r in all_rows if r.tier2 == "paired"]
+    rows = cand_paired_rows
+    excluded: set[str] = set()
+    base_paired: set[str] = set()
+    have_base_manifest = (
+        base_manifest is not None
+        and os.path.isfile(base_manifest)
+        and os.path.realpath(base_manifest) != os.path.realpath(manifest)
+    )
+    if have_base_manifest:
+        base_paired = {r.name for r in read_manifest(base_manifest) if r.tier2 == "paired"}
+    if base_run_manifest is not None:
+        base_run_rows = read_manifest(base_run_manifest)
+        base_run_names = {r.name for r in base_run_rows}
+        cand_paired_names = {r.name for r in cand_paired_rows}
+        rows = [r for r in cand_paired_rows if r.name in base_run_names]
+        excluded = cand_paired_names - base_run_names
+        if any(r.name not in cand_paired_names for r in base_run_rows):
+            missing = sorted(r.name for r in base_run_rows if r.name not in cand_paired_names)
+            print("::error::tier 2: --base-run-manifest contains rows not marked `paired` in "
+                  f"--manifest: {missing}")
+            return 1
+        # Contract pin, not a live detector on the shipped workflow: tier1.yml
+        # itself derives the filtered base-run manifest from the candidate's
+        # paired rows, so this subset can only fire if a future edit reintroduces
+        # an independent classifier.
+        if base_paired:
+            unexpected = sorted(excluded - (cand_paired_names - base_paired))
+            if unexpected:
+                print("::error::tier 2: rows excluded from --base-run-manifest are not a subset "
+                      f"of candidate paired minus base paired: {unexpected}")
+                return 1
+        # Live detector: when the merge-base has no bench/ci-suite.txt there is
+        # NO exemption path, so the filtered set must equal the candidate's own
+        # paired set.
+        if not have_base_manifest and excluded:
+            print("::error::tier 2: --base-manifest absent or predates #209, so "
+                  f"--base-run-manifest must not exclude paired rows: {sorted(excluded)}")
+            return 1
     if not rows:
         # Vacuity guard: `paired` disappearing from the manifest would make this
         # whole tier silently pass.
@@ -816,9 +858,8 @@ def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
     print(f"    B2 (merge-base, 2nd): {b2_dir}")
     print(f"    regression band     : ±{band}%  (PROVISIONAL — see .specify/ci209-bench-gate.md §4)")
     print(f"    noise band          : ±{noise_band}%  (tighter on purpose — see run_paired)")
-    print()
-
-    hard: list[str] = check_paired_not_narrowed(manifest, all_rows, base_manifest)
+    if base_run_manifest is not None:
+        print(f"    base-run manifest   : {base_run_manifest}  ({len(rows)} compared, {len(excluded)} excluded)")
     print()
     uninformative: list[str] = []
     regressions: list[str] = []
@@ -1037,6 +1078,10 @@ def main(argv: list[str]) -> int:
                    help="tier 2: the MERGE-BASE's bench/ci-suite.txt. The candidate's "
                         "`paired` set is diffed against it: additions are permitted, "
                         "deletions and downgrades are [T2-DOWNGRADE] failures.")
+    p.add_argument("--base-run-manifest",
+                   help="tier 2: the merge-base RUNNER'S filtered manifest. "
+                        "run_paired compares candidate `paired` rows intersected "
+                        "with this file; keep this distinct from --base-manifest.")
     p.add_argument("--band", type=float, default=PAIRED_BAND_PCT)
     p.add_argument("--noise-band", type=float, default=PAIRED_NOISE_BAND_PCT,
                    help="tier 2: same-tree spread above which a run is UNINFORMATIVE")
@@ -1047,7 +1092,8 @@ def main(argv: list[str]) -> int:
         if not (args.a1 and args.b1 and args.a2 and args.b2):
             p.error("--paired requires --a1, --b1, --a2 and --b2 (A-B-A-B)")
         return run_paired(args.a1, args.b1, args.a2, args.b2, args.manifest,
-                          args.band, args.noise_band, args.base_manifest)
+                          args.band, args.noise_band, args.base_manifest,
+                          args.base_run_manifest)
     if args.suite:
         return run_suite(args.suite, args.baselines_dir, args.manifest, args.tolerance)
     p.error("one of --suite or --paired is required")
