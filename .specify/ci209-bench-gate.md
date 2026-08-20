@@ -275,6 +275,7 @@ binaries including the 10 whose baselines are non-comparands.
 | T1-6 | duplicate `(name, run_type, aggregate_name)` identity — row multiplicity changed |
 | T1-7 | `time_unit` not uniform across rows, or changed vs the previous tier |
 | T1-8 | any row with Google-Benchmark's `error_occurred` set |
+| T1-9 | if an `iterations` key is present, it is a positive integer |
 
 T1-6 is Codex F5 and it matters for real inputs: `dictionary/xml_loader.json` carries **21 rows with
 6 duplicate names**, `threading_baselines.json` **56 rows with 16 duplicates**. A `{name: value}` dict
@@ -368,11 +369,12 @@ Per `.specify/ci241-coverage-ccache.md` §3, so no band can be fitted to the num
 | **AC-1** | the job prints `nproc`, CPU model, compiler version, and the Google-Benchmark `context` for every binary | **block** |
 | **AC-2** | a probe makes the `bench` job **RED in a real CI run**, failing on the cell that names the defect. The probe is a **manifest row naming a binary that is not built** (tier-1 cell T1-3) — deterministic, one line, trivially reverted | **block** |
 | **AC-3** | with the probe reverted, the same job is **GREEN** on otherwise-unmodified code | **block** |
-| **AC-4** | `ci/test-bench-gate.sh` asserts every T1-1…T1-8 cell **and** the tier-2 comparison, and **each mutant reddens the one cell that names its defect** | **block** |
+| **AC-4** | `ci/test-bench-gate.sh` asserts every T1-1…T1-9 cell **and** the tier-2 comparison, and **each mutant reddens the one cell that names its defect** | **block** |
 | **AC-5** | `bench` is in `tier1-required`'s `needs:` **and** its `== success` assertion loop, in the same commit | **block** |
 | **AC-6** | `ci/test-tier1-python-policy.sh`'s `EXPECTED_NEEDS`, its M4 mutant literal, `CI_PIN_HARNESSES`, and a new echo-stub mutant for `ci/test-bench-gate.sh` are all updated, and `MUTANTS_DECLARED` matches the number run | **block** |
 | **AC-7** | tier 2 prints the **A-vs-A** delta, and a run whose A-vs-A exceeds the band reports **UNINFORMATIVE**, not PASS | **block** |
 | **AC-8** | the `bench` job's wall time stays **≤ 34 min** (the `coverage` job, Tier 1's current pole), with build time and benchmark time reported separately | **exceeded ⇒ explicit disposition required before merge, not a silent record** |
+| **AC-9** | tier 1's iteration-count predicate (**T1-9**) is part of the binding design record and is pinned by `ci/test-bench-gate.sh`'s `T1-9` cell | **block** |
 
 AC-2/AC-3 are the both-poles requirement, and AC-2 is proven on a **deterministic** cell — never on
 the timing band, whose RED would be unreproducible and would prove nothing about the gate.
