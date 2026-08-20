@@ -179,6 +179,25 @@ with open(sys.argv[1]) as f:
 
 jobs = doc["jobs"]
 
+def logical_run_lines(run: str) -> list[str]:
+    lines = []
+    buf = ""
+    for raw in run.splitlines():
+        if raw.lstrip().startswith("#"):
+            continue
+        line = raw.rstrip()
+        if line.endswith("\\"):
+            buf += line[:-1] + " "
+            continue
+        buf += line
+        normalized = " ".join(buf.split())
+        if normalized:
+            lines.append(normalized)
+        buf = ""
+    if buf.strip():
+        lines.append(" ".join(buf.split()))
+    return lines
+
 # #254: `python-bindings` is gone. The set this pin is exact over is now the
 # `linux` job's own preset list — a list of STRINGS, not the list of dicts the
 # deleted job's matrix.include was. Reading it from the YAML rather than
@@ -417,6 +436,18 @@ out = {
     "linux_job_keys": linux_job_keys,
     "workflow_env": workflow_env,
     "workflow_has_defaults": workflow_has_defaults,
+    "bench_base_runner_calls": [
+        line.strip()
+        for step in jobs["bench"]["steps"]
+        for line in str(step.get("run", "")).splitlines()
+        if "ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/" in line
+    ],
+    "bench_cmp_invocations": [
+        line
+        for step in jobs["bench"]["steps"]
+        for line in logical_run_lines(str(step.get("run", "")))
+        if "tools/bench_compare.py" in line
+    ],
     "wheel_step_order": wheel_step_order,
     "wheel_identity_steps": wheel_identity_steps,
     "wheel_build_env": wheel_build_env,
@@ -1086,7 +1117,11 @@ assert_py_re_case_table() {
 # fail; before #254 it never had a mutant at all.
 assert_tier1_required_needs() {
   local json="$1" case_id="$2"
-  local EXPECTED_NEEDS="check-layers,ci-script-pins,coverage,gate-precheck,linux,python-wheel-build,python-wheel-test"
+  # ⚠️ EIGHT since #209, was seven — `bench` added. The bench job was absent
+  # from tier1-required's needs:, so it could go red while this required check
+  # reported green. #209 makes it blocking; this census is what stops a later
+  # edit quietly dropping it back out.
+  local EXPECTED_NEEDS="bench,check-layers,ci-script-pins,coverage,gate-precheck,linux,python-wheel-build,python-wheel-test"
   local got
   got="$(echo "$json" | jq -r '.tier1_required_needs | sort | join(",")')"
   [ "$got" = "$EXPECTED_NEEDS" ] \
@@ -1108,6 +1143,10 @@ CI_PIN_HARNESSES=(
   "ci/test-ccache-scripts.sh"
   "ci/test-tier1-python-policy.sh"
   "ci/test-python-install-witness.sh"
+  # #209 — the bench gate's own harness. It proves ci/run-bench-suite.sh +
+  # tools/bench_compare.py actually redden on each integrity defect; a harness
+  # that is green when run but never run is exactly what this census exists for.
+  "ci/test-bench-gate.sh"
   # #252's checker pin. ⚠️ ADDED WITH ITS OWN MUTANT (M65), not just appended.
   # M26 proves this census CAN fire, but it proves it for ONE harness — and a
   # census that only ever reddens on the member it was written against says
@@ -1128,6 +1167,40 @@ assert_ci_pin_call_sites() {
   done
 }
 
+assert_bench_base_runner_manifest_calls() {
+  local json="$1" case_id="$2"
+  local count
+  count="$(echo "$json" | jq -r '.bench_base_runner_calls | length')"
+  [ "$count" = "4" ] \
+    || fail "$case_id: found $count base-leg run-bench-suite.sh invocation(s) in the bench job, expected exactly 4. The A-B-A-B retry path has four merge-base runner calls, and every one must carry the filtered base-run manifest."
+
+  if ! echo "$json" | jq -e '.bench_base_runner_calls[] | select(contains("$BENCH_BASE_RUN_MANIFEST") | not)' >/dev/null; then
+    return
+  fi
+  fail "$case_id: at least one bench-job base-leg run-bench-suite.sh invocation omits \$BENCH_BASE_RUN_MANIFEST: $(echo "$json" | jq -c '.bench_base_runner_calls'). All four merge-base runner calls must carry the filtered manifest or the retry path reverts to the candidate manifest and rejects a correct addition."
+}
+
+EXPECTED_BENCH_CMP_INVOCATIONS=(
+  "--suite bench-results/a1"
+  "--paired --a1 bench-results/a1 --b1 bench-results/b1 --a2 bench-results/a2 --b2 bench-results/b2 --base-manifest /tmp/fixpp-base/bench/ci-suite.txt --base-run-manifest \"\$BENCH_BASE_RUN_MANIFEST\""
+)
+
+assert_bench_cmp_invocations() {
+  local json="$1" case_id="$2"
+  local count
+  count="$(echo "$json" | jq -r '.bench_cmp_invocations | length')"
+  [ "$count" = "2" ] \
+    || fail "$case_id: found $count bench-job tools/bench_compare.py invocation(s), expected exactly 2. The bench job must keep both the suite scan and the paired comparator call sites."
+
+  local got_lines expected expected_json got_json
+  mapfile -t got_lines < <(echo "$json" | jq -r '.bench_cmp_invocations[] | sub("^python3 tools/bench_compare.py "; "")' | sort)
+  mapfile -t expected < <(printf '%s\n' "${EXPECTED_BENCH_CMP_INVOCATIONS[@]}" | sort)
+  expected_json="$(printf '%s\n' "${expected[@]}" | jq -R . | jq -s .)"
+  got_json="$(printf '%s\n' "${got_lines[@]}" | jq -R . | jq -s .)"
+  [ "$got_json" = "$expected_json" ] \
+    || fail "$case_id: bench-job tools/bench_compare.py argv set $(echo "$got_json" | jq -c .) != expected $(echo "$expected_json" | jq -c .). Every production comparator argv must stay pinned exactly, in both directions."
+}
+
 # Two mutation targets, so two parameters: M1/M2/M3 mutate the DERIVE SCRIPT
 # and leave the workflow alone; M4-M8 do the reverse.
 run_full_pin() {
@@ -1139,6 +1212,8 @@ run_full_pin() {
   assert_py_re_case_table "$json" "$case_id"
   assert_tier1_required_needs "$json" "$case_id"
   assert_ci_pin_call_sites "$json" "$case_id"
+  assert_bench_base_runner_manifest_calls "$json" "$case_id"
+  assert_bench_cmp_invocations "$json" "$case_id"
   assert_linux_job_context "$json" "$case_id"
   assert_wheel_build_env "$json" "$case_id"
   assert_wheel_identity_steps "$json" "$case_id"
@@ -1159,13 +1234,18 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
+# ⚠️ MERGE RESOLUTION (#209 x #252). #252 shipped 49 + M65 = 50; this branch
+# independently shipped 49 + M64 = 50. Merged the correct total is 51 and BOTH
+# mutant names survive — 64 and 65 do not collide. This is the value #252's own
+# rebase note prescribed for exactly this merge; the failure mode it guards is one
+# side's edit silently replacing the other's, which reads as a passing count.
 # ⚠️ REBASE NOTE (#252). This is 49 + M65 = 50 ON THIS BRANCH. `ci/209-bench-gate`
 # independently takes it 49 -> 50 by adding its own M64, so after that branch
 # merges the correct value here is 51 and BOTH mutant names survive (64 and 65 do
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=50  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M65 + M28 (1
+MUTANTS_DECLARED=54  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -1173,7 +1253,9 @@ MUTANTS_DECLARED=50  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M4
                      # M51-M55 added at #270 Gate B r2 (R2-F1): the substring loop those three replaced never
                      # checked a VALUE on either side of the CIBW_ENVIRONMENT / CIBW_CONTAINER_ENGINE contract.
                      # M56-M63 added at #270 Gate B r3 (R3-F1): the wheel restore/assert/seed call sites and the
-                     # seed step's main-ref guard were still unpinned at the workflow boundary.
+                     # seed step's main-ref guard were still unpinned at the workflow boundary. M66 adds the
+                     # bench job's four-invocation invariant for BENCH_BASE_RUN_MANIFEST on the merge-base legs.
+                     # M67/M68 add the bench job's two production tools/bench_compare.py invocation pins.
 MUTANTS_RUN=0
 # GREEN controls are counted separately: a summary that calls them RED would be
 # the very over-claim MUTANTS_DECLARED exists to prevent.
@@ -1309,8 +1391,8 @@ PYEOF
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins,\n"
-new = "    needs: [gate-precheck, linux, check-layers, ci-script-pins,\n"
+old = "    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins, bench,\n"
+new = "    needs: [gate-precheck, linux, check-layers, ci-script-pins, bench,\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 PYEOF2
@@ -1544,6 +1626,22 @@ assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
 
+  # M64 (#209): the ci-script-pins call site for the BENCH-GATE harness replaced
+  # by an echo. M26 proves the census assertion can fire, but it proves it for
+  # ONE harness — and a census that only ever reddens on the member it was
+  # written against says nothing about the member added later. This is the
+  # (selector, text-source, quantifier) enumeration lesson: the new row needs its
+  # own witness, not the previous row's.
+  mutate_workflow M64 "the bench-gate harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-bench-gate.sh\n"
+new = "        run: echo \"bash ci/test-bench-gate.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
   # M65 (#252): the SAME dead-call-site shape as M26, on the census row #252
   # added. Its own mutant because M26 only ever proves the census fires for
   # `ci/test-python-install-witness.sh`; a row proven by a sibling's mutant is a
@@ -1557,6 +1655,37 @@ old = "          bash ci/test-sanitized-deps.sh\n"
 new = "          echo \"bash ci/test-sanitized-deps.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
+'
+
+  # M66 (#272): one of the four merge-base runner calls in the bench job loses
+  # $BENCH_BASE_RUN_MANIFEST. Without this pin, the retry path silently reverts
+  # to the candidate manifest and rejects a legitimate candidate-only addition.
+  mutate_workflow M66 "one merge-base runner call in bench loses BENCH_BASE_RUN_MANIFEST" 'at least one bench-job base-leg run-bench-suite.sh invocation omits \$BENCH_BASE_RUN_MANIFEST' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired \"$BENCH_BASE_RUN_MANIFEST\"\n"
+new = "          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  mutate_workflow M67 "bench paired comparator loses --base-run-manifest" 'bench-job tools/bench_compare.py argv set .*base-run-manifest' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "              --base-run-manifest \"$BENCH_BASE_RUN_MANIFEST\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, ""))
+'
+
+  mutate_workflow M68 "bench suite comparator invocation deleted" 'found 1 bench-job tools/bench_compare.py invocation\(s\), expected exactly 2' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: python3 tools/bench_compare.py --suite bench-results/a1\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, ""))
 '
 
   # M27: an `if:` added to the Configure step. NOT covered by the golden — the

@@ -2030,6 +2030,24 @@ jobs:
       - name: Regression pin — peak-RSS instrument dispositions (#266)
         run: bash ci/test-peak-rss.sh
 
+      # #209 — the bench gate's own harness. 61 cells over synthetic
+      # Google-Benchmark JSON: every hard cell of tools/bench_compare.py and
+      # ci/run-bench-suite.sh is proven RED for its own named reason, and the
+      # GREEN controls pin shapes that must PASS (notably a `stddev` aggregate
+      # of exactly 0.0, which an over-eager "every timing must be > 0" rule
+      # would have rejected on a correct tree, and a candidate ADDING a
+      # benchmark or a paired manifest row, which Article VIII §3 requires).
+      #
+      # It earned its place immediately: cell R-SILENT caught a real defect in
+      # ci/run-bench-suite.sh — a stale results file from an earlier invocation
+      # satisfied the "binary wrote no results" check, so a benchmark that
+      # silently stopped emitting would have read as a clean measurement.
+      #
+      # Buildless and hermetic — python3 + coreutils, no compiler, no benchmark
+      # binaries, no network. ~1 s.
+      - name: Regression pin — bench gate dispositions (#209)
+        run: bash ci/test-bench-gate.sh
+
       # #252's checker is the only thing standing between "the sanitizer legs are
       # green" and "the sanitizer legs can see the C half of their closure", so it
       # gets the same treatment as the instruments above: every property driven by
@@ -2080,11 +2098,18 @@ jobs:
       - name: Run dictionary snapshot exclusivity gate
         run: bash tools/check_dictionary_snapshot_exclusivity.sh
 
-  # ── Benchmarks (SOFT — exit 0 always; Phase 3) ──────────────────────────
-  # SOFT GATE: perf regression gate is disabled until Phase 4 module 1 closes
-  # per [const §VIII.2] and the deliverables note in Step 4.
+  # ── Benchmarks (HARD since #209) ─────────────────────────────────────────
+  # ⚠️ THIS JOB WAS SOFT IN THREE PLACES AND RAN A BENCHMARK THAT MEASURES
+  # NOTHING. It is now a blocking gate and is in `tier1-required`'s `needs:`.
+  # Design + acceptance criteria: .specify/ci209-bench-gate.md. Three tiers:
+  #   tier 1  execution + schema over the allowlist — HARD, needs no comparand
+  #   tier 2  candidate vs its own merge-base on THIS runner, A-B-A — HARD
+  #   tier 3  checked-in baselines — INFORMATIONAL, each skip named
+  # The old header cited [const §VIII.2] for the soft disposition. §VIII.2 fixes
+  # a ±5% review/re-baselining obligation and never prescribed a CI exit code;
+  # it is not what made this job soft, and no amendment was needed to harden it.
   bench:
-    name: bench (soft)
+    name: bench
     runs-on: ubuntu-24.04
     # Backstop against a hung bench build; matches the `linux` job's 90
     # (previously inherited GitHub's 360-min default).
@@ -2118,7 +2143,12 @@ jobs:
       CCACHE_DIR: /tmp/fixpp-ccache-linux-clang-release
 
     steps:
+      # fetch-depth: 0 — #209 tier 2 needs the MERGE-BASE commit present locally
+      # to `git worktree add` and build it. The default shallow clone has only
+      # HEAD, so `git rev-parse HEAD~1` and a checkout of base.sha both fail.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       # Heavy build on the ~14 GB free-disk ceiling; reclaim the preinstalled
       # SDKs we don't use (~30 GB). Mirrors the `linux` job's identical step.
@@ -2257,16 +2287,213 @@ jobs:
       - name: Build
         run: cmake --build --preset linux-clang-release
 
-      - name: Run benchmark
-        run: |
-          ./build/linux-clang-release/bin/placeholder_bench \
-            --benchmark_format=json \
-            --benchmark_out=current.json
-        continue-on-error: true  # SOFT: bench binary may not exist yet
+      # ── #209: the real benchmarks, and an assertion ────────────────────────
+      # ⚠️ EVERY `continue-on-error` IS GONE FROM THIS JOB, and there were TWO,
+      # not one. The brief for #209 named the compare step; the "Run benchmark"
+      # step carried its own (`# SOFT: bench binary may not exist yet`), and
+      # tools/bench_compare.py `return 0`d by construction on top of both. Three
+      # independent softnesses — removing any subset would leave this job green
+      # regardless of outcome and the new `tier1-required` needs: entry vacuous.
+      #
+      # It also ran `placeholder_bench`, which measures nothing. #263 is what
+      # that cost: XmlLoader::load regressed 60-90% ON MAIN, and no CI job could
+      # have reported a runtime regression of any size.
 
-      - name: Compare vs baseline (SOFT — exits 0 always)
-        run: python3 tools/bench_compare.py bench/baselines/placeholder.json current.json
-        continue-on-error: true  # SOFT gate this phase
+      - name: Run bench suite (candidate, measurement A1)
+        run: ci/run-bench-suite.sh build/linux-clang-release bench-results/a1
+
+      # ── Tier 2: the merge-base, built on THIS runner ───────────────────────
+      # The hard timing signal is candidate-vs-its-own-merge-base on ONE VM, not
+      # candidate-vs-checked-in-baseline. That is not a preference: 10 of the
+      # allowlisted baselines carry no `cpu_time` field on any row (they are
+      # hand-authored analysis records), 3 more are `benchmarks: []`, and every
+      # remaining one was recorded on the WSL2 dev host. Re-seeding is circular
+      # — from the candidate it becomes its own comparand; from main it
+      # canonizes #263's known regression. Full argument:
+      # .specify/ci209-bench-gate.md §2-3.
+      #
+      # Only the `paired` targets are built here, not the whole tree.
+      - name: Build the merge-base (tier 2 comparand)
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          # ⚠️ `pull_request.base.sha` is the base BRANCH TIP, not the merge base.
+          # Using it attributes every unrelated main-side change since the branch
+          # point to this PR. Compute the real ancestor.
+          BASE_TIP='${{ github.event.pull_request.base.sha }}'
+          BEFORE='${{ github.event.before }}'
+          if [ -n "$BASE_TIP" ]; then
+            BASE_SHA="$(git merge-base "$HEAD_SHA" "$BASE_TIP")"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            # push: `before` is the tip prior to the push, so a MULTI-COMMIT push
+            # is covered as one range. `HEAD~1` would compare only its last
+            # commit and let a regression in an earlier commit of the same push
+            # through.
+            BASE_SHA="$BEFORE"
+          else
+            # workflow_dispatch, or a push with no usable `before` (new branch).
+            BASE_SHA="$(git rev-parse HEAD~1)"
+          fi
+          # The base must be a genuine ANCESTOR, or the delta is not "what this
+          # change did".
+          if ! git merge-base --is-ancestor "$BASE_SHA" "$HEAD_SHA"; then
+            echo "::error::tier 2: resolved base $BASE_SHA is not an ancestor of HEAD $HEAD_SHA."
+            exit 1
+          fi
+          # ⚠️ A base that resolves to HEAD would build the same tree twice and
+          # pass FOREVER — a tier-2-shaped false green. Fail closed instead.
+          if [ "$BASE_SHA" = "$HEAD_SHA" ]; then
+            echo "::error::tier 2: merge-base resolved to HEAD ($HEAD_SHA) — the comparison would be a tree against itself and could never fail. Refusing to run."
+            exit 1
+          fi
+          echo "tier 2 base=$BASE_SHA head=$HEAD_SHA"
+          echo "BENCH_BASE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
+          git worktree add /tmp/fixpp-base "$BASE_SHA"
+          cd /tmp/fixpp-base
+          conan install . -pr "${GITHUB_WORKSPACE}/conan/profiles/linux-clang-release" \
+            --build=missing -of build/linux-clang-release
+          cmake --preset linux-clang-release -DFIXPP_BUILD_BENCH=ON
+          # Only the paired targets — the base tree exists to supply a comparand,
+          # not to be tested.
+          #
+          # ⚠️ THE TWO LISTS MUST BE ALLOWED TO DIFFER, AND ASSUMING OTHERWISE WAS
+          # A P1. This block used to classify from build-log GREP after the fact:
+          # an "unknown target" phrase exempted the failure as a candidate-only
+          # addition. That is the wrong source of truth in both directions:
+          # wording drift turns a legitimate addition into a false red, and a real
+          # base-tree failure whose log happens to match is exempted. The fix is
+          # smaller and deletes the heuristic: decide from the merge-base's OWN
+          # bench/ci-suite.txt BEFORE building.
+          #
+          # If the merge-base HAS a manifest, a listed target must build and ANY
+          # nonzero is fatal. An unlisted target is a candidate-only addition,
+          # permitted per Article VIII §3 and excluded from the paired base legs.
+          # If the merge-base predates #209 and has no manifest, NO exemption is
+          # possible: every candidate paired target is built and any failure is
+          # fatal. The comparator's G10/G10-RED cells pin the same asymmetry.
+          #
+          # ⚠️ The filtered list is for the base RUNNER ONLY. The comparator's
+          # --base-manifest must stay the base's OWN bench/ci-suite.txt: the
+          # filtered list is derived from the candidate's paired rows, so a row the
+          # candidate DOWNGRADED is absent from it, and using it there would make
+          # [T2-DOWNGRADE] undetectable. Two different things that look like one.
+          BASE_RUN_MANIFEST=/tmp/fixpp-base-run-manifest.txt
+          : > "$BASE_RUN_MANIFEST"
+          ADDED=""
+          BASE_BENCH_MANIFEST=/tmp/fixpp-base/bench/ci-suite.txt
+          HAVE_BASE_BENCH_MANIFEST=0
+          if [ -f "$BASE_BENCH_MANIFEST" ]; then
+            HAVE_BASE_BENCH_MANIFEST=1
+          fi
+          awk '$3=="paired" && $1 !~ /^#/ {print $1"\t"$2"\t"$3}' \
+              "${GITHUB_WORKSPACE}/bench/ci-suite.txt" > /tmp/cand-paired.tsv
+          test -s /tmp/cand-paired.tsv || { echo "::error::no paired rows in the candidate manifest"; exit 1; }
+          while IFS=$'\t' read -r exe c3 c4; do
+            t="${exe##*/}"
+            if [ "$HAVE_BASE_BENCH_MANIFEST" -eq 1 ] && ! awk -v exe="$exe" '$1 == exe { found=1 } END { exit found ? 0 : 1 }' "$BASE_BENCH_MANIFEST"; then
+              ADDED="$ADDED $t"
+              echo "::notice::merge-base manifest has no row for '$t' — candidate-only addition, excluded from the paired base legs (permitted per Article VIII §3)"
+              continue
+            fi
+            if cmake --build --preset linux-clang-release --target "$t" > /tmp/bt.log 2>&1; then
+              printf '%s\t%s\t%s\n' "$exe" "$c3" "$c4" >> "$BASE_RUN_MANIFEST"
+            else
+              echo "::error::base build FAILED for target '$t' listed by the merge-base manifest:"
+              tail -40 /tmp/bt.log
+              exit 1
+            fi
+          done < /tmp/cand-paired.tsv
+          test -s "$BASE_RUN_MANIFEST" || { echo "::error::no paired target exists in the merge-base — the paired tier would compare nothing, which is a silent pass"; exit 1; }
+          echo "BENCH_BASE_RUN_MANIFEST=$BASE_RUN_MANIFEST" >> "$GITHUB_ENV"
+          echo "base paired set: $(wc -l < "$BASE_RUN_MANIFEST") row(s) built; candidate-only additions:${ADDED:- none}"
+
+      # ── A-B-A-B ────────────────────────────────────────────────────────────
+      # A-vs-A is a noise floor for the CANDIDATE phase, and it is NOT enough on
+      # its own: a throttle transient confined to the single base measurement
+      # inflates the base, shrinks the apparent delta, and lets a real
+      # regression through while both A legs agree perfectly. So the base is
+      # measured twice as well and B-vs-B is checked by the same rule. Worked
+      # example in tools/bench_compare.py's run_paired docstring.
+      - name: Run bench suite (merge-base, measurement B1)
+        run: ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired "$BENCH_BASE_RUN_MANIFEST"
+
+      - name: Run bench suite (candidate again, measurement A2)
+        run: ci/run-bench-suite.sh build/linux-clang-release bench-results/a2 --only-paired
+
+      - name: Run bench suite (merge-base again, measurement B2)
+        run: ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b2 --only-paired "$BENCH_BASE_RUN_MANIFEST"
+
+      # ── The assertions. No continue-on-error. ──────────────────────────────
+      - name: "Tier 1 + 3 — execution, schema, and baseline report"
+        run: python3 tools/bench_compare.py --suite bench-results/a1
+
+      # Exit 2 means the INSTRUMENT was noisy (same-tree spread over the noise
+      # band), not that the code regressed. Re-measure once before failing: a
+      # transient that spans one four-leg pass rarely spans two, and this keeps
+      # a bad runner from blocking the merge queue on a first blip.
+      #
+      # ⚠️ The retry is bounded at ONE and a second exit-2 FAILS. It does not
+      # loop, and it never degrades to exit 0 — a gate a noisy runner can
+      # silently switch off while reporting green is the false-green shape this
+      # whole change removes. The failure message names runner noise rather than
+      # a perf regression so an operator can tell the two apart without reading
+      # the log.
+      - name: "Tier 2 — paired base-vs-candidate (HARD)"
+        run: |
+          set -uo pipefail
+          # ⚠️ --base-manifest: THE MANIFEST IS PART OF THE GATE AND THE CHANGE
+          # BEING GATED CAN EDIT IT. Flipping one pre-existing row from `paired`
+          # to `no` removes that binary from --only-paired, from the base build's
+          # target list and from run_paired's filter at once, so the regression
+          # it was measuring stops existing rather than being reported missing;
+          # the other paired rows keep T2-VACUOUS quiet and the gate exits 0
+          # (Gate B round 2, P1, F1 — reproduced at +100%, `tier 2 PASSED`).
+          # Diffing against the merge-base's own copy makes deletions and
+          # downgrades [T2-DOWNGRADE] failures while still permitting additions.
+          #
+          # It is NOT the only defence, and deliberately so: a merge-base that
+          # PREDATES #209 has no bench/ci-suite.txt at all — including this PR's
+          # own — and that case is exempted BY NAME, not silently. The mandatory
+          # paired floor in ci/test-bench-gate.sh (cells M-PINNED / M-PINNED-RED)
+          # is what covers it, and runs unconditionally in ci-script-pins.
+          cmp_paired() {
+            python3 tools/bench_compare.py --paired \
+              --a1 bench-results/a1 --b1 bench-results/b1 \
+              --a2 bench-results/a2 --b2 bench-results/b2 \
+              --base-manifest /tmp/fixpp-base/bench/ci-suite.txt \
+              --base-run-manifest "$BENCH_BASE_RUN_MANIFEST"
+          }
+          cmp_paired && exit 0
+          rc=$?
+          # Exit 2 is also argparse's malformed-command-line code, so a broken
+          # cmp_paired definition is misdiagnosed here as runner noise and costs
+          # one full re-measurement before the real failure returns.
+          if [ "$rc" -ne 2 ]; then
+            echo "::error::tier 2 FAILED (exit $rc) — a regression or an integrity finding, not runner noise."
+            exit "$rc"
+          fi
+          echo "::warning::tier 2 was UNINFORMATIVE (runner noise exceeded the noise band). Re-measuring once."
+          ci/run-bench-suite.sh build/linux-clang-release bench-results/a1 --only-paired
+          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired "$BENCH_BASE_RUN_MANIFEST"
+          ci/run-bench-suite.sh build/linux-clang-release bench-results/a2 --only-paired
+          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b2 --only-paired "$BENCH_BASE_RUN_MANIFEST"
+          cmp_paired && exit 0
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::error::tier 2 UNINFORMATIVE TWICE — this runner's own measurement noise exceeds the noise band across two independent four-leg passes. This is an INSTRUMENT failure, not a detected performance regression: do not read it as the code being slow. Re-run the job; if it recurs, the tier-2 band needs re-deriving (see .specify/ci209-bench-gate.md §6a)."
+          fi
+          exit "$rc"
+
+      # Kept for the record trail AC-8 asks for: the job's own cost, separable
+      # into build vs measurement, so the critical-path budget can be judged
+      # from data rather than from the 180-minute timeout.
+      - name: Upload bench results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench-results/
+          retention-days: 14
 
   # ── Required gate: the Tier 1 matrix must ACTUALLY have run green ──────────
   # Closes the skip-into-green hole. The core build/test jobs are gated
@@ -2292,7 +2519,17 @@ jobs:
     # and empty is neither `success` nor `skipped` — so leaving any assertion
     # behind makes this required check RED on EVERY non-release run, both
     # branches of the python_touched split, PR and push alike.
-    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins,
+    # #209: `bench` ADDED. It was absent, so the bench job could go red while
+    # this required check reported green — and it could not even do that, being
+    # soft in three independent places (both of its steps carried
+    # `continue-on-error: true` and `tools/bench_compare.py` returned 0 by
+    # construction). All three are gone; this entry is what makes the remaining
+    # `exit 1` able to block. `bench` joins the UNCONDITIONAL `== success` set
+    # below, not the wheel-style `skipped` branch: its `if:` is
+    # character-identical to `linux`/`check-layers`, so it has no legitimate
+    # skip disposition on a non-release event, and the release early-exit
+    # already covers the one event where it does not run.
+    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins, bench,
             python-wheel-build, python-wheel-test]
     if: always()
     steps:
@@ -2328,9 +2565,14 @@ jobs:
           # to be `success` even on a PR that has not yet earned its gate labels
           # — it is the only member of this list that can be green before then.
           csp='${{ needs.ci-script-pins.result }}'
-          echo "gate-precheck=$gp  linux=$lx  coverage=$cov  check-layers=$cl  ci-script-pins=$csp"
+          # #209 — moved in as ONE UNIT with the `needs:` entry above, per this
+          # job's own standing warning: a `needs:` member with no assertion is
+          # silently ignored, and an assertion for a job not in `needs:`
+          # evaluates to the empty string and reds every non-release run.
+          bch='${{ needs.bench.result }}'
+          echo "gate-precheck=$gp  linux=$lx  coverage=$cov  check-layers=$cl  ci-script-pins=$csp  bench=$bch"
           fail=0
-          for kv in "gate-precheck=$gp" "linux=$lx" "coverage=$cov" "check-layers=$cl" "ci-script-pins=$csp"; do
+          for kv in "gate-precheck=$gp" "linux=$lx" "coverage=$cov" "check-layers=$cl" "ci-script-pins=$csp" "bench=$bch"; do
             if [ "${kv#*=}" != "success" ]; then
               echo "::error::Tier 1 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The core build/test matrix must actually run — satisfy Gate A + Gate B (gate-a-done / gate-b-done) so the matrix fires before merge."
               fail=1
