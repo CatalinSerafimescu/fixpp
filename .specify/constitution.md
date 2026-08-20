@@ -1,13 +1,95 @@
 <!--
-Sync Impact Report — v0.11 → v0.12 (2026-08-19) — RATIFIED
-  Bump: MINOR (re-points a budget's COMPARAND and discloses a provisional enforcement band; the ±5% figure is unchanged, so this is not perf-budget tightening under Article XX §4, and no banned pattern is added).
+Sync Impact Report — v0.11 → v1.0 (2026-08-20) — RATIFIED
+  Bump: MAJOR, per Article XX §4, with the CHANGELOG.md entry that clause requires.
+    This amendment is BOTH a tightening and a loosening, and the loosening does not cancel the
+    tightening. TIGHTENING: five binaries move from having NO hard timing decision at all to a hard
+    >±50% rejection, so changes that were previously mergeable now fail — an effective perf-budget
+    tightening even though the printed "±5%" numeral is unchanged. LOOSENING: checked-in baselines
+    cease to gate, and 18 of 23 manifest binaries carry no automated timing limit. Article XX §4
+    classifies perf-budget tightening as backwards-incompatible; converting an unenforced obligation
+    into an enforceable rejection criterion is such a tightening. (The v0.12/MINOR classification
+    carried by the first draft of this amendment was WRONG and was corrected at Gate A round 1, P1.)
+    NOTE: this document's version is independent of the library's release version. Constitution v1.0
+    asserts nothing about project GA; it is Article XX §4's major increment from v0.11.
+    NOTE: `CHANGELOG.md` did not exist when this amendment was written, though Article XX §4 has
+    required an entry in it since v0.1 — a mandate on a file that was never created, the same class
+    of defect as issue #209's FINDINGS.md. It is CREATED by this PR rather than the clause being
+    quietly ignored.
   Modified principles:
-    - Article VIII §2 (Regression budget) — the comparand changes from checked-in `bench/baselines/` to a PAIRED base-vs-candidate measurement taken on one runner (candidate and merge-base built and benchmarked in the same job, A-B-A-B, min-per-tree). Stored baselines are reclassified as an INFORMATIONAL tier that reports per-row with a named non-comparability reason and does not gate. The same-PR obligation is retained but re-pointed from "update the baseline" to "record the accepted delta", because for 17 of 23 benched binaries there is no stored baseline to update. A provisional ±50% CI sentinel is disclosed explicitly, with ±5% retained as the standard.
-  Added sections: none. Removed sections: none.
-  §XVIII.5 disposition: NO conflict — this amends a verification instrument, not a protocol scope or a post-1.0 carve-out.
-  Rationale: the rule as written was UNENFORCEABLE on exactly the set that matters, and measurement rather than argument establishes it. Of 25 files under `bench/baselines/`, 10 are usable release-build machine comparands; 3 are empty (`codegen/typed_accessor_bench.json`, `dictionary/reify_bench.json`, `session/placeholder.json`), 11 carry zero rows with a `cpu_time` field, and 1 is a debug build. Of the FIVE binaries the paired tier hard-gates, FOUR (`framer_bench`, `parser_bench`, `writer_bench`, `validator_bench`) declare `none:hand-authored-record-no-cpu_time-field` in `bench/ci-suite.txt`, and the fifth's comparand — `dictionary/xml_loader.json` — was shown by #263 to describe a state that never shipped: seeded by `d526e082` and invalidated six commits later by `20a40f7b` inside the same PR (#66), never re-seeded, so the ±5% budget was silently breached 8–16x against it for three months. Only 6 of 23 `bench/ci-suite.txt` rows declare a `gb-json:` comparand at all. The replacement instrument needs no stored comparand and is the only one this repo has measured to be valid (paired same-VM 2.10x where unpaired read 1.02x on the same change). The ±5% figure is NOT changed; what changes is what it is measured against, plus an honest statement that CI presently decides at ±50%.
-  Templates / dependents reviewed: plan-template.md / spec-template.md / tasks-template.md — no change. Affected catalogue rows: none (no OFFICIAL row asserts a comparand). Affected specs/design docs, which continue to cite "±5% per [const §VIII.2]" CORRECTLY since the figure is unchanged, but whose incidental references to `bench/baselines/` as the comparand are now superseded and are follow-ups, NOT fixed here: `.specify/2l-tap.md` (TS-8), `.specify/2f-async-mutex.phase4-tests.md`, `.specify/ci209-bench-gate.md`, `bench/README.md`, `bench/REPORT.md`, and the header comment of `bench/dictionary/xml_loader_bench.cpp`.
-  Process: standalone amendment PR per Article XX §2 — NOT folded into PR #272, which carries a Gate A WAIVER, and §2 mandates Gate A review on every amendment. Gate A therefore runs on this PR and must not be waived. User ratification given 2026-08-19.
+    - Article VIII §2 (Regression budget) — REWRITTEN. The comparand changes from checked-in
+      `bench/baselines/` to a PAIRED base-vs-candidate measurement on one runner, against the
+      merge-base of the candidate and the PR's TARGET BRANCH (A-B-A-B, min-per-tree). Stored
+      baselines are reclassified as informational and do not gate the per-PR budget. The ±50%
+      sentinel is expressed as a BOUNDED EXCEPTION ("no wider than ±50%, until §6a is satisfied")
+      rather than as mutable operational status ("CI currently enforces"), and the band/paired-set/
+      sample-count/promotion-state are delegated to the bench-gate decision record. The automated
+      timing scope is stated as FIVE binaries with the other EIGHTEEN explicitly outside it.
+      Acceptance of a >±5% delta now requires a recorded paired measurement AND explicit maintainer
+      approval — never author-declared. Cumulative-drift and release-anchor limits are stated.
+    - Article VIII §4 (v1.0 perf targets, latency bullet) — clarified that §2's "checked-in baselines
+      do not gate" does NOT reach the v1.0 release baseline, which remains blocking. §2 governs the
+      per-PR budget only.
+  Added sections: Article VIII §2a (fail-closed invariants of the paired comparand: merge-base of
+    candidate and PR target branch, required ancestor and distinct from HEAD; missing/crashed/empty/
+    uninformative measurement is a FAILURE; paired set is NON-DECREASING). These were present in the
+    #272 implementation but were not constitutional, so a future workflow edit could have removed
+    them without amending anything.
+  Added files: CHANGELOG.md (Article XX §4).
+  Removed sections: none.
+  §XVIII.5 disposition: NO conflict — this amends a verification instrument, not a protocol scope or
+    a post-1.0 carve-out.
+  Rationale: the rule as written was UNENFORCEABLE on exactly the set that matters, and a census
+    rather than an argument establishes it. Under `bench/baselines/` there are 27 TRACKED FILES: 25
+    JSON and 2 `.gitkeep`. Of the 25 JSON — an exact partition, 3+10+1+11=25 — 3 carry zero benchmark
+    rows (`codegen/typed_accessor_bench.json`, `dictionary/reify_bench.json`,
+    `session/placeholder.json`), 10 have no `cpu_time` KEY on any row, 1 (`bench/baselines/placeholder.json`,
+    the TOP-LEVEL file, distinct from the session one) has a row whose `cpu_time` is `null`, and 11
+    carry numeric `cpu_time`. Of those 11, one (`log/log_enqueue.json`) is a debug build → 10 release
+    records; one of those (`sync/async_mutex_baselines.json`) is a hand-authored PARTIAL SCHEMA
+    lacking `real_time`/`time_unit`/`run_type` → NINE usable full-schema release comparands, for 23
+    benched binaries. FIVE files declare a debug build (`log_enqueue.json` + four wire records) across
+    TWO key spellings, `library_build_type` and `build_type` — a single-spelling sweep undercounts
+    them, which is how the first draft said "1 debug build".
+    Of the FIVE binaries the paired tier hard-gates, FOUR (`framer_bench`, `parser_bench`,
+    `writer_bench`, `validator_bench`) declare `none:hand-authored-record-no-cpu_time-field`, and the
+    fifth's comparand — `dictionary/xml_loader.json` — was shown by #263 to describe a state that
+    never shipped: seeded by `d526e082`, invalidated THREE commits later (`git rev-list --count
+    d526e082..20a40f7b` = 3, not six as the first draft said) by `20a40f7b` inside the same PR (#66),
+    never re-seeded, so the ±5% budget was silently breached 8–16x against it for three months. Only
+    6 of 23 `bench/ci-suite.txt` rows declare a `gb-json:` comparand at all. The replacement
+    instrument needs no stored comparand and is the only one this repo has MEASURED to be valid
+    (paired same-VM 2.10x where unpaired read 1.02x on the same change). The ±5% figure is NOT
+    changed; what changes is what it is measured against, what CI can presently decide, and who may
+    accept a breach.
+  CI-state dependency: the CI facts §2 relies on are TRUE on `main` as of `91abcc74` (PR #272, merged
+    2026-08-20) and were re-verified against that tree, not against the branch this amendment was
+    first drafted on: `PAIRED_BAND_PCT = 50.0`; `bench/ci-suite.txt` has 23 rows, 5 `paired`, 6
+    `gb-json:`; the job is `bench` with no `continue-on-error` (the string "bench (soft)" survives
+    only inside a historical timing comment at `tier1.yml:2241`); `.specify/ci209-bench-gate.md`
+    exists. Gate A round 1's first P1 — that the amendment described CI absent from its own tree —
+    is closed by that merge plus this rebase.
+  Templates / dependents reviewed: plan-template.md / spec-template.md / tasks-template.md — no
+    change. Affected catalogue rows: none (no OFFICIAL row asserts a comparand).
+  Affected docs making PRESENT-TENSE comparand claims now superseded — catalogued by the claim, not
+    by one grep spelling; historical `specs/NNN-*` bundles are deliberately NOT rewritten, active
+    design docs and source documentation are listed in full. FOLLOW-UPS, not fixed here:
+      .specify/2f-async-mutex.phase4-tests.md:156-157 ("Tier 1 CI runs benches; if regression > 5%
+        AND the PR doesn't update the baseline with rationale, CI fails")
+      .specify/2j-controlplane.md:902 ("CI fails on > 5% regression vs bench/baselines/control_plane/")
+      .specify/2l-tap.md:1056 (TS-8, "Baseline stored in bench/baselines/tap_ring_write.json. ±5%")
+      .specify/2k-log-otel.md, bench/README.md, bench/REPORT.md:74,125
+      bench/session/CMakeLists.txt:29 · bench/sync/CMakeLists.txt:4
+      bench/session/bench_memory_store.cpp:8 ("CI fails on > 5% regression vs per-host baseline")
+      bench/session/bench_file_store.cpp:8 ("CI fails on > 2x regression vs per-host baseline" — note
+        this one asserts a THIRD number, neither ±5% nor ±50%)
+      bench/session/bench_heartbeat_cadence.cpp:10 · bench/session/fix_time_bench.cpp:13 ·
+        bench/session/fsm_bench.cpp:35 · bench/dictionary/xml_loader_bench.cpp (header comment)
+  Process: standalone amendment PR per Article XX §2 — NOT folded into PR #272, which carries a Gate
+    A WAIVER, and §2 mandates Codex Gate A review on EVERY amendment. Gate A therefore runs on this
+    PR and must not be waived; the Gate-A-fold deviation used by 035/043/068/069/075-078/082 applies
+    only to amendments riding a feature branch, which this is not. Gate A round 1 verdict was BLOCK
+    (4 P1 / 5 P2); this revision answers all nine. User ratification of the v-major classification and
+    of creating CHANGELOG.md given 2026-08-20.
 
 Sync Impact Report — v0.10 → v0.11 (2026-08-12) — RATIFIED
   Bump: MINOR (reclassifies a post-1.0 carve-out as delivered; no banned-pattern addition, no perf-budget tightening, Article I §1's codegen scope permissively unchanged → not v-major per Article XX §4).
@@ -202,16 +284,28 @@ Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
 ## Article VIII — Performance Budgets & Benchmarks
 
 1. **Bench framework: Google Benchmark.** Every perf-sensitive module has a benchmark in `bench/`.
-2. **Regression budget: ±5%.** The comparand is a **paired base-vs-candidate measurement taken on one runner** — the candidate tree and its merge-base built and benchmarked in the same job, A-B-A-B, compared min-per-tree. Checked-in `bench/baselines/` files are an **informational** tier: each row is reported with a named reason when it is not comparable, and they do not gate. Intentional perf changes record the accepted delta **in the same PR** with rationale in the PR body.
+2. **Regression budget: ±5%** against the **merge-base of the candidate and the PR's target branch**, measured as a **paired base-vs-candidate run on one runner** — both trees built and benchmarked in the same job, A-B-A-B, compared min-per-tree.
 
-   *Why the comparand changed (v0.12).* `bench/baselines/` cannot serve as one. Of 25 files, **10** are usable release-build machine comparands; the rest are empty, debug-build, or hand-authored ceiling records with no `cpu_time` field. Of the five binaries the paired tier gates, **four declare `none:` in `bench/ci-suite.txt`** and the fifth is `dictionary/xml_loader.json`, which issue #263 demonstrated has **never described `main`** — it was seeded six commits before a correctness fix inside its own PR and never re-seeded. A budget stated against a comparand that does not exist is *unenforceable*, not strict. Paired same-runner measurement needs no stored comparand, which is why it covers every benched binary rather than six, and it is the only instrument this repo has measured to be valid: an unpaired CI A/B read **1.02×** on a change a paired same-VM A/B read **2.10×**.
+   **±5% is the standard. It is not what automated CI presently decides.** Until the estimator characterisation in `.specify/ci209-bench-gate.md` §6a is satisfied (20 samples per binary), CI may enforce a sentinel **no wider than ±50%** over an explicitly listed set of paired binaries. **A green sentinel is not evidence of ±5% compliance.** The current band, paired set, sample count and promotion state are maintained in that decision record — deliberately not here, because they are operational status and this document is not.
 
-   *Provisional enforcement band.* **±5% remains the standard.** CI currently enforces a **provisional ±50% sentinel**, derived from this repo's worst recorded noise, pending the estimator characterisation in `.specify/ci209-bench-gate.md` §6a (20 samples per binary). **The gap between the standard and what CI can presently decide is disclosed, not closed**; tightening the band is a named follow-up with its criteria already fixed. Any claim that CI enforces ±5% is false until that work lands.
+   **The automated timing scope is five binaries, not all twenty-three.** `bench/ci-suite.txt` lists 23 executed binaries; **5** receive a paired timing comparison. The other **18** are execution- and schema-checked only and carry **no automated timing limit whatsoever** — a slowdown in one is caught by review or not at all. Execution coverage is not regression-budget coverage, and this clause must not be read as promising the latter.
+
+   **Checked-in `bench/baselines/` files do not gate.** They are an informational tier: each row is reported with a named reason when it is not comparable. This governs the **per-PR** budget only — **§4's v1.0 release baseline is untouched by it and remains a blocker**, and a per-change budget cannot by itself bound cumulative drift (repeated +4.9% steps each pass). Establishing a periodic or release-anchored comparand is a named follow-up, not something this clause provides.
+
+   **An accepted regression is never author-declared.** Any delta beyond ±5% requires, in the same PR: the actual paired measurement recorded, a rationale, and **explicit maintainer approval**. Attaching a rationale is not acceptance, and §3's "a benchmark in the same PR" does not require that benchmark to *pass* — this clause does.
+
+   2a. **Fail-closed invariants of the paired comparand.** Constitutional, not workflow detail, so that a future workflow edit cannot remove them silently: the base is the **merge-base of the candidate and the PR's target branch**, required to be an ancestor of the candidate and distinct from it; a **missing, crashed, empty or uninformative** measurement is a **failure**, never a pass; and the paired set is **non-decreasing** — narrowing it is itself a change requiring the same disclosure and approval as a regression.
+
+   *Why the comparand changed (v1.0).* `bench/baselines/` cannot serve as one, by census rather than by argument. Of **27 tracked files** there, 25 are JSON and 2 are `.gitkeep`. Of the 25: **3** carry zero benchmark rows, **10** have no `cpu_time` key on any row, **1** (`bench/baselines/placeholder.json`) has a row whose `cpu_time` is `null`, and **11** carry numeric `cpu_time` — an exact partition, 3 + 10 + 1 + 11 = 25. Of those 11, one (`log/log_enqueue.json`) is a debug build, leaving **10** release records; one of those (`sync/async_mutex_baselines.json`) is a hand-authored partial schema lacking `real_time`, `time_unit` and `run_type`. **Nine** usable full-schema release comparands therefore exist, for 23 benched binaries. **Five** files in total declare a debug build — `log_enqueue.json` plus four wire records — across **two different key spellings** (`library_build_type` and `build_type`), which is why a single-spelling sweep undercounts them.
+
+   Of the five binaries the paired tier gates, **four declare `none:` in `bench/ci-suite.txt`**, and the fifth's comparand — `dictionary/xml_loader.json` — was shown by issue #263 never to have described `main`: seeded by `d526e082`, invalidated **three** commits later by `20a40f7b` inside the same PR (#66), and never re-seeded, so the ±5% budget was breached 8–16× against it for three months without detection. **A budget stated against a comparand that does not exist is *unenforceable*, not strict.**
+
+   Paired same-runner measurement needs no stored comparand, and is the only instrument this repo has *measured* to be valid: an unpaired CI A/B read **1.02×** on a change that a paired same-VM A/B read **2.10×**.
 3. **No perf change merged without a benchmark in the same PR.**
 4. **v1.0 perf targets:**
    - Parser: parity-or-better with `hffix` on identical hardware (parse/sec).
    - Session throughput: parity-or-better with QuickFIX on identical hardware (messages/sec, end-to-end).
-   - Latency: end-to-end session round-trip p50 and p99 measured and reported in `bench/REPORT.md`; no specific number is constitutional, but regressions vs the v1.0 baseline are blockers.
+   - Latency: end-to-end session round-trip p50 and p99 measured and reported in `bench/REPORT.md`; no specific number is constitutional, but regressions vs the v1.0 baseline are blockers. **§2's "checked-in baselines do not gate" does not reach this clause** — the v1.0 release baseline is a release anchor, not a per-PR comparand, and remains blocking.
 5. **Allocator policy on the hot path:** zero `new`/`delete` between parse and `fromApp` callback. Arena/PMR is the default; deviations require justification in the relevant `/plan`.
 6. **Codex adversarial perf review** (v1.0 release-candidate gate) hunts for benchmark hacks, compiler optimization that elides work, and unrealistic data shapes. Findings are blockers.
 
