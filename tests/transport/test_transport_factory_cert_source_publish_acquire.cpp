@@ -153,8 +153,7 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
     // a saturated core the writer would otherwise starve the very readers it is
     // waiting for. (A reader killed by its own ASSERT_* returns from the lambda;
     // if every reader dies that way this loop exits on the deadline, not a hang.)
-    constexpr auto kWitnessDeadline = std::chrono::seconds{10};
-    const auto witness_until = std::chrono::steady_clock::now() + kWitnessDeadline;
+    const auto witness_until = std::chrono::steady_clock::now() + std::chrono::seconds{10};
     for (int i = kRounds; valid_reads.load(std::memory_order_acquire) == 0 &&
                           std::chrono::steady_clock::now() < witness_until;
          ++i) {
