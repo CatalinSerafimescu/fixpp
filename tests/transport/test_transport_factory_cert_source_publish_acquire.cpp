@@ -26,6 +26,8 @@
 
 #include <asio/awaitable.hpp>
 #include <atomic>
+#include <bit>
+#include <chrono>
 #include <memory>
 #include <span>
 #include <thread>
@@ -98,7 +100,7 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
 
     std::atomic<bool> writer_done{false};
     std::atomic<int> any_reader_started{0};
-    std::atomic<int> valid_reads{0};  // reads that returned a known source id
+    std::atomic<unsigned> observed_ids{0};  // bit i ⇔ some reader saw sources[i]
 
     // Readers: concurrently call cert_source_snapshot() and assert the result is
     // one of the exact instances we published (or nullptr, which is also valid
@@ -125,7 +127,8 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
                     ASSERT_LT(id, kSourceCount)
                         << "cert_source_snapshot() returned an out-of-range id=" << id
                         << " — possible torn pointer (corrupted object identity)";
-                    ++valid_reads;
+                    observed_ids.fetch_or(1u << static_cast<unsigned>(id),
+                                          std::memory_order_release);
                 }
                 any_reader_started.store(1, std::memory_order_release);
             }
@@ -142,14 +145,48 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
         ASSERT_TRUE(r.has_value()) << "reload_credentials() must succeed for non-null source";
     }
 
+    // Issue #283: hold the stimulus until it is WITNESSED. any_reader_started
+    // is a START barrier — it proves a reader entered the loop, not that one
+    // observed the window. Measured on a starved single core, the kRounds above
+    // complete in ~345 us with the readers never rescheduled: 40/40 runs closed
+    // the window with zero overlapping reads. A single observed id is not
+    // enough either: once the writer stops storing, every later snapshot
+    // returns the same pointer, so a reader that only wakes up after the last
+    // store can still contribute one id post-window. Keep publishing until
+    // readers have observed TWO DISTINCT published source ids — unobtainable
+    // unless some read landed strictly between two stores, i.e. a reader ran
+    // while the store sequence was still advancing. Bounded by a deadline that
+    // fails loudly rather than hanging. yield() is required: on a saturated
+    // core the writer would otherwise starve the very readers it is waiting
+    // for. (A reader killed by its own ASSERT_* returns from the lambda; if
+    // every reader dies that way this loop exits on the deadline, not a hang.)
+    const auto witness_until = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    for (int i = kRounds; std::popcount(observed_ids.load(std::memory_order_acquire)) < 2 &&
+                          std::chrono::steady_clock::now() < witness_until;
+         ++i) {
+        auto src = sources[static_cast<std::size_t>(i % kSourceCount)];
+        auto r = factory->reload_credentials(src);
+        ASSERT_TRUE(r.has_value()) << "reload_credentials() must succeed for non-null source";
+        std::this_thread::yield();
+    }
+
+    // Sample BEFORE closing the window. Belt-and-braces rather than
+    // load-bearing: once the writer stops storing, no new id can appear, so
+    // this sample and a post-join read would agree. The mechanism that makes
+    // the assertion an in-window statement is the two-distinct-ids condition
+    // above, not this sample's placement.
+    const unsigned witnessed_ids = observed_ids.load(std::memory_order_acquire);
+
     writer_done.store(true, std::memory_order_release);
     for (auto& t : readers) {
         t.join();
     }
 
-    EXPECT_GT(valid_reads.load(), 0)
-        << "readers did not observe any non-null snapshots during the write window — "
-           "publish/acquire edge not exercised";
+    EXPECT_GE(std::popcount(witnessed_ids), 2)
+        << "readers observed fewer than two distinct published sources inside the "
+           "write window — no read is proven to have landed between two publications, "
+           "so the publish/acquire edge is not exercised (witnessed_ids=0x"
+        << std::hex << witnessed_ids << ")";
 }
 
 }  // namespace
