@@ -19,9 +19,8 @@
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <chrono>
-#include <future>
-
 #include <fixpp/core/clock.hpp>
+#include <future>
 
 namespace fixpp::test_support {
 
@@ -94,8 +93,9 @@ template <class Ready>
 // `quiesce_on_exit` nor a `TearDown()`, and its `feed_inbound`/`open_session`
 // helpers fail with non-fatal `ADD_FAILURE()` and continue — so the test body
 // keeps pumping past a stale helper-local buffer rather than returning early.
-// Filed on #284 alongside the wider 340-site migration; out of scope for the
-// PR that introduced this header.
+// Filed on #289 alongside the wider 340-site migration, the ten logout sites,
+// and the residual-work witness; out of scope for the PR that introduced this
+// header.
 //
 // This is a test-harness utility, but the hazard it exists for is NOT
 // test-only — an earlier revision of this comment claimed it was, and that
@@ -116,8 +116,7 @@ template <class Fut>
                                     std::chrono::steady_clock::duration budget = kPumpBudget,
                                     std::chrono::steady_clock::duration slice = kPumpSlice) {
     return pump_until(
-        ioc,
-        [&fut] { return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready; },
+        ioc, [&fut] { return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready; },
         budget, slice);
 }
 
@@ -150,23 +149,28 @@ inline constexpr const char* kPumpBudgetMiss =
 //
 // `io_context::stopped()` is a DISJUNCTION, not an exact detector: it is true
 // either because the context ran out of work or because something called
-// `stop()` explicitly (asio `io_context.hpp:453-455`). At THIS caller, the
-// preceding `restart()` clears any prior stopped flag, nothing in
-// `tests/session/test_test_request_id_cross_session_race.cpp` or
-// `tests/support/` calls `ioc.stop()`, and no production code outside
-// `src/capi/` creates a work guard — so `stopped()==false` here really does
-// mean session/coroutine work is still outstanding. It is also not
-// authoritative: `mock_clock::sleep_until` registers a new waiter whenever the
-// deadline is still in the future (`src/core/test/mock_clock.cpp:119-126`),
-// and `cancel_sleeps()` above is a ONE-SHOT drain that installs nothing to
-// reject a later registration (`src/core/test/mock_clock.cpp:166-181`) — so a
-// coroutine whose first run happens during this destructor's own `run_for`
-// (the session liveness loop's `sleep_until`, `src/session/session.cpp:4816`,
-// is the concrete case) can arm a sleep nothing will ever fire, and this guard
-// cannot force that residual, only observe it. Report what was observed rather
-// than exit silently: ADD_FAILURE (non-fatal — a fatal assertion in a
-// destructor is an inert `return`) so a guard that never quiesces shows up in
-// CI instead of leaving a dangling frame to fire nondeterministically later.
+// `stop()` explicitly (asio `io_context.hpp:453-455`). The `stop()` sweep
+// supports the false-negative direction only: for any `io_context` reachable
+// from this caller, the preceding `restart()` clears any prior stopped flag and
+// nothing on this call path calls `stop()` on that same context. The one
+// `tests/support/` exception is `disjoint_session_executor.hpp:71`'s
+// `ioc_.stop()`, but that helper owns a private `ioc_` and is included only by
+// `tests/core/test_trace_context_resume.cpp`, so it is out of reach here. The
+// false-positive sweep is separate: for any `io_context` reachable from this
+// caller, no production code outside `src/capi/` creates a work guard, so
+// `stopped()==false` here really does mean session/coroutine work is still
+// outstanding. It is also not authoritative: `mock_clock::sleep_until`
+// registers a new waiter whenever the deadline is still in the future
+// (`src/core/test/mock_clock.cpp:119-126`), and `cancel_sleeps()` above is a
+// ONE-SHOT drain that installs nothing to reject a later registration
+// (`src/core/test/mock_clock.cpp:166-181`) — so a coroutine whose first run
+// happens during this destructor's own `run_for` (the session liveness loop's
+// `sleep_until`, `src/session/session.cpp:4816`, is the concrete case) can arm
+// a sleep nothing will ever fire, and this guard cannot force that residual,
+// only observe it. Report what was observed rather than exit silently:
+// ADD_FAILURE (non-fatal — a fatal assertion in a destructor is an inert
+// `return`) so a guard that never quiesces shows up in CI instead of leaving a
+// dangling frame to fire nondeterministically later.
 struct quiesce_on_exit {
     asio::io_context& ioc;
     fixpp::core::Clock& clock;
@@ -177,10 +181,10 @@ struct quiesce_on_exit {
         ioc.run_for(std::chrono::seconds{5});
         if (!ioc.stopped()) {
             ADD_FAILURE() << "quiesce_on_exit: the io_context did not run out of work within the "
-                              "5s quiesce window. At this caller that is expected to mean a "
-                              "coroutine frame is still suspended and will be destroyed while "
-                              "referencing objects that are about to be destructed, but this guard "
-                              "only observes the residual, not its cause.";
+                             "5s quiesce window. At this caller that is expected to mean a "
+                             "coroutine frame is still suspended and will be destroyed while "
+                             "referencing objects that are about to be destructed, but this guard "
+                             "only observes the residual, not its cause.";
         }
     }
 };
