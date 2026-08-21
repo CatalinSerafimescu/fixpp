@@ -9,7 +9,7 @@ Sync Impact Report — v0.11 → v1.0 (2026-08-20) — PENDING GATE A + USER SIG
   Bump: MAJOR, per Article XX §4, with the CHANGELOG.md entry that clause requires.
     This amendment is BOTH a tightening and a loosening, and the loosening does not cancel the
     tightening. TIGHTENING: five binaries move from having NO hard timing decision at all to a hard
-    >±50% rejection, so changes that were previously mergeable now fail — an effective perf-budget
+    >+50% slowdown rejection, so changes that were previously mergeable now fail — an effective perf-budget
     tightening even though the printed "±5%" numeral is unchanged. LOOSENING: checked-in baselines
     cease to gate, and 18 of 23 manifest binaries carry no automated timing limit. Article XX §4
     classifies perf-budget tightening as backwards-incompatible; converting an unenforced obligation
@@ -48,21 +48,30 @@ Sync Impact Report — v0.11 → v1.0 (2026-08-20) — PENDING GATE A + USER SIG
       per-PR budget only.
   Added sections: Article VIII §2a (fail-closed invariants of the paired comparand: merge-base of
     candidate and PR target branch, distinct from the candidate; crashed/empty/uninformative
-    measurement, and a missing measurement for a binary the merge-base CAN build, are each a
-    FAILURE; paired set is NON-DECREASING). Three corrections from Gate A round 2, all P1:
-      (a) the previous revision made EVERY missing measurement a failure, which CONTRADICTED the
-          shipped implementation and would have outlawed the behaviour PR #272 spent two Gate B
-          rounds building. `tools/bench_compare.py:671-673` states that adding a paired binary
-          "must never be an error"; `:823` excludes candidate-only additions from the compared
-          rows; `.github/workflows/tier1.yml:2393-2395` classifies them before the base build. A
-          binary that did not exist in the merge-base CANNOT have a base measurement. §2a now
-          carries that exemption explicitly, as the ONLY one, and closes it: such a row stays
-          hard-gated on execution and schema, is excluded from timing for that PR alone, and is a
-          MANDATORY paired comparand from its first merged commit onward.
-      (b) "required to be an ancestor of the candidate" is dropped as redundant — a merge-base is
-          necessarily an ancestor.
-      (c) these invariants were NOT all "present in the implementation", as the previous
-          CHANGELOG text claimed; the missing-measurement rule as written was contradicted by it.
+    measurement is a FAILURE, as is a missing measurement for any paired row PRESENT IN THE
+    MERGE-BASE'S MANIFEST; the sole exemption is a row ABSENT from that manifest; paired status is
+    IRREVERSIBLE).
+    ★ §2a has been rewritten TWICE, and both times the defect was the same: the constitution
+      asserted a rule the implementation does not have. Recorded because it is the transferable
+      lesson of this amendment.
+      Gate A round 2 (P1) — the first draft made EVERY missing measurement a failure, which would
+        have outlawed the candidate-only-addition path PR #272 had just spent Gate B rounds 4 and 5
+        building (`tools/bench_compare.py:671-673` "must never be an error"; `:823` excludes those
+        rows; `tier1.yml:2393-2395` classifies them before the base build).
+      Gate A round 3 (P1 ×3) — the replacement then (i) asserted a BUILDABILITY predicate the
+        classifier does not implement: it tests MANIFEST MEMBERSHIP, and `bench/transport/*` are
+        real CMake targets absent from the manifest, so a buildable base binary would be exempted
+        anyway; (ii) declared the paired set "non-decreasing" AND permitted approved narrowing —
+        incompatible, and the comparator (`bench_compare.py:765-779`) has no approval path at all,
+        failing removal unconditionally; (iii) left a resurrection hole where an approved removal
+        followed by a re-add collects the addition exemption again.
+      The current text fixes all three by DESCRIBING THE SHIPPED PREDICATE (manifest membership),
+        naming the over-exemption it causes as a tracked follow-up rather than legislating around
+        it, and making paired status ABSOLUTELY irreversible — which is both what the comparator
+        enforces and what closes the resurrection hole, since a row that cannot be dropped cannot
+        be re-added.
+      Also dropped: "required to be an ancestor of the candidate", redundant — a merge-base is
+        necessarily an ancestor.
   Added files: CHANGELOG.md (Article XX §4).
   Removed sections: none.
   §XVIII.5 disposition: NO conflict — this amends a verification instrument, not a protocol scope or
@@ -334,17 +343,20 @@ Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
 
    **+5% is the standard. It is not what automated CI presently decides.** Until the estimator characterisation in `.specify/ci209-bench-gate.md` §6a is satisfied, CI may enforce a provisional slowdown threshold that **must not exceed +50%** over an explicitly listed set of paired binaries. **A green sentinel is not evidence of +5% compliance.** That +50% ceiling is a constitutional limit on how weak CI may become — widening it requires an amendment — while the *current* threshold, paired set, sample count and promotion state are operational status maintained in that decision record, not here.
 
-   **Automated timing coverage is partial, and this clause promises no more than it delivers.** Only an explicitly listed subset of the binaries in `bench/ci-suite.txt` receives a paired timing comparison; the remainder are execution- and schema-checked only and carry **no automated timing limit whatsoever** — a slowdown in one is caught by review or not at all. **Execution coverage is not regression-budget coverage.** The paired subset is **non-decreasing** (§2a), and every binary that becomes eligible under `.specify/ci209-bench-gate.md` §6a **must be promoted into it at or before the next release**; leaving an eligible binary unpaired past that point is a violation of this clause, not a deferred nicety.
+   **Automated timing coverage is partial, and this clause promises no more than it delivers.** Only an explicitly listed subset of the binaries in `bench/ci-suite.txt` receives a paired timing comparison; the remainder are execution- and schema-checked only and carry **no automated timing limit whatsoever** — a slowdown in one is caught by review or not at all. **Execution coverage is not regression-budget coverage.** Paired status is **irreversible** and the subset therefore only grows (§2a).
+
+   **Closing that hole is an obligation with a deadline, and the deadline is on the evidence, not on the promotion.** `.specify/ci209-bench-gate.md` §6a makes a binary eligible for promotion on its A-vs-A spread across 20 `push:main` runs — but the workflow produces the A2 leg **only for rows already marked `paired`**, so an unpaired binary can never generate the evidence that would promote it. **That criterion is circular as it stands and cannot fire.** The binding requirement is therefore: a **characterisation lane that collects A-vs-A evidence for unpaired candidates must exist before the v1.0 library release**, and from the release at which it exists, every binary it shows eligible under §6a **must be paired at or before the next library release** ("release" here means a tagged library release, never a constitution version). Until that lane exists, no binary is promotable and this clause obliges building it — not pretending a promotion path is already open.
 
    **Checked-in `bench/baselines/` files do not gate.** They are an informational tier: each row is reported with a named reason when it is not comparable. This governs the **per-PR** budget only — **§4's v1.0 release baseline is untouched by it and remains a blocker**. A per-change budget cannot by itself bound **cumulative drift** (repeated +4.9% steps each pass); a release-anchored comparand closing that hole **is required at v1.0** and is tracked as such, not left permanently optional.
 
    **An accepted regression is never author-declared.** A slowdown beyond +5% requires, in the same PR: the actual paired measurement recorded, a rationale, and **approval by someone other than the change's author**, recorded as a GitHub PR approval or an explicit user statement in the PR thread — **not** a claim in the PR body or a label the author applied. Where the author is the sole maintainer and no independent approver exists, the fallback is **explicit user ratification recorded in the PR thread**, which is a distinct act from authoring the PR. Attaching a rationale is not acceptance, and §3's "a benchmark in the same PR" does not require that benchmark to *pass* — this clause does.
 
-   2a. **Fail-closed invariants of the paired comparand.** Constitutional, not workflow detail, so that a future workflow edit cannot remove them silently:
+   2a. **Fail-closed invariants of the paired comparand.** Constitutional, not workflow detail, so that a future workflow edit cannot remove them silently. Each states what the instrument **does**, not what would be ideal; where the two differ the gap is named rather than papered over.
    - the base is the **merge-base of the candidate and the PR's target branch**, required to be distinct from the candidate;
-   - a **crashed, empty or uninformative** measurement, and a **missing measurement for a binary the merge-base can build**, are each a **failure**, never a pass;
-   - **exception, and the only one:** a paired binary that does not exist in the merge-base is a **candidate-only addition**. Its base measurement is *necessarily* absent, and that absence must not be an error — adding a benched binary is what §3 asks for. Such a row is still **hard-gated on execution and schema** in the candidate, is excluded from timing comparison for that PR alone, and becomes a **mandatory paired comparand from its first merged commit onward**;
-   - the paired set is **non-decreasing** — narrowing it is itself a change requiring the same disclosure and approval as a regression.
+   - a **crashed, empty or uninformative** measurement is a **failure**, never a pass; so is a **missing** measurement for any paired row **present in the merge-base's `bench/ci-suite.txt`**;
+   - **exception, and the only one:** a paired row **absent from the merge-base's `bench/ci-suite.txt`** is a **candidate-only addition**. That absence must not be an error — adding a benched binary is what §3 asks for. Such a row is still **hard-gated on execution and schema** in the candidate, and is excluded from timing comparison for that PR only.
+     ⚠️ **The predicate is manifest membership, not buildability, and that is a known over-exemption.** A binary the merge-base could build but never listed is exempted too — `bench/transport/*` are exactly that shape today: real CMake targets absent from the manifest. Narrowing the exemption to *genuinely unmeasurable in the base* requires a semantic target census in the base build tree, which is tracked as a follow-up against the bench gate, **not** claimed here. This clause deliberately describes the shipped predicate; a constitution that describes a better instrument than the one running is the defect this amendment exists to remove.
+   - **paired status is irreversible.** Once a row is `paired` in a merged manifest it may not be removed or downgraded — there is no approval path, and the comparator enforces this unconditionally. Retiring a benchmark **entirely** (deleting the binary and its row) is a different act, permitted, and requires its own disclosure in the PR. Stating this absolutely is what closes the resurrection hole: a row that cannot be dropped cannot be re-added to collect the addition exemption a second time.
 
    *Why the comparand changed (v1.0).* `bench/baselines/` cannot serve as one, by census rather than by argument. Of **27 tracked files** there, 25 are JSON and 2 are `.gitkeep`. Of the 25: **3** carry zero benchmark rows, **10** have no `cpu_time` key on any row, **1** (`bench/baselines/placeholder.json`) has a row whose `cpu_time` is `null`, and **11** carry numeric `cpu_time` — an exact partition, 3 + 10 + 1 + 11 = 25. Of those 11, one (`log/log_enqueue.json`) is a debug build, leaving **10** release records; one of those (`sync/async_mutex_baselines.json`) is a hand-authored partial schema lacking `real_time`, `time_unit` and `run_type`. **Nine** usable full-schema release comparands therefore exist, for 23 benched binaries. **Five** files in total declare a debug build — `log_enqueue.json` plus four wire records — across **two different key spellings** (`library_build_type` and `build_type`), which is why a single-spelling sweep undercounts them.
 

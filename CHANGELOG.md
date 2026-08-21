@@ -29,9 +29,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## Constitution v1.0 — 2026-08-20
+## Unreleased — Constitution v1.0 (pending Gate A + user sign-off)
 
 **Backwards-incompatible.** Article XX §4 major bump: an effective perf-budget tightening.
+
+> ⚠️ **Not yet ratified.** The constitution's authoritative version remains **v0.11** until Gate A
+> converges and the user signs off. This heading and its ratification date are set in the same
+> final commit that flips the status paragraph to v1.0 — deliberately not before, because a
+> CHANGELOG entry dated as released while the document it describes is pending is the same
+> lifecycle contradiction Gate A round 2 raised against the Sync Impact Report.
 
 ### Changed
 
@@ -48,16 +54,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Article VIII §2a — fail-closed invariants of the paired comparand.** The base must be the
   merge-base of the candidate and the PR's target branch, distinct from the candidate; a
-  crashed, empty or uninformative measurement — and a missing measurement for a binary the
-  merge-base *can* build — is a **failure**; and the paired set is **non-decreasing**. Most of
-  these were enforced by the implementation but not by the constitution, so a workflow edit
-  could have removed them without amending anything.
+  crashed, empty or uninformative measurement is a **failure**, as is a missing measurement for
+  any paired row **present in the merge-base's `bench/ci-suite.txt`**. Most of these were
+  enforced by the implementation but not by the constitution, so a workflow edit could have
+  removed them without amending anything.
 
-  **One explicit exception, and only one:** a paired binary that does not exist in the
-  merge-base is a *candidate-only addition*. Its base measurement is necessarily absent, and
-  that absence is not an error — adding a benched binary is what §3 asks for. Such a row stays
-  hard-gated on execution and schema, is excluded from timing comparison for that PR alone, and
-  becomes a mandatory paired comparand from its first merged commit onward.
+  **One explicit exception, and only one:** a paired row **absent from the merge-base's
+  manifest** is a *candidate-only addition*; that absence is not an error — adding a benched
+  binary is what §3 asks for. Such a row stays hard-gated on execution and schema, and is
+  excluded from timing comparison for that PR only.
+
+  ⚠️ **The predicate is manifest membership, not buildability**, which over-exempts: a binary
+  the merge-base could build but never listed is exempted too (`bench/transport/*` are exactly
+  that today — real CMake targets absent from the manifest). Narrowing it needs a semantic
+  target census in the base build tree and is a **follow-up**, not claimed here. The clause
+  describes the shipped predicate deliberately; a constitution that describes a better
+  instrument than the one running is the defect this amendment exists to remove.
+
+  **Paired status is irreversible.** A merged `paired` row may not be removed or downgraded —
+  there is no approval path and the comparator enforces this unconditionally. Retiring a
+  benchmark entirely is a separate, permitted act requiring its own disclosure. Stating it
+  absolutely is what closes the resurrection hole: a row that cannot be dropped cannot be
+  re-added to collect the addition exemption twice.
 - **This file**, per Article XX §4.
 
 ### Why this is backwards-incompatible
@@ -96,16 +114,29 @@ so the ±5% budget was silently breached 8–16× against it for three months.
   +5% compliance.**
 - A per-change budget does not bound **cumulative drift** — repeated +4.9% steps each pass. A
   release-anchored comparand closing that hole is **required at v1.0**, not optional.
-- Every binary that becomes eligible under §6a **must be promoted into the paired set at or
-  before the next release**; leaving an eligible binary unpaired past that point violates §2.
+- ★ **No binary is currently promotable, and §6a's criterion is circular.** Eligibility needs a
+  binary's A-vs-A spread over 20 `push:main` runs, but the workflow produces the A2 leg **only
+  for rows already marked `paired`** — so an unpaired binary can never generate the evidence
+  that would promote it. §2 therefore binds the obligation to the **evidence**, not the
+  promotion: a characterisation lane collecting A-vs-A for unpaired candidates **must exist
+  before the v1.0 library release**, and from then on eligible binaries must be paired at or
+  before the next **library** release (never a constitution version).
 
-Counts above (5 paired / 18 unpaired / 23 total) are **as of this entry's date**. The paired set
-is non-decreasing and required to grow, so treat them as a point-in-time record, not a standing
+Counts above (5 paired / 18 unpaired / 23 total) are **as of this entry's date**. Paired status
+is irreversible and the set only grows, so treat them as a point-in-time record, not a standing
 fact — the current set lives in `.specify/ci209-bench-gate.md`.
 
 Implemented by PR #272 (`91abcc74`), which closes the instrumentation half of issue #263.
-Amendment PR #285. Gate A returned **BLOCK twice** — round 1 on four P1s including the MINOR
-misclassification, round 2 on four more, of which the sharpest was that the first draft of §2a
-made *every* missing measurement a failure and so would have outlawed the candidate-only-addition
-path that PR #272 itself had just spent two Gate B rounds building. This entry reflects both
-corrections.
+Amendment PR #285. Gate A returned **BLOCK three times**, and in each round the majority of the
+new P1s were defects introduced by the previous round's fix:
+
+- **round 1** — four P1s, including the MINOR misclassification corrected here;
+- **round 2** — the first draft of §2a made *every* missing measurement a failure, which would
+  have outlawed the candidate-only-addition path PR #272 had just spent two Gate B rounds
+  building;
+- **round 3** — §2a's replacement asserted a **buildability** predicate the classifier does not
+  implement, declared the paired set "non-decreasing" while also permitting approved narrowing,
+  and bound promotion to a criterion that cannot fire.
+
+Every one of those was a rule the constitution stated and the code did not have. The corrected
+text describes the shipped instrument and names its gaps as gaps.
