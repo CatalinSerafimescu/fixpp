@@ -29,15 +29,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## Unreleased — Constitution v1.0 (pending Gate A + user sign-off)
+## Constitution v1.0 — 2026-08-21
 
 **Backwards-incompatible.** Article XX §4 major bump: an effective perf-budget tightening.
 
-> ⚠️ **Not yet ratified.** The constitution's authoritative version remains **v0.11** until Gate A
-> converges and the user signs off. This heading and its ratification date are set in the same
-> final commit that flips the status paragraph to v1.0 — deliberately not before, because a
-> CHANGELOG entry dated as released while the document it describes is pending is the same
-> lifecycle contradiction Gate A round 2 raised against the Sync Impact Report.
+Ratified 2026-08-21, after Gate A converged at round 5 (PASS, 0 P1 / 0 P2 / 0 P3) following four
+BLOCKs. This heading carried `Unreleased` until both the gate and the sign-off had happened — a
+CHANGELOG entry dated as released while the document it describes is still pending is the
+lifecycle contradiction Gate A round 3 raised, and it is dated here only because that is no
+longer the case.
 
 ### Changed
 
