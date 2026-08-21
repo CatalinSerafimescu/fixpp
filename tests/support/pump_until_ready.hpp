@@ -7,9 +7,9 @@
 // Hoisted (issue #284) from tests/session/logout_exchange_test.cpp, which
 // introduced `pump_until_ready` for exactly this defect. Parameterised on the
 // way out, because it is the seventh member of a family that had each solved
-// the same problem separately and incompatibly — see the sibling census in
-// #284, alongside the census of raw `run_for(W); restart(); get()` sites that
-// have no helper at all.
+// the same problem separately and incompatibly — see issue #289's sibling-
+// helper census, alongside #289(a)'s census of raw
+// `run_for(W); restart(); get()` sites that have no helper at all.
 
 #pragma once
 
