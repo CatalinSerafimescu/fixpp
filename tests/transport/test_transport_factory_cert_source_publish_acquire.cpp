@@ -26,6 +26,7 @@
 
 #include <asio/awaitable.hpp>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <span>
 #include <thread>
@@ -142,12 +143,39 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
         ASSERT_TRUE(r.has_value()) << "reload_credentials() must succeed for non-null source";
     }
 
+    // Issue #283: hold the stimulus until it is WITNESSED. any_reader_started
+    // is a START barrier — it proves a reader entered the loop, not that one
+    // observed the window. Measured on a starved single core, the kRounds above
+    // complete in ~345 us with the readers never rescheduled: 40/40 runs closed
+    // the window with zero overlapping reads. Keep publishing until a reader has
+    // observed a non-null snapshot while the writer is STILL RUNNING, bounded by
+    // a deadline that fails loudly rather than hanging. yield() is required: on
+    // a saturated core the writer would otherwise starve the very readers it is
+    // waiting for. (A reader killed by its own ASSERT_* returns from the lambda;
+    // if every reader dies that way this loop exits on the deadline, not a hang.)
+    constexpr auto kWitnessDeadline = std::chrono::seconds{10};
+    const auto witness_until = std::chrono::steady_clock::now() + kWitnessDeadline;
+    for (int i = kRounds; valid_reads.load(std::memory_order_acquire) == 0 &&
+                          std::chrono::steady_clock::now() < witness_until;
+         ++i) {
+        auto src = sources[static_cast<std::size_t>(i % kSourceCount)];
+        auto r = factory->reload_credentials(src);
+        ASSERT_TRUE(r.has_value()) << "reload_credentials() must succeed for non-null source";
+        std::this_thread::yield();
+    }
+
+    // Sample BEFORE closing the window. A read counted after writer_done is set
+    // did not overlap the writer at all, so it proves nothing about the
+    // publish/acquire edge — asserting on the post-join total is what let the
+    // old witness go green on 37 of those same 40 zero-overlap runs.
+    const int in_window_reads = valid_reads.load(std::memory_order_acquire);
+
     writer_done.store(true, std::memory_order_release);
     for (auto& t : readers) {
         t.join();
     }
 
-    EXPECT_GT(valid_reads.load(), 0)
+    EXPECT_GT(in_window_reads, 0)
         << "readers did not observe any non-null snapshots during the write window — "
            "publish/acquire edge not exercised";
 }
