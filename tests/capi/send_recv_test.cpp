@@ -201,8 +201,7 @@ TEST(CapiSendRecv, TwoEngineRoundTripReplyFromDrainThread) {
     const auto order = make_app_payload("ORDER001");
     ASSERT_EQ(fixpp_session_send(ini_h, order.data(), order.size()), FIXPP_ERR_OK);
 
-    // The completing reply IS the proof (T030): poll until EVERY post-condition
-    // asserted below holds — not just a_got_reply.
+    // The completing reply IS the proof (T030).
     //
     // Issue #283: waiting on a_got_reply alone is a PROXY. B's drain thread
     // stores reply_sent strictly AFTER fixpp_session_send returns, and that
