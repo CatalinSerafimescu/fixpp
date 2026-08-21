@@ -65,11 +65,17 @@ Sync Impact Report — v0.11 → v1.0 (2026-08-20) — PENDING GATE A + USER SIG
         incompatible, and the comparator (`bench_compare.py:765-779`) has no approval path at all,
         failing removal unconditionally; (iii) left a resurrection hole where an approved removal
         followed by a re-add collects the addition exemption again.
-      The current text fixes all three by DESCRIBING THE SHIPPED PREDICATE (manifest membership),
-        naming the over-exemption it causes as a tracked follow-up rather than legislating around
-        it, and making paired status ABSOLUTELY irreversible — which is both what the comparator
-        enforces and what closes the resurrection hole, since a row that cannot be dropped cannot
-        be re-added.
+      Gate A round 4 (P1 ×1) — the round-3 text then permitted "retiring a benchmark entirely" as
+        a separate act. To the comparator that IS removal (`bench_compare.py:765-779` fails removal
+        and downgrade alike, with no retirement input), so the clause once more permitted what the
+        code forbids — AND reopened the resurrection hole it claimed to close, since a retired row
+        re-added later collects the candidate-only exemption again.
+      The current text fixes all four by DESCRIBING THE SHIPPED INSTRUMENT: the manifest-membership
+        predicate, with the over-exemption it causes named as a tracked follow-up rather than
+        legislated around; and paired status ABSOLUTELY irreversible with NO retirement carve-out,
+        which is exactly what the comparator enforces. The consequence — that there is no supported
+        way to delete a paired benchmark without an amendment — is stated as a named gap rather
+        than softened by an exception nothing enforces.
       Also dropped: "required to be an ancestor of the candidate", redundant — a merge-base is
         necessarily an ancestor.
   Added files: CHANGELOG.md (Article XX §4).
@@ -356,7 +362,8 @@ Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
    - a **crashed, empty or uninformative** measurement is a **failure**, never a pass; so is a **missing** measurement for any paired row **present in the merge-base's `bench/ci-suite.txt`**;
    - **exception, and the only one:** a paired row **absent from the merge-base's `bench/ci-suite.txt`** is a **candidate-only addition**. That absence must not be an error — adding a benched binary is what §3 asks for. Such a row is still **hard-gated on execution and schema** in the candidate, and is excluded from timing comparison for that PR only.
      ⚠️ **The predicate is manifest membership, not buildability, and that is a known over-exemption.** A binary the merge-base could build but never listed is exempted too — `bench/transport/*` are exactly that shape today: real CMake targets absent from the manifest. Narrowing the exemption to *genuinely unmeasurable in the base* requires a semantic target census in the base build tree, which is tracked as a follow-up against the bench gate, **not** claimed here. This clause deliberately describes the shipped predicate; a constitution that describes a better instrument than the one running is the defect this amendment exists to remove.
-   - **paired status is irreversible.** Once a row is `paired` in a merged manifest it may not be removed or downgraded — there is no approval path, and the comparator enforces this unconditionally. Retiring a benchmark **entirely** (deleting the binary and its row) is a different act, permitted, and requires its own disclosure in the PR. Stating this absolutely is what closes the resurrection hole: a row that cannot be dropped cannot be re-added to collect the addition exemption a second time.
+   - **paired status is irreversible, with no exception.** Once a row is `paired` in a merged manifest it may not be removed or downgraded — there is no approval path, and the comparator fails both unconditionally. **This includes retiring the benchmark entirely**: to the comparator, deleting a paired row *is* removing it, and no separate retirement path exists. Admitting one would reopen the resurrection hole the absolute rule closes — retire, then re-add, and the row collects the candidate-only exemption a second time. **Retiring a paired benchmark therefore requires amending this clause**, which is the intended friction: the alternative is an exemption whose only enforcement is that nobody abuses it.
+     ⚠️ Named gap, not a hidden one: there is consequently **no supported way to delete a paired benchmark**. Should that become necessary, it needs comparator support (an append-only paired-history ledger, and a reintroduced identity comparing against its latest paired ancestor rather than qualifying as a fresh addition) *and* an amendment — in that order, so the rule never again promises a path the instrument does not have.
 
    *Why the comparand changed (v1.0).* `bench/baselines/` cannot serve as one, by census rather than by argument. Of **27 tracked files** there, 25 are JSON and 2 are `.gitkeep`. Of the 25: **3** carry zero benchmark rows, **10** have no `cpu_time` key on any row, **1** (`bench/baselines/placeholder.json`) has a row whose `cpu_time` is `null`, and **11** carry numeric `cpu_time` — an exact partition, 3 + 10 + 1 + 11 = 25. Of those 11, one (`log/log_enqueue.json`) is a debug build, leaving **10** release records; one of those (`sync/async_mutex_baselines.json`) is a hand-authored partial schema lacking `real_time`, `time_unit` and `run_type`. **Nine** usable full-schema release comparands therefore exist, for 23 benched binaries. **Five** files in total declare a debug build — `log_enqueue.json` plus four wire records — across **two different key spellings** (`library_build_type` and `build_type`), which is why a single-spelling sweep undercounts them.
 

@@ -71,11 +71,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   describes the shipped predicate deliberately; a constitution that describes a better
   instrument than the one running is the defect this amendment exists to remove.
 
-  **Paired status is irreversible.** A merged `paired` row may not be removed or downgraded —
-  there is no approval path and the comparator enforces this unconditionally. Retiring a
-  benchmark entirely is a separate, permitted act requiring its own disclosure. Stating it
-  absolutely is what closes the resurrection hole: a row that cannot be dropped cannot be
-  re-added to collect the addition exemption twice.
+  **Paired status is irreversible, with no exception.** A merged `paired` row may not be removed
+  or downgraded — there is no approval path and the comparator fails both unconditionally. That
+  **includes retiring the benchmark entirely**: to the comparator, deleting a paired row *is*
+  removing it. Admitting a retirement path would reopen the resurrection hole the absolute rule
+  closes — retire, re-add, collect the addition exemption again — so retiring a paired benchmark
+  requires **amending the clause**.
+
+  ⚠️ Named gap: there is consequently **no supported way to delete a paired benchmark**. Doing so
+  would need comparator support — an append-only paired-history ledger, and a reintroduced
+  identity comparing against its latest paired ancestor rather than qualifying as a fresh
+  addition — *and* an amendment, in that order.
 - **This file**, per Article XX §4.
 
 ### Why this is backwards-incompatible
