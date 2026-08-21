@@ -1,4 +1,155 @@
 <!--
+Sync Impact Report — v0.11 → v1.0 (2026-08-21) — RATIFIED
+  Article XX §2 sequence observed in order: Gate A converged (round 5, PASS, 0 P1 / 0 P2 / 0 P3),
+    THEN user sign-off 2026-08-21. This header read PENDING until both had happened — an earlier
+    revision asserted RATIFIED while Gate A was still running (round 2, P1), and the flip to v1.0
+    is deliberately the last commit before merge rather than a claim made in advance.
+  Bump: MAJOR, per Article XX §4, with the CHANGELOG.md entry that clause requires.
+    This amendment is BOTH a tightening and a loosening, and the loosening does not cancel the
+    tightening. TIGHTENING: five binaries move from having NO hard timing decision at all to a hard
+    >+50% slowdown rejection, so changes that were previously mergeable now fail — an effective perf-budget
+    tightening even though the printed "±5%" numeral is unchanged. LOOSENING: checked-in baselines
+    cease to gate, and 18 of 23 manifest binaries carry no automated timing limit. Article XX §4
+    classifies perf-budget tightening as backwards-incompatible; converting an unenforced obligation
+    into an enforceable rejection criterion is such a tightening. (The v0.12/MINOR classification
+    carried by the first draft of this amendment was WRONG and was corrected at Gate A round 1, P1.)
+    NOTE: this document's version is independent of the library's release version. Constitution v1.0
+    asserts nothing about project GA; it is Article XX §4's major increment from v0.11.
+    NOTE: `CHANGELOG.md` did not exist when this amendment was written, though Article XX §4 has
+    required an entry in it since v0.1 — a mandate on a file that was never created, the same class
+    of defect as issue #209's FINDINGS.md. It is CREATED by this PR rather than the clause being
+    quietly ignored.
+  Modified principles:
+    - Article VIII §2 (Regression budget) — REWRITTEN. The comparand changes from checked-in
+      `bench/baselines/` to a PAIRED base-vs-candidate measurement on one runner, against the
+      merge-base of the candidate and the PR's TARGET BRANCH (A-B-A-B, min-per-tree). Stored
+      baselines are reclassified as informational and do not gate the per-PR budget. The budget is
+      stated ONE-SIDED throughout ("a slowdown greater than +5%", "must not exceed +50%") to match
+      the shipped comparator, which rejects only `delta > band` and passes an improvement
+      (`tools/bench_compare.py:1017`); the previous revision's two-sided "±" wording would have
+      required approval for a 10% speed-up (Gate A round 2, P2). The +50% sentinel is expressed as
+      a CONSTITUTIONAL CEILING on how weak CI may become — widening it needs an amendment — while
+      the current threshold/paired-set/sample-count/promotion-state are delegated to the bench-gate
+      decision record. The partial timing coverage is stated WITHOUT embedding its cardinality:
+      naming "five of twenty-three" made the constitution stale the moment a sixth binary is
+      promoted, which the non-decreasing rule actively invites (Gate A round 2, P2); the counts now
+      live in the historical rationale below, and the normative text carries a binding PROMOTION
+      DEADLINE instead — every binary eligible under §6a must be paired at or before the next
+      release. Acceptance of a >+5% slowdown requires a recorded paired measurement AND approval by
+      someone OTHER THAN THE AUTHOR, as a GitHub PR approval or an explicit user statement in the
+      PR thread, with an explicit sole-maintainer fallback — the previous revision's undefined
+      "maintainer approval" was self-approval with an extra step, since CODEOWNERS names only the
+      author (Gate A round 2, P1). The cumulative-drift follow-up is bound to v1.0 rather than left
+      permanently optional.
+    - Article VIII §4 (v1.0 perf targets, latency bullet) — clarified that §2's "checked-in baselines
+      do not gate" does NOT reach the v1.0 release baseline, which remains blocking. §2 governs the
+      per-PR budget only.
+  Added sections: Article VIII §2a (fail-closed invariants of the paired comparand: merge-base of
+    candidate and PR target branch, distinct from the candidate; crashed/empty/uninformative
+    measurement is a FAILURE, as is a missing measurement for any paired row PRESENT IN THE
+    MERGE-BASE'S MANIFEST; the sole exemption is a row ABSENT from that manifest; paired status is
+    IRREVERSIBLE).
+    ★ §2a has been rewritten TWICE, and both times the defect was the same: the constitution
+      asserted a rule the implementation does not have. Recorded because it is the transferable
+      lesson of this amendment.
+      Gate A round 2 (P1) — the first draft made EVERY missing measurement a failure, which would
+        have outlawed the candidate-only-addition path PR #272 had just spent Gate B rounds 4 and 5
+        building (`tools/bench_compare.py:671-673` "must never be an error"; `:823` excludes those
+        rows; `tier1.yml:2393-2395` classifies them before the base build).
+      Gate A round 3 (P1 ×3) — the replacement then (i) asserted a BUILDABILITY predicate the
+        classifier does not implement: it tests MANIFEST MEMBERSHIP, and `bench/transport/*` are
+        real CMake targets absent from the manifest, so a buildable base binary would be exempted
+        anyway; (ii) declared the paired set "non-decreasing" AND permitted approved narrowing —
+        incompatible, and the comparator (`bench_compare.py:765-779`) has no approval path at all,
+        failing removal unconditionally; (iii) left a resurrection hole where an approved removal
+        followed by a re-add collects the addition exemption again.
+      Gate A round 4 (P1 ×1) — the round-3 text then permitted "retiring a benchmark entirely" as
+        a separate act. To the comparator that IS removal (`bench_compare.py:765-779` fails removal
+        and downgrade alike, with no retirement input), so the clause once more permitted what the
+        code forbids — AND reopened the resurrection hole it claimed to close, since a retired row
+        re-added later collects the candidate-only exemption again.
+      The current text fixes all four by DESCRIBING THE SHIPPED INSTRUMENT: the manifest-membership
+        predicate, with the over-exemption it causes named as a tracked follow-up rather than
+        legislated around; and paired status ABSOLUTELY irreversible with NO retirement carve-out,
+        which is exactly what the comparator enforces. The consequence — that there is no supported
+        way to delete a paired benchmark without an amendment — is stated as a named gap rather
+        than softened by an exception nothing enforces.
+      Also dropped: "required to be an ancestor of the candidate", redundant — a merge-base is
+        necessarily an ancestor.
+  Added files: CHANGELOG.md (Article XX §4).
+  Removed sections: none.
+  §XVIII.5 disposition: NO conflict — this amends a verification instrument, not a protocol scope or
+    a post-1.0 carve-out.
+  Rationale: the rule as written was UNENFORCEABLE on exactly the set that matters, and a census
+    rather than an argument establishes it. Under `bench/baselines/` there are 27 TRACKED FILES: 25
+    JSON and 2 `.gitkeep`. Of the 25 JSON — an exact partition, 3+10+1+11=25 — 3 carry zero benchmark
+    rows (`codegen/typed_accessor_bench.json`, `dictionary/reify_bench.json`,
+    `session/placeholder.json`), 10 have no `cpu_time` KEY on any row, 1 (`bench/baselines/placeholder.json`,
+    the TOP-LEVEL file, distinct from the session one) has a row whose `cpu_time` is `null`, and 11
+    carry numeric `cpu_time`. Of those 11, one (`log/log_enqueue.json`) is a debug build → 10 release
+    records; one of those (`sync/async_mutex_baselines.json`) is a hand-authored PARTIAL SCHEMA
+    lacking `real_time`/`time_unit`/`run_type` → NINE usable full-schema release comparands, for 23
+    benched binaries. FIVE files declare a debug build (`log_enqueue.json` + four wire records) across
+    TWO key spellings, `library_build_type` and `build_type` — a single-spelling sweep undercounts
+    them, which is how the first draft said "1 debug build".
+    Of the FIVE binaries the paired tier hard-gates, FOUR (`framer_bench`, `parser_bench`,
+    `writer_bench`, `validator_bench`) declare `none:hand-authored-record-no-cpu_time-field`, and the
+    fifth's comparand — `dictionary/xml_loader.json` — was shown by #263 to describe a state that
+    never shipped: seeded by `d526e082`, invalidated THREE commits later (`git rev-list --count
+    d526e082..20a40f7b` = 3, not six as the first draft said) by `20a40f7b` inside the same PR (#66),
+    never re-seeded, so the ±5% budget was silently breached 8–16x against it for three months. Only
+    6 of 23 `bench/ci-suite.txt` rows declare a `gb-json:` comparand at all. The replacement
+    instrument needs no stored comparand and is the only one this repo has MEASURED to be valid
+    (paired same-VM 2.10x where unpaired read 1.02x on the same change). The ±5% figure is NOT
+    changed; what changes is what it is measured against, what CI can presently decide, and who may
+    accept a breach.
+  CI-state dependency: the CI facts §2 relies on are TRUE on `main` as of `91abcc74` (PR #272, merged
+    2026-08-20) and were re-verified against that tree, not against the branch this amendment was
+    first drafted on: `PAIRED_BAND_PCT = 50.0`; `bench/ci-suite.txt` has 23 rows, 5 `paired`, 6
+    `gb-json:`; the job is `bench` with no `continue-on-error` (the string "bench (soft)" survives
+    only inside a historical timing comment at `tier1.yml:2241`); `.specify/ci209-bench-gate.md`
+    exists. Gate A round 1's first P1 — that the amendment described CI absent from its own tree —
+    is closed by that merge plus this rebase.
+  Templates / dependents reviewed: plan-template.md / spec-template.md / tasks-template.md — no
+    change. Affected catalogue rows: none (no OFFICIAL row asserts a comparand).
+  Affected docs making PRESENT-TENSE comparand claims now superseded. ⚠️ This inventory is
+    EXPLICITLY NOT EXHAUSTIVE, and the previous revision's claim that active docs were "listed in
+    full" was FALSE (Gate A round 2, P2). Two successive sweeps found different sets: the first
+    required a CI verb AND the word "baseline" on one line and returned 13 files; a semantic sweep
+    over all of `.specify/*.md` + `bench/**` returned 25+, including several the first missed
+    entirely. Completing and correcting the inventory is tracked as a FOLLOW-UP ISSUE, not claimed
+    done here — an incomplete list presented as complete is the same defect class this amendment
+    exists to fix. Historical `specs/NNN-*` bundles are deliberately out of scope.
+    Known members, by claim (none fixed in this PR):
+      ±5%-vs-previous-tagged-release, a comparand that was never implemented at all:
+        .specify/2b-wire.md:661 · .specify/2c-codegen.md + .draft-r1.md:718 ·
+        .specify/2d-threading.md:1093 · .specify/2e-msgstore.md:1136 (also asserts >2x for
+        FileStore rows) · .specify/2f-async-mutex.md:1704 + .draft-r1.md:872
+      ±5%-vs-bench/baselines, the comparand this amendment retires:
+        .specify/2f-async-mutex.phase4-tests.md:18,156-157 · .specify/2j-controlplane.md:902 ·
+        .specify/2l-tap.md:1056 · .specify/2k-log-otel.md:57 · .specify/2g-tls.md:897 ·
+        .specify/2m-pybind.md:1265 · .specify/2i-capi.md · bench/README.md:5 ·
+        bench/REPORT.md:6,74,125 · bench/session/CMakeLists.txt:4,29 · bench/sync/CMakeLists.txt:4 ·
+        bench/threading/CMakeLists.txt:5 · bench/threading/bench_threading.cpp:18 ·
+        bench/session/{bench_heartbeat_cadence.cpp:10, fix_time_bench.cpp:13, fsm_bench.cpp:35,
+        heartbeat_bench.cpp:37, seqnum_bench.cpp:17, bench_compid_authorize.cpp:21} ·
+        bench/sync/bench_async_mutex_{contended.cpp:6, uncontended.cpp:7} ·
+        bench/tls/bench_pinset_snapshot_acquire.cpp:128 · bench/dictionary/xml_loader_bench.cpp
+      claims about binaries that are NOT in the 23-row manifest at all, so no CI gate of any kind
+      applies to them — a stronger defect than a stale comparand:
+        bench/transport/bench_async_read_some_dispatch.cpp:10 ·
+        bench/transport/bench_async_write_issue.cpp:10
+      asserts a THIRD threshold, neither +5% nor +50%:
+        bench/session/bench_file_store.cpp:8 and bench/session/CMakeLists.txt:4 ("> 2x regression")
+      bench/session/bench_heartbeat_cadence.cpp:10 · bench/session/fix_time_bench.cpp:13 ·
+        bench/session/fsm_bench.cpp:35 · bench/dictionary/xml_loader_bench.cpp (header comment)
+  Process: standalone amendment PR per Article XX §2 — NOT folded into PR #272, which carries a Gate
+    A WAIVER, and §2 mandates Codex Gate A review on EVERY amendment. Gate A therefore runs on this
+    PR and must not be waived; the Gate-A-fold deviation used by 035/043/068/069/075-078/082 applies
+    only to amendments riding a feature branch, which this is not. Gate A round 1 verdict was BLOCK
+    (4 P1 / 5 P2); this revision answers all nine. User ratification of the v-major classification and
+    of creating CHANGELOG.md given 2026-08-20.
+
 Sync Impact Report — v0.10 → v0.11 (2026-08-12) — RATIFIED
   Bump: MINOR (reclassifies a post-1.0 carve-out as delivered; no banned-pattern addition, no perf-budget tightening, Article I §1's codegen scope permissively unchanged → not v-major per Article XX §4).
   Modified principles:
@@ -92,7 +243,7 @@ Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
 -->
 # fixpp Constitution
 
-> **Status:** user-ratified v0.11 (2026-08-12) — annotation-only: records feature **082 (structural-group-detection, PR #261, closes issue #196)** reclassifying Article XVIII §7's "**`fixpp::v42` builders remain DEFERRED**" clause as **DELIVERED**. Repeating-group detection moves from the count field's declared XML datatype (`FieldRef::type == NumInGroup`) to the `<group>` element, at every read/validate and codegen site, so FIX 4.0/4.1/4.2's legacy `INT`-typed count fields register groups (4 / 7 / 18) and FIX 4.3 gains one real group its dictionary mis-types (`NoClearingInstructions(576)`); `fixpp::v42` gains the full typed builder/validator tier, with all 14 required-group omissions rejected by test rather than avoided by descope. **Article I §1's codegen scope is CONFIRMED UNCHANGED** — it already reads "FIX 4.2, FIX 4.4, FIX 5.0 SP2, FIXT.1.1", so this amendment is permissive and widens the version set nowhere; the six unaffected dictionaries are pinned byte-identical by golden diff. **The v0.9 entry below is left intact as historical record** even though its v42 clause is now superseded. Article XX §2 user-ratification given **2026-07-30** (`specs/082-structural-group-detection/spec.md` § Open decisions OD-2); Gate A converged at round 3 and was user-signed-off 2026-07-30, folded into feature 082. Prior: v0.10 (2026-07-18) — annotation-only: records feature 078 (precompiled-builder-libs, PR #200) restructuring the already-delivered typed builder/validator tier's on-disk layout into precompiled per-version STATIC libraries + a slim declaration surface (Article I §1 + XVIII §7 annotated); wire byte-identical, zero core/C-ABI change, consumer compile closure-bounded (L-078-1). Gate A (3 rounds) + Gate B (7 rounds, 0 waivers) folded into feature 078. Prior: v0.9 (2026-07-16) — REMOVES the FIX Latest typed `build_<Msg>` builder codegen post-1.0 carve-out from Article I §1 (both loci) + reclassifies Article XVIII §7 v50sp2 application-message builder widening as v1.0-delivered (v42 builders DEFERRED — L-063-1 zero-typed-groups, issue #196) + narrows the Article XVIII §2 v1.2 annotation: feature 077 delivers the FIX Latest typed builder tier (and v50sp2 builders + v44 dedup) via a structural-plan Args-dedup redesign (each group's Args emitted once per distinct `(no_tag, recursive signature)` plan into `fixpp::<ns>::groups`; 576 plans / ~78 MB single-TU vlatest header, down from 137 MB), proven per-version complete by a non-circular raw-XML/Orchestra census; only ApplExtID(1156)=303 differentiation + session negotiation remain post-1.0 for FIX Latest. Gate A folded into feature 077 (converged 3 rounds, no waivers). Prior: v0.8 (2026-07-16) — amends Article I §1 (BOTH the FIX Latest bullet and the post-1.0 milestone line) + annotates Article XVIII §2 to record that feature 076 delivers the FIX Latest typed **read/reify/args/validator codegen tier for all 181 messages** under `fixpp::vlatest` in v1.0 (opt-in `FIXPP_CODEGEN_FIX_LATEST`, non-circular census); the post-1.0 carve-out narrows to *typed `build_<Msg>` builder codegen + ApplExtID(1156)=303 differentiation + session negotiation* — the builder tier deferred to a follow-up (137 MB uncompilable Builders.hpp; Args-dedup redesign required). Gate A folded into feature 076. Prior: v0.7 (2026-07-14) — amends Article I §1 to narrow the FIX Latest post-1.0 carve-out (feature 074, v0.6) to *typed codegen + ApplExtID(1156)=303 differentiation + session negotiation*: dictionary-driven wire validation (required/type/enum-domain/group-structure checking) now ships generically for all ten supported dictionaries in v1.0 via feature 075; Gate A folded into feature 075, converged round 5, user-signed-off 2026-07-14. Prior: v0.6 (2026-07-13) — amends Article I §1 to add FIX Latest at the read/dictionary tier via `dict::OrchestraLoader` / `session_version::vlatest` (feature 074) — the first version-set widening; scoped to the dictionary/runtime-read tier only (typed/wire/session tiers stay post-1.0); Gate A folded into feature 074, user-signed-off 2026-07-13. Prior: v0.5 (2026-07-11) — amends Article XVIII §7 (reclassifies the FIX44 `msgcat='app'` typed-codegen subset of A-014..A-034 from v1.x-deferred to v1.0-delivered-by-069; full 83-message set-based delivery, FIX50-only rows + XMLnonFIX stay deferred; Gate A folded into feature 069, user-signed-off 2026-07-11). Prior: v0.4 (2026-07-11) — adds Article VII §8 (test-authoring convention: whole-binary grouped executables, `gtest_discover_tests` prohibited for buckets, `ctest -L` selection; feature 068). Ratified by explicit user request 2026-07-11 (not a standalone Article XX §2 PR — rode feature 068's branch; Codex Gate A waived, additive/no-trigger-category, same rationale as the feature's own `gate-a-waived` disposition). Prior: v0.3 (2026-06-17) — amends Article XII §5 (reopens the closed `SecurityProfile` set + adds `insecure_plain_tcp` non-TLS profile; opt-in-only, loud `[[deprecated]]`-class friction; Gate A folded into feature 043). v0.2 (2026-06-13) — amends Article XV §1 + XI §6 (FileStore §XV.4-offload bounded-frame exemption; Gate A folded into feature 035). Base v0.1 (2026-05-10) — Phase 2 Gate A converged (Codex review + Claude Sonnet review + Codex adversarial pass, all 18 issues resolved); see `decisions/constitution.md`.
+> **Status:** user-ratified **v1.0** (2026-08-21) — **first backwards-incompatible amendment** (Article XX §4 v-major, with the `CHANGELOG.md` entry that clause has required since v0.1 and which did not exist until this PR created it). Re-points Article VIII §2's regression comparand from checked-in `bench/baselines/` — of which only **nine** of 25 JSON files are usable full-schema release records — to a **paired base-vs-candidate run on one runner** against the merge-base of the candidate and the PR's target branch. The budget is stated **one-sided** (a slowdown greater than **+5%**) to match the shipped comparator; CI's provisional threshold **must not exceed +50%**, a constitutional ceiling on how weak CI may become. Adds **§2a**, the fail-closed invariants, whose sole exemption is a paired row **absent from the merge-base's manifest** and under which paired status is **irreversible with no exception**. Accepted slowdowns require approval by someone other than the author. §4's v1.0 release baseline is explicitly untouched. Implemented by PR #272 (`91abcc74`, closes the instrumentation half of #263). Standalone amendment PR #285 per Article XX §2 — **Gate A ran and was NOT waived**, converging at round 5 after four BLOCKs; Gate B waived (docs-only: `.specify/` + `CHANGELOG.md`, zero code and zero CI), rationale disclosed in the PR body. Prior: v0.11 (2026-08-12) — annotation-only: records feature **082 (structural-group-detection, PR #261, closes issue #196)** reclassifying Article XVIII §7's "**`fixpp::v42` builders remain DEFERRED**" clause as **DELIVERED**. Repeating-group detection moves from the count field's declared XML datatype (`FieldRef::type == NumInGroup`) to the `<group>` element, at every read/validate and codegen site, so FIX 4.0/4.1/4.2's legacy `INT`-typed count fields register groups (4 / 7 / 18) and FIX 4.3 gains one real group its dictionary mis-types (`NoClearingInstructions(576)`); `fixpp::v42` gains the full typed builder/validator tier, with all 14 required-group omissions rejected by test rather than avoided by descope. **Article I §1's codegen scope is CONFIRMED UNCHANGED** — it already reads "FIX 4.2, FIX 4.4, FIX 5.0 SP2, FIXT.1.1", so this amendment is permissive and widens the version set nowhere; the six unaffected dictionaries are pinned byte-identical by golden diff. **The v0.9 entry below is left intact as historical record** even though its v42 clause is now superseded. Article XX §2 user-ratification given **2026-07-30** (`specs/082-structural-group-detection/spec.md` § Open decisions OD-2); Gate A converged at round 3 and was user-signed-off 2026-07-30, folded into feature 082. Prior: v0.10 (2026-07-18) — annotation-only: records feature 078 (precompiled-builder-libs, PR #200) restructuring the already-delivered typed builder/validator tier's on-disk layout into precompiled per-version STATIC libraries + a slim declaration surface (Article I §1 + XVIII §7 annotated); wire byte-identical, zero core/C-ABI change, consumer compile closure-bounded (L-078-1). Gate A (3 rounds) + Gate B (7 rounds, 0 waivers) folded into feature 078. Prior: v0.9 (2026-07-16) — REMOVES the FIX Latest typed `build_<Msg>` builder codegen post-1.0 carve-out from Article I §1 (both loci) + reclassifies Article XVIII §7 v50sp2 application-message builder widening as v1.0-delivered (v42 builders DEFERRED — L-063-1 zero-typed-groups, issue #196) + narrows the Article XVIII §2 v1.2 annotation: feature 077 delivers the FIX Latest typed builder tier (and v50sp2 builders + v44 dedup) via a structural-plan Args-dedup redesign (each group's Args emitted once per distinct `(no_tag, recursive signature)` plan into `fixpp::<ns>::groups`; 576 plans / ~78 MB single-TU vlatest header, down from 137 MB), proven per-version complete by a non-circular raw-XML/Orchestra census; only ApplExtID(1156)=303 differentiation + session negotiation remain post-1.0 for FIX Latest. Gate A folded into feature 077 (converged 3 rounds, no waivers). Prior: v0.8 (2026-07-16) — amends Article I §1 (BOTH the FIX Latest bullet and the post-1.0 milestone line) + annotates Article XVIII §2 to record that feature 076 delivers the FIX Latest typed **read/reify/args/validator codegen tier for all 181 messages** under `fixpp::vlatest` in v1.0 (opt-in `FIXPP_CODEGEN_FIX_LATEST`, non-circular census); the post-1.0 carve-out narrows to *typed `build_<Msg>` builder codegen + ApplExtID(1156)=303 differentiation + session negotiation* — the builder tier deferred to a follow-up (137 MB uncompilable Builders.hpp; Args-dedup redesign required). Gate A folded into feature 076. Prior: v0.7 (2026-07-14) — amends Article I §1 to narrow the FIX Latest post-1.0 carve-out (feature 074, v0.6) to *typed codegen + ApplExtID(1156)=303 differentiation + session negotiation*: dictionary-driven wire validation (required/type/enum-domain/group-structure checking) now ships generically for all ten supported dictionaries in v1.0 via feature 075; Gate A folded into feature 075, converged round 5, user-signed-off 2026-07-14. Prior: v0.6 (2026-07-13) — amends Article I §1 to add FIX Latest at the read/dictionary tier via `dict::OrchestraLoader` / `session_version::vlatest` (feature 074) — the first version-set widening; scoped to the dictionary/runtime-read tier only (typed/wire/session tiers stay post-1.0); Gate A folded into feature 074, user-signed-off 2026-07-13. Prior: v0.5 (2026-07-11) — amends Article XVIII §7 (reclassifies the FIX44 `msgcat='app'` typed-codegen subset of A-014..A-034 from v1.x-deferred to v1.0-delivered-by-069; full 83-message set-based delivery, FIX50-only rows + XMLnonFIX stay deferred; Gate A folded into feature 069, user-signed-off 2026-07-11). Prior: v0.4 (2026-07-11) — adds Article VII §8 (test-authoring convention: whole-binary grouped executables, `gtest_discover_tests` prohibited for buckets, `ctest -L` selection; feature 068). Ratified by explicit user request 2026-07-11 (not a standalone Article XX §2 PR — rode feature 068's branch; Codex Gate A waived, additive/no-trigger-category, same rationale as the feature's own `gate-a-waived` disposition). Prior: v0.3 (2026-06-17) — amends Article XII §5 (reopens the closed `SecurityProfile` set + adds `insecure_plain_tcp` non-TLS profile; opt-in-only, loud `[[deprecated]]`-class friction; Gate A folded into feature 043). v0.2 (2026-06-13) — amends Article XV §1 + XI §6 (FileStore §XV.4-offload bounded-frame exemption; Gate A folded into feature 035). Base v0.1 (2026-05-10) — Phase 2 Gate A converged (Codex review + Claude Sonnet review + Codex adversarial pass, all 18 issues resolved); see `decisions/constitution.md`.
 > **Authority:** This document is project-wide non-negotiables. Every `/specify`, `/plan`, ADR, and PR must satisfy it. Conflicts are resolved by amending the constitution first (Article XX) — never by silently violating an article.
 > **Citation form:** other documents cite articles as `[const §Roman.arabic]` (e.g., `[const §VIII.3]`).
 
@@ -192,12 +343,36 @@ Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
 ## Article VIII — Performance Budgets & Benchmarks
 
 1. **Bench framework: Google Benchmark.** Every perf-sensitive module has a benchmark in `bench/`.
-2. **Regression budget: ±5%** vs `bench/baselines/` per profile. Intentional perf changes update the baseline **in the same PR** with rationale in the PR body.
+2. **Regression budget: a slowdown greater than +5%** against the **merge-base of the candidate and the PR's target branch**, measured as a **paired base-vs-candidate run on one runner** — both trees built and benchmarked in the same job, A-B-A-B, compared min-per-tree. The budget is **one-sided**: it bounds slowdowns. A speed-up needs no approval.
+
+   **+5% is the standard. It is not what automated CI presently decides.** Until the estimator characterisation in `.specify/ci209-bench-gate.md` §6a is satisfied, CI may enforce a provisional slowdown threshold that **must not exceed +50%** over an explicitly listed set of paired binaries. **A green sentinel is not evidence of +5% compliance.** That +50% ceiling is a constitutional limit on how weak CI may become — widening it requires an amendment — while the *current* threshold, paired set, sample count and promotion state are operational status maintained in that decision record, not here.
+
+   **Automated timing coverage is partial, and this clause promises no more than it delivers.** Only an explicitly listed subset of the binaries in `bench/ci-suite.txt` receives a paired timing comparison; the remainder are execution- and schema-checked only and carry **no automated timing limit whatsoever** — a slowdown in one is caught by review or not at all. **Execution coverage is not regression-budget coverage.** Paired status is **irreversible** and the subset therefore only grows (§2a).
+
+   **Closing that hole is an obligation with a deadline, and the deadline is on the evidence, not on the promotion.** `.specify/ci209-bench-gate.md` §6a makes a binary eligible for promotion on its A-vs-A spread across 20 `push:main` runs — but the workflow produces the A2 leg **only for rows already marked `paired`**, so an unpaired binary can never generate the evidence that would promote it. **That criterion is circular as it stands and cannot fire.** The binding requirement is therefore: a **characterisation lane that collects A-vs-A evidence for unpaired candidates must exist before the v1.0 library release**, and from the release at which it exists, every binary it shows eligible under §6a **must be paired at or before the next library release** ("release" here means a tagged library release, never a constitution version). Until that lane exists, no binary is promotable and this clause obliges building it — not pretending a promotion path is already open.
+
+   **Checked-in `bench/baselines/` files do not gate.** They are an informational tier: each row is reported with a named reason when it is not comparable. This governs the **per-PR** budget only — **§4's v1.0 release baseline is untouched by it and remains a blocker**. A per-change budget cannot by itself bound **cumulative drift** (repeated +4.9% steps each pass); a release-anchored comparand closing that hole **is required at v1.0** and is tracked as such, not left permanently optional.
+
+   **An accepted regression is never author-declared.** A slowdown beyond +5% requires, in the same PR: the actual paired measurement recorded, a rationale, and **approval by someone other than the change's author**, recorded as a GitHub PR approval or an explicit user statement in the PR thread — **not** a claim in the PR body or a label the author applied. Where the author is the sole maintainer and no independent approver exists, the fallback is **explicit user ratification recorded in the PR thread**, which is a distinct act from authoring the PR. Attaching a rationale is not acceptance, and §3's "a benchmark in the same PR" does not require that benchmark to *pass* — this clause does.
+
+   2a. **Fail-closed invariants of the paired comparand.** Constitutional, not workflow detail, so that a future workflow edit cannot remove them silently. Each states what the instrument **does**, not what would be ideal; where the two differ the gap is named rather than papered over.
+   - the base is the **merge-base of the candidate and the PR's target branch**, required to be distinct from the candidate;
+   - a **crashed, empty or uninformative** measurement is a **failure**, never a pass; so is a **missing** measurement for any paired row **present in the merge-base's `bench/ci-suite.txt`**;
+   - **exception, and the only one:** a paired row **absent from the merge-base's `bench/ci-suite.txt`** is a **candidate-only addition**. That absence must not be an error — adding a benched binary is what §3 asks for. Such a row is still **hard-gated on execution and schema** in the candidate, and is excluded from timing comparison for that PR only.
+     ⚠️ **The predicate is manifest membership, not buildability, and that is a known over-exemption.** A binary the merge-base could build but never listed is exempted too — `bench/transport/*` are exactly that shape today: real CMake targets absent from the manifest. Narrowing the exemption to *genuinely unmeasurable in the base* requires a semantic target census in the base build tree, which is tracked as a follow-up against the bench gate, **not** claimed here. This clause deliberately describes the shipped predicate; a constitution that describes a better instrument than the one running is the defect this amendment exists to remove.
+   - **paired status is irreversible, with no exception.** Once a row is `paired` in a merged manifest it may not be removed or downgraded — there is no approval path, and the comparator fails both unconditionally. **This includes retiring the benchmark entirely**: to the comparator, deleting a paired row *is* removing it, and no separate retirement path exists. Admitting one would reopen the resurrection hole the absolute rule closes — retire, then re-add, and the row collects the candidate-only exemption a second time. **Retiring a paired benchmark therefore requires amending this clause**, which is the intended friction: the alternative is an exemption whose only enforcement is that nobody abuses it.
+     ⚠️ Named gap, not a hidden one: there is consequently **no supported way to delete a paired benchmark**. Should that become necessary, it needs comparator support (an append-only paired-history ledger, and a reintroduced identity comparing against its latest paired ancestor rather than qualifying as a fresh addition) *and* an amendment — in that order, so the rule never again promises a path the instrument does not have.
+
+   *Why the comparand changed (v1.0).* `bench/baselines/` cannot serve as one, by census rather than by argument. Of **27 tracked files** there, 25 are JSON and 2 are `.gitkeep`. Of the 25: **3** carry zero benchmark rows, **10** have no `cpu_time` key on any row, **1** (`bench/baselines/placeholder.json`) has a row whose `cpu_time` is `null`, and **11** carry numeric `cpu_time` — an exact partition, 3 + 10 + 1 + 11 = 25. Of those 11, one (`log/log_enqueue.json`) is a debug build, leaving **10** release records; one of those (`sync/async_mutex_baselines.json`) is a hand-authored partial schema lacking `real_time`, `time_unit` and `run_type`. **Nine** usable full-schema release comparands therefore exist, for 23 benched binaries. **Five** files in total declare a debug build — `log_enqueue.json` plus four wire records — across **two different key spellings** (`library_build_type` and `build_type`), which is why a single-spelling sweep undercounts them.
+
+   Of the five binaries the paired tier gates, **four declare `none:` in `bench/ci-suite.txt`**, and the fifth's comparand — `dictionary/xml_loader.json` — was shown by issue #263 never to have described `main`: seeded by `d526e082`, invalidated **three** commits later by `20a40f7b` inside the same PR (#66), and never re-seeded, so the ±5% budget was breached 8–16× against it for three months without detection. **A budget stated against a comparand that does not exist is *unenforceable*, not strict.**
+
+   Paired same-runner measurement needs no stored comparand, and is the only instrument this repo has *measured* to be valid: an unpaired CI A/B read **1.02×** on a change that a paired same-VM A/B read **2.10×**.
 3. **No perf change merged without a benchmark in the same PR.**
 4. **v1.0 perf targets:**
    - Parser: parity-or-better with `hffix` on identical hardware (parse/sec).
    - Session throughput: parity-or-better with QuickFIX on identical hardware (messages/sec, end-to-end).
-   - Latency: end-to-end session round-trip p50 and p99 measured and reported in `bench/REPORT.md`; no specific number is constitutional, but regressions vs the v1.0 baseline are blockers.
+   - Latency: end-to-end session round-trip p50 and p99 measured and reported in `bench/REPORT.md`; no specific number is constitutional, but regressions vs the v1.0 baseline are blockers. **§2's "checked-in baselines do not gate" does not reach this clause** — the v1.0 release baseline is a release anchor, not a per-PR comparand, and remains blocking.
 5. **Allocator policy on the hot path:** zero `new`/`delete` between parse and `fromApp` callback. Arena/PMR is the default; deviations require justification in the relevant `/plan`.
 6. **Codex adversarial perf review** (v1.0 release-candidate gate) hunts for benchmark hacks, compiler optimization that elides work, and unrealistic data shapes. Findings are blockers.
 
