@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <chrono>
@@ -32,7 +33,9 @@ inline constexpr auto kPumpBudget = std::chrono::seconds{10};
 // on a context with outstanding work never drains early, so a pump built on it
 // burns a whole slice per call however fast the work is. Measured on 106 calls
 // of a 5-post operation: 20 ms slice = 2151 ms, 1 ms slice = 124 ms. Callers
-// that pump often should pass something small.
+// that pump often should pass something small. The floor holds for every full
+// slice; only the final slice of a run is clipped to the remaining budget (see
+// `pump_until` below), so the measured figures are unaffected.
 inline constexpr auto kPumpSlice = std::chrono::milliseconds{1};
 
 // Drive `ioc` until `ready()` returns true, or `budget` elapses. Returns
@@ -60,8 +63,10 @@ template <class Ready>
                               std::chrono::steady_clock::duration slice = kPumpSlice) {
     auto wg = asio::make_work_guard(ioc);
     const auto deadline = std::chrono::steady_clock::now() + budget;
-    while (!ready() && std::chrono::steady_clock::now() < deadline) {
-        ioc.run_for(slice);
+    auto now = std::chrono::steady_clock::now();
+    while (!ready() && now < deadline) {
+        ioc.run_for(std::min(slice, deadline - now));
+        now = std::chrono::steady_clock::now();
     }
     wg.reset();
     const bool done = ready();
