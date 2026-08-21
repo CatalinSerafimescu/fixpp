@@ -26,6 +26,7 @@
 
 #include <asio/awaitable.hpp>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <memory>
 #include <span>
@@ -99,7 +100,7 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
 
     std::atomic<bool> writer_done{false};
     std::atomic<int> any_reader_started{0};
-    std::atomic<int> valid_reads{0};  // reads that returned a known source id
+    std::atomic<unsigned> observed_ids{0};  // bit i ⇔ some reader saw sources[i]
 
     // Readers: concurrently call cert_source_snapshot() and assert the result is
     // one of the exact instances we published (or nullptr, which is also valid
@@ -126,7 +127,8 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
                     ASSERT_LT(id, kSourceCount)
                         << "cert_source_snapshot() returned an out-of-range id=" << id
                         << " — possible torn pointer (corrupted object identity)";
-                    ++valid_reads;
+                    observed_ids.fetch_or(1u << static_cast<unsigned>(id),
+                                          std::memory_order_release);
                 }
                 any_reader_started.store(1, std::memory_order_release);
             }
@@ -147,14 +149,19 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
     // is a START barrier — it proves a reader entered the loop, not that one
     // observed the window. Measured on a starved single core, the kRounds above
     // complete in ~345 us with the readers never rescheduled: 40/40 runs closed
-    // the window with zero overlapping reads. Keep publishing until a reader has
-    // observed a non-null snapshot while the writer is STILL RUNNING, bounded by
-    // a deadline that fails loudly rather than hanging. yield() is required: on
-    // a saturated core the writer would otherwise starve the very readers it is
-    // waiting for. (A reader killed by its own ASSERT_* returns from the lambda;
-    // if every reader dies that way this loop exits on the deadline, not a hang.)
+    // the window with zero overlapping reads. A single observed id is not
+    // enough either: once the writer stops storing, every later snapshot
+    // returns the same pointer, so a reader that only wakes up after the last
+    // store can still contribute one id post-window. Keep publishing until
+    // readers have observed TWO DISTINCT published source ids — unobtainable
+    // unless some read landed strictly between two stores, i.e. a reader ran
+    // while the store sequence was still advancing. Bounded by a deadline that
+    // fails loudly rather than hanging. yield() is required: on a saturated
+    // core the writer would otherwise starve the very readers it is waiting
+    // for. (A reader killed by its own ASSERT_* returns from the lambda; if
+    // every reader dies that way this loop exits on the deadline, not a hang.)
     const auto witness_until = std::chrono::steady_clock::now() + std::chrono::seconds{10};
-    for (int i = kRounds; valid_reads.load(std::memory_order_acquire) == 0 &&
+    for (int i = kRounds; std::popcount(observed_ids.load(std::memory_order_acquire)) < 2 &&
                           std::chrono::steady_clock::now() < witness_until;
          ++i) {
         auto src = sources[static_cast<std::size_t>(i % kSourceCount)];
@@ -163,20 +170,23 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
         std::this_thread::yield();
     }
 
-    // Sample BEFORE closing the window. A read counted after writer_done is set
-    // did not overlap the writer at all, so it proves nothing about the
-    // publish/acquire edge — asserting on the post-join total is what let the
-    // old witness go green on 37 of those same 40 zero-overlap runs.
-    const int in_window_reads = valid_reads.load(std::memory_order_acquire);
+    // Sample BEFORE closing the window. Belt-and-braces rather than
+    // load-bearing: once the writer stops storing, no new id can appear, so
+    // this sample and a post-join read would agree. The mechanism that makes
+    // the assertion an in-window statement is the two-distinct-ids condition
+    // above, not this sample's placement.
+    const unsigned witnessed_ids = observed_ids.load(std::memory_order_acquire);
 
     writer_done.store(true, std::memory_order_release);
     for (auto& t : readers) {
         t.join();
     }
 
-    EXPECT_GT(in_window_reads, 0)
-        << "readers did not observe any non-null snapshots during the write window — "
-           "publish/acquire edge not exercised";
+    EXPECT_GE(std::popcount(witnessed_ids), 2)
+        << "readers observed fewer than two distinct published sources inside the "
+           "write window — no read is proven to have landed between two publications, "
+           "so the publish/acquire edge is not exercised (witnessed_ids=0x"
+        << std::hex << witnessed_ids << ")";
 }
 
 }  // namespace
