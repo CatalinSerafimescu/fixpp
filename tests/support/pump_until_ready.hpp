@@ -92,10 +92,17 @@ template <class Ready>
 // Filed on #284 alongside the wider 340-site migration; out of scope for the
 // PR that introduced this header.
 //
-// This is a TEST-harness utility: production drives the io_context with a
-// continuous ioc.run() on worker threads (src/capi/engine.cpp), so a real
-// client never encounters this — it is an artifact of use_future + a manually
-// pumped, fixed-window io_context. [[feedback_mock_clock_advance_before_timer_armed_race]]
+// This is a test-harness utility, but the hazard it exists for is NOT
+// test-only — an earlier revision of this comment claimed it was, and that
+// claim was wrong. It is prevented by construction only on the C ABI, whose
+// boundary owns an internal io_context and worker thread(s) running ioc_.run()
+// continuously (src/capi/engine.cpp:8-9, 248-251). The C++ API is the opposite:
+// EngineConfig::executor is consumer-supplied and Engine::start() "does NOT
+// block or run the executor" (include/fixpp/session/engine.hpp:223), so a
+// consumer that drives its own io_context with a bounded run and then blocks on
+// a fixpp awaitable deadlocks exactly as this test did. Recorded as L-284-1 in
+// spec/behaviors-and-limitations.md — read it before treating this shape as a
+// harness quirk. [[feedback_mock_clock_advance_before_timer_armed_race]]
 template <class Fut>
 [[nodiscard]] bool pump_until_ready(asio::io_context& ioc, Fut& fut,
                                     std::chrono::steady_clock::duration budget = kPumpBudget,
