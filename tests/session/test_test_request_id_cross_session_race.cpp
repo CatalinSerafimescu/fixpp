@@ -49,6 +49,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -269,12 +270,21 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     SessionFixture sA{ioc.get_executor(), clock, "SENDER_A", "TARGET_A"};
     SessionFixture sB{ioc.get_executor(), clock, "SENDER_B", "TARGET_B"};
 
+    // Arena for inbound frame buffers. `on_inbound_frame` takes its span by
+    // value into the coroutine frame, so a block-scoped buffer dies with its
+    // block on ASSERT_TRUE's early return while the suspended coroutine still
+    // holds a span over it — `deque::push_back` never invalidates references
+    // to existing elements, so a span over `frames.back()` stays valid for the
+    // arena's whole (test-scope) lifetime. Declared BEFORE `quiesce` so it
+    // outlives the guard below.
+    std::deque<std::vector<std::byte>> frames;
+
     // #284 teardown. On the budget-exhausted path the awaited coroutine is
     // still SUSPENDED and its frame references sA/sB, the clock, and (for
-    // on_inbound_frame) a span over a block-scoped buffer. Declared AFTER the
-    // fixtures so it runs BEFORE them, on every exit path including the early
-    // `return` an ASSERT_* performs. See the header for why reordering the
-    // declarations cannot substitute.
+    // on_inbound_frame) a span into `frames`. Declared AFTER the fixtures and
+    // the frame arena so it runs BEFORE them, on every exit path including the
+    // early `return` an ASSERT_* performs. See the header for why reordering
+    // the declarations cannot substitute.
     quiesce_on_exit quiesce{ioc, *clock};
 
     // Open both sessions (initiator path: each emits a Logon immediately).
@@ -288,7 +298,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
     // Drive both sessions to Active by feeding them peer Logon-acks.
     {
-        auto logon_a = make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1);
+        auto& logon_a = frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1));
         auto fut_a = asio::co_spawn(ioc,
                                     sA.session->on_inbound_frame(
                                         std::span<const std::byte>{logon_a.data(), logon_a.size()}),
@@ -297,7 +307,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
         (void)fut_a.get();
     }
     {
-        auto logon_b = make_logon_frame("FIX.4.2", 1, "TARGET_B", "SENDER_B", 1);
+        auto& logon_b = frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_B", "SENDER_B", 1));
         auto fut_b = asio::co_spawn(ioc,
                                     sB.session->on_inbound_frame(
                                         std::span<const std::byte>{logon_b.data(), logon_b.size()}),
@@ -382,7 +392,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
         if (!tr_ids_a.empty()) {
             std::string latest_a = tr_ids_a.back();
-            auto hb = make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a);
+            auto& hb = frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a));
             auto fut = asio::co_spawn(
                 ioc, sA.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
                 asio::use_future);
@@ -393,7 +403,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
         if (!tr_ids_b.empty()) {
             std::string latest_b = tr_ids_b.back();
-            auto hb = make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b);
+            auto& hb = frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b));
             auto fut = asio::co_spawn(
                 ioc, sB.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
                 asio::use_future);
