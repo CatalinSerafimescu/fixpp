@@ -143,12 +143,25 @@ inline constexpr const char* kPumpBudgetMiss =
 // frame still pending — sufficient for the case this guard exists for, not a
 // general fix.
 //
-// `io_context::stopped()` is true iff the context ran out of work (as opposed
-// to hitting its run_for deadline with work still queued), so it is an EXACT,
-// not heuristic, detector of the residual above. Report it loudly rather than
-// exit silently: ADD_FAILURE (non-fatal — a fatal assertion in a destructor is
-// an inert `return`) so a guard that never quiesces shows up in CI instead of
-// leaving a dangling frame to fire nondeterministically later.
+// `io_context::stopped()` is a DISJUNCTION, not an exact detector: it is true
+// either because the context ran out of work or because something called
+// `stop()` explicitly (asio `io_context.hpp:453-455`). At THIS caller, the
+// preceding `restart()` clears any prior stopped flag, nothing in
+// `tests/session/test_test_request_id_cross_session_race.cpp` or
+// `tests/support/` calls `ioc.stop()`, and no production code outside
+// `src/capi/` creates a work guard — so `stopped()==false` here really does
+// mean session/coroutine work is still outstanding. It is also not
+// authoritative: `mock_clock::sleep_until` registers a new waiter whenever the
+// deadline is still in the future (`src/core/test/mock_clock.cpp:119-126`),
+// and `cancel_sleeps()` above is a ONE-SHOT drain that installs nothing to
+// reject a later registration (`src/core/test/mock_clock.cpp:166-181`) — so a
+// coroutine whose first run happens during this destructor's own `run_for`
+// (the session liveness loop's `sleep_until`, `src/session/session.cpp:4816`,
+// is the concrete case) can arm a sleep nothing will ever fire, and this guard
+// cannot force that residual, only observe it. Report what was observed rather
+// than exit silently: ADD_FAILURE (non-fatal — a fatal assertion in a
+// destructor is an inert `return`) so a guard that never quiesces shows up in
+// CI instead of leaving a dangling frame to fire nondeterministically later.
 struct quiesce_on_exit {
     asio::io_context& ioc;
     fixpp::core::Clock& clock;
@@ -158,9 +171,11 @@ struct quiesce_on_exit {
         ioc.restart();
         ioc.run_for(std::chrono::seconds{5});
         if (!ioc.stopped()) {
-            ADD_FAILURE() << "quiesce_on_exit: io_context did not run out of work within the 5s "
-                              "quiesce window — a coroutine frame is still suspended and will be "
-                              "destroyed while referencing objects that are about to be destructed.";
+            ADD_FAILURE() << "quiesce_on_exit: the io_context did not run out of work within the "
+                              "5s quiesce window. At this caller that is expected to mean a "
+                              "coroutine frame is still suspended and will be destroyed while "
+                              "referencing objects that are about to be destructed, but this guard "
+                              "only observes the residual, not its cause.";
         }
     }
 };
