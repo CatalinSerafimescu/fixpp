@@ -120,11 +120,11 @@ TEST(PinsetStress, ConcurrentAddRemoveAndFind) {
     }
 
     // Keep mutating until the finder has actually witnessed the pin absent.
-    // yield() is required: on a saturated core the writer would otherwise starve
-    // the very finder it is waiting for. Bounded by a wall-clock deadline, because
-    // what is being waited on is a thread being SCHEDULED, and by iteration
-    // ceiling, because every add() allocates a Certificate and a time-only bound
-    // is no bound at all on allocation.
+    // Throttling (not yield()) is required: on a saturated core the writer
+    // would otherwise starve the very finder it is waiting for. Bounded by a
+    // wall-clock deadline, because what is being waited on is a thread being
+    // SCHEDULED, and the throttle also bounds total allocation over the
+    // deadline (see the loop body below).
     const auto witness_until = std::chrono::steady_clock::now() + std::chrono::seconds{10};
     while (!observed_absent.load(std::memory_order_acquire) &&
            std::chrono::steady_clock::now() < witness_until) {
@@ -153,10 +153,15 @@ TEST(PinsetStress, ConcurrentAddRemoveAndFind) {
         (void)ps.add(make_cert(kFp));
         added = true;
     }
-    ASSERT_TRUE(ps.find(kFp).found()) << "the pin must be PRESENT when the write window closes";
 
     writer_done.store(true, std::memory_order_release);
     finder.join();
+
+    // Checked after join(), not before: a fatal assertion here with `finder`
+    // still joinable would be std::terminate (see the sibling publish/acquire
+    // file's documentation of this hazard). Nothing mutates the pinset between
+    // the re-add above and here, so post-join is semantically identical.
+    ASSERT_TRUE(ps.find(kFp).found()) << "the pin must be PRESENT when the write window closes";
 
     // The test is a data-race oracle (TSan catches violations). The witness below
     // is what makes that oracle non-vacuous: it proves the finder read

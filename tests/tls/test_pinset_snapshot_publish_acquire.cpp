@@ -80,6 +80,7 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
     std::atomic<bool> writer_done{false};
     std::atomic<int> reader_started{0};
     std::atomic<int> stable_reads{0};      // stable pin always consistent
+    std::atomic<int> consistent_reads{0};  // rotating pin found at least once, ever
 
     // Issue #287 (shape of #283): `consistent_reads > 0` / `stable_reads > 0`
     // read after the join, gated only by reader_started, was a START barrier —
@@ -114,6 +115,7 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
                        "possible torn publish/acquire";
                 // Dereference SAN vector too (exercises the PMR pointer fields).
                 (void)v.value->san_dns.size();
+                ++consistent_reads;
             }
             if (!now_found) {
                 observed_absent.store(true, std::memory_order_release);
@@ -160,15 +162,12 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
         }
     }
 
-    // Keep rotating until the reader has actually witnessed a transition.
-    // yield() is required: on a saturated core the writer would otherwise
-    // starve the very reader it is waiting for. Bounded by a deadline so a
-    // genuinely broken publish fails loudly instead of hanging.
     // Keep rotating until the reader has actually witnessed the pin absent.
-    // yield() is required: on a saturated core the writer would otherwise starve
-    // the very reader it is waiting for. Bounded by a wall-clock deadline, because
-    // what is being waited on is a thread being SCHEDULED, and by
-    // the allocation per add() bounded by throttling the loop's RATE.
+    // Throttling (not yield()) is required: on a saturated core the writer
+    // would otherwise starve the very reader it is waiting for. Bounded by a
+    // wall-clock deadline, because what is being waited on is a thread being
+    // SCHEDULED, and the throttle also bounds total allocation over the
+    // deadline (see the loop body below).
     const auto witness_until = std::chrono::steady_clock::now() + std::chrono::seconds{10};
     while (!observed_absent.load(std::memory_order_acquire) &&
            std::chrono::steady_clock::now() < witness_until) {
@@ -210,11 +209,14 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
     // sampling it early would risk a FALSE RED (a reader can complete the read
     // that sets it after the sample). So: count early, witness late.
     //
-    // consistent_reads is dropped — it asserted nothing this does not. It was
-    // incremented unconditionally inside `if (now_found)`, and the reader runs all
-    // three witnesses in the same iteration, so a reader that saw the pin absent
-    // in-window also ran the find that would have incremented it.
+    // consistent_reads is sampled here too, alongside stable_reads, for
+    // consistency with its neighbour — but unlike stable_reads it is NOT an
+    // in-window count. It asserts a purely functional fact ("the reader's
+    // find(kFpAdded) succeeded at least once, ever"), which is equally true
+    // read before or after the join; sampling late (post-join) would be just
+    // as valid.
     const int witnessed_stable = stable_reads.load(std::memory_order_acquire);
+    const int witnessed_consistent = consistent_reads.load(std::memory_order_acquire);
 
     writer_done.store(true, std::memory_order_release);
     reader.join();
@@ -228,6 +230,16 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
     EXPECT_GT(witnessed_stable, 0)
         << "reader thread did not observe the stable pin — "
            "snapshot_ invariant not exercised";
+    EXPECT_GT(witnessed_consistent, 0)
+        << "reader thread never observed the rotating pin FOUND — "
+           "find(kFpAdded) succeeding is not implied by observed_absent, which is "
+           "satisfiable even if the rotating pin were never findable at all";
+
+    // Nothing mutates the pinset after the re-add above, so this is equally
+    // valid post-join and avoids the fatal-assert-with-joinable-thread hazard
+    // documented at the ADD_FAILURE sites above.
+    EXPECT_TRUE(ps.find(kFpAdded).found())
+        << "rotating pin must be findable in its terminal (re-added) state";
 }
 
 }  // namespace
