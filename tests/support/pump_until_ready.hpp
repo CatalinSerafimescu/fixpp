@@ -13,6 +13,8 @@
 
 #pragma once
 
+#include <gtest/gtest.h>
+
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <chrono>
@@ -76,6 +78,20 @@ template <class Ready>
 // undefined, so the caller must also quiesce before teardown — `quiesce_on_exit`
 // below is the scope-guard form that covers ASSERT_*'s early return.
 //
+// This obligation binds callers whose coroutine input is NOT already outlived
+// by the pump's own scope (e.g. a block-scoped buffer passed by span into the
+// coroutine frame). It does NOT relieve a caller from also giving that input a
+// lifetime enclosing the guard — `quiesce_on_exit` only fixes the ORDER of
+// destruction, not a dangling reference within the surviving objects.
+//
+// Known un-migrated caller: tests/session/logout_exchange_test.cpp (ten sites:
+// :182, :192, :268, :276, :306, :361, :531, :573, :656, :666) has neither
+// `quiesce_on_exit` nor a `TearDown()`, and its `feed_inbound`/`open_session`
+// helpers fail with non-fatal `ADD_FAILURE()` and continue — so the test body
+// keeps pumping past a stale helper-local buffer rather than returning early.
+// Filed on #284 alongside the wider 340-site migration; out of scope for the
+// PR that introduced this header.
+//
 // This is a TEST-harness utility: production drives the io_context with a
 // continuous ioc.run() on worker threads (src/capi/engine.cpp), so a real
 // client never encounters this — it is an artifact of use_future + a manually
@@ -95,20 +111,34 @@ template <class Fut>
 inline constexpr const char* kPumpBudgetMiss =
     "#284: the operation did not complete within the bounded-pump budget. Site: ";
 
-// Destroy any still-suspended coroutine frames while the objects they reference
-// are alive.
+// Best-effort attempt to destroy any still-suspended coroutine frames while the
+// objects they reference are alive.
 //
 // Declare AFTER the fixtures whose lifetimes are at stake, so it runs BEFORE
 // them, on every exit path including the early `return` an ASSERT_* performs.
 // Reordering the declarations instead cannot work: the clock's parked waiters
 // hold work guards on the io_context, so EITHER destruction order has a
-// dangling side. The only safe state is no pending state.
+// dangling side. The only safe state is no pending state — but this guard only
+// OBSERVES whether that state was reached; it cannot force it (see below).
 //
 // `run_for` rather than a `run_one_for` loop deliberately: `run_one_until` also
 // tests its deadline before dispatching, so a slice-at-a-time drain can return
 // on "nothing was ready within the slice" and leave work queued — the very
 // mechanism documented above. `run_for` drains until the context genuinely runs
-// out of work, and costs ~nothing when there is none.
+// out of work OR its deadline elapses, whichever comes first — the difference
+// from a sliced drain is deadline LENGTH, not immunity to the mechanism. A
+// co_spawn frame holds a tracked-work guard, so a coroutine parked on anything
+// other than a clock sleep (the common case, released by cancel_sleeps() above)
+// keeps the context non-empty for the full 5s, and `run_for` returns with that
+// frame still pending — sufficient for the case this guard exists for, not a
+// general fix.
+//
+// `io_context::stopped()` is true iff the context ran out of work (as opposed
+// to hitting its run_for deadline with work still queued), so it is an EXACT,
+// not heuristic, detector of the residual above. Report it loudly rather than
+// exit silently: ADD_FAILURE (non-fatal — a fatal assertion in a destructor is
+// an inert `return`) so a guard that never quiesces shows up in CI instead of
+// leaving a dangling frame to fire nondeterministically later.
 struct quiesce_on_exit {
     asio::io_context& ioc;
     fixpp::core::Clock& clock;
@@ -117,6 +147,11 @@ struct quiesce_on_exit {
         clock.cancel_sleeps();
         ioc.restart();
         ioc.run_for(std::chrono::seconds{5});
+        if (!ioc.stopped()) {
+            ADD_FAILURE() << "quiesce_on_exit: io_context did not run out of work within the 5s "
+                              "quiesce window — a coroutine frame is still suspended and will be "
+                              "destroyed while referencing objects that are about to be destructed.";
+        }
     }
 };
 
