@@ -45,9 +45,11 @@
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -67,6 +69,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 
@@ -178,6 +181,19 @@ static std::uint32_t parse_tr_id(std::string_view s) {
     return v;
 }
 
+// ── Bounded pump (#284) ───────────────────────────────────────────────────────
+//
+// Every `co_spawn(..., use_future)` → `run_for(window)` → `restart()` →
+// `fut.get()` site below now waits with `pump_until_ready` instead: it drives
+// the context UNTIL the operation completes, bounded by a real-time budget.
+// The helper is the one logout_exchange_test.cpp introduced for this same
+// defect, hoisted to tests/support; its header carries the full rationale, the
+// failure text, and the teardown guard the budget path needs.
+using fixpp::test_support::kPumpBudgetMiss;
+using fixpp::test_support::pump_until;
+using fixpp::test_support::pump_until_ready;
+using fixpp::test_support::quiesce_on_exit;
+
 // ── Session fixture helper ─────────────────────────────────────────────────────
 
 struct SessionFixture {
@@ -254,36 +270,49 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     SessionFixture sA{ioc.get_executor(), clock, "SENDER_A", "TARGET_A"};
     SessionFixture sB{ioc.get_executor(), clock, "SENDER_B", "TARGET_B"};
 
+    // Arena for inbound frame buffers. `on_inbound_frame` takes its span by
+    // value into the coroutine frame, so a block-scoped buffer dies with its
+    // block on ASSERT_TRUE's early return while the suspended coroutine still
+    // holds a span over it — `deque::push_back` never invalidates references
+    // to existing elements, so a span over `frames.back()` stays valid for the
+    // arena's whole (test-scope) lifetime. Declared BEFORE `quiesce` so it
+    // outlives the guard below.
+    std::deque<std::vector<std::byte>> frames;
+
+    // #284 teardown. On the budget-exhausted path the awaited coroutine is
+    // still SUSPENDED and its frame references sA/sB, the clock, and (for
+    // on_inbound_frame) a span into `frames`. Declared AFTER the fixtures and
+    // the frame arena so it runs BEFORE them, on every exit path including the
+    // early `return` an ASSERT_* performs. See the header for why reordering
+    // the declarations cannot substitute.
+    quiesce_on_exit quiesce{ioc, *clock};
+
     // Open both sessions (initiator path: each emits a Logon immediately).
     auto fut_open_a = asio::co_spawn(ioc, sA.session->open(), asio::use_future);
-    ioc.run_for(50ms);
-    ioc.restart();
+    ASSERT_TRUE(pump_until_ready(ioc, fut_open_a)) << kPumpBudgetMiss << "opening session A";
     ASSERT_TRUE(fut_open_a.get().has_value()) << "Session A failed to open";
 
     auto fut_open_b = asio::co_spawn(ioc, sB.session->open(), asio::use_future);
-    ioc.run_for(50ms);
-    ioc.restart();
+    ASSERT_TRUE(pump_until_ready(ioc, fut_open_b)) << kPumpBudgetMiss << "opening session B";
     ASSERT_TRUE(fut_open_b.get().has_value()) << "Session B failed to open";
 
     // Drive both sessions to Active by feeding them peer Logon-acks.
     {
-        auto logon_a = make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1);
+        auto& logon_a = frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1));
         auto fut_a = asio::co_spawn(ioc,
                                     sA.session->on_inbound_frame(
                                         std::span<const std::byte>{logon_a.data(), logon_a.size()}),
                                     asio::use_future);
-        ioc.run_for(50ms);
-        ioc.restart();
+        ASSERT_TRUE(pump_until_ready(ioc, fut_a)) << kPumpBudgetMiss << "feeding session A's Logon-ack";
         (void)fut_a.get();
     }
     {
-        auto logon_b = make_logon_frame("FIX.4.2", 1, "TARGET_B", "SENDER_B", 1);
+        auto& logon_b = frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_B", "SENDER_B", 1));
         auto fut_b = asio::co_spawn(ioc,
                                     sB.session->on_inbound_frame(
                                         std::span<const std::byte>{logon_b.data(), logon_b.size()}),
                                     asio::use_future);
-        ioc.run_for(50ms);
-        ioc.restart();
+        ASSERT_TRUE(pump_until_ready(ioc, fut_b)) << kPumpBudgetMiss << "feeding session B's Logon-ack";
         (void)fut_b.get();
     }
 
@@ -340,10 +369,22 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     const int kIterations = 50;
 
     for (int i = 0; i < kIterations; ++i) {
-        // Advance by 1.5s to trigger the TestRequest emission.
+        // Advance by 1.5s to trigger the TestRequest emission, then pump until
+        // BOTH sessions have actually emitted this iteration's TestRequest.
+        //
+        // #284: this was the last fixed window in the test, and it was the one
+        // that mattered most — it is the emission driver, so an under-served
+        // 20 ms here silently shrinks the corpus every assertion below runs
+        // over rather than hanging. Waiting on the emission itself is what lets
+        // the count be pinned EXACTLY at kIterations instead of to a band, and
+        // a band wide enough to tolerate the old window would have admitted the
+        // very collapse it was meant to detect.
         clock->advance(std::chrono::milliseconds{1500});
-        ioc.run_for(20ms);
-        ioc.restart();
+        const auto want = static_cast<std::size_t>(i + 1);
+        ASSERT_TRUE(pump_until(ioc, [&] {
+            return sA.transport.collect_test_req_ids().size() >= want &&
+                   sB.transport.collect_test_req_ids().size() >= want;
+        })) << kPumpBudgetMiss << "waiting for both TestRequests at iteration " << i;
 
         // Find the most recently emitted TR from each session and echo it back.
         auto tr_ids_a = sA.transport.collect_test_req_ids();
@@ -351,23 +392,23 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
         if (!tr_ids_a.empty()) {
             std::string latest_a = tr_ids_a.back();
-            auto hb = make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a);
+            auto& hb = frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a));
             auto fut = asio::co_spawn(
                 ioc, sA.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
                 asio::use_future);
-            ioc.run_for(20ms);
-            ioc.restart();
+            ASSERT_TRUE(pump_until_ready(ioc, fut))
+                << kPumpBudgetMiss << "feeding session A's Heartbeat at iteration " << i;
             (void)fut.get();
         }
 
         if (!tr_ids_b.empty()) {
             std::string latest_b = tr_ids_b.back();
-            auto hb = make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b);
+            auto& hb = frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b));
             auto fut = asio::co_spawn(
                 ioc, sB.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
                 asio::use_future);
-            ioc.run_for(20ms);
-            ioc.restart();
+            ASSERT_TRUE(pump_until_ready(ioc, fut))
+                << kPumpBudgetMiss << "feeding session B's Heartbeat at iteration " << i;
             (void)fut.get();
         }
     }
@@ -376,15 +417,13 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     {
         auto fut_a = asio::co_spawn(ioc, sA.session->close(fixpp::session::close_mode::terminal),
                                     asio::use_future);
-        ioc.run_for(50ms);
-        ioc.restart();
+        ASSERT_TRUE(pump_until_ready(ioc, fut_a)) << kPumpBudgetMiss << "closing session A";
         (void)fut_a.get();
     }
     {
         auto fut_b = asio::co_spawn(ioc, sB.session->close(fixpp::session::close_mode::terminal),
                                     asio::use_future);
-        ioc.run_for(50ms);
-        ioc.restart();
+        ASSERT_TRUE(pump_until_ready(ioc, fut_b)) << kPumpBudgetMiss << "closing session B";
         (void)fut_b.get();
     }
 
@@ -392,11 +431,20 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     auto ids_a = sA.transport.collect_test_req_ids();
     auto ids_b = sB.transport.collect_test_req_ids();
 
-    // Assertion: both sessions must have emitted at least some TestRequests.
-    ASSERT_GT(ids_a.size(), 0u)
-        << "Session A emitted no TestRequests — check clock/liveness wiring";
-    ASSERT_GT(ids_b.size(), 0u)
-        << "Session B emitted no TestRequests — check clock/liveness wiring";
+    // Assertion: each session emitted exactly one TestRequest per iteration.
+    //
+    // #284: the previous `> 0` form was satisfiable by a SINGLE emission, so any
+    // change that pumped less would have collapsed the corpus every assertion
+    // below runs over while leaving all of them green — the #283/#286 vacuity
+    // class. An EQUALITY is only assertable because the loop above now waits on
+    // the emission instead of on a fixed window; a tolerance band wide enough to
+    // survive that window would have admitted the collapse it claims to catch.
+    ASSERT_EQ(ids_a.size(), static_cast<std::size_t>(kIterations))
+        << "Session A emitted " << ids_a.size() << " TestRequests, expected exactly "
+        << kIterations << " — check clock/liveness wiring";
+    ASSERT_EQ(ids_b.size(), static_cast<std::size_t>(kIterations))
+        << "Session B emitted " << ids_b.size() << " TestRequests, expected exactly "
+        << kIterations << " — check clock/liveness wiring";
 
     // ── Assertion (a): per-session isolation — sequences are contiguous ───────
     //
@@ -499,6 +547,12 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 // avoid races on the mock_clock's internal state (which is a test concern,
 // not the SUT concern). The TSan stress comes from both sessions running
 // their liveness loops concurrently on the pool threads.
+//
+// #284 disposition: the six `fut.get()` calls below are NOT the #284 defect.
+// This test runs on a `thread_pool`, whose own threads service the work, so a
+// get() here waits on a context that is still being pumped. #284 is specific to
+// the single-threaded io_context in test 1, where the test thread was both the
+// only pump and the blocked waiter.
 TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     asio::thread_pool pool{4};
 

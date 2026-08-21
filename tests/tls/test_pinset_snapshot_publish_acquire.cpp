@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <thread>
@@ -78,14 +79,35 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
 
     std::atomic<bool> writer_done{false};
     std::atomic<int> reader_started{0};
-    std::atomic<int> consistent_reads{0};  // find() returned expected DN
     std::atomic<int> stable_reads{0};      // stable pin always consistent
+    std::atomic<int> consistent_reads{0};  // rotating pin found at least once, ever
+
+    // Issue #287 (shape of #283): `consistent_reads > 0` / `stable_reads > 0`
+    // read after the join, gated only by reader_started, was a START barrier —
+    // entering the loop is not observing the write window, and kRounds is even so
+    // the rotating pin is PRESENT when the writer stops and every late find
+    // succeeds.
+    //
+    // The closure is that the reader observed the rotating pin ABSENT. Absent
+    // exists only between a remove and the next add, and the writer is pinned to
+    // stop in the PRESENT state (see the re-add after the witness loop), so no
+    // read taken after the window can see it. An absent observation is therefore
+    // necessarily in-window.
+    //
+    // A weaker form was tried first and REJECTED by mutation: "the reader saw the
+    // state change between two of its own consecutive reads". That proves the two
+    // reads BRACKET a mutation, not that either landed inside the window — a
+    // reader can read the pre-seeded pin, be descheduled through the whole burst,
+    // and read again afterwards. With the witness loop deleted it stayed GREEN
+    // 40/40 under starvation; the absent form REDs.
+    std::atomic<bool> observed_absent{false};
 
     std::thread reader([&] {
         while (!writer_done.load(std::memory_order_acquire)) {
             // Witness 1: find() on the rotating pin.
             auto v = ps.find(kFpAdded);
-            if (v.found()) {
+            const bool now_found = v.found();
+            if (now_found) {
                 // Any found entry MUST have the exact DN the writer provided.
                 // A torn write would leave subject_dn in an indeterminate state.
                 EXPECT_EQ(v.value->subject_dn, kExpectedDn)
@@ -94,6 +116,9 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
                 // Dereference SAN vector too (exercises the PMR pointer fields).
                 (void)v.value->san_dns.size();
                 ++consistent_reads;
+            }
+            if (!now_found) {
+                observed_absent.store(true, std::memory_order_release);
             }
 
             // Witness 2: snapshot() — acquire-load the entire snapshot.
@@ -137,17 +162,84 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
         }
     }
 
+    // Keep rotating until the reader has actually witnessed the pin absent.
+    // Throttling (not yield()) is required: on a saturated core the writer
+    // would otherwise starve the very reader it is waiting for. Bounded by a
+    // wall-clock deadline, because what is being waited on is a thread being
+    // SCHEDULED, and the throttle also bounds total allocation over the
+    // deadline (see the loop body below).
+    const auto witness_until = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    while (!observed_absent.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < witness_until) {
+        if (added) {
+            (void)ps.remove(kFpAdded);
+            added = false;
+        } else {
+            // Non-fatal + break, NOT ASSERT_*: a fatal assertion here returns from
+            // the test body with `reader` still joinable, which is std::terminate.
+            // (The kRounds loop above has that shape already; left as-is —
+            // pre-existing, and out of this change's scope.)
+            if (!ps.add(make_cert(kFpAdded, kExpectedDn)).has_value()) {
+                ADD_FAILURE() << "add() must succeed during the witness loop";
+                break;
+            }
+            added = true;
+        }
+        // Throttle, do NOT spin. An ITERATION ceiling cannot bound this loop:
+        // it is waiting for a descheduled reader, so it must be able to span the
+        // whole deadline, and 2000 spun iterations exhaust in milliseconds — a
+        // count-bounded net was proven not to rescue a 400 ms-delayed reader.
+        // Bounding the RATE instead bounds total allocation over the deadline
+        // (10 s / 200 us) while leaving the deadline the operative bound.
+        std::this_thread::sleep_for(std::chrono::microseconds{200});
+    }
+
+    // Leave the rotating pin PRESENT. Load-bearing, not tidiness: if the writer
+    // could stop with it absent, a find taken long after the window would see
+    // absent and satisfy the assertion having overlapped nothing.
+    if (!added) {
+        if (!ps.add(make_cert(kFpAdded, kExpectedDn)).has_value()) {
+            ADD_FAILURE() << "add() must succeed when restoring the terminal state";
+        }
+    }
+
+    // stable_reads is a COUNT, so it keeps growing after the window closes and
+    // must be sampled HERE to say anything about in-window reads. The absent
+    // witness is the opposite: it cannot be produced once the window closes, and
+    // sampling it early would risk a FALSE RED (a reader can complete the read
+    // that sets it after the sample). So: count early, witness late.
+    //
+    // consistent_reads is sampled here too, alongside stable_reads, for
+    // consistency with its neighbour — but unlike stable_reads it is NOT an
+    // in-window count. It asserts a purely functional fact ("the reader's
+    // find(kFpAdded) succeeded at least once, ever"), which is equally true
+    // read before or after the join; sampling late (post-join) would be just
+    // as valid.
+    const int witnessed_stable = stable_reads.load(std::memory_order_acquire);
+    const int witnessed_consistent = consistent_reads.load(std::memory_order_acquire);
+
     writer_done.store(true, std::memory_order_release);
     reader.join();
 
-    // At least some reads must have found the rotating pin (confirms the reader
-    // actually ran during the write window, not just after).
-    EXPECT_GT(consistent_reads.load(), 0)
-        << "reader thread did not observe any successful find() during the write "
-           "window — test may not have exercised the publish/acquire edge";
-    EXPECT_GT(stable_reads.load(), 0)
+    // The reader must have raced the writer, not merely run before or after it.
+    EXPECT_TRUE(observed_absent.load(std::memory_order_acquire))
+        << "the reader never observed the rotating pin ABSENT. It is present before "
+           "the window opens and present after it closes, so an absent read is the "
+           "proof that a find landed between a remove and the next add — without one, "
+           "the publish/acquire edge is not exercised";
+    EXPECT_GT(witnessed_stable, 0)
         << "reader thread did not observe the stable pin — "
            "snapshot_ invariant not exercised";
+    EXPECT_GT(witnessed_consistent, 0)
+        << "reader thread never observed the rotating pin FOUND — "
+           "find(kFpAdded) succeeding is not implied by observed_absent, which is "
+           "satisfiable even if the rotating pin were never findable at all";
+
+    // Nothing mutates the pinset after the re-add above, so this is equally
+    // valid post-join and avoids the fatal-assert-with-joinable-thread hazard
+    // documented at the ADD_FAILURE sites above.
+    EXPECT_TRUE(ps.find(kFpAdded).found())
+        << "rotating pin must be findable in its terminal (re-added) state";
 }
 
 }  // namespace

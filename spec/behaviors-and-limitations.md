@@ -2036,3 +2036,79 @@ Five findings surfaced by 083-group-delimiter-resolution's `/simplify` pass and 
 
   A copy is decisively cheaper than a second walk on both dictionaries measured (4–12x), so "1 walk + 1 copy" beats "2 walks" on the C++ `Session`, validation-ON path — the majority path this item's optimization claim rests on. The previous statement here ("reasoned, not measured") is superseded; this is the measured claim.
    **Provenance of these figures: measured BEFORE the 082 merge (`7efaa8ca`), and deliberately not re-taken.** 082 made group detection structural, which ADDS registration work to `as_table_view()` — FIX 4.2 alone goes from 0 to 18 registered groups (B-082-1). That makes the **walk** side more expensive, so the copy/walk ratio can only fall and the conclusion can only strengthen; the percentages above are therefore an upper bound on the ratio, not a current reading. Re-measuring needs a release build of `table_view_footprint_bench` on the merged tree; it was judged disproportionate for a number that is directionally safe by 5–10x of headroom. If the exact figures are ever load-bearing again, re-run `BM_TableView_Build*`/`BM_TableView_Copy*` and replace the table rather than adjusting it.
+
+## fixpp#284 — driving a consumer-supplied executor (2026-08-21)
+
+Issue #284 was diagnosed and fixed as a test-harness defect. The mechanism underneath it is not
+test-specific: it is reachable through the public C++ API by any consumer that supplies its own
+executor, which is the supported way to use `Engine`. That half is recorded here. Spec: none — this
+is a consumer-contract row, not a Spec-Kit feature. Evidence: issue #284, PR #288.
+
+### Limitations
+
+- **L-284-1 — if you supply the executor, you own driving it to completion: if a BOUNDED run
+  (e.g. `run_for`/`run_until`/`run_one_for`/`poll`/`run_one`) returns while the awaited `fixpp` operation is still
+  incomplete, and no other thread continues driving that executor, a subsequent blocking wait on it
+  is a PERMANENT deadlock, not a timeout.** The C++ API does not own a run loop. `EngineConfig::executor`
+  is a consumer-supplied `asio::any_io_executor` (`include/fixpp/core/engine_config.hpp:126`;
+  per-session override at `include/fixpp/session/session_config.hpp:167`), and `Engine::start()`
+  explicitly "**does NOT block or run the executor**" — it only `co_spawn`s the role loops
+  (`include/fixpp/session/engine.hpp:223`). In the consumer-driven topology this row concerns — a
+  manually pumped `io_context`, e.g. via a bounded run — the consumer drives it themselves; the
+  session's public operations — `Session::open()`, `close()`, `send()`, `on_inbound_frame()`
+  (`include/fixpp/session/session.hpp:156, 188, 282, 275`) — return `asio::awaitable`, so the
+  natural consumer spelling is `co_spawn(ioc, …, use_future)` plus a wait. (`any_io_executor` also
+  admits a self-driving `asio::thread_pool`, which has no bounded-run entry point and so cannot
+  express this hazard's antecedent — this row does not apply to that shape.)
+
+  **The deadlock.** `io_context::run_for` is `run_until`, and `run_one_until` tests
+  `now < abs_time` **before** dispatching, so a window that expires returns leaving ready handlers
+  **queued**. Worse, a `co_spawn`ed coroutine holds a tracked outstanding-work guard, so `run_for`
+  on a context with a live session never drains early — it burns its whole window, and whether the
+  awaited operation completed inside it is purely a scheduling question, not a property of the
+  operation. Once `run_for` returns, nothing services the context again, so a subsequent
+  `future::get()` (or any other blocking wait) parks **forever** on the same thread that was the
+  only pump:
+
+  ```cpp
+  auto fut = asio::co_spawn(ioc, sess.send(payload), asio::use_future);
+  ioc.run_for(200ms);   // may expire with the send still in flight — a live outcome, not a bug
+  fut.get();            // parks forever: this thread was the only pump, and it is now blocked
+  ```
+
+  This is a **liveness** failure, not a latency one: there is no timeout underneath it and no error
+  is ever returned. Widening the window does not fix it — it only changes how often the schedule
+  loses. Nothing in `fixpp` can surface it, because from the library's side the operation is simply
+  still suspended, exactly as it would be one microsecond before completing.
+
+  **The rule.** Either (a) drive the executor to completion on a thread that is not the one waiting —
+  a dedicated `ioc.run()` worker, which is precisely what the C ABI does for you — or (b) if you must
+  pump on the calling thread, pump **until the operation completes**, bounded by a budget that
+  *reports* rather than by a window that returns silently. A fixed window followed by an
+  unconditional blocking wait is the shape to avoid. Two adjacent hazards for (b): `run_for` on an
+  already-**stopped** context returns without dispatching anything (call `restart()` between
+  phases, or the next pump is a silent no-op); and on the give-up path the awaited coroutine is
+  still **suspended**, holding references to whatever you passed it, so destroying those objects
+  before the frame is a use-after-free.
+
+  **NOT reachable through the C ABI — prevented by construction, not merely unobserved.** The
+  `fixpp_engine_*` boundary owns an internal `io_context` plus worker thread(s), each running
+  `ioc_.run()` continuously with a work guard (`src/capi/engine.cpp:8-9, 248-255`), so a pure-C
+  consumer never supplies or drives an executor and cannot express this shape at all. The contract
+  in this row binds the C++ API only. (The blocking C-ABI calls have a *different* documented
+  hazard — B-050-3's strand self-deadlock when called from inside the receive callback — which is
+  unrelated to this one.)
+
+  **Why this is documented rather than prevented.** `Engine` stores only an `any_io_executor`;
+  nothing it holds can observe whether the consumer's loop is continuous or bounded, so there is no
+  cheap production assertion seam — the same conclusion L-048-2 reached for the drain-overlap
+  contract, and enforced the same way. A library-owned loop removes the hazard (that is what the C
+  ABI's shape buys), but changing the C++ API to own one would take the executor-injection contract
+  away from the consumers that depend on it.
+
+  **Status: `wontfix` for the current executor-injection contract** — a documented consumer
+  obligation, scoped to the C++ API. *(Issue #284; mechanism verified against the cached asio
+  `impl/io_context.hpp` at PR #288's Gate B. Reproduced deterministically in-tree by under-serving a
+  single window: the process parks — `State: S`, one thread, CPU frozen at one jiffy — and was still
+  wedged at 449 s, 15x the deadline it was first killed at. Fixed test-side by
+  `tests/support/pump_until_ready.hpp`, which is shape (b) above.)*

@@ -84,28 +84,51 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
   fixpp::sync::atomic_shared_ptr<Payload> ptr;
   std::atomic<bool> stop{false};
   std::atomic<bool> observed_broken{false};
-  // Gate B #4: count validated non-null reader observations so the test fails if
-  // the writer raced ahead and finished before any reader ever loaded (a
-  // stimulus-guarded no-op). A barrier (readers_ready + go) also forces all
-  // readers into their loop BEFORE the writer publishes.
-  std::atomic<int> valid_reads{0};
+  // A barrier (readers_ready + go) forces all readers into their loop BEFORE the
+  // writer publishes.
   std::atomic<int> readers_ready{0};
   std::atomic<bool> go{false};
+
+  // Issue #287 (shape of #283): readers_ready is a START barrier — N readers
+  // ENTERING their loops is not N readers OBSERVING the write window — and
+  // the `valid_reads > 0` counter it replaces did not close it either: the
+  // writer's stop condition already kept publishing while that count was zero,
+  // but a reader descheduled
+  // through the whole burst can wake after the writer's LAST store, read the
+  // now-stable payload, and satisfy the count having overlapped nothing. That
+  // is exactly the insufficiency #286's Gate B round 1 found in its own first
+  // fix. The closure is a TRANSITION observed between two of a reader's OWN
+  // consecutive loads: once the writer stops storing, every later load returns
+  // the same payload, so two consecutive loads differing is unobtainable unless
+  // a store landed strictly between them.
+  std::atomic<bool> observed_transition{false};
 
   const int kReaderCount = 4;
   // Torn-read stress floor (correctness depends on this quantity — see file header).
   const int kMinIterations = 20000;
-  // Hard ceiling for the overlap-witness extension below. The writer publishes at
+  // Bounds for the overlap-witness extension below. The writer publishes at
   // least kMinIterations, then keeps publishing ONLY while no reader has yet
-  // observed a writer payload (valid_reads == 0), capped here so a genuinely broken
-  // atomic (a store that never becomes visible) still terminates and fails the final
-  // EXPECT_GT rather than looping forever. 20× the floor is ample headroom for a
-  // single reader to be scheduled on an oversubscribed runner.
-  const int kMaxIterations = kMinIterations * 20;
+  // observed a transition. TWO bounds, because they cap different things and
+  // neither implies the other:
+  //   - a wall-clock deadline, because what the writer is waiting for is a
+  //     reader being SCHEDULED, and on an oversubscribed runner that is a time
+  //     quantity, not a store count;
+  //   - a throttle, because every phase-2 iteration make_shared's a Payload
+  //     that a reader may briefly hold via a snapshot, so an unthrottled phase
+  //     2 is unbounded allocation over the deadline. (The atomic itself does
+  //     NOT defer destruction of displaced pointees — `store()` releases the
+  //     previous payload at the end of the same call, see
+  //     atomic_shared_ptr.hpp:100-113 (and in this build the active path is the
+  //     native `std::atomic<std::shared_ptr>` alias, which has the same
+  //     property) — so the bound here is scheduling fairness plus total
+  //     allocation, not a retire list.) Note the throttle, NOT an iteration
+  //     ceiling: a count-bounded loop cannot span the deadline it is supposed
+  //     to wait out.
+  const auto kWitnessBudget = std::chrono::seconds{10};
 
   // Seed a valid (a == 0) payload so readers never load null before the writer's
-  // first store. The seed is deliberately NOT counted toward valid_reads (only
-  // writer payloads with a > 0 are) — see the reader loop below.
+  // first store, and is the only payload with a == 0 — which is what makes a
+  // seed→writer-payload change a genuine observation of the first store.
   {
     auto seed = std::make_shared<Payload>();
     seed->a = 0; seed->b = 0; seed->c = 0; seed->checksum = 0;
@@ -118,6 +141,7 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
     readers.emplace_back([&]() {
       readers_ready.fetch_add(1, std::memory_order_relaxed);
       while (!go.load(std::memory_order_acquire)) { /* spin to the barrier */ }
+      int prev_a = 0;  // 0 = no writer payload loaded yet (the seed is also 0)
       while (!stop.load(std::memory_order_relaxed)) {
         auto snapshot = ptr.load(std::memory_order_acquire);
         if (!snapshot) {
@@ -128,12 +152,31 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
           stop.store(true, std::memory_order_relaxed);
           return;
         }
-        // Gate B r2: count ONLY writer-produced payloads (a >= 1). The seed has
-        // a == 0, so a reader that only ever sees the seed (ineffective writer
-        // stores) does NOT satisfy the assertion below.
-        if (snapshot->a > 0) {
-          valid_reads.fetch_add(1, std::memory_order_relaxed);
+        // #287 overlap witness: two consecutive loads by THIS reader returning
+        // different WRITER payloads (both a >= 1, the seed is the only a == 0).
+        //
+        // Soundness: observing writer payload X means the load happened after
+        // store X; observing a different Y later means store Y came after store
+        // X. So at the first load the writer had NOT yet performed store Y — it
+        // was still storing. The load is therefore inside the write window.
+        //
+        // Excluding the seed is load-bearing, not tidiness. Allowing prev_a == 0
+        // admits the vacuous path this witness exists to close: a reader can load
+        // the seed before the writer starts, be descheduled through the ENTIRE
+        // burst, and load the final payload afterwards — two different values,
+        // zero overlap. Mutation-proven: with the seed admitted, deleting the
+        // phase-2 witness loop left the assertion GREEN 40/40 under starvation.
+        //
+        // This SUBSUMES the Gate-B-r2 `valid_reads` counter it replaces. Writer
+        // payloads start at a == 1 and the seed is the only a == 0, so any two
+        // distinct values include one writer payload — `valid_reads > 0` could
+        // never fail while this passes. Dropping it also removes a per-iteration
+        // relaxed RMW on a cacheline shared by four readers, from the middle of
+        // the very torn-read loop this test exists to stress.
+        if (prev_a > 0 && snapshot->a > 0 && snapshot->a != prev_a) {
+          observed_transition.store(true, std::memory_order_release);
         }
+        prev_a = snapshot->a;
       }
     });
   }
@@ -143,21 +186,39 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
   go.store(true, std::memory_order_release);
 
   std::thread writer([&]() {
-    // Publish the fixed torn-read floor (kMinIterations). If no reader has yet
-    // witnessed a writer payload by then, KEEP publishing (structural overlap
-    // guarantee: don't signal stop while valid_reads == 0) up to the hard ceiling.
-    for (int i = 1;
-         i <= kMaxIterations && !stop.load(std::memory_order_relaxed) &&
-             (i <= kMinIterations ||
-              valid_reads.load(std::memory_order_relaxed) == 0);
-         ++i) {
+    const auto publish = [&](int i) {
       auto payload = std::make_shared<Payload>();
       payload->a = i;
       payload->b = i * 3;
       payload->c = i ^ 0x55AA55AA;
       payload->checksum = payload->a + payload->b + payload->c;
       ptr.store(payload, std::memory_order_release);
+    };
+
+    // Phase 1: the fixed torn-read floor, published at full speed.
+    int i = 1;
+    for (; i <= kMinIterations && !stop.load(std::memory_order_relaxed); ++i) {
+      publish(i);
     }
+
+    // Phase 2: keep publishing until a reader has witnessed a transition.
+    // Throttling (not yield()) is required: on a saturated core the writer
+    // would otherwise starve the very readers it is waiting for.
+    const auto witness_until = std::chrono::steady_clock::now() + kWitnessBudget;
+    while (!observed_transition.load(std::memory_order_acquire) &&
+           !stop.load(std::memory_order_relaxed) &&
+           std::chrono::steady_clock::now() < witness_until) {
+      publish(i++);
+      // Throttle, do NOT spin. An ITERATION ceiling cannot bound this loop: it is
+      // waiting for a descheduled reader, so it must be able to span the whole
+      // deadline, and a spun ceiling exhausts in milliseconds — proven not to
+      // rescue a 400 ms-delayed reader. Bounding the RATE bounds total allocation
+      // over the deadline (10 s / 200 us) — each publish make_shared's a Payload
+      // that a reader's snapshot may briefly extend — while leaving the deadline
+      // the operative bound.
+      std::this_thread::sleep_for(std::chrono::microseconds{200});
+    }
+
     stop.store(true, std::memory_order_relaxed);
   });
 
@@ -168,9 +229,15 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
 
   EXPECT_FALSE(observed_broken.load(std::memory_order_relaxed))
       << "A torn/partial Payload was observed — store/load ordering is broken";
-  EXPECT_GT(valid_reads.load(std::memory_order_relaxed), 0)
-      << "No reader ever observed a published value — the publish/acquire "
-         "stimulus did not actually overlap a reader (Gate B #4).";
+  // Read AFTER the joins, deliberately. Sampling before the stop flag would be a
+  // FALSE-RED risk rather than belt-and-braces: a reader can pass its stop check,
+  // perform the load that completes a genuine in-window transition, and set the
+  // flag after the sample. A recorded transition proves a store landed between
+  // two of that reader's loads whenever the flag is read.
+  EXPECT_TRUE(observed_transition.load(std::memory_order_acquire))
+      << "No reader observed the published payload CHANGE between two of its own "
+         "consecutive loads — no load is proven to have landed between two stores, "
+         "so the publish/acquire stimulus did not overlap a reader (#287).";
 }
 
 // ── Gate B P1 regression: pointee destructor re-enters the SAME atomic ────────
