@@ -2046,16 +2046,20 @@ is a consumer-contract row, not a Spec-Kit feature. Evidence: issue #284, PR #28
 
 ### Limitations
 
-- **L-284-1 — if you supply the executor, you own driving it to completion: a BOUNDED run
-  (`run_for`/`run_until`/`run_one_for`) followed by a blocking wait on a `fixpp` awaitable is a
-  PERMANENT deadlock, not a timeout.** The C++ API does not own a run loop. `EngineConfig::executor`
+- **L-284-1 — if you supply the executor, you own driving it to completion: if a BOUNDED run
+  (`run_for`/`run_until`/`run_one_for`) returns while the awaited `fixpp` operation is still
+  incomplete, and no other thread continues driving that executor, a subsequent blocking wait on it
+  is a PERMANENT deadlock, not a timeout.** The C++ API does not own a run loop. `EngineConfig::executor`
   is a consumer-supplied `asio::any_io_executor` (`include/fixpp/core/engine_config.hpp:126`;
   per-session override at `include/fixpp/session/session_config.hpp:167`), and `Engine::start()`
   explicitly "**does NOT block or run the executor**" — it only `co_spawn`s the role loops
-  (`include/fixpp/session/engine.hpp:223`). The consumer therefore drives the `io_context`, and the
+  (`include/fixpp/session/engine.hpp:223`). In the consumer-driven topology this row concerns — a
+  manually pumped `io_context`, e.g. via a bounded run — the consumer drives it themselves; the
   session's public operations — `Session::open()`, `close()`, `send()`, `on_inbound_frame()`
   (`include/fixpp/session/session.hpp:156, 188, 282, 275`) — return `asio::awaitable`, so the
-  natural consumer spelling is `co_spawn(ioc, …, use_future)` plus a wait.
+  natural consumer spelling is `co_spawn(ioc, …, use_future)` plus a wait. (`any_io_executor` also
+  admits a self-driving `asio::thread_pool`, which has no bounded-run entry point and so cannot
+  express this hazard's antecedent — this row does not apply to that shape.)
 
   **The deadlock.** `io_context::run_for` is `run_until`, and `run_one_until` tests
   `now < abs_time` **before** dispatching, so a window that expires returns leaving ready handlers
@@ -2089,7 +2093,7 @@ is a consumer-contract row, not a Spec-Kit feature. Evidence: issue #284, PR #28
 
   **NOT reachable through the C ABI — prevented by construction, not merely unobserved.** The
   `fixpp_engine_*` boundary owns an internal `io_context` plus worker thread(s), each running
-  `ioc_.run()` continuously with a work guard (`src/capi/engine.cpp:8-9, 248-251`), so a pure-C
+  `ioc_.run()` continuously with a work guard (`src/capi/engine.cpp:8-9, 248-255`), so a pure-C
   consumer never supplies or drives an executor and cannot express this shape at all. The contract
   in this row binds the C++ API only. (The blocking C-ABI calls have a *different* documented
   hazard — B-050-3's strand self-deadlock when called from inside the receive callback — which is

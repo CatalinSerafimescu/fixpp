@@ -96,13 +96,16 @@ template <class Ready>
 // test-only — an earlier revision of this comment claimed it was, and that
 // claim was wrong. It is prevented by construction only on the C ABI, whose
 // boundary owns an internal io_context and worker thread(s) running ioc_.run()
-// continuously (src/capi/engine.cpp:8-9, 248-251). The C++ API is the opposite:
+// continuously (src/capi/engine.cpp:8-9, 248-255). The C++ API is the opposite:
 // EngineConfig::executor is consumer-supplied and Engine::start() "does NOT
 // block or run the executor" (include/fixpp/session/engine.hpp:223), so a
-// consumer that drives its own io_context with a bounded run and then blocks on
-// a fixpp awaitable deadlocks exactly as this test did. Recorded as L-284-1 in
-// spec/behaviors-and-limitations.md — read it before treating this shape as a
-// harness quirk. [[feedback_mock_clock_advance_before_timer_armed_race]]
+// consumer that drives its own io_context with a bounded run, and then blocks
+// on a fixpp awaitable, deadlocks exactly as this test did IF the bounded run
+// returns before the awaitable completes AND no other thread continues driving
+// that io_context. Recorded, with those two conditions attached to the
+// deadlock claim, as L-284-1 in spec/behaviors-and-limitations.md — read it
+// before treating this shape as a harness quirk.
+// [[feedback_mock_clock_advance_before_timer_armed_race]]
 template <class Fut>
 [[nodiscard]] bool pump_until_ready(asio::io_context& ioc, Fut& fut,
                                     std::chrono::steady_clock::duration budget = kPumpBudget,
