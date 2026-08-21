@@ -2047,7 +2047,7 @@ is a consumer-contract row, not a Spec-Kit feature. Evidence: issue #284, PR #28
 ### Limitations
 
 - **L-284-1 — if you supply the executor, you own driving it to completion: if a BOUNDED run
-  (`run_for`/`run_until`/`run_one_for`) returns while the awaited `fixpp` operation is still
+  (e.g. `run_for`/`run_until`/`run_one_for`/`poll`/`run_one`) returns while the awaited `fixpp` operation is still
   incomplete, and no other thread continues driving that executor, a subsequent blocking wait on it
   is a PERMANENT deadlock, not a timeout.** The C++ API does not own a run loop. `EngineConfig::executor`
   is a consumer-supplied `asio::any_io_executor` (`include/fixpp/core/engine_config.hpp:126`;
