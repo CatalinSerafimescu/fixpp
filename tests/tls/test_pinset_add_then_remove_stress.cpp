@@ -16,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <fixpp/tls/certificate.hpp>
 #include <fixpp/tls/pinset.hpp>
@@ -54,17 +55,39 @@ TEST(PinsetStress, ConcurrentAddRemoveAndFind) {
     // finder_ready: the finder sets this to 1 after its first loop iteration,
     // ensuring the main thread waits until the finder has actually started.
     std::atomic<int> finder_started{0};
-    std::atomic<int> find_count{0};
+
+    // Issue #287 (shape of #283): the previous witness was `find_count > 0`
+    // read after the join, gated only by finder_started — a START barrier.
+    // Entering the loop is not observing the write window, and a post-join total
+    // counts finds that overlapped nothing: kRounds is even, so the pin is
+    // PRESENT when the writer stops and every late find succeeds.
+    //
+    // The closure is that the finder observed the pin ABSENT. Absent exists only
+    // between a remove and the next add, and the writer is pinned to stop in the
+    // PRESENT state (see the re-add after the witness loop), so no read taken
+    // after the window can see it. An absent observation is therefore necessarily
+    // in-window.
+    //
+    // A weaker form was tried first and REJECTED by mutation: "the finder saw the
+    // state change between two of its own consecutive reads". That proves the two
+    // reads BRACKET a mutation, not that either landed inside the window — a
+    // finder can read the pre-seeded pin, be descheduled through the whole burst,
+    // and read again afterwards. With the witness loop deleted it stayed GREEN
+    // 40/40 under starvation; the absent form REDs. This is #286's own lesson
+    // (a fix for a vacuous witness can itself be vacuous), re-earned here.
+    std::atomic<bool> observed_absent{false};
 
     // Thread B: finder — runs concurrently with writer.
     std::thread finder([&] {
         while (!writer_done.load(std::memory_order_acquire)) {
             auto v = ps.find(kFp);
-            if (v.found()) {
+            const bool now_found = v.found();
+            if (now_found) {
                 // Dereference value: must be safe (snapshot keeps it alive).
                 // Touch subject_dn to exercise the reference under ASan.
                 (void)v.value->subject_dn.size();
-                ++find_count;
+            } else {
+                observed_absent.store(true, std::memory_order_release);
             }
             // Also exercise snapshot() path.
             auto snap = ps.snapshot();
@@ -96,13 +119,53 @@ TEST(PinsetStress, ConcurrentAddRemoveAndFind) {
         }
     }
 
+    // Keep mutating until the finder has actually witnessed the pin absent.
+    // yield() is required: on a saturated core the writer would otherwise starve
+    // the very finder it is waiting for. Bounded by a wall-clock deadline, because
+    // what is being waited on is a thread being SCHEDULED, and by iteration
+    // ceiling, because every add() allocates a Certificate and a time-only bound
+    // is no bound at all on allocation.
+    const auto witness_until = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    while (!observed_absent.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < witness_until) {
+        if (added) {
+            (void)ps.remove(kFp);
+            added = false;
+        } else {
+            (void)ps.add(make_cert(kFp));
+            added = true;
+        }
+        // Throttle, do NOT spin. An ITERATION ceiling cannot bound this loop:
+        // it is waiting for a descheduled reader, so it must be able to span the
+        // whole deadline, and 2000 spun iterations exhaust in milliseconds — a
+        // count-bounded net was proven not to rescue a 400 ms-delayed reader.
+        // Bounding the RATE instead bounds total allocation over the deadline
+        // (10 s / 200 us) while leaving the deadline the operative bound.
+        std::this_thread::sleep_for(std::chrono::microseconds{200});
+    }
+
+    // Leave the pin PRESENT. This is what makes the witness sound, not tidiness:
+    // if the writer could stop with the pin absent, a find taken long after the
+    // window would see absent and satisfy the assertion having overlapped
+    // nothing. The loop exits at an arbitrary point in the alternation, so the
+    // terminal state has to be restored explicitly.
+    if (!added) {
+        (void)ps.add(make_cert(kFp));
+        added = true;
+    }
+    ASSERT_TRUE(ps.find(kFp).found()) << "the pin must be PRESENT when the write window closes";
+
     writer_done.store(true, std::memory_order_release);
     finder.join();
 
-    // The test is a data-race oracle (TSan catches violations).
-    // Additionally verify find_count > 0 to confirm finder actually ran.
-    EXPECT_GT(find_count.load(), 0)
-        << "finder thread must have completed at least one successful find";
+    // The test is a data-race oracle (TSan catches violations). The witness below
+    // is what makes that oracle non-vacuous: it proves the finder read
+    // concurrently with the mutations, not merely before or after them.
+    EXPECT_TRUE(observed_absent.load(std::memory_order_acquire))
+        << "the finder never observed the pin ABSENT. The pin is present before the "
+           "window opens and present after it closes, so an absent read is the proof "
+           "that a find landed between a remove and the next add — without one, the "
+           "concurrent add/remove/find window was not exercised";
 }
 
 }  // namespace

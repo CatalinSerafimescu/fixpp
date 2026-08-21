@@ -64,6 +64,7 @@
 #include "_fixtures_/store_temp_dir.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
@@ -140,35 +141,9 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
     return wire.substr(pos, end - pos);
 }
 
-// Bounded pump: drive `ioc` until `fut` is ready (10 s cap); returns whether it
-// became ready. Replaces the `ioc.run_for(FIXED); ioc.restart(); fut.get()`
-// idiom, which deadlocks when the awaited op posts its completion back to `ioc`
-// AFTER the fixed window closes and nothing pumps `ioc` again (observed as a
-// 120 s ctest timeout on slow MSVC-debug runs of the FileStore-offloaded test).
-// A work_guard keeps `ioc` alive across 20 ms slices; the trailing restart()
-// leaves it runnable for the next phase (a stopped context makes the next
-// run_for a silent no-op). Callers MUST check the bool BEFORE fut.get() so a
-// genuine lost-wake FAILs loudly at 10 s instead of hanging out the timeout.
-//
-// This is a TEST-harness utility: production drives the io_context with a
-// continuous ioc.run() on worker threads (src/capi/engine.cpp), so a real
-// client never encounters this — it is an artifact of use_future + a manually
-// pumped, fixed-window io_context. [[feedback_mock_clock_advance_before_timer_armed_race]]
-template <class Fut>
-[[nodiscard]] bool pump_until_ready(asio::io_context& ioc, Fut& fut) {
-    auto wg = asio::make_work_guard(ioc);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
-    while (fut.wait_for(std::chrono::milliseconds{0}) != std::future_status::ready &&
-           std::chrono::steady_clock::now() < deadline) {
-        ioc.run_for(std::chrono::milliseconds{20});
-    }
-    wg.reset();
-    const bool ready = fut.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready;
-    ioc.restart();
-    return ready;
-}
-
 }  // namespace
+
+using fixpp::test_support::pump_until_ready;
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
 
