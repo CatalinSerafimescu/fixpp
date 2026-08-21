@@ -113,11 +113,15 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
   //   - a wall-clock deadline, because what the writer is waiting for is a
   //     reader being SCHEDULED, and on an oversubscribed runner that is a time
   //     quantity, not a store count;
-  //   - a throttle, because every phase-2 iteration make_shared's a Payload and
-  //     this atomic DEFERS destruction of displaced pointees (see the deadlock
-  //     regression below), so an unthrottled phase 2 is unbounded allocation plus
-  //     a growing retire list. Note the throttle, NOT an iteration ceiling: a
-  //     count-bounded loop cannot span the deadline it is supposed to wait out.
+  //   - a throttle, because every phase-2 iteration make_shared's a Payload
+  //     that a reader may briefly hold via a snapshot, so an unthrottled phase
+  //     2 is unbounded allocation over the deadline. (The atomic itself does
+  //     NOT defer destruction of displaced pointees — `store()` releases the
+  //     previous payload at the end of the same call, see
+  //     atomic_shared_ptr.hpp:100-113 — so the bound here is scheduling
+  //     fairness plus total allocation, not a retire list.) Note the throttle,
+  //     NOT an iteration ceiling: a count-bounded loop cannot span the
+  //     deadline it is supposed to wait out.
   const auto kWitnessBudget = std::chrono::seconds{10};
 
   // Seed a valid (a == 0) payload so readers never load null before the writer's
@@ -196,8 +200,8 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
     }
 
     // Phase 2: keep publishing until a reader has witnessed a transition.
-    // yield() is required: on a saturated core the writer would otherwise
-    // starve the very readers it is waiting for.
+    // Throttling (not yield()) is required: on a saturated core the writer
+    // would otherwise starve the very readers it is waiting for.
     const auto witness_until = std::chrono::steady_clock::now() + kWitnessBudget;
     while (!observed_transition.load(std::memory_order_acquire) &&
            !stop.load(std::memory_order_relaxed) &&
@@ -207,9 +211,9 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
       // waiting for a descheduled reader, so it must be able to span the whole
       // deadline, and a spun ceiling exhausts in milliseconds — proven not to
       // rescue a 400 ms-delayed reader. Bounding the RATE bounds total allocation
-      // over the deadline (10 s / 200 us) — which matters here because this
-      // atomic DEFERS destruction of displaced pointees — while leaving the
-      // deadline the operative bound.
+      // over the deadline (10 s / 200 us) — each publish make_shared's a Payload
+      // that a reader's snapshot may briefly extend — while leaving the deadline
+      // the operative bound.
       std::this_thread::sleep_for(std::chrono::microseconds{200});
     }
 
