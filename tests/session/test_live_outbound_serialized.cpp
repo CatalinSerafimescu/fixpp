@@ -1072,6 +1072,7 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     // frame `ioc` destroys — a span handed to a spawned coroutine must not
     // dangle if a bounded pump below fails and the body returns early.
     std::deque<std::vector<std::byte>> frames;
+    asio::cancellation_signal sig;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -1102,14 +1103,13 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
 
     // Block the NEXT write so the phase-1 Logout emit blocks in async_write — this
-    // deterministically suspends close #1 inside phase-1's cancellable
+    // deterministically suspends the first close inside phase-1's cancellable
     // `run_logout_phase1() || close_grace` await (the unblocked path completes too
     // fast to be a meaningful witness). close()'s FQ-G force-close unblocks it at the
-    // logout timeout, so close #1 still completes once it is allowed to.
+    // logout timeout, so the first close still completes once it is allowed to.
     raw_ptr->arm_block();
 
-    // close #1 (graceful) from a CANCELLABLE caller — enters phase-1 and suspends.
-    asio::cancellation_signal sig;
+    // first close (graceful) from a CANCELLABLE caller — enters phase-1 and suspends.
     auto close1 = asio::co_spawn(
         ioc,
         [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
@@ -1117,23 +1117,23 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
             co_return co_await sess.close(fixpp::session::close_mode::graceful);
         },
         asio::bind_cancellation_slot(sig.slot(), asio::use_future));
-    ioc.run_for(50ms);  // let close #1 enter phase-1 and suspend (no peer Logout ACK)
+    ioc.run_for(50ms);  // let the first close enter phase-1 and suspend (no peer Logout ACK)
     ioc.restart();
     sig.emit(asio::cancellation_type::total);  // cancel the caller mid-close
 
-    // close #2 (terminal, un-cancelled) — the Engine::stop() post-join drain analogue.
+    // second close (terminal, un-cancelled) — the Engine::stop() post-join drain analogue.
     auto close2 = asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal),
                                  asio::use_future);
 
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close1, 3s))
-        << "close #1 timed out";
+        << "first close timed out";
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close2, 3s))
-        << "close #2 timed out";
+        << "second close timed out";
 
     EXPECT_EQ(close1.wait_for(0ms), std::future_status::ready)
         << "the caller-cancelled close(graceful) must still complete";
     ASSERT_EQ(close2.wait_for(0ms), std::future_status::ready)
-        << "second close() hung: close #1 was aborted mid-drain without publishing "
+        << "second close() hung: the first close was aborted mid-drain without publishing "
         << "close_result_, so the `closing`-branch wait never resolves. close() must "
         << "be cancellation-immune once entered.";
     (void)close1.get();
@@ -1162,6 +1162,7 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
 TEST(LiveOutboundSerializedTest, BudgetMissQuiescesBeforeSessionTeardown) {
     EXPECT_FATAL_FAILURE(
         ([] {
+            std::deque<std::vector<std::byte>> frames;
             asio::io_context ioc;
             fixpp::core::EngineConfig eng;
             eng.executor = ioc.get_executor();
@@ -1183,7 +1184,8 @@ TEST(LiveOutboundSerializedTest, BudgetMissQuiescesBeforeSessionTeardown) {
             fixpp::transport::handshake_result hr{};
             sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-            auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+            auto& logon = frames.emplace_back(
+                make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
             auto logon_fut = asio::co_spawn(
                 ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
             ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
@@ -1195,7 +1197,7 @@ TEST(LiveOutboundSerializedTest, BudgetMissQuiescesBeforeSessionTeardown) {
             // so the coroutine is GENUINELY still suspended when ASSERT_TRUE
             // fires — not just theoretically racing it.
             raw_ptr->arm_block();
-            auto payload = make_min_app_payload();
+            auto& payload = frames.emplace_back(make_min_app_payload());
             auto send_fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}),
                                            asio::use_future);
 
