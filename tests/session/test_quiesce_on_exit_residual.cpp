@@ -33,11 +33,22 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
+#include <array>
+#include <asio/any_io_executor.hpp>
+#include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/steady_timer.hpp>
+#include <asio/use_awaitable.hpp>
 #include <chrono>
+#include <cstddef>
+#include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/transport/transport.hpp>
 #include <memory>
+#include <span>
 
 #include "support/pump_until_ready.hpp"
 
@@ -52,6 +63,43 @@ std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context& ioc) 
     auto stp = fixpp::core::steady_time_point{} + seconds{0};
     return std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
 }
+
+// Minimal Transport double for ClosesTransportBeforeDraining below: async_write
+// blocks on a steady_timer until close() cancels it, mirroring the "blocked
+// write" shape every live-transport hang in this suite takes.
+class BlockedWriteTransport final : public fixpp::transport::Transport {
+public:
+    explicit BlockedWriteTransport(asio::any_io_executor exec) : timer_{std::move(exec)} {}
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::transport::ConnectInfo>>
+    async_connect(fixpp::transport::Endpoint const&) override {
+        co_return fixpp::transport::ConnectInfo{};
+    }
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
+        std::span<std::byte>) override {
+        co_return std::unexpected{fixpp::core::error::transport_read_eof};
+    }
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_write(
+        std::span<const std::byte> buf) override {
+        timer_.expires_after(std::chrono::seconds{30});
+        asio::error_code ec;
+        co_await timer_.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+        if (closed_) {
+            co_return std::unexpected{fixpp::core::error::transport_already_closed};
+        }
+        co_return buf.size();
+    }
+    [[nodiscard]] fixpp::core::expected_t<void> cancel() noexcept override { return {}; }
+    [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override {
+        closed_ = true;
+        timer_.cancel();
+        return {};
+    }
+
+private:
+    asio::steady_timer timer_;
+    bool closed_{false};
+};
 
 }  // namespace
 
@@ -82,4 +130,42 @@ TEST(QuiesceOnExitResidualWitness, SilentWhenIocDrainsNormally) {
     auto clock = make_mock_clock(ioc);
 
     quiesce_on_exit quiesce{ioc, *clock, 1ms};
+}
+
+// gate-b/r1 P1-4 (Art. VII §4): the two-argument {ioc, clock} aggregate
+// init's DEFAULT budget (5s) had no falsifiable witness — every existing
+// two-arg caller drains promptly regardless of what the default is, so
+// changing the initializer 5s->0ms left the whole suite green. Assert the
+// default directly. Costs no wall-clock: `quiesce` is never exercised past
+// construction here (the io_context is never run), only its stored `budget`
+// member is read, and the destructor's own drain runs against an empty,
+// never-started context, which stops immediately regardless of the budget.
+TEST(QuiesceOnExitResidualWitness, DefaultBudgetIsFiveSeconds) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+
+    quiesce_on_exit quiesce{ioc, *clock};
+    EXPECT_EQ(quiesce.budget, 5s);
+}
+
+// gate-b/r1 P1-1's mechanism, isolated: quiesce_on_exit.transport, when set,
+// must be closed BEFORE the residual-work drain runs. Without it, a
+// coroutine parked in async_write on a still-open transport never wakes, and
+// this test's 50ms drain window would time out (ADD_FAILURE) even though
+// nothing is leaked forever — it simply never quiesces within budget.
+// Mutation: deleting the `quiesce.transport = &transport;` line below turns
+// this RED (ADD_FAILURE fires, caught by gtest as a normal test failure —
+// there is no SPI wrapper here because the passing path must be silent).
+TEST(QuiesceOnExitResidualWitness, ClosesTransportBeforeDraining) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+    BlockedWriteTransport transport{ioc.get_executor()};
+
+    std::array<std::byte, 1> buf{};
+    asio::co_spawn(ioc, transport.async_write(std::span<const std::byte>{buf}), asio::detached);
+    ioc.run_for(10ms);  // let the write actually start blocking on the timer
+    ioc.restart();
+
+    quiesce_on_exit quiesce{ioc, *clock, 50ms};
+    quiesce.transport = &transport;
 }

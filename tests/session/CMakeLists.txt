@@ -154,6 +154,7 @@ add_executable(session_pure_tests
   test_session_event_ring_overflow.cpp
   test_reload_credentials_in_flight.cpp
   test_live_outbound_serialized.cpp
+  test_quiesce_on_exit_residual.cpp                                     # gate-b/r1 P1-3 (Art. VII §8)
   test_enum_validation_logon.cpp                                        # T030 (075)
   $<TARGET_OBJECTS:session_test_support>
 )
@@ -599,7 +600,8 @@ target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
 # diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the
 # branch's polarity — see the file header for the documented scope limits.
-add_threading_test(session_quiesce_on_exit_residual test_quiesce_on_exit_residual.cpp)
+# gate-b/r1 P1-3 (Art. VII §8): single-threaded, isolation-safe — folded into
+# session_pure_tests above rather than a standalone add_threading_test binary.
 
 # ── 005 Phase 7 (US5) — seam #7/#8: Reject + SendingTime tests (T050/T051) ────
 # Red-first TDD: authored before T054/T056 implementation; turns green at T057.
