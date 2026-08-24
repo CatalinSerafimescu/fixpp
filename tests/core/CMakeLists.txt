@@ -172,6 +172,25 @@ set_tests_properties(decimal_mul_u64_wide PROPERTIES
   LABELS "060;US2;decimal_compare"
   TIMEOUT 120)
 
+# ── issue #289 batch B0 — run_for residual measurement instrument self-test ─
+# Bare-asio self-test for tests/support/measure_run_for_residual.hpp (no
+# fixpp_session/fixpp_core dependency: the instrument only needs asio::asio +
+# <future>). Links asio::asio directly, mirroring the "asio-dependent impls
+# don't live in the fixpp_core leaf" note above.
+add_executable(run_for_residual_instrument_test test_run_for_residual_instrument.cpp)
+target_include_directories(run_for_residual_instrument_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_link_libraries(run_for_residual_instrument_test PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME run_for_residual_instrument COMMAND run_for_residual_instrument_test)
+set_tests_properties(run_for_residual_instrument PROPERTIES
+  LABELS "289;foundational;run_for_residual"
+  TIMEOUT 60)
+
 add_executable(decimal_mul_u64_wide_test_portable decimal_mul_u64_wide_test.cpp)
 target_compile_definitions(decimal_mul_u64_wide_test_portable PRIVATE
   FIXPP_DECIMAL_FORCE_PORTABLE_MUL
