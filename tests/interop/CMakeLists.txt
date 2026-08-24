@@ -56,19 +56,6 @@ target_compile_definitions(interop_support PUBLIC
     FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
 )
 
-# ── interop_fixture_test — direct pin for run_until's stopped-at-entry restart
-# (#289(B1)) ─────────────────────────────────────────────────────────────────
-add_executable(interop_fixture_test
-    support/interop_fixture_test.cpp
-)
-target_link_libraries(interop_fixture_test PRIVATE
-    interop_support
-    GTest::gtest
-    GTest::gtest_main
-)
-add_test(NAME interop_fixture_test COMMAND interop_fixture_test)
-set_tests_properties(interop_fixture_test PROPERTIES LABELS "interop;support")
-
 # ── Aggregation targets the quickstart references (cmake --build --target interop_*) ──
 # Empty at Phase 1 ("builds an empty suite"); per-phase tasks attach drivers via
 # add_dependencies(interop_<group> <test_target>).
@@ -130,11 +117,14 @@ endfunction()
 
 # ── support smoke (T002 Phase-1 checkpoint: the suite configures + builds + runs) ──
 # Runtime-validates the support layer: golden parse/diff + descriptor + probe token.
+# support/interop_fixture_test.cpp (#289(B1)) is folded in here rather than a
+# standalone executable — gate-b/r1 P1-3 (Art. VII §8): single-threaded,
+# isolation-safe, and this bucket already exercises the same fixture.
 fixpp_add_interop_test(
     NAME interop_support_smoke_test
     GROUP happy
     LABEL "interop;016;interop-support"
-    SOURCES support_smoke_test.cpp
+    SOURCES support_smoke_test.cpp support/interop_fixture_test.cpp
 )
 
 # ── US1 happy-path drivers (T010, T016) ───────────────────────────────────────
