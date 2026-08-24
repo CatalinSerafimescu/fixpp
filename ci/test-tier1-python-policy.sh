@@ -1154,6 +1154,13 @@ CI_PIN_HARNESSES=(
   # an assertion nobody has seen fail, which is the same shape as the defect
   # #252's own checker exists to close.
   "ci/test-sanitized-deps.sh"
+  # #289's pump census. ⚠️ ADDED WITH ITS OWN MUTANT (M69), not just appended.
+  # M26/M64/M65 already prove this census CAN fire, but each proves it for
+  # ONE prior harness — a row proven by a sibling's mutant is a row nobody has
+  # seen fail. Same lesson as M65's own comment: without a dedicated mutant,
+  # the workflow invocation could be deleted later while every self-test
+  # stays green.
+  "ci/test-pump-census.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1245,7 +1252,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=54  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 + M28 (1
+MUTANTS_DECLARED=55  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -1256,6 +1263,8 @@ MUTANTS_DECLARED=54  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M4
                      # seed step's main-ref guard were still unpinned at the workflow boundary. M66 adds the
                      # bench job's four-invocation invariant for BENCH_BASE_RUN_MANIFEST on the merge-base legs.
                      # M67/M68 add the bench job's two production tools/bench_compare.py invocation pins.
+                     # M69 (#289) adds the ci-script-pins call-site pin for ci/test-pump-census.sh — same
+                     # dead-call-site shape as M26/M64/M65, its own mutant per that row's own comment.
 MUTANTS_RUN=0
 # GREEN controls are counted separately: a summary that calls them RED would be
 # the very over-claim MUTANTS_DECLARED exists to prevent.
@@ -1686,6 +1695,20 @@ t = open(src).read()
 old = "        run: python3 tools/bench_compare.py --suite bench-results/a1\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, ""))
+'
+
+  # M69 (#289): the SAME dead-call-site shape as M26/M64/M65, on the pump-census
+  # row #289 added. Its own mutant because none of M26/M64/M65 exercise this row
+  # — each proves the census fires for a DIFFERENT harness, and a row proven by
+  # a sibling's mutant is a row nobody has seen fail.
+  mutate_workflow M69 "the pump-census harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-pump-census.sh\n"
+new = "        run: echo \"bash ci/test-pump-census.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
 '
 
   # M27: an `if:` added to the Configure step. NOT covered by the golden — the

@@ -2067,6 +2067,19 @@ jobs:
           python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
           bash ci/test-sanitized-deps.sh
 
+      # #289's migration census. Pins the EXACT set (not a count, and not a
+      # floor) of `.run_for(...)` sites followed within six source lines by a
+      # `.get(...)` across tests/**/*.{cpp,hpp} — the lexical population the
+      # migration is retiring one PR at a time. A count alone would pass a
+      # fixture that lost one site and gained a different one; exact-set
+      # equality catches additions, removals, and substitutions alike, and
+      # forces a legitimate migration PR to update the pin in the same change
+      # (see ci/expected-eligible-tests.txt:13-19 for why this repo already
+      # prefers exact equality to a floor). Buildless — no compiler, no
+      # ctest, python3 + coreutils only.
+      - name: "Regression pin — run_for/get pump census (#289)"
+        run: bash ci/test-pump-census.sh
+
   check-layers:
     name: check-layers
     runs-on: ubuntu-24.04
