@@ -82,15 +82,16 @@ def test_engine_close_preflight_raises_without_closing_sibling(monkeypatch):
     # `_dead = False` / `_was_explicitly_closed = False`. That combination is
     # exactly what makes _Finalizable.__del__ (fixpp_oo.py:99-111) act: at some
     # arbitrary later garbage collection -- plausibly inside a DIFFERENT test
-    # file -- it calls close(), which reaches the real `session_close` /
-    # `engine_destroy` with a plain `object()` where a native handle is
-    # expected. __del__ swallows the resulting exception, so it is silent.
+    # file -- it calls close(), which passes the fake `object()` handle to
+    # `session_close`/`engine_destroy`. SWIG's pointer-conversion typemap
+    # rejects that during argument conversion and raises `TypeError` before
+    # any native function is entered; `__del__` then swallows the exception,
+    # as designed.
     #
-    # A silent native call whose timing is decided by the garbage collector is
-    # the same hazard class as the 3.11 GC segfault seen on SWIG 4.5.0, and
-    # this file is collected immediately before test_roundtrip.py, where that
-    # crash occurred. Marking them closed makes __del__ return at its first
-    # guard and removes the deferred call entirely.
+    # These objects violate the class invariant that a live (non-`_dead`)
+    # instance carries a real native handle. Leaving the deferred, GC-timed
+    # close attempt in place serves no purpose. Marking them closed makes
+    # __del__ return at its first guard and removes it entirely.
     for _synthetic in (active, sibling, engine):
         _synthetic._dead = True
         _synthetic._was_explicitly_closed = True
@@ -102,12 +103,15 @@ def test_session_close_step0_backstop_leaves_state_unmodified(monkeypatch):
     class _App(fixpp.Application):
         def __init__(self):
             self.result = None
+            self.done = threading.Event()
 
         def fromApp(self, session, msg):
             try:
                 session.close()
             except Exception as exc:
                 self.result = (exc, session._dead, session._application is self)
+            finally:
+                self.done.set()
 
     app = _App()
     dict_h, acc_engine, ini_engine, acc, ini = establish_pair(app)
@@ -127,12 +131,17 @@ def test_session_close_step0_backstop_leaves_state_unmodified(monkeypatch):
         # finalized inside this window incremented the counter and failed this
         # test for a reason unrelated to the reentrancy backstop.
         #
-        # SWIG 4.5.0 exposed exactly that: it perturbed GC timing enough to make
-        # the 3.12 leg fail deterministically, even though the generated native
-        # teardown surface (SwigPyObject_dealloc, the tp_* slots,
-        # _wrap_session_close, _wrap_engine_destroy) is byte-identical between
-        # SWIG 4.4.1 and 4.5.0. The fragility was always here; the version bump
-        # only made it observable.
+        # SWIG 4.5.0 exposed exactly that: it made the 3.12 leg fail
+        # deterministically, and the fragility predates the bump. The
+        # generated teardown surface this test exercises directly
+        # (SwigPyObject_dealloc, the tp_* slots, _wrap_session_close,
+        # _wrap_engine_destroy) is byte-identical between SWIG 4.4.1 and
+        # 4.5.0 -- but that only shows the diff does not obviously change
+        # teardown, not that SWIG 4.5.0 introduced nothing. Other generated
+        # code reachable from this test DID change: the reentrant guard's
+        # exception is built via `_make_error` -> `strerror`
+        # (fixpp_oo.py:245, fixpp.i:287-295), whose 4.5.0 wrapper routes
+        # through the new `SWIG_FromBinaryCharPtrAndSize` path.
         #
         # Keying on the handle makes the assertion say what the test name says:
         # the step-0 backstop performed no native close FOR THIS SESSION.
@@ -151,8 +160,7 @@ def test_session_close_step0_backstop_leaves_state_unmodified(monkeypatch):
         monkeypatch.setattr(fixpp_oo, "session_close", _counting_session_close)
 
         send_app_message(ini)
-        deadline = threading.Event()
-        assert deadline.wait(0.1) is False
+        assert app.done.wait(timeout=RECV_TIMEOUT), "fromApp callback never completed"
         # A named failure beats the TypeError that unpacking None would raise.
         # `fromApp` records `result` only in its `except` branch, so if the
         # step-0 backstop ever stops raising, `result` stays None and every
