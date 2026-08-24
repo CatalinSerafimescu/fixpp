@@ -19,18 +19,42 @@
 # Usage:  bash ci/test-pump-census.sh
 set -uo pipefail
 
-fail() {
-    echo "FAIL: $*" >&2
+# ── failure model ───────────────────────────────────────────────────────────
+# `setup_fail` aborts immediately: a missing script or unreadable pin makes
+# every later assertion meaningless, so continuing would report noise.
+#
+# `fail` (assertions) RECORDS and CONTINUES. This is load-bearing, not a
+# style choice. Gate B round 1 found that a fail-fast harness cannot prove its
+# later assertions are independently falsifiable: the production control runs
+# first, so mutating (say) block-comment blanking aborted at the production
+# check and the block-comment assertion NEVER RAN. Its named diagnostic was
+# therefore unreachable, which is exactly the "assertion that cannot fail for
+# its own named reason" class this harness exists to catch. Accumulating lets
+# every named assertion report in the same run as the mutation that breaks it.
+failures=0
+
+setup_fail() {
+    echo "FAIL(setup): $*" >&2
     exit 1
 }
+
+fail() {
+    echo "FAIL: $*" >&2
+    failures=$((failures + 1))
+}
+# NOTE: fail() does NOT touch $checks. Every assertion is written as
+#   [ cond ] || fail "..."
+#   pass
+# so `pass` runs unconditionally and $checks already counts assertions REACHED,
+# pass or fail. Incrementing here too would double-count a failing assertion.
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$here/.." && pwd)"
 script="$here/pump-census.sh"
 production_pin="$here/expected-pump-sites.txt"
 
-[ -f "$script" ] || fail "missing census script: $script"
-[ -s "$production_pin" ] || fail "production pin is missing or empty"
+[ -f "$script" ] || setup_fail "missing census script: $script"
+[ -s "$production_pin" ] || setup_fail "production pin is missing or empty"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -243,10 +267,20 @@ printf '%s\n' "$output" | grep -Fq 'tests directory not found' ||
     fail "missing-root failure lacked an attributed diagnostic"
 pass
 
-# ── self-assert the declared assertion count (Q2 assertion 11) ──────────────
+# ── self-assert the declared assertion count ────────────────────────────────
 # Not itself counted in $checks: a check that increments its own tally after
 # reading it would compare against a total that has not yet included itself.
-[ "$checks" -eq "$expected_checks" ] ||
-    fail "ran $checks assertions; declared $expected_checks"
+#
+# $checks counts assertions REACHED (fail() increments it too), so this cannot
+# be satisfied by aborting early — the whole point of the accumulating model.
+if [ "$checks" -ne "$expected_checks" ]; then
+    echo "FAIL: reached $checks assertions; declared $expected_checks" >&2
+    failures=$((failures + 1))
+fi
+
+if [ "$failures" -ne 0 ]; then
+    echo "FAILED: $failures of $checks pump-census assertions" >&2
+    exit 1
+fi
 
 echo "PASS: $checks pump-census assertions"
