@@ -153,20 +153,27 @@ using fixpp::test_support::quiesce_on_exit;
 
 class LogoutExchangeTest : public ::testing::Test {
 protected:
-    asio::io_context ioc;
-    std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig engine;
-
     // Fixture-owned arena for frames fed via feed_inbound(). #289(b-Q3): a
     // frame built body-local (or helper-local) and passed by span into a
     // coroutine dangles if the pump times out and the caller unwinds before
     // the coroutine is quiesced — a body-local `quiesce_on_exit` fixes
     // destruction ORDER relative to `sess`, but not a helper-local buffer
     // that is already gone by the time the guard runs. `std::deque` never
-    // invalidates existing elements on push_back, and this member outlives
-    // every body-local guard and every Session in the test, so a span into
-    // it stays valid regardless of when/whether the coroutine quiesces.
+    // invalidates existing elements on push_back, so a span into it stays
+    // valid regardless of when/whether the coroutine quiesces — PROVIDED the
+    // deque itself outlives `ioc`. Declared BEFORE `ioc` (gate-b/r1 P1-2):
+    // members destruct in REVERSE declaration order, so a coroutine frame
+    // still held by `ioc`'s own internal completion machinery at the moment
+    // `ioc` is destroyed finds this arena still alive, not already freed.
+    // The prior order (ioc declared first, so inbound_frames destructed
+    // BEFORE it) was exactly backwards: `std::deque`'s non-invalidation
+    // guarantee protects against reallocation, not against the arena's OWNER
+    // dying first.
     std::deque<std::vector<std::byte>> inbound_frames;
+
+    asio::io_context ioc;
+    std::shared_ptr<fixpp::core::mock_clock> clock;
+    fixpp::core::EngineConfig engine;
 
     void SetUp() override {
         using namespace std::chrono;
@@ -509,12 +516,19 @@ TEST_F(LogoutExchangeTest, LogoutSentInboundLogoutDisconnects) {
     auto ir = feed_inbound(sess, peer_logout);
     ASSERT_TRUE(ir.has_value())
         << kPumpBudgetMiss << "LogoutSentInboundLogoutDisconnects: feed_inbound(Logout)";
-    EXPECT_TRUE(ir->has_value());
+    ASSERT_TRUE(ir->has_value());
 
     // LogoutSent + inbound Logout → Disconnected.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "LogoutSent + inbound Logout → Disconnected (confirm)";
 
+    // gate-b/r1 P2-5: the inner expected_t check above must be FATAL (an
+    // in-progress-Logout confirm that failed leaves close_fut's coroutine
+    // still parked on the FSM never reaching Disconnected), and close_fut
+    // itself must be bounded — an unchecked get() here can park to the 120s
+    // CTest timeout instead of failing loudly at the pump budget.
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut))
+        << kPumpBudgetMiss << "LogoutSentInboundLogoutDisconnects: close_fut";
     (void)close_fut.get();
 }
 
