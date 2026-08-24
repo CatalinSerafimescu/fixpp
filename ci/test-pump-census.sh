@@ -271,8 +271,9 @@ pass
 # Not itself counted in $checks: a check that increments its own tally after
 # reading it would compare against a total that has not yet included itself.
 #
-# $checks counts assertions REACHED (fail() increments it too), so this cannot
-# be satisfied by aborting early — the whole point of the accumulating model.
+# $checks counts assertions REACHED: every call site's trailing `pass` runs
+# unconditionally now that fail() no longer aborts, so this cannot be
+# satisfied by an early exit — the whole point of the accumulating model.
 if [ "$checks" -ne "$expected_checks" ]; then
     echo "FAIL: reached $checks assertions; declared $expected_checks" >&2
     failures=$((failures + 1))
