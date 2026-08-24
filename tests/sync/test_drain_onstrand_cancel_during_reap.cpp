@@ -34,6 +34,7 @@
 #include <future>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -44,18 +45,6 @@ using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
 
 using fixpp::sync::test::yield_n;
-
-// Drive an io_context until `done` (or a 5s self-deadline). Returns false on hang.
-template <class DoneFn>
-bool run_until(asio::io_context& ioc, DoneFn done) {
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (std::chrono::steady_clock::now() < deadline) {
-        ioc.run_for(std::chrono::milliseconds(50));
-        if (done()) return true;
-    }
-    ioc.stop();
-    return false;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ordering (a): on_cancel wins (cancel precedes drain). Holder held through reap.
@@ -119,10 +108,16 @@ TEST(DrainOnStrandCancelDuringReap, OnCancelWinsWhenCancelPrecedesDrain) {
         };
 
         asio::co_spawn(ioc, main_coro(), asio::detached);
-        bool ok = run_until(ioc, [&] {
-            return drain_done.load(std::memory_order_acquire) &&
-                   completed.load(std::memory_order_acquire) == N;
-        });
+        bool ok = fixpp::test_support::pump_until(
+            ioc,
+            [&] {
+                return drain_done.load(std::memory_order_acquire) &&
+                       completed.load(std::memory_order_acquire) == N;
+            },
+            std::chrono::seconds(5));
+        if (!ok) {
+            ioc.stop();  // preserve existing timeout state
+        }
         ASSERT_TRUE(ok) << "Rep " << rep << " hung";
 
         EXPECT_TRUE(drain_ok.load()) << "Rep " << rep << " drain failed";
@@ -205,10 +200,16 @@ TEST(DrainOnStrandCancelDuringReap, PostDrainCancelIsBenignNoDoubleResume) {
         };
 
         asio::co_spawn(ioc, main_coro(), asio::detached);
-        bool ok = run_until(ioc, [&] {
-            return drain_done.load(std::memory_order_acquire) &&
-                   completed.load(std::memory_order_acquire) == N;
-        });
+        bool ok = fixpp::test_support::pump_until(
+            ioc,
+            [&] {
+                return drain_done.load(std::memory_order_acquire) &&
+                       completed.load(std::memory_order_acquire) == N;
+            },
+            std::chrono::seconds(5));
+        if (!ok) {
+            ioc.stop();  // preserve existing timeout state
+        }
         ASSERT_TRUE(ok) << "Rep " << rep << " hung";
 
         EXPECT_TRUE(drain_ok.load()) << "Rep " << rep << " drain failed";

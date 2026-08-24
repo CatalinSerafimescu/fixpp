@@ -190,6 +190,7 @@ add_executable(transport_listener_accept_error_cancel
   test_listener_accept_error_cancel.cpp)
 target_include_directories(transport_listener_accept_error_cancel PRIVATE
   "${CMAKE_SOURCE_DIR}/src"
+  "${CMAKE_SOURCE_DIR}/tests"
 )
 target_link_libraries(transport_listener_accept_error_cancel PRIVATE
   fixpp_transport

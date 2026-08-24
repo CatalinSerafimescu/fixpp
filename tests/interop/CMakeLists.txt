@@ -38,6 +38,9 @@ add_library(interop_support STATIC
 target_include_directories(interop_support PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"            # consumers: #include "support/..."
 )
+target_include_directories(interop_support PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"              # interop_fixture.cpp: support/pump_until_ready.hpp
+)
 target_link_libraries(interop_support PUBLIC
     fixpp_session
     fixpp_tls
@@ -52,6 +55,19 @@ target_link_libraries(interop_support PUBLIC
 target_compile_definitions(interop_support PUBLIC
     FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
 )
+
+# ── interop_fixture_test — direct pin for run_until's stopped-at-entry restart
+# (#289(B1)) ─────────────────────────────────────────────────────────────────
+add_executable(interop_fixture_test
+    support/interop_fixture_test.cpp
+)
+target_link_libraries(interop_fixture_test PRIVATE
+    interop_support
+    GTest::gtest
+    GTest::gtest_main
+)
+add_test(NAME interop_fixture_test COMMAND interop_fixture_test)
+set_tests_properties(interop_fixture_test PROPERTIES LABELS "interop;support")
 
 # ── Aggregation targets the quickstart references (cmake --build --target interop_*) ──
 # Empty at Phase 1 ("builds an empty suite"); per-phase tasks attach drivers via

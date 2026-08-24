@@ -81,6 +81,7 @@
 #include <optional>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync_test_support.hpp"
 
 namespace {
@@ -92,28 +93,6 @@ using fixpp::sync::expected_t;
 using fixpp::sync::test::yield_n;
 
 constexpr std::size_t kCapacity = 512;
-
-// Drives `ioc` until `f` is ready or a 5s deadline elapses (mirrors the
-// bounded-drain idiom in test_drain_predrain_holder.cpp). Needed ONLY for
-// the pre-fix mutation-RED run of the wrap/reissue witness below: a
-// reissued live slot leaves the clobbered waiter's coroutine frame
-// permanently suspended (never resumed — its `attached_awaiter_` now
-// points elsewhere), and asio's awaitable machinery counts a suspended
-// frame as outstanding executor work, so a blind `ioc.run()` would block
-// forever even though `run()` ITSELF has already returned (co_return) —
-// checking `f`'s readiness directly (not the io_context's work count)
-// sidesteps that. Returns true iff `f` became ready before the deadline.
-template <typename T>
-bool run_until_ready(asio::io_context& ioc, std::future<T>& f) {
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (std::chrono::steady_clock::now() < deadline) {
-        ioc.run_for(std::chrono::milliseconds(50));
-        if (f.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) return true;
-    }
-    if (f.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) return true;
-    ioc.stop();
-    return false;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test 1 — ordinary capacity boundary (FR-009 baseline; not a discriminator).
@@ -460,12 +439,16 @@ TEST(SyncPoolExhaustionReuse, BoundedCounterPreventsWrapAndReissue) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    // Bounded drive (see run_until_ready's comment): pre-fix, a detected
+    // Bounded drive (see pump_until_ready.hpp's comment): pre-fix, a detected
     // reissue leaves B's coroutine permanently suspended, which would make
     // a blind ioc.run() hang forever even though `run()` itself already
     // returned. `run()`'s own completion (not the io_context's outstanding
     // work count) is the signal we actually need.
-    bool completed = run_until_ready(ioc, f);
+    bool completed = fixpp::test_support::pump_until_ready(ioc, f, std::chrono::seconds(5),
+                                                             std::chrono::milliseconds(50));
+    if (!completed) {
+        ioc.stop();  // preserve existing failure-state behavior
+    }
     ASSERT_TRUE(completed)
         << "test driver did not observe run() completion within the bounded "
            "deadline — see captured diagnostics below";

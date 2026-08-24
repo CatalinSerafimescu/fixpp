@@ -502,6 +502,7 @@ target_compile_definitions(test_pool_exhaustion_reuse PRIVATE
   FIXPP_ASYNC_MUTEX_TEST_SEAM)
 target_include_directories(test_pool_exhaustion_reuse PRIVATE
   "${CMAKE_SOURCE_DIR}/include"
+  "${CMAKE_SOURCE_DIR}/tests"
 )
 target_link_libraries(test_pool_exhaustion_reuse PRIVATE
   asio::asio

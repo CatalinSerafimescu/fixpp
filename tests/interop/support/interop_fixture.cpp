@@ -10,6 +10,8 @@
 #include <future>
 #include <utility>
 
+#include "support/pump_until_ready.hpp"
+
 namespace fixpp::interop {
 
 namespace {
@@ -53,17 +55,14 @@ void InteropEngineFixture::start() {
 
 bool InteropEngineFixture::run_until(const std::function<bool()>& ready,
                                      std::chrono::milliseconds deadline) {
-    const auto t_end = std::chrono::steady_clock::now() + deadline;
-    while (std::chrono::steady_clock::now() < t_end) {
-        if (ready()) {
-            return true;
-        }
-        if (ioc_.stopped()) {
-            ioc_.restart();
-        }
-        ioc_.run_for(kPumpSlice);
+    // pump_until does not revive a context already stopped at entry (a work
+    // guard does not clear stopped()); this fixture's contract does. Restart
+    // here, before handing off to the shared primitive.
+    if (ioc_.stopped()) {
+        ioc_.restart();
     }
-    return ready();
+    return fixpp::test_support::pump_until(
+        ioc_, [&ready] { return ready(); }, deadline, kPumpSlice);
 }
 
 std::chrono::milliseconds InteropEngineFixture::stop_within(std::chrono::milliseconds bound) {
