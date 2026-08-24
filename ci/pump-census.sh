@@ -167,6 +167,17 @@ def blank_non_code(source: str) -> str:
 
         elif state == "line-comment":
             ch = source[i]
+            # Backslash-newline splice (C++ phase 2, applied before comment
+            # recognition in phase 3): a `\` immediately followed by a
+            # newline continues the line comment onto the next physical
+            # line, so the newline must NOT end the comment here. Both
+            # characters are still blanked (preserving the physical line
+            # count other callers rely on for path:line reporting).
+            if ch == "\\" and i + 1 < n and source[i + 1] == "\n":
+                out.append(blank(ch))
+                out.append(blank(source[i + 1]))
+                i += 2
+                continue
             out.append(blank(ch))
             i += 1
             if ch == "\n":

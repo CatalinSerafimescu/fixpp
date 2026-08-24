@@ -36,7 +36,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 checks=0
-expected_checks=16
+expected_checks=18
 pass() { checks=$((checks + 1)); }
 
 run_capture() {
@@ -44,13 +44,36 @@ run_capture() {
     status=$?
 }
 
-# ── 1-3: production control, invoked from a deliberately unrelated cwd ──────
+# Runs $script against a tree that contains ONLY a decoy (no genuine
+# run_for/get() pair) and requires it to reach the "instrument produced zero
+# sites" liveness diagnostic — the pump-census.sh guard that refuses to read
+# an empty measurement as a clean tree (see the zero-match-tree case below).
+# This is the discriminating assertion for a single blanking class: if that
+# class's blanking is broken, the decoy is NOT blanked, the scanner finds a
+# real (spurious) site, the zero-sites branch is never reached, and this
+# fails for exactly that reason — independent of any other fixture or check.
+assert_decoy_alone_yields_zero_sites() {
+    local label="$1" decoy_root="$2"
+    run_capture bash "$script" --root "$decoy_root" --expected "$baseline_pin"
+    [ "$status" -ne 0 ] ||
+        fail "$label decoy (alone) was matched as a real site: $output"
+    pass
+
+    printf '%s\n' "$output" | grep -Fq 'instrument produced zero sites' ||
+        fail "$label decoy (alone) failed for the wrong reason (not blanked correctly): $output"
+    pass
+}
+
+# ── 1: production control, invoked from a deliberately unrelated cwd ────────
 # Proves the script resolves the repo root from its OWN location, not from
-# the caller's cwd (Q2 assertion 9), and that the production pin the script
-# ships with is exactly what the live tree produces (Q2 assertion 10 — the
-# "nonempty, sorted, unique, and exactly equal to production output" half is
-# proven implicitly: pump-census.sh itself refuses a malformed/duplicate pin
-# before it ever compares, so an exit 0 here already implies that shape).
+# the caller's cwd, and that the production pin the script ships with is
+# exactly what the live tree produces. This is ONE falsifiable property, not
+# three: pump-census.sh's own internal diff already refuses a nonempty/
+# mismatched result before ever exiting 0 (see its `[ -s "$actual" ]` and
+# `diff -u "$expected" "$actual"` gates), so "nonempty" and "count matches
+# the pin" are IMPLIED by "exit status 0" here, not independently falsifiable
+# — a prior revision counted them as three separate assertions that could
+# never fail for their own reason (gate-b/r1 finding #1).
 #
 # ⚠️ THIS CHECK DEPENDS ON ci/expected-pump-sites.txt MATCHING THE LIVE TREE
 # AT THE INSTANT THIS RUNS. That is intentional — it is the production gate,
@@ -65,16 +88,6 @@ output="$(cd "$tmp" && bash "$script" 2>&1)"
 status=$?
 [ "$status" -eq 0 ] ||
     fail "production census failed from a different cwd: $output"
-pass
-
-[ -n "$output" ] ||
-    fail "production census passed with empty output"
-pass
-
-production_count="$(printf '%s\n' "$output" | wc -l | tr -d '[:space:]')"
-pin_count="$(wc -l <"$production_pin" | tr -d '[:space:]')"
-[ "$production_count" = "$pin_count" ] ||
-    fail "production output count $production_count != pin count $pin_count"
 pass
 
 # ── fixture: a known-good site, a comment/string decoy, and a too-far decoy ─
@@ -107,7 +120,7 @@ EOF
 baseline_pin="$tmp/baseline.pin"
 printf '%s\n' 'tests/a.cpp:2' >"$baseline_pin"
 
-# ── 4-5: known-good fixture produces EXACTLY the expected path:line ─────────
+# ── 2-3: known-good fixture produces EXACTLY the expected path:line ─────────
 run_capture bash "$script" --root "$fixture" --expected "$baseline_pin"
 [ "$status" -eq 0 ] ||
     fail "known-good fixture failed: $output"
@@ -117,17 +130,49 @@ pass
     fail "fixture matched the wrong set (comment/string/7-lines-away decoys must NOT match): $output"
 pass
 
-# ── 6-7: comments, string literals, and a .get() 7 lines away — implicit ────
-# in check 5 above (the ONLY line in the output is tests/a.cpp:2), but pinned
-# explicitly here too: the fixture's decoys are named, and if any of them
-# leaked into the output, check 5's exact-string comparison would already
-# have failed with a DIFFERENT (wrong) line list, not just a wrong count.
-printf '%s\n' "$output" | grep -Fq 'a.cpp:7' &&
-    fail "block-comment decoy matched (should be blanked)"
-pass
-printf '%s\n' "$output" | grep -Fq 'a.cpp:9' &&
-    fail "string-literal decoy matched (should be blanked)"
-pass
+# ── 4-7: comments and string literals, each in its OWN fixture invoked ──────
+# separately, so a mutation of ONE blanking path reaches THIS assertion,
+# naming that class, rather than dying behind check 3's blanket exact-match
+# with a generic diagnostic (gate-b/r1 finding #1 — checks 6-7 of a prior
+# revision could never independently fail, because check 3 above already
+# `fail()`s and exits before they are ever reached on a leak).
+comment_decoy="$tmp/comment_decoy"
+mkdir -p "$comment_decoy/tests"
+cat >"$comment_decoy/tests/decoy.cpp" <<'EOF'
+void f() {
+    ioc.run_for(1ms);
+    /* ioc.run_for(1ms);
+       decoy.get(); */
+}
+EOF
+assert_decoy_alone_yields_zero_sites "block-comment" "$comment_decoy"
+
+string_decoy="$tmp/string_decoy"
+mkdir -p "$string_decoy/tests"
+cat >"$string_decoy/tests/decoy.cpp" <<'EOF'
+void f() {
+    ioc.run_for(1ms);
+    const char* text = "ioc.run_for(1ms); decoy.get();";
+}
+EOF
+assert_decoy_alone_yields_zero_sites "string-literal" "$string_decoy"
+
+# ── 8-9 (gate-b/r1 P2-h): a `\`-continued line comment must stay a comment ──
+# across the spliced newline. C++ removes backslash-newline pairs (phase 2)
+# BEFORE recognising `//` (phase 3), so `future.get()` on the line after a
+# `\`-terminated `//` comment is still inside that comment to the compiler.
+# The per-physical-line blanker must splice this the same way, or it reads
+# `future.get()` as live code (see ci/pump-census.sh's line-comment state).
+continuation_decoy="$tmp/continuation_decoy"
+mkdir -p "$continuation_decoy/tests"
+cat >"$continuation_decoy/tests/decoy.cpp" <<'EOF'
+void f() {
+    ioc.run_for(1ms);
+    // continued comment \
+    decoy.get();
+}
+EOF
+assert_decoy_alone_yields_zero_sites "backslash-continued line-comment" "$continuation_decoy"
 
 # ── add a genuine header site: proves hpp scope and upward drift ────────────
 cat >"$fixture/tests/b.hpp" <<'EOF'
@@ -136,7 +181,7 @@ void added() { ioc.run_for(1ms);
 }
 EOF
 
-# ── 8-10: an ADDED site makes the census exit nonzero, naming the site ──────
+# ── 10-12: an ADDED site makes the census exit nonzero, naming the site ──────
 run_capture bash "$script" --root "$fixture" --expected "$baseline_pin"
 [ "$status" -ne 0 ] ||
     fail "added .hpp site did not make the census RED"
@@ -151,7 +196,7 @@ printf '%s\n' "$output" | grep -Fq '+tests/b.hpp:1' ||
     fail "added-site mutant did not identify tests/b.hpp:1 — .hpp scope or diff naming broken"
 pass
 
-# ── 11-12: a stale (too-high) pin also fails — proves downward ratcheting ───
+# ── 13-14: a stale (too-high) pin also fails — proves downward ratcheting ───
 # (Q3: exact-set equality forces a legitimate migration's pin down, not just
 # a floor that only catches upward drift.)
 stale_pin="$tmp/stale.pin"
@@ -170,7 +215,7 @@ printf '%s\n' "$output" | grep -Fq -- '-tests/b.hpp:1' ||
     fail "downward mutant did not identify the stale pinned site"
 pass
 
-# ── 13-14: zero-match tree is an instrument-liveness failure, not "clean" ───
+# ── 15-16: zero-match tree is an instrument-liveness failure, not "clean" ───
 zero="$tmp/zero"
 mkdir -p "$zero/tests"
 printf '%s\n' 'int no_candidate;' >"$zero/tests/empty.cpp"
@@ -185,7 +230,7 @@ printf '%s\n' "$output" | grep -Fq \
     fail "zero-match failure was not attributed to instrument liveness"
 pass
 
-# ── 15-16: missing/wrongly-rooted tests/ fails loudly, not silently-empty ───
+# ── 17-18: missing/wrongly-rooted tests/ fails loudly, not silently-empty ───
 run_capture bash "$script" \
     --root "$tmp/does-not-exist" \
     --expected "$baseline_pin"
