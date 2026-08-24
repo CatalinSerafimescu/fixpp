@@ -45,6 +45,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
@@ -56,6 +57,7 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -143,7 +145,9 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 
 }  // namespace
 
+using fixpp::test_support::kPumpBudgetMiss;
 using fixpp::test_support::pump_until_ready;
+using fixpp::test_support::quiesce_on_exit;
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
 
@@ -152,6 +156,17 @@ protected:
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
     fixpp::core::EngineConfig engine;
+
+    // Fixture-owned arena for frames fed via feed_inbound(). #289(b-Q3): a
+    // frame built body-local (or helper-local) and passed by span into a
+    // coroutine dangles if the pump times out and the caller unwinds before
+    // the coroutine is quiesced — a body-local `quiesce_on_exit` fixes
+    // destruction ORDER relative to `sess`, but not a helper-local buffer
+    // that is already gone by the time the guard runs. `std::deque` never
+    // invalidates existing elements on push_back, and this member outlives
+    // every body-local guard and every Session in the test, so a span into
+    // it stays valid regardless of when/whether the coroutine quiesces.
+    std::deque<std::vector<std::byte>> inbound_frames;
 
     void SetUp() override {
         using namespace std::chrono;
@@ -177,55 +192,73 @@ protected:
     }
 
     // Open a session and drive the ioc until the awaitable completes.
-    fixpp::core::expected_t<void> open_session(Session& sess) {
+    // nullopt means the pump budget was missed — the coroutine is still
+    // suspended and the caller must not continue as though open() ran.
+    std::optional<fixpp::core::expected_t<void>> open_session(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         if (!pump_until_ready(ioc, fut)) {
-            ADD_FAILURE() << "open() did not complete within 10s";
-            return std::unexpected(fixpp::core::error::dispatch_aborted);
+            return std::nullopt;
         }
         return fut.get();
     }
 
-    // Feed an inbound frame and wait for the FSM dispatch.
-    fixpp::core::expected_t<void> feed_inbound(Session& sess, std::span<const std::byte> frame) {
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
+    // Feed an inbound frame and wait for the FSM dispatch. `frame` is copied
+    // into `inbound_frames` BEFORE the coroutine is spawned, so the span the
+    // coroutine references stays valid for the coroutine's whole lifetime
+    // regardless of what happens to the caller's own buffer (see
+    // `inbound_frames`'s doc comment). nullopt means the pump budget was
+    // missed.
+    std::optional<fixpp::core::expected_t<void>> feed_inbound(Session& sess,
+                                                               std::span<const std::byte> frame) {
+        inbound_frames.emplace_back(frame.begin(), frame.end());
+        std::span<const std::byte> stable(inbound_frames.back());
+        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(stable), asio::use_future);
         if (!pump_until_ready(ioc, fut)) {
-            ADD_FAILURE() << "on_inbound_frame() did not complete within 10s";
-            return std::unexpected(fixpp::core::error::dispatch_aborted);
+            return std::nullopt;
         }
         return fut.get();
-    }
-
-    // Drive a session to Active state (acceptor path: send inbound Logon).
-    void drive_to_active(Session& sess) {
-        auto open_r = open_session(sess);
-        ASSERT_TRUE(open_r.has_value()) << "open() should succeed";
-
-        // Feed peer Logon (seq=1, peer=TW, our=ISLD).
-        auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
-        auto inbound_r = feed_inbound(sess, logon);
-        ASSERT_TRUE(inbound_r.has_value()) << "Logon inbound should succeed";
-
-        // On the LogonSent path (initiator), the Logon ack moves to Active.
-        // On the NotConnected path (acceptor), it moves to LogonReceived.
-        // Either is acceptable for the logout test; force to Active via seqnum.
-        // The acceptor path (NotConnected → LogonReceived) also needs the
-        // second inbound message to advance to Active per the matrix.
-        // For these tests, the LogonSent→Active path is canonical.
     }
 
     // Drive a session to Active via the LogonSent → Active path.
     // (open() → LogonSent → inbound Logon ack → Active)
-    void drive_to_active_initiator(Session& sess) {
+    //
+    // Returns an AssertionResult rather than using ASSERT_* directly: this is
+    // a non-void helper (open_session/feed_inbound return expected_t, not
+    // void), so a fatal ASSERT_* would not compile here, and — since this
+    // helper is itself void-shaped from the caller's point of view otherwise
+    // — a fatal assertion inside it would only exit the helper, letting the
+    // caller carry on against a session that never reached Active. Every
+    // caller must wrap this in ASSERT_TRUE(...).
+    ::testing::AssertionResult drive_to_active_initiator(Session& sess) {
         auto open_r = open_session(sess);
-        ASSERT_TRUE(open_r.has_value()) << "open() should succeed";
-        EXPECT_EQ(sess.state(), fsm_state::LogonSent);
+        if (!open_r.has_value()) {
+            return ::testing::AssertionFailure()
+                   << kPumpBudgetMiss << "drive_to_active_initiator: open()";
+        }
+        if (!open_r->has_value()) {
+            return ::testing::AssertionFailure() << "open() should succeed";
+        }
+        if (sess.state() != fsm_state::LogonSent) {
+            return ::testing::AssertionFailure()
+                   << "expected LogonSent after open(), got state "
+                   << static_cast<int>(sess.state());
+        }
 
         // Feed peer Logon-ack (seq=1): LogonSent → Active.
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
         auto r = feed_inbound(sess, logon);
-        ASSERT_TRUE(r.has_value()) << "Logon-ack should succeed";
-        EXPECT_EQ(sess.state(), fsm_state::Active);
+        if (!r.has_value()) {
+            return ::testing::AssertionFailure()
+                   << kPumpBudgetMiss << "drive_to_active_initiator: feed_inbound(Logon-ack)";
+        }
+        if (!r->has_value()) {
+            return ::testing::AssertionFailure() << "Logon-ack should succeed";
+        }
+        if (sess.state() != fsm_state::Active) {
+            return ::testing::AssertionFailure()
+                   << "expected Active after Logon-ack, got state " << static_cast<int>(sess.state());
+        }
+        return ::testing::AssertionSuccess();
     }
 };
 
@@ -243,7 +276,8 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    drive_to_active_initiator(sess);
+    quiesce_on_exit quiesce{ioc, *clock};
+    ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Trigger graceful close in background.
@@ -264,16 +298,15 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
 
     // Feed inbound Logout confirmation (peer seq=2, since we sent seq 1 for Logon).
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
-    auto inbound_r = asio::co_spawn(ioc, sess.on_inbound_frame(peer_logout), asio::use_future);
-    ASSERT_TRUE(pump_until_ready(ioc, inbound_r)) << "inbound Logout did not complete within 10s";
-    auto ir = inbound_r.get();
-    EXPECT_TRUE(ir.has_value()) << "Inbound Logout should be accepted";
+    auto inbound_r = feed_inbound(sess, peer_logout);
+    ASSERT_TRUE(inbound_r.has_value()) << kPumpBudgetMiss << "GracefulBothDirections: inbound Logout";
+    EXPECT_TRUE(inbound_r->has_value()) << "Inbound Logout should be accepted";
 
     // Session should now be Disconnected.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
 
     // close() should complete without error.
-    ASSERT_TRUE(pump_until_ready(ioc, close_fut)) << "close() did not complete within 10s";
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut)) << kPumpBudgetMiss << "GracefulBothDirections: close()";
     auto close_r = close_fut.get();
     EXPECT_TRUE(close_r.has_value()) << "close() should complete ok";
 }
@@ -289,7 +322,8 @@ TEST_F(LogoutExchangeTest, NeverConfirmedForceDisconnect) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    drive_to_active_initiator(sess);
+    quiesce_on_exit quiesce{ioc, *clock};
+    ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Trigger graceful close.
@@ -304,7 +338,7 @@ TEST_F(LogoutExchangeTest, NeverConfirmedForceDisconnect) {
     // close_fut) rather than a fixed window that could close before the offload.
     clock->advance(std::chrono::seconds{3});
     ASSERT_TRUE(pump_until_ready(ioc, close_fut))
-        << "close() did not complete within 10s after the logout timeout fired";
+        << kPumpBudgetMiss << "NeverConfirmedForceDisconnect: close() after logout timeout";
 
     // Session should be Disconnected due to timeout.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
@@ -335,7 +369,8 @@ TEST_F(LogoutExchangeTest, ConfigurableTimeoutHonored) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    drive_to_active_initiator(sess);
+    quiesce_on_exit quiesce{ioc, *clock};
+    ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Trigger graceful close.
@@ -359,7 +394,8 @@ TEST_F(LogoutExchangeTest, ConfigurableTimeoutHonored) {
     // still hardcoded to 2s, the 300ms mock advance never reaches the deadline →
     // close never completes → this FAILs loudly at 10s (the RC#D regression).
     ASSERT_TRUE(pump_until_ready(ioc, close_fut))
-        << "RC#D: close() did not complete within 10s — the configured 200ms timeout "
+        << kPumpBudgetMiss
+        << "RC#D: ConfigurableTimeoutHonored: close() — the configured 200ms timeout "
            "must fire at a 300ms clock advance (a hardcoded 2s timeout wedges here).";
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
@@ -376,13 +412,18 @@ TEST_F(LogoutExchangeTest, NotConnectedInboundLogoutDisconnects) {
     // the same "pre-Active Logout → Disconnected" matrix column as NotConnected.)
     auto cfg3 = make_cfg();
     Session sess3(engine, cfg3);
+    quiesce_on_exit quiesce{ioc, *clock};
+
     auto r3 = open_session(sess3);
-    ASSERT_TRUE(r3.has_value());
+    ASSERT_TRUE(r3.has_value()) << kPumpBudgetMiss << "NotConnectedInboundLogoutDisconnects: open()";
+    ASSERT_TRUE(r3->has_value());
     EXPECT_EQ(sess3.state(), fsm_state::LogonSent);
 
     auto logout = make_logout_frame("FIX.4.2", 1, "TW", "ISLD");
     auto ir = feed_inbound(sess3, logout);
-    EXPECT_TRUE(ir.has_value());
+    ASSERT_TRUE(ir.has_value())
+        << kPumpBudgetMiss << "NotConnectedInboundLogoutDisconnects: feed_inbound(Logout)";
+    EXPECT_TRUE(ir->has_value());
     EXPECT_EQ(sess3.state(), fsm_state::Disconnected)
         << "LogonSent + inbound Logout → Disconnected";
 }
@@ -391,8 +432,6 @@ TEST_F(LogoutExchangeTest, NotConnectedInboundLogoutDisconnects) {
 TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     auto cfg0 = make_cfg();
     Session sess(engine, cfg0);
-    auto r = open_session(sess);
-    ASSERT_TRUE(r.has_value());
 
     // Drive to LogonReceived (acceptor path: NotConnected → LogonReceived).
     // For this we need to be in NotConnected, which is post-construction.
@@ -419,13 +458,21 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess2(engine, cfg);
-    drive_to_active_initiator(sess2);
+    quiesce_on_exit quiesce{ioc, *clock};
+
+    auto r = open_session(sess);
+    ASSERT_TRUE(r.has_value()) << kPumpBudgetMiss << "LogonReceivedInboundLogoutDisconnects: open(sess)";
+    ASSERT_TRUE(r->has_value());
+
+    ASSERT_TRUE(drive_to_active_initiator(sess2));
     ASSERT_EQ(sess2.state(), fsm_state::Active);
 
     // Feed inbound Logout (peer initiates Logout while we are Active).
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
     auto ir = feed_inbound(sess2, peer_logout);
-    EXPECT_TRUE(ir.has_value());
+    ASSERT_TRUE(ir.has_value())
+        << kPumpBudgetMiss << "LogonReceivedInboundLogoutDisconnects: feed_inbound(Logout)";
+    EXPECT_TRUE(ir->has_value());
 
     // Per matrix Active row: inbound Logout → emit Logout → Disconnected.
     EXPECT_EQ(sess2.state(), fsm_state::Disconnected) << "Active + inbound Logout → Disconnected";
@@ -445,7 +492,8 @@ TEST_F(LogoutExchangeTest, LogoutSentInboundLogoutDisconnects) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    drive_to_active_initiator(sess);
+    quiesce_on_exit quiesce{ioc, *clock};
+    ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Initiate graceful close → LogoutSent.
@@ -459,7 +507,9 @@ TEST_F(LogoutExchangeTest, LogoutSentInboundLogoutDisconnects) {
     // Feed inbound Logout confirmation.
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
     auto ir = feed_inbound(sess, peer_logout);
-    EXPECT_TRUE(ir.has_value());
+    ASSERT_TRUE(ir.has_value())
+        << kPumpBudgetMiss << "LogoutSentInboundLogoutDisconnects: feed_inbound(Logout)";
+    EXPECT_TRUE(ir->has_value());
 
     // LogoutSent + inbound Logout → Disconnected.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
@@ -475,12 +525,15 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogoutEmitsConfirmAndDisconnects) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    drive_to_active_initiator(sess);
+    quiesce_on_exit quiesce{ioc, *clock};
+    ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
     auto ir = feed_inbound(sess, peer_logout);
-    EXPECT_TRUE(ir.has_value());
+    ASSERT_TRUE(ir.has_value())
+        << kPumpBudgetMiss << "ActiveInboundLogoutEmitsConfirmAndDisconnects: feed_inbound(Logout)";
+    EXPECT_TRUE(ir->has_value());
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
     ASSERT_GE(td.sent_count(), 1u) << "Should emit confirming Logout";
@@ -493,7 +546,8 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogout_SeqnumOverflow_SurfacesError) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    drive_to_active_initiator(sess);
+    quiesce_on_exit quiesce{ioc, *clock};
+    ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const std::size_t frames_before = td.sent_count();
@@ -504,12 +558,14 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogout_SeqnumOverflow_SurfacesError) {
 
     auto peer_logout = make_logout_frame("FIX.4.2", next_inbound, "TW", "ISLD");
     auto inbound_r = feed_inbound(sess, peer_logout);
+    ASSERT_TRUE(inbound_r.has_value())
+        << kPumpBudgetMiss << "ActiveInboundLogout_SeqnumOverflow_SurfacesError: feed_inbound(Logout)";
 
-    EXPECT_FALSE(inbound_r.has_value())
+    EXPECT_FALSE(inbound_r->has_value())
         << "Active inbound Logout must surface assign_outbound() overflow; "
         << "got ok (bug: session.cpp site 3 returns success after Disconnect).";
-    ASSERT_FALSE(inbound_r.has_value());
-    EXPECT_EQ(inbound_r.error(), fixpp::core::error::store_seqnum_overflow)
+    ASSERT_FALSE(inbound_r->has_value());
+    EXPECT_EQ(inbound_r->error(), fixpp::core::error::store_seqnum_overflow)
         << "Active inbound Logout must return store_seqnum_overflow on outbound seqnum overflow.";
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "Active inbound Logout overflow must transition to Disconnected.";
@@ -524,11 +580,13 @@ TEST_F(LogoutExchangeTest, DisconnectedInboundLogoutIgnored) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    drive_to_active_initiator(sess);
+    quiesce_on_exit quiesce{ioc, *clock};
+    ASSERT_TRUE(drive_to_active_initiator(sess));
 
     // Force disconnect via terminal close.
     auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
-    ASSERT_TRUE(pump_until_ready(ioc, close_fut)) << "terminal close() did not complete within 10s";
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut))
+        << kPumpBudgetMiss << "DisconnectedInboundLogoutIgnored: terminal close()";
     (void)close_fut.get();
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
@@ -536,8 +594,10 @@ TEST_F(LogoutExchangeTest, DisconnectedInboundLogoutIgnored) {
 
     auto logout = make_logout_frame("FIX.4.2", 3, "TW", "ISLD");
     auto ir = feed_inbound(sess, logout);
+    ASSERT_TRUE(ir.has_value())
+        << kPumpBudgetMiss << "DisconnectedInboundLogoutIgnored: feed_inbound(Logout)";
     // Disconnected state ignores all inbound (co_return ok per matrix).
-    EXPECT_TRUE(ir.has_value());
+    EXPECT_TRUE(ir->has_value());
     EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "Disconnected stays Disconnected";
     EXPECT_EQ(td.sent_count(), sent_before) << "No outbound frame emitted in Disconnected";
 }
@@ -551,7 +611,8 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    drive_to_active_initiator(sess);
+    quiesce_on_exit quiesce{ioc, *clock};
+    ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
@@ -570,7 +631,8 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
 
     // Clean up: advance clock past timeout to complete close.
     clock->advance(std::chrono::seconds{3});
-    ASSERT_TRUE(pump_until_ready(ioc, close_fut)) << "close() did not complete within 10s after timeout";
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut))
+        << kPumpBudgetMiss << "InitiateLogoutFromActive: close() after timeout";
     (void)close_fut.get();
 }
 
@@ -650,6 +712,21 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
     {
         fixpp::session::Session sess(engine, cfg);
 
+        // Feed peer Logon-ack → Active. 2 stores now buffered: outbound Logon
+        // (from open) + inbound Logon-ack (from on_inbound_frame). Built here,
+        // ahead of the guard below, so the guard (which must run BEFORE `sess`
+        // is destroyed on any exit path, including an ASSERT_TRUE early
+        // return from either pump below) also runs before this buffer is
+        // destroyed — #289(b-Q3): a body-local guard placed after a body-
+        // local input a suspended coroutine may reference is required, not
+        // just after `sess` itself.
+        auto logon_ack = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
+
+        // Declared after `sess` and `logon_ack`, before the first pump: on
+        // every exit path this destructs first, draining `ioc` while `sess`,
+        // `clock`, `ioc`, cfg, transport, and the file pool are still alive.
+        fixpp::test_support::quiesce_on_exit quiesce{ioc, *clock};
+
         // Drive to Active: open() → LogonSent → inbound Logon-ack → Active.
         {
             auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
@@ -658,9 +735,6 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
         }
 
-        // Feed peer Logon-ack → Active. 2 stores now buffered: outbound Logon
-        // (from open) + inbound Logon-ack (from on_inbound_frame).
-        auto logon_ack = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
         {
             auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut)) << "Logon-ack did not complete within 10s";
