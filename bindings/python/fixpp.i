@@ -798,3 +798,39 @@ try:
 except ImportError:
     pass
 %}
+
+/* ── #295 — drop SWIG >= 4.5's unused module-scope `import typing` ───────────
+ * SWIG 4.5.0 added `import typing` to the generated proxy's preamble. Nothing
+ * in the generated output uses it: measured on 4.5.0 against THIS interface
+ * file, `typing` occurs exactly once in fixpp.py (the import itself) and zero
+ * times in fixpp_wrap.cxx. But a module-scope import binds the name in the
+ * module namespace, so `dir(fixpp)` grew a `typing` entry and the exact-set
+ * import-surface snapshot (tests/wheel/test_import_surface.py) correctly
+ * rejected it — the wheel really was exposing a stdlib module as public API.
+ *
+ * Fixed HERE rather than by capping `swig<4.5` in pyproject.toml, and rather
+ * than by adding "typing" to EXPECTED_PUBLIC_SURFACE:
+ *   - the pyproject pin is deliberately open-ended ("NO upper bound — builds
+ *     with the latest SWIG"), and this repo's precedent for a SWIG behaviour
+ *     change is a version-agnostic fix, not a pin: see the SWIG_Python_Append-
+ *     Output/is_void note in pyproject.toml, where the 4.3 semantics change was
+ *     absorbed by the typemaps instead of a version bound.
+ *   - widening EXPECTED_PUBLIC_SURFACE would green the gate while leaving the
+ *     leak shipped. The snapshot caught real drift; it is not the thing to fix.
+ *
+ * `globals().pop(name, None)` rather than `del typing`: this block is emitted
+ * unconditionally, so on SWIG < 4.5 (which emits no such import) a bare `del`
+ * would raise NameError at import time. pop-with-default is a no-op there.
+ *
+ * This is the LAST %pythoncode block in the file and SWIG emits these in source
+ * order, so it runs after the preamble import (verified on 4.5.0: the import is
+ * line 22, this pop is line 349 of 351).
+ *
+ * ⚠️ If a future SWIG actually USES `typing` in generated code, this pop turns
+ * that into a NameError at `import fixpp` — loud, immediate, and caught by the
+ * whole tests/wheel/ suite, not a silent surface change. That is the intended
+ * failure direction; re-verify the two occurrence counts above before bumping
+ * past a SWIG major/minor that touches the proxy preamble. */
+%pythoncode %{
+globals().pop("typing", None)
+%}
