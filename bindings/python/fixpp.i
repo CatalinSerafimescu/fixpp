@@ -834,11 +834,15 @@ except ImportError:
  * was appended below it. Correctness here does not depend on being last, so a
  * future append below this one needs no change.
  *
- * ⚠️ If a future SWIG actually USES `typing` in generated code, this pop turns
- * that into a NameError at `import fixpp` — loud, immediate, and caught by the
- * whole tests/wheel/ suite, not a silent surface change. That is the intended
- * failure direction; re-verify the two occurrence counts above before bumping
- * past a SWIG major/minor that touches the proxy preamble. */
+ * ⚠️ Bounded guarantee, not a total one. This pop makes any future `typing`
+ * use that is evaluated as MODULE-LEVEL code after this block (i.e. at
+ * `import fixpp` time) fail loudly and immediately with `NameError`. It does
+ * NOT protect a future use inside a generated FUNCTION BODY: that would
+ * import fine and only fail later, when the function is first called — and
+ * the test suite cannot guarantee it calls every future generated code path.
+ * Re-verify the two occurrence counts above, and grep the generated output
+ * for `typing` INSIDE function bodies, before bumping past a SWIG
+ * major/minor that touches the proxy preamble. */
 %pythoncode %{
 globals().pop("typing", None)
 %}
