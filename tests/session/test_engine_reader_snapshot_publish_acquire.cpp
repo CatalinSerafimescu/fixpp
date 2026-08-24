@@ -80,6 +80,7 @@
 #include <thread>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::Engine;
@@ -286,10 +287,24 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     ioc_thread.join();
     reader_thread.join();
 
-    // Stop the engine cleanly: restart the ioc and drive stop() to completion.
+    // If the initiator never connected within the window (e.g. a slow or
+    // failed loopback connect), run_raw_acceptor's async_accept() (or the
+    // co_spawned accept lambda above) is STILL SUSPENDED here — the
+    // unconditional ioc.run() this block used to call would then wait on it
+    // forever instead of returning once stop() completes, turning a
+    // diagnosable failure (nonnull_reads==0 below) into a 30s CTest timeout.
+    // Force it to unblock before draining. [gate-b/r1 P2-6]
+    asio::error_code raw_acc_close_ec;
+    raw_acc.cancel(raw_acc_close_ec);
+    raw_acc.close(raw_acc_close_ec);
+
+    // Stop the engine cleanly: restart the ioc and drive stop() to completion,
+    // bounded so a stuck stop() (or a still-pending cancellation completion)
+    // fails loudly instead of hanging the ctest run.
     ioc.restart();
     auto stop_fut = asio::co_spawn(ioc, engine->stop(), asio::use_future);
-    ioc.run();
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, stop_fut))
+        << "engine->stop() did not complete within the bounded pump budget";
     stop_fut.get();
 
     // Primary oracle: TSan must report no race on reader_snapshot_ or the shared_ptr
@@ -313,6 +328,52 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
 
     // Destroy Engine after stop() — strict assert(stopped()) is satisfied.
     engine.reset();
+}
+
+// ── Counter-test for P2-6 (gate-b/r1) ────────────────────────────────────────
+// Isolates the exact mechanism the fix above depends on, without the full
+// Engine/session machinery: if nothing ever connects, a raw acceptor's
+// async_accept() is still suspended when the driving thread's bounded
+// run_for() window closes. Before the fix, an unconditional ioc.run() after
+// that point would wait on it forever. This proves cancel()+close() on the
+// acceptor, followed by a bounded pump, reaches completion promptly instead
+// of hanging — i.e. the disable-the-connect-trigger case reaches its
+// diagnostic rather than timing out.
+TEST(EngineReaderSnapshotPublishAcquire, PendingAcceptDoesNotWedgeBoundedDrain) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor raw_acc{ioc};
+    asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
+    raw_acc.open(ep.protocol());
+    raw_acc.set_option(asio::ip::tcp::acceptor::reuse_address{true});
+    raw_acc.bind(ep);
+    raw_acc.listen(1);
+
+    // Nobody ever connects: this stays suspended past the run_for() window
+    // below, exactly like the connect-disabled scenario this test names.
+    std::atomic<bool> accept_completed{false};
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            asio::error_code ec;
+            (void)co_await raw_acc.async_accept(asio::redirect_error(asio::use_awaitable, ec));
+            accept_completed.store(true, std::memory_order_release);
+        },
+        asio::detached);
+
+    ioc.run_for(50ms);
+    ioc.restart();
+    ASSERT_FALSE(accept_completed.load(std::memory_order_acquire))
+        << "the accept must still be pending for this counter-test to be meaningful";
+
+    // The fix under test: cancel+close the acceptor before the bounded drain.
+    asio::error_code close_ec;
+    raw_acc.cancel(close_ec);
+    raw_acc.close(close_ec);
+
+    ASSERT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return accept_completed.load(std::memory_order_acquire); }, 2s))
+        << "cancel()+close() on a pending acceptor must unblock its async_accept() "
+        << "promptly instead of leaving it suspended forever";
 }
 
 #pragma clang diagnostic pop
