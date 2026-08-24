@@ -26,10 +26,20 @@
 //     Logon, and then calls publish_entry — making the session visible via lookup().
 //   - No TLS fixtures required; no FIX Logon ACK required for publication.
 //
-// Overlap guarantee: the main-thread lookup loop runs `while (!ioc_done)` (ioc_done
-// is set AFTER ioc.run_for(kRunWindow) returns), so the loop spans the entire window
-// during which the connect loop publishes.  After the window, we assert nonnull_reads>0
-// to prove the publish happened and was observed concurrently.
+// Witnessed transition, not a fixed-window guarantee, and not a start-barrier
+// alone: a dedicated reader THREAD is started first and loops on lookup() while
+// the engine's io_context is not yet being driven — Engine::start() only spawns
+// coroutines onto ioc; nothing executes them until ioc is pumped — so its first
+// reads are null. The main thread then waits (bounded) until that LIVE reader has
+// actually recorded a null read before letting the io_context run at all, so
+// publication cannot precede the reader's first observation. The reader keeps
+// running, concurrently with the io_context, until ioc_done — spanning the whole
+// transition — so null_reads>0 and nonnull_reads>0 together prove a live
+// concurrent reader observed both the pre-publish and post-publish states, not
+// just that a read could theoretically have landed on either side. A single
+// EXPECT_GT(nonnull_reads,0) alone is NOT sufficient: the io_thread could publish
+// before the reader's first read, in which case every observed read is the
+// terminal non-null state and no null→non-null transition is actually witnessed.
 //
 // Scope: no TLS fixtures required (insecure_plain_tcp + raw loopback peer).
 // SecurityProfile::kind::insecure_plain_tcp — suppress the [[deprecated]] friction
@@ -70,6 +80,7 @@
 #include <thread>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::Engine;
@@ -124,6 +135,13 @@ static asio::awaitable<void> run_raw_acceptor(
 // ── EngineReaderSnapshotPublishAcquire ───────────────────────────────────────
 
 TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
+    // [gate-b/r2 F2] declared BEFORE `ioc` (destructed LAST) so that on the
+    // bounded-pump timeout path below, `ioc` (and any coroutine frame it
+    // still holds — e.g. a suspended engine->stop()) is destroyed first,
+    // before `engine`. See the timeout branch below for the other half of
+    // this fix: on that path `engine` must also be deliberately leaked, or
+    // ~Engine's `stopped_` assert aborts instead of reporting the failure.
+    std::unique_ptr<Engine> engine;
     asio::io_context ioc;
 
     // ── Bind the raw loopback acceptor.  ────────────────────────────────────
@@ -152,7 +170,7 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     eng_cfg.default_transport_factory = std::move(*factory_r);
 
-    auto engine = std::make_unique<Engine>(ioc.get_executor(), std::move(eng_cfg));
+    engine = std::make_unique<Engine>(ioc.get_executor(), std::move(eng_cfg));
 
     // ── Register one initiator session targeting the loopback port. ──────────
     SessionConfig sc;
@@ -198,7 +216,59 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     // We do NOT call session->state() — that is session-strand-only (data race).
 
     std::atomic<bool> ioc_done{false};
+    std::atomic<bool> reader_saw_null{false};
+    int null_reads = 0;
+    int nonnull_reads = 0;
 
+    // ── Reader thread: live across the whole null→non-null transition ───────
+    // Started BEFORE the io_context is ever pumped and kept running until
+    // ioc_done, so it is a single continuously-reading witness spanning both
+    // the pre-publish and post-publish states — not two disjoint loops. Its
+    // first observation is guaranteed null (nothing executes on `ioc` until
+    // it is pumped below), but the ASSERTION below does not rely on that
+    // guarantee alone: the main thread holds the io_context back (see the
+    // wait on reader_saw_null) until this thread has ACTUALLY observed and
+    // recorded a null read, so the null read is witnessed by a live
+    // concurrent reader, not merely presumed reachable. An overlap witness on
+    // a start barrier alone is probabilistic — the sibling lesson recorded in
+    // [[feedback_overlap_witness_needs_stimulus_held_until_witnessed]]; this
+    // applies the same fix to the null-side of the transition.
+    std::thread reader_thread([&] {
+        while (!ioc_done.load(std::memory_order_acquire)) {
+            auto session = engine->lookup(sid);
+            if (session == nullptr) {
+                // Valid: session not yet published (publish_entry not yet called).
+                ++null_reads;
+                reader_saw_null.store(true, std::memory_order_release);
+            } else {
+                // Session published.  We hold a strong-ref via shared_ptr<Session>.
+                // The refcount increment is the primary correctness witness under TSan:
+                // a torn acquire-load of reader_snapshot_ would produce an invalid
+                // shared_ptr whose refcount operations race → TSan fires.
+                ++nonnull_reads;
+            }
+            // Prevent the optimizer from eliding the loads.
+            (void)session.get();
+        }
+    });
+
+    // Wait (bounded) until the live reader has actually observed null before
+    // letting the io_context run at all — publication cannot happen before
+    // this point, so it cannot precede the reader's first observation. This
+    // wait is a scheduling nicety, not a correctness gate: it has no fatal
+    // assertion (a std::thread must not be joinable when one fires), and if
+    // it times out the reader is very likely to have already recorded a null
+    // read anyway (nothing publishes until below), so the final assertions
+    // below remain the honest oracle either way.
+    {
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        while (!reader_saw_null.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(1ms);
+        }
+    }
+
+    // ── Let the io_context run, witnessed concurrently by the reader ────────
     // Spawn the raw acceptor coroutine.  Hold window = kRunWindow so the socket
     // stays alive for the whole test.
     asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
@@ -218,43 +288,50 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
         ioc_done.store(true, std::memory_order_release);
     });
 
-    // Main thread: repeatedly call lookup() while the engine's control strand
-    // is publishing the session snapshot.
-    //
-    // Loop until ioc_done is set — this spans the entire window during which
-    // the connect loop connects, emits Logon, and calls publish_entry.
-    int null_reads = 0;
-    int nonnull_reads = 0;
-    while (!ioc_done.load(std::memory_order_acquire)) {
-        auto session = engine->lookup(sid);
-        if (session == nullptr) {
-            // Valid: session not yet published (publish_entry not yet called).
-            ++null_reads;
-        } else {
-            // Session published.  We hold a strong-ref via shared_ptr<Session>.
-            // The refcount increment is the primary correctness witness under TSan:
-            // a torn acquire-load of reader_snapshot_ would produce an invalid
-            // shared_ptr whose refcount operations race → TSan fires.
-            ++nonnull_reads;
-        }
-        // Prevent the optimizer from eliding the loads.
-        (void)session.get();
-    }
-
-    // Wait for the ioc thread.
+    // Wait for both threads. No fatal assertion runs before this join —
+    // a std::thread must not be joinable when one fires (it would call
+    // std::terminate on unwind).
     ioc_thread.join();
+    reader_thread.join();
 
-    // Stop the engine cleanly: restart the ioc and drive stop() to completion.
+    // If the initiator never connected within the window (e.g. a slow or
+    // failed loopback connect), run_raw_acceptor's async_accept() (or the
+    // co_spawned accept lambda above) is STILL SUSPENDED here — the
+    // unconditional ioc.run() this block used to call would then wait on it
+    // forever instead of returning once stop() completes, turning a
+    // diagnosable failure (nonnull_reads==0 below) into a 30s CTest timeout.
+    // Force it to unblock before draining. [gate-b/r1 P2-6]
+    asio::error_code raw_acc_close_ec;
+    raw_acc.cancel(raw_acc_close_ec);
+    raw_acc.close(raw_acc_close_ec);
+
+    // Stop the engine cleanly: restart the ioc and drive stop() to completion,
+    // bounded so a stuck stop() (or a still-pending cancellation completion)
+    // fails loudly instead of hanging the ctest run.
     ioc.restart();
     auto stop_fut = asio::co_spawn(ioc, engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::pump_until_ready(ioc, stop_fut)) {
+        // [gate-b/r2 F2] Already-failing path: the stop() frame is still
+        // suspended in `ioc` and holds Engine&. ~Engine would trip its
+        // stopped_ assert and abort, replacing this diagnosable failure.
+        // Leak deliberately.
+        (void)engine.release();
+        ADD_FAILURE() << "engine->stop() did not complete within the bounded pump budget";
+        return;
+    }
     stop_fut.get();
 
     // Primary oracle: TSan must report no race on reader_snapshot_ or the shared_ptr
-    // refcount.  The functional oracle is that at least some nonnull reads occurred,
-    // proving the publish_entry ran during the main-thread read window.
-    EXPECT_EQ(null_reads + nonnull_reads, null_reads + nonnull_reads)  // loop completed
-        << "sanity: loop count must be consistent";
+    // refcount. The functional oracle is the WITNESSED null→non-null transition:
+    // null_reads>0 proves a nonterminal pre-publish observation actually happened
+    // (not just that the loop could theoretically have seen one), and
+    // nonnull_reads>0 proves publish_entry ran and was observed. Neither alone is
+    // sufficient — see the file header and w-Q1/w-Q2 above.
+    EXPECT_GT(null_reads, 0)
+        << "The reader never observed a null lookup() result before the engine's "
+           "io_context was driven — cannot witness the null-to-non-null transition "
+           "this test names. This mutation is harness scheduling, not a production "
+           "defect: production has no synchronous eager-publication seam to force it.";
 
     EXPECT_GT(nonnull_reads, 0)
         << "Expected at least one non-null lookup() result — the connect loop should have "
@@ -265,6 +342,52 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
 
     // Destroy Engine after stop() — strict assert(stopped()) is satisfied.
     engine.reset();
+}
+
+// ── Counter-test for P2-6 (gate-b/r1) ────────────────────────────────────────
+// Isolates the exact mechanism the fix above depends on, without the full
+// Engine/session machinery: if nothing ever connects, a raw acceptor's
+// async_accept() is still suspended when the driving thread's bounded
+// run_for() window closes. Before the fix, an unconditional ioc.run() after
+// that point would wait on it forever. This proves cancel()+close() on the
+// acceptor, followed by a bounded pump, reaches completion promptly instead
+// of hanging — i.e. the disable-the-connect-trigger case reaches its
+// diagnostic rather than timing out.
+TEST(EngineReaderSnapshotPublishAcquire, PendingAcceptDoesNotWedgeBoundedDrain) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor raw_acc{ioc};
+    asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
+    raw_acc.open(ep.protocol());
+    raw_acc.set_option(asio::ip::tcp::acceptor::reuse_address{true});
+    raw_acc.bind(ep);
+    raw_acc.listen(1);
+
+    // Nobody ever connects: this stays suspended past the run_for() window
+    // below, exactly like the connect-disabled scenario this test names.
+    std::atomic<bool> accept_completed{false};
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            asio::error_code ec;
+            (void)co_await raw_acc.async_accept(asio::redirect_error(asio::use_awaitable, ec));
+            accept_completed.store(true, std::memory_order_release);
+        },
+        asio::detached);
+
+    ioc.run_for(50ms);
+    ioc.restart();
+    ASSERT_FALSE(accept_completed.load(std::memory_order_acquire))
+        << "the accept must still be pending for this counter-test to be meaningful";
+
+    // The fix under test: cancel+close the acceptor before the bounded drain.
+    asio::error_code close_ec;
+    raw_acc.cancel(close_ec);
+    raw_acc.close(close_ec);
+
+    ASSERT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return accept_completed.load(std::memory_order_acquire); }, 2s))
+        << "cancel()+close() on a pending acceptor must unblock its async_accept() "
+        << "promptly instead of leaving it suspended forever";
 }
 
 #pragma clang diagnostic pop

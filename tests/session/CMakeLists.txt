@@ -154,6 +154,7 @@ add_executable(session_pure_tests
   test_session_event_ring_overflow.cpp
   test_reload_credentials_in_flight.cpp
   test_live_outbound_serialized.cpp
+  test_quiesce_on_exit_residual.cpp                                     # gate-b/r1 P1-3 (Art. VII §8)
   test_enum_validation_logon.cpp                                        # T030 (075)
   $<TARGET_OBJECTS:session_test_support>
 )
@@ -595,6 +596,12 @@ target_compile_definitions(store_file_concurrent_tsan PRIVATE FIXPP_TEST_HOOKS)
 #           close(terminal) skips phase 1.
 add_threading_test(session_logout_exchange logout_exchange_test.cpp)
 target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
+
+# ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
+# diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the
+# branch's polarity — see the file header for the documented scope limits.
+# gate-b/r1 P1-3 (Art. VII §8): single-threaded, isolation-safe — folded into
+# session_pure_tests above rather than a standalone add_threading_test binary.
 
 # ── 005 Phase 7 (US5) — seam #7/#8: Reject + SendingTime tests (T050/T051) ────
 # Red-first TDD: authored before T054/T056 implementation; turns green at T057.
@@ -2358,10 +2365,15 @@ set_tests_properties(session_plaintext_factory_mismatch PROPERTIES
 # (fixpp::sync::atomic_shared_ptr<const ReaderSnapshot>).
 # Uses insecure_plain_tcp + a raw loopback acceptor — no TLS fixtures required.
 # Engine runs its io_context on a background thread (control-strand runs connect loop
-# and calls publish_entry → reader_snapshot_ release-store);
-# main thread loops calling lookup() until ioc_done (acquire-load of reader_snapshot_).
-# Overlap guarantee: main-thread loop runs while(!ioc_done), spanning the entire
-# 500ms window during which the connect loop publishes. nonnull_reads>0 proves overlap.
+# and calls publish_entry → reader_snapshot_ release-store); a dedicated reader
+# thread loops calling lookup() (acquire-load of reader_snapshot_), started BEFORE
+# the io_context is ever driven and kept alive until ioc_done, spanning the whole
+# transition. #289: NOT a start barrier alone and NOT a fixed-window guarantee —
+# the main thread waits until the LIVE reader has actually recorded a null read
+# before letting the io_context run, so publication cannot precede that
+# observation (null_reads>0), and the reader keeps reading through publication
+# (nonnull_reads>0). Both halves are asserted; see the file header for why
+# nonnull_reads>0 alone is not sufficient (a #287 false-green class).
 add_executable(engine_reader_snapshot_publish_acquire_test
     test_engine_reader_snapshot_publish_acquire.cpp)
 target_link_libraries(engine_reader_snapshot_publish_acquire_test PRIVATE

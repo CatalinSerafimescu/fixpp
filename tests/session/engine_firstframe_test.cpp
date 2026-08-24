@@ -72,24 +72,12 @@
 #include <vector>
 
 #include "engine_loopback_harness.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::test_support::EngineLoopbackHarness;
 
 namespace {
-
-// Drive `ioc` in slices until `done` flips or `cap` elapses. The accept loop
-// holds an outstanding async_accept forever, so a bare ioc.run_for(cap) never
-// returns early — it always costs the full cap. Slicing keeps a passing run at
-// the cost of the behaviour under test rather than the cost of its bound.
-static void run_until(asio::io_context& ioc, const std::atomic<bool>& done,
-                      std::chrono::steady_clock::duration cap) {
-    const auto limit = std::chrono::steady_clock::now() + cap;
-    while (!done.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < limit) {
-        ioc.run_for(50ms);
-        ioc.restart();
-    }
-}
 
 // Real behavioral probe (NO hardcoded result): connect TCP to the acceptor,
 // optionally send `payload`, then read. The acceptor's bounded pre-session
@@ -297,7 +285,9 @@ TEST(EngineFirstFrameTest, NonTlsSilentPeerClosedByHandshakeBound) {
                    asio::detached);
 
     // BOUNDED: 3s cap. The probe's read pends on the stub; the cap ends the run.
-    run_until(ioc, done, 3s);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return done.load(std::memory_order_acquire); }, 3s, 50ms))
+        << "probe did not report within cap";
 
     const bool measured_closed = closed.load(std::memory_order_acquire);
 
@@ -343,7 +333,9 @@ TEST(EngineFirstFrameTest, NonTlsPeerWithPayloadClosedByHandshakeBound) {
         asio::detached);
 
     // BOUNDED: 3s cap.
-    run_until(ioc, done, 3s);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return done.load(std::memory_order_acquire); }, 3s, 50ms))
+        << "probe did not report within cap";
 
     const bool measured_closed = closed.load(std::memory_order_acquire);
 
@@ -384,13 +376,17 @@ TEST(EngineFirstFrameTest, AcceptLoopRunsContinuously) {
     std::atomic<bool> first_done{false};
     asio::co_spawn(ioc, probe_closed_within_window(ioc, port, "", first_closed, first_done),
                    asio::detached);
-    run_until(ioc, first_done, 3s);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return first_done.load(std::memory_order_acquire); }, 3s, 50ms))
+        << "probe did not report within cap";
 
     std::atomic<bool> second_closed{false};
     std::atomic<bool> second_done{false};
     asio::co_spawn(ioc, probe_closed_within_window(ioc, port, "", second_closed, second_done),
                    asio::detached);
-    run_until(ioc, second_done, 3s);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return second_done.load(std::memory_order_acquire); }, 3s, 50ms))
+        << "probe did not report within cap";
 
     const bool both_closed = first_closed.load(std::memory_order_acquire) &&
                              second_closed.load(std::memory_order_acquire);
@@ -454,7 +450,9 @@ TEST(EngineFirstFrameTest, PostHandshakeStallClosedByFirstFrameDeadline) {
 
     // Cap > the probe's self-deadline so the probe always reports; a passing
     // run costs ~5s (the deadline), not the cap.
-    run_until(ioc, probe.done, 15s);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return probe.done.load(std::memory_order_acquire); }, 15s, 50ms))
+        << "probe did not report within cap";
 
     const bool measured_closed = probe.closed.load(std::memory_order_acquire);
     const auto measured_ms = probe.elapsed.count();
@@ -546,7 +544,9 @@ TEST(EngineFirstFrameTest, PostHandshakeOverBudgetClosedByByteBudget) {
     // Cap > the 5s deadline so a budget-less build still REPORTS its close (at
     // ~5s) and fails on the band, rather than failing ambiguously on "never
     // closed".
-    run_until(ioc, probe.done, 12s);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return probe.done.load(std::memory_order_acquire); }, 12s, 50ms))
+        << "probe did not report within cap";
 
     const bool measured_closed = probe.closed.load(std::memory_order_acquire);
     const auto measured_ms = probe.elapsed.count();
@@ -613,7 +613,9 @@ TEST(EngineFirstFrameTest, PostHandshakeRejectionDoesNotStopTheAcceptLoop) {
                                         make_carried_over_budget_payload(4097),
                                         /*self_deadline_after=*/3s, first),
                    asio::detached);
-    run_until(ioc, first.done, 5s);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return first.done.load(std::memory_order_acquire); }, 5s, 50ms))
+        << "probe did not report within cap";
 
     const bool first_closed = first.closed.load(std::memory_order_acquire);
     const auto first_ms = first.elapsed.count();
@@ -631,7 +633,9 @@ TEST(EngineFirstFrameTest, PostHandshakeRejectionDoesNotStopTheAcceptLoop) {
                                         make_carried_over_budget_payload(4097),
                                         /*self_deadline_after=*/3s, second),
                    asio::detached);
-    run_until(ioc, second.done, 5s);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return second.done.load(std::memory_order_acquire); }, 5s, 50ms))
+        << "probe did not report within cap";
 
     const bool second_closed = second.closed.load(std::memory_order_acquire);
     const auto second_ms = second.elapsed.count();

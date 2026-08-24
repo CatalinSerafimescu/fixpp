@@ -20,6 +20,7 @@
 #include <asio/io_context.hpp>
 #include <chrono>
 #include <fixpp/core/clock.hpp>
+#include <fixpp/transport/transport.hpp>
 #include <future>
 
 namespace fixpp::test_support {
@@ -87,15 +88,6 @@ template <class Ready>
 // coroutine frame). It does NOT relieve a caller from also giving that input a
 // lifetime enclosing the guard — `quiesce_on_exit` only fixes the ORDER of
 // destruction, not a dangling reference within the surviving objects.
-//
-// Known un-migrated caller: tests/session/logout_exchange_test.cpp (ten sites:
-// :182, :192, :268, :276, :306, :361, :531, :573, :656, :666) has neither
-// `quiesce_on_exit` nor a `TearDown()`, and its `feed_inbound`/`open_session`
-// helpers fail with non-fatal `ADD_FAILURE()` and continue — so the test body
-// keeps pumping past a stale helper-local buffer rather than returning early.
-// Filed on #289 alongside the wider 340-site migration, the ten logout sites,
-// and the residual-work witness; out of scope for the PR that introduced this
-// header.
 //
 // This is a test-harness utility, but the hazard it exists for is NOT
 // test-only — an earlier revision of this comment claimed it was, and that
@@ -174,14 +166,32 @@ inline constexpr const char* kPumpBudgetMiss =
 struct quiesce_on_exit {
     asio::io_context& ioc;
     fixpp::core::Clock& clock;
+    // Defaulted to preserve every existing two-argument {ioc, clock}
+    // aggregate initialisation's current 5s behaviour. A caller with a
+    // deterministic reason to bound this tighter (e.g. a test whose only
+    // purpose is to trigger the branch below) may supply a shorter budget.
+    std::chrono::steady_clock::duration budget = std::chrono::seconds{5};
+    // A live transport under the caller's control, if any (gate-b/r1 P1-1).
+    // Cancelling clock sleeps is not sufficient to unstick a coroutine parked
+    // in async_write/async_read_some on a still-open transport — that op
+    // completes only when the transport itself is closed. nullptr (default)
+    // when no such transport is in play; set it (this struct is a plain
+    // aggregate, so the field may be assigned after construction, e.g. once
+    // the caller attaches the transport) whenever one is. Assumes
+    // Transport::close() is noexcept and idempotent (true of every transport
+    // in this suite) — safe to call even if the caller already closed it.
+    fixpp::transport::Transport* transport = nullptr;
 
     ~quiesce_on_exit() {
+        if (transport) {
+            (void)transport->close();
+        }
         clock.cancel_sleeps();
         ioc.restart();
-        ioc.run_for(std::chrono::seconds{5});
+        ioc.run_for(budget);
         if (!ioc.stopped()) {
             ADD_FAILURE() << "quiesce_on_exit: the io_context did not run out of work within the "
-                             "5s quiesce window. At this caller that is expected to mean a "
+                             "configured quiesce window. At this caller that is expected to mean a "
                              "coroutine frame is still suspended and will be destroyed while "
                              "referencing objects that are about to be destructed, but this guard "
                              "only observes the residual, not its cause.";

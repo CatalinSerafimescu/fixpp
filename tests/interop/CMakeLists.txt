@@ -38,6 +38,9 @@ add_library(interop_support STATIC
 target_include_directories(interop_support PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"            # consumers: #include "support/..."
 )
+target_include_directories(interop_support PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"              # interop_fixture.cpp: support/pump_until_ready.hpp
+)
 target_link_libraries(interop_support PUBLIC
     fixpp_session
     fixpp_tls
@@ -114,11 +117,14 @@ endfunction()
 
 # ── support smoke (T002 Phase-1 checkpoint: the suite configures + builds + runs) ──
 # Runtime-validates the support layer: golden parse/diff + descriptor + probe token.
+# support/interop_fixture_test.cpp (#289(B1)) is folded in here rather than a
+# standalone executable — gate-b/r1 P1-3 (Art. VII §8): single-threaded,
+# isolation-safe, and this bucket already exercises the same fixture.
 fixpp_add_interop_test(
     NAME interop_support_smoke_test
     GROUP happy
     LABEL "interop;016;interop-support"
-    SOURCES support_smoke_test.cpp
+    SOURCES support_smoke_test.cpp support/interop_fixture_test.cpp
 )
 
 # ── US1 happy-path drivers (T010, T016) ───────────────────────────────────────

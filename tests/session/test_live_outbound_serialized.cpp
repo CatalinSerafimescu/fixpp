@@ -33,6 +33,7 @@
 // Anti-hang: every ioc.run_for() is bounded; internal self-deadlines via timers
 //   ensure ioc.run_for() never hangs waiting on blocked transport ops.
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <asio/any_io_executor.hpp>
@@ -52,6 +53,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <deque>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/fix_time.hpp>
@@ -69,6 +71,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 
@@ -392,17 +395,6 @@ static fixpp::session::SessionConfig make_acceptor_cfg(asio::any_io_executor exe
     return cfg;
 }
 
-template <class Future>
-void run_until_ready(asio::io_context& ioc, Future& fut, std::chrono::milliseconds step = 50ms,
-                     std::chrono::milliseconds budget = 2s) {
-    const auto deadline = std::chrono::steady_clock::now() + budget;
-    while (fut.wait_for(0ms) != std::future_status::ready &&
-           std::chrono::steady_clock::now() < deadline) {
-        ioc.run_for(step);
-        ioc.restart();
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell A — write-error propagates through store_then_emit → FSM → Disconnected
 // ─────────────────────────────────────────────────────────────────────────────
@@ -448,6 +440,10 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
 }
 
 TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -455,26 +451,39 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     auto cfg = make_acceptor_cfg(ioc.get_executor());
 
     fixpp::session::Session sess{eng, cfg};
+    // gate-b/r1 P1-1: declared AFTER `sess` so it destructs BEFORE it — on an
+    // ASSERT_TRUE early return below, a coroutine still suspended holding
+    // &sess must be forced to unwind (transport closed, drained) before sess
+    // itself is destroyed, or its frame dangles. No real clock is otherwise
+    // needed by this test (heartbeat_interval is disabled by
+    // make_acceptor_cfg); this one exists solely for the guard.
+    auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    run_until_ready(ioc, open_fut);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
+        << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<FailNthWriteTransport>(ioc.get_executor(), 2);
     auto* raw_ptr = raw_transport.get();
+    teardown_guard.transport = raw_ptr;
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
     auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
                                     asio::use_future);
-    run_until_ready(ioc, logon_fut);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
+        << "peer Logon timed out";
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
 
-    auto test_req = make_peer_test_request("FIX.4.4", 2, "INITIATOR", "ACCEPTOR", "TR1");
+    auto& test_req =
+        frames.emplace_back(make_peer_test_request("FIX.4.4", 2, "INITIATOR", "ACCEPTOR", "TR1"));
     auto hb_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{test_req}),
                                  asio::use_future);
-    run_until_ready(ioc, hb_fut);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, hb_fut, 2s))
+        << "TestRequest handling timed out";
     ASSERT_EQ(hb_fut.wait_for(0ms), std::future_status::ready) << "TestRequest handling timed out";
     auto hb_r = hb_fut.get();
 
@@ -677,6 +686,10 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
 }
 
 TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -688,19 +701,25 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     cfg.heartbeat_interval = std::chrono::seconds{1};
 
     fixpp::session::Session sess{eng, cfg};
+    // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it), reusing
+    // this test's real clock so its liveness-loop sleep is also cancelled.
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    run_until_ready(ioc, open_fut);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
+        << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<FailNthWriteTransport>(ioc.get_executor(), 2);
     auto* raw_ptr = raw_transport.get();
+    teardown_guard.transport = raw_ptr;
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
     auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
                                     asio::use_future);
-    run_until_ready(ioc, logon_fut);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
+        << "peer Logon timed out";
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
 
@@ -723,6 +742,10 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
 }
 
 TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -730,25 +753,32 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     auto cfg = make_acceptor_cfg(ioc.get_executor());
 
     fixpp::session::Session sess{eng, cfg};
+    // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
+    // clock is otherwise needed by this test; this one exists for the guard.
+    auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    run_until_ready(ioc, open_fut);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
+        << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
     auto* raw_ptr = raw_transport.get();
+    teardown_guard.transport = raw_ptr;
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
     auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
                                     asio::use_future);
-    run_until_ready(ioc, logon_fut);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
+        << "peer Logon timed out";
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
 
     raw_ptr->arm_block();
 
-    auto payload = make_min_app_payload();
+    auto& payload = frames.emplace_back(make_min_app_payload());
     auto send_fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
     ioc.run_for(50ms);
@@ -781,6 +811,10 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
 }
 
 TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -789,25 +823,32 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     cfg.logout_disconnect_timeout_ms = 100;
 
     fixpp::session::Session sess{eng, cfg};
+    // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
+    // clock is otherwise needed by this test; this one exists for the guard.
+    auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    run_until_ready(ioc, open_fut);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
+        << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
     auto* raw_ptr = raw_transport.get();
+    teardown_guard.transport = raw_ptr;
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
     auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
                                     asio::use_future);
-    run_until_ready(ioc, logon_fut);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
+        << "peer Logon timed out";
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
 
     raw_ptr->arm_block();
 
-    auto payload = make_min_app_payload();
+    auto& payload = frames.emplace_back(make_min_app_payload());
     auto send_fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
     ioc.run_for(50ms);
@@ -823,14 +864,16 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
         // Cleanup for the unfixed behavior: force-release the parked write so the
         // test fails fast instead of leaving the runner wedged.
         raw_ptr->close();
-        run_until_ready(ioc, close_fut, 20ms, 1s);
+        EXPECT_TRUE(fixpp::test_support::pump_until_ready(ioc, close_fut, 1s))
+            << "cleanup pump for close_fut did not complete";
     }
 
     EXPECT_TRUE(close_ready)
         << "close(graceful) must bound phase-1 Logout behind blocked live writes; "
         << "current HEAD hangs here until the transport is manually closed";
 
-    run_until_ready(ioc, send_fut, 20ms, 1s);
+    EXPECT_TRUE(fixpp::test_support::pump_until_ready(ioc, send_fut, 1s))
+        << "cleanup pump for send_fut did not complete";
 
     ASSERT_EQ(close_fut.wait_for(0ms), std::future_status::ready);
     auto close_r = close_fut.get();
@@ -867,6 +910,10 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
 // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F3/F4; gate-b/r2]
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -878,28 +925,49 @@ TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf)
     cfg.heartbeat_interval = std::chrono::seconds{1};
 
     auto sess = std::make_unique<fixpp::session::Session>(eng, cfg);
+    // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it) so any
+    // ASSERT_TRUE below that returns early before the manual `sess.reset()`
+    // still quiesces the liveness sleep before `sess`'s unique_ptr destructor
+    // runs. No transport is tracked here — the ControlledWriteTransport below
+    // is never armed/blocked in this test, so it isn't a hang source.
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *clock};
     auto open_fut = asio::co_spawn(ioc, sess->open(), asio::use_future);
-    run_until_ready(ioc, open_fut);
-    ASSERT_EQ(open_fut.wait_for(0ms), std::future_status::ready) << "open() timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
+        << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
     fixpp::transport::handshake_result hr{};
     sess->attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    auto close_then_destroy = [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
-        auto inbound_r = co_await sess->on_inbound_frame(std::span<const std::byte>{logon});
-        if (!inbound_r) {
-            co_return std::unexpected(inbound_r.error());
-        }
-        EXPECT_EQ(sess->state(), fixpp::session::fsm_state::Active)
-            << "Session must reach Active before the close race witness";
-        co_return co_await sess->close(fixpp::session::close_mode::terminal);
-    };
-    auto close_fut = asio::co_spawn(ioc, close_then_destroy(), asio::use_future);
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
+    // [gate-b/r2 F1] the lambda is passed to co_spawn UNINVOKED, so asio owns
+    // the closure and keeps it alive for the coroutine's whole lifetime.
+    //
+    // Do NOT invoke it here (`...}(),`). A lambda coroutine reaches its
+    // captures THROUGH the closure object — the frame does not copy them —
+    // so the closure must outlive the coroutine. An immediately-invoked
+    // temporary closure dies at the end of this full-expression while the
+    // coroutine is still suspended at the first co_await, and every later
+    // resumption then reads `sess`/`logon` through destroyed storage. That is
+    // strictly worse than a named local: it dangles on EVERY run, not only on
+    // an early-return path. 148 co_spawn sites under tests/ pass the callable;
+    // this is the form to match.
+    auto close_fut = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+            auto inbound_r = co_await sess->on_inbound_frame(std::span<const std::byte>{logon});
+            if (!inbound_r) {
+                co_return std::unexpected(inbound_r.error());
+            }
+            EXPECT_EQ(sess->state(), fixpp::session::fsm_state::Active)
+                << "Session must reach Active before the close race witness";
+            co_return co_await sess->close(fixpp::session::close_mode::terminal);
+        },
+        asio::use_future);
 
-    run_until_ready(ioc, close_fut, 20ms, 1s);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close_fut, 1s))
+        << "close() timed out";
     ASSERT_EQ(close_fut.wait_for(0ms), std::future_status::ready)
         << "close() must complete in the same executor turn even when liveness "
         << "has not started yet";
@@ -1000,6 +1068,11 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
 // before the shield; GREEN after. [Codex Gate-B/r2 deterministic-regression sketch]
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
+    asio::cancellation_signal sig;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -1008,30 +1081,35 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     cfg.logout_disconnect_timeout_ms = 500;  // phase-1 suspends ~500ms (no peer ACK)
 
     fixpp::session::Session sess{eng, cfg};
+    // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
+    // clock is otherwise needed by this test; this one exists for the guard.
+    auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    run_until_ready(ioc, open_fut);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
+        << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
     auto* raw_ptr = raw_transport.get();
+    teardown_guard.transport = raw_ptr;
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
     asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
     ioc.run_for(100ms);
     ioc.restart();
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
 
     // Block the NEXT write so the phase-1 Logout emit blocks in async_write — this
-    // deterministically suspends close #1 inside phase-1's cancellable
+    // deterministically suspends the first close inside phase-1's cancellable
     // `run_logout_phase1() || close_grace` await (the unblocked path completes too
     // fast to be a meaningful witness). close()'s FQ-G force-close unblocks it at the
-    // logout timeout, so close #1 still completes once it is allowed to.
+    // logout timeout, so the first close still completes once it is allowed to.
     raw_ptr->arm_block();
 
-    // close #1 (graceful) from a CANCELLABLE caller — enters phase-1 and suspends.
-    asio::cancellation_signal sig;
+    // first close (graceful) from a CANCELLABLE caller — enters phase-1 and suspends.
     auto close1 = asio::co_spawn(
         ioc,
         [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
@@ -1039,21 +1117,23 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
             co_return co_await sess.close(fixpp::session::close_mode::graceful);
         },
         asio::bind_cancellation_slot(sig.slot(), asio::use_future));
-    ioc.run_for(50ms);  // let close #1 enter phase-1 and suspend (no peer Logout ACK)
+    ioc.run_for(50ms);  // let the first close enter phase-1 and suspend (no peer Logout ACK)
     ioc.restart();
     sig.emit(asio::cancellation_type::total);  // cancel the caller mid-close
 
-    // close #2 (terminal, un-cancelled) — the Engine::stop() post-join drain analogue.
+    // second close (terminal, un-cancelled) — the Engine::stop() post-join drain analogue.
     auto close2 = asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal),
                                  asio::use_future);
 
-    run_until_ready(ioc, close1, 20ms, 3s);
-    run_until_ready(ioc, close2, 20ms, 3s);
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close1, 3s))
+        << "first close timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close2, 3s))
+        << "second close timed out";
 
     EXPECT_EQ(close1.wait_for(0ms), std::future_status::ready)
         << "the caller-cancelled close(graceful) must still complete";
     ASSERT_EQ(close2.wait_for(0ms), std::future_status::ready)
-        << "second close() hung: close #1 was aborted mid-drain without publishing "
+        << "second close() hung: the first close was aborted mid-drain without publishing "
         << "close_result_, so the `closing`-branch wait never resolves. close() must "
         << "be cancellation-immune once entered.";
     (void)close1.get();
@@ -1064,6 +1144,71 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     raw_ptr->close();
     ioc.run_for(100ms);
     ioc.restart();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Counter-test for P1-1 (gate-b/r1) — the worst finding of the round.
+//
+// Deliberately starves a pump (1ms budget against a write blocked for 30s) so
+// ASSERT_TRUE fails and the enclosing lambda returns early with send_fut's
+// coroutine still suspended in async_write, holding a reference into `sess`.
+// `teardown_guard` (declared after `sess`, matching every fix above) must
+// still force the transport closed and drain `ioc` — letting the suspended
+// coroutine actually finish and release its frame — BEFORE `sess` is
+// destroyed. A green run under ASan (no use-after-lifetime report) proves the
+// fix converts a bounded FAILURE into a bounded, SAFE failure, not a UAF.
+// [P1-1; gate-b/r1]
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(LiveOutboundSerializedTest, BudgetMissQuiescesBeforeSessionTeardown) {
+    EXPECT_FATAL_FAILURE(
+        ([] {
+            std::deque<std::vector<std::byte>> frames;
+            asio::io_context ioc;
+            fixpp::core::EngineConfig eng;
+            eng.executor = ioc.get_executor();
+            auto cfg = make_acceptor_cfg(ioc.get_executor());
+
+            fixpp::session::Session sess{eng, cfg};
+            auto teardown_clock =
+                std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+            fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+
+            auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+            ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
+                << "open() timed out";
+            ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
+
+            auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
+            auto* raw_ptr = raw_transport.get();
+            teardown_guard.transport = raw_ptr;
+            fixpp::transport::handshake_result hr{};
+            sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
+
+            auto& logon = frames.emplace_back(
+                make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
+            auto logon_fut = asio::co_spawn(
+                ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+            ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
+                << "peer Logon timed out";
+            ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
+            ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
+
+            // Block the NEXT write for far longer than the pump budget below,
+            // so the coroutine is GENUINELY still suspended when ASSERT_TRUE
+            // fires — not just theoretically racing it.
+            raw_ptr->arm_block();
+            auto& payload = frames.emplace_back(make_min_app_payload());
+            auto send_fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}),
+                                           asio::use_future);
+
+            // 1ms budget against a 30s-blocked write: guaranteed miss.
+            ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, send_fut, 1ms))
+                << "deliberate budget miss for the P1-1 counter-test";
+            // Unreached on the intended path: the ASSERT_TRUE above fires and
+            // returns first, leaving send_fut's coroutine suspended. Exactly
+            // that early return is what this test is proving is now safe.
+        }()),
+        "deliberate budget miss for the P1-1 counter-test");
 }
 
 }  // namespace fixpp::session::test

@@ -67,6 +67,10 @@ add_threading_core_test(threading_trace_context_engine_fallback
 # Phase 4: fixpp_core_tests — pure C++ US1/US2/US4 tests (no C-ABI header
 # dependency). 068: whole-binary add_test (converted from gtest_discover_tests);
 # core_smoke_test.cpp folded in (068 US2) — same link-deps, no LABELS.
+# issue #289 batch B0 gate-b/r1: test_run_for_residual_instrument.cpp folded
+# in (Art. VII §8 — it is isolation-safe: single-threaded, no global state,
+# no own main, no concurrency). asio::asio added below for its sole benefit;
+# fixpp_core itself has no asio dependency [arch §2.2].
 add_executable(fixpp_core_tests
   core_smoke_test.cpp
   decimal_parse_test.cpp
@@ -76,12 +80,14 @@ add_executable(fixpp_core_tests
   decimal_cross_traits_test.cpp
   decimal_alias_test.cpp
   decimal_predicates_test.cpp
+  test_run_for_residual_instrument.cpp
 )
 target_include_directories(fixpp_core_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/tests/support"
 )
 target_link_libraries(fixpp_core_tests PRIVATE
   fixpp_core
+  asio::asio
   GTest::gtest
   GTest::gtest_main
 )

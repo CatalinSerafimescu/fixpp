@@ -17,6 +17,8 @@
 #include <future>
 #include <system_error>
 
+#include "support/pump_until_ready.hpp"
+
 #define private public
 #include "transport/asio_listener.hpp"
 #undef private
@@ -39,18 +41,6 @@ asio_listener::Config make_listener_cfg(std::uint16_t port = 0, std::uint32_t ba
     return cfg;
 }
 
-template <typename T>
-bool run_until_ready(asio::io_context& ioc, std::future<T>& fut,
-                     std::chrono::milliseconds timeout = 500ms) {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (fut.wait_for(0ms) != std::future_status::ready &&
-           std::chrono::steady_clock::now() < deadline) {
-        ioc.run_for(10ms);
-        ioc.restart();
-    }
-    return fut.wait_for(0ms) == std::future_status::ready;
-}
-
 TEST(ListenerAcceptErrorCancel, TotalCancellationReturnsContractError) {
     asio::io_context ioc;
     asio_listener listener{ioc.get_executor(), make_listener_cfg()};
@@ -67,7 +57,8 @@ TEST(ListenerAcceptErrorCancel, TotalCancellationReturnsContractError) {
         }
     });
 
-    ASSERT_TRUE(run_until_ready(ioc, fut)) << "async_accept did not complete after total cancel";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, fut, 500ms, 10ms))
+        << "async_accept did not complete after total cancel";
 
     try {
         auto result = fut.get();
@@ -97,7 +88,7 @@ TEST(ListenerAcceptErrorCancel, NonListeningAcceptorMapsToTransportFactoryFailed
 
     auto fut = asio::co_spawn(ioc.get_executor(), listener.async_accept(), asio::use_future);
 
-    ASSERT_TRUE(run_until_ready(ioc, fut))
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, fut, 500ms, 10ms))
         << "async_accept on a non-listening acceptor did not complete with an error";
 
     auto result = fut.get();
