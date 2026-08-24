@@ -262,8 +262,27 @@ TEST(RunForResidualInstrument, PreReadinessHandlerIsExcludedFromResidual) {
 // dispatches is not free, so a transition this close to the deadline can
 // consume the remaining window and under-report a genuine residual as zero.
 TEST(RunForResidualInstrument, NearDeadlineTransitionIsFlaggedInconclusive) {
-    constexpr auto kWindow = 500ms;
-    constexpr auto kFireAt = 490ms;  // within the 25ms (5%) margin of kWindow's deadline
+    // The transition must land INSIDE the `window/20` margin but BEFORE the
+    // deadline, so the timer has to hit a band `window/20` wide whose far edge
+    // IS the deadline. Both slacks must therefore exceed the platform's timer
+    // granularity — ~15.6 ms on Windows by default, vs ~1 ms on Linux.
+    //
+    // The original 500 ms / 490 ms pair gave a 25 ms band and only 10 ms of
+    // room before the deadline, so on windows-msvc-release the timer fired
+    // AFTER the deadline: `run_one_until` returned 0 at the deadline with the
+    // promise still unset, and the test read ready_observed=false. It passed on
+    // Linux for the whole of gate-b and failed on its first Windows run.
+    //
+    // Scaled so both slacks are ~4x Windows granularity. The band is
+    // 3000/20 = 150 ms and the transition sits 75 ms inside it:
+    //   fires before the deadline  — tolerates up to 75 ms of timer lateness
+    //   lands within the margin    — tolerates up to 75 ms of earliness
+    // Duration is bounded by kFireAt, not kWindow: once the promise is set the
+    // context is out of work, so the loop exits via exhausted-work at ~2.9 s.
+    // Do NOT shrink these back toward the deadline without redoing that
+    // arithmetic against the coarsest platform in the matrix.
+    constexpr auto kWindow = 3000ms;
+    constexpr auto kFireAt = 2925ms;  // 75 ms inside kWindow's 150 ms (5%) margin
 
     asio::io_context ioc;
     std::promise<void> prom;
