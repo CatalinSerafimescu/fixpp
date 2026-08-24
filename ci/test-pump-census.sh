@@ -56,11 +56,11 @@ production_pin="$here/expected-pump-sites.txt"
 [ -f "$script" ] || setup_fail "missing census script: $script"
 [ -s "$production_pin" ] || setup_fail "production pin is missing or empty"
 
-tmp="$(mktemp -d)"
+tmp="$(mktemp -d)" || setup_fail "mktemp -d failed"
 trap 'rm -rf "$tmp"' EXIT
 
 checks=0
-expected_checks=18
+expected_checks=26
 pass() { checks=$((checks + 1)); }
 
 run_capture() {
@@ -76,13 +76,37 @@ run_capture() {
 # class's blanking is broken, the decoy is NOT blanked, the scanner finds a
 # real (spurious) site, the zero-sites branch is never reached, and this
 # fails for exactly that reason — independent of any other fixture or check.
+#
+# gate-b/r2 finding F5: the "was matched as a real site" check used to be
+# pinned against $baseline_pin ("tests/a.cpp:2"), a path this decoy tree
+# never contains. That is vacuous both ways: correct blanking -> zero sites
+# -> the liveness guard exits nonzero; broken blanking -> a spurious site at
+# some tests/decoy.cpp:N -> differs from tests/a.cpp:2 -> the plain diff
+# also exits nonzero. Nonzero either way, so the check could never redden
+# for its own stated reason — only the second (diagnostic) assertion below
+# ever caught a real regression.
+#
+# Fixed by pinning against $3, the EXACT site(s) this decoy would leak if
+# ITS OWN targeted blanking mutation were applied (measured by running the
+# real mutant against the real fixture — see the gate-b/r2 F4/F5 report).
+# Correct blanking -> zero sites -> liveness guard -> exit NONZERO (this
+# assertion passes). Broken blanking -> the leaked site(s) match $3 exactly
+# -> diff matches -> exit 0 (this assertion FAILS, discriminating for its
+# own named reason, independent of the second assertion below).
 assert_decoy_alone_yields_zero_sites() {
-    local label="$1" decoy_root="$2"
-    run_capture bash "$script" --root "$decoy_root" --expected "$baseline_pin"
+    local label="$1" decoy_root="$2" leak_sites="$3"
+    local leak_pin
+    leak_pin="$(mktemp "$tmp/leak-pin.XXXXXX")" ||
+        setup_fail "mktemp for $label leak pin failed"
+    printf '%s\n' "$leak_sites" >"$leak_pin" ||
+        setup_fail "$label leak pin write failed: $leak_pin"
+
+    run_capture bash "$script" --root "$decoy_root" --expected "$leak_pin"
     [ "$status" -ne 0 ] ||
         fail "$label decoy (alone) was matched as a real site: $output"
     pass
 
+    run_capture bash "$script" --root "$decoy_root" --expected "$baseline_pin"
     printf '%s\n' "$output" | grep -Fq 'instrument produced zero sites' ||
         fail "$label decoy (alone) failed for the wrong reason (not blanked correctly): $output"
     pass
@@ -116,9 +140,9 @@ pass
 
 # ── fixture: a known-good site, a comment/string decoy, and a too-far decoy ─
 fixture="$tmp/fixture"
-mkdir -p "$fixture/tests"
+mkdir -p "$fixture/tests" || setup_fail "mkdir failed: $fixture/tests"
 
-cat >"$fixture/tests/a.cpp" <<'EOF'
+cat >"$fixture/tests/a.cpp" <<'EOF' || setup_fail "fixture write failed: $fixture/tests/a.cpp"
 void baseline() {
     ioc.run_for(1ms);
     ioc.restart();
@@ -142,7 +166,8 @@ void too_far() {
 EOF
 
 baseline_pin="$tmp/baseline.pin"
-printf '%s\n' 'tests/a.cpp:2' >"$baseline_pin"
+printf '%s\n' 'tests/a.cpp:2' >"$baseline_pin" ||
+    setup_fail "baseline pin write failed: $baseline_pin"
 
 # ── 2-3: known-good fixture produces EXACTLY the expected path:line ─────────
 run_capture bash "$script" --root "$fixture" --expected "$baseline_pin"
@@ -161,25 +186,37 @@ pass
 # revision could never independently fail, because check 3 above already
 # `fail()`s and exits before they are ever reached on a leak).
 comment_decoy="$tmp/comment_decoy"
-mkdir -p "$comment_decoy/tests"
-cat >"$comment_decoy/tests/decoy.cpp" <<'EOF'
+mkdir -p "$comment_decoy/tests" || setup_fail "mkdir failed: $comment_decoy/tests"
+cat >"$comment_decoy/tests/decoy.cpp" <<'EOF' || setup_fail "fixture write failed: $comment_decoy/tests/decoy.cpp"
 void f() {
     ioc.run_for(1ms);
     /* ioc.run_for(1ms);
        decoy.get(); */
 }
 EOF
-assert_decoy_alone_yields_zero_sites "block-comment" "$comment_decoy"
+# Leak pin measured by running the real block-comment mutation (disabling
+# `elif source.startswith("/*", i):`) against this exact fixture: BOTH the
+# outer real run_for (line 2, whose "following" window now sees line 4
+# unblanked) and the comment-embedded fake run_for (line 3, same window)
+# register — an outer real call plus a still-blanked decoy is already
+# covered by checks 2-3 above, so this fixture is kept as-is rather than
+# reshaped to leak a single line.
+assert_decoy_alone_yields_zero_sites "block-comment" "$comment_decoy" \
+    "$(printf 'tests/decoy.cpp:2\ntests/decoy.cpp:3')"
 
 string_decoy="$tmp/string_decoy"
-mkdir -p "$string_decoy/tests"
-cat >"$string_decoy/tests/decoy.cpp" <<'EOF'
+mkdir -p "$string_decoy/tests" || setup_fail "mkdir failed: $string_decoy/tests"
+cat >"$string_decoy/tests/decoy.cpp" <<'EOF' || setup_fail "fixture write failed: $string_decoy/tests/decoy.cpp"
 void f() {
     ioc.run_for(1ms);
     const char* text = "ioc.run_for(1ms); decoy.get();";
 }
 EOF
-assert_decoy_alone_yields_zero_sites "string-literal" "$string_decoy"
+# Leak pin measured against the real quote-open mutation (disabling
+# `elif source[i] in ('"', "'"):`): the string is never entered, so line 3
+# reads as code; only the outer line-2 run_for finds a get() in its window.
+assert_decoy_alone_yields_zero_sites "string-literal" "$string_decoy" \
+    'tests/decoy.cpp:2'
 
 # ── 8-9 (gate-b/r1 P2-h): a `\`-continued line comment must stay a comment ──
 # across the spliced newline. C++ removes backslash-newline pairs (phase 2)
@@ -188,18 +225,103 @@ assert_decoy_alone_yields_zero_sites "string-literal" "$string_decoy"
 # The per-physical-line blanker must splice this the same way, or it reads
 # `future.get()` as live code (see ci/pump-census.sh's line-comment state).
 continuation_decoy="$tmp/continuation_decoy"
-mkdir -p "$continuation_decoy/tests"
-cat >"$continuation_decoy/tests/decoy.cpp" <<'EOF'
+mkdir -p "$continuation_decoy/tests" || setup_fail "mkdir failed: $continuation_decoy/tests"
+cat >"$continuation_decoy/tests/decoy.cpp" <<'EOF' || setup_fail "fixture write failed: $continuation_decoy/tests/decoy.cpp"
 void f() {
     ioc.run_for(1ms);
     // continued comment \
     decoy.get();
 }
 EOF
-assert_decoy_alone_yields_zero_sites "backslash-continued line-comment" "$continuation_decoy"
+# Leak pin measured against the real backslash-splice mutation (disabling
+# the `ch == "\\" and source[i+1] == "\n"` check in the line-comment state):
+# the newline ends the comment early, so "decoy.get();" on the next physical
+# line reads as code, within the outer line-2 run_for's window.
+assert_decoy_alone_yields_zero_sites "backslash-continued line-comment" "$continuation_decoy" \
+    'tests/decoy.cpp:2'
+
+# ── gate-b/r2 F4: two more decision-bearing lexer branches had NOTHING that
+# could fail on them — proven by mutation: disabling either left all 18
+# assertions green (see the gate-b/r2 F4 report for the exact mutants).
+# Each decoy below is isolated to ONE branch and its leak pin is measured
+# against that branch's own real mutant, following the same pattern as 4-9.
+
+# ── raw string, CUSTOM delimiter, embedding a literal `"` in its body ───────
+# `raw:` recognises `(?:u8|u|U|L)?R"delim(...)delim"`. With that branch
+# disabled, `R"tag(` is read as plain code: `R` is an ordinary character and
+# the following `"` opens an ORDINARY string, which then closes at the
+# first literal `"` it finds — the one embedded in "before \" ..." — leaving
+# the rest of the (fake) raw-string body, including the decoy run_for/get(),
+# as live code. Correct raw-string blanking treats the embedded `"` as
+# ordinary content and only closes at the real `)tag"` end token, so nothing
+# leaks.
+raw_custom_delim_decoy="$tmp/raw_custom_delim_decoy"
+mkdir -p "$raw_custom_delim_decoy/tests" || setup_fail "mkdir failed: $raw_custom_delim_decoy/tests"
+cat >"$raw_custom_delim_decoy/tests/decoy.cpp" <<'EOF' || setup_fail "fixture write failed: $raw_custom_delim_decoy/tests/decoy.cpp"
+void f() {
+    const char* text = R"tag(before " ioc.run_for(1ms);
+       decoy.get();
+    )tag";
+}
+EOF
+assert_decoy_alone_yields_zero_sites "raw-string (custom delimiter)" "$raw_custom_delim_decoy" \
+    'tests/decoy.cpp:2'
+
+# ── raw string, PREFIXED (u8R), same embedded-quote mechanism ───────────────
+# Proves the optional `(?:u8|u|U|L)?` prefix group is exercised, not just
+# the bare `R"..."` form — same targeted mutation as above.
+raw_prefixed_decoy="$tmp/raw_prefixed_decoy"
+mkdir -p "$raw_prefixed_decoy/tests" || setup_fail "mkdir failed: $raw_prefixed_decoy/tests"
+cat >"$raw_prefixed_decoy/tests/decoy.cpp" <<'EOF' || setup_fail "fixture write failed: $raw_prefixed_decoy/tests/decoy.cpp"
+void f() {
+    const char* text = u8R"tag(before " ioc.run_for(1ms);
+       decoy.get();
+    )tag";
+}
+EOF
+assert_decoy_alone_yields_zero_sites "raw-string (u8R prefix)" "$raw_prefixed_decoy" \
+    'tests/decoy.cpp:2'
+
+# ── ordinary string with an escaped backslash AND an escaped quote ──────────
+# The literal-state escape branch (`if ch == "\\" and i < n:`) is what lets
+# `\"` inside a normal string continue the literal instead of closing it.
+# With that branch disabled, the backslash before the embedded `\"` is
+# blanked alone (no lookahead), so the very next character — the escaped
+# quote — is read as the REAL closing quote, ending the string early and
+# exposing the rest (including the decoy run_for/get(), spliced onto the
+# next physical line via a legitimate backslash-newline string
+# continuation) as live code.
+escaped_string_decoy="$tmp/escaped_string_decoy"
+mkdir -p "$escaped_string_decoy/tests" || setup_fail "mkdir failed: $escaped_string_decoy/tests"
+cat >"$escaped_string_decoy/tests/decoy.cpp" <<'EOF' || setup_fail "fixture write failed: $escaped_string_decoy/tests/decoy.cpp"
+void f() {
+    const char* s = "a\\b\" ioc.run_for(1ms); \
+trailing.get()";
+}
+EOF
+assert_decoy_alone_yields_zero_sites "escaped quote/backslash in string" "$escaped_string_decoy" \
+    'tests/decoy.cpp:2'
+
+# ── character literal containing a quote, incl. an escaped delimiter ────────
+# `char q = '"';` alone needs no escape handling (the stored `quote`
+# variable already distinguishes `'` from `"`); it is kept here for realism
+# per the fixture's own decoy shape. The escaped-`'` literal on the next
+# line is what exercises the SAME escape branch as the string decoy above,
+# with `'` as the delimiter instead of `"`.
+char_quote_decoy="$tmp/char_quote_decoy"
+mkdir -p "$char_quote_decoy/tests" || setup_fail "mkdir failed: $char_quote_decoy/tests"
+cat >"$char_quote_decoy/tests/decoy.cpp" <<'EOF' || setup_fail "fixture write failed: $char_quote_decoy/tests/decoy.cpp"
+void f() {
+    char q = '"';
+    char c = 'a\\b\' ioc.run_for(1ms); \
+trailing.get()';
+}
+EOF
+assert_decoy_alone_yields_zero_sites "character literal with quote" "$char_quote_decoy" \
+    'tests/decoy.cpp:3'
 
 # ── add a genuine header site: proves hpp scope and upward drift ────────────
-cat >"$fixture/tests/b.hpp" <<'EOF'
+cat >"$fixture/tests/b.hpp" <<'EOF' || setup_fail "fixture write failed: $fixture/tests/b.hpp"
 void added() { ioc.run_for(1ms);
     added_future.get();
 }
@@ -226,9 +348,10 @@ pass
 stale_pin="$tmp/stale.pin"
 printf '%s\n' \
     'tests/a.cpp:2' \
-    'tests/b.hpp:1' >"$stale_pin"
+    'tests/b.hpp:1' >"$stale_pin" ||
+    setup_fail "stale pin write failed: $stale_pin"
 
-rm "$fixture/tests/b.hpp"
+rm "$fixture/tests/b.hpp" || setup_fail "fixture cleanup failed: $fixture/tests/b.hpp"
 
 run_capture bash "$script" --root "$fixture" --expected "$stale_pin"
 [ "$status" -ne 0 ] ||
@@ -241,8 +364,9 @@ pass
 
 # ── 15-16: zero-match tree is an instrument-liveness failure, not "clean" ───
 zero="$tmp/zero"
-mkdir -p "$zero/tests"
-printf '%s\n' 'int no_candidate;' >"$zero/tests/empty.cpp"
+mkdir -p "$zero/tests" || setup_fail "mkdir failed: $zero/tests"
+printf '%s\n' 'int no_candidate;' >"$zero/tests/empty.cpp" ||
+    setup_fail "zero fixture write failed: $zero/tests/empty.cpp"
 
 run_capture bash "$script" --root "$zero" --expected "$baseline_pin"
 [ "$status" -ne 0 ] ||

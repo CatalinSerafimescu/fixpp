@@ -53,6 +53,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <deque>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/fix_time.hpp>
@@ -439,6 +440,10 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
 }
 
 TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -465,7 +470,7 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
     auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
                                     asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
@@ -473,7 +478,8 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
 
-    auto test_req = make_peer_test_request("FIX.4.4", 2, "INITIATOR", "ACCEPTOR", "TR1");
+    auto& test_req =
+        frames.emplace_back(make_peer_test_request("FIX.4.4", 2, "INITIATOR", "ACCEPTOR", "TR1"));
     auto hb_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{test_req}),
                                  asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, hb_fut, 2s))
@@ -680,6 +686,10 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
 }
 
 TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -705,7 +715,7 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
     auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
                                     asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
@@ -732,6 +742,10 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
 }
 
 TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -754,7 +768,7 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
     auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
                                     asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
@@ -764,7 +778,7 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
 
     raw_ptr->arm_block();
 
-    auto payload = make_min_app_payload();
+    auto& payload = frames.emplace_back(make_min_app_payload());
     auto send_fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
     ioc.run_for(50ms);
@@ -797,6 +811,10 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
 }
 
 TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -820,7 +838,7 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
     auto logon_fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}),
                                     asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
@@ -830,7 +848,7 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
 
     raw_ptr->arm_block();
 
-    auto payload = make_min_app_payload();
+    auto& payload = frames.emplace_back(make_min_app_payload());
     auto send_fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}), asio::use_future);
     ioc.run_for(50ms);
@@ -892,6 +910,10 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
 // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F3/F4; gate-b/r2]
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -918,17 +940,31 @@ TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf)
     fixpp::transport::handshake_result hr{};
     sess->attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
-    auto close_then_destroy = [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
-        auto inbound_r = co_await sess->on_inbound_frame(std::span<const std::byte>{logon});
-        if (!inbound_r) {
-            co_return std::unexpected(inbound_r.error());
-        }
-        EXPECT_EQ(sess->state(), fixpp::session::fsm_state::Active)
-            << "Session must reach Active before the close race witness";
-        co_return co_await sess->close(fixpp::session::close_mode::terminal);
-    };
-    auto close_fut = asio::co_spawn(ioc, close_then_destroy(), asio::use_future);
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
+    // [gate-b/r2 F1] the lambda is passed to co_spawn UNINVOKED, so asio owns
+    // the closure and keeps it alive for the coroutine's whole lifetime.
+    //
+    // Do NOT invoke it here (`...}(),`). A lambda coroutine reaches its
+    // captures THROUGH the closure object — the frame does not copy them —
+    // so the closure must outlive the coroutine. An immediately-invoked
+    // temporary closure dies at the end of this full-expression while the
+    // coroutine is still suspended at the first co_await, and every later
+    // resumption then reads `sess`/`logon` through destroyed storage. That is
+    // strictly worse than a named local: it dangles on EVERY run, not only on
+    // an early-return path. 148 co_spawn sites under tests/ pass the callable;
+    // this is the form to match.
+    auto close_fut = asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+            auto inbound_r = co_await sess->on_inbound_frame(std::span<const std::byte>{logon});
+            if (!inbound_r) {
+                co_return std::unexpected(inbound_r.error());
+            }
+            EXPECT_EQ(sess->state(), fixpp::session::fsm_state::Active)
+                << "Session must reach Active before the close race witness";
+            co_return co_await sess->close(fixpp::session::close_mode::terminal);
+        },
+        asio::use_future);
 
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close_fut, 1s))
         << "close() timed out";
@@ -1032,6 +1068,10 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
 // before the shield; GREEN after. [Codex Gate-B/r2 deterministic-regression sketch]
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose) {
+    // [gate-b/r2 F1] declared BEFORE `ioc` so it outlives every coroutine
+    // frame `ioc` destroys — a span handed to a spawned coroutine must not
+    // dangle if a bounded pump below fails and the body returns early.
+    std::deque<std::vector<std::byte>> frames;
     asio::io_context ioc;
     fixpp::core::EngineConfig eng;
     eng.executor = ioc.get_executor();
@@ -1055,7 +1095,7 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-    auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+    auto& logon = frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
     asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::detached);
     ioc.run_for(100ms);
     ioc.restart();

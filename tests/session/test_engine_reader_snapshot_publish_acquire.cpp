@@ -135,6 +135,13 @@ static asio::awaitable<void> run_raw_acceptor(
 // ── EngineReaderSnapshotPublishAcquire ───────────────────────────────────────
 
 TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
+    // [gate-b/r2 F2] declared BEFORE `ioc` (destructed LAST) so that on the
+    // bounded-pump timeout path below, `ioc` (and any coroutine frame it
+    // still holds — e.g. a suspended engine->stop()) is destroyed first,
+    // before `engine`. See the timeout branch below for the other half of
+    // this fix: on that path `engine` must also be deliberately leaked, or
+    // ~Engine's `stopped_` assert aborts instead of reporting the failure.
+    std::unique_ptr<Engine> engine;
     asio::io_context ioc;
 
     // ── Bind the raw loopback acceptor.  ────────────────────────────────────
@@ -163,7 +170,7 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     eng_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     eng_cfg.default_transport_factory = std::move(*factory_r);
 
-    auto engine = std::make_unique<Engine>(ioc.get_executor(), std::move(eng_cfg));
+    engine = std::make_unique<Engine>(ioc.get_executor(), std::move(eng_cfg));
 
     // ── Register one initiator session targeting the loopback port. ──────────
     SessionConfig sc;
@@ -303,8 +310,15 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     // fails loudly instead of hanging the ctest run.
     ioc.restart();
     auto stop_fut = asio::co_spawn(ioc, engine->stop(), asio::use_future);
-    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, stop_fut))
-        << "engine->stop() did not complete within the bounded pump budget";
+    if (!fixpp::test_support::pump_until_ready(ioc, stop_fut)) {
+        // [gate-b/r2 F2] Already-failing path: the stop() frame is still
+        // suspended in `ioc` and holds Engine&. ~Engine would trip its
+        // stopped_ assert and abort, replacing this diagnosable failure.
+        // Leak deliberately.
+        (void)engine.release();
+        ADD_FAILURE() << "engine->stop() did not complete within the bounded pump budget";
+        return;
+    }
     stop_fut.get();
 
     // Primary oracle: TSan must report no race on reader_snapshot_ or the shared_ptr

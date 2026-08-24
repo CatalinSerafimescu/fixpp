@@ -196,11 +196,11 @@ tests/session/test_live_identity_binding.cpp:301
 tests/session/test_live_identity_binding.cpp:425
 tests/session/test_live_identity_binding.cpp:455
 tests/session/test_live_identity_binding.cpp:472
-tests/session/test_live_outbound_serialized.cpp:409
-tests/session/test_live_outbound_serialized.cpp:519
-tests/session/test_live_outbound_serialized.cpp:626
-tests/session/test_live_outbound_serialized.cpp:785
-tests/session/test_live_outbound_serialized.cpp:964
+tests/session/test_live_outbound_serialized.cpp:1000
+tests/session/test_live_outbound_serialized.cpp:410
+tests/session/test_live_outbound_serialized.cpp:525
+tests/session/test_live_outbound_serialized.cpp:632
+tests/session/test_live_outbound_serialized.cpp:799
 tests/session/test_logout_timeout.cpp:171
 tests/session/test_logout_timeout.cpp:179
 tests/session/test_logout_timeout.cpp:238
