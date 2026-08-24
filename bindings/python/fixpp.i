@@ -773,7 +773,8 @@ fixpp_error_t fixpp_msg_get_string(const fixpp_msg_t* msg, uint16_t tag,
 const char* fixpp_version_string(void);
 
 /* ── PY-004 / 055 (T002): OO layer re-export ─────────────────────────────────
- * Last %pythoncode block in the generated proxy: every flat function wrapper
+ * Ordering requirement (NOT "the last block" -- two blocks follow this one
+ * today): every flat function wrapper
  * and the %pythoncode exception block above are already bound, so fixpp_oo's
  * `from fixpp import ...` resolves. Exposes the OO wrappers on the `fixpp`
  * surface (FR-001 additive) so `import fixpp; fixpp.Engine` works alongside the
@@ -822,9 +823,16 @@ except ImportError:
  * unconditionally, so on SWIG < 4.5 (which emits no such import) a bare `del`
  * would raise NameError at import time. pop-with-default is a no-op there.
  *
- * This is the LAST %pythoncode block in the file and SWIG emits these in source
- * order, so it runs after the preamble import (verified on 4.5.0: the import is
- * line 22, this pop is line 349 of 351).
+ * ORDERING INVARIANT (this is what matters, not this block's position):
+ * SWIG emits %pythoncode blocks in SOURCE ORDER, and the `import typing` being
+ * undone lives in the generated PREAMBLE, which precedes every %pythoncode
+ * block. So any block in this file runs after it. Verified on 4.5.0: the
+ * import is line 22, this pop is line 349 of 351.
+ *
+ * Deliberately NOT stated as "the last block in the file". The comment 60-odd
+ * lines above made exactly that claim and went stale the moment another block
+ * was appended below it. Correctness here does not depend on being last, so a
+ * future append below this one needs no change.
  *
  * ⚠️ If a future SWIG actually USES `typing` in generated code, this pop turns
  * that into a NameError at `import fixpp` — loud, immediate, and caught by the

@@ -75,6 +75,26 @@ def test_engine_close_preflight_raises_without_closing_sibling(monkeypatch):
     assert active._dead is False
     assert touched["destroy"] == 0
 
+    # #295 — neutralise the synthetic objects before they go out of scope.
+    #
+    # They were built with `object.__new__` and FAKE handles (`_handle =
+    # object()`), and the assertions above deliberately leave them with
+    # `_dead = False` / `_was_explicitly_closed = False`. That combination is
+    # exactly what makes _Finalizable.__del__ (fixpp_oo.py:99-111) act: at some
+    # arbitrary later garbage collection -- plausibly inside a DIFFERENT test
+    # file -- it calls close(), which reaches the real `session_close` /
+    # `engine_destroy` with a plain `object()` where a native handle is
+    # expected. __del__ swallows the resulting exception, so it is silent.
+    #
+    # A silent native call whose timing is decided by the garbage collector is
+    # the same hazard class as the 3.11 GC segfault seen on SWIG 4.5.0, and
+    # this file is collected immediately before test_roundtrip.py, where that
+    # crash occurred. Marking them closed makes __del__ return at its first
+    # guard and removes the deferred call entirely.
+    for _synthetic in (active, sibling, engine):
+        _synthetic._dead = True
+        _synthetic._was_explicitly_closed = True
+
 
 def test_session_close_step0_backstop_leaves_state_unmodified(monkeypatch):
     native = {"closed": 0}
@@ -89,17 +109,58 @@ def test_session_close_step0_backstop_leaves_state_unmodified(monkeypatch):
             except Exception as exc:
                 self.result = (exc, session._dead, session._application is self)
 
-    monkeypatch.setattr(
-        fixpp_oo, "session_close",
-        lambda handle: native.__setitem__("closed", native["closed"] + 1),
-    )
-
     app = _App()
     dict_h, acc_engine, ini_engine, acc, ini = establish_pair(app)
     try:
+        # #295 — count ONLY closes of the session under test, and install the
+        # patch AFTER establish_pair rather than before it.
+        #
+        # The previous form patched the module-level `session_close` before the
+        # pair existed and counted EVERY call in the process. That made the
+        # `native["closed"] == 0` assertion below mean "no unrelated Engine or
+        # Session ANYWHERE in this process had its __del__ fire during this
+        # ~0.1s window" -- which is not what this test is named for and not
+        # something it can control. The path is real: _Finalizable.__del__
+        # (fixpp_oo.py:99-111) calls close() -> _close_impl -> session_close
+        # (fixpp_oo.py:255), and Engine.close() cascades the same way once per
+        # live session it owns. Any object left unclosed by an EARLIER test and
+        # finalized inside this window incremented the counter and failed this
+        # test for a reason unrelated to the reentrancy backstop.
+        #
+        # SWIG 4.5.0 exposed exactly that: it perturbed GC timing enough to make
+        # the 3.12 leg fail deterministically, even though the generated native
+        # teardown surface (SwigPyObject_dealloc, the tp_* slots,
+        # _wrap_session_close, _wrap_engine_destroy) is byte-identical between
+        # SWIG 4.4.1 and 4.5.0. The fragility was always here; the version bump
+        # only made it observable.
+        #
+        # Keying on the handle makes the assertion say what the test name says:
+        # the step-0 backstop performed no native close FOR THIS SESSION.
+        # Non-target handles are delegated to the real function so that
+        # finalizers firing during the window still do their actual work
+        # instead of being silently swallowed.
+        target_handle = acc._handle
+        real_session_close = fixpp_oo.session_close
+
+        def _counting_session_close(handle):
+            if handle == target_handle:
+                native["closed"] += 1
+                return None
+            return real_session_close(handle)
+
+        monkeypatch.setattr(fixpp_oo, "session_close", _counting_session_close)
+
         send_app_message(ini)
         deadline = threading.Event()
         assert deadline.wait(0.1) is False
+        # A named failure beats the TypeError that unpacking None would raise.
+        # `fromApp` records `result` only in its `except` branch, so if the
+        # step-0 backstop ever stops raising, `result` stays None and every
+        # assertion below becomes unreachable. Say that plainly instead.
+        assert app.result is not None, (
+            "session.close() inside fromApp did not raise -- the step-0 "
+            "reentrant-close backstop is absent, so the assertions below "
+            "cannot be evaluated")
         exc, dead, app_still_attached = app.result
         assert isinstance(exc, fixpp.CallbackReentrantClose)
         assert exc.code == 1204
@@ -107,6 +168,10 @@ def test_session_close_step0_backstop_leaves_state_unmodified(monkeypatch):
         assert app_still_attached is True
         assert native["closed"] == 0
     finally:
+        # Undo before teardown so close_pair() performs REAL closes. Under the
+        # previous form the patch was still active here (pytest undoes it only
+        # after the test returns), so every close in teardown was swallowed.
+        monkeypatch.undo()
         close_pair(ini_engine, acc_engine, dict_h)
 
 
