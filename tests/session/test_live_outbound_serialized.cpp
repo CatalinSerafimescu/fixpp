@@ -33,6 +33,7 @@
 // Anti-hang: every ioc.run_for() is bounded; internal self-deadlines via timers
 //   ensure ioc.run_for() never hangs waiting on blocked transport ops.
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <asio/any_io_executor.hpp>
@@ -445,6 +446,14 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     auto cfg = make_acceptor_cfg(ioc.get_executor());
 
     fixpp::session::Session sess{eng, cfg};
+    // gate-b/r1 P1-1: declared AFTER `sess` so it destructs BEFORE it — on an
+    // ASSERT_TRUE early return below, a coroutine still suspended holding
+    // &sess must be forced to unwind (transport closed, drained) before sess
+    // itself is destroyed, or its frame dangles. No real clock is otherwise
+    // needed by this test (heartbeat_interval is disabled by
+    // make_acceptor_cfg); this one exists solely for the guard.
+    auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
         << "open() timed out";
@@ -452,6 +461,7 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
 
     auto raw_transport = std::make_unique<FailNthWriteTransport>(ioc.get_executor(), 2);
     auto* raw_ptr = raw_transport.get();
+    teardown_guard.transport = raw_ptr;
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
@@ -681,6 +691,9 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     cfg.heartbeat_interval = std::chrono::seconds{1};
 
     fixpp::session::Session sess{eng, cfg};
+    // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it), reusing
+    // this test's real clock so its liveness-loop sleep is also cancelled.
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
         << "open() timed out";
@@ -688,6 +701,7 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
 
     auto raw_transport = std::make_unique<FailNthWriteTransport>(ioc.get_executor(), 2);
     auto* raw_ptr = raw_transport.get();
+    teardown_guard.transport = raw_ptr;
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
@@ -725,6 +739,10 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     auto cfg = make_acceptor_cfg(ioc.get_executor());
 
     fixpp::session::Session sess{eng, cfg};
+    // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
+    // clock is otherwise needed by this test; this one exists for the guard.
+    auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
         << "open() timed out";
@@ -732,6 +750,7 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
     auto* raw_ptr = raw_transport.get();
+    teardown_guard.transport = raw_ptr;
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
@@ -786,6 +805,10 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     cfg.logout_disconnect_timeout_ms = 100;
 
     fixpp::session::Session sess{eng, cfg};
+    // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
+    // clock is otherwise needed by this test; this one exists for the guard.
+    auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
         << "open() timed out";
@@ -793,6 +816,7 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
     auto* raw_ptr = raw_transport.get();
+    teardown_guard.transport = raw_ptr;
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
@@ -879,6 +903,12 @@ TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf)
     cfg.heartbeat_interval = std::chrono::seconds{1};
 
     auto sess = std::make_unique<fixpp::session::Session>(eng, cfg);
+    // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it) so any
+    // ASSERT_TRUE below that returns early before the manual `sess.reset()`
+    // still quiesces the liveness sleep before `sess`'s unique_ptr destructor
+    // runs. No transport is tracked here — the ControlledWriteTransport below
+    // is never armed/blocked in this test, so it isn't a hang source.
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *clock};
     auto open_fut = asio::co_spawn(ioc, sess->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
         << "open() timed out";
@@ -1010,6 +1040,10 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     cfg.logout_disconnect_timeout_ms = 500;  // phase-1 suspends ~500ms (no peer ACK)
 
     fixpp::session::Session sess{eng, cfg};
+    // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
+    // clock is otherwise needed by this test; this one exists for the guard.
+    auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
         << "open() timed out";
@@ -1017,6 +1051,7 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
     auto* raw_ptr = raw_transport.get();
+    teardown_guard.transport = raw_ptr;
     fixpp::transport::handshake_result hr{};
     sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
@@ -1069,6 +1104,69 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     raw_ptr->close();
     ioc.run_for(100ms);
     ioc.restart();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Counter-test for P1-1 (gate-b/r1) — the worst finding of the round.
+//
+// Deliberately starves a pump (1ms budget against a write blocked for 30s) so
+// ASSERT_TRUE fails and the enclosing lambda returns early with send_fut's
+// coroutine still suspended in async_write, holding a reference into `sess`.
+// `teardown_guard` (declared after `sess`, matching every fix above) must
+// still force the transport closed and drain `ioc` — letting the suspended
+// coroutine actually finish and release its frame — BEFORE `sess` is
+// destroyed. A green run under ASan (no use-after-lifetime report) proves the
+// fix converts a bounded FAILURE into a bounded, SAFE failure, not a UAF.
+// [P1-1; gate-b/r1]
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(LiveOutboundSerializedTest, BudgetMissQuiescesBeforeSessionTeardown) {
+    EXPECT_FATAL_FAILURE(
+        ([] {
+            asio::io_context ioc;
+            fixpp::core::EngineConfig eng;
+            eng.executor = ioc.get_executor();
+            auto cfg = make_acceptor_cfg(ioc.get_executor());
+
+            fixpp::session::Session sess{eng, cfg};
+            auto teardown_clock =
+                std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+            fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+
+            auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+            ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
+                << "open() timed out";
+            ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
+
+            auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
+            auto* raw_ptr = raw_transport.get();
+            teardown_guard.transport = raw_ptr;
+            fixpp::transport::handshake_result hr{};
+            sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
+
+            auto logon = make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR");
+            auto logon_fut = asio::co_spawn(
+                ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
+            ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))
+                << "peer Logon timed out";
+            ASSERT_TRUE(logon_fut.get().has_value()) << "peer Logon failed";
+            ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must reach Active";
+
+            // Block the NEXT write for far longer than the pump budget below,
+            // so the coroutine is GENUINELY still suspended when ASSERT_TRUE
+            // fires — not just theoretically racing it.
+            raw_ptr->arm_block();
+            auto payload = make_min_app_payload();
+            auto send_fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>{payload}),
+                                           asio::use_future);
+
+            // 1ms budget against a 30s-blocked write: guaranteed miss.
+            ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, send_fut, 1ms))
+                << "deliberate budget miss for the P1-1 counter-test";
+            // Unreached on the intended path: the ASSERT_TRUE above fires and
+            // returns first, leaving send_fut's coroutine suspended. Exactly
+            // that early return is what this test is proving is now safe.
+        }()),
+        "deliberate budget miss for the P1-1 counter-test");
 }
 
 }  // namespace fixpp::session::test

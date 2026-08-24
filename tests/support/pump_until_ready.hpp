@@ -20,6 +20,7 @@
 #include <asio/io_context.hpp>
 #include <chrono>
 #include <fixpp/core/clock.hpp>
+#include <fixpp/transport/transport.hpp>
 #include <future>
 
 namespace fixpp::test_support {
@@ -170,8 +171,21 @@ struct quiesce_on_exit {
     // deterministic reason to bound this tighter (e.g. a test whose only
     // purpose is to trigger the branch below) may supply a shorter budget.
     std::chrono::steady_clock::duration budget = std::chrono::seconds{5};
+    // A live transport under the caller's control, if any (gate-b/r1 P1-1).
+    // Cancelling clock sleeps is not sufficient to unstick a coroutine parked
+    // in async_write/async_read_some on a still-open transport — that op
+    // completes only when the transport itself is closed. nullptr (default)
+    // when no such transport is in play; set it (this struct is a plain
+    // aggregate, so the field may be assigned after construction, e.g. once
+    // the caller attaches the transport) whenever one is. Assumes
+    // Transport::close() is noexcept and idempotent (true of every transport
+    // in this suite) — safe to call even if the caller already closed it.
+    fixpp::transport::Transport* transport = nullptr;
 
     ~quiesce_on_exit() {
+        if (transport) {
+            (void)transport->close();
+        }
         clock.cancel_sleeps();
         ioc.restart();
         ioc.run_for(budget);
