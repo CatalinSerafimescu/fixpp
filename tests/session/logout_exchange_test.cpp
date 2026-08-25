@@ -161,14 +161,20 @@ protected:
     // that is already gone by the time the guard runs. `std::deque` never
     // invalidates existing elements on push_back, so a span into it stays
     // valid regardless of when/whether the coroutine quiesces — PROVIDED the
-    // deque itself outlives `ioc`. Declared BEFORE `ioc` (gate-b/r1 P1-2):
-    // members destruct in REVERSE declaration order, so a coroutine frame
-    // still held by `ioc`'s own internal completion machinery at the moment
-    // `ioc` is destroyed finds this arena still alive, not already freed.
-    // The prior order (ioc declared first, so inbound_frames destructed
-    // BEFORE it) was exactly backwards: `std::deque`'s non-invalidation
-    // guarantee protects against reallocation, not against the arena's OWNER
-    // dying first.
+    // deque itself outlives `ioc`. Declared BEFORE `ioc` (gate-b/r1 P1-2) as
+    // a DEFENSIVE measure: if `ioc`'s own teardown machinery ever resumed,
+    // rather than merely destroyed, a still-suspended coroutine frame holding
+    // a span into this arena, this order is what would keep the arena alive
+    // for it. That is not what makes this file's `feed_inbound`-driven
+    // `quiesce_on_exit` sites below safe today — that is the arena COPY (see the comment above
+    // `FeedInboundSpansTheArenaCopyNotTheCallersBuffer`) — and this order is
+    // currently unpinned: swapping it (declaring `ioc` first) leaves the
+    // whole suite green, and two probes built to fault the swapped order
+    // (a frame left unpumped, and one drained with a single `poll_one()`
+    // first) both stayed ASan-clean (gate-b/r3 finding 3). asio destroys
+    // pending completion handlers on `io_context` destruction rather than
+    // invoking them, so no in-tree shape currently exercises the resumption
+    // this order guards against.
     std::deque<std::vector<std::byte>> inbound_frames;
 
     asio::io_context ioc;
@@ -209,6 +215,19 @@ protected:
         return fut.get();
     }
 
+    // Copy `frame` into `inbound_frames` and spawn the FSM dispatch, without
+    // pumping. Split out of `feed_inbound` (gate-b/r2 fix 1) so a witness can
+    // let the caller's own buffer die between spawn and pump -- proving the
+    // coroutine reads the arena copy, not merely that one was made. This is
+    // the ONE spelling of the span handed to `on_inbound_frame`; `feed_inbound`
+    // below is spawn-then-pump and must not re-derive it.
+    std::future<fixpp::core::expected_t<void>> feed_inbound_spawn(
+        Session& sess, std::span<const std::byte> frame) {
+        inbound_frames.emplace_back(frame.begin(), frame.end());
+        std::span<const std::byte> stable(inbound_frames.back());
+        return asio::co_spawn(ioc, sess.on_inbound_frame(stable), asio::use_future);
+    }
+
     // Feed an inbound frame and wait for the FSM dispatch. `frame` is copied
     // into `inbound_frames` BEFORE the coroutine is spawned, so the span the
     // coroutine references stays valid for the coroutine's whole lifetime
@@ -216,10 +235,8 @@ protected:
     // `inbound_frames`'s doc comment). nullopt means the pump budget was
     // missed.
     std::optional<fixpp::core::expected_t<void>> feed_inbound(Session& sess,
-                                                               std::span<const std::byte> frame) {
-        inbound_frames.emplace_back(frame.begin(), frame.end());
-        std::span<const std::byte> stable(inbound_frames.back());
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(stable), asio::use_future);
+                                                              std::span<const std::byte> frame) {
+        auto fut = feed_inbound_spawn(sess, frame);
         if (!pump_until_ready(ioc, fut)) {
             return std::nullopt;
         }
@@ -246,9 +263,8 @@ protected:
             return ::testing::AssertionFailure() << "open() should succeed";
         }
         if (sess.state() != fsm_state::LogonSent) {
-            return ::testing::AssertionFailure()
-                   << "expected LogonSent after open(), got state "
-                   << static_cast<int>(sess.state());
+            return ::testing::AssertionFailure() << "expected LogonSent after open(), got state "
+                                                 << static_cast<int>(sess.state());
         }
 
         // Feed peer Logon-ack (seq=1): LogonSent → Active.
@@ -262,12 +278,77 @@ protected:
             return ::testing::AssertionFailure() << "Logon-ack should succeed";
         }
         if (sess.state() != fsm_state::Active) {
-            return ::testing::AssertionFailure()
-                   << "expected Active after Logon-ack, got state " << static_cast<int>(sess.state());
+            return ::testing::AssertionFailure() << "expected Active after Logon-ack, got state "
+                                                 << static_cast<int>(sess.state());
         }
         return ::testing::AssertionSuccess();
     }
 };
+
+// ── (gate-b/r1 F7, rewritten gate-b/r2 fix 1) feed_inbound spans the arena
+//    copy, not the caller's buffer — pinned ─────────────────────────────────
+//
+// This file's `feed_inbound`-driven `quiesce_on_exit` sites — every site that
+// drives its inbound frame through `feed_inbound`/`feed_inbound_spawn`, which is
+// all of them except `SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose`
+// (that one hands `on_inbound_frame` a body-local buffer directly and is safe by
+// a different invariant — see its own doc comment) — declare their inbound frame
+// AFTER the guard: the arrangement `drain_or_report`'s two-shape taxonomy in
+// `pump_until_ready.hpp` (MISS-BRANCH drain vs DESTRUCTOR-BODY drain) calls
+// unsafe (a block-local declared after the guard dies BEFORE it, since
+// destruction runs in reverse declaration order). They are safe
+// only because `feed_inbound` (above) copies each frame into `inbound_frames`, a
+// fixture-owned deque, and the coroutine spawned by `feed_inbound_spawn` reads
+// THAT span for its whole lifetime — never the caller's own buffer. That
+// invariant lives only in prose; nothing pins it. Someone "removing a redundant
+// copy" from `feed_inbound_spawn` would leave this whole suite green today and
+// flip every one of those sites from safe to hazardous silently. (`inbound_frames`
+// is also declared before `ioc` — see its own doc comment — but that is a
+// separate, currently-defensive-only invariant, not what makes these sites safe.)
+// Re-derive the exact site list on demand (one spelling; resolve hits by hand):
+// `grep -n 'quiesce_on_exit [a-zA-Z_]*{' tests/session/logout_exchange_test.cpp`.
+//
+// A round-1 version of this witness compared `data()` pointers after the
+// pump completed, which proves an arena copy EXISTS but not that the
+// coroutine actually reads it: `inbound_frames.emplace_back` alone makes
+// pointer identity differ from the caller's buffer regardless of which span
+// is handed to `co_spawn`, so `stable(inbound_frames.back()) -> stable(frame)`
+// -- the exact regression this test exists to catch -- passed unchanged.
+//
+// This version instead defers the pump: spawn against the arena span, let
+// the caller's `std::vector<std::byte>` die at the end of the nested block,
+// THEN pump. If the coroutine ever spans the caller's buffer instead of the
+// arena copy, resuming it after the buffer is freed is a heap-use-after-free
+// that ASan reports directly -- the fault IS the pin, not a downstream
+// assertion that could itself be satisfied by an unrelated code path.
+TEST_F(LogoutExchangeTest, FeedInboundSpansTheArenaCopyNotTheCallersBuffer) {
+    auto cfg = make_cfg();
+    TransportDouble td;
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
+
+    Session sess(engine, cfg);
+    quiesce_on_exit quiesce{ioc, *clock};
+    ASSERT_TRUE(drive_to_active_initiator(sess));
+
+    std::future<fixpp::core::expected_t<void>> fut;
+    {
+        auto caller_buffer = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
+        fut = feed_inbound_spawn(sess, caller_buffer);
+        ASSERT_FALSE(inbound_frames.empty());
+        EXPECT_NE(inbound_frames.back().data(), caller_buffer.data())
+            << "feed_inbound_spawn must copy into inbound_frames, not span the caller's "
+               "buffer directly -- otherwise this file's feed_inbound-driven quiesce_on_exit "
+               "sites, which declare their inbound frame AFTER the guard, would be unsafe.";
+        EXPECT_EQ(inbound_frames.back(), caller_buffer)
+            << "the arena copy must be byte-identical to what the caller passed";
+        // caller_buffer is destroyed here, before the coroutine is pumped.
+    }
+
+    ASSERT_TRUE(pump_until_ready(ioc, fut))
+        << kPumpBudgetMiss << "FeedInboundSpansTheArenaCopyNotTheCallersBuffer";
+    auto r = fut.get();
+    ASSERT_TRUE(r.has_value()) << "inbound Logout dispatch should succeed";
+}
 
 // ── Test 1: GracefulBothDirections ────────────────────────────────────────────
 //
@@ -306,14 +387,16 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
     // Feed inbound Logout confirmation (peer seq=2, since we sent seq 1 for Logon).
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
     auto inbound_r = feed_inbound(sess, peer_logout);
-    ASSERT_TRUE(inbound_r.has_value()) << kPumpBudgetMiss << "GracefulBothDirections: inbound Logout";
+    ASSERT_TRUE(inbound_r.has_value())
+        << kPumpBudgetMiss << "GracefulBothDirections: inbound Logout";
     EXPECT_TRUE(inbound_r->has_value()) << "Inbound Logout should be accepted";
 
     // Session should now be Disconnected.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
 
     // close() should complete without error.
-    ASSERT_TRUE(pump_until_ready(ioc, close_fut)) << kPumpBudgetMiss << "GracefulBothDirections: close()";
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut))
+        << kPumpBudgetMiss << "GracefulBothDirections: close()";
     auto close_r = close_fut.get();
     EXPECT_TRUE(close_r.has_value()) << "close() should complete ok";
 }
@@ -422,14 +505,15 @@ TEST_F(LogoutExchangeTest, NotConnectedInboundLogoutDisconnects) {
     quiesce_on_exit quiesce{ioc, *clock};
 
     auto r3 = open_session(sess3);
-    ASSERT_TRUE(r3.has_value()) << kPumpBudgetMiss << "NotConnectedInboundLogoutDisconnects: open()";
+    ASSERT_TRUE(r3.has_value()) << kPumpBudgetMiss
+                                << "NotConnectedInboundLogoutDisconnects: open()";
     ASSERT_TRUE(r3->has_value());
     EXPECT_EQ(sess3.state(), fsm_state::LogonSent);
 
     auto logout = make_logout_frame("FIX.4.2", 1, "TW", "ISLD");
     auto ir = feed_inbound(sess3, logout);
-    ASSERT_TRUE(ir.has_value())
-        << kPumpBudgetMiss << "NotConnectedInboundLogoutDisconnects: feed_inbound(Logout)";
+    ASSERT_TRUE(ir.has_value()) << kPumpBudgetMiss
+                                << "NotConnectedInboundLogoutDisconnects: feed_inbound(Logout)";
     EXPECT_TRUE(ir->has_value());
     EXPECT_EQ(sess3.state(), fsm_state::Disconnected)
         << "LogonSent + inbound Logout → Disconnected";
@@ -468,7 +552,8 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     quiesce_on_exit quiesce{ioc, *clock};
 
     auto r = open_session(sess);
-    ASSERT_TRUE(r.has_value()) << kPumpBudgetMiss << "LogonReceivedInboundLogoutDisconnects: open(sess)";
+    ASSERT_TRUE(r.has_value()) << kPumpBudgetMiss
+                               << "LogonReceivedInboundLogoutDisconnects: open(sess)";
     ASSERT_TRUE(r->has_value());
 
     ASSERT_TRUE(drive_to_active_initiator(sess2));
@@ -477,8 +562,8 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     // Feed inbound Logout (peer initiates Logout while we are Active).
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
     auto ir = feed_inbound(sess2, peer_logout);
-    ASSERT_TRUE(ir.has_value())
-        << kPumpBudgetMiss << "LogonReceivedInboundLogoutDisconnects: feed_inbound(Logout)";
+    ASSERT_TRUE(ir.has_value()) << kPumpBudgetMiss
+                                << "LogonReceivedInboundLogoutDisconnects: feed_inbound(Logout)";
     EXPECT_TRUE(ir->has_value());
 
     // Per matrix Active row: inbound Logout → emit Logout → Disconnected.
@@ -514,8 +599,8 @@ TEST_F(LogoutExchangeTest, LogoutSentInboundLogoutDisconnects) {
     // Feed inbound Logout confirmation.
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
     auto ir = feed_inbound(sess, peer_logout);
-    ASSERT_TRUE(ir.has_value())
-        << kPumpBudgetMiss << "LogoutSentInboundLogoutDisconnects: feed_inbound(Logout)";
+    ASSERT_TRUE(ir.has_value()) << kPumpBudgetMiss
+                                << "LogoutSentInboundLogoutDisconnects: feed_inbound(Logout)";
     ASSERT_TRUE(ir->has_value());
 
     // LogoutSent + inbound Logout → Disconnected.
@@ -573,7 +658,8 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogout_SeqnumOverflow_SurfacesError) {
     auto peer_logout = make_logout_frame("FIX.4.2", next_inbound, "TW", "ISLD");
     auto inbound_r = feed_inbound(sess, peer_logout);
     ASSERT_TRUE(inbound_r.has_value())
-        << kPumpBudgetMiss << "ActiveInboundLogout_SeqnumOverflow_SurfacesError: feed_inbound(Logout)";
+        << kPumpBudgetMiss
+        << "ActiveInboundLogout_SeqnumOverflow_SurfacesError: feed_inbound(Logout)";
 
     EXPECT_FALSE(inbound_r->has_value())
         << "Active inbound Logout must surface assign_outbound() overflow; "
@@ -608,8 +694,8 @@ TEST_F(LogoutExchangeTest, DisconnectedInboundLogoutIgnored) {
 
     auto logout = make_logout_frame("FIX.4.2", 3, "TW", "ISLD");
     auto ir = feed_inbound(sess, logout);
-    ASSERT_TRUE(ir.has_value())
-        << kPumpBudgetMiss << "DisconnectedInboundLogoutIgnored: feed_inbound(Logout)";
+    ASSERT_TRUE(ir.has_value()) << kPumpBudgetMiss
+                                << "DisconnectedInboundLogoutIgnored: feed_inbound(Logout)";
     // Disconnected state ignores all inbound (co_return ok per matrix).
     EXPECT_TRUE(ir->has_value());
     EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "Disconnected stays Disconnected";
