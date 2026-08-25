@@ -169,3 +169,34 @@ TEST(QuiesceOnExitResidualWitness, ClosesTransportBeforeDraining) {
     quiesce_on_exit quiesce{ioc, *clock, 50ms};
     quiesce.transport = &transport;
 }
+
+// gate-b/r1 F1b (opus_pr301_1_triage.md fix queue item 2): `drain_or_report`'s
+// residual ADD_FAILURE branch (pump_until_ready.hpp:225-232) has shipped
+// since #289 with no witness that has ever seen it fire — every existing
+// caller in this file's `Fixture` fixtures leaves `EngineConfig::clock` null,
+// so `run_liveness_loop()` co_returns immediately and nothing is ever
+// outstanding at the drain. `quiesce_on_exit`'s destructor body is
+// structurally identical and IS proven RED above
+// (QuiesceOnExitResidualWitness.ReportsWhenIocNeverDrains), but a copied body
+// is not a tested body — `drain_or_report` is a separate free function with
+// its own text and its own callers (Fixture::feed, Fixture::~Fixture in
+// tests/session/test_next_expected_msgseqnum.cpp). Prove both directions
+// directly.
+TEST(DrainOrReportWitness, ReportsWhenIocNeverDrains) {
+    asio::io_context ioc;
+    auto keep_alive = asio::make_work_guard(ioc);  // keeps ioc.stopped()==false for the whole budget
+
+    EXPECT_NONFATAL_FAILURE(fixpp::test_support::drain_or_report(ioc, "probe", 1ms),
+                            "did not run out of work within the teardown drain");
+}
+
+// Negative control: an otherwise-empty io_context drains and stops within the
+// budget, so the residual branch must stay silent. Any nonfatal failure here
+// (an unexpected ADD_FAILURE) fails this test outright — that IS the
+// assertion, proving the instrument in the direction the flagship failure
+// class (an instrument that reports clean whether or not it can fail) would
+// otherwise hide.
+TEST(DrainOrReportWitness, SilentWhenIocDrainsNormally) {
+    asio::io_context ioc;
+    fixpp::test_support::drain_or_report(ioc, "probe", 1ms);
+}
