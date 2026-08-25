@@ -1368,20 +1368,17 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
             // reason is gtest's, not `guard`'s: gtest's own
             // HandleExceptionsInMethodIfSupported deliberately RETHROWS a
             // GoogleTestFailureException once GTEST_FLAG(throw_on_failure) is
-            // set, so *any* gtest failure inside `throw_on_failure_scope`'s
-            // window aborts the process, regardless of what else is in scope --
-            // this is NOT the "two exceptions unwinding at once" rule
-            // ([except.terminate] fires only when a function invoked during
-            // unwinding EXITS via an exception, and
-            // `~quiesce_or_release_on_exit`'s blanket `catch (...)` prevents
-            // that by construction; this enclosing test exists to pin exactly
-            // that swallow, and reproduces it with `guard` constructed but also
-            // with `guard` absent from scope entirely -- `guard`'s presence is
-            // not what makes the difference). Constructing `throw_scope` and
-            // `guard` only after every setup ASSERT_TRUE has already succeeded
-            // keeps the setup failure path entirely outside the flag's window,
-            // which is the actual reason it stays a named failure instead of a
-            // terminate.
+            // set, so any gtest failure inside `throw_on_failure_scope`'s
+            // window throws, and aborts unless something in scope catches it --
+            // which is exactly what `~quiesce_or_release_on_exit`'s blanket
+            // `catch (...)` does, and what this test pins (this is NOT the "two
+            // exceptions unwinding at once" rule: [except.terminate] fires only
+            // when a function invoked during unwinding EXITS via an exception,
+            // and the blanket catch here means it never does). Constructing
+            // `throw_scope` and `guard` only after every setup ASSERT_TRUE has
+            // already succeeded keeps the setup failure path entirely outside
+            // the flag's window, which is the actual reason it stays a named
+            // failure instead of a terminate.
             //
             // Same residual shape as ResidualPathReleasesTheFixtures (two
             // fixtures, 0 ms budget, real outstanding work) -- reused here rather
