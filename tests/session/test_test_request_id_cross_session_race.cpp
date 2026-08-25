@@ -43,6 +43,7 @@
 #include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
+#include <asio/post.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
 #include <atomic>
@@ -63,6 +64,7 @@
 #include <optional>
 #include <set>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -1095,12 +1097,20 @@ inline std::shared_ptr<fixpp::core::mock_clock> make_witness_clock(asio::io_cont
 // The fixture MUST be scoped INSIDE the macro's statement. Declaring it before
 // EXPECT_NONFATAL_FAILURE would run the guard after the macro stopped intercepting
 // failures, and this test would pass while asserting nothing.
+// (gate-b/r1 F6) Two fixtures, not one: `fixtures` is a `std::vector`, and a
+// single-element vector cannot distinguish a correct `for (auto* owner :
+// fixtures)` loop from one that only ever touches `fixtures[0]` (an
+// off-by-one, or a `break` after the first iteration). `sB` is otherwise
+// idle — no session opened, nothing spawned on it — because the ordering
+// property under test is "every owner in the vector is released", not
+// anything about sB's own residual state.
 TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
     std::atomic<int> destructions{0};
+    std::atomic<int> destructions_b{0};
     std::weak_ptr<fixpp::core::Clock> weak_clock;
 
     EXPECT_NONFATAL_FAILURE(
-        ([&destructions, &weak_clock] {
+        ([&destructions, &destructions_b, &weak_clock] {
             // Arena for the inbound frame, declared BEFORE `ioc` for the same reason
             // the real test's is — and this witness is where that reason was
             // MEASURED rather than reasoned about. An earlier revision declared the
@@ -1126,12 +1136,16 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
                 std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_A", "TARGET_A");
             sA->destructions = &destructions;
 
+            auto sB =
+                std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_B", "TARGET_B");
+            sB->destructions = &destructions_b;
+
             // 0 ms budget, so the guard cannot drain. Its `poll_one()` probe is what
             // makes this a REAL residual rather than the deadline artefact: with the
             // probe in place, an empty context at a zero budget reports QUIESCED (the
             // third witness below pins exactly that), so reaching the residual branch
             // here means work genuinely remained.
-            quiesce_or_release_on_exit guard{ioc, *clock, {&sA}, std::chrono::milliseconds{0}};
+            quiesce_or_release_on_exit guard{ioc, *clock, {&sA, &sB}, std::chrono::milliseconds{0}};
 
             // Real outstanding work: open the session (so its liveness loop is live
             // and re-arms), then spawn an inbound frame that is never pumped.
@@ -1167,6 +1181,13 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
            "strand handle is then destroyed after ~io_context destroys the frames that "
            "borrow it, which is the ordering #303 exists to prevent.";
 
+    // The n>1 case: a loop that stops after the first owner (an off-by-one, or a
+    // stray `break`) would release sA and leave sB destroyed — this is the only
+    // assertion that would catch that, since a single-fixture test cannot.
+    EXPECT_EQ(destructions_b.load(std::memory_order_relaxed), 0)
+        << "the SECOND SessionFixture in `fixtures` was destroyed on the residual "
+           "path -- the release loop must release every owner, not only the first.";
+
     // An independent check on a different observable: the released fixture's graph is
     // retained. This proves RETENTION, not fixture identity — a compound mutant that
     // drops release() while copying the clock elsewhere would keep it live. The
@@ -1175,6 +1196,46 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
     EXPECT_FALSE(weak_clock.expired())
         << "the fixture-owned clock did not survive the residual path, so the fixture's "
            "EngineConfig shared_ptr copy died with it.";
+}
+
+// ── (gate-b/r1 F6) The fail-safe `catch(...)`: a throwing pump still releases ─
+//
+// `~quiesce_or_release_on_exit`'s inner `catch (...) { quiesced = false; }`
+// exists so an exception mid-pump is treated as residual rather than as
+// quiesced — the fail-SAFE direction, since it means "release, don't destroy
+// fixtures whose frames' fate is unknown". Nothing exercised it: the two
+// witnesses above never make the pump throw.
+//
+// A zero budget means `run_for(0)` returns without dispatching anything (the
+// #305 deadline artefact), so the throw is engineered to come from the
+// guard's OWN `poll_one()` call instead — which does dispatch one ready
+// handler, and does so from inside the same inner `try`.
+TEST(CrossSessionTeardown, ThrowingPumpStillReleasesTheFixtures) {
+    std::atomic<int> destructions{0};
+
+    EXPECT_NONFATAL_FAILURE(
+        ([&destructions] {
+            asio::io_context ioc;
+            auto clock = make_witness_clock(ioc);
+
+            auto sA =
+                std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_A", "TARGET_A");
+            sA->destructions = &destructions;
+
+            asio::post(ioc, [] { throw std::runtime_error("gate-b/r1 F6: injected pump fault"); });
+
+            quiesce_or_release_on_exit guard{ioc, *clock, {&sA}, std::chrono::milliseconds{0}};
+        }()),
+        "the io_context did not run out of work");
+
+    // THE DIRECT OBSERVATION. A mutant that turns the inner catch's
+    // `quiesced = false` into `quiesced = true` would destroy the fixture here
+    // instead of releasing it, and this assertion catches that.
+    EXPECT_EQ(destructions.load(std::memory_order_relaxed), 0)
+        << "the SessionFixture was DESTROYED after a throwing pump handler. The inner "
+           "catch(...) must treat a mid-pump exception as residual (quiesced=false) and "
+           "release, not destroy, since the exception leaves the outstanding work in an "
+           "unknown state.";
 }
 
 // ── Direction 2: QUIESCED ⇒ the fixture is DESTROYED, and nothing is reported ─
