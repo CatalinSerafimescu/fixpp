@@ -492,9 +492,14 @@ struct quiesce_or_release_on_exit {
                 // deliberately left mid-flight for this probe to resume: both reach
                 // the residual branch, both are ASan- and LSan-clean.
                 //
-                // NOT copying the shared header's claim that `stopped()==false`
-                // necessarily means outstanding work: that claim omits this window.
-                // It is the poll_one() above that makes it true here.
+                // This guard was written first, when the shared header still claimed
+                // that `stopped()==false` necessarily means outstanding work — a claim
+                // that omits this window. That defect is now fixed at the source
+                // (#305): both `quiesce_on_exit` and `drain_or_report` carry the same
+                // probe, and the header's claim is corrected in place. The probe stays
+                // duplicated here because this guard does not delegate to either of
+                // them — it computes the verdict itself so the release decision cannot
+                // drift from it — not because the shared version is still wrong.
                 (void)ioc.poll_one();
                 quiesced = ioc.stopped();
             } catch (...) {
