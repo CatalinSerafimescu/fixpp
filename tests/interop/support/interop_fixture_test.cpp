@@ -179,7 +179,7 @@ TEST(InteropEngineFixtureTeardown, StoppedFlagIsNotTreatedAsCompletion) {
            "so this test did not exercise the distinction it exists to pin";
 }
 
-// ── #292 — the release() is pinned BEHAVIOURALLY, not just by its message ────
+// ── #292 — the miss path RETAINS the Engine-owned clock (release() proxy) ───
 //
 // Gap this closes: the two tests above check the ADD_FAILURE text, so a mutant
 // that drops `engine_.release()` while keeping the message passes both of them.
@@ -187,6 +187,14 @@ TEST(InteropEngineFixtureTeardown, StoppedFlagIsNotTreatedAsCompletion) {
 // `assert(stopped_)` is a no-op under NDEBUG, and __lsan_ignore_object makes the
 // leak invisible to LeakSanitizer by design. So "the Engine outlived ioc_" was
 // COVERED but UNASSERTED.
+//
+// NAMED FOR THE OBSERVABLE, not the intent (gate-b/r4 P2-1). What this test can
+// fail on is CLOCK RETENTION; Engine release is what that retention stands in
+// for. The two come apart under one mutant — copy the clock elsewhere on the
+// failure branch, then destroy the Engine — which leaves this green. Proving
+// Engine identity directly would need a destruction counter inside Engine, a
+// src/ seam this PR cannot add. The proxy is sound for every mutation that does
+// not deliberately forge it, and the name now says which is which.
 //
 // The pin observes a value that cannot be terminal: the Engine holds its
 // EngineConfig BY VALUE, so it owns a shared_ptr copy of the configured clock.
@@ -197,7 +205,7 @@ TEST(InteropEngineFixtureTeardown, StoppedFlagIsNotTreatedAsCompletion) {
 // The clock is supplied by the caller here so the test holds the only other
 // strong reference and can drop it deliberately — with_clock() honours an
 // explicit clock rather than injecting its own.
-TEST(InteropEngineFixtureTeardown, MissPathActuallyReleasesTheEngine) {
+TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
     std::weak_ptr<fixpp::core::Clock> weak_clock;
 
     EXPECT_NONFATAL_FAILURE(
@@ -230,7 +238,7 @@ TEST(InteropEngineFixtureTeardown, MissPathActuallyReleasesTheEngine) {
            "suspended in ioc_, which is the silent failure #292 exists to prevent.";
 }
 
-// ── #292 — a throwing stop() is REPORTED and RELEASED (gate-b/r2 P1-1) ──────
+// ── #292 — a throwing stop() is REPORTED, and retains the Engine-owned clock ─
 //
 // Withdraws two round-1 waivers that both rested on "no test seam exists to make
 // Engine::stop() throw". One does: every interop target compiles with
@@ -261,7 +269,7 @@ TEST(InteropEngineFixtureTeardown, MissPathActuallyReleasesTheEngine) {
 //     the Engine. Closing that needs an Engine-destruction counter, which is a
 //     src/ seam this PR cannot add.
 // Both are recorded as gaps rather than waived silently.
-TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndReleasesTheEngine) {
+TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwnedClock) {
     std::weak_ptr<fixpp::core::Clock> weak_clock;
 
     EXPECT_NONFATAL_FAILURE(
@@ -296,14 +304,22 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndReleasesTheEngine) {
 //
 // NAMED FOR THE PROPERTY THAT IS LOAD-BEARING, which is not literally "co_spawn
 // was called once" (gate-b/r3 P1-2). Codex proposed a mutant that keeps the
-// tracked future and co_spawns an EXTRA detached stop() beside it. Measured: the
-// test stays green — and so does the system, because Engine::stop() opens with
-// its own idempotency guard, `if (stopped_.load(acquire)) co_return;`
-// (engine.cpp:1163). A second operation spawned after the first has set the flag
-// returns immediately and never reaches the hook. An extra spawn is INERT.
+// tracked future and co_spawns an EXTRA detached stop() beside it. Applied and
+// measured: the test stayed green, and the hook was entered exactly once.
 //
-// So the literal spawn count is neither observable test-side nor the thing that
-// can hurt. The two properties that CAN are both asserted here:
+// The reason is an ORDERING, not a guarantee, and the distinction matters enough
+// to write down. Engine::stop() opens with an idempotency guard,
+// `if (stopped_.load(acquire)) co_return;` (engine.cpp:1163), so a second
+// operation that starts AFTER the first has set the flag returns immediately.
+// But the authoritative store happens in the INNER control-strand body
+// (engine.cpp:1197), which does NOT re-check the flag before storing. Two
+// operations that both clear the outer check before either inner body runs would
+// therefore BOTH execute a full teardown. The measured single entry reflects the
+// pump order actually taken, not an invariant — so "an extra spawn is harmless"
+// would be an over-claim, and the fixture's own spawn-once guard is what makes
+// the question moot for shipped code.
+//
+// The two properties that are both load-bearing AND asserted here:
 //   1. exactly ONE teardown body runs   — the hook-entry counter
 //   2. that operation's failure is not masked — the rethrow
 // Deleting the `if (!stop_fut_.valid())` guard breaks (2): the second call

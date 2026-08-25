@@ -376,8 +376,26 @@ if(TARGET fixpp_codegen_generate)
     target_include_directories(interop_business_message_interop_test PRIVATE
         "${_BM_INTEROP_CODEGEN_INC}"
     )
+    # TIMEOUT: 30 -> 120 (#292, gate-b/r4 P2-2).
+    #
+    # This is ONE ctest entry over FOUR parameterized cells (2 counterparties x 2
+    # roles). The cells' own declared budgets already exceed 30 s in the worst
+    # case -- a 5 s activation budget each, initiator cells a further 3 + 5 + 0.5,
+    # acceptor cells 10 + 0.5 -- so the entry was ALREADY under-provisioned before
+    # this change; nothing here made it so.
+    #
+    # It matters now because #292 gave the fixture destructor a bounded stop drive
+    # that REPORTS a named failure. Under a stop regression each cell can add its
+    # teardown bound on top, and if ctest kills the process first the report never
+    # prints: the run reads as `Timeout` instead of naming what broke. That is the
+    # exact failure mode #292 exists to remove, so a timeout that truncates the
+    # diagnostic defeats the fix.
+    #
+    # 120 s costs nothing on a healthy run -- this entry completes in ~0.03 s, and
+    # a ctest timeout only bites when something is already wrong. It matches the
+    # 120 s used at tests/session/CMakeLists.txt for the same reason.
     set_tests_properties(interop_business_message_interop_test PROPERTIES
-        TIMEOUT 30)
+        TIMEOUT 120)
 else()
     message(STATUS
         "tests/interop: fixpp_codegen_generate not available; skipping business message interop test")
