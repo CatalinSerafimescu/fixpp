@@ -106,6 +106,10 @@
 // no store and registers no listener — a real cost, bounded and named, on the same
 // footing as tests/interop/support/interop_fixture.cpp's larger version of it.
 //
+// Measured on `linux-clang-asan` (clang 22, libstdc++, `-fsanitize=address`) at
+// `61f685a4`; these are allocator- and stdlib-dependent, so treat a different
+// number as a re-measurement, not a regression.
+//
 // That same experiment is what proves the suppression is load-bearing rather than
 // decorative, and that the release() on the residual path actually executes: with
 // the ignore removed the leak APPEARS, from a test that still reports [ OK ].
