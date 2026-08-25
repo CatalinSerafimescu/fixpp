@@ -259,6 +259,38 @@ struct SessionFixture {
 // SC-003: we advance the clock enough for each session to emit ≥ 100
 // TestRequests (fast test; TSan is the stress mechanism, not the count).
 TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
+    // Arena for inbound frame buffers. `on_inbound_frame` takes its span by
+    // value into the coroutine frame, so a block-scoped buffer dies with its
+    // block on ASSERT_TRUE's early return while the suspended coroutine still
+    // holds a span over it — `deque::push_back` never invalidates references to
+    // existing elements, so a span over `frames.back()` stays valid for the
+    // arena's whole lifetime.
+    //
+    // Declared BEFORE `ioc` (#293), therefore destroyed AFTER it. The invariant
+    // that matters is NOT "the arena outlives the guard" — that is the weaker
+    // property, and it was all the previous comment here claimed. It is: THE
+    // ARENA MUST OUTLIVE EVERY COROUTINE FRAME `ioc` DESTROYS. `quiesce_on_exit`
+    // below only fixes the ORDER of destruction relative to itself; it cannot
+    // force quiescence (see its definition — it reports residual work via
+    // ADD_FAILURE rather than eliminating it). On the budget-exhausted path a
+    // suspended frame survives the guard and is destroyed by ~io_context, so
+    // only storage declared before `ioc` is guaranteed to still be alive then.
+    //
+    // `frames` is pure storage — it holds no executor and no strand — so it is
+    // safe for it to outlive `ioc`. That is NOT true of `sA`/`sB` below, which
+    // own Sessions whose executors wrap `asio::make_strand` (session.hpp:360):
+    // a strand handle destroyed after its io_context dereferences an already-
+    // destroyed service (asio strand_executor_service.ipp:83-94 unlinks through
+    // `service_`, which ~execution_context has already destroyed —
+    // execution_context.ipp:60-64). Verified with a standalone repro plus a
+    // bare-executor control arm. So they deliberately stay AFTER `ioc`.
+    //
+    // RESIDUAL, stated rather than papered over: the suspended
+    // `on_inbound_frame` frame references `frames` AND `sA`/`sB`. This ordering
+    // closes only the `frames` half. The session half cannot be closed by
+    // reordering — it would require the frame not to survive at all.
+    std::deque<std::vector<std::byte>> frames;
+
     // Single io_context so we can coordinate clock advancement.
     asio::io_context ioc;
     // Both sessions share the same mock_clock driven by the ioc executor.
@@ -270,21 +302,13 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     SessionFixture sA{ioc.get_executor(), clock, "SENDER_A", "TARGET_A"};
     SessionFixture sB{ioc.get_executor(), clock, "SENDER_B", "TARGET_B"};
 
-    // Arena for inbound frame buffers. `on_inbound_frame` takes its span by
-    // value into the coroutine frame, so a block-scoped buffer dies with its
-    // block on ASSERT_TRUE's early return while the suspended coroutine still
-    // holds a span over it — `deque::push_back` never invalidates references
-    // to existing elements, so a span over `frames.back()` stays valid for the
-    // arena's whole (test-scope) lifetime. Declared BEFORE `quiesce` so it
-    // outlives the guard below.
-    std::deque<std::vector<std::byte>> frames;
-
     // #284 teardown. On the budget-exhausted path the awaited coroutine is
     // still SUSPENDED and its frame references sA/sB, the clock, and (for
-    // on_inbound_frame) a span into `frames`. Declared AFTER the fixtures and
-    // the frame arena so it runs BEFORE them, on every exit path including the
-    // early `return` an ASSERT_* performs. See the header for why reordering
-    // the declarations cannot substitute.
+    // on_inbound_frame) a span into `frames`. Declared AFTER the fixtures so it
+    // runs BEFORE them, on every exit path including the early `return` an
+    // ASSERT_* performs. See the header for why reordering the declarations
+    // cannot substitute for this guard. (`frames` is now declared above `ioc`
+    // — see there — so it is destroyed after BOTH this guard and `ioc`.)
     quiesce_on_exit quiesce{ioc, *clock};
 
     // Open both sessions (initiator path: each emits a Logon immediately).
