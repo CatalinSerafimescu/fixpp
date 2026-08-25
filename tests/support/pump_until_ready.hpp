@@ -187,8 +187,8 @@ template <class Fut>
 // A free function rather than an RAII guard like `quiesce_on_exit`, for THREE
 // reasons — the first is the obvious one and the other two are the load-bearing
 // ones:
-//   1. `quiesce_on_exit` requires a non-null `fixpp::core::Clock&` (:168) and
-//      these fixtures assign none.
+//   1. `quiesce_on_exit` requires a non-null `fixpp::core::Clock&` (its
+//      `clock` member below) and these fixtures assign none.
 //   2. It must run ONLY on the miss branch. `quiesce_on_exit` drains
 //      unconditionally at scope exit; arming one per call at a site invoked 32
 //      times, each measured at ~27 us, would reintroduce exactly the per-call
@@ -200,7 +200,7 @@ template <class Fut>
 //
 // ⚠️ DIVERGENCE FROM `quiesce_on_exit`, AND IT IS A KNOWN TRAP FOR THE REST OF
 // #289's MIGRATION: this does NOT close a transport. `quiesce_on_exit` grew its
-// `transport` field (:298) from a real defect (gate-b/r1 P1-1) — cancelling
+// `transport` field (below) from a real defect (gate-b/r1 P1-1) — cancelling
 // clock sleeps does not unstick a coroutine parked in `async_write` /
 // `async_read_some`, which completes only when the transport itself is closed.
 // No caller here attaches a live Transport (this file has zero references to
@@ -216,7 +216,8 @@ template <class Fut>
 // block-local declared after the fixture, outlives its referent unless the
 // drain happens in THAT scope. Both shapes exist at the #289 sites.
 //
-// `ioc.stopped()` is a DISJUNCTION and is NOT authoritative — see :142-162.
+// `ioc.stopped()` is a DISJUNCTION and is NOT authoritative — see
+// `quiesce_on_exit`'s comment on the disjunction, below.
 // A false return is evidence of residual work, not proof of its absence.
 inline void drain_or_report(asio::io_context& ioc, const char* site,
                             std::chrono::steady_clock::duration budget = kQuiesceBudget) {
@@ -227,7 +228,7 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
                          "drain, so a coroutine frame is probably still suspended and will be "
                          "destroyed while referencing objects that are about to die. This "
                          "observes the residual, not its cause (stopped() is disjunctive — see "
-                         "pump_until_ready.hpp:142-162). Site: "
+                         "quiesce_on_exit's comment on the disjunction, below). Site: "
                       << site;
     }
 }

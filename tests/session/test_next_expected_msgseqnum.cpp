@@ -352,10 +352,10 @@ struct Fixture {
     // first) is the obvious-looking fix and it is WRONG: `session`'s bound
     // executor is a strand on this context under the default
     // `per_session_strand`, and destroying a strand after its context is an
-    // unconditional heap-use-after-free — see the numbered rule at
-    // support/pump_until_ready.hpp:125. Measured: with `ioc` moved last this
-    // binary aborts under ASan inside the FIRST test, 0 tests completed, at
-    // asio/detail/impl/strand_executor_service.ipp:88.
+    // unconditional heap-use-after-free — see the numbered strand rule in
+    // `quiesce_on_exit`'s comment in support/pump_until_ready.hpp. Measured:
+    // with `ioc` moved last this binary aborts under ASan inside the FIRST
+    // test, 0 tests completed, at asio/detail/impl/strand_executor_service.ipp:88.
     asio::io_context ioc;
     OutboundCapture capture;
     fixpp::core::EngineConfig eng;
