@@ -171,8 +171,8 @@ TEST(QuiesceOnExitResidualWitness, ClosesTransportBeforeDraining) {
 }
 
 // gate-b/r1 F1b (opus_pr301_1_triage.md fix queue item 2): `drain_or_report`'s
-// residual ADD_FAILURE branch (pump_until_ready.hpp:296) has shipped
-// since #289 with no witness that has ever seen it fire — every existing
+// residual `ADD_FAILURE` branch has shipped since #289 with no witness that
+// has ever seen it fire — every existing
 // caller in this file's `Fixture` fixtures leaves `EngineConfig::clock` null,
 // so `run_liveness_loop()` co_returns immediately and nothing is ever
 // outstanding at the drain. `quiesce_on_exit`'s destructor body is
@@ -296,9 +296,9 @@ TEST(QuiesceOnExitResidualWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
 
 // ── (gate-b/r1 F3) The bound the header states but nothing enforced ───────────
 //
-// pump_until_ready.hpp:238-240 ("The probe can then dispatch at most ONE
-// handler") states that the zero/expired-budget probe dispatches at most one
-// handler — `poll_one()`, not `poll()`. Nothing above pins
+// `drain_or_report`'s PROBE comment in `pump_until_ready.hpp` ("The probe can
+// then dispatch at most ONE handler") states that the zero/expired-budget
+// probe dispatches at most one handler — `poll_one()`, not `poll()`. Nothing above pins
 // that cardinality: every existing witness uses at most one outstanding handler,
 // so `poll_one() -> poll()` (an unbounded drain during teardown) leaves the whole
 // binary green. Two independently observable handlers, and both the dispatch
@@ -347,8 +347,8 @@ TEST(DrainOrReportWitness, ZeroBudgetProbeDispatchesAtMostOneHandler) {
 // dispatch capability for `quiesce_on_exit`; the PR twinned the empty-context
 // witness across both helpers (ZeroBudgetOnEmptyContextIsNotResidual) but not
 // this one — the exact "fixed one of two identical shapes" class
-// pump_until_ready.hpp:231-233 names. `drain_or_report` gained the identical
-// capability and nothing observed it.
+// `drain_or_report`'s PROBE comment in `pump_until_ready.hpp` names.
+// `drain_or_report` gained the identical capability and nothing observed it.
 TEST(DrainOrReportWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
     bool resumed = false;
     {

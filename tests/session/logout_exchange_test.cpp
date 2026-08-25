@@ -293,9 +293,10 @@ protected:
 // all of them except `SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose`
 // (that one hands `on_inbound_frame` a body-local buffer directly and is safe by
 // a different invariant — see its own doc comment) — declare their inbound frame
-// AFTER the guard: the arrangement `pump_until_ready.hpp`'s own two-shape
-// taxonomy (:252-262) calls unsafe (a block-local declared after the guard dies
-// BEFORE it, since destruction runs in reverse declaration order). They are safe
+// AFTER the guard: the arrangement `drain_or_report`'s two-shape taxonomy in
+// `pump_until_ready.hpp` (MISS-BRANCH drain vs DESTRUCTOR-BODY drain) calls
+// unsafe (a block-local declared after the guard dies BEFORE it, since
+// destruction runs in reverse declaration order). They are safe
 // only because `feed_inbound` (above) copies each frame into `inbound_frames`, a
 // fixture-owned deque, and the coroutine spawned by `feed_inbound_spawn` reads
 // THAT span for its whole lifetime — never the caller's own buffer. That

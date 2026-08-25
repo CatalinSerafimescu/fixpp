@@ -2361,9 +2361,9 @@ TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
 //
 // The miss is DETERMINISTIC, not wedged and not timing-dependent: `run_for(0)`
 // is `run_until(now)`, and `run_one_until` tests `now < abs_time` BEFORE
-// dispatching (support/pump_until_ready.hpp:50-52), so nothing is dispatched and
-// the future cannot be ready. The coroutine is left suspended at its initial
-// suspend point still holding a span into `frame`.
+// dispatching (`pump_until`'s doc comment in support/pump_until_ready.hpp), so
+// nothing is dispatched and the future cannot be ready. The coroutine is left suspended at its
+// initial suspend point still holding a span into `frame`.
 //
 // BOTH durations must be zero. A zero window alone does NOT miss: the boundary
 // grace slice dispatches the queued work and the future becomes ready. That was
@@ -2397,9 +2397,9 @@ TEST(PumpWindowMiss, FeedMissDrainsWhileCallerTemporaryAlive) {
 // exactly as documented above, and only the boundary GRACE slice (left at its
 // default here) gives that queued handler a dispatch opportunity. This is the
 // tree-side proof for the historical, pre-shipping observation both comments
-// above reference: delete the grace dispatch at pump_until_ready.hpp:179-180
-// and this test goes RED, because then nothing ever pumps `ioc` and `fut`
-// never becomes ready.
+// above reference: delete `run_window_then_ready`'s grace dispatch (the trailing
+// `ioc.run_for(grace); ioc.restart();` in `pump_until_ready.hpp`) and this test
+// goes RED, because then nothing ever pumps `ioc` and `fut` never becomes ready.
 TEST(PumpWindowMiss, ZeroWindowStillReadyViaBoundaryGrace) {
     asio::io_context ioc;
     std::promise<void> p;

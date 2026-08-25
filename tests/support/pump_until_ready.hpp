@@ -134,8 +134,9 @@ inline constexpr auto kQuiesceBudget = std::chrono::seconds{5};
 // This is the #289 migration shape, and it is NOT `pump_until_ready`. The two
 // differ on purpose:
 //
-//   - No work guard. `pump_until` takes one (:64) so `run_for` cannot drain
-//     early, which is what gives that helper its documented COST FLOOR (:32-39:
+//   - No work guard. `pump_until` takes one (its `wg = asio::make_work_guard(ioc)`)
+//     so `run_for` cannot drain early, which is what gives that helper its
+//     documented COST FLOOR (`kPumpSlice`'s doc comment above:
 //     "1 ms slice = 124 ms" over 106 calls, ~1.17 ms/call). The #289 sites were
 //     measured at ~27 us, so adopting that floor would be a ~40x per-call
 //     regression at 32 sites. Here `run_for` keeps its normal early-drain
@@ -147,8 +148,8 @@ inline constexpr auto kQuiesceBudget = std::chrono::seconds{5};
 //     future-readiness would leave that detached task unserviced; running the
 //     original window to drain-or-deadline services it exactly as today.
 //
-// What it DOES take from `pump_until_ready` is the load-bearing property at
-// :79-81 — the caller must consult the bool BEFORE `fut.get()`. `[[nodiscard]]`
+// What it DOES take from `pump_until_ready` is the load-bearing property in
+// its own doc comment — the caller must consult the bool BEFORE `fut.get()`. `[[nodiscard]]`
 // puts a compiler DIAGNOSTIC on ignoring it, rather than leaving it to a
 // reviewer or a lexical checker. Note that is a WARNING, not an error: this
 // repo does not build tests under a blanket `-Werror` (the one targeted use is
@@ -156,8 +157,9 @@ inline constexpr auto kQuiesceBudget = std::chrono::seconds{5};
 // do not describe it as compiler-ENFORCED.
 //
 // The grace slice is not a "CI tolerance" and must not be grown into one.
-// `run_one_until` tests `now < abs_time` BEFORE dispatching (:50-52), so a
-// handler that became ready at the instant the window closed is left QUEUED.
+// `run_one_until` tests `now < abs_time` BEFORE dispatching (see `pump_until`'s
+// doc comment above), so a handler that became ready at the instant the window
+// closed is left QUEUED.
 // One `kPumpSlice` gives exactly that handler a dispatch opportunity. It moves
 // the deadline by one slice; it does not make a slow runner safe, and no
 // statically-chosen value could.
