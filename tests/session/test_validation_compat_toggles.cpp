@@ -1604,6 +1604,11 @@ TEST(ValidationCompatToggles, NoHeap_RelaxedDeliverPath) {
     const int from_app_snapshot = app->from_app_count;
 
     // ── Guarded window: one S4 deliver-without-advance invocation ────────────
+    // NB: feed()'s miss branch now allocates inside this window (drain_or_report's
+    // run_for and ADD_FAILURE), so a miss here would make alloc_guard_end() exit(1)
+    // rather than report under LD_PRELOAD=libmallocnesia.so. Currently unreachable:
+    // this file's mallocnesia companion is if(FALSE)-disabled (REMAINING-WORK item
+    // 13), and this is not a regression — a miss here hung on main.
     if (alloc_guard_start) alloc_guard_start();
 
     fix->feed(too_low_frame);
