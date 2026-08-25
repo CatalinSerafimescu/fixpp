@@ -14,9 +14,14 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
+#include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <atomic>
 #include <chrono>
+#include <fixpp/core/clock.hpp>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/system_clock_source.hpp>
+#include <memory>
 
 #include "support/interop_fixture.hpp"
 
@@ -64,14 +69,13 @@ TEST(InteropEngineFixtureRunUntil, RevivesContextStoppedAtEntry) {
 TEST(InteropEngineFixtureTeardown, BoundedStopMissReportsNamedFailure) {
     EXPECT_NONFATAL_FAILURE(
         ([] {
-            fixpp::interop::InteropEngineFixture fx;
+            // 0 ms teardown bound: stop_within's `while (now < t0 + bound)` body
+            // never executes, so stop() is co_spawned but never pumped and cannot
+            // complete. No hanging session and no wall-clock cost is needed.
+            fixpp::interop::InteropEngineFixture fx{{}, std::chrono::milliseconds{0}};
             fx.start();
-            // 0 ms: stop_within's `while (now < t0 + bound)` body never executes,
-            // so stop() is co_spawned but never pumped and cannot complete. No
-            // hanging session and no wall-clock cost is needed to reach the branch.
-            fx.set_teardown_bound_for_test(std::chrono::milliseconds{0});
         }()),
-        "Engine::stop() did not complete within the");
+        "Engine::stop() did not complete successfully");
 }
 
 // Counter-direction: an engine that stops cleanly must leave the branch silent.
@@ -79,12 +83,43 @@ TEST(InteropEngineFixtureTeardown, BoundedStopMissReportsNamedFailure) {
 // unconditionally. Any non-fatal failure here fails this test outright, which is
 // exactly the assertion.
 TEST(InteropEngineFixtureTeardown, CleanStopReportsNothing) {
+    // Non-vacuity control for MissPathActuallyReleasesTheEngine below: the SAME
+    // weak_ptr probe must read the OPPOSITE way here. Without this, a probe that
+    // could never expire (e.g. some other strong reference kept the clock alive)
+    // would satisfy that test while proving nothing. A zero is only meaningful
+    // once the instrument has been seen non-zero.
+    std::weak_ptr<fixpp::core::Clock> weak_clock;
+    {
+        asio::io_context probe_ioc;
+        auto clock =
+            std::make_shared<fixpp::core::system_clock_source>(probe_ioc.get_executor());
+        weak_clock = clock;
+        fixpp::core::EngineConfig cfg;
+        cfg.clock = clock;
+        clock.reset();
+
+        fixpp::interop::InteropEngineFixture probe_fx{std::move(cfg)};
+        probe_fx.start();
+        const auto probe_elapsed = probe_fx.stop_within(std::chrono::seconds{5});
+        EXPECT_LT(probe_elapsed, std::chrono::seconds{5});
+        // ~probe_fx destroys the Engine normally here (stop completed), so the
+        // EngineConfig-owned clock copy dies with it.
+    }
+    EXPECT_TRUE(weak_clock.expired())
+        << "the weak_ptr probe cannot detect a DESTROYED Engine, so its "
+           "non-expiry on the miss path would prove nothing";
+
     fixpp::interop::InteropEngineFixture fx;
     fx.start();
     const auto elapsed = fx.stop_within(std::chrono::seconds{5});
     EXPECT_LT(elapsed, std::chrono::seconds{5})
         << "an idle engine must stop well inside the bound";
-    EXPECT_TRUE(fx.stopped()) << "stop() must have completed";
+    // stop_completed(), NOT stopped(). stopped() is the predicate this whole
+    // change exists to discredit — it is true from step 1 of teardown onward, so
+    // asserting it here would leave this counter-direction test green even if
+    // stop_completed_ were wired wrong, which is precisely the mutant it is
+    // supposed to catch.
+    EXPECT_TRUE(fx.stop_completed()) << "the spawned stop() operation must have resolved";
     // ~fx runs here and must add no failure.
 }
 
@@ -105,37 +140,90 @@ TEST(InteropEngineFixtureTeardown, CleanStopReportsNothing) {
 //
 // Reaching the window deterministically: poll_one() dispatches at most one ready
 // handler, so we step the context one handler at a time and stop the moment the
-// flag flips. No sleeping, no timing assumption.
+// flag flips. The one-handler granularity is REQUIRED, not merely tidy: if
+// stop() were allowed to run to completion, the destructor's stop_within(0 ms)
+// would still evaluate its post-loop readiness check, set stop_completed_, take
+// the clean path and emit NO failure — and EXPECT_NONFATAL_FAILURE would then
+// fail. A slice-based pump could not reliably stop short of completion.
 TEST(InteropEngineFixtureTeardown, StoppedFlagIsNotTreatedAsCompletion) {
     bool reached_window = false;
 
     EXPECT_NONFATAL_FAILURE(
         ([&reached_window] {
-            fixpp::interop::InteropEngineFixture fx;
+            fixpp::interop::InteropEngineFixture fx{{}, std::chrono::milliseconds{0}};
             fx.start();
 
             // Spawn stop() without letting it run to completion (0 ms bound
             // pumps nothing), then step the context one handler at a time.
             (void)fx.stop_within(std::chrono::milliseconds{0});
-            for (int i = 0; i < 1000 && !fx.stopped(); ++i) {
-                if (fx.ioc().stopped()) {
-                    fx.ioc().restart();
-                }
-                if (fx.ioc().poll_one() == 0) {
-                    break;
-                }
+            for (int i = 0; i < 1000 && !fx.stopped() && fx.ioc().poll_one() != 0; ++i) {
             }
 
             // The window: the Engine says "stopped", the operation says "not
             // finished". If this does not hold the test below proves nothing,
             // so assert it rather than let the run pass quietly.
+            //
+            // Honest note on the second conjunct: stop_completed_ is written
+            // only inside stop_within, and nothing between the 0 ms call above
+            // and this line calls it, so !stop_completed() cannot currently be
+            // false. It is retained as a pin against a future edit that re-enters
+            // stop_within here — NOT because it discriminates today.
             reached_window = fx.stopped() && !fx.stop_completed();
-
-            fx.set_teardown_bound_for_test(std::chrono::milliseconds{0});
         }()),
-        "Engine::stop() did not complete within the");
+        "Engine::stop() did not complete successfully");
 
     EXPECT_TRUE(reached_window)
         << "could not reach the stopped()==true / stop_completed()==false window, "
            "so this test did not exercise the distinction it exists to pin";
+}
+
+// ── #292 — the release() is pinned BEHAVIOURALLY, not just by its message ────
+//
+// Gap this closes: the two tests above check the ADD_FAILURE text, so a mutant
+// that drops `engine_.release()` while keeping the message passes both of them.
+// Neither instrument that would otherwise notice is reliable — ~Engine's
+// `assert(stopped_)` is a no-op under NDEBUG, and __lsan_ignore_object makes the
+// leak invisible to LeakSanitizer by design. So "the Engine outlived ioc_" was
+// COVERED but UNASSERTED.
+//
+// The pin observes a value that cannot be terminal: the Engine holds its
+// EngineConfig BY VALUE, so it owns a shared_ptr copy of the configured clock.
+// If the destructor released the Engine, that copy is never destroyed and the
+// weak_ptr stays live; if the Engine was destroyed instead, every copy dies with
+// it and the weak_ptr expires. No spelling of the failure message can fake it.
+//
+// The clock is supplied by the caller here so the test holds the only other
+// strong reference and can drop it deliberately — with_clock() honours an
+// explicit clock rather than injecting its own.
+TEST(InteropEngineFixtureTeardown, MissPathActuallyReleasesTheEngine) {
+    std::weak_ptr<fixpp::core::Clock> weak_clock;
+
+    EXPECT_NONFATAL_FAILURE(
+        ([&weak_clock] {
+            asio::io_context probe_ioc;
+            auto clock = std::make_shared<fixpp::core::system_clock_source>(
+                probe_ioc.get_executor());
+            weak_clock = clock;
+
+            fixpp::core::EngineConfig cfg;
+            cfg.clock = clock;
+
+            fixpp::interop::InteropEngineFixture fx{std::move(cfg),
+                                                    std::chrono::milliseconds{0}};
+            fx.start();
+
+            // Drop the test's own strong reference, so after ~fx the ONLY thing
+            // that can still be holding the clock alive is a leaked Engine.
+            // Sampled here rather than before construction: the fixture's ctor
+            // copies the config, so a count taken earlier would be inflated by
+            // copies that are about to die anyway and would prove nothing.
+            clock.reset();
+        }()),
+        "Engine::stop() did not complete successfully");
+
+    EXPECT_FALSE(weak_clock.expired())
+        << "the Engine was DESTROYED on the bounded-stop miss path instead of "
+           "being released: its EngineConfig-owned clock reference died with it. "
+           "A destroyed Engine means ~Engine ran with teardown frames still "
+           "suspended in ioc_, which is the silent failure #292 exists to prevent.";
 }

@@ -35,7 +35,13 @@ namespace fixpp::interop {
 
 class InteropEngineFixture {
 public:
-    explicit InteropEngineFixture(fixpp::core::EngineConfig cfg = {});
+    // `teardown_bound` (#292) bounds the DESTRUCTOR's stop() drive. It is a ctor
+    // parameter rather than a setter so it cannot be changed after a stop_within()
+    // has already drawn a conclusion from the old value, and so the fixture holds
+    // no mutable knob. Tests that exercise the miss branch pass 0 ms.
+    explicit InteropEngineFixture(fixpp::core::EngineConfig cfg = {},
+                                  std::chrono::milliseconds teardown_bound =
+                                      std::chrono::seconds{2});
 
     // Ensures Engine::stop() has completed before the Engine is destroyed
     // (the Engine dtor asserts stopped()). Idempotent with explicit stop_within().
@@ -61,9 +67,17 @@ public:
     // FR-028 down-peer watchdog failure condition). Idempotent: a second call after
     // a completed stop() returns immediately.
     // [[nodiscard]] (#292): the destructor used to CALL this and drop the answer,
-    // so a stop() that never completed was invisible. Every one of the 14 call
-    // sites already binds the result; the attribute makes a recurrence a compile
-    // error rather than a review question.
+    // so a stop() that never completed was invisible.
+    //
+    // Scope of the guarantee, stated precisely because it is easy to overstate:
+    // this does NOT make a recurrence of that bug a compile error. The
+    // destructor is itself a legitimate discarder — it consumes the outcome via
+    // stop_completed_, not via the return value, and writes `(void)stop_within(...)`.
+    // What actually prevents the recurrence is stop_completed_. The attribute
+    // protects the EXTERNAL call sites — every one of which binds the result
+    // today — from silently growing one that does not. Deliberately no count
+    // here: a number in a comment goes stale on the next test added, and the
+    // invariant ("external callers bind it") is what matters.
     [[nodiscard]] std::chrono::milliseconds stop_within(std::chrono::milliseconds bound);
 
     // NOTE (#292): this forwards Engine::stopped(), which is NOT a completion
@@ -79,14 +93,6 @@ public:
     // operation this fixture owns has resolved and its get() returned. Unlike
     // stopped(), this cannot be true while a teardown frame is still suspended.
     [[nodiscard]] bool stop_completed() const noexcept { return stop_completed_; }
-
-    // Test-only seam (#292). The destructor's teardown bound is 30 s — generous
-    // on purpose — which makes the not-completed branch untestable in practice
-    // (a witness would have to hang for 30 s). A test sets this to 0 ms to take
-    // that branch deterministically and in no time at all.
-    void set_teardown_bound_for_test(std::chrono::milliseconds b) noexcept {
-        teardown_bound_ = b;
-    }
 
 private:
     asio::io_context ioc_;
@@ -106,8 +112,10 @@ private:
     // why moving the Engine would be strictly worse.
     std::shared_ptr<fixpp::core::Clock> clock_;
 
-    // (#292) Held by pointer, but still declared LAST — destroyed FIRST, before
-    // ioc_, exactly as the plain value member was.
+    // (#292) Held by pointer, but still declared AFTER ioc_ — therefore destroyed
+    // BEFORE it, exactly as the plain value member was. (It is no longer the last
+    // member; the bookkeeping below follows it. Only the order relative to ioc_
+    // matters, and that is unchanged.)
     //
     // Issue #292 suggests declaring this BEFORE ioc_ so the Engine outlives the
     // context. DO NOT DO THAT. Engine holds
@@ -133,15 +141,33 @@ private:
     // state rather than a stop_within() local. Two reasons it must outlive the
     // call: a second stop_within() must pump the SAME operation instead of
     // spawning a second stop(), and the destructor must be able to ask whether
-    // that specific operation ever finished. `stop_spawned_` is separate from
-    // stop_fut_.valid() because get() invalidates the future.
-    std::future<void> stop_fut_;
-    bool stop_spawned_{false};
+    // that specific operation ever finished.
+    //
+    // shared_future, not future, and that choice is load-bearing. future::get()
+    // INVALIDATES, so a plain future needs a separate "already spawned" flag to
+    // survive the one path where get() is reached without success: Engine::stop()
+    // co_awaits async_wait unguarded in its joins, so a non-zero error_code
+    // propagates as system_error, get() throws, and stop_completed_ is never set.
+    // With a plain future, valid() would then be false forever — the pump loop
+    // could never observe readiness and would spin a whole core for the entire
+    // teardown bound before reporting. shared_future::get() neither invalidates
+    // nor consumes the exception (it rethrows on every call), so valid() is a
+    // permanent "spawned" flag, the throw path reports immediately, and the
+    // extra bool disappears.
+    std::shared_future<void> stop_fut_;
     bool stop_completed_{false};
 
-    // Destructor teardown bound. 30 s by default — teardown correctness, not the
-    // FR-028 watchdog assertion. Overridable only via set_teardown_bound_for_test.
-    std::chrono::milliseconds teardown_bound_{std::chrono::seconds{30}};
+    // Destructor teardown bound (#292). Was 30 s, chosen when the destructor
+    // DISCARDED the outcome and the wait was therefore free. Now that the
+    // destructor reports, the bound has to be sized so the report can actually
+    // be emitted: interop_business_message_interop_test carries `TIMEOUT 30`
+    // (tests/interop/CMakeLists.txt:380) and its cells already spend up to 3 s in
+    // expect_graceful_stop (hp_support.hpp:317), so a 30 s destructor drive would
+    // blow the ctest timeout FIRST and ctest would report `Timeout` instead of the
+    // named ADD_FAILURE this whole change exists to produce. 2 s is three orders
+    // of magnitude above a healthy stop (an idle engine is bounded at 2 s and
+    // passes — support_smoke_test.cpp:114) and leaves headroom under the timeout.
+    std::chrono::milliseconds teardown_bound_;
 };
 
 }  // namespace fixpp::interop
