@@ -435,6 +435,15 @@ struct quiesce_or_release_on_exit {
                 // was written with a block-local buffer first and this probe faulted
                 // it under ASan.
                 //
+                // Because that obligation is NEW relative to the guard this replaces,
+                // the fault oracle was re-run against THIS guard rather than against
+                // `quiesce_on_exit` — the first run predated the probe, so it never
+                // exercised a resumption at all and could not have spoken to it. Two
+                // arms at a zero budget, one with a frame parked at its initial
+                // suspend point and one with two Active sessions plus a frame
+                // deliberately left mid-flight for this probe to resume: both reach
+                // the residual branch, both are ASan- and LSan-clean.
+                //
                 // NOT copying the shared header's claim that `stopped()==false`
                 // necessarily means outstanding work: that claim omits this window.
                 // It is the poll_one() above that makes it true here.
@@ -1142,8 +1151,19 @@ TEST(CrossSessionTeardown, ZeroBudgetOnAnEmptyContextIsNotResidual) {
     asio::io_context ioc;
     auto clock = make_witness_clock(ioc);
 
-    // No fixtures and nothing spawned: the context provably holds no work, so the
-    // ONLY thing that can make the guard report a residual is the deadline artefact.
+    // ASSERT the emptiness rather than assume it. "No fixtures and nothing spawned"
+    // is not by itself proof the context holds no work — constructing the mock_clock
+    // against `ioc.get_executor()` could have posted. It does not (measured), but a
+    // test whose whole argument is "the context is empty, so any residual report is
+    // the deadline artefact" must not leave that premise unchecked: if the clock ctor
+    // ever starts posting, this test would pass for the wrong reason — `poll_one()`
+    // draining that one handler — and would stop being a pin on anything.
+    ASSERT_EQ(ioc.poll(), 0u) << "the context is not empty at entry, so a residual "
+                                 "report below would no longer isolate the deadline artefact";
+    ioc.restart();
+
+    // The context provably holds no work, so the ONLY thing that can make the guard
+    // report a residual is the deadline artefact its poll_one() probe exists to close.
     quiesce_or_release_on_exit guard{ioc, *clock, {}, std::chrono::milliseconds{0}};
     // ~guard runs here and must add no failure.
 }
