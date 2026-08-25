@@ -209,6 +209,19 @@ protected:
         return fut.get();
     }
 
+    // Copy `frame` into `inbound_frames` and spawn the FSM dispatch, without
+    // pumping. Split out of `feed_inbound` (gate-b/r2 fix 1) so a witness can
+    // let the caller's own buffer die between spawn and pump -- proving the
+    // coroutine reads the arena copy, not merely that one was made. This is
+    // the ONE spelling of the span handed to `on_inbound_frame`; `feed_inbound`
+    // below is spawn-then-pump and must not re-derive it.
+    std::future<fixpp::core::expected_t<void>> feed_inbound_spawn(
+        Session& sess, std::span<const std::byte> frame) {
+        inbound_frames.emplace_back(frame.begin(), frame.end());
+        std::span<const std::byte> stable(inbound_frames.back());
+        return asio::co_spawn(ioc, sess.on_inbound_frame(stable), asio::use_future);
+    }
+
     // Feed an inbound frame and wait for the FSM dispatch. `frame` is copied
     // into `inbound_frames` BEFORE the coroutine is spawned, so the span the
     // coroutine references stays valid for the coroutine's whole lifetime
@@ -217,9 +230,7 @@ protected:
     // missed.
     std::optional<fixpp::core::expected_t<void>> feed_inbound(Session& sess,
                                                               std::span<const std::byte> frame) {
-        inbound_frames.emplace_back(frame.begin(), frame.end());
-        std::span<const std::byte> stable(inbound_frames.back());
-        auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(stable), asio::use_future);
+        auto fut = feed_inbound_spawn(sess, frame);
         if (!pump_until_ready(ioc, fut)) {
             return std::nullopt;
         }
@@ -268,25 +279,35 @@ protected:
     }
 };
 
-// ── (gate-b/r1 F7) feed_inbound's arena copy, pinned ──────────────────────────
+// ── (gate-b/r1 F7, rewritten gate-b/r2 fix 1) feed_inbound spans the arena
+//    copy, not the caller's buffer — pinned ─────────────────────────────────
 //
 // 10 of this file's 11 `quiesce_on_exit` sites declare their inbound frame
 // AFTER the guard — the arrangement `pump_until_ready.hpp`'s own two-shape
 // taxonomy (:252-262) calls unsafe (a block-local declared after the guard
 // dies BEFORE it, since destruction runs in reverse declaration order). They
 // are safe only because `feed_inbound` (above) copies each frame into
-// `inbound_frames`, a fixture-owned deque declared before `ioc`, and spans
-// THAT — never the caller's own buffer. That invariant lives only in prose;
-// nothing pins it. Someone "removing a redundant copy" from `feed_inbound`
-// would leave this whole suite green today and flip all 10 sites from safe
-// to hazardous silently.
+// `inbound_frames`, a fixture-owned deque declared before `ioc`, and the
+// coroutine spawned by `feed_inbound_spawn` reads THAT span for its whole
+// lifetime — never the caller's own buffer. That invariant lives only in
+// prose; nothing pins it. Someone "removing a redundant copy" from
+// `feed_inbound_spawn` would leave this whole suite green today and flip all
+// 10 sites from safe to hazardous silently.
 //
-// Pointer identity, not contents alone: a contents-only assertion survives
-// exactly the change this exists to catch — in THIS test the caller's own
-// buffer happens to outlive the call, so an uncopied span would still read
-// correct bytes. Only comparing `data()` pointers proves the copy actually
-// ran.
-TEST_F(LogoutExchangeTest, FeedInboundCopiesIntoTheArenaNotTheCallersBuffer) {
+// A round-1 version of this witness compared `data()` pointers after the
+// pump completed, which proves an arena copy EXISTS but not that the
+// coroutine actually reads it: `inbound_frames.emplace_back` alone makes
+// pointer identity differ from the caller's buffer regardless of which span
+// is handed to `co_spawn`, so `stable(inbound_frames.back()) -> stable(frame)`
+// -- the exact regression this test exists to catch -- passed unchanged.
+//
+// This version instead defers the pump: spawn against the arena span, let
+// the caller's `std::vector<std::byte>` die at the end of the nested block,
+// THEN pump. If the coroutine ever spans the caller's buffer instead of the
+// arena copy, resuming it after the buffer is freed is a heap-use-after-free
+// that ASan reports directly -- the fault IS the pin, not a downstream
+// assertion that could itself be satisfied by an unrelated code path.
+TEST_F(LogoutExchangeTest, FeedInboundSpansTheArenaCopyNotTheCallersBuffer) {
     auto cfg = make_cfg();
     TransportDouble td;
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
@@ -295,20 +316,24 @@ TEST_F(LogoutExchangeTest, FeedInboundCopiesIntoTheArenaNotTheCallersBuffer) {
     quiesce_on_exit quiesce{ioc, *clock};
     ASSERT_TRUE(drive_to_active_initiator(sess));
 
-    auto caller_buffer = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
-    const std::byte* caller_data = caller_buffer.data();
+    std::future<fixpp::core::expected_t<void>> fut;
+    {
+        auto caller_buffer = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
+        fut = feed_inbound_spawn(sess, caller_buffer);
+        ASSERT_FALSE(inbound_frames.empty());
+        EXPECT_NE(inbound_frames.back().data(), caller_buffer.data())
+            << "feed_inbound_spawn must copy into inbound_frames, not span the caller's "
+               "buffer directly -- otherwise the 10 quiesce_on_exit sites in this file that "
+               "declare their inbound frame AFTER the guard would be unsafe.";
+        EXPECT_EQ(inbound_frames.back(), caller_buffer)
+            << "the arena copy must be byte-identical to what the caller passed";
+        // caller_buffer is destroyed here, before the coroutine is pumped.
+    }
 
-    auto r = feed_inbound(sess, caller_buffer);
-    ASSERT_TRUE(r.has_value()) << kPumpBudgetMiss
-                               << "FeedInboundCopiesIntoTheArenaNotTheCallersBuffer";
-
-    ASSERT_FALSE(inbound_frames.empty());
-    EXPECT_NE(inbound_frames.back().data(), caller_data)
-        << "feed_inbound must copy into inbound_frames, not span the caller's buffer "
-           "directly -- otherwise the 10 quiesce_on_exit sites in this file that declare "
-           "their inbound frame AFTER the guard would be unsafe.";
-    EXPECT_EQ(inbound_frames.back(), caller_buffer)
-        << "the arena copy must be byte-identical to what the caller passed";
+    ASSERT_TRUE(pump_until_ready(ioc, fut))
+        << kPumpBudgetMiss << "FeedInboundSpansTheArenaCopyNotTheCallersBuffer";
+    auto r = fut.get();
+    ASSERT_TRUE(r.has_value()) << "inbound Logout dispatch should succeed";
 }
 
 // ── Test 1: GracefulBothDirections ────────────────────────────────────────────
