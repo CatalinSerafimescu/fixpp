@@ -18,9 +18,12 @@ python -m venv /tmp/wheel-venv && /tmp/wheel-venv/bin/pip install <the.whl> pyte
 
 Ports of the in-tree `bindings/python/tests/` suite — the **round-trip, smoke,
 exception, lifetime, OO-behaviour, and sub-interpreter** tests — adapted to the
-locator. The *only* divergence from each source file is its dict helper
-(`_dict_path` / `oo_test_support.dict_path` / `_gil_staging._dict_path`), now
-delegating to `_wheeldict.resolve("FIX44")`; everything else is a faithful copy.
+locator. For every file below **except `test_subinterpreter.py`**, the *only*
+divergence from its in-tree source is its dict helper (`_dict_path` /
+`oo_test_support.dict_path` / `_gil_staging._dict_path`), now delegating to
+`_wheeldict.resolve("FIX44")`; everything else is a faithful copy.
+`test_subinterpreter.py` is the one behavioural exception — see its table row
+and issue #298.
 
 | File | Source | Locator swap |
 |---|---|---|
@@ -36,7 +39,19 @@ delegating to `_wheeldict.resolve("FIX44")`; everything else is a faithful copy.
 | `test_pickle_ban.py` | as-is | — |
 | `test_reentrancy.py` | as-is | via `_oo_reentrancy_staging` / `oo_test_support` |
 | `test_callback_raise_watchdog.py` | as-is | via `_gil_staging` |
-| `test_subinterpreter.py` | as-is | — (locator-independent, F1) |
+| `test_subinterpreter.py` | **diverges** | n/a — locator-independent, but NOT as-is (see below) |
+
+⚠️ **`test_subinterpreter.py` is not a faithful port below Python 3.12.** The
+in-tree source skips the whole test when `_xxsubinterpreters` is absent and,
+on every Python version, tolerates a `RunFailedError` whose message doesn't
+match the CPython import-barrier text (`bindings/python/tests/test_subinterpreter.py`).
+The wheel twin instead makes `_xxsubinterpreters` **mandatory** below 3.12
+(treating an absent module as a broken runner, not a skip) and, below 3.12,
+**rejects** that tolerance — any `RunFailedError` fails the test. On 3.12+ the
+two files behave identically (both `importorskip` and both check the barrier
+text). This is a known, tracked discrepancy pending reconciliation — see
+issue #298 — not an intended design; do not treat the wheel twin's stricter
+3.10/3.11 behaviour as the documented contract.
 
 Support modules: `_wheeldict.py` (locator resolver), `oo_test_support.py`,
 `_gil_staging.py`, `_oo_reentrancy_staging.py`. The two staging modules run as
