@@ -165,8 +165,8 @@ protected:
     // a DEFENSIVE measure: if `ioc`'s own teardown machinery ever resumed,
     // rather than merely destroyed, a still-suspended coroutine frame holding
     // a span into this arena, this order is what would keep the arena alive
-    // for it. That is not what makes the 10 `quiesce_on_exit` sites below
-    // safe today — that is the arena COPY (see the comment above
+    // for it. That is not what makes this file's `feed_inbound`-driven
+    // `quiesce_on_exit` sites below safe today — that is the arena COPY (see the comment above
     // `FeedInboundSpansTheArenaCopyNotTheCallersBuffer`) — and this order is
     // currently unpinned: swapping it (declaring `ioc` first) leaves the
     // whole suite green, and two probes built to fault the swapped order
@@ -288,19 +288,24 @@ protected:
 // ── (gate-b/r1 F7, rewritten gate-b/r2 fix 1) feed_inbound spans the arena
 //    copy, not the caller's buffer — pinned ─────────────────────────────────
 //
-// 10 of this file's 11 `quiesce_on_exit` sites declare their inbound frame
-// AFTER the guard — the arrangement `pump_until_ready.hpp`'s own two-shape
-// taxonomy (:252-262) calls unsafe (a block-local declared after the guard
-// dies BEFORE it, since destruction runs in reverse declaration order). They
-// are safe only because `feed_inbound` (above) copies each frame into
-// `inbound_frames`, a fixture-owned deque, and the coroutine spawned by
-// `feed_inbound_spawn` reads THAT span for its whole lifetime — never the
-// caller's own buffer. That invariant lives only in prose; nothing pins it.
-// Someone "removing a redundant copy" from `feed_inbound_spawn` would leave
-// this whole suite green today and flip all 10 sites from safe to hazardous
-// silently. (`inbound_frames` is also declared before `ioc` — see its own
-// doc comment — but that is a separate, currently-defensive-only invariant,
-// not what makes these 10 sites safe.)
+// This file's `feed_inbound`-driven `quiesce_on_exit` sites — every site that
+// drives its inbound frame through `feed_inbound`/`feed_inbound_spawn`, which is
+// all of them except `SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose`
+// (that one hands `on_inbound_frame` a body-local buffer directly and is safe by
+// a different invariant — see its own doc comment) — declare their inbound frame
+// AFTER the guard: the arrangement `pump_until_ready.hpp`'s own two-shape
+// taxonomy (:252-262) calls unsafe (a block-local declared after the guard dies
+// BEFORE it, since destruction runs in reverse declaration order). They are safe
+// only because `feed_inbound` (above) copies each frame into `inbound_frames`, a
+// fixture-owned deque, and the coroutine spawned by `feed_inbound_spawn` reads
+// THAT span for its whole lifetime — never the caller's own buffer. That
+// invariant lives only in prose; nothing pins it. Someone "removing a redundant
+// copy" from `feed_inbound_spawn` would leave this whole suite green today and
+// flip every one of those sites from safe to hazardous silently. (`inbound_frames`
+// is also declared before `ioc` — see its own doc comment — but that is a
+// separate, currently-defensive-only invariant, not what makes these sites safe.)
+// Re-derive the exact site list on demand (one spelling; resolve hits by hand):
+// `grep -n 'quiesce_on_exit [a-zA-Z_]*{' tests/session/logout_exchange_test.cpp`.
 //
 // A round-1 version of this witness compared `data()` pointers after the
 // pump completed, which proves an arena copy EXISTS but not that the
@@ -331,8 +336,8 @@ TEST_F(LogoutExchangeTest, FeedInboundSpansTheArenaCopyNotTheCallersBuffer) {
         ASSERT_FALSE(inbound_frames.empty());
         EXPECT_NE(inbound_frames.back().data(), caller_buffer.data())
             << "feed_inbound_spawn must copy into inbound_frames, not span the caller's "
-               "buffer directly -- otherwise the 10 quiesce_on_exit sites in this file that "
-               "declare their inbound frame AFTER the guard would be unsafe.";
+               "buffer directly -- otherwise this file's feed_inbound-driven quiesce_on_exit "
+               "sites, which declare their inbound frame AFTER the guard, would be unsafe.";
         EXPECT_EQ(inbound_frames.back(), caller_buffer)
             << "the arena copy must be byte-identical to what the caller passed";
         // caller_buffer is destroyed here, before the coroutine is pumped.

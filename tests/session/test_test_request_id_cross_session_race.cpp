@@ -429,35 +429,56 @@ struct SessionFixture {
 // divergence between them would fail toward NOT releasing — silently, on the path
 // that is already failing.
 //
-// THE POPULATION, COUNTED — and counted TWICE, because the first two versions of
-// this paragraph were both wrong and each was wrong in the direction that made
-// staying file-local look better than the evidence supports.
+// THE POPULATION — recurs elsewhere in the tree; not a lone site. The first two
+// versions of this paragraph tried to pin that population as a fixed number and
+// were each wrong in the direction that made staying file-local look better than
+// the evidence supports:
 //
 //   v1 said "one site is not a pattern."          Wrong: the shape repeats.
-//   v2 said "SEVEN more sites, but each attaches
+//   v2 said "a handful more sites, but each attaches
 //            a live Transport, so they have a
 //            forcing lever this one lacks."       Wrong twice over, below.
 //
-// The count is EIGHTEEN, not seven (`grep` for a `quiesce_on_exit` OBJECT
-// declaration, excluding the helper's own self-test):
+// A third number would go stale the same way: this very PR added a site to the
+// population it counts (see `logout_exchange_test.cpp`'s doc comment on
+// `FeedInboundSpansTheArenaCopyNotTheCallersBuffer`). So this states the
+// CONDITION instead of a count: the population is every PLAIN `quiesce_on_exit`
+// OBJECT DECLARATION under `tests/` — deliberately NOT `quiesce_or_release_on_exit`
+// (the seam this file defines below), since the whole point of this paragraph is
+// to compare the population of plain-shape sites against this file's one seam
+// user, not to fold the seam into the count it's being compared to. Also
+// excluded: this helper's own self-test (`test_quiesce_on_exit_residual.cpp`),
+// the struct definition, its destructor, and any comment or string literal that
+// merely names it. Re-derive on demand:
 //
-//   tests/session/logout_exchange_test.cpp          11 sites
-//   tests/session/test_live_outbound_serialized.cpp  7 sites
+//   grep -rn 'quiesce_on_exit [a-zA-Z_]*{' tests/
 //
-// And the forcing-lever claim is false for most of them. `.transport = ` is set at
-// 6 sites, ALL of them in test_live_outbound_serialized.cpp; logout_exchange_test.cpp
-// sets it ZERO times. So its 11 sites each declare `Session sess(engine, cfg);`
-// followed immediately by `quiesce_on_exit quiesce{ioc, *clock};` with no transport
-// attached — which is exactly this file's shape, with exactly this file's absence of
-// a way to force quiescence.
+// Not a count in itself — resolve every hit by hand. Run at HEAD, its hits fall
+// into: real object declarations (the population); `test_quiesce_on_exit_residual.cpp`
+// (excluded, the self-test); and the single comment hit inside THIS file, at the
+// sentence a few paragraphs down that names the shape by example (readable in
+// context, not a declaration) — note this pattern, by construction, does NOT
+// match `quiesce_or_release_on_exit` (no shared contiguous substring past
+// `quiesce_`), so it never picks up this file's own seam declarations, which is
+// the intended scope. The pattern also misses paren-init (`quiesce_on_exit
+// q(...)`), a declaration split across lines, and `auto`/alias-typed forms, so a
+// future absence of those forms is not itself evidence none exist.
+//
+// And the forcing-lever claim is false for MOST of the population: `.transport = `
+// is set only in `test_live_outbound_serialized.cpp` — `logout_exchange_test.cpp`
+// sets it nowhere. So `logout_exchange_test.cpp`'s sites each declare
+// `Session sess(engine, cfg);` followed immediately by
+// `quiesce_on_exit quiesce{ioc, *clock};` with no transport attached — which is
+// exactly this file's shape, with exactly this file's absence of a way to force
+// quiescence.
 //
 // Stated plainly, because the understated version is the one that keeps getting
 // written: this is NOT a lone site. What was actually measured (below) is the
-// state `poll_one()` observes AT THE GUARD — zero outstanding work, at every one
-// of the 18, on the path CI takes today. Whether a suspended frame could reach
-// that same guard on an ASSERT_*-early-return path is a DIFFERENT question, and
-// it is unmeasured except at the one site built to take such a path on purpose
-// (`test_live_outbound_serialized.cpp:1174`, `BudgetMissQuiescesBeforeSessionTeardown`).
+// state `poll_one()` observes AT THE GUARD — zero outstanding work, at every
+// population member, on the path CI takes today. Whether a suspended frame could
+// reach that same guard on an ASSERT_*-early-return path is a DIFFERENT question,
+// and it is unmeasured except at the one site built to take such a path on purpose
+// (`test_live_outbound_serialized.cpp`'s `BudgetMissQuiescesBeforeSessionTeardown`).
 // Both statements are true at once; an earlier draft of this comment let the first
 // read as proof of the second, which it is not.
 //
@@ -475,33 +496,48 @@ struct SessionFixture {
 // justification that rests on a temporary fact has to be re-earned when the fact
 // changes, not left standing because it once held.
 //
-// WHAT THE ZERO ACTUALLY MEASURES, AND WHAT IT DOES NOT. The 18 sites were
-// instrumented and run: at every one, `poll_one()` reports the `io_context` holds
-// ZERO outstanding work by the time the guard's destructor finishes running. But
-// that reading is taken INSIDE the guard, AFTER `transport->close()` and
-// `clock.cancel_sleeps()` have already run — so at the six lever-bearing sites
-// (`test_live_outbound_serialized.cpp`, `.transport = ` set) it records "the lever
-// drained the suspended frame", not "no suspended frame existed". Measured
-// directly: setting `BudgetMissQuiescesBeforeSessionTeardown`'s guard budget to
-// `0ms` reads zero WITH its forcing lever in place, and with the lever removed
-// ("`teardown_guard.transport = raw_ptr;`" commented out) prints "terminate called
-// without an active exception" instead. So the earlier claim that no suspended
-// frames are left behind anywhere is false at that site — deleted rather than
-// kept, because the guard's own zero is exactly what a lever produces there, not
-// evidence a lever was unnecessary.
+// WHAT THE ZERO ACTUALLY MEASURES, AND WHAT IT DOES NOT. Every population member
+// (condition above) was instrumented and run: at each one, `poll_one()` reports
+// the `io_context` holds ZERO outstanding work by the time the guard's destructor
+// finishes running. But that reading is taken INSIDE the guard, AFTER
+// `transport->close()` and `clock.cancel_sleeps()` have already run — so at the
+// lever-bearing sites (`test_live_outbound_serialized.cpp`, `.transport = ` set)
+// it records "the lever drained the suspended frame", not "no suspended frame
+// existed". Measured directly: setting `BudgetMissQuiescesBeforeSessionTeardown`'s
+// guard budget to `0ms` reads zero WITH its forcing lever in place, and with the
+// lever removed ("`teardown_guard.transport = raw_ptr;`" commented out) prints
+// "terminate called without an active exception" instead. So the earlier claim
+// that no suspended frames are left behind anywhere is false at that site —
+// deleted rather than kept, because the guard's own zero is exactly what a lever
+// produces there, not evidence a lever was unnecessary.
 //
 // A release seam nonetheless has exactly ONE user — this site — but the ground for
-// that is different from "the 18 are measured empty": it is what each of the 18
-// borrows, checkable by reading rather than by an unreproducible instrumentation
-// run. The 11 `logout_exchange_test.cpp` sites need no seam because they borrow
-// nothing that dies first — `feed_inbound` copies each inbound frame into
-// `inbound_frames`, a fixture-owned deque declared before `ioc`
-// (`logout_exchange_test.cpp:172, :218-226`), and spans THAT, not the caller's
-// temporary. The 7 `test_live_outbound_serialized.cpp` sites each carry their own
-// `frames` deque declared before `ioc` the same way, plus, at the one site that
+// that is not "the population is measured empty": it is what each member borrows,
+// checkable by reading rather than by an unreproducible instrumentation run.
+// `logout_exchange_test.cpp`'s `feed_inbound`-driven sites need no seam because
+// they borrow nothing that dies first: `feed_inbound_spawn` copies each inbound
+// frame into `LogoutExchangeTest::inbound_frames`, a fixture-owned deque declared
+// before `ioc` (see that member's own doc comment, and `feed_inbound_spawn`'s
+// body), and the spawned coroutine spans THAT, not the caller's temporary. That
+// argument covers every site that reaches the guard through `feed_inbound`; it
+// does NOT cover every `quiesce_on_exit` declaration in the file — two named
+// exceptions:
+//
+//   - `SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose`
+//     hands `on_inbound_frame` a body-local `std::vector` directly, with no
+//     `feed_inbound` in the picture. It is safe for a DIFFERENT reason: that
+//     buffer is declared BEFORE its `quiesce_on_exit`, in the same block, so the
+//     guard's drain runs while the buffer is still alive.
+//   - `FeedInboundSpansTheArenaCopyNotTheCallersBuffer` (this PR's own witness)
+//     deliberately lets the caller's buffer die BEFORE the pump — that is the
+//     point of the test — and is safe only because the arena copy is what gets
+//     spanned, not because "nothing here ever dies first".
+//
+// `test_live_outbound_serialized.cpp`'s sites each carry their own `frames`
+// deque declared before `ioc` the same way, plus, at the one site that
 // deliberately reaches the guard on an abnormal path, a working transport lever
-// that closes what the deque-ordering argument alone does not cover. Both are
-// facts about the tree rather than an assumption about it. Hoisting a generic
+// that closes what the deque-ordering argument alone does not cover. All of this
+// is a fact about the tree rather than an assumption about it. Hoisting a generic
 // seam for one user is the speculative generality the repo's own extraction rule
 // warns against.
 //
