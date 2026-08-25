@@ -258,7 +258,6 @@ static std::uint32_t parse_tr_id(std::string_view s) {
 using fixpp::test_support::kPumpBudgetMiss;
 using fixpp::test_support::pump_until;
 using fixpp::test_support::pump_until_ready;
-using fixpp::test_support::quiesce_on_exit;
 
 // ── Session fixture helper ─────────────────────────────────────────────────────
 
@@ -311,14 +310,6 @@ struct SessionFixture {
             destructions->fetch_add(1, std::memory_order_relaxed);
         }
     }
-
-    // Session is non-copyable and non-movable, and this fixture is only ever a
-    // local or a unique_ptr target; spelling these out keeps the user-declared
-    // destructor above from silently changing what is allowed.
-    SessionFixture(const SessionFixture&) = delete;
-    SessionFixture& operator=(const SessionFixture&) = delete;
-    SessionFixture(SessionFixture&&) = delete;
-    SessionFixture& operator=(SessionFixture&&) = delete;
 
     // Open the session (initiator: emits Logon, waits for Logon-ack).
     // Returns the future for the open() awaitable.
@@ -383,8 +374,27 @@ struct SessionFixture {
 // here on purpose. Keeping `quiesce_on_exit` and adding a second guard that re-read
 // `ioc.stopped()` afterwards would split one decision across two files, and a
 // divergence between them would fail toward NOT releasing — silently, on the path
-// that is already failing. When a second site needs this shape, hoist the release
-// seam into the shared guard; not before (one site is not a pattern).
+// that is already failing.
+//
+// THE POPULATION, MEASURED RATHER THAN ASSUMED — because an earlier draft of this
+// comment justified staying file-local with "one site is not a pattern", and the
+// census says otherwise. `tests/session/test_live_outbound_serialized.cpp` has
+// SEVEN more `quiesce_on_exit` sites, each holding a `Session` BY VALUE that a
+// suspended frame references. The shape does repeat.
+//
+// What those sites have and this one does not is a FORCING mechanism: each attaches
+// a live Transport to the guard (`teardown_guard.transport = ...`), and closing a
+// transport genuinely completes a coroutine parked in async_write/async_read_some
+// rather than merely observing that it is parked. This test drives a `mock_clock`
+// and a plain `transport_send` lambda, so it has no such lever — which is why it
+// needs the release and they may not. Whether they do is UNMEASURED; it is not
+// claimed either way here.
+//
+// So the reason this stays file-local is scope and ownership, not rarity:
+// `tests/support/pump_until_ready.hpp` is owned by an open PR, and hoisting also
+// means templating on the released type, which this one site does not justify
+// deciding for the other seven. Hoisting is the right end state once those seven
+// are measured.
 //
 // `quiesce_on_exit`'s `transport` arm is deliberately absent: it exists because
 // cancelling clock sleeps does not unstick a coroutine parked in
@@ -463,9 +473,6 @@ struct quiesce_or_release_on_exit {
             // Release BEFORE reporting, so a throwing ADD_FAILURE cannot leave the
             // fixtures to be destroyed under still-suspended frames.
             for (auto* owner : fixtures) {
-                if (owner == nullptr) {
-                    continue;
-                }
                 auto* leaked = owner->release();
                 FIXPP_XSESSION_LSAN_IGNORE(leaked);
             }
