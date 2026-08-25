@@ -811,8 +811,9 @@ except ImportError:
  *
  * Fixed HERE rather than by capping `swig<4.5` in pyproject.toml, and rather
  * than by adding "typing" to EXPECTED_PUBLIC_SURFACE:
- *   - the pyproject pin is deliberately open-ended ("NO upper bound — builds
- *     with the latest SWIG"), and this repo's precedent for a SWIG behaviour
+ *   - before the temporary #296 cap, the pyproject policy was deliberately
+ *     open-ended ("NO upper bound — builds with the latest SWIG"), and this
+ *     repo's precedent for a SWIG behaviour
  *     change is a version-agnostic fix, not a pin: see the SWIG_Python_Append-
  *     Output/is_void note in pyproject.toml, where the 4.3 semantics change was
  *     absorbed by the typemaps instead of a version bound.
