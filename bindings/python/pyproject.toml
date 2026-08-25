@@ -16,9 +16,11 @@
 # compiler, no Conan. See L-056-4 in spec/behaviors-and-limitations.md.
 
 [build-system]
-# PKG-1: scikit-build-core backend; swig>=4.2 (NO upper bound — builds with the
-#   latest SWIG, 4.4.1 today). Lower bound (>=4.2): a 4.0 runner silently
-#   regresses the limited-API/abi3 mode (research D-3).
+# PKG-1: scikit-build-core backend. TARGET POLICY (to be restored once #296
+#   closes — see the #296 note below for the requirement actually IN FORCE
+#   today): swig>=4.2 with NO upper bound (builds with the latest SWIG, 4.4.1
+#   at the time this policy was written). Lower bound (>=4.2): a 4.0 runner
+#   silently regresses the limited-API/abi3 mode (research D-3).
 #   SWIG-version-agnostic argout: SWIG 4.3.0 gave SWIG_Python_AppendOutput an
 #   `is_void` arg and now keeps a Py_None primary result for a NON-void fn unless
 #   is_void=1 — which would make our "consume the fixpp_error_t return, surface
@@ -42,9 +44,15 @@
 #   4.5.0 had exposed — both are now found and fixed on their own merits (the
 #   #295 fixes to bindings/python/tests/test_reentrancy.py and fixpp.i) and
 #   stay fixed regardless of which SWIG builds this. What remains open is #296
-#   itself. 4.4.1 is the known-good pin, not an arbitrary one: the last fully
-#   green wheel run used it (run 32509172828 on 3ce0b6da, 2026-08-21), with
-#   cibuildwheel 4.2.0 and scikit-build-core 1.0.3 identical to today's pins.
+#   itself. 4.4.1 is the known-good version, not an arbitrary one: it is what the last
+#   fully green wheel run resolved to (run 32509172828 on 3ce0b6da,
+#   2026-08-21), where cibuildwheel resolved to 4.2.0 and scikit-build-core to
+#   1.0.3 — the SAME versions cibuildwheel and scikit-build-core resolve to
+#   today. Neither is pinned (cibuildwheel is installed with no version
+#   specifier in tier1.yml; scikit-build-core's own requirement here is
+#   `>=0.11`, see below), so that repeat resolution is an OBSERVATION about
+#   what PyPI currently serves, not a guarantee — a future cibuildwheel or
+#   scikit-build-core release could resolve differently on the next run.
 #   EXIT CONDITION: drop the `<4.5` upper bound once #296 is root-caused — this
 #   cap is not the permanent policy.
 requires = ["scikit-build-core>=0.11", "swig>=4.2,<4.5"]
