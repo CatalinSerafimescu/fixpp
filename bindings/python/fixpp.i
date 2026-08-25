@@ -842,7 +842,15 @@ except ImportError:
  * the test suite cannot guarantee it calls every future generated code path.
  * Re-verify the two occurrence counts above, and grep the generated output
  * for `typing` INSIDE function bodies, before bumping past a SWIG
- * major/minor that touches the proxy preamble. */
+ * major/minor that touches the proxy preamble.
+ *
+ * ⚠️ #296 CAP CAVEAT: while pyproject.toml's temporary `swig<4.5` cap (added
+ * for #296, unrelated to this block) is in force, the build resolves 4.4.1,
+ * which emits no `import typing` — so this pop is a no-op CI never exercises.
+ * Verified locally in both directions before the cap: 4.5.0 unfixed — 72
+ * public names, `typing` PRESENT (the control proving the check can fail);
+ * 4.5.0 fixed — 71 names, `typing` absent; 4.2.0 fixed — clean import, no
+ * NameError. Re-verify when the cap lifts; do not assume it still works. */
 %pythoncode %{
 globals().pop("typing", None)
 %}

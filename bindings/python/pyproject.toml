@@ -31,7 +31,23 @@
 #   4.4.1 (the shipped wheel) via the tests/wheel/ subset (T012).
 #   Exact published at implement (2026-06-30): scikit-build-core 0.12.2, swig
 #   4.4.1 (latest); 4.2.0 local.
-requires = ["scikit-build-core>=0.11", "swig>=4.2"]
+#
+#   ⚠️ #296 TEMPORARY CAP layered on top of the policy above — it does not
+#   replace it. An intermittent 3.11 GC segfault was observed under SWIG 4.5.0
+#   whose cause is still not established. The open-ended, version-agnostic
+#   policy above (absorb a SWIG behaviour change in the typemaps, per the 4.3
+#   is_void note, rather than pin) remains this project's target state; the cap
+#   below is a bounded safety measure, not a reversal. It was previously
+#   rejected on the grounds that capping would hide two real latent bugs SWIG
+#   4.5.0 had exposed — both are now found and fixed on their own merits (the
+#   #295 fixes to bindings/python/tests/test_reentrancy.py and fixpp.i) and
+#   stay fixed regardless of which SWIG builds this. What remains open is #296
+#   itself. 4.4.1 is the known-good pin, not an arbitrary one: the last fully
+#   green wheel run used it (run 32509172828 on 3ce0b6da, 2026-08-21), with
+#   cibuildwheel 4.2.0 and scikit-build-core 1.0.3 identical to today's pins.
+#   EXIT CONDITION: drop the `<4.5` upper bound once #296 is root-caused — this
+#   cap is not the permanent policy.
+requires = ["scikit-build-core>=0.11", "swig>=4.2,<4.5"]
 build-backend = "scikit_build_core.build"
 
 [project]
