@@ -230,6 +230,20 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
     // shape — fixed here in the same change rather than only in the older copy,
     // because a fix that lands on one of two identical shapes is how this repo's
     // "fixed some sites of a claim, missed another" class keeps recurring.
+    //
+    // WHAT THIS COSTS A CALLER, bounded rather than left as "it may dispatch",
+    // because #289's migration is adding callers faster than anyone re-reads this:
+    //   - At the default `kQuiesceBudget` (5 s), and at any budget whose deadline
+    //     has NOT already passed at entry, `run_for` enters the scheduler and has
+    //     already run every ready handler. The probe can then dispatch at most ONE
+    //     handler that became ready exactly at the deadline boundary. On the
+    //     quiesced path it dispatches nothing and only sets `stopped_`.
+    //   - Only at a zero or already-expired budget does the probe resume work that
+    //     `run_for` would not have. No caller outside this suite's own witnesses
+    //     passes such a budget (checked: every non-witness call uses the default).
+    // Either way the dispatch happens in the CALLER'S scope, which is the whole
+    // reason this is a free function called on the miss branch rather than a guard
+    // — so anything the resumed frame borrowed is still alive by construction.
     (void)ioc.poll_one();
     if (!ioc.stopped()) {
         ADD_FAILURE() << "#289: the io_context did not run out of work within the teardown "
