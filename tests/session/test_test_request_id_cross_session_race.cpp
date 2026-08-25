@@ -162,20 +162,20 @@
 // is still current:
 //
 //   witness                                  fixtures released   leaked
-//   ResidualPathReleasesTheFixtures                  2           674838 B / 68
-//   ThrowingPumpStillReleasesTheFixtures             1           334045 B / 17
-//   OuterCatchSwallowsAThrowingAddFailure            2           674838 B / 68
+//   ResidualPathReleasesTheFixtures                  2           674846 B / 68
+//   ThrowingPumpStillReleasesTheFixtures             1           334053 B / 17
+//   OuterCatchSwallowsAThrowingAddFailure            2           674846 B / 68
 //   QuiescedPathDestroysTheFixtures                  0           none
 //   ZeroBudgetOnAnEmptyContextIsNotResidual          0           none
 //   ------------------------------------------------------------------------
-//   total (DERIVED, not the claim)                   5          1683721 B / 153
+//   total (DERIVED, not the claim)                   5          1683745 B / 153
 //
 // The three non-empty rows each also release one io_context, which is why every
 // row grew against the previous measurement while the fixture column did not.
 //
 // Three cross-checks that make the table self-auditing, and that a future reader
 // should re-run rather than trust: the per-witness bytes sum EXACTLY to the total
-// (674838 + 334045 + 674838 = 1683721); so do the allocation counts
+// (674846 + 334053 + 674846 = 1683745); so do the allocation counts
 // (68 + 17 + 68 = 153) -- together these are what license "nothing else in the
 // binary leaks"; and `grep -c 'leak of 266272 byte'` on the run reports 5, matching
 // the fixture column. If any identity breaks, the table is wrong, not the
@@ -424,6 +424,34 @@ struct SessionFixture {
     }
 };
 
+// (#311 review) REPLACES an earlier `observe_ioc_release`, which read the
+// caller's owner after the guard and reported `owner == nullptr`. That is the
+// weaker observable and it admitted a mutant that violates the exact invariant:
+//
+//     auto* p = ioc.release();
+//     delete p;                 // owner is still null; the context is gone
+//
+// The property is the DESTRUCTION, so the destruction is what gets counted. A
+// second probe was tried and also rejected -- a shared_ptr sentinel captured by a
+// handler queued on the context dies when the handler is DISPATCHED just as
+// readily as when it is destroyed, so it cannot see an unconditional release on
+// any path that pumps. Measured on the sibling interop fixture: that version
+// passed 21/21 against precisely that mutant.
+//
+// Derives from `asio::io_context`, which has no virtual destructor: instances are
+// only ever owned by `std::unique_ptr<counting_io_context>` and only ever deleted
+// through it, never through a base pointer. `~counting_io_context` runs before
+// `~io_context`, so the count is taken as destruction begins.
+struct counting_io_context : asio::io_context {
+    std::atomic<int>* destructions = nullptr;
+
+    ~counting_io_context() {
+        if (destructions != nullptr) {
+            destructions->fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+};
+
 // ── (#303) Teardown guard: quiesce, or RELEASE the fixtures ───────────────────
 //
 // Replaces `quiesce_on_exit` at this one site. The shared guard only OBSERVES
@@ -446,8 +474,9 @@ struct SessionFixture {
 //
 // So the load-bearing property of the release is not "we skipped a free". It is:
 //
-//     ON THE RESIDUAL PATH, NOTHING IN THIS SCOPE IS DESTROYED -- not the fixtures,
-//     and not the io_context either.
+//     ON THE RESIDUAL PATH, EVERY ROOT OF THE ASYNC OBJECT GRAPH -- EVERY
+//     SessionFixture, AND THE io_context -- IS RELEASED, SO NOTHING IN THAT GRAPH
+//     IS DESTRUCTED.
 //
 // Which subsumes the narrower form this paragraph used to state ("a released fixture
 // is never destroyed, therefore its Session's strand handle is never destroyed,
@@ -617,12 +646,28 @@ struct quiesce_or_release_on_exit {
     //       guard held inside a LEAKED object is none of those. The loop never
     //       terminates.
     //
-    // Releasing the fixtures is precisely what strands that count: the residual
-    // branch is by definition `outstanding_work_ > 0` (`poll_one()` stops the
-    // context iff the count is zero), and destroying the fixtures is what used to
-    // release it. So on Windows the old shape wedged `~io_context` forever — all
+    // Releasing the fixtures is precisely what can strand that count, and
+    // destroying the fixtures is what used to release it. So on Windows the old
+    // shape wedged `~io_context` forever — all
     // three MSVC legs of PR #304 timed out at 120 s in exactly this test, at
     // exactly this line, while Tier 1 and Tier 3 were green.
+    //
+    // THE RESIDUAL BRANCH IS TWO DIFFERENT STATES, and an earlier version of this
+    // paragraph collapsed them — it said the branch means `outstanding_work_ > 0`
+    // "by definition". That is true of only one of them:
+    //
+    //   OBSERVED residual — the pump returned and `poll_one()` left the context
+    //       unstopped. `poll_one()` stops the context iff the count is zero, so
+    //       here the count really is positive.
+    //   UNKNOWN residual — `run_for` or `poll_one` THREW, and the inner
+    //       `catch (...)` set `quiesced = false`. A throwing handler can have been
+    //       the last outstanding operation, so the count may well be zero by now.
+    //
+    // The release is right in both cases, but for different reasons: in the first
+    // because work demonstrably remains, in the second because the state is
+    // unknown and destroying a graph whose frames may still be suspended is the
+    // unsafe direction. Only the first is a claim about the work count. The
+    // failure text below is worded to cover both without asserting the count.
     //
     // Measured on a 9-line standalone probe, no coroutines, no Session, no clock —
     // a stack `io_context` plus one leaked `executor_work_guard`:
@@ -635,13 +680,23 @@ struct quiesce_or_release_on_exit {
     // Arm B is this member. The invariant it buys is SHORTER than the one it
     // replaces, which is the real argument for it:
     //
-    //     ON THE RESIDUAL PATH, NOTHING IN THIS SCOPE IS DESTROYED.
+    //     ON THE RESIDUAL PATH, EVERY ROOT OF THE ASYNC OBJECT GRAPH -- EVERY
+    //     SessionFixture, AND THE io_context -- IS RELEASED, SO NOTHING IN THAT
+    //     GRAPH IS DESTRUCTED.
     //
-    // No destruction means no destruction ORDER, so the strand-after-io_context
-    // fault and the frame-over-dead-storage fault are both unreachable by
-    // construction rather than by an ordering argument that has to be re-derived
-    // every time a member moves.
-    std::unique_ptr<asio::io_context>& ioc;
+    // Scoped to the GRAPH, not to the scope. An earlier wording said "nothing in
+    // this scope is destroyed", which is simply false and worth correcting rather
+    // than quietly rephrasing: the guard itself, its vector, the emptied
+    // `unique_ptr`s, the local futures and `shared_ptr`s, the alias, and the frame
+    // arena are all destroyed — `CrossSessionDisjoint`'s `frames` deque
+    // deliberately so, AFTER the released context. What must not be destructed is
+    // the graph those roots own.
+    //
+    // No destruction of the graph means no destruction ORDER within it, so the
+    // strand-after-io_context fault and the frame-over-dead-storage fault are both
+    // unreachable by construction rather than by an ordering argument that has to
+    // be re-derived every time a member moves.
+    std::unique_ptr<counting_io_context>& ioc;
     fixpp::core::Clock& clock;
     // Released, in order, if the context does not quiesce. Pointers rather than
     // values so the guard can null the caller's own owners — leaving a released
@@ -737,15 +792,18 @@ struct quiesce_or_release_on_exit {
             FIXPP_XSESSION_LSAN_IGNORE(leaked_ioc);
 
             ADD_FAILURE()
-                << "quiesce_or_release_on_exit: the io_context did not run out of work within "
-                   "the configured quiesce window, so a coroutine frame is still suspended. "
-                   "The SessionFixtures AND the io_context were all RELEASED deliberately "
-                   "(#303), so nothing in the guarded scope is destroyed at all: the frames "
-                   "are never resumed over dead storage, no Session strand handle is "
-                   "destroyed after its io_context, and ~io_context never runs -- which on "
-                   "Windows would otherwise spin forever on the outstanding-work count this "
-                   "very residual represents. This guard reports the residual; it does not "
-                   "claim to have found its cause.";
+                << "quiesce_or_release_on_exit: the io_context was not observed to run out "
+                   "of work within the configured quiesce window -- either it demonstrably "
+                   "still holds work, or the pump threw and the state is unknown -- so a "
+                   "coroutine frame may still be suspended. Every root of the async graph, "
+                   "the SessionFixtures AND the io_context, was RELEASED deliberately "
+                   "(#303/#311), so nothing in that graph is destructed: no frame is resumed "
+                   "over dead storage, no Session strand handle is destroyed after its "
+                   "io_context, and ~io_context never runs -- which on Windows can otherwise "
+                   "spin forever, since win_iocp_io_context::shutdown loops while "
+                   "(outstanding_work_ > 0) and decrements only by destroying operations it "
+                   "can find. This guard reports the residual; it does not claim to have "
+                   "found its cause.";
         } catch (...) {
             // Nothing may escape a destructor.
         }
@@ -766,11 +824,6 @@ struct quiesce_or_release_on_exit {
 // and which is unavailable on Linux at any price since `scheduler::shutdown`
 // ignores the stranded work count entirely. `owner == nullptr` is the same
 // decision observed one step earlier, and it is observable everywhere.
-struct observe_ioc_release {
-    std::unique_ptr<asio::io_context>& owner;
-    bool* released;
-    ~observe_ioc_release() { *released = (owner == nullptr); }
-};
 
 }  // anonymous namespace
 
@@ -830,7 +883,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // Heap-owned so ~quiesce_or_release_on_exit can RELEASE it on the residual
     // path (see its `ioc` member for why that is mandatory on Windows). `ioc`
     // aliases the same object, so every use below is unchanged.
-    auto ioc_owner = std::make_unique<asio::io_context>();
+    auto ioc_owner = std::make_unique<counting_io_context>();
     asio::io_context& ioc = *ioc_owner;
     // Both sessions share the same mock_clock driven by the ioc executor.
     using sc = std::chrono::system_clock;
@@ -1320,10 +1373,10 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
     std::atomic<int> destructions{0};
     std::atomic<int> destructions_b{0};
     std::weak_ptr<fixpp::core::Clock> weak_clock;
-    bool ioc_released = false;
+    std::atomic<int> ioc_destructions{0};
 
     EXPECT_NONFATAL_FAILURE(
-        ([&destructions, &destructions_b, &weak_clock, &ioc_released] {
+        ([&destructions, &destructions_b, &weak_clock, &ioc_destructions] {
             // Arena for the inbound frame, declared BEFORE `ioc` for the same reason
             // the real test's is — and this witness is where that reason was
             // MEASURED rather than reasoned about. An earlier revision declared the
@@ -1344,7 +1397,7 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
             // Heap-owned so ~quiesce_or_release_on_exit can RELEASE it on the residual
             // path (see its `ioc` member for why that is mandatory on Windows). `ioc`
             // aliases the same object, so every use below is unchanged.
-            auto ioc_owner = std::make_unique<asio::io_context>();
+            auto ioc_owner = std::make_unique<counting_io_context>();
             asio::io_context& ioc = *ioc_owner;
             auto clock = make_witness_clock(ioc);
             weak_clock = clock;
@@ -1362,9 +1415,7 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
             // probe in place, an empty context at a zero budget reports QUIESCED (the
             // third witness below pins exactly that), so reaching the residual branch
             // here means work genuinely remained.
-            // BEFORE the guard, so it is destroyed after it and reads the owner
-            // once the release has (or has not) happened.
-            observe_ioc_release observe{ioc_owner, &ioc_released};
+            ioc_owner->destructions = &ioc_destructions;
             quiesce_or_release_on_exit guard{
                 ioc_owner, *clock, {&sA, &sB}, std::chrono::milliseconds{0}};
 
@@ -1393,7 +1444,7 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
             // shared_ptr copy — so this reset cannot leave that reference dangling.
             clock.reset();
         }()),
-        "the io_context did not run out of work");
+        "was not observed to run out of work");
 
     // THE DIRECT OBSERVATION. A mutant that deletes the release() while keeping the
     // message above passes the SPI matcher and fails here.
@@ -1425,12 +1476,14 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
     // that count is non-zero), so the symptom there is a ctest timeout with no
     // diagnostic. This assertion turns it into a named failure, on every
     // platform, including the one where the bug cannot manifest at all.
-    EXPECT_TRUE(ioc_released)
-        << "the io_context was NOT released on the residual path. Releasing the fixtures "
-           "without releasing it strands the io_context's outstanding-work count -- POSIX "
-           "ignores that at shutdown, Windows spins on it forever, and all three MSVC legs "
-           "of PR #304 timed out at 120 s in this exact test before the io_context was "
-           "released too.";
+    EXPECT_EQ(ioc_destructions.load(std::memory_order_relaxed), 0)
+        << "~io_context RAN on the residual path, so the io_context was destroyed rather "
+           "than released. Releasing the fixtures without releasing it can strand the "
+           "outstanding-work count -- POSIX ignores such a count at shutdown, Windows spins "
+           "on it forever, and all three MSVC legs of PR #304 timed out at 120 s in this "
+           "exact test before the io_context was released too. Counting the destruction "
+           "rather than checking the owner for null is deliberate: `release()` followed by "
+           "`delete` leaves the owner null and still destroys the context.";
 }
 
 // ── (gate-b/r1 F6) The fail-safe `catch(...)`: a throwing pump still releases ─
@@ -1453,7 +1506,7 @@ TEST(CrossSessionTeardown, ThrowingPumpStillReleasesTheFixtures) {
             // Heap-owned so ~quiesce_or_release_on_exit can RELEASE it on the residual
             // path (see its `ioc` member for why that is mandatory on Windows). `ioc`
             // aliases the same object, so every use below is unchanged.
-            auto ioc_owner = std::make_unique<asio::io_context>();
+            auto ioc_owner = std::make_unique<counting_io_context>();
             asio::io_context& ioc = *ioc_owner;
             auto clock = make_witness_clock(ioc);
 
@@ -1466,7 +1519,7 @@ TEST(CrossSessionTeardown, ThrowingPumpStillReleasesTheFixtures) {
             quiesce_or_release_on_exit guard{
                 ioc_owner, *clock, {&sA}, std::chrono::milliseconds{0}};
         }()),
-        "the io_context did not run out of work");
+        "was not observed to run out of work");
 
     // THE DIRECT OBSERVATION. A mutant that turns the inner catch's
     // `quiesced = false` into `quiesced = true` would destroy the fixture here
@@ -1532,7 +1585,7 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
             // Heap-owned so ~quiesce_or_release_on_exit can RELEASE it on the residual
             // path (see its `ioc` member for why that is mandatory on Windows). `ioc`
             // aliases the same object, so every use below is unchanged.
-            auto ioc_owner = std::make_unique<asio::io_context>();
+            auto ioc_owner = std::make_unique<counting_io_context>();
             asio::io_context& ioc = *ioc_owner;
             auto clock = make_witness_clock(ioc);
 
@@ -1567,7 +1620,7 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
             // the residual branch, releases sA and sB, then ADD_FAILURE() throws
             // GoogleTestFailureException straight into the outer catch(...).
         }()),
-        "the io_context did not run out of work");
+        "was not observed to run out of work");
 
     // (a) NOTHING ESCAPED. If the outer catch did not swallow the throw, it
     // would propagate out of an implicitly-noexcept destructor and the process
@@ -1598,13 +1651,13 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
 TEST(CrossSessionTeardown, QuiescedPathDestroysTheFixtures) {
     std::atomic<int> destructions{0};
     std::weak_ptr<fixpp::core::Clock> weak_clock;
-    bool ioc_released = false;
+    std::atomic<int> ioc_destructions{0};
 
     {
         // Heap-owned so ~quiesce_or_release_on_exit can RELEASE it on the residual
         // path (see its `ioc` member for why that is mandatory on Windows). `ioc`
         // aliases the same object, so every use below is unchanged.
-        auto ioc_owner = std::make_unique<asio::io_context>();
+        auto ioc_owner = std::make_unique<counting_io_context>();
         asio::io_context& ioc = *ioc_owner;
         auto clock = make_witness_clock(ioc);
         weak_clock = clock;
@@ -1615,7 +1668,7 @@ TEST(CrossSessionTeardown, QuiescedPathDestroysTheFixtures) {
 
         // Nothing spawned and a real budget, so the guard drains and takes the
         // quiesced branch.
-        observe_ioc_release observe{ioc_owner, &ioc_released};
+        ioc_owner->destructions = &ioc_destructions;
         quiesce_or_release_on_exit guard{ioc_owner, *clock, {&sA}, std::chrono::seconds{1}};
 
         clock.reset();
@@ -1630,14 +1683,14 @@ TEST(CrossSessionTeardown, QuiescedPathDestroysTheFixtures) {
            "used by the residual witness cannot distinguish release from destruction and "
            "proves nothing there.";
 
-    // Without this, the residual witness's `ioc_released` assertion is satisfied by a
+    // Without this, the residual witness's destruction assertion is satisfied by a
     // guard that releases the io_context UNCONDITIONALLY -- which would leak one per
     // guarded scope on every ordinary run, and, worse, would silently stop exercising
     // ~io_context anywhere this guard is used.
-    EXPECT_FALSE(ioc_released)
-        << "the io_context was released on a QUIESCED teardown. The release is the "
-           "residual branch's decision only; taking it unconditionally leaks an "
-           "io_context per guarded scope.";
+    EXPECT_EQ(ioc_destructions.load(std::memory_order_relaxed), 1)
+        << "~io_context did NOT run on a QUIESCED teardown, so the io_context was released "
+           "there too. The release is the residual branch's decision only; taking it "
+           "unconditionally leaks an io_context per guarded scope.";
 }
 
 // ── Direction 3: the `poll_one()` probe is load-bearing ──────────────────────
@@ -1656,7 +1709,7 @@ TEST(CrossSessionTeardown, ZeroBudgetOnAnEmptyContextIsNotResidual) {
     // Heap-owned so ~quiesce_or_release_on_exit can RELEASE it on the residual
     // path (see its `ioc` member for why that is mandatory on Windows). `ioc`
     // aliases the same object, so every use below is unchanged.
-    auto ioc_owner = std::make_unique<asio::io_context>();
+    auto ioc_owner = std::make_unique<counting_io_context>();
     asio::io_context& ioc = *ioc_owner;
     auto clock = make_witness_clock(ioc);
 

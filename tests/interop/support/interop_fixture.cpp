@@ -87,8 +87,9 @@ fixpp::core::EngineConfig with_clock(fixpp::core::EngineConfig cfg,
 
 InteropEngineFixture::InteropEngineFixture(fixpp::core::EngineConfig cfg,
                                            std::chrono::milliseconds teardown_bound)
-    : clock_(std::make_shared<fixpp::core::system_clock_source>(ioc_.get_executor())),
-      engine_(std::make_unique<fixpp::session::Engine>(ioc_.get_executor(),
+    : ioc_(std::make_unique<fixpp::interop::counting_io_context>()),
+      clock_(std::make_shared<fixpp::core::system_clock_source>(ioc_->get_executor())),
+      engine_(std::make_unique<fixpp::session::Engine>(ioc_->get_executor(),
                                                        with_clock(std::move(cfg), clock_))),
       teardown_bound_(teardown_bound) {}
 
@@ -146,6 +147,36 @@ InteropEngineFixture::~InteropEngineFixture() {
         auto* leaked = engine_.release();
         FIXPP_INTEROP_LSAN_IGNORE(leaked);
 
+        // ── (#311) AND THE io_context, FOR THE SAME REASON, ON THE SAME BRANCH ──
+        //
+        // Releasing the Engine without releasing this is the shape that wedges
+        // `~io_context` forever on Windows. The full argument is on the `ioc_`
+        // member; the short form is that the leak above is exactly what can strand
+        // an outstanding-work count, POSIX ignores such a count at shutdown and
+        // Windows spins on it, and this class cannot tell from the inside whether
+        // the count is backed by an operation shutdown can find.
+        //
+        // The invariant is therefore about OWNERSHIP ROOTS, not about the scope:
+        //
+        //     ON THE TEARDOWN-MISS PATH, EVERY ROOT OF THE ASYNC OBJECT GRAPH --
+        //     THE ENGINE AND THE io_context -- IS RELEASED, SO NOTHING IN THAT
+        //     GRAPH IS DESTRUCTED.
+        //
+        // Stated that way on purpose. "Nothing here is destroyed" would be false
+        // and was the wording of an earlier draft: this destructor's own locals,
+        // the emptied `unique_ptr`s and `stop_fut_` are all destroyed, and so are
+        // the caller's. What must not be destructed is the graph, and these two
+        // releases are what covers it.
+        //
+        // Its own statement, deliberately NOT
+        // `FIXPP_INTEROP_LSAN_IGNORE(ioc_.release())`: that spelling works only
+        // because the non-sanitizer expansion happens to be `((void)(p))`, and a
+        // later `((void)0)` -- the ordinary way to silence an unused-parameter
+        // warning -- would silently delete this release on every non-ASan build,
+        // which is every MSVC build, which is the only platform that needs it.
+        auto* leaked_ioc = ioc_.release();
+        FIXPP_INTEROP_LSAN_IGNORE(leaked_ioc);
+
         // The wording states the shared condition and explicitly declines to name
         // a residual it cannot guarantee (gate-b/r7 P2-1, r8 P2-1).
         ADD_FAILURE() << "InteropEngineFixture: Engine::stop() did not finish (it did not "
@@ -158,16 +189,23 @@ InteropEngineFixture::~InteropEngineFixture() {
                          "complete and what survives depends on where it threw — stop() can "
                          "throw before OR after session close and registry clear. The Engine "
                          "was leaked deliberately so this failure is reported instead of "
-                         "~Engine running against whatever remains (#292).";
+                         "~Engine running against whatever remains (#292), and the io_context "
+                         "was released with it (#311) -- releasing only the Engine can strand "
+                         "an outstanding-work count that POSIX ignores at shutdown but "
+                         "win_iocp_io_context::shutdown spins on forever.";
     } catch (...) {
         // Nothing may escape a noexcept destructor.
     }
 }
 
 void InteropEngineFixture::start() {
-    // The fixture injects a real clock via with_clock() at construction (see
-    // the with_clock() call in the ctor), so validate_engine_config succeeds
-    // unconditionally here.  Assert to surface any future misconfiguration
+    // validate_engine_config succeeds here because EngineConfig::clock is never
+    // null by this point -- with_clock() fills it at construction WHEN THE CALLER
+    // LEFT IT NULL, and honours an explicit one otherwise. Note the difference
+    // (#311): what is unconditional is that SOME clock is set, not that it is the
+    // fixture's own system_clock_source. An earlier version of this comment said
+    // "the fixture injects a real clock ... unconditionally", and a teardown
+    // safety argument was later built on that misreading.  Assert to surface any future misconfiguration
     // rather than silently running without session loops.  [041 T019 / C-4]
     auto r = engine_->start();
     assert(r.has_value() && "InteropEngineFixture::start() — engine_.start() failed");
@@ -179,11 +217,11 @@ bool InteropEngineFixture::run_until(const std::function<bool()>& ready,
     // pump_until does not revive a context already stopped at entry (a work
     // guard does not clear stopped()); this fixture's contract does. Restart
     // here, before handing off to the shared primitive.
-    if (ioc_.stopped()) {
-        ioc_.restart();
+    if (ioc_->stopped()) {
+        ioc_->restart();
     }
     return fixpp::test_support::pump_until(
-        ioc_, [&ready] { return ready(); }, deadline, kPumpSlice);
+        *ioc_, [&ready] { return ready(); }, deadline, kPumpSlice);
 }
 
 std::chrono::milliseconds InteropEngineFixture::stop_within(std::chrono::milliseconds bound) {
@@ -195,8 +233,8 @@ std::chrono::milliseconds InteropEngineFixture::stop_within(std::chrono::millise
     }
 
     const auto t0 = std::chrono::steady_clock::now();
-    if (ioc_.stopped()) {
-        ioc_.restart();
+    if (ioc_->stopped()) {
+        ioc_->restart();
     }
 
     // Spawn EXACTLY ONCE. A second stop_within() must pump the operation already
@@ -205,7 +243,7 @@ std::chrono::milliseconds InteropEngineFixture::stop_within(std::chrono::millise
     // invalidate, so valid() is a permanent "already spawned" flag — including on
     // the path where get() threw. See the header for why that matters.
     if (!stop_fut_.valid()) {
-        stop_fut_ = asio::co_spawn(ioc_, engine_->stop(), asio::use_future).share();
+        stop_fut_ = asio::co_spawn(*ioc_, engine_->stop(), asio::use_future).share();
     }
 
     // We must keep pumping the io_context for stop()'s teardown coroutines
@@ -218,8 +256,8 @@ std::chrono::milliseconds InteropEngineFixture::stop_within(std::chrono::millise
         if (ready()) {
             break;
         }
-        if (ioc_.stopped()) {
-            ioc_.restart();
+        if (ioc_->stopped()) {
+            ioc_->restart();
         }
         // Clamp the final slice to the remaining budget (gate-b/r1 P1-1). An
         // unclamped run_for can START at t_end - 1ms and run a whole 5 ms slice,
@@ -233,7 +271,7 @@ std::chrono::milliseconds InteropEngineFixture::stop_within(std::chrono::millise
         if (remaining <= std::chrono::steady_clock::duration::zero()) {
             break;
         }
-        ioc_.run_for(std::min<std::chrono::steady_clock::duration>(kPumpSlice, remaining));
+        ioc_->run_for(std::min<std::chrono::steady_clock::duration>(kPumpSlice, remaining));
     }
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
