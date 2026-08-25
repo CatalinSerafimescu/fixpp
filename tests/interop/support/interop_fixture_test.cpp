@@ -248,6 +248,19 @@ TEST(InteropEngineFixtureTeardown, MissPathActuallyReleasesTheEngine) {
 //
 // Two properties, one test: the failure is REPORTED (the SPI matcher), and the
 // Engine is RELEASED rather than destroyed (the weak_ptr, live afterwards).
+//
+// SCOPE, stated so the test is not read as proving more (gate-b/r3 P2-1, P2-2):
+//   - This fixture registers NO sessions, so every per-session cancel / close /
+//     join loop inside stop() is empty. The test proves the destructor handles an
+//     exceptional future, reports, and retains the Engine — it does NOT prove the
+//     hook fired before a NON-EMPTY registry was cleared. Mutation that stays
+//     green: move the hook after registry_.clear(). Closing that needs a
+//     registered session and a probe on registry-owned state.
+//   - The weak_ptr observes CLOCK RETENTION, not Engine identity. Mutation that
+//     stays green: copy the clock elsewhere on the failure branch, then destroy
+//     the Engine. Closing that needs an Engine-destruction counter, which is a
+//     src/ seam this PR cannot add.
+// Both are recorded as gaps rather than waived silently.
 TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndReleasesTheEngine) {
     std::weak_ptr<fixpp::core::Clock> weak_clock;
 
@@ -272,31 +285,58 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndReleasesTheEngine) {
 
     EXPECT_FALSE(weak_clock.expired())
         << "a stop() that threw partway through teardown left the Engine DESTROYED "
-           "rather than released — its EngineConfig-owned clock died with it. The "
-           "teardown frames are still suspended in ioc_ at that point.";
+           "rather than released — its EngineConfig-owned clock died with it. "
+           "(Precisely (gate-b/r3 P3-1): on THIS path the stop operation completed "
+           "exceptionally, so its frames are no longer suspended in ioc_. What is "
+           "unsafe is that teardown stopped before session close and registry "
+           "clear, so Engine-owned state may still be referenced.)";
 }
 
-// ── #292 — stop() is spawned EXACTLY ONCE (withdraws the round-1 P1-2 waiver) ─
+// ── #292 — exactly one teardown body runs, and its failure is not masked ─────
 //
-// Round 1 waived this as unwitnessable, on the argument that both frames live on
-// the same io_context and complete in the same pump so nothing is observable.
-// That argument only covers two NORMALLY-completing idle stops. It does not
-// cover a first operation that completed by THROWING, and the hook above makes
-// that state reachable deterministically.
+// NAMED FOR THE PROPERTY THAT IS LOAD-BEARING, which is not literally "co_spawn
+// was called once" (gate-b/r3 P1-2). Codex proposed a mutant that keeps the
+// tracked future and co_spawns an EXTRA detached stop() beside it. Measured: the
+// test stays green — and so does the system, because Engine::stop() opens with
+// its own idempotency guard, `if (stopped_.load(acquire)) co_return;`
+// (engine.cpp:1163). A second operation spawned after the first has set the flag
+// returns immediately and never reaches the hook. An extra spawn is INERT.
 //
-// The discriminator: with the spawn-once guard, the second stop_within() observes
-// the ORIGINAL shared_future and rethrows its stored exception. Without the
-// guard, it co_spawns a fresh stop(); stopped_ is already true so that one
-// returns normally, the exception is masked, and the first frame is abandoned.
-TEST(InteropEngineFixtureTeardown, StopIsSpawnedExactlyOnce) {
+// So the literal spawn count is neither observable test-side nor the thing that
+// can hurt. The two properties that CAN are both asserted here:
+//   1. exactly ONE teardown body runs   — the hook-entry counter
+//   2. that operation's failure is not masked — the rethrow
+// Deleting the `if (!stop_fut_.valid())` guard breaks (2): the second call
+// co_spawns a fresh stop(), which returns normally because stopped_ is already
+// true, silently masking the first operation's exception and abandoning it.
+//
+// Round 1 waived all of this as unwitnessable, on an argument that only ever
+// covered two NORMALLY-completing idle stops. It never covered a first operation
+// that completed by THROWING, which the hook makes reachable deterministically.
+TEST(InteropEngineFixtureTeardown, ExactlyOneTeardownBodyRunsAndItsFailureIsNotMasked) {
+    // The observation is a COUNT, not just the rethrow (gate-b/r3 P1-2). An
+    // earlier version asserted only that the second call rethrows the original
+    // exception. That reddens when the guard is deleted in the obvious way (the
+    // tracked future is replaced, masking the exception) but stays GREEN under a
+    // different violation of the same named property: keep assigning the tracked
+    // future exactly as now AND co_spawn an extra detached stop() beside it. Both
+    // bodies can pass the outer stopped_ check before either sets the flag, the
+    // tracked future still rethrows, and nothing notices two teardowns ran.
+    //
+    // Counting hook entries observes the operations themselves rather than the
+    // handle to one of them, so an untracked spawn cannot hide behind it.
+    std::atomic<int> hook_entries{0};
+
     EXPECT_NONFATAL_FAILURE(
-        ([] {
+        ([&hook_entries] {
             fixpp::interop::InteropEngineFixture fx;
             fx.start();
-            fx.engine().set_post_send_drain_hook([]() -> asio::awaitable<void> {
-                throw std::runtime_error("post-send-drain hook throws (gate-b/r2 P1-2)");
-                co_return;
-            });
+            fx.engine().set_post_send_drain_hook(
+                [&hook_entries]() -> asio::awaitable<void> {
+                    hook_entries.fetch_add(1, std::memory_order_relaxed);
+                    throw std::runtime_error("post-send-drain hook throws (gate-b/r3 P1-2)");
+                    co_return;
+                });
 
             // Spawn operation #1 and drive it far enough to reach the throwing
             // hook, so its future is ready-with-exception rather than pending.
@@ -319,4 +359,10 @@ TEST(InteropEngineFixtureTeardown, StopIsSpawnedExactlyOnce) {
                    "and abandoned the first — the frame is now unowned in ioc_";
         }()),
         "Engine::stop() did not complete successfully");
+
+    EXPECT_EQ(hook_entries.load(std::memory_order_relaxed), 1)
+        << "Engine::stop()'s teardown body ran " << hook_entries.load(std::memory_order_relaxed)
+        << " times, not once. The rethrow assertion above cannot see this — it "
+           "observes the TRACKED future, so an extra spawn leaves that handle "
+           "untouched. This counter observes the operations themselves.";
 }
