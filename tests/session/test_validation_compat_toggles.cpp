@@ -282,13 +282,29 @@ static std::unique_ptr<Fixture> make_acceptor(
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
+        fixpp::test_support::drain_or_report(fix->ioc, "make_acceptor");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_acceptor";
         // Return the fixture, NOT nullptr: no call site in this file
         // null-checks the result, so nullptr would turn a miss into a
         // null-dereference SEGFAULT, which reports strictly worse than the
         // hang this migration removes (a crashed leg emits no FAILED lines
-        // at all). open() borrows nothing block-local, so ~Fixture's drain
-        // covers it and the caller then fails loudly on its own assertion.
+        // at all).
+        //
+        // The drain above settles open() BEFORE the fixture escapes.
+        // ~Fixture's drain is NOT sufficient for an escaping fixture: it runs
+        // only at fixture destruction, and a caller that destroys a fixture
+        // MEMBER first — fix->session.reset() in CompID_KnobOff_MismatchAccepted
+        // — then pumps ioc resumes this frame over the destroyed Session.
+        // Proven: heap-use-after-free, freed at
+        // test_validation_compat_toggles.cpp:365, read in
+        // Session::open() (.resume) at src/session/session.cpp:937, resumed
+        // from the next run_window_then_ready. Keep returning the fixture
+        // rather than nullptr — that part of the reasoning is unchanged.
+        //
+        // The drain's honest limit: drain_or_report is best-effort — if it
+        // reports a residual, the frame is still suspended and the hazard
+        // returns; it converts unconditional UB into an observed-and-reported
+        // residual, not a guaranteed absence of one.
         return fix;
     }
     (void)open_fut.get();
@@ -325,13 +341,16 @@ static std::unique_ptr<Fixture> make_initiator(
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s)) {
+        fixpp::test_support::drain_or_report(fix->ioc, "make_initiator");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_initiator";
         // Return the fixture, NOT nullptr: no call site in this file
         // null-checks the result, so nullptr would turn a miss into a
         // null-dereference SEGFAULT, which reports strictly worse than the
         // hang this migration removes (a crashed leg emits no FAILED lines
-        // at all). open() borrows nothing block-local, so ~Fixture's drain
-        // covers it and the caller then fails loudly on its own assertion.
+        // at all). The drain above settles open() BEFORE the fixture escapes
+        // — see make_acceptor's comment above for the proven mechanism
+        // (heap-use-after-free, reproduced under ASan) and the drain's
+        // honest limits.
         return fix;
     }
     (void)open_fut.get();
@@ -677,13 +696,16 @@ static std::unique_ptr<Fixture> make_acceptor_seqval_off(
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
+        fixpp::test_support::drain_or_report(fix->ioc, "make_acceptor_seqval_off");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_acceptor_seqval_off";
         // Return the fixture, NOT nullptr: no call site in this file
         // null-checks the result, so nullptr would turn a miss into a
         // null-dereference SEGFAULT, which reports strictly worse than the
         // hang this migration removes (a crashed leg emits no FAILED lines
-        // at all). open() borrows nothing block-local, so ~Fixture's drain
-        // covers it and the caller then fails loudly on its own assertion.
+        // at all). The drain above settles open() BEFORE the fixture escapes
+        // — see make_acceptor's comment above for the proven mechanism
+        // (heap-use-after-free, reproduced under ASan) and the drain's
+        // honest limits.
         return fix;
     }
     (void)open_fut.get();
@@ -1301,10 +1323,18 @@ TEST(ValidationCompatToggles, Combination_Matrix_FourCells) {
         // is only valid in a void-returning function. Return the fixture, not
         // nullptr — the four call sites below dereference the result without a
         // null check, so nullptr would turn a miss into a SEGFAULT, which reports
-        // strictly worse than the hang this migration removes. `open()` borrows
-        // nothing block-local, so ~Fixture's drain covers the suspended frame and
-        // the caller then fails loudly on its own `Active` precondition.
+        // strictly worse than the hang this migration removes.
         if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
+            fixpp::test_support::drain_or_report(
+                fix->ioc, "Combination_Matrix_FourCells/make_acceptor_with_knobs");
+            // The drain above settles open() BEFORE the fixture escapes to the four
+            // call sites below. ~Fixture's drain is not sufficient for an escaping
+            // fixture on its own: it runs only at fixture destruction, and this
+            // lambda's fixture escapes past that point (returned, then
+            // dereferenced by its caller). See make_acceptor's comment above for
+            // the proven mechanism (heap-use-after-free, reproduced under ASan)
+            // and the drain's honest limits. Keep returning the fixture rather
+            // than nullptr — that part of the reasoning is unchanged.
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "Combination_Matrix_FourCells/make_acceptor_with_knobs";
             return fix;
@@ -1448,6 +1478,14 @@ TEST(ValidationCompatToggles, Inbound_Only_OutboundUnchanged) {
         // captured; the caller compares the four vectors and fails loudly on its
         // own assertion, which is a better report than an empty vector silently
         // comparing equal to another empty vector would be.
+        //
+        // No drain needed on this branch, unlike `Combination_Matrix_FourCells`'s
+        // lambda above: `fix` here is a lambda-local `unique_ptr<Fixture>`,
+        // destroyed at the `return` two lines below — no caller holds it past
+        // that point. `~Fixture`'s drain therefore runs microseconds later with
+        // every member still alive, which is exactly the case it was written
+        // for. The hazard only appears when a live fixture ESCAPES the miss
+        // branch to a caller that can destroy a member before `~Fixture` runs.
         if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "Inbound_Only_OutboundUnchanged/capture_outbound_logon";

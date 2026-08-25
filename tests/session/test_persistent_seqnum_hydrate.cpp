@@ -436,14 +436,30 @@ static std::unique_ptr<Fixture> make_acceptor(
     // open() — sets NotConnected for acceptor.
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
+        fixpp::test_support::drain_or_report(fix->ioc, "make_acceptor");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_acceptor";
         // Return the fixture, NOT nullptr: no call site in this file
         // null-checks the result, so nullptr would turn a miss into a
         // null-dereference SEGFAULT, which reports strictly worse than
         // the hang this migration removes (a crashed leg emits no FAILED
-        // lines at all). open() borrows nothing block-local, so
-        // ~Fixture's drain covers it and the caller then fails loudly on
-        // its own state assertion.
+        // lines at all).
+        //
+        // The drain above settles open() BEFORE the fixture escapes.
+        // ~Fixture's drain is NOT sufficient for an escaping fixture: it
+        // runs only at fixture destruction, and a caller that destroys a
+        // fixture MEMBER before that point would resume this frame over
+        // dead storage instead — proven in
+        // test_validation_compat_toggles.cpp's CompID_KnobOff_MismatchAccepted
+        // (heap-use-after-free, reproduced under ASan; see that file's
+        // make_acceptor comment for the full trace). This file has no such
+        // caller today, but the invariant the drain protects is the same one,
+        // not a per-file exemption. Keep returning the fixture rather than
+        // nullptr — that part of the reasoning is unchanged.
+        //
+        // The drain's honest limit: drain_or_report is best-effort — if it
+        // reports a residual, the frame is still suspended and the hazard
+        // returns; it converts unconditional UB into an observed-and-reported
+        // residual, not a guaranteed absence of one.
         return fix;
     }
     (void)open_fut.get();
@@ -487,14 +503,16 @@ static std::unique_ptr<Fixture> make_initiator(
     // open() emits the initiator Logon and transitions to LogonSent.
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s)) {
+        fixpp::test_support::drain_or_report(fix->ioc, "make_initiator");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_initiator";
         // Return the fixture, NOT nullptr: no call site in this file
         // null-checks the result, so nullptr would turn a miss into a
         // null-dereference SEGFAULT, which reports strictly worse than
         // the hang this migration removes (a crashed leg emits no FAILED
-        // lines at all). open() borrows nothing block-local, so
-        // ~Fixture's drain covers it and the caller then fails loudly on
-        // its own state assertion.
+        // lines at all). The drain above settles open() BEFORE the
+        // fixture escapes — see make_acceptor's comment above for the
+        // proven mechanism (heap-use-after-free, reproduced under ASan)
+        // and the drain's honest limits.
         return fix;
     }
     (void)open_fut.get();
