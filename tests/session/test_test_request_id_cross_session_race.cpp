@@ -92,38 +92,64 @@
 // vectors, and the entire Session (buffers, arena, validator, strand). Those
 // resources are retained until process exit.
 //
-// What bounds the exposure is WHICH runs can reach it. There are two:
+// What bounds the exposure is WHICH runs can reach it:
 //   - a real `CrossSessionDisjoint` residual, where the guard's ADD_FAILURE has
 //     already made the binary RED, so nothing green is hiding anything;
-//   - the two `CrossSessionTeardown` witnesses that drive the residual path
-//     through `EXPECT_NONFATAL_FAILURE` and therefore leave the binary GREEN:
-//     `ResidualPathReleasesTheFixtures` and `ThrowingPumpStillReleasesTheFixtures`.
-//     Both ARE a real hole: an unrelated leak reachable through either witness's
-//     own fixtures would be suppressed.
+//   - every `CrossSessionTeardown` witness that drives the residual path through
+//     `EXPECT_NONFATAL_FAILURE` and therefore leaves the binary GREEN. Those ARE a
+//     real hole: an unrelated leak reachable through such a witness's own fixtures
+//     would be suppressed.
 //
-// The size of that hole is MEASURED, not estimated, and stated structurally so it
-// survives the next witness added to this suite rather than going stale: the
-// stable invariant is the per-fixture root, not the total. Replacing this macro
-// with a no-op and re-running (leak detection on) attributes every leaked byte to
-// a `make_unique<Session>` inside a `SessionFixture` (266272 bytes each) reachable
-// from one of the two witnesses above -- nothing else in the binary leaks:
-//   - `ResidualPathReleasesTheFixtures` releases TWO fixtures (`sA`, `sB`):
-//     671075 byte(s) in 61 allocation(s).
-//   - `ThrowingPumpStillReleasesTheFixtures` releases ONE fixture:
-//     333568 byte(s) in 12 allocation(s).
-//   - total (derived, not the claim): 1004643 byte(s) in 73 allocation(s), three
-//     `SessionFixture` roots across the two witnesses.
+// ⚠️ THE NUMBERS BELOW WENT STALE THREE ROUNDS RUNNING, EACH TIME BECAUSE A LATER
+// COMMIT IN THE SAME PR ADDED A WITNESS THAT REACHES THE RELEASE PATH. Read the
+// rule before the figures, because the rule is the durable part:
+//
+//     ADDING, REMOVING, OR RETARGETING ANY TEST THAT REACHES THE FIXTURE-RELEASE
+//     PATH INVALIDATES THIS BLOCK. Re-measure and rewrite it in the SAME commit.
+//
+// Calling a figure "structural" does not make it survive; only re-deriving it does.
+// Two prior versions of this paragraph said they were stated structurally to
+// survive the next witness, and both were falsified by the next witness.
+//
+// Re-derive with (one command, from the worktree root):
+//   sed -i 's/__lsan_ignore_object(p)/((void)(p))/' <this file>   # then rebuild + run
+//   cmake --build build/linux-clang-asan --target session_test_request_id_cross_session_race -j2
+//   ./build/linux-clang-asan/bin/session_test_request_id_cross_session_race
+// then RESTORE the macro. Leak detection must be ON (no ASAN_OPTIONS).
+//
+// The one genuinely stable invariant is the PER-FIXTURE root: every leaked byte is
+// attributable to a `make_unique<Session>` inside one released `SessionFixture`,
+// 266272 B each. Everything else below is derived from how many fixtures each
+// witness releases, and is therefore a function of the test list, not of the code.
+//
+// Measured on `linux-clang-asan` (clang 22, libstdc++, `-fsanitize=address`), at
+// `a89ec230` — the LAST code-affecting commit of this PR, deliberately:
+//
+//   witness                                  fixtures released   leaked
+//   ResidualPathReleasesTheFixtures                  2           671075 B / 61
+//   ThrowingPumpStillReleasesTheFixtures             1           333568 B / 12
+//   OuterCatchSwallowsAThrowingAddFailure            2           671075 B / 61
+//   QuiescedPathDestroysTheFixtures                  0           none
+//   ZeroBudgetOnAnEmptyContextIsNotResidual          0           none
+//   ------------------------------------------------------------------------
+//   total (DERIVED, not the claim)                   5          1675718 B / 134
+//
+// Two cross-checks that make the table self-auditing, and that a future reader
+// should re-run rather than trust: the per-witness figures sum EXACTLY to the
+// total (671075 + 333568 + 671075 = 1675718), which is what licenses "nothing else
+// in the binary leaks"; and `grep -c 'leak of 266272 byte'` on the run reports 5,
+// matching the fixture column. If either identity breaks, the table is wrong, not
+// the allocator.
+//
+// The per-fixture byte count is allocator- and stdlib-dependent, so a different
+// NUMBER in the last column is a re-measurement, not a regression. That licence
+// covers the bytes ONLY — never the witness list or the fixture column, which are
+// facts about which tests reach the residual path.
+//
 // So the suppressed set in a green run is bounded to fixtures that open no store
-// and register no listener under these two named witnesses -- a real cost,
-// bounded and named, on the same footing as
-// tests/interop/support/interop_fixture.cpp's larger version of it.
-//
-// Measured on `linux-clang-asan` (clang 22, libstdc++, `-fsanitize=address`) at
-// `6163b9d3`. The per-fixture byte count (266272 B) is allocator- and
-// stdlib-dependent, so treat a different NUMBER THERE as a re-measurement, not a
-// regression. It does NOT license a change in the fixture or witness COUNT above
-// without updating this comment -- that split is a structural fact about which
-// witnesses reach the residual path, not an artifact of the allocator.
+// and register no listener, under the named witnesses above — a real cost, bounded
+// and named, on the same footing as tests/interop/support/interop_fixture.cpp's
+// larger version of it.
 //
 // That same experiment is what proves the suppression is load-bearing rather than
 // decorative, and that the release() on the residual path actually executes: with
