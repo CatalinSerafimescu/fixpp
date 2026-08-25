@@ -409,12 +409,30 @@ struct SessionFixture {
 // `__lsan_ignore_object` + a named `ADD_FAILURE`, for a single `Engine`. This is the
 // mechanism's SECOND occurrence, not its first.
 //
-// So the reason this stays file-local is scope and ownership ALONE, and that reason
-// is sufficient on its own: `tests/support/pump_until_ready.hpp` is owned by an open
-// PR and cannot be edited from this branch. When it can be, the right hoist is NOT
-// templating on `SessionFixture` — it is a `std::vector<std::function<void()>>` of
-// release-closures, which decouples the guard from `SessionFixture` and `Engine`
-// alike and would let the interop fixture above collapse into the same seam.
+// WHY IT STAYS FILE-LOCAL — and this reason REPLACED an earlier one that has since
+// expired, which is worth saying rather than quietly editing. The first version of
+// this paragraph said the seam stays here because `tests/support/pump_until_ready.hpp`
+// was owned by an open PR and could not be edited from this branch. That was true
+// when written and is no longer: #301 merged, and the file is editable now. A
+// justification that rests on a temporary fact has to be re-earned when the fact
+// changes, not left standing because it once held.
+//
+// The reason that replaces it is stronger, because it is measured. The 18 sites
+// above were instrumented and run: at every one of them, on the path CI actually
+// takes, the `io_context` holds ZERO outstanding work by the time the guard runs —
+// confirmed at a zero budget, where `poll_one()` reports quiesced only if
+// `outstanding_work_ == 0`, and a suspended `co_spawn` frame would have kept that
+// count non-zero. So there are no suspended frames to leave behind at any of them.
+//
+// A release seam therefore has exactly ONE user — this site — and that is a fact
+// about the tree rather than an assumption about it. Hoisting a generic seam for one
+// user is the speculative generality the repo's own extraction rule warns against.
+//
+// When a SECOND site genuinely needs it, the right hoist is NOT templating on
+// `SessionFixture` — it is a `std::vector<std::function<void()>>` of release-closures,
+// which decouples the guard from `SessionFixture` and `Engine` alike and would let the
+// interop fixture above collapse into the same seam instead of remaining a second
+// implementation.
 //
 // `quiesce_on_exit`'s `transport` arm is deliberately absent: it exists because
 // cancelling clock sleeps does not unstick a coroutine parked in
