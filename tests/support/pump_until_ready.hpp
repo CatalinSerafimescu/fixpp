@@ -419,11 +419,10 @@ struct quiesce_on_exit {
     // Transport::close() is noexcept and idempotent (true of every transport
     // in this suite) — safe to call even if the caller already closed it. The
     // pointee must also OUTLIVE this guard: `~quiesce_on_exit` dereferences it
-    // unconditionally, on every exit path. At every current site this holds
-    // only because the transport's owning `unique_ptr` is moved into a
-    // `Session` declared before the guard — a copy-paste that skips that move,
-    // or declares the guard after the `unique_ptr` instead, leaves this
-    // dangling.
+    // unconditionally, on every exit path. The condition is simply that the
+    // pointee is declared BEFORE the guard — whether it is a `Session`-owned
+    // transport or a plain block-local does not matter, and both shapes exist.
+    // Declaring the guard first leaves this dangling.
     fixpp::transport::Transport* transport = nullptr;
 
     ~quiesce_on_exit() {

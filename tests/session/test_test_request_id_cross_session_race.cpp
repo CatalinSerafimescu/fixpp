@@ -470,10 +470,10 @@ struct SessionFixture {
 // into: real object declarations (the population); `test_quiesce_on_exit_residual.cpp`
 // (excluded, the self-test); the struct definition itself
 // (`tests/support/pump_until_ready.hpp`, `struct quiesce_on_exit {` — also a
-// zero-width match of this pattern); and the single comment hit inside THIS
-// file, at the sentence a few paragraphs down that names the shape by example
-// (readable in context, not a declaration) — note this pattern, by construction, does NOT
-// match `quiesce_or_release_on_exit` (no shared contiguous substring past
+// zero-width match of this pattern); and the comment hits inside THIS file --
+// the parenthetical just above and the sentence a few paragraphs down that names
+// the shape by example (each readable in context, neither a declaration) — note this pattern, by
+// construction, does NOT match `quiesce_or_release_on_exit` (no shared contiguous substring past
 // `quiesce_`), so it never picks up this file's own seam declarations, which is
 // the intended scope. The pattern also misses paren-init (`quiesce_on_exit
 // q(...)`), a declaration split across lines, and `auto`/alias-typed forms, so a
