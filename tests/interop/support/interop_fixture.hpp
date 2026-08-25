@@ -41,7 +41,7 @@ public:
     // no mutable knob. Tests that exercise the miss branch pass 0 ms.
     explicit InteropEngineFixture(fixpp::core::EngineConfig cfg = {},
                                   std::chrono::milliseconds teardown_bound =
-                                      std::chrono::seconds{2});
+                                      std::chrono::seconds{5});
 
     // Ensures Engine::stop() has completed before the Engine is destroyed
     // (the Engine dtor asserts stopped()). Idempotent with explicit stop_within().
@@ -159,14 +159,19 @@ private:
 
     // Destructor teardown bound (#292). Was 30 s, chosen when the destructor
     // DISCARDED the outcome and the wait was therefore free. Now that the
-    // destructor reports, the bound has to be sized so the report can actually
-    // be emitted: interop_business_message_interop_test carries `TIMEOUT 30`
+    // destructor reports, the bound must be small enough for the report to be
+    // emitted at all: interop_business_message_interop_test carries `TIMEOUT 30`
     // (tests/interop/CMakeLists.txt:380) and its cells already spend up to 3 s in
     // expect_graceful_stop (hp_support.hpp:317), so a 30 s destructor drive would
-    // blow the ctest timeout FIRST and ctest would report `Timeout` instead of the
-    // named ADD_FAILURE this whole change exists to produce. 2 s is three orders
-    // of magnitude above a healthy stop (an idle engine is bounded at 2 s and
-    // passes — support_smoke_test.cpp:114) and leaves headroom under the timeout.
+    // blow the ctest timeout FIRST — ctest would report `Timeout` and the named
+    // ADD_FAILURE this whole change exists to produce would never print.
+    //
+    // 5 s, not 2 s (gate-b/r1 P2-2). 2 s was justified only by an IDLE engine
+    // completing inside a 2 s ceiling (support_smoke_test.cpp:114), which is not
+    // a worst-case healthy stop and gave no real margin — too tight a bound makes
+    // the suite FLAKY, which is worse than the bug. The suite's own standard for
+    // a healthy graceful stop is the 3 s watchdog at hp_support.hpp:317, so the
+    // bound is set above that, leaving 3 + 5 = 8 s well inside `TIMEOUT 30`.
     std::chrono::milliseconds teardown_bound_;
 };
 

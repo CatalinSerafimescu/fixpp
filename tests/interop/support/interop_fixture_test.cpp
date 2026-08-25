@@ -227,3 +227,46 @@ TEST(InteropEngineFixtureTeardown, MissPathActuallyReleasesTheEngine) {
            "A destroyed Engine means ~Engine ran with teardown frames still "
            "suspended in ioc_, which is the silent failure #292 exists to prevent.";
 }
+
+// ── #292 — a second stop_within() drives the operation already in flight ────
+//
+// NAMED FOR WHAT IT PROVES. An earlier draft of this test was called
+// StopIsSpawnedExactlyOnce and claimed to pin the spawn-once guard. It did not:
+// under the exact mutation (delete the `if (!stop_fut_.valid())` guard so every
+// call co_spawns another stop()) it stayed GREEN, as did all four sibling
+// witnesses. Two probes were tried and both failed to discriminate —
+//   (a) restart + drain, then assert ioc().stopped();
+//   (b) assert ioc().stopped() immediately, with no drain.
+// Neither works, and the reason is structural: both frames live on the SAME
+// io_context, this fixture registers no sessions, so Engine::stop() completes
+// trivially and BOTH frames finish inside the same pump. There is no state in
+// which the abandoned frame outlives the pump, so there is nothing to observe.
+//
+// Recorded as a gate-b/r1 P1-2 WAIVER rather than dressed up: the spawn-once
+// guard is argued correct by reading (shared_future::get() does not invalidate,
+// so valid() is a permanent "already spawned" flag on the success, timeout AND
+// throw paths) and is NOT covered by a falsifiable test. A witness would need a
+// session whose teardown genuinely blocks, which needs a seam this PR cannot add
+// without touching src/.
+//
+// What this test DOES prove, which is real and was previously unasserted: a
+// zero-bound call leaves the operation in flight, and a later positive-bound
+// call drives that operation to completion and reports it. That is the re-entry
+// contract every interop cell depends on.
+TEST(InteropEngineFixtureTeardown, SecondStopWithinDrivesTheOperationInFlight) {
+    fixpp::interop::InteropEngineFixture fx;
+    fx.start();
+
+    // A 0 ms bound never enters the pump loop, so the operation is left in flight.
+    const auto first = fx.stop_within(std::chrono::milliseconds{0});
+    EXPECT_EQ(first, std::chrono::milliseconds{0});
+    ASSERT_FALSE(fx.stop_completed())
+        << "the 0 ms call must leave the operation in flight, or the second call "
+           "below has nothing to drive and this test proves nothing";
+
+    const auto second = fx.stop_within(std::chrono::seconds{5});
+    EXPECT_LT(second, std::chrono::seconds{5});
+    EXPECT_TRUE(fx.stop_completed())
+        << "a second stop_within() must drive the in-flight operation to "
+           "completion rather than reporting a miss";
+}

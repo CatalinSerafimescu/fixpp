@@ -16,6 +16,15 @@
 // stop()-did-not-complete path (see the header). Tell LeakSanitizer so the
 // intentional leak does not bury the ADD_FAILURE that path exists to report.
 //
+// WAIVED, GRAPH-WIDE, stated rather than understated (gate-b/r1 P2-1): this is
+// not a one-allocation excuse. LSan treats the ignored Engine as a ROOT, so
+// everything reachable through it — registry, Sessions, listeners, transports,
+// clock, logger/provider state, buffers — also drops out of leak reports, and
+// those resources are retained until process exit. Accepted because this path is
+// reached only when the test has ALREADY failed, so a red run is not being
+// turned green; the alternative (an LSan report burying the named diagnostic)
+// loses the one piece of information the path exists to produce.
+//
 // Shape follows the repo's established sanitizer-detection idiom (two separate
 // #if blocks, not an #elif chain) — see tests/alloc_guard/
 // test_validate_gate_alloc_guard.cpp:95-105. An #elif chain would skip the
@@ -81,41 +90,42 @@ InteropEngineFixture::~InteropEngineFixture() {
     // at step 1 of stop()'s teardown (engine.cpp:1196), so it reports true while
     // steps 2-5 are still suspended. Gating on it would take the "safe" branch
     // for exactly the partially-torn-down case that is least safe.
-    // No `if (!stop_completed_)` guard here: stop_within already returns
-    // immediately on that flag (see its own gate), so the branch would be a
-    // duplicate of it.
-    {
-        try {
-            (void)stop_within(teardown_bound_);
-        } catch (...) {
-            // stop() completed by THROWING. A destructor is implicitly noexcept,
-            // so letting this escape would call std::terminate and destroy the
-            // named failure this branch exists to report. The throw is reported
-            // below via the not-completed path.
+    // The WHOLE body is guarded, not just the stop drive (gate-b/r1 P1-3). A
+    // destructor is implicitly noexcept, and ADD_FAILURE() is NOT nothrow:
+    // gtest's AddTestPartResult throws GoogleTestFailureException under
+    // --gtest_throw_on_failure, and the streaming chain can throw on allocation.
+    // With the report outside the guard, the one path that exists to produce a
+    // named failure would instead call std::terminate under that flag.
+    try {
+        // No `if (!stop_completed_)` guard: stop_within already returns
+        // immediately on that flag, so the branch would duplicate it.
+        (void)stop_within(teardown_bound_);
+
+        if (stop_completed_) {
+            return;
         }
+
+        // Already-failing path. The stop() frame is still suspended inside ioc_
+        // and holds Engine&. Letting ~Engine run would either trip its stopped_
+        // assert and ABORT (stop never entered), or -- worse, because it is
+        // silent -- pass that assert while teardown frames are still live (stop
+        // entered but did not finish). Leak on purpose: the Engine, its
+        // EngineConfig-owned clock and its control_strand_ then outlive ioc_, so
+        // the frames ~ioc_ destroys next still have live referents. See the
+        // header for why reordering members instead would be strictly worse.
+        auto* leaked = engine_.release();
+        FIXPP_INTEROP_LSAN_IGNORE(leaked);
+
+        ADD_FAILURE() << "InteropEngineFixture: Engine::stop() did not complete successfully "
+                         "(it timed out within the "
+                      << teardown_bound_.count()
+                      << " ms teardown bound, or it threw); the Engine was leaked deliberately "
+                         "so this failure is reported instead of ~Engine being destroyed while "
+                         "its teardown frames are still suspended (#292).";
+    } catch (...) {
+        // Either stop() threw (reported via the not-completed path above) or the
+        // report itself threw. Nothing may escape a noexcept destructor.
     }
-
-    if (stop_completed_) {
-        return;
-    }
-
-    // Already-failing path. The stop() frame is still suspended inside ioc_ and
-    // holds Engine&. Letting ~Engine run would either trip its stopped_ assert
-    // and ABORT (stop never entered), or — worse, because it is silent — pass
-    // that assert while teardown frames are still live (stop entered but did not
-    // finish). Leak on purpose: the Engine, its EngineConfig-owned clock and its
-    // control_strand_ then outlive ioc_, so the frames ~ioc_ destroys next still
-    // have live referents. See the header for why reordering members instead
-    // would be strictly worse.
-    auto* leaked = engine_.release();
-    FIXPP_INTEROP_LSAN_IGNORE(leaked);
-
-    ADD_FAILURE() << "InteropEngineFixture: Engine::stop() did not complete successfully "
-                     "(it timed out within the "
-                  << teardown_bound_.count()
-                  << " ms teardown bound, or it threw); the Engine was leaked deliberately "
-                     "so this failure is reported instead of ~Engine being destroyed while "
-                     "its teardown frames are still suspended (#292).";
 }
 
 void InteropEngineFixture::start() {
@@ -175,17 +185,27 @@ std::chrono::milliseconds InteropEngineFixture::stop_within(std::chrono::millise
         if (ioc_.stopped()) {
             ioc_.restart();
         }
-        ioc_.run_for(kPumpSlice);
+        // Clamp the final slice to the remaining budget (gate-b/r1 P1-1). An
+        // unclamped run_for can START at t_end - 1ms and run a whole 5 ms slice,
+        // so completion at t_end + 4 ms was accepted as "within bound". The
+        // shared pump does the same clamp for the same reason.
+        ioc_.run_for(std::min<std::chrono::steady_clock::duration>(
+            kPumpSlice, t_end - std::chrono::steady_clock::now()));
     }
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0);
 
-    // Completion is recorded ONLY after the future resolved. get() both surfaces
-    // any exception stop() threw (propagated to the test) and invalidates the
-    // future. shared_future::get() does not invalidate and rethrows on every call,
-// so a throwing stop() leaves the operation observably finished rather than
-// permanently unready.
+    // Completion is recorded ONLY after the future resolved AND get() returned
+    // normally. get() surfaces any exception stop() threw, propagating it to the
+    // caller. shared_future::get() does NOT invalidate and rethrows on every
+    // subsequent call, so a throwing stop() leaves the operation observably
+    // finished (valid, ready) rather than permanently unready — which is what
+    // keeps the spawn-once guard correct on that path.
+    //
+    // ORDER IS LOAD-BEARING: get() first, then set the flag. Swapping them makes
+    // a throwing stop() look like a completed one, and the destructor would then
+    // destroy the Engine as though teardown had succeeded.
     if (ready()) {
         stop_fut_.get();
         stop_completed_ = true;
