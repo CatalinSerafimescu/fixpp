@@ -216,7 +216,7 @@ protected:
     // `inbound_frames`'s doc comment). nullopt means the pump budget was
     // missed.
     std::optional<fixpp::core::expected_t<void>> feed_inbound(Session& sess,
-                                                               std::span<const std::byte> frame) {
+                                                              std::span<const std::byte> frame) {
         inbound_frames.emplace_back(frame.begin(), frame.end());
         std::span<const std::byte> stable(inbound_frames.back());
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(stable), asio::use_future);
@@ -246,9 +246,8 @@ protected:
             return ::testing::AssertionFailure() << "open() should succeed";
         }
         if (sess.state() != fsm_state::LogonSent) {
-            return ::testing::AssertionFailure()
-                   << "expected LogonSent after open(), got state "
-                   << static_cast<int>(sess.state());
+            return ::testing::AssertionFailure() << "expected LogonSent after open(), got state "
+                                                 << static_cast<int>(sess.state());
         }
 
         // Feed peer Logon-ack (seq=1): LogonSent → Active.
@@ -262,8 +261,8 @@ protected:
             return ::testing::AssertionFailure() << "Logon-ack should succeed";
         }
         if (sess.state() != fsm_state::Active) {
-            return ::testing::AssertionFailure()
-                   << "expected Active after Logon-ack, got state " << static_cast<int>(sess.state());
+            return ::testing::AssertionFailure() << "expected Active after Logon-ack, got state "
+                                                 << static_cast<int>(sess.state());
         }
         return ::testing::AssertionSuccess();
     }
@@ -300,8 +299,8 @@ TEST_F(LogoutExchangeTest, FeedInboundCopiesIntoTheArenaNotTheCallersBuffer) {
     const std::byte* caller_data = caller_buffer.data();
 
     auto r = feed_inbound(sess, caller_buffer);
-    ASSERT_TRUE(r.has_value())
-        << kPumpBudgetMiss << "FeedInboundCopiesIntoTheArenaNotTheCallersBuffer";
+    ASSERT_TRUE(r.has_value()) << kPumpBudgetMiss
+                               << "FeedInboundCopiesIntoTheArenaNotTheCallersBuffer";
 
     ASSERT_FALSE(inbound_frames.empty());
     EXPECT_NE(inbound_frames.back().data(), caller_data)
@@ -349,14 +348,16 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
     // Feed inbound Logout confirmation (peer seq=2, since we sent seq 1 for Logon).
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
     auto inbound_r = feed_inbound(sess, peer_logout);
-    ASSERT_TRUE(inbound_r.has_value()) << kPumpBudgetMiss << "GracefulBothDirections: inbound Logout";
+    ASSERT_TRUE(inbound_r.has_value())
+        << kPumpBudgetMiss << "GracefulBothDirections: inbound Logout";
     EXPECT_TRUE(inbound_r->has_value()) << "Inbound Logout should be accepted";
 
     // Session should now be Disconnected.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
 
     // close() should complete without error.
-    ASSERT_TRUE(pump_until_ready(ioc, close_fut)) << kPumpBudgetMiss << "GracefulBothDirections: close()";
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut))
+        << kPumpBudgetMiss << "GracefulBothDirections: close()";
     auto close_r = close_fut.get();
     EXPECT_TRUE(close_r.has_value()) << "close() should complete ok";
 }
@@ -465,14 +466,15 @@ TEST_F(LogoutExchangeTest, NotConnectedInboundLogoutDisconnects) {
     quiesce_on_exit quiesce{ioc, *clock};
 
     auto r3 = open_session(sess3);
-    ASSERT_TRUE(r3.has_value()) << kPumpBudgetMiss << "NotConnectedInboundLogoutDisconnects: open()";
+    ASSERT_TRUE(r3.has_value()) << kPumpBudgetMiss
+                                << "NotConnectedInboundLogoutDisconnects: open()";
     ASSERT_TRUE(r3->has_value());
     EXPECT_EQ(sess3.state(), fsm_state::LogonSent);
 
     auto logout = make_logout_frame("FIX.4.2", 1, "TW", "ISLD");
     auto ir = feed_inbound(sess3, logout);
-    ASSERT_TRUE(ir.has_value())
-        << kPumpBudgetMiss << "NotConnectedInboundLogoutDisconnects: feed_inbound(Logout)";
+    ASSERT_TRUE(ir.has_value()) << kPumpBudgetMiss
+                                << "NotConnectedInboundLogoutDisconnects: feed_inbound(Logout)";
     EXPECT_TRUE(ir->has_value());
     EXPECT_EQ(sess3.state(), fsm_state::Disconnected)
         << "LogonSent + inbound Logout → Disconnected";
@@ -511,7 +513,8 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     quiesce_on_exit quiesce{ioc, *clock};
 
     auto r = open_session(sess);
-    ASSERT_TRUE(r.has_value()) << kPumpBudgetMiss << "LogonReceivedInboundLogoutDisconnects: open(sess)";
+    ASSERT_TRUE(r.has_value()) << kPumpBudgetMiss
+                               << "LogonReceivedInboundLogoutDisconnects: open(sess)";
     ASSERT_TRUE(r->has_value());
 
     ASSERT_TRUE(drive_to_active_initiator(sess2));
@@ -520,8 +523,8 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     // Feed inbound Logout (peer initiates Logout while we are Active).
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
     auto ir = feed_inbound(sess2, peer_logout);
-    ASSERT_TRUE(ir.has_value())
-        << kPumpBudgetMiss << "LogonReceivedInboundLogoutDisconnects: feed_inbound(Logout)";
+    ASSERT_TRUE(ir.has_value()) << kPumpBudgetMiss
+                                << "LogonReceivedInboundLogoutDisconnects: feed_inbound(Logout)";
     EXPECT_TRUE(ir->has_value());
 
     // Per matrix Active row: inbound Logout → emit Logout → Disconnected.
@@ -557,8 +560,8 @@ TEST_F(LogoutExchangeTest, LogoutSentInboundLogoutDisconnects) {
     // Feed inbound Logout confirmation.
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
     auto ir = feed_inbound(sess, peer_logout);
-    ASSERT_TRUE(ir.has_value())
-        << kPumpBudgetMiss << "LogoutSentInboundLogoutDisconnects: feed_inbound(Logout)";
+    ASSERT_TRUE(ir.has_value()) << kPumpBudgetMiss
+                                << "LogoutSentInboundLogoutDisconnects: feed_inbound(Logout)";
     ASSERT_TRUE(ir->has_value());
 
     // LogoutSent + inbound Logout → Disconnected.
@@ -616,7 +619,8 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogout_SeqnumOverflow_SurfacesError) {
     auto peer_logout = make_logout_frame("FIX.4.2", next_inbound, "TW", "ISLD");
     auto inbound_r = feed_inbound(sess, peer_logout);
     ASSERT_TRUE(inbound_r.has_value())
-        << kPumpBudgetMiss << "ActiveInboundLogout_SeqnumOverflow_SurfacesError: feed_inbound(Logout)";
+        << kPumpBudgetMiss
+        << "ActiveInboundLogout_SeqnumOverflow_SurfacesError: feed_inbound(Logout)";
 
     EXPECT_FALSE(inbound_r->has_value())
         << "Active inbound Logout must surface assign_outbound() overflow; "
@@ -651,8 +655,8 @@ TEST_F(LogoutExchangeTest, DisconnectedInboundLogoutIgnored) {
 
     auto logout = make_logout_frame("FIX.4.2", 3, "TW", "ISLD");
     auto ir = feed_inbound(sess, logout);
-    ASSERT_TRUE(ir.has_value())
-        << kPumpBudgetMiss << "DisconnectedInboundLogoutIgnored: feed_inbound(Logout)";
+    ASSERT_TRUE(ir.has_value()) << kPumpBudgetMiss
+                                << "DisconnectedInboundLogoutIgnored: feed_inbound(Logout)";
     // Disconnected state ignores all inbound (co_return ok per matrix).
     EXPECT_TRUE(ir->has_value());
     EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "Disconnected stays Disconnected";
