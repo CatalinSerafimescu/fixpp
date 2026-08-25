@@ -161,14 +161,20 @@ protected:
     // that is already gone by the time the guard runs. `std::deque` never
     // invalidates existing elements on push_back, so a span into it stays
     // valid regardless of when/whether the coroutine quiesces — PROVIDED the
-    // deque itself outlives `ioc`. Declared BEFORE `ioc` (gate-b/r1 P1-2):
-    // members destruct in REVERSE declaration order, so a coroutine frame
-    // still held by `ioc`'s own internal completion machinery at the moment
-    // `ioc` is destroyed finds this arena still alive, not already freed.
-    // The prior order (ioc declared first, so inbound_frames destructed
-    // BEFORE it) was exactly backwards: `std::deque`'s non-invalidation
-    // guarantee protects against reallocation, not against the arena's OWNER
-    // dying first.
+    // deque itself outlives `ioc`. Declared BEFORE `ioc` (gate-b/r1 P1-2) as
+    // a DEFENSIVE measure: if `ioc`'s own teardown machinery ever resumed,
+    // rather than merely destroyed, a still-suspended coroutine frame holding
+    // a span into this arena, this order is what would keep the arena alive
+    // for it. That is not what makes the 10 `quiesce_on_exit` sites below
+    // safe today — that is the arena COPY (see the comment above
+    // `FeedInboundSpansTheArenaCopyNotTheCallersBuffer`) — and this order is
+    // currently unpinned: swapping it (declaring `ioc` first) leaves the
+    // whole suite green, and two probes built to fault the swapped order
+    // (a frame left unpumped, and one drained with a single `poll_one()`
+    // first) both stayed ASan-clean (gate-b/r3 finding 3). asio destroys
+    // pending completion handlers on `io_context` destruction rather than
+    // invoking them, so no in-tree shape currently exercises the resumption
+    // this order guards against.
     std::deque<std::vector<std::byte>> inbound_frames;
 
     asio::io_context ioc;
@@ -287,12 +293,14 @@ protected:
 // taxonomy (:252-262) calls unsafe (a block-local declared after the guard
 // dies BEFORE it, since destruction runs in reverse declaration order). They
 // are safe only because `feed_inbound` (above) copies each frame into
-// `inbound_frames`, a fixture-owned deque declared before `ioc`, and the
-// coroutine spawned by `feed_inbound_spawn` reads THAT span for its whole
-// lifetime — never the caller's own buffer. That invariant lives only in
-// prose; nothing pins it. Someone "removing a redundant copy" from
-// `feed_inbound_spawn` would leave this whole suite green today and flip all
-// 10 sites from safe to hazardous silently.
+// `inbound_frames`, a fixture-owned deque, and the coroutine spawned by
+// `feed_inbound_spawn` reads THAT span for its whole lifetime — never the
+// caller's own buffer. That invariant lives only in prose; nothing pins it.
+// Someone "removing a redundant copy" from `feed_inbound_spawn` would leave
+// this whole suite green today and flip all 10 sites from safe to hazardous
+// silently. (`inbound_frames` is also declared before `ioc` — see its own
+// doc comment — but that is a separate, currently-defensive-only invariant,
+// not what makes these 10 sites safe.)
 //
 // A round-1 version of this witness compared `data()` pointers after the
 // pump completed, which proves an arena copy EXISTS but not that the
