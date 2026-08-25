@@ -239,11 +239,35 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
     //     handler that became ready exactly at the deadline boundary. On the
     //     quiesced path it dispatches nothing and only sets `stopped_`.
     //   - Only at a zero or already-expired budget does the probe resume work that
-    //     `run_for` would not have. No caller outside this suite's own witnesses
-    //     passes such a budget (checked: every non-witness call uses the default).
-    // Either way the dispatch happens in the CALLER'S scope, which is the whole
-    // reason this is a free function called on the miss branch rather than a guard
-    // — so anything the resumed frame borrowed is still alive by construction.
+    //     `run_for` would not have.
+    //
+    // ⚠️ THE SECOND BULLET IS A PRECONDITION ON CALLERS, NOT A SURVEY RESULT. It is
+    // true today that every non-witness call takes the default budget, but that is a
+    // property of the current tree, not an invariant — and #289 is adding callers.
+    // A caller passing a zero or already-expired budget makes the probe resume work
+    // nothing else would. DO NOT pass one here without reading the paragraph below.
+    //
+    // ⚠️ AND THE SAFETY OF THAT DISPATCH IS A PROPERTY OF THE CALL SITE, NOT OF THIS
+    // FUNCTION. An earlier version of this comment claimed the dispatch "happens in
+    // the CALLER'S scope, so anything the resumed frame borrowed is still alive by
+    // construction". That is true of a MISS-BRANCH drain — the shape this helper was
+    // designed for, where the drain runs inside the scope that still owns the
+    // borrowed storage — and FALSE of a DESTRUCTOR-BODY drain, which is the other
+    // shape callers actually use. A destructor body protects fixture MEMBERS; a
+    // caller's temporary, or a block-local declared after the fixture, is already
+    // dead by then.
+    //
+    // Both shapes exist right now, in one file:
+    //   `test_next_expected_msgseqnum.cpp:393`  `Fixture::feed`'s miss branch — SAFE
+    //   `test_next_expected_msgseqnum.cpp:374`  `~Fixture()`               — NOT
+    // and that is not a hypothetical pairing: deleting the in-`feed` drain while
+    // keeping `~Fixture`'s reproduces a `heap-use-after-free` under ASan, because
+    // `~Fixture`'s drain is precisely what RESUMES the frame over the dead temporary.
+    //
+    // So this probe confers no safety. It inherits whatever the call site already
+    // guarantees, and it makes a resumption slightly more likely at sites that were
+    // quiet only because nothing resumed them. (Correction owed to the #289/#307
+    // session, which had the RED oracle for it.)
     (void)ioc.poll_one();
     if (!ioc.stopped()) {
         ADD_FAILURE() << "#289: the io_context did not run out of work within the teardown "
