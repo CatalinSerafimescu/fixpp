@@ -134,8 +134,9 @@ inline constexpr auto kQuiesceBudget = std::chrono::seconds{5};
 // This is the #289 migration shape, and it is NOT `pump_until_ready`. The two
 // differ on purpose:
 //
-//   - No work guard. `pump_until` takes one (:64) so `run_for` cannot drain
-//     early, which is what gives that helper its documented COST FLOOR (:32-39:
+//   - No work guard. `pump_until` takes one (its `wg = asio::make_work_guard(ioc)`)
+//     so `run_for` cannot drain early, which is what gives that helper its
+//     documented COST FLOOR (`kPumpSlice`'s doc comment above:
 //     "1 ms slice = 124 ms" over 106 calls, ~1.17 ms/call). The #289 sites were
 //     measured at ~27 us, so adopting that floor would be a ~40x per-call
 //     regression at 32 sites. Here `run_for` keeps its normal early-drain
@@ -147,8 +148,8 @@ inline constexpr auto kQuiesceBudget = std::chrono::seconds{5};
 //     future-readiness would leave that detached task unserviced; running the
 //     original window to drain-or-deadline services it exactly as today.
 //
-// What it DOES take from `pump_until_ready` is the load-bearing property at
-// :79-81 — the caller must consult the bool BEFORE `fut.get()`. `[[nodiscard]]`
+// What it DOES take from `pump_until_ready` is the load-bearing property in
+// its own doc comment — the caller must consult the bool BEFORE `fut.get()`. `[[nodiscard]]`
 // puts a compiler DIAGNOSTIC on ignoring it, rather than leaving it to a
 // reviewer or a lexical checker. Note that is a WARNING, not an error: this
 // repo does not build tests under a blanket `-Werror` (the one targeted use is
@@ -156,8 +157,9 @@ inline constexpr auto kQuiesceBudget = std::chrono::seconds{5};
 // do not describe it as compiler-ENFORCED.
 //
 // The grace slice is not a "CI tolerance" and must not be grown into one.
-// `run_one_until` tests `now < abs_time` BEFORE dispatching (:50-52), so a
-// handler that became ready at the instant the window closed is left QUEUED.
+// `run_one_until` tests `now < abs_time` BEFORE dispatching (see `pump_until`'s
+// doc comment above), so a handler that became ready at the instant the window
+// closed is left QUEUED.
 // One `kPumpSlice` gives exactly that handler a dispatch opportunity. It moves
 // the deadline by one slice; it does not make a slow runner safe, and no
 // statically-chosen value could.
@@ -203,12 +205,26 @@ template <class Fut>
 // `transport` field (below) from a real defect (gate-b/r1 P1-1) — cancelling
 // clock sleeps does not unstick a coroutine parked in `async_write` /
 // `async_read_some`, which completes only when the transport itself is closed.
-// No caller here attaches a live Transport (this file has zero references to
-// one), so the gap is latent. It stops being latent for the FIRST migrated
-// fixture that has a live Transport and no Clock — precisely the combination
-// this helper is for. Such a caller must close the transport itself before
-// calling this, or use `quiesce_on_exit`. Do not assume this drain is
-// sufficient because it was sufficient here.
+// Stated as a CONDITION rather than a count, because the count form of this
+// sentence was already going stale. It used to read "no caller here attaches a
+// live Transport … so the gap is latent", and #307 lands exactly such a caller
+// (`CompID_KnobOff_AuthzAllowListStillEnforced`, which attaches a NullSinkTransport
+// and has no Clock). A sentence that names its own falsification condition — "it
+// stops being latent for the FIRST fixture that…" — should have been written as
+// that condition in the first place. Conditions are merge-order independent;
+// counts create an obligation on whoever merges next.
+//
+// The condition:
+//
+//     A caller whose transport can PARK a coroutine — i.e. whose async_write /
+//     async_read_some can stay pending — MUST use `quiesce_on_exit` with
+//     `.transport` set, or close the transport itself before calling this.
+//     `drain_or_report` cannot close a transport and never will, whoever calls it.
+//
+// A transport that cannot park is unaffected: that is a property of the transport,
+// not of how many callers exist. #307's is of that kind — its `async_read_some`
+// reports EOF immediately and its `async_write` swallows its bytes — so the gap is
+// unreachable there. Do not read "unreachable at that caller" as "unreachable".
 //
 // Call this while EVERY object the suspended coroutine references is still
 // alive. That is not automatic: a fixture destructor body protects fixture
@@ -223,6 +239,75 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
                             std::chrono::steady_clock::duration budget = kQuiesceBudget) {
     ioc.restart();
     ioc.run_for(budget);
+    // (#305) THE PROBE. See `quiesce_on_exit`'s destructor for the full argument;
+    // the short version is that `run_for` can return WITHOUT ever consulting the
+    // work count, so `stopped()` alone reports a residual that does not exist.
+    // This helper is NEW (#301) and inherited the defect by having the identical
+    // shape — fixed here in the same change rather than only in the older copy,
+    // because a fix that lands on one of two identical shapes is how this repo's
+    // "fixed some sites of a claim, missed another" class keeps recurring.
+    //
+    // WHAT THIS COSTS A CALLER, bounded rather than left as "it may dispatch",
+    // because #289's migration is adding callers faster than anyone re-reads this:
+    //   - At the default `kQuiesceBudget` (5 s), and at any budget whose deadline
+    //     has NOT already passed at entry, `run_for` enters the scheduler and has
+    //     already run every ready handler. The probe can then dispatch at most ONE
+    //     handler that became ready exactly at the deadline boundary. On the
+    //     quiesced path it dispatches nothing and only sets `stopped_`.
+    //   - Only at a zero or already-expired budget does the probe resume work that
+    //     `run_for` would not have.
+    //
+    // ⚠️ THE SECOND BULLET IS A PRECONDITION ON CALLERS, NOT A SURVEY RESULT. It is
+    // true today that every non-witness call takes the default budget, but that is a
+    // property of the current tree, not an invariant — and #289 is adding callers.
+    // A caller passing a zero or already-expired budget makes the probe resume work
+    // nothing else would. DO NOT pass one here without reading the paragraph below.
+    //
+    // ⚠️ AND THE SAFETY OF THAT DISPATCH IS A PROPERTY OF THE CALL SITE, NOT OF THIS
+    // FUNCTION. An earlier version of this comment claimed the dispatch "happens in
+    // the CALLER'S scope, so anything the resumed frame borrowed is still alive by
+    // construction". That is true of a MISS-BRANCH drain — the shape this helper was
+    // designed for, where the drain runs inside the scope that still owns the
+    // borrowed storage — and FALSE of a DESTRUCTOR-BODY drain, which is the other
+    // shape callers actually use. A destructor body protects fixture MEMBERS; a
+    // caller's temporary, or a block-local declared after the fixture, is already
+    // dead by then.
+    //
+    // Both shapes exist right now, in one file:
+    //   `test_next_expected_msgseqnum.cpp:393`  `Fixture::feed`'s miss branch — SAFE
+    //   `test_next_expected_msgseqnum.cpp:374`  `~Fixture()`               — NOT
+    // and that is not a hypothetical pairing: deleting the in-`feed` drain while
+    // keeping `~Fixture`'s reproduces a `heap-use-after-free` under ASan, because
+    // `~Fixture`'s drain is precisely what RESUMES the frame over the dead temporary.
+    //
+    // ⚠️ (gate-b/r2) SAFE ABOVE IS CONDITIONAL, not unqualified: it holds only
+    // because `feed`'s own drain SUCCEEDS at this call site. If `drain_or_report`
+    // ever reported a residual here, `feed` returns anyway (this function is
+    // `void`), and `~Fixture`'s LATER drain would then resume a frame whose
+    // borrowed temporary is already gone -- `feed` cannot retain it; the storage
+    // is not its to hold. It does not bite HERE because this fixture has no
+    // clock and no transport (`quiesce_on_exit`'s ⚠️ DIVERGENCE paragraph above
+    // applies: no forcing lever, nothing closes a transport, nothing cancels a
+    // sleep), so nothing between `feed`'s drain and `~Fixture`'s can change a
+    // frame's readiness -- a frame that survives `feed`'s 5 s drain is in the
+    // same state at `~Fixture`. The one caller that reaches the miss branch with
+    // non-default durations leaves a single posted handler, which the default
+    // budget's drain dispatches.
+    //
+    // The remedy for the day this DOES bite is not a `bool` return from
+    // `drain_or_report` -- that pushes a policy decision onto every #289
+    // migration call site, and it still would not help `feed`, which cannot
+    // retain a caller's temporary regardless of what it is told. The remedy is
+    // the arena-copy pattern `logout_exchange_test.cpp`'s `feed_inbound` already
+    // uses: copy into a fixture-owned arena declared before `ioc` (so it
+    // outlives `ioc`'s own destruction) and span the copy, never the caller's
+    // own buffer.
+    //
+    // So this probe confers no safety. It inherits whatever the call site already
+    // guarantees, and it makes a resumption slightly more likely at sites that were
+    // quiet only because nothing resumed them. (Correction owed to the #289/#307
+    // session, which had the RED oracle for it.)
+    (void)ioc.poll_one();
     if (!ioc.stopped()) {
         ADD_FAILURE() << "#289: the io_context did not run out of work within the teardown "
                          "drain, so a coroutine frame is probably still suspended and will be "
@@ -292,7 +377,19 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // false-positive sweep is separate: for any `io_context` reachable from this
 // caller, no production code outside `src/capi/` creates a work guard, so
 // `stopped()==false` here really does mean session/coroutine work is still
-// outstanding. It is also not authoritative: `mock_clock::sleep_until`
+// outstanding.
+//
+// ⚠️ (#305) THAT LAST SENTENCE WAS AN OVER-CLAIM, AND THE PROBE BELOW IS WHAT
+// MAKES IT TRUE. The work-guard census above is sound as far as it goes, but it
+// reasons only about who can hold work OPEN — it never asks whether the work
+// count was CONSULTED. `run_for` can return without consulting it at all (see the
+// probe in the destructor), and then `stopped()==false` means "the deadline had
+// already passed", not "work is outstanding". The census could not have caught
+// that, because the defect is not in the population it enumerates. Kept, rather
+// than deleted and quietly rewritten, so the shape of the mistake stays visible:
+// an exhaustive sweep of the wrong axis reads exactly like proof.
+//
+// It is also not authoritative: `mock_clock::sleep_until`
 // registers a new waiter whenever the deadline is still in the future
 // (`src/core/test/mock_clock.cpp:119-126`), and `cancel_sleeps()` above is a
 // ONE-SHOT drain that installs nothing to reject a later registration
@@ -320,7 +417,12 @@ struct quiesce_on_exit {
     // aggregate, so the field may be assigned after construction, e.g. once
     // the caller attaches the transport) whenever one is. Assumes
     // Transport::close() is noexcept and idempotent (true of every transport
-    // in this suite) — safe to call even if the caller already closed it.
+    // in this suite) — safe to call even if the caller already closed it. The
+    // pointee must also OUTLIVE this guard: `~quiesce_on_exit` dereferences it
+    // unconditionally, on every exit path. The condition is simply that the
+    // pointee is declared BEFORE the guard — whether it is a `Session`-owned
+    // transport or a plain block-local does not matter, and both shapes exist.
+    // Declaring the guard first leaves this dangling.
     fixpp::transport::Transport* transport = nullptr;
 
     ~quiesce_on_exit() {
@@ -330,6 +432,34 @@ struct quiesce_on_exit {
         clock.cancel_sleeps();
         ioc.restart();
         ioc.run_for(budget);
+        // ── (#305) THE PROBE, and it repairs a predicate this header over-claimed ──
+        //
+        // `io_context::run_for` is `run_until`, which loops on `run_one_until`, and
+        // `run_one_until` is `while (now < abs_time) { ... }  return 0;`
+        // (asio impl/io_context.hpp:112-131). If the deadline has ALREADY arrived at
+        // entry the loop body never runs, `impl_.wait_one` is never called, and
+        // nothing consults `outstanding_work_` or sets `stopped_`. The `restart()`
+        // immediately above has just cleared that flag. So `stopped()` reads false
+        // whether or not any work exists — unconditionally at a zero budget, and
+        // reachable at any budget's deadline boundary.
+        //
+        // `poll_one()` closes it: `scheduler::poll_one` is
+        // `if (outstanding_work_ == 0) { stop(); return 0; }`
+        // (asio detail/impl/scheduler.ipp:289-295), so after this line `stopped()`
+        // reflects the WORK COUNT rather than the deadline.
+        //
+        // ⚠️ THIS IS A NEW CAPABILITY AT A ZERO BUDGET, NOT AN INHERITED OBLIGATION,
+        // and the distinction is the one an earlier draft of this comment got wrong.
+        // `run_for(budget)` already resumes coroutines, so "a drain resumes frames" is
+        // nothing new at a normal budget. But `run_for(0)` resumes NOTHING — it returns
+        // before entering the scheduler — whereas `poll_one()` WILL dispatch. So the
+        // expired-deadline path gains the ability to resume a frame, in exactly the case
+        // where a caller chose a zero budget because it wanted nothing run. The
+        // obligation that follows is the usual one and it now binds a path it did not
+        // bind before: storage a suspended frame borrowed must outlive this guard.
+        // Witnessed directly rather than described — see the zero-budget cases in
+        // tests/session/test_quiesce_on_exit_residual.cpp.
+        (void)ioc.poll_one();
         if (!ioc.stopped()) {
             ADD_FAILURE() << "quiesce_on_exit: the io_context did not run out of work within the "
                              "configured quiesce window. At this caller that is expected to mean a "

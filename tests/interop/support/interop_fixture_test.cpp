@@ -63,7 +63,8 @@ TEST(InteropEngineFixtureRunUntil, RevivesContextStoppedAtEntry) {
 // The fixture MUST be scoped INSIDE the macro's statement. Declaring it before
 // EXPECT_NONFATAL_FAILURE would run its destructor after the macro stopped
 // intercepting failures, and this test would pass while asserting nothing — the
-// same trap called out in tests/session/test_quiesce_on_exit_residual.cpp:110.
+// same trap called out in tests/session/test_quiesce_on_exit_residual.cpp's
+// `QuiesceOnExitResidualWitness.ReportsWhenIocNeverDrains` scoping comment.
 //
 // Polarity, both directions:
 //   MISS  -> exactly one non-fatal failure naming the bound   (this test)
