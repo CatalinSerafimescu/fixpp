@@ -1251,6 +1251,94 @@ TEST(CrossSessionTeardown, ThrowingPumpStillReleasesTheFixtures) {
            "unknown state.";
 }
 
+// ── (gate-b/r2 finding 4) the OUTER `catch(...)` is reachable and swallows a ──
+//    throwing ADD_FAILURE, after the release has already run ────────────────
+//
+// `~quiesce_or_release_on_exit`'s outer `catch (...) { }` exists because
+// `ADD_FAILURE()` can throw under `--gtest_throw_on_failure`, and "nothing may
+// escape a destructor" is unconditional: this destructor is implicitly
+// `noexcept`, so letting the throw through is `std::terminate`. No CI lane sets
+// `--gtest_throw_on_failure`, so that branch never ran and its own comment's
+// claim -- "the release has already happened above it, and ADD_FAILURE has
+// already recorded the failure before throwing" -- was untested.
+//
+// RAII-scoped `GTEST_FLAG_SET(throw_on_failure, true)`, not a subprocess: the
+// residual path's own `ADD_FAILURE()` is enough to drive the throw in-process,
+// and driving it is exactly what exercises the catch this test pins. Restoring
+// the previous value is mandatory -- left set, every later `EXPECT_*` in this
+// binary would throw instead of merely failing.
+struct throw_on_failure_scope {
+    bool previous = GTEST_FLAG_GET(throw_on_failure);
+    throw_on_failure_scope() { GTEST_FLAG_SET(throw_on_failure, true); }
+    ~throw_on_failure_scope() { GTEST_FLAG_SET(throw_on_failure, previous); }
+};
+
+TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
+    std::atomic<int> destructions{0};
+    std::atomic<int> destructions_b{0};
+
+    EXPECT_NONFATAL_FAILURE(
+        ([&destructions, &destructions_b] {
+            // Scope ends AFTER the guard's scope below, so throw_on_failure is
+            // still true when ~quiesce_or_release_on_exit's ADD_FAILURE() runs.
+            throw_on_failure_scope throw_scope;
+
+            // Same residual shape as ResidualPathReleasesTheFixtures (two
+            // fixtures, 0 ms budget, real outstanding work) -- reused here rather
+            // than simplified, so this witness forces the guard down the exact
+            // path whose ADD_FAILURE is under test.
+            std::deque<std::vector<std::byte>> frames;
+            asio::io_context ioc;
+            auto clock = make_witness_clock(ioc);
+
+            auto sA =
+                std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_A", "TARGET_A");
+            sA->destructions = &destructions;
+            auto sB =
+                std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_B", "TARGET_B");
+            sB->destructions = &destructions_b;
+
+            quiesce_or_release_on_exit guard{ioc, *clock, {&sA, &sB}, std::chrono::milliseconds{0}};
+
+            auto fut_open = asio::co_spawn(ioc, sA->session->open(), asio::use_future);
+            ASSERT_TRUE(pump_until_ready(ioc, fut_open))
+                << kPumpBudgetMiss << "opening the witness session";
+            ASSERT_TRUE(fut_open.get().has_value());
+
+            auto& logon =
+                frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1));
+            auto fut = asio::co_spawn(ioc,
+                                      sA->session->on_inbound_frame(
+                                          std::span<const std::byte>{logon.data(), logon.size()}),
+                                      asio::use_future);
+            (void)fut;  // deliberately never pumped
+
+            // ~guard runs here, while throw_on_failure is still true: it takes
+            // the residual branch, releases sA and sB, then ADD_FAILURE() throws
+            // GoogleTestFailureException straight into the outer catch(...).
+        }()),
+        "the io_context did not run out of work");
+
+    // (a) NOTHING ESCAPED. If the outer catch did not swallow the throw, it
+    // would propagate out of an implicitly-noexcept destructor and the process
+    // would already have called std::terminate -- reaching this line at all is
+    // the assertion.
+    SUCCEED() << "control reached past ~quiesce_or_release_on_exit without "
+                 "std::terminate, so the outer catch(...) swallowed the throw";
+
+    // (b) THE RELEASE STILL HAPPENED. The throw must not have preempted the
+    // release loop, which runs above the ADD_FAILURE() that throws. A mutant
+    // that reorders ADD_FAILURE() before the release loop would destroy the
+    // fixtures here instead of releasing them.
+    EXPECT_EQ(destructions.load(std::memory_order_relaxed), 0)
+        << "the SessionFixture was destroyed even though ~quiesce_or_release_on_exit "
+           "throws under --gtest_throw_on_failure -- the release loop must run, and "
+           "complete, before ADD_FAILURE() can throw.";
+    EXPECT_EQ(destructions_b.load(std::memory_order_relaxed), 0)
+        << "the SECOND SessionFixture was destroyed even though "
+           "~quiesce_or_release_on_exit throws under --gtest_throw_on_failure.";
+}
+
 // ── Direction 2: QUIESCED ⇒ the fixture is DESTROYED, and nothing is reported ─
 //
 // Without this, direction 1 is satisfied by a guard that releases unconditionally —
