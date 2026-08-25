@@ -95,26 +95,39 @@
 // What bounds the exposure is WHICH runs can reach it. There are two:
 //   - a real `CrossSessionDisjoint` residual, where the guard's ADD_FAILURE has
 //     already made the binary RED, so nothing green is hiding anything;
-//   - `CrossSessionTeardown.ResidualPathReleasesTheFixtures`, which runs inside
-//     EXPECT_NONFATAL_FAILURE and therefore leaves the binary GREEN. That one IS
-//     a real hole: an unrelated leak reachable through that witness's own single
-//     fixture would be suppressed.
+//   - the two `CrossSessionTeardown` witnesses that drive the residual path
+//     through `EXPECT_NONFATAL_FAILURE` and therefore leave the binary GREEN:
+//     `ResidualPathReleasesTheFixtures` and `ThrowingPumpStillReleasesTheFixtures`.
+//     Both ARE a real hole: an unrelated leak reachable through either witness's
+//     own fixtures would be suppressed.
 //
-// The size of that hole is MEASURED, not estimated. Replacing this macro with a
-// no-op and re-running produced `337715 byte(s) leaked in 51 allocation(s)`, every
-// one of them rooted at that witness's single `SessionFixture` (the top entry is
-// its `make_unique<Session>`, 266272 bytes). Nothing else in the binary leaks. So
-// the suppressed set in a green run is 51 allocations under one fixture that opens
-// no store and registers no listener — a real cost, bounded and named, on the same
-// footing as tests/interop/support/interop_fixture.cpp's larger version of it.
+// The size of that hole is MEASURED, not estimated, and stated structurally so it
+// survives the next witness added to this suite rather than going stale: the
+// stable invariant is the per-fixture root, not the total. Replacing this macro
+// with a no-op and re-running (leak detection on) attributes every leaked byte to
+// a `make_unique<Session>` inside a `SessionFixture` (266272 bytes each) reachable
+// from one of the two witnesses above -- nothing else in the binary leaks:
+//   - `ResidualPathReleasesTheFixtures` releases TWO fixtures (`sA`, `sB`):
+//     671075 byte(s) in 61 allocation(s).
+//   - `ThrowingPumpStillReleasesTheFixtures` releases ONE fixture:
+//     333568 byte(s) in 12 allocation(s).
+//   - total (derived, not the claim): 1004643 byte(s) in 73 allocation(s), three
+//     `SessionFixture` roots across the two witnesses.
+// So the suppressed set in a green run is bounded to fixtures that open no store
+// and register no listener under these two named witnesses -- a real cost,
+// bounded and named, on the same footing as
+// tests/interop/support/interop_fixture.cpp's larger version of it.
 //
 // Measured on `linux-clang-asan` (clang 22, libstdc++, `-fsanitize=address`) at
-// `61f685a4`; these are allocator- and stdlib-dependent, so treat a different
-// number as a re-measurement, not a regression.
+// `6163b9d3`. The per-fixture byte count (266272 B) is allocator- and
+// stdlib-dependent, so treat a different NUMBER THERE as a re-measurement, not a
+// regression. It does NOT license a change in the fixture or witness COUNT above
+// without updating this comment -- that split is a structural fact about which
+// witnesses reach the residual path, not an artifact of the allocator.
 //
 // That same experiment is what proves the suppression is load-bearing rather than
 // decorative, and that the release() on the residual path actually executes: with
-// the ignore removed the leak APPEARS, from a test that still reports [ OK ].
+// the ignore removed the leak APPEARS, from tests that still report [ OK ].
 //
 // Shape follows the repo's established sanitizer-detection idiom (two separate
 // #if blocks, not an #elif chain) — see tests/interop/support/interop_fixture.cpp:49-62.
