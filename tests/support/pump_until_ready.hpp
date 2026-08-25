@@ -264,6 +264,29 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
     // keeping `~Fixture`'s reproduces a `heap-use-after-free` under ASan, because
     // `~Fixture`'s drain is precisely what RESUMES the frame over the dead temporary.
     //
+    // ⚠️ (gate-b/r2) SAFE ABOVE IS CONDITIONAL, not unqualified: it holds only
+    // because `feed`'s own drain SUCCEEDS at this call site. If `drain_or_report`
+    // ever reported a residual here, `feed` returns anyway (this function is
+    // `void`), and `~Fixture`'s LATER drain would then resume a frame whose
+    // borrowed temporary is already gone -- `feed` cannot retain it; the storage
+    // is not its to hold. It does not bite HERE because this fixture has no
+    // clock and no transport (`quiesce_on_exit`'s ⚠️ DIVERGENCE paragraph above
+    // applies: no forcing lever, nothing closes a transport, nothing cancels a
+    // sleep), so nothing between `feed`'s drain and `~Fixture`'s can change a
+    // frame's readiness -- a frame that survives `feed`'s 5 s drain is in the
+    // same state at `~Fixture`. The one caller that reaches the miss branch with
+    // non-default durations leaves a single posted handler, which the default
+    // budget's drain dispatches.
+    //
+    // The remedy for the day this DOES bite is not a `bool` return from
+    // `drain_or_report` -- that pushes a policy decision onto every #289
+    // migration call site, and it still would not help `feed`, which cannot
+    // retain a caller's temporary regardless of what it is told. The remedy is
+    // the arena-copy pattern `logout_exchange_test.cpp`'s `feed_inbound` already
+    // uses: copy into a fixture-owned arena declared before `ioc` (so it
+    // outlives `ioc`'s own destruction) and span the copy, never the caller's
+    // own buffer.
+    //
     // So this probe confers no safety. It inherits whatever the call site already
     // guarantees, and it makes a resumption slightly more likely at sites that were
     // quiet only because nothing resumed them. (Correction owed to the #289/#307
