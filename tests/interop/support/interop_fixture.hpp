@@ -167,24 +167,28 @@ private:
 
     // Destructor teardown bound (#292). Was 30 s, chosen when the destructor
     // DISCARDED the outcome and the wait was therefore free. Now that it reports,
-    // the bound is constrained from BOTH sides, and the round-1/round-2 churn
-    // here was caused by justifying only one side at a time:
+    // the bound is constrained from both sides.
     //
-    // UPPER (gate-b/r2 P2-1). interop_business_message_interop_test is ONE ctest
-    // entry carrying `TIMEOUT 30` (tests/interop/CMakeLists.txt:380) over FOUR
-    // parameterized cells (2 counterparties x 2 roles). Under a stop regression
-    // every cell can spend 3 s in expect_graceful_stop (hp_support.hpp:317) and
-    // then `bound` in its destructor, so the entry costs 4*(3+bound). At 5 s that
-    // is 32 s — ctest kills the binary BEFORE the reports print, destroying the
-    // very diagnostic this change exists to produce. At 2 s it is 20 s, inside
-    // the timeout with room for the test bodies.
+    // UPPER — HISTORICAL, and no longer the binding constraint (gate-b/r6 P2-2).
+    // When interop_business_message_interop_test carried `TIMEOUT 30`, that ONE
+    // ctest entry covered FOUR parameterized cells, each able to spend 3 s in
+    // expect_graceful_stop (hp_support.hpp:317) plus `bound` in its destructor:
+    // 4*(3+bound), which forced bound < 4.5 s. This PR raised that entry to
+    // `TIMEOUT 120` (tests/interop/CMakeLists.txt) precisely because the 30 s
+    // aggregate was already smaller than the cells' own declared budgets, so it
+    // truncated the very report #292 adds. Against 120 s the upper constraint is
+    // bound < 27 s and 2 s is nowhere near it. Recorded in the past tense rather
+    // than deleted: it is why this value moved 30 -> 2 -> 5 -> 2 across review
+    // rounds, each move answering one side while ignoring the other.
     //
-    // LOWER. The bound is only ever REACHED when stop() is already misbehaving:
-    // a cell that calls expect_graceful_stop successfully leaves stop_completed_
-    // true, and the destructor then returns without pumping at all. For the cells
-    // that rely on the destructor for a HEALTHY stop, a loopback stop completes in
-    // single-digit ms (support_smoke_test.cpp:114 bounds an idle engine at 2 s and
-    // passes instantly). 2 s is ~2 orders of magnitude of headroom on that path.
+    // LOWER — the constraint that still binds. The bound is only ever REACHED
+    // when stop() is already misbehaving: a cell that calls expect_graceful_stop
+    // successfully leaves stop_completed_ true and the destructor returns without
+    // pumping. For cells that rely on the destructor for a HEALTHY stop, a
+    // loopback stop completes in single-digit ms (support_smoke_test.cpp:114
+    // bounds an idle engine at 2 s and passes instantly). 2 s is ~2 orders of
+    // magnitude of headroom, and keeping it small keeps a regressed run's total
+    // teardown cost low now that the ctest ceiling is no longer doing that job.
     std::chrono::milliseconds teardown_bound_;
 };
 

@@ -235,8 +235,8 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
         << "the Engine-owned clock did not survive the bounded-stop miss path: "
            "the EngineConfig's shared_ptr copy died, which is the proxy for the "
            "Engine having been destroyed instead of released. "
-           "A destroyed Engine means ~Engine ran with teardown frames still "
-           "suspended in ioc_, which is the silent failure #292 exists to prevent.";
+           "On this path ~Engine would have run while the stop() frame is still "
+           "suspended in ioc_ — the silent failure #292 exists to prevent.";
 }
 
 // ── #292 — a throwing stop() is REPORTED, and retains the Engine-owned clock ─
@@ -263,8 +263,9 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
 // SCOPE, stated so the test is not read as proving more (gate-b/r3 P2-1, P2-2):
 //   - This fixture registers NO sessions, so every per-session cancel / close /
 //     join loop inside stop() is empty. The test proves the destructor handles an
-//     exceptional future, reports, and retains the Engine — it does NOT prove the
-//     hook fired before a NON-EMPTY registry was cleared. Mutation that stays
+//     exceptional future, reports, and keeps the Engine-owned CLOCK alive — it
+//     does NOT prove Engine identity (see the clock-proxy note below), and it does
+//     NOT prove the hook fired before a NON-EMPTY registry was cleared. Mutation that stays
 //     green: move the hook after registry_.clear(). Closing that needs a
 //     registered session and a probe on registry-owned state.
 //   - The weak_ptr observes CLOCK RETENTION, not Engine identity. Mutation that
@@ -378,8 +379,13 @@ TEST(InteropEngineFixtureTeardown, ExactlyOneTeardownBodyRunsAndItsFailureIsNotM
             }
             EXPECT_TRUE(rethrew)
                 << "the second stop_within() did not rethrow the in-flight "
-                   "operation's exception, which means it spawned a SECOND stop() "
-                   "and abandoned the first — the frame is now unowned in ioc_";
+                   "operation's exception. The mutation this test was written "
+                   "against is a lost spawn-once guard, which masks the first "
+                   "operation by co_spawning a fresh stop() that returns normally. "
+                   "This assertion observes only that the expected exception did "
+                   "not surface — other changes could suppress or alter it without "
+                   "respawning, so read it as 'the failure was masked', not as a "
+                   "unique diagnosis (gate-b/r6 P2-3).";
         }()),
         "Engine::stop() did not complete successfully");
 
