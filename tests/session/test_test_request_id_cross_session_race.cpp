@@ -399,9 +399,14 @@ struct SessionFixture {
 // a way to force quiescence.
 //
 // Stated plainly, because the understated version is the one that keeps getting
-// written: this is NOT a lone site. Whether those 18 can actually REACH the residual
-// branch is unmeasured, and that is the open question — not whether they have the
-// same shape, which they demonstrably do.
+// written: this is NOT a lone site. What was actually measured (below) is the
+// state `poll_one()` observes AT THE GUARD — zero outstanding work, at every one
+// of the 18, on the path CI takes today. Whether a suspended frame could reach
+// that same guard on an ASSERT_*-early-return path is a DIFFERENT question, and
+// it is unmeasured except at the one site built to take such a path on purpose
+// (`test_live_outbound_serialized.cpp:1174`, `BudgetMissQuiescesBeforeSessionTeardown`).
+// Both statements are true at once; an earlier draft of this comment let the first
+// read as proof of the second, which it is not.
 //
 // PRIOR ART, named so nobody has to rediscover it: release-on-residual is not
 // invented here. `tests/interop/support/interop_fixture.cpp:95-160`
@@ -417,16 +422,35 @@ struct SessionFixture {
 // justification that rests on a temporary fact has to be re-earned when the fact
 // changes, not left standing because it once held.
 //
-// The reason that replaces it is stronger, because it is measured. The 18 sites
-// above were instrumented and run: at every one of them, on the path CI actually
-// takes, the `io_context` holds ZERO outstanding work by the time the guard runs —
-// confirmed at a zero budget, where `poll_one()` reports quiesced only if
-// `outstanding_work_ == 0`, and a suspended `co_spawn` frame would have kept that
-// count non-zero. So there are no suspended frames to leave behind at any of them.
+// WHAT THE ZERO ACTUALLY MEASURES, AND WHAT IT DOES NOT. The 18 sites were
+// instrumented and run: at every one, `poll_one()` reports the `io_context` holds
+// ZERO outstanding work by the time the guard's destructor finishes running. But
+// that reading is taken INSIDE the guard, AFTER `transport->close()` and
+// `clock.cancel_sleeps()` have already run — so at the six lever-bearing sites
+// (`test_live_outbound_serialized.cpp`, `.transport = ` set) it records "the lever
+// drained the suspended frame", not "no suspended frame existed". Measured
+// directly: setting `BudgetMissQuiescesBeforeSessionTeardown`'s guard budget to
+// `0ms` reads zero WITH its forcing lever in place, and with the lever removed
+// ("`teardown_guard.transport = raw_ptr;`" commented out) prints "terminate called
+// without an active exception" instead. So the earlier claim that no suspended
+// frames are left behind anywhere is false at that site — deleted rather than
+// kept, because the guard's own zero is exactly what a lever produces there, not
+// evidence a lever was unnecessary.
 //
-// A release seam therefore has exactly ONE user — this site — and that is a fact
-// about the tree rather than an assumption about it. Hoisting a generic seam for one
-// user is the speculative generality the repo's own extraction rule warns against.
+// A release seam nonetheless has exactly ONE user — this site — but the ground for
+// that is different from "the 18 are measured empty": it is what each of the 18
+// borrows, checkable by reading rather than by an unreproducible instrumentation
+// run. The 11 `logout_exchange_test.cpp` sites need no seam because they borrow
+// nothing that dies first — `feed_inbound` copies each inbound frame into
+// `inbound_frames`, a fixture-owned deque declared before `ioc`
+// (`logout_exchange_test.cpp:172, :218-226`), and spans THAT, not the caller's
+// temporary. The 7 `test_live_outbound_serialized.cpp` sites each carry their own
+// `frames` deque declared before `ioc` the same way, plus, at the one site that
+// deliberately reaches the guard on an abnormal path, a working transport lever
+// that closes what the deque-ordering argument alone does not cover. Both are
+// facts about the tree rather than an assumption about it. Hoisting a generic
+// seam for one user is the speculative generality the repo's own extraction rule
+// warns against.
 //
 // When a SECOND site genuinely needs it, the right hoist is NOT templating on
 // `SessionFixture` — it is a `std::vector<std::function<void()>>` of release-closures,
