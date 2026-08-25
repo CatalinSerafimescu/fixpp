@@ -45,7 +45,8 @@ Conan profile, runs
 (self-contained `.so`, no external libs), then `scikit-build-core` drives the
 existing `FIXPP_BUILD_PYTHON` CMake target with `-DPy_LIMITED_API=0x030A0000`
 (compile-only) under scikit-build-core's `wheel.py-api = "cp310"` abi3 tag
-(SWIG ≥ 4.2), and `auditwheel repair` normalises the
+(SWIG `>=4.2,<4.5`; the `<4.5` cap is a temporary #296 safety bound and lifts
+when #296 is root-caused), and `auditwheel repair` normalises the
 tag. **One build** produces the single `cp310-abi3` wheel; the **four** CPython
 3.10/3.11/3.12/3.13 install-tests of §2 run against that one artifact.
 (Build-graph + toolchain + abi3 detail: research D-2/D-3/D-7.)
