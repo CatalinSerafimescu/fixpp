@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
+#include <asio/post.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
@@ -376,8 +377,9 @@ struct Fixture {
     // defaults. The only caller that passes them is the #289 miss-path witness
     // at the bottom of this file, which needs BOTH at zero to reach the
     // not-ready branch: a zero window alone is not enough, because the boundary
-    // grace slice then dispatches the work and the future becomes ready. (That
-    // is the grace doing its job — it is live, not decorative.)
+    // grace slice then dispatches the work and the future becomes ready. (The
+    // grace's positive companion, PumpWindowMiss.ZeroWindowStillReadyViaBoundaryGrace
+    // at the bottom of this file, pins that it is live, not decorative.)
     void feed(const std::vector<std::byte>& frame,
               std::chrono::steady_clock::duration window = 5s,
               std::chrono::steady_clock::duration grace = fixpp::test_support::kPumpSlice) {
@@ -2367,7 +2369,9 @@ TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
 // grace slice dispatches the queued work and the future becomes ready. That was
 // observed, not assumed — this witness was written with the grace left at its
 // default and reported "Expected: 1 non-fatal failure / Actual: 0 failures".
-// So the grace slice is exercised and load-bearing, not decorative.
+// The positive companion below, PumpWindowMiss.ZeroWindowStillReadyViaBoundaryGrace,
+// pins that observation as a checked-in test: a zero window with the grace left
+// at its default reports ready.
 //
 // What this pins is the LIFETIME rule, not merely that a failure is reported:
 // the argument is a caller's TEMPORARY, destroyed at the end of the full
@@ -2385,6 +2389,24 @@ TEST(PumpWindowMiss, FeedMissDrainsWhileCallerTemporaryAlive) {
                                       std::chrono::steady_clock::duration::zero(),
                                       std::chrono::steady_clock::duration::zero()),
                             "was not ready when its preserved run window returned");
+}
+
+// Positive companion to the miss witness above. A zero WINDOW alone must NOT
+// miss: `asio::post` queues its handler without dispatching it (nothing pumps
+// `ioc` before this call), so `ioc.run_for(0)` at the window step is a no-op
+// exactly as documented above, and only the boundary GRACE slice (left at its
+// default here) gives that queued handler a dispatch opportunity. This is the
+// tree-side proof for the historical, pre-shipping observation both comments
+// above reference: delete the grace dispatch at pump_until_ready.hpp:179-180
+// and this test goes RED, because then nothing ever pumps `ioc` and `fut`
+// never becomes ready.
+TEST(PumpWindowMiss, ZeroWindowStillReadyViaBoundaryGrace) {
+    asio::io_context ioc;
+    std::promise<void> p;
+    auto fut = p.get_future();
+    asio::post(ioc, [&p] { p.set_value(); });  // queued, not dispatched
+    EXPECT_TRUE(fixpp::test_support::run_window_then_ready(
+        ioc, fut, std::chrono::steady_clock::duration::zero()));  // grace = kPumpSlice
 }
 
 }  // namespace
