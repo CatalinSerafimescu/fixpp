@@ -39,6 +39,7 @@
 #include <asio/detached.hpp>
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
+#include <asio/post.hpp>
 #include <asio/redirect_error.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/use_awaitable.hpp>
@@ -286,6 +287,78 @@ TEST(QuiesceOnExitResidualWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
         // ~quiesce: run_for(0ms) resumes nothing, then poll_one() dispatches the
         // co_spawn's initial handler and the coroutine runs to completion — which
         // also drains the work count, so this path stays silent.
+    }
+    EXPECT_TRUE(resumed)
+        << "the zero-budget probe did not resume the suspended coroutine. If the probe was "
+           "removed, ZeroBudgetOnEmptyContextIsNotResidual should also be red; if it is not, "
+           "the probe is present but no longer dispatching.";
+}
+
+// ── (gate-b/r1 F3) The bound the header states but nothing enforced ───────────
+//
+// pump_until_ready.hpp:238-240 and :404 state that the zero/expired-budget probe
+// dispatches AT MOST ONE handler — `poll_one()`, not `poll()`. Nothing above pins
+// that cardinality: every existing witness uses at most one outstanding handler,
+// so `poll_one() -> poll()` (an unbounded drain during teardown) leaves the whole
+// binary green. Two independently observable handlers, and both the dispatch
+// count and the still-outstanding second handler's residual report are asserted.
+//
+// The EXPECT_NONFATAL_FAILURE wrapper is mandatory, not stylistic: with two
+// handlers queued, poll_one() runs exactly one and leaves outstanding_work_ != 0,
+// so stopped() is false and the guard's ADD_FAILURE correctly fires on CORRECT
+// code. Without the wrapper this test reds on the correct code. Under the
+// poll_one -> poll mutant both handlers run, the work count reaches zero, no
+// report is emitted — EXPECT_NONFATAL_FAILURE fails (no failure was intercepted)
+// and `ran == 2`: the cell kills the mutant on both axes.
+TEST(QuiesceOnExitResidualWitness, ZeroBudgetProbeDispatchesAtMostOneHandler) {
+    int ran = 0;
+    {
+        asio::io_context ioc;
+        auto clock = make_mock_clock(ioc);
+        asio::post(ioc, [&ran] { ++ran; });
+        asio::post(ioc, [&ran] { ++ran; });
+        EXPECT_NONFATAL_FAILURE(([&] { quiesce_on_exit quiesce{ioc, *clock, 0ms}; }()),
+                                "quiesce_on_exit: the io_context did not run out of work");
+    }
+    EXPECT_EQ(ran, 1) << "the probe dispatched more than one handler; poll_one() may have "
+                         "become poll(), which drains an unbounded queue during teardown";
+}
+
+// The twin, on `drain_or_report`. Same shape, same mandatory-wrapper reasoning;
+// see the comment above.
+TEST(DrainOrReportWitness, ZeroBudgetProbeDispatchesAtMostOneHandler) {
+    int ran = 0;
+    {
+        asio::io_context ioc;
+        asio::post(ioc, [&ran] { ++ran; });
+        asio::post(ioc, [&ran] { ++ran; });
+        EXPECT_NONFATAL_FAILURE(
+            ([&] { fixpp::test_support::drain_or_report(ioc, "probe", 0ms); }()),
+            "did not run out of work within the teardown drain");
+    }
+    EXPECT_EQ(ran, 1) << "the probe dispatched more than one handler; poll_one() may have "
+                         "become poll(), which drains an unbounded queue during teardown";
+}
+
+// ── (gate-b/r1 F5) drain_or_report's missing resumption twin ──────────────────
+//
+// ZeroBudgetProbeCanNowResumeACoroutine above proves the new zero-budget
+// dispatch capability for `quiesce_on_exit`; the PR twinned the empty-context
+// witness across both helpers (ZeroBudgetOnEmptyContextIsNotResidual) but not
+// this one — the exact "fixed one of two identical shapes" class
+// pump_until_ready.hpp:231-233 names. `drain_or_report` gained the identical
+// capability and nothing observed it.
+TEST(DrainOrReportWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
+    bool resumed = false;
+    {
+        asio::io_context ioc;
+        asio::co_spawn(ioc, record_resumption(&resumed), asio::detached);
+
+        EXPECT_FALSE(resumed) << "nothing may have run before the guard";
+        fixpp::test_support::drain_or_report(ioc, "probe", 0ms);
+        // run_for(0ms) resumes nothing, then poll_one() dispatches the co_spawn's
+        // initial handler and the coroutine runs to completion — which also
+        // drains the work count, so this call stays silent.
     }
     EXPECT_TRUE(resumed)
         << "the zero-budget probe did not resume the suspended coroutine. If the probe was "
