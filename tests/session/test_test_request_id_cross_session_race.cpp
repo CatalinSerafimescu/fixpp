@@ -37,6 +37,7 @@
 //   [const §XI.4] per-session strand isolation
 //   research.md D-3 (wrap-around at UINT32_MAX acceptable)
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -60,16 +61,81 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <thread>
 #include <set>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+
+// (#303) The teardown guard below deliberately LEAKS the SessionFixtures on the
+// residual path (see `quiesce_or_release_on_exit`). Tell LeakSanitizer, or the
+// intentional leak reddens the binary and buries the named ADD_FAILURE that path
+// exists to produce.
+//
+// MEASURED, in THIS binary, before writing this block: a deliberate unreachable
+// allocation produced `LeakSanitizer: detected memory leaks` **after** its test
+// had already printed `[ OK ]`. So `detect_leaks` is on here and an un-ignored
+// leak from a PASSING test fails the run. That is why this is mandatory rather
+// than tidy.
+//
+// COST, stated rather than understated. `__lsan_ignore_object` makes the ignored
+// chunk a ROOT, so the whole graph reachable from each released SessionFixture
+// also drops out of leak reports: its EngineConfig (clock, executor), its
+// SessionConfig (dictionary, security profile), its CaptureTransport frame
+// vectors, and the entire Session (buffers, arena, validator, strand). Those
+// resources are retained until process exit.
+//
+// What bounds the exposure is WHICH runs can reach it. There are two:
+//   - a real `CrossSessionDisjoint` residual, where the guard's ADD_FAILURE has
+//     already made the binary RED, so nothing green is hiding anything;
+//   - `CrossSessionTeardown.ResidualPathReleasesTheFixtures`, which runs inside
+//     EXPECT_NONFATAL_FAILURE and therefore leaves the binary GREEN. That one IS
+//     a real hole: an unrelated leak reachable through that witness's own single
+//     fixture would be suppressed.
+//
+// The size of that hole is MEASURED, not estimated. Replacing this macro with a
+// no-op and re-running produced `337715 byte(s) leaked in 51 allocation(s)`, every
+// one of them rooted at that witness's single `SessionFixture` (the top entry is
+// its `make_unique<Session>`, 266272 bytes). Nothing else in the binary leaks. So
+// the suppressed set in a green run is 51 allocations under one fixture that opens
+// no store and registers no listener — a real cost, bounded and named, on the same
+// footing as tests/interop/support/interop_fixture.cpp's larger version of it.
+//
+// That same experiment is what proves the suppression is load-bearing rather than
+// decorative, and that the release() on the residual path actually executes: with
+// the ignore removed the leak APPEARS, from a test that still reports [ OK ].
+//
+// Shape follows the repo's established sanitizer-detection idiom (two separate
+// #if blocks, not an #elif chain) — see tests/interop/support/interop_fixture.cpp:49-62.
+// An #elif chain would skip the __SANITIZE_ADDRESS__ arm on any compiler that
+// defines __has_feature without reporting address_sanitizer through it.
+//
+// MSVC is excluded deliberately: windows-msvc-asan is a real tier2 lane whose
+// profile sets /fsanitize=address, so __SANITIZE_ADDRESS__ IS defined there, but
+// MSVC's ASan ships no LeakSanitizer and no <sanitizer/lsan_interface.h> — the
+// include would be a hard compile error, and there is no leak detector to appease.
+#if !defined(_MSC_VER)
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define FIXPP_XSESSION_HAVE_LSAN 1
+#endif
+#endif
+#if !defined(FIXPP_XSESSION_HAVE_LSAN) && defined(__SANITIZE_ADDRESS__)
+#define FIXPP_XSESSION_HAVE_LSAN 1
+#endif
+#endif
+
+#if defined(FIXPP_XSESSION_HAVE_LSAN)
+#include <sanitizer/lsan_interface.h>
+#define FIXPP_XSESSION_LSAN_IGNORE(p) __lsan_ignore_object(p)
+#else
+#define FIXPP_XSESSION_LSAN_IGNORE(p) ((void)(p))
+#endif
 
 using namespace std::chrono_literals;
 
@@ -202,6 +268,25 @@ struct SessionFixture {
     CaptureTransport transport;
     std::unique_ptr<fixpp::session::Session> session;
 
+    // (#303) DIRECT observation of whether this fixture was destroyed, for the
+    // teardown witnesses below. nullptr everywhere else, so the two real tests
+    // are unaffected.
+    //
+    // This exists because the obvious probe is FORGEABLE. The natural witness for
+    // "the guard released the fixtures" is a weak_ptr on the fixture-owned clock:
+    // if the fixture was destroyed, its EngineConfig shared_ptr copy dies and the
+    // weak_ptr expires. But that observes CLOCK RETENTION, not fixture identity —
+    // a mutant that drops the release() while copying the clock somewhere else
+    // keeps the weak_ptr live and passes. #292 hit exactly this and had to record
+    // it as an accepted gap, because closing it there needed a src/ seam
+    // (tests/interop/support/interop_fixture_test.cpp:191-203).
+    //
+    // Here it costs nothing: SessionFixture is file-local, so it can count its own
+    // destructions and no spelling of the failure message or of the clock graph can
+    // fake a destructor that did not run. The counter must be declared OUTSIDE the
+    // scope under test — it is read after that scope has exited.
+    std::atomic<int>* destructions = nullptr;
+
     SessionFixture(asio::any_io_executor ex, std::shared_ptr<fixpp::core::mock_clock> clk,
                    std::string_view sender, std::string_view target) {
         engine.executor = ex;
@@ -220,6 +305,20 @@ struct SessionFixture {
 
         session = std::make_unique<fixpp::session::Session>(engine, cfg);
     }
+
+    ~SessionFixture() {
+        if (destructions != nullptr) {
+            destructions->fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
+    // Session is non-copyable and non-movable, and this fixture is only ever a
+    // local or a unique_ptr target; spelling these out keeps the user-declared
+    // destructor above from silently changing what is allowed.
+    SessionFixture(const SessionFixture&) = delete;
+    SessionFixture& operator=(const SessionFixture&) = delete;
+    SessionFixture(SessionFixture&&) = delete;
+    SessionFixture& operator=(SessionFixture&&) = delete;
 
     // Open the session (initiator: emits Logon, waits for Logon-ack).
     // Returns the future for the open() awaitable.
@@ -242,6 +341,137 @@ struct SessionFixture {
     [[nodiscard]] std::future<fixpp::core::expected_t<void>> async_close(asio::thread_pool& pool) {
         return asio::co_spawn(pool, session->close(fixpp::session::close_mode::terminal),
                               asio::use_future);
+    }
+};
+
+// ── (#303) Teardown guard: quiesce, or RELEASE the fixtures ───────────────────
+//
+// Replaces `quiesce_on_exit` at this one site. The shared guard only OBSERVES
+// residual work and says so itself; on the budget-exhausted path it returns, the
+// fixtures are destroyed, and only afterwards does `~io_context` destroy coroutine
+// frames that borrowed them. This guard closes that by making the same observation
+// DECIDE something: if the context did not quiesce, the fixtures are deliberately
+// released (leaked) so the frames `~io_context` destroys still have live referents.
+//
+// WHY LEAKING IS THE FIX AND NOT A SHORTCUT. The obvious symmetry — declare the
+// fixtures before `ioc` so they outlive it — is REFUTED by measurement.
+// `SessionConfig::mode` defaults to `per_session_strand`, so `Session::exec_` holds
+// an `asio::make_strand(...)` handle, and `~strand_impl` unlinks through a raw
+// `service_` pointer that `~execution_context` has already destroyed. Reproduced in
+// THIS binary while preparing this change: an `any_io_executor` holding a strand and
+// destroyed after its `io_context` reports `heap-use-after-free` at
+// `asio/detail/impl/strand_executor_service.ipp:88`, while the bare-executor control
+// arm is clean. Reordering would convert a conditional, budget-exhausted hazard into
+// an unconditional one on every run.
+//
+// So the load-bearing property of the release is not "we skipped a free". It is:
+//
+//     A RELEASED FIXTURE IS NEVER DESTROYED, THEREFORE ITS SESSION'S STRAND HANDLE
+//     IS NEVER DESTROYED, THEREFORE THE ORDER THAT WOULD FAULT NEVER ARISES.
+//
+// Stated as an invariant rather than a mechanism because a future cleanup pass that
+// "fixes the leak" by destroying these on the way out would reintroduce exactly the
+// use-after-free the reorder was refuted for.
+//
+// THE WHOLE FIXTURE, NOT JUST THE SESSION: `Session` holds
+// `const fixpp::core::EngineConfig& engine_` — a REFERENCE into
+// `SessionFixture::engine` (include/fixpp/session/session.hpp:621) — and its
+// by-value `cfg_` copy carries a `transport_send` lambda capturing
+// `SessionFixture*`. Releasing only the Session would leave both dangling.
+//
+// ONE COMPUTATION OF "DID IT QUIESCE". The quiesce and the release live together
+// here on purpose. Keeping `quiesce_on_exit` and adding a second guard that re-read
+// `ioc.stopped()` afterwards would split one decision across two files, and a
+// divergence between them would fail toward NOT releasing — silently, on the path
+// that is already failing. When a second site needs this shape, hoist the release
+// seam into the shared guard; not before (one site is not a pattern).
+//
+// `quiesce_on_exit`'s `transport` arm is deliberately absent: it exists because
+// cancelling clock sleeps does not unstick a coroutine parked in
+// async_write/async_read_some, and only closing the transport does. This test drives
+// a `mock_clock` and a plain `transport_send` lambda; there is no
+// `fixpp::transport::Transport` in play, so there is nothing to close.
+struct quiesce_or_release_on_exit {
+    asio::io_context& ioc;
+    fixpp::core::Clock& clock;
+    // Released, in order, if the context does not quiesce. Pointers rather than
+    // values so the guard can null the caller's own owners — leaving a released
+    // `unique_ptr` behind means the caller's later destruction is a no-op rather
+    // than a double free.
+    std::vector<std::unique_ptr<SessionFixture>*> fixtures;
+    std::chrono::steady_clock::duration budget = std::chrono::seconds{5};
+
+    ~quiesce_or_release_on_exit() {
+        // Nothing may escape a destructor. ADD_FAILURE can throw under
+        // --gtest_throw_on_failure, and the pump can throw out of a handler; neither
+        // may skip the release or propagate.
+        try {
+            bool quiesced = false;
+            try {
+                clock.cancel_sleeps();
+                ioc.restart();
+                ioc.run_for(budget);
+                // THE PROBE, and it is not decoration. `io_context::run_for` is
+                // `run_until`, and `run_one_until` tests `now < abs_time` BEFORE
+                // entering the scheduler (asio impl/io_context.hpp:108-131), so a run
+                // whose deadline has already passed returns WITHOUT ever consulting
+                // the work count — leaving the just-restarted context unstopped even
+                // when it holds no work at all. That is unconditional for a zero
+                // budget and reachable at any budget's deadline boundary.
+                //
+                // `poll_one()` closes it: it calls `stop()` when `outstanding_work_`
+                // is already zero (asio detail/impl/scheduler.ipp:289-295), so after
+                // this line `stopped()` reflects the work count rather than the
+                // deadline.
+                //
+                // ⚠️ IT MAY DISPATCH ONE HANDLER, AND A DISPATCH RESUMES A SUSPENDED
+                // COROUTINE. That is safe with respect to the FIXTURES — they are all
+                // still alive at this point, which is exactly why draining here and
+                // not later is the right place — but it inherits the obligation the
+                // `run_for` above already carries: any storage a suspended frame
+                // borrowed must outlive this guard, or the resumption reads dead
+                // memory. `CrossSessionDisjoint`'s frame arena is declared before
+                // `ioc` for this reason. Not hypothetical: the residual witness below
+                // was written with a block-local buffer first and this probe faulted
+                // it under ASan.
+                //
+                // NOT copying the shared header's claim that `stopped()==false`
+                // necessarily means outstanding work: that claim omits this window.
+                // It is the poll_one() above that makes it true here.
+                (void)ioc.poll_one();
+                quiesced = ioc.stopped();
+            } catch (...) {
+                // An exception mid-pump leaves the residual UNKNOWN. Fail safe:
+                // treat it as residual and release, rather than destroy fixtures
+                // whose frames may still be suspended.
+                quiesced = false;
+            }
+
+            if (quiesced) {
+                return;  // fixtures destroy normally on the caller's own unwind
+            }
+
+            // Release BEFORE reporting, so a throwing ADD_FAILURE cannot leave the
+            // fixtures to be destroyed under still-suspended frames.
+            for (auto* owner : fixtures) {
+                if (owner == nullptr) {
+                    continue;
+                }
+                auto* leaked = owner->release();
+                FIXPP_XSESSION_LSAN_IGNORE(leaked);
+            }
+
+            ADD_FAILURE()
+                << "quiesce_or_release_on_exit: the io_context did not run out of work within "
+                   "the configured quiesce window, so a coroutine frame is still suspended and "
+                   "will be destroyed by ~io_context after this scope unwinds. The "
+                   "SessionFixtures were RELEASED deliberately (#303) so those frames still "
+                   "have live referents, and so that no Session strand handle is destroyed "
+                   "after its io_context. This guard reports the residual; it does not claim "
+                   "to have found its cause.";
+        } catch (...) {
+            // Nothing may escape a destructor.
+        }
     }
 };
 
@@ -293,10 +523,10 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // execution_context.ipp:60-64). Verified with a standalone repro plus a
     // bare-executor control arm. So they deliberately stay AFTER `ioc`.
     //
-    // RESIDUAL, stated rather than papered over: the suspended
-    // `on_inbound_frame` frame references `frames` AND `sA`/`sB`. This ordering
-    // closes only the `frames` half. The session half cannot be closed by
-    // reordering — it would require the frame not to survive at all.
+    // The suspended `on_inbound_frame` frame references `frames` AND `sA`/`sB`.
+    // This ordering closes only the `frames` half; the session half is closed
+    // below by `quiesce_or_release_on_exit`, which releases the fixtures rather
+    // than reordering them (#303 — see that guard for why reordering is refuted).
     std::deque<std::vector<std::byte>> frames;
 
     // Single io_context so we can coordinate clock advancement.
@@ -307,50 +537,57 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     auto clock = std::make_shared<fixpp::core::mock_clock>(
         utc_2024, fixpp::core::steady_time_point{}, ioc.get_executor());
 
-    SessionFixture sA{ioc.get_executor(), clock, "SENDER_A", "TARGET_A"};
-    SessionFixture sB{ioc.get_executor(), clock, "SENDER_B", "TARGET_B"};
+    // Held by unique_ptr so the teardown guard can RELEASE them (#303). They stay
+    // declared AFTER `ioc` deliberately: their Sessions own strand handles, and a
+    // strand destroyed after its io_context faults — see the guard.
+    auto sA = std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_A", "TARGET_A");
+    auto sB = std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_B", "TARGET_B");
 
-    // #284 teardown. On the budget-exhausted path the awaited coroutine is
-    // still SUSPENDED and its frame references sA/sB, the clock, and (for
-    // on_inbound_frame) a span into `frames`. Declared AFTER the fixtures so it
-    // runs BEFORE them, on every exit path including the early `return` an
-    // ASSERT_* performs. See the header for why reordering the declarations
-    // cannot substitute for this guard. (`frames` is now declared above `ioc`
-    // — see there — so it is destroyed after BOTH this guard and `ioc`.)
-    quiesce_on_exit quiesce{ioc, *clock};
+    // #284 teardown, plus #303's release. On the budget-exhausted path the awaited
+    // coroutine is still SUSPENDED and its frame references sA/sB, the clock, and
+    // (for on_inbound_frame) a span into `frames`. Declared AFTER the fixtures so
+    // it runs BEFORE them, on every exit path including the early `return` an
+    // ASSERT_* performs — and so that it can release them while they are still
+    // owned. (`frames` is declared above `ioc` — see there — so it is destroyed
+    // after BOTH this guard and `ioc`.)
+    quiesce_or_release_on_exit quiesce{ioc, *clock, {&sA, &sB}};
 
     // Open both sessions (initiator path: each emits a Logon immediately).
-    auto fut_open_a = asio::co_spawn(ioc, sA.session->open(), asio::use_future);
+    auto fut_open_a = asio::co_spawn(ioc, sA->session->open(), asio::use_future);
     ASSERT_TRUE(pump_until_ready(ioc, fut_open_a)) << kPumpBudgetMiss << "opening session A";
     ASSERT_TRUE(fut_open_a.get().has_value()) << "Session A failed to open";
 
-    auto fut_open_b = asio::co_spawn(ioc, sB.session->open(), asio::use_future);
+    auto fut_open_b = asio::co_spawn(ioc, sB->session->open(), asio::use_future);
     ASSERT_TRUE(pump_until_ready(ioc, fut_open_b)) << kPumpBudgetMiss << "opening session B";
     ASSERT_TRUE(fut_open_b.get().has_value()) << "Session B failed to open";
 
     // Drive both sessions to Active by feeding them peer Logon-acks.
     {
-        auto& logon_a = frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1));
+        auto& logon_a =
+            frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1));
         auto fut_a = asio::co_spawn(ioc,
-                                    sA.session->on_inbound_frame(
+                                    sA->session->on_inbound_frame(
                                         std::span<const std::byte>{logon_a.data(), logon_a.size()}),
                                     asio::use_future);
-        ASSERT_TRUE(pump_until_ready(ioc, fut_a)) << kPumpBudgetMiss << "feeding session A's Logon-ack";
+        ASSERT_TRUE(pump_until_ready(ioc, fut_a))
+            << kPumpBudgetMiss << "feeding session A's Logon-ack";
         (void)fut_a.get();
     }
     {
-        auto& logon_b = frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_B", "SENDER_B", 1));
+        auto& logon_b =
+            frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_B", "SENDER_B", 1));
         auto fut_b = asio::co_spawn(ioc,
-                                    sB.session->on_inbound_frame(
+                                    sB->session->on_inbound_frame(
                                         std::span<const std::byte>{logon_b.data(), logon_b.size()}),
                                     asio::use_future);
-        ASSERT_TRUE(pump_until_ready(ioc, fut_b)) << kPumpBudgetMiss << "feeding session B's Logon-ack";
+        ASSERT_TRUE(pump_until_ready(ioc, fut_b))
+            << kPumpBudgetMiss << "feeding session B's Logon-ack";
         (void)fut_b.get();
     }
 
-    ASSERT_EQ(sA.session->state(), fixpp::session::fsm_state::Active)
+    ASSERT_EQ(sA->session->state(), fixpp::session::fsm_state::Active)
         << "Session A must be Active before advancing clock";
-    ASSERT_EQ(sB.session->state(), fixpp::session::fsm_state::Active)
+    ASSERT_EQ(sB->session->state(), fixpp::session::fsm_state::Active)
         << "Session B must be Active before advancing clock";
 
     // Advance mock clock to generate TestRequests.
@@ -413,20 +650,24 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
         // very collapse it was meant to detect.
         clock->advance(std::chrono::milliseconds{1500});
         const auto want = static_cast<std::size_t>(i + 1);
-        ASSERT_TRUE(pump_until(ioc, [&] {
-            return sA.transport.collect_test_req_ids().size() >= want &&
-                   sB.transport.collect_test_req_ids().size() >= want;
-        })) << kPumpBudgetMiss << "waiting for both TestRequests at iteration " << i;
+        ASSERT_TRUE(pump_until(ioc,
+                               [&] {
+                                   return sA->transport.collect_test_req_ids().size() >= want &&
+                                          sB->transport.collect_test_req_ids().size() >= want;
+                               }))
+            << kPumpBudgetMiss << "waiting for both TestRequests at iteration " << i;
 
         // Find the most recently emitted TR from each session and echo it back.
-        auto tr_ids_a = sA.transport.collect_test_req_ids();
-        auto tr_ids_b = sB.transport.collect_test_req_ids();
+        auto tr_ids_a = sA->transport.collect_test_req_ids();
+        auto tr_ids_b = sB->transport.collect_test_req_ids();
 
         if (!tr_ids_a.empty()) {
             std::string latest_a = tr_ids_a.back();
-            auto& hb = frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a));
+            auto& hb = frames.emplace_back(
+                make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a));
             auto fut = asio::co_spawn(
-                ioc, sA.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
+                ioc,
+                sA->session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
                 asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut))
                 << kPumpBudgetMiss << "feeding session A's Heartbeat at iteration " << i;
@@ -435,9 +676,11 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
         if (!tr_ids_b.empty()) {
             std::string latest_b = tr_ids_b.back();
-            auto& hb = frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b));
+            auto& hb = frames.emplace_back(
+                make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b));
             auto fut = asio::co_spawn(
-                ioc, sB.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
+                ioc,
+                sB->session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
                 asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut))
                 << kPumpBudgetMiss << "feeding session B's Heartbeat at iteration " << i;
@@ -447,21 +690,21 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
     // Close both sessions before analysis.
     {
-        auto fut_a = asio::co_spawn(ioc, sA.session->close(fixpp::session::close_mode::terminal),
+        auto fut_a = asio::co_spawn(ioc, sA->session->close(fixpp::session::close_mode::terminal),
                                     asio::use_future);
         ASSERT_TRUE(pump_until_ready(ioc, fut_a)) << kPumpBudgetMiss << "closing session A";
         (void)fut_a.get();
     }
     {
-        auto fut_b = asio::co_spawn(ioc, sB.session->close(fixpp::session::close_mode::terminal),
+        auto fut_b = asio::co_spawn(ioc, sB->session->close(fixpp::session::close_mode::terminal),
                                     asio::use_future);
         ASSERT_TRUE(pump_until_ready(ioc, fut_b)) << kPumpBudgetMiss << "closing session B";
         (void)fut_b.get();
     }
 
     // Collect all TestRequest IDs from both sessions.
-    auto ids_a = sA.transport.collect_test_req_ids();
-    auto ids_b = sB.transport.collect_test_req_ids();
+    auto ids_a = sA->transport.collect_test_req_ids();
+    auto ids_b = sB->transport.collect_test_req_ids();
 
     // Assertion: each session emitted exactly one TestRequest per iteration.
     //
@@ -472,11 +715,11 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // the emission instead of on a fixed window; a tolerance band wide enough to
     // survive that window would have admitted the collapse it claims to catch.
     ASSERT_EQ(ids_a.size(), static_cast<std::size_t>(kIterations))
-        << "Session A emitted " << ids_a.size() << " TestRequests, expected exactly "
-        << kIterations << " — check clock/liveness wiring";
+        << "Session A emitted " << ids_a.size() << " TestRequests, expected exactly " << kIterations
+        << " — check clock/liveness wiring";
     ASSERT_EQ(ids_b.size(), static_cast<std::size_t>(kIterations))
-        << "Session B emitted " << ids_b.size() << " TestRequests, expected exactly "
-        << kIterations << " — check clock/liveness wiring";
+        << "Session B emitted " << ids_b.size() << " TestRequests, expected exactly " << kIterations
+        << " — check clock/liveness wiring";
 
     // ── Assertion (a): per-session isolation — sequences are contiguous ───────
     //
@@ -718,6 +961,191 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         }
         EXPECT_TRUE(ok) << "Session B TestReqID sequence is not monotone";
     }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// (#303) Teardown witnesses for `quiesce_or_release_on_exit`
+//
+// WHY THESE ARE BEHAVIOURAL AND NOT A SANITIZER SWEEP. The fault oracle for this
+// issue was run before the fix and came back a REAL zero: with the unfixed order
+// and a forced residual, no ASan diagnostic appears at any frame depth — while
+// three positive controls in the SAME binary went red, including an
+// `any_io_executor` holding a strand and outliving its `io_context`
+// (`heap-use-after-free` at `asio/detail/impl/strand_executor_service.ipp:88`).
+//
+// The reason is mechanical, and it inverts the intuitive test: after
+// `~io_context` destroys the surviving frames, NOTHING RESUMES THEM. Destroying a
+// suspended frame runs the destructors of its in-scope locals; it does not
+// re-enter the body, so the dead `Session*` is never dereferenced. The only drain
+// that outlives the fixtures is inside `~io_context`'s own shutdown, and that
+// destroys rather than resumes.
+//
+// ⚠️ So a clean ASan run over `CrossSessionDisjoint` is NOT evidence this hazard
+// is absent — it is evidence the instrument has nothing to observe. The fix is
+// by-construction hardening, exactly as #302 recorded #293's arena half, and the
+// acceptance instrument has to be the BEHAVIOUR: on a residual teardown the
+// fixtures were released, and on a quiesced teardown they were destroyed.
+//
+// Both directions are pinned, because either alone is satisfiable by a guard that
+// answers unconditionally, and BOTH assert the destruction count directly rather
+// than only the clock proxy — see `SessionFixture::destructions`.
+// ══════════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// Shared construction for the witnesses. utc_2024 matches the tests above.
+inline std::shared_ptr<fixpp::core::mock_clock> make_witness_clock(asio::io_context& ioc) {
+    using sc = std::chrono::system_clock;
+    return std::make_shared<fixpp::core::mock_clock>(
+        sc::time_point{} + std::chrono::seconds{1704067200}, fixpp::core::steady_time_point{},
+        ioc.get_executor());
+}
+
+}  // namespace
+
+// ── Direction 1: RESIDUAL ⇒ the fixture is RELEASED, and it is reported ───────
+//
+// The fixture MUST be scoped INSIDE the macro's statement. Declaring it before
+// EXPECT_NONFATAL_FAILURE would run the guard after the macro stopped intercepting
+// failures, and this test would pass while asserting nothing.
+TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
+    std::atomic<int> destructions{0};
+    std::weak_ptr<fixpp::core::Clock> weak_clock;
+
+    EXPECT_NONFATAL_FAILURE(
+        ([&destructions, &weak_clock] {
+            // Arena for the inbound frame, declared BEFORE `ioc` for the same reason
+            // the real test's is — and this witness is where that reason was
+            // MEASURED rather than reasoned about. An earlier revision declared the
+            // buffer as a plain local after the guard; the guard's own `poll_one()`
+            // then RESUMED the suspended `on_inbound_frame` frame over the
+            // already-destroyed buffer and ASan reported heap-use-after-free in
+            // `scan_frame_header` with `quiesce_or_release_on_exit::~...` four frames
+            // down the stack.
+            //
+            // The lesson generalises and is easy to get backwards: what faults is not
+            // a frame being DESTROYED — that runs trivial destructors and is usually
+            // silent — it is a frame being RESUMED after its borrowed storage died.
+            // Every drain in this guard (`run_for`, and the `poll_one()` probe) is
+            // such a resumption, so any storage a suspended frame borrows must
+            // outlive the guard.
+            std::deque<std::vector<std::byte>> frames;
+
+            asio::io_context ioc;
+            auto clock = make_witness_clock(ioc);
+            weak_clock = clock;
+
+            auto sA =
+                std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_A", "TARGET_A");
+            sA->destructions = &destructions;
+
+            // 0 ms budget, so the guard cannot drain. Its `poll_one()` probe is what
+            // makes this a REAL residual rather than the deadline artefact: with the
+            // probe in place, an empty context at a zero budget reports QUIESCED (the
+            // third witness below pins exactly that), so reaching the residual branch
+            // here means work genuinely remained.
+            quiesce_or_release_on_exit guard{ioc, *clock, {&sA}, std::chrono::milliseconds{0}};
+
+            // Real outstanding work: open the session (so its liveness loop is live
+            // and re-arms), then spawn an inbound frame that is never pumped.
+            auto fut_open = asio::co_spawn(ioc, sA->session->open(), asio::use_future);
+            ASSERT_TRUE(pump_until_ready(ioc, fut_open))
+                << kPumpBudgetMiss << "opening the witness session";
+            ASSERT_TRUE(fut_open.get().has_value());
+
+            auto& logon =
+                frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1));
+            auto fut = asio::co_spawn(ioc,
+                                      sA->session->on_inbound_frame(
+                                          std::span<const std::byte>{logon.data(), logon.size()}),
+                                      asio::use_future);
+            (void)fut;  // deliberately never pumped
+
+            // Drop the test's own strong reference, so after the scope the ONLY thing
+            // that can still hold the clock alive is a RELEASED fixture. Sampled here
+            // rather than before construction: the fixture copies the config, so an
+            // earlier sample would be inflated by copies that are about to die anyway.
+            //
+            // `guard.clock` is a reference to *clock and is used during the guard's
+            // destructor, which runs while sA is still alive and still owns a
+            // shared_ptr copy — so this reset cannot leave that reference dangling.
+            clock.reset();
+        }()),
+        "the io_context did not run out of work");
+
+    // THE DIRECT OBSERVATION. A mutant that deletes the release() while keeping the
+    // message above passes the SPI matcher and fails here.
+    EXPECT_EQ(destructions.load(std::memory_order_relaxed), 0)
+        << "the SessionFixture was DESTROYED on the residual teardown path. Its Session's "
+           "strand handle is then destroyed after ~io_context destroys the frames that "
+           "borrow it, which is the ordering #303 exists to prevent.";
+
+    // An independent check on a different observable: the released fixture's graph is
+    // retained. This proves RETENTION, not fixture identity — a compound mutant that
+    // drops release() while copying the clock elsewhere would keep it live. The
+    // destruction count above is what covers that; the two are kept because they fail
+    // for different reasons.
+    EXPECT_FALSE(weak_clock.expired())
+        << "the fixture-owned clock did not survive the residual path, so the fixture's "
+           "EngineConfig shared_ptr copy died with it.";
+}
+
+// ── Direction 2: QUIESCED ⇒ the fixture is DESTROYED, and nothing is reported ─
+//
+// Without this, direction 1 is satisfied by a guard that releases unconditionally —
+// which would leak on every run of every test using it — and by a `destructions`
+// probe that can never increment. Any non-fatal failure inside this test fails it
+// outright, which is exactly the second assertion.
+TEST(CrossSessionTeardown, QuiescedPathDestroysTheFixtures) {
+    std::atomic<int> destructions{0};
+    std::weak_ptr<fixpp::core::Clock> weak_clock;
+
+    {
+        asio::io_context ioc;
+        auto clock = make_witness_clock(ioc);
+        weak_clock = clock;
+
+        auto sA =
+            std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_A", "TARGET_A");
+        sA->destructions = &destructions;
+
+        // Nothing spawned and a real budget, so the guard drains and takes the
+        // quiesced branch.
+        quiesce_or_release_on_exit guard{ioc, *clock, {&sA}, std::chrono::seconds{1}};
+
+        clock.reset();
+    }
+
+    EXPECT_EQ(destructions.load(std::memory_order_relaxed), 1)
+        << "the SessionFixture was NOT destroyed on a quiesced teardown — the guard is "
+           "releasing unconditionally, which leaks on every ordinary run and makes the "
+           "residual witness vacuous.";
+    EXPECT_TRUE(weak_clock.expired())
+        << "the fixture-owned clock outlived a quiesced teardown, so the weak_ptr probe "
+           "used by the residual witness cannot distinguish release from destruction and "
+           "proves nothing there.";
+}
+
+// ── Direction 3: the `poll_one()` probe is load-bearing ──────────────────────
+//
+// `io_context::run_for` is `run_until`, and `run_one_until` tests `now < abs_time`
+// BEFORE entering the scheduler (asio impl/io_context.hpp:108-131). A run whose
+// deadline has already passed therefore returns without ever consulting the work
+// count, leaving a just-restarted context UNSTOPPED even when it holds no work —
+// unconditionally so at a zero budget.
+//
+// Without the guard's `poll_one()`, this scope would take the residual branch on an
+// EMPTY context: it would report a residual that does not exist and leak a fixture
+// on a healthy teardown. Deleting that one line turns this test red, and it is the
+// only test here that it turns red.
+TEST(CrossSessionTeardown, ZeroBudgetOnAnEmptyContextIsNotResidual) {
+    asio::io_context ioc;
+    auto clock = make_witness_clock(ioc);
+
+    // No fixtures and nothing spawned: the context provably holds no work, so the
+    // ONLY thing that can make the guard report a residual is the deadline artefact.
+    quiesce_or_release_on_exit guard{ioc, *clock, {}, std::chrono::milliseconds{0}};
+    // ~guard runs here and must add no failure.
 }
 
 }  // namespace fixpp::session::test
