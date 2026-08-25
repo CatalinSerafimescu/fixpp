@@ -3,9 +3,17 @@
 # Produces _fixpp.so (or _fixpp.pyd on Windows) + fixpp.py.
 # [arch §4.12] — depends on fixpp::capi ONLY; no C++ engine headers leak.
 
-# T005 / PKG-1 / D-3 — SWIG 4.2 PINNED: a 4.0 runner silently regresses the
+# T005 / PKG-1 / D-3 — SWIG 4.2 minimum: a 4.0 runner silently regresses the
 # limited-API (abi3) heap-type mode.
-find_package(SWIG 4.2 REQUIRED)
+#
+# ⚠️ #296 TEMPORARY UPPER BOUND — mirrors the `swig>=4.2,<4.5` cap in
+# bindings/python/pyproject.toml (see that file for the root cause: an
+# intermittent 3.11 GC segfault observed under SWIG 4.5.0, still not
+# root-caused). Without this, a direct/in-tree CMake build is unconstrained
+# and can pick up a system SWIG 4.5 even though the wheel build excludes it.
+# Both bounds are TEMPORARY and must be lifted TOGETHER once #296 is
+# root-caused; do not drop one without the other.
+find_package(SWIG 4.2...<4.5 REQUIRED)
 include(UseSWIG)
 
 # T005 — request the stable-ABI (SABI) development component when available so the

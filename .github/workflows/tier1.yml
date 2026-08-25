@@ -437,8 +437,10 @@ jobs:
           sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
           clang++ --version
           # swig + python3-dev (#254): every leg now builds the Python bindings,
-          # so `find_package(SWIG 4.2 REQUIRED)` (bindings/python/CMakeLists.txt)
-          # must resolve here. Both are carried over VERBATIM from the deleted
+          # so `find_package(SWIG 4.2...<4.5 REQUIRED)` (bindings/python/CMakeLists.txt,
+          # #296 temporary cap) must resolve here — the distro's unbounded `swig`
+          # package must currently land inside that range or configure fails.
+          # Both packages are carried over VERBATIM from the deleted
           # `python-bindings` job's apt line — that is the configuration CI has
           # proven green, and python3-dev additionally decides which
           # Python3_SITEARCH branch fires (bindings/python/CMakeLists.txt).

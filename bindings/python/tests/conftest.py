@@ -1,6 +1,10 @@
-# The tests/wheel/ suite is a deliberate, byte-faithful fork of this in-tree
-# suite (same basenames: test_smoke.py, test_close_flow.py, ...) that runs the
-# SHIPPED wheel out-of-repo. It is exercised only by the python-wheel-test CI
+# The tests/wheel/ suite is a deliberate fork of this in-tree suite (same
+# basenames: test_smoke.py, test_close_flow.py, ...) that runs the SHIPPED
+# wheel out-of-repo. Byte-faithful except for an explicit, enumerated
+# allowlist (see bindings/python/tests/wheel/README.md "Membership"): most
+# files differ only in their dict-locator helper; test_subinterpreter.py has
+# a real behavioural divergence below Python 3.12, tracked as issue #298. It
+# is exercised only by the python-wheel-test CI
 # job, which copies tests/wheel/ to a scratch dir and points pytest there — it
 # is NEVER meant to be collected in place. Without this ignore, the in-tree
 # `pytest bindings/python/tests/` (run by all six tier-1 `linux` matrix legs

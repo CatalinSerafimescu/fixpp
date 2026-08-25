@@ -7,7 +7,7 @@ Defines what `pip wheel bindings/python/` (via `scikit-build-core` under
 
 | ID | Rule |
 |---|---|
-| PKG-1 | `[build-system] requires = ["scikit-build-core>=…", "swig>=4.2"]`, `build-backend = "scikit_build_core.build"`. **`swig>=4.2` is PINNED** — a 4.0 runner silently regresses the limited-API (abi3) mode (research D-3). Lower-bound pins; exact versions verified against PyPI at implement (per the dependency rule). |
+| PKG-1 | `[build-system] requires = ["scikit-build-core>=…", "swig>=4.2,<4.5"]`, `build-backend = "scikit_build_core.build"`. SWIG 4.2 is the minimum because a 4.0 runner silently regresses the limited-API (abi3) mode (research D-3). The `<4.5` upper bound is a temporary safety cap for issue #296 and must lift together with the matching cap in `bindings/python/CMakeLists.txt` once #296 is root-caused. |
 | PKG-2 | `[project] name = "fixpp"`; `version` is **dynamic**, sourced from the CMake `project(VERSION)` via `tool.scikit-build.metadata.version` (research D-6). No second version source. |
 | PKG-3 | `[project] requires-python = ">=3.10"` (the abi3 `cp310` floor; the stable-ABI wheel covers 3.10–3.13 and future 3.14+ — no upper cap, since abi3 forward-compatibility is the point; 3.14+ is covered-by-abi3 but untested in v1). |
 | PKG-4 | scikit-build-core drives the existing `bindings/python/CMakeLists.txt` with `-DFIXPP_BUILD_PYTHON=ON` and the in-container Conan toolchain file (research D-2/D-7). |
