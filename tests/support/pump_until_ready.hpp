@@ -203,12 +203,26 @@ template <class Fut>
 // `transport` field (below) from a real defect (gate-b/r1 P1-1) — cancelling
 // clock sleeps does not unstick a coroutine parked in `async_write` /
 // `async_read_some`, which completes only when the transport itself is closed.
-// No caller here attaches a live Transport (this file has zero references to
-// one), so the gap is latent. It stops being latent for the FIRST migrated
-// fixture that has a live Transport and no Clock — precisely the combination
-// this helper is for. Such a caller must close the transport itself before
-// calling this, or use `quiesce_on_exit`. Do not assume this drain is
-// sufficient because it was sufficient here.
+// Stated as a CONDITION rather than a count, because the count form of this
+// sentence was already going stale. It used to read "no caller here attaches a
+// live Transport … so the gap is latent", and #307 lands exactly such a caller
+// (`CompID_KnobOff_AuthzAllowListStillEnforced`, which attaches a NullSinkTransport
+// and has no Clock). A sentence that names its own falsification condition — "it
+// stops being latent for the FIRST fixture that…" — should have been written as
+// that condition in the first place. Conditions are merge-order independent;
+// counts create an obligation on whoever merges next.
+//
+// The condition:
+//
+//     A caller whose transport can PARK a coroutine — i.e. whose async_write /
+//     async_read_some can stay pending — MUST use `quiesce_on_exit` with
+//     `.transport` set, or close the transport itself before calling this.
+//     `drain_or_report` cannot close a transport and never will, whoever calls it.
+//
+// A transport that cannot park is unaffected: that is a property of the transport,
+// not of how many callers exist. #307's is of that kind — its `async_read_some`
+// reports EOF immediately and its `async_write` swallows its bytes — so the gap is
+// unreachable there. Do not read "unreachable at that caller" as "unreachable".
 //
 // Call this while EVERY object the suspended coroutine references is still
 // alive. That is not automatic: a fixture destructor body protects fixture
