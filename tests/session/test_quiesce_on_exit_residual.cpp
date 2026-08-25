@@ -171,7 +171,7 @@ TEST(QuiesceOnExitResidualWitness, ClosesTransportBeforeDraining) {
 }
 
 // gate-b/r1 F1b (opus_pr301_1_triage.md fix queue item 2): `drain_or_report`'s
-// residual ADD_FAILURE branch (pump_until_ready.hpp:225-232) has shipped
+// residual ADD_FAILURE branch (pump_until_ready.hpp:296) has shipped
 // since #289 with no witness that has ever seen it fire — every existing
 // caller in this file's `Fixture` fixtures leaves `EngineConfig::clock` null,
 // so `run_liveness_loop()` co_returns immediately and nothing is ever
@@ -296,8 +296,9 @@ TEST(QuiesceOnExitResidualWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
 
 // ── (gate-b/r1 F3) The bound the header states but nothing enforced ───────────
 //
-// pump_until_ready.hpp:238-240 and :404 state that the zero/expired-budget probe
-// dispatches AT MOST ONE handler — `poll_one()`, not `poll()`. Nothing above pins
+// pump_until_ready.hpp:238-240 ("The probe can then dispatch at most ONE
+// handler") states that the zero/expired-budget probe dispatches at most one
+// handler — `poll_one()`, not `poll()`. Nothing above pins
 // that cardinality: every existing witness uses at most one outstanding handler,
 // so `poll_one() -> poll()` (an unbounded drain during teardown) leaves the whole
 // binary green. Two independently observable handlers, and both the dispatch
