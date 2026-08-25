@@ -123,15 +123,28 @@
 // the #define). The command would then have rewritten its own instructions, and an
 // anchor-count assertion of 1 -- the discipline this repo uses to prove a mutation
 // applied -- would read 2 and refuse. A comment that quotes the token it tells you
-// to replace is its own second occurrence.
+// to replace is its own second occurrence. That token in fact appears a THIRD time
+// (in the COST paragraph above and in the PRIOR ART paragraph below), so an
+// anchor-count assertion built against the sanitizer-call TEXT is never safe here.
+// Locate the `#define FIXPP_XSESSION_LSAN_IGNORE` line itself and mutate it BY
+// ADDRESS instead — that anchor is unique regardless of how many times the
+// sanitizer-call text appears elsewhere in the file.
 //
 // The one genuinely stable invariant is the PER-FIXTURE root: every leaked byte is
-// attributable to a `make_unique<Session>` inside one released `SessionFixture`,
-// 266272 B each. Everything else below is derived from how many fixtures each
-// witness releases, and is therefore a function of the test list, not of the code.
+// attributable to state owned by one released `SessionFixture` — most of it
+// (266272 B per fixture) to the `make_unique<Session>` inside it, and a real
+// minority (65536+64+16 B per fixture) to `make_minimal_dictionary()`, hanging off
+// `SessionConfig` rather than the `Session` itself (the COST paragraph above
+// already attributes it there correctly; do not fold it into the Session figure).
+// Everything else below is derived from how many fixtures each witness releases,
+// and is therefore a function of the test list, not of the code.
 //
-// Measured on `linux-clang-asan` (clang 22, libstdc++, `-fsanitize=address`), at
-// `a89ec230` — the LAST code-affecting commit of this PR, deliberately:
+// Measured on `linux-clang-asan` (clang 22, libstdc++, `-fsanitize=address`). Not
+// pinned to a specific commit as "the last code-affecting one" -- an earlier
+// version of this line named one and was wrong: the named commit's own diff
+// touched only comments, in a file this binary does not even link. Trust the
+// re-measurement RULE above (not a commit citation) to decide whether this table
+// is still current:
 //
 //   witness                                  fixtures released   leaked
 //   ResidualPathReleasesTheFixtures                  2           671075 B / 61
