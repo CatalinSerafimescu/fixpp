@@ -223,6 +223,14 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
                             std::chrono::steady_clock::duration budget = kQuiesceBudget) {
     ioc.restart();
     ioc.run_for(budget);
+    // (#305) THE PROBE. See `quiesce_on_exit`'s destructor for the full argument;
+    // the short version is that `run_for` can return WITHOUT ever consulting the
+    // work count, so `stopped()` alone reports a residual that does not exist.
+    // This helper is NEW (#301) and inherited the defect by having the identical
+    // shape — fixed here in the same change rather than only in the older copy,
+    // because a fix that lands on one of two identical shapes is how this repo's
+    // "fixed some sites of a claim, missed another" class keeps recurring.
+    (void)ioc.poll_one();
     if (!ioc.stopped()) {
         ADD_FAILURE() << "#289: the io_context did not run out of work within the teardown "
                          "drain, so a coroutine frame is probably still suspended and will be "
@@ -292,7 +300,19 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // false-positive sweep is separate: for any `io_context` reachable from this
 // caller, no production code outside `src/capi/` creates a work guard, so
 // `stopped()==false` here really does mean session/coroutine work is still
-// outstanding. It is also not authoritative: `mock_clock::sleep_until`
+// outstanding.
+//
+// ⚠️ (#305) THAT LAST SENTENCE WAS AN OVER-CLAIM, AND THE PROBE BELOW IS WHAT
+// MAKES IT TRUE. The work-guard census above is sound as far as it goes, but it
+// reasons only about who can hold work OPEN — it never asks whether the work
+// count was CONSULTED. `run_for` can return without consulting it at all (see the
+// probe in the destructor), and then `stopped()==false` means "the deadline had
+// already passed", not "work is outstanding". The census could not have caught
+// that, because the defect is not in the population it enumerates. Kept, rather
+// than deleted and quietly rewritten, so the shape of the mistake stays visible:
+// an exhaustive sweep of the wrong axis reads exactly like proof.
+//
+// It is also not authoritative: `mock_clock::sleep_until`
 // registers a new waiter whenever the deadline is still in the future
 // (`src/core/test/mock_clock.cpp:119-126`), and `cancel_sleeps()` above is a
 // ONE-SHOT drain that installs nothing to reject a later registration
@@ -330,6 +350,34 @@ struct quiesce_on_exit {
         clock.cancel_sleeps();
         ioc.restart();
         ioc.run_for(budget);
+        // ── (#305) THE PROBE, and it repairs a predicate this header over-claimed ──
+        //
+        // `io_context::run_for` is `run_until`, which loops on `run_one_until`, and
+        // `run_one_until` is `while (now < abs_time) { ... }  return 0;`
+        // (asio impl/io_context.hpp:112-131). If the deadline has ALREADY arrived at
+        // entry the loop body never runs, `impl_.wait_one` is never called, and
+        // nothing consults `outstanding_work_` or sets `stopped_`. The `restart()`
+        // immediately above has just cleared that flag. So `stopped()` reads false
+        // whether or not any work exists — unconditionally at a zero budget, and
+        // reachable at any budget's deadline boundary.
+        //
+        // `poll_one()` closes it: `scheduler::poll_one` is
+        // `if (outstanding_work_ == 0) { stop(); return 0; }`
+        // (asio detail/impl/scheduler.ipp:289-295), so after this line `stopped()`
+        // reflects the WORK COUNT rather than the deadline.
+        //
+        // ⚠️ THIS IS A NEW CAPABILITY AT A ZERO BUDGET, NOT AN INHERITED OBLIGATION,
+        // and the distinction is the one an earlier draft of this comment got wrong.
+        // `run_for(budget)` already resumes coroutines, so "a drain resumes frames" is
+        // nothing new at a normal budget. But `run_for(0)` resumes NOTHING — it returns
+        // before entering the scheduler — whereas `poll_one()` WILL dispatch. So the
+        // expired-deadline path gains the ability to resume a frame, in exactly the case
+        // where a caller chose a zero budget because it wanted nothing run. The
+        // obligation that follows is the usual one and it now binds a path it did not
+        // bind before: storage a suspended frame borrowed must outlive this guard.
+        // Witnessed directly rather than described — see the zero-budget cases in
+        // tests/session/test_quiesce_on_exit_residual.cpp.
+        (void)ioc.poll_one();
         if (!ioc.stopped()) {
             ADD_FAILURE() << "quiesce_on_exit: the io_context did not run out of work within the "
                              "configured quiesce window. At this caller that is expected to mean a "
