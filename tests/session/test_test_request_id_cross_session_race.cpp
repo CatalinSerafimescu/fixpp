@@ -131,11 +131,19 @@
 // sanitizer-call text appears elsewhere in the file.
 //
 // The one genuinely stable invariant is the PER-FIXTURE root: every leaked byte is
-// attributable to state owned by one released `SessionFixture` — most of it
-// (266272 B per fixture) to the `make_unique<Session>` inside it, and a real
-// minority (65536+64+16 B per fixture) to `make_minimal_dictionary()`, hanging off
-// `SessionConfig` rather than the `Session` itself (the COST paragraph above
-// already attributes it there correctly; do not fold it into the Session figure).
+// REACHABLE FROM one released `SessionFixture`. Reachable-from, not owned-by, and
+// the distinction is the reason the suppression works at all — a sizeable minority
+// of the blocks are asio coroutine frames (`Session::run_liveness_loop`, allocated
+// by `asio::detail::thread_info_base`), which no fixture owns but every one keeps
+// alive. `__lsan_ignore_object` suppresses by REACHABILITY, so those are covered;
+// the leak-clean baseline with the suppression intact is the proof.
+//
+// Deliberately no per-component byte split here. An earlier revision carried one
+// and got the arithmetic wrong — it omitted a 40-byte `_Sp_counted_deleter` control
+// block allocated inside `make_minimal_dictionary()`, so its dictionary subtotal
+// was short by 40 B per fixture. A split is a second set of figures to keep true,
+// on the same moving target, for no decision anyone makes from this block. The
+// per-witness table below is the measurement; this paragraph is the invariant.
 // Everything else below is derived from how many fixtures each witness releases,
 // and is therefore a function of the test list, not of the code.
 //
