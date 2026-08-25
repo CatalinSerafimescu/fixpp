@@ -85,7 +85,7 @@ TEST(InteropEngineFixtureTeardown, BoundedStopMissReportsNamedFailure) {
 // unconditionally. Any non-fatal failure here fails this test outright, which is
 // exactly the assertion.
 TEST(InteropEngineFixtureTeardown, CleanStopReportsNothing) {
-    // Non-vacuity control for MissPathActuallyReleasesTheEngine below: the SAME
+    // Non-vacuity control for MissPathRetainsTheEngineOwnedClock below: the SAME
     // weak_ptr probe must read the OPPOSITE way here. Without this, a probe that
     // could never expire (e.g. some other strong reference kept the clock alive)
     // would satisfy that test while proving nothing. A zero is only meaningful
@@ -232,8 +232,9 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
         "Engine::stop() did not complete successfully");
 
     EXPECT_FALSE(weak_clock.expired())
-        << "the Engine was DESTROYED on the bounded-stop miss path instead of "
-           "being released: its EngineConfig-owned clock reference died with it. "
+        << "the Engine-owned clock did not survive the bounded-stop miss path: "
+           "the EngineConfig's shared_ptr copy died, which is the proxy for the "
+           "Engine having been destroyed instead of released. "
            "A destroyed Engine means ~Engine ran with teardown frames still "
            "suspended in ioc_, which is the silent failure #292 exists to prevent.";
 }
@@ -255,7 +256,9 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
 // That is the same silent class the whole PR exists to remove.
 //
 // Two properties, one test: the failure is REPORTED (the SPI matcher), and the
-// Engine is RELEASED rather than destroyed (the weak_ptr, live afterwards).
+// Engine-owned clock SURVIVES the fixture (the weak_ptr, live afterwards) — which
+// is the observable proxy for the Engine having been released rather than
+// destroyed, not a direct observation of it. See the scope note below.
 //
 // SCOPE, stated so the test is not read as proving more (gate-b/r3 P2-1, P2-2):
 //   - This fixture registers NO sessions, so every per-session cancel / close /
@@ -292,8 +295,9 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
         "Engine::stop() did not complete successfully");
 
     EXPECT_FALSE(weak_clock.expired())
-        << "a stop() that threw partway through teardown left the Engine DESTROYED "
-           "rather than released — its EngineConfig-owned clock died with it. "
+        << "a stop() that threw partway through teardown did not retain the "
+           "Engine-owned clock — the EngineConfig's shared_ptr copy died, which is "
+           "the proxy for the Engine having been destroyed rather than released. "
            "(Precisely (gate-b/r3 P3-1): on THIS path the stop operation completed "
            "exceptionally, so its frames are no longer suspended in ioc_. What is "
            "unsafe is that teardown stopped before session close and registry "
@@ -339,8 +343,11 @@ TEST(InteropEngineFixtureTeardown, ExactlyOneTeardownBodyRunsAndItsFailureIsNotM
     // bodies can pass the outer stopped_ check before either sets the flag, the
     // tracked future still rethrows, and nothing notices two teardowns ran.
     //
-    // Counting hook entries observes the operations themselves rather than the
-    // handle to one of them, so an untracked spawn cannot hide behind it.
+    // Counting hook entries observes teardown BODIES THAT REACH THE HOOK, rather
+    // than the handle to one operation. Stated that precisely (gate-b/r5 P2-1)
+    // because it is NOT "every stop operation": an extra operation that
+    // short-circuits at the outer stopped_ check never reaches the hook and is
+    // invisible here — which is exactly what the measured extra-spawn mutant did.
     std::atomic<int> hook_entries{0};
 
     EXPECT_NONFATAL_FAILURE(
@@ -380,5 +387,6 @@ TEST(InteropEngineFixtureTeardown, ExactlyOneTeardownBodyRunsAndItsFailureIsNotM
         << "Engine::stop()'s teardown body ran " << hook_entries.load(std::memory_order_relaxed)
         << " times, not once. The rethrow assertion above cannot see this — it "
            "observes the TRACKED future, so an extra spawn leaves that handle "
-           "untouched. This counter observes the operations themselves.";
+           "untouched. This counter observes the teardown bodies that reach the "
+           "hook.";
 }
