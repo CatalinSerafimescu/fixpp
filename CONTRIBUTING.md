@@ -11,7 +11,11 @@
   - CI provisions Clang 22 the same way, so local == CI.
 - **Build: CMake ≥ 3.28 + Ninja.**
 - **Deps: Conan 2.x.** Profiles live in `conan/profiles/`.
-- **Python: 3.12, SWIG 4.2+, pytest** (only when working on Python bindings).
+- **Python: 3.12, SWIG >=4.2,<4.5, pytest** (only when working on Python bindings). The
+  upper bound is a temporary #296 safety cap (an intermittent 3.11 GC segfault
+  under SWIG 4.5.0, not yet root-caused); it applies to both the wheel build
+  (`bindings/python/pyproject.toml`) and the direct CMake build
+  (`bindings/python/CMakeLists.txt`).
 
 ## Pre-PR build gate (mandatory)
 
