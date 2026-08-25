@@ -468,9 +468,11 @@ struct SessionFixture {
 //
 // Not a count in itself — resolve every hit by hand. Run at HEAD, its hits fall
 // into: real object declarations (the population); `test_quiesce_on_exit_residual.cpp`
-// (excluded, the self-test); and the single comment hit inside THIS file, at the
-// sentence a few paragraphs down that names the shape by example (readable in
-// context, not a declaration) — note this pattern, by construction, does NOT
+// (excluded, the self-test); the struct definition itself
+// (`tests/support/pump_until_ready.hpp`, `struct quiesce_on_exit {` — also a
+// zero-width match of this pattern); and the single comment hit inside THIS
+// file, at the sentence a few paragraphs down that names the shape by example
+// (readable in context, not a declaration) — note this pattern, by construction, does NOT
 // match `quiesce_or_release_on_exit` (no shared contiguous substring past
 // `quiesce_`), so it never picks up this file's own seam declarations, which is
 // the intended scope. The pattern also misses paren-init (`quiesce_on_exit
@@ -533,18 +535,21 @@ struct SessionFixture {
 // before `ioc` (see that member's own doc comment, and `feed_inbound_spawn`'s
 // body), and the spawned coroutine spans THAT, not the caller's temporary. That
 // argument covers every site that reaches the guard through `feed_inbound`; it
-// does NOT cover every `quiesce_on_exit` declaration in the file — two named
-// exceptions:
+// does NOT cover every `quiesce_on_exit` declaration in the file — one named
+// exception:
 //
 //   - `SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose`
 //     hands `on_inbound_frame` a body-local `std::vector` directly, with no
 //     `feed_inbound` in the picture. It is safe for a DIFFERENT reason: that
 //     buffer is declared BEFORE its `quiesce_on_exit`, in the same block, so the
 //     guard's drain runs while the buffer is still alive.
-//   - `FeedInboundSpansTheArenaCopyNotTheCallersBuffer` (this PR's own witness)
-//     deliberately lets the caller's buffer die BEFORE the pump — that is the
-//     point of the test — and is safe only because the arena copy is what gets
-//     spanned, not because "nothing here ever dies first".
+//
+// `FeedInboundSpansTheArenaCopyNotTheCallersBuffer` (this PR's own witness) is
+// NOT a second exception, even though it deliberately lets the caller's buffer
+// die BEFORE the pump — that is the point of the test: it is the argument's
+// clearest instance, safe only because the arena copy is what gets spanned,
+// which is the `feed_inbound` argument verbatim, not a case of "nothing here
+// ever dies first".
 //
 // `test_live_outbound_serialized.cpp`'s sites each carry their own `frames`
 // deque declared before `ioc` the same way, plus, at the one site that
