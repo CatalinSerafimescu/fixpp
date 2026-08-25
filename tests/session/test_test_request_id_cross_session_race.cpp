@@ -111,11 +111,19 @@
 // Two prior versions of this paragraph said they were stated structurally to
 // survive the next witness, and both were falsified by the next witness.
 //
-// Re-derive with (one command, from the worktree root):
-//   sed -i 's/__lsan_ignore_object(p)/((void)(p))/' <this file>   # then rebuild + run
+// Re-derive: edit the `#define FIXPP_XSESSION_LSAN_IGNORE` below so it expands to
+// `((void)(p))` instead of the sanitizer call, then rebuild and run:
 //   cmake --build build/linux-clang-asan --target session_test_request_id_cross_session_race -j2
 //   ./build/linux-clang-asan/bin/session_test_request_id_cross_session_race
 // then RESTORE the macro. Leak detection must be ON (no ASAN_OPTIONS).
+//
+// ⚠️ EDIT THAT LINE BY HAND — do NOT script it by matching the sanitizer call's
+// text. An earlier revision of this block spelled the re-derivation as a `sed`
+// over that literal, which made the string appear TWICE in this file (here and at
+// the #define). The command would then have rewritten its own instructions, and an
+// anchor-count assertion of 1 -- the discipline this repo uses to prove a mutation
+// applied -- would read 2 and refuse. A comment that quotes the token it tells you
+// to replace is its own second occurrence.
 //
 // The one genuinely stable invariant is the PER-FIXTURE root: every leaked byte is
 // attributable to a `make_unique<Session>` inside one released `SessionFixture`,
