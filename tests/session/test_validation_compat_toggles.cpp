@@ -1490,9 +1490,13 @@ TEST(ValidationCompatToggles, Inbound_Only_OutboundUnchanged) {
         // lambda above: `fix` here is a lambda-local `unique_ptr<Fixture>`,
         // destroyed at the `return` two lines below — no caller holds it past
         // that point. `~Fixture`'s drain therefore runs microseconds later with
-        // every member still alive, which is exactly the case it was written
-        // for. The hazard only appears when a live fixture ESCAPES the miss
-        // branch to a caller that can destroy a member before `~Fixture` runs.
+        // every member still alive; it merely completes a frame nothing else
+        // would resume, and is harmless here because every referent it touches
+        // is a fixture member (cf. the `CompID_KnobOff_AuthzAllowListStillEnforced`
+        // block-local drain comment above: what makes a drain required is a
+        // LATER DRAIN that resumes the frame). The hazard only appears when a
+        // live fixture ESCAPES the miss branch to a caller that can destroy a
+        // member before `~Fixture` runs.
         if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "Inbound_Only_OutboundUnchanged/capture_outbound_logon";
