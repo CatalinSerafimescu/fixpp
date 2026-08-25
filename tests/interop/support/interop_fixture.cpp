@@ -20,10 +20,18 @@
 // not a one-allocation excuse. LSan treats the ignored Engine as a ROOT, so
 // everything reachable through it — registry, Sessions, listeners, transports,
 // clock, logger/provider state, buffers — also drops out of leak reports, and
-// those resources are retained until process exit. Accepted because this path is
-// reached only when the test has ALREADY failed, so a red run is not being
-// turned green; the alternative (an LSan report burying the named diagnostic)
-// loses the one piece of information the path exists to produce.
+// those resources are retained until process exit. The round-1 rationale said "reached
+// only when the test has ALREADY failed, so no red run is turned green". That is
+// WRONG for this binary (gate-b/r2 P2-3): the miss witnesses run inside
+// EXPECT_NONFATAL_FAILURE, which CONSUMES the expected failure and leaves
+// interop_support_smoke_test GREEN — so an unrelated real leak reachable through
+// one of those ignored graphs would be hidden in a green sanitizer binary.
+//
+// Accepted anyway, with that cost stated rather than denied: the alternative is
+// an LSan report burying the named diagnostic this path exists to produce, and
+// the suppressed graphs are default-EngineConfig Engines with NO registered
+// sessions, no listeners and no stores — the reachable set is the clock and the
+// strand. Real exposure, small and bounded to this binary.
 //
 // Shape follows the repo's established sanitizer-detection idiom (two separate
 // #if blocks, not an #elif chain) — see tests/alloc_guard/
@@ -90,25 +98,41 @@ InteropEngineFixture::~InteropEngineFixture() {
     // at step 1 of stop()'s teardown (engine.cpp:1196), so it reports true while
     // steps 2-5 are still suspended. Gating on it would take the "safe" branch
     // for exactly the partially-torn-down case that is least safe.
-    // The WHOLE body is guarded, not just the stop drive (gate-b/r1 P1-3). A
-    // destructor is implicitly noexcept, and ADD_FAILURE() is NOT nothrow:
-    // gtest's AddTestPartResult throws GoogleTestFailureException under
-    // --gtest_throw_on_failure, and the streaming chain can throw on allocation.
-    // With the report outside the guard, the one path that exists to produce a
-    // named failure would instead call std::terminate under that flag.
+    // NESTED guards, and the nesting is the point (gate-b/r2 P1-1).
+    //
+    // Round 1 wrapped the whole body in ONE try/catch to stop ADD_FAILURE()
+    // escaping a noexcept destructor. That fix was incomplete in a way that
+    // reintroduced the very defect this PR exists to remove: a throw out of
+    // stop_within() jumped straight to the outer handler, skipping the
+    // stop_completed_ check, the release() AND the report — so the Engine was
+    // destroyed SILENTLY with teardown incomplete. Because stop() sets stopped_
+    // at step 1, ~Engine's assert would have passed on the way out.
+    //
+    // INNER catch: stop() finished by throwing, which means teardown did NOT
+    // complete. Swallow the exception but FALL THROUGH to the failure path.
+    // OUTER catch: last resort for the report itself — ADD_FAILURE() is not
+    // nothrow (gtest's AddTestPartResult throws GoogleTestFailureException under
+    // --gtest_throw_on_failure, and the streaming chain can throw on allocation).
     try {
-        // No `if (!stop_completed_)` guard: stop_within already returns
-        // immediately on that flag, so the branch would duplicate it.
-        (void)stop_within(teardown_bound_);
+        try {
+            // No `if (!stop_completed_)` guard: stop_within already returns
+            // immediately on that flag, so the branch would duplicate it.
+            (void)stop_within(teardown_bound_);
+        } catch (...) {
+            // Deliberately NOT reported here — stop_completed_ is still false,
+            // so the path below reports and releases. Returning or rethrowing
+            // here is what round 1 got wrong.
+        }
 
         if (stop_completed_) {
             return;
         }
 
-        // Already-failing path. The stop() frame is still suspended inside ioc_
-        // and holds Engine&. Letting ~Engine run would either trip its stopped_
-        // assert and ABORT (stop never entered), or -- worse, because it is
-        // silent -- pass that assert while teardown frames are still live (stop
+        // Already-failing path: stop() timed out, or it threw partway through
+        // teardown. Either way its frame may still be suspended inside ioc_
+        // holding Engine&. Letting ~Engine run would either trip its stopped_
+        // assert and ABORT (stop never entered), or — worse, because it is
+        // silent — pass that assert while teardown frames are still live (stop
         // entered but did not finish). Leak on purpose: the Engine, its
         // EngineConfig-owned clock and its control_strand_ then outlive ioc_, so
         // the frames ~ioc_ destroys next still have live referents. See the
@@ -123,8 +147,7 @@ InteropEngineFixture::~InteropEngineFixture() {
                          "so this failure is reported instead of ~Engine being destroyed while "
                          "its teardown frames are still suspended (#292).";
     } catch (...) {
-        // Either stop() threw (reported via the not-completed path above) or the
-        // report itself threw. Nothing may escape a noexcept destructor.
+        // Nothing may escape a noexcept destructor.
     }
 }
 
@@ -189,8 +212,15 @@ std::chrono::milliseconds InteropEngineFixture::stop_within(std::chrono::millise
         // unclamped run_for can START at t_end - 1ms and run a whole 5 ms slice,
         // so completion at t_end + 4 ms was accepted as "within bound". The
         // shared pump does the same clamp for the same reason.
-        ioc_.run_for(std::min<std::chrono::steady_clock::duration>(
-            kPumpSlice, t_end - std::chrono::steady_clock::now()));
+        // `remaining` is recomputed and TESTED here rather than reusing the loop
+        // condition's sample (gate-b/r2 P3-1): the deadline can pass BETWEEN the
+        // two now() calls, handing run_for a negative duration. Current asio
+        // treats that as already-expired, but the arithmetic should not rely on it.
+        const auto remaining = t_end - std::chrono::steady_clock::now();
+        if (remaining <= std::chrono::steady_clock::duration::zero()) {
+            break;
+        }
+        ioc_.run_for(std::min<std::chrono::steady_clock::duration>(kPumpSlice, remaining));
     }
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(

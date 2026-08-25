@@ -41,7 +41,7 @@ public:
     // no mutable knob. Tests that exercise the miss branch pass 0 ms.
     explicit InteropEngineFixture(fixpp::core::EngineConfig cfg = {},
                                   std::chrono::milliseconds teardown_bound =
-                                      std::chrono::seconds{5});
+                                      std::chrono::seconds{2});
 
     // Ensures Engine::stop() has completed before the Engine is destroyed
     // (the Engine dtor asserts stopped()). Idempotent with explicit stop_within().
@@ -66,6 +66,14 @@ public:
     // A return value >= bound means stop() did NOT complete within the bound (the
     // FR-028 down-peer watchdog failure condition). Idempotent: a second call after
     // a completed stop() returns immediately.
+    //
+    // NOT a hard wall-clock bound, and the difference matters (gate-b/r2 P2-2):
+    // io_context::run_for bounds how long the context WAITS for work, not how long
+    // an already-dispatched handler may run. A stop continuation that blocks
+    // synchronously past the deadline still leaves the future ready, so this can
+    // return late with completion recorded. The consequence is a missed DEADLINE
+    // diagnostic, not a lifetime hazard — once stop() genuinely completed there
+    // are no suspended frames and destroying the Engine is safe.
     // [[nodiscard]] (#292): the destructor used to CALL this and drop the answer,
     // so a stop() that never completed was invisible.
     //
@@ -158,20 +166,25 @@ private:
     bool stop_completed_{false};
 
     // Destructor teardown bound (#292). Was 30 s, chosen when the destructor
-    // DISCARDED the outcome and the wait was therefore free. Now that the
-    // destructor reports, the bound must be small enough for the report to be
-    // emitted at all: interop_business_message_interop_test carries `TIMEOUT 30`
-    // (tests/interop/CMakeLists.txt:380) and its cells already spend up to 3 s in
-    // expect_graceful_stop (hp_support.hpp:317), so a 30 s destructor drive would
-    // blow the ctest timeout FIRST — ctest would report `Timeout` and the named
-    // ADD_FAILURE this whole change exists to produce would never print.
+    // DISCARDED the outcome and the wait was therefore free. Now that it reports,
+    // the bound is constrained from BOTH sides, and the round-1/round-2 churn
+    // here was caused by justifying only one side at a time:
     //
-    // 5 s, not 2 s (gate-b/r1 P2-2). 2 s was justified only by an IDLE engine
-    // completing inside a 2 s ceiling (support_smoke_test.cpp:114), which is not
-    // a worst-case healthy stop and gave no real margin — too tight a bound makes
-    // the suite FLAKY, which is worse than the bug. The suite's own standard for
-    // a healthy graceful stop is the 3 s watchdog at hp_support.hpp:317, so the
-    // bound is set above that, leaving 3 + 5 = 8 s well inside `TIMEOUT 30`.
+    // UPPER (gate-b/r2 P2-1). interop_business_message_interop_test is ONE ctest
+    // entry carrying `TIMEOUT 30` (tests/interop/CMakeLists.txt:380) over FOUR
+    // parameterized cells (2 counterparties x 2 roles). Under a stop regression
+    // every cell can spend 3 s in expect_graceful_stop (hp_support.hpp:317) and
+    // then `bound` in its destructor, so the entry costs 4*(3+bound). At 5 s that
+    // is 32 s — ctest kills the binary BEFORE the reports print, destroying the
+    // very diagnostic this change exists to produce. At 2 s it is 20 s, inside
+    // the timeout with room for the test bodies.
+    //
+    // LOWER. The bound is only ever REACHED when stop() is already misbehaving:
+    // a cell that calls expect_graceful_stop successfully leaves stop_completed_
+    // true, and the destructor then returns without pumping at all. For the cells
+    // that rely on the destructor for a HEALTHY stop, a loopback stop completes in
+    // single-digit ms (support_smoke_test.cpp:114 bounds an idle engine at 2 s and
+    // passes instantly). 2 s is ~2 orders of magnitude of headroom on that path.
     std::chrono::milliseconds teardown_bound_;
 };
 

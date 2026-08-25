@@ -20,8 +20,10 @@
 #include <chrono>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
+#include <asio/awaitable.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <memory>
+#include <stdexcept>
 
 #include "support/interop_fixture.hpp"
 
@@ -228,45 +230,93 @@ TEST(InteropEngineFixtureTeardown, MissPathActuallyReleasesTheEngine) {
            "suspended in ioc_, which is the silent failure #292 exists to prevent.";
 }
 
-// ── #292 — a second stop_within() drives the operation already in flight ────
+// ── #292 — a throwing stop() is REPORTED and RELEASED (gate-b/r2 P1-1) ──────
 //
-// NAMED FOR WHAT IT PROVES. An earlier draft of this test was called
-// StopIsSpawnedExactlyOnce and claimed to pin the spawn-once guard. It did not:
-// under the exact mutation (delete the `if (!stop_fut_.valid())` guard so every
-// call co_spawns another stop()) it stayed GREEN, as did all four sibling
-// witnesses. Two probes were tried and both failed to discriminate —
-//   (a) restart + drain, then assert ioc().stopped();
-//   (b) assert ioc().stopped() immediately, with no drain.
-// Neither works, and the reason is structural: both frames live on the SAME
-// io_context, this fixture registers no sessions, so Engine::stop() completes
-// trivially and BOTH frames finish inside the same pump. There is no state in
-// which the abandoned frame outlives the pump, so there is nothing to observe.
+// Withdraws two round-1 waivers that both rested on "no test seam exists to make
+// Engine::stop() throw". One does: every interop target compiles with
+// FIXPP_TEST_HOOKS (tests/interop/CMakeLists.txt:93), Engine exposes
+// set_post_send_drain_hook() (engine.hpp:340), and stop() co_awaits it
+// (engine.cpp:1304) BEFORE step 4 (session close) and step 5 (registry clear).
+// A throwing hook therefore aborts teardown midway — exactly the state to test.
 //
-// Recorded as a gate-b/r1 P1-2 WAIVER rather than dressed up: the spawn-once
-// guard is argued correct by reading (shared_future::get() does not invalidate,
-// so valid() is a permanent "already spawned" flag on the success, timeout AND
-// throw paths) and is NOT covered by a falsifiable test. A witness would need a
-// session whose teardown genuinely blocks, which needs a seam this PR cannot add
-// without touching src/.
+// The defect this pins was introduced by the round-1 fix for P1-3. Wrapping the
+// whole destructor in ONE try/catch meant a throw out of stop_within() jumped
+// straight to the handler, skipping the completion check, the release() and the
+// report: the Engine was destroyed SILENTLY with teardown incomplete, and
+// because stop() sets stopped_ at step 1, ~Engine's assert passed on the way out.
+// That is the same silent class the whole PR exists to remove.
 //
-// What this test DOES prove, which is real and was previously unasserted: a
-// zero-bound call leaves the operation in flight, and a later positive-bound
-// call drives that operation to completion and reports it. That is the re-entry
-// contract every interop cell depends on.
-TEST(InteropEngineFixtureTeardown, SecondStopWithinDrivesTheOperationInFlight) {
-    fixpp::interop::InteropEngineFixture fx;
-    fx.start();
+// Two properties, one test: the failure is REPORTED (the SPI matcher), and the
+// Engine is RELEASED rather than destroyed (the weak_ptr, live afterwards).
+TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndReleasesTheEngine) {
+    std::weak_ptr<fixpp::core::Clock> weak_clock;
 
-    // A 0 ms bound never enters the pump loop, so the operation is left in flight.
-    const auto first = fx.stop_within(std::chrono::milliseconds{0});
-    EXPECT_EQ(first, std::chrono::milliseconds{0});
-    ASSERT_FALSE(fx.stop_completed())
-        << "the 0 ms call must leave the operation in flight, or the second call "
-           "below has nothing to drive and this test proves nothing";
+    EXPECT_NONFATAL_FAILURE(
+        ([&weak_clock] {
+            asio::io_context probe_ioc;
+            auto clock = std::make_shared<fixpp::core::system_clock_source>(
+                probe_ioc.get_executor());
+            weak_clock = clock;
+            fixpp::core::EngineConfig cfg;
+            cfg.clock = clock;
 
-    const auto second = fx.stop_within(std::chrono::seconds{5});
-    EXPECT_LT(second, std::chrono::seconds{5});
-    EXPECT_TRUE(fx.stop_completed())
-        << "a second stop_within() must drive the in-flight operation to "
-           "completion rather than reporting a miss";
+            fixpp::interop::InteropEngineFixture fx{std::move(cfg)};
+            fx.start();
+            fx.engine().set_post_send_drain_hook([]() -> asio::awaitable<void> {
+                throw std::runtime_error("post-send-drain hook throws (gate-b/r2 P1-1)");
+                co_return;
+            });
+            clock.reset();
+        }()),
+        "Engine::stop() did not complete successfully");
+
+    EXPECT_FALSE(weak_clock.expired())
+        << "a stop() that threw partway through teardown left the Engine DESTROYED "
+           "rather than released — its EngineConfig-owned clock died with it. The "
+           "teardown frames are still suspended in ioc_ at that point.";
+}
+
+// ── #292 — stop() is spawned EXACTLY ONCE (withdraws the round-1 P1-2 waiver) ─
+//
+// Round 1 waived this as unwitnessable, on the argument that both frames live on
+// the same io_context and complete in the same pump so nothing is observable.
+// That argument only covers two NORMALLY-completing idle stops. It does not
+// cover a first operation that completed by THROWING, and the hook above makes
+// that state reachable deterministically.
+//
+// The discriminator: with the spawn-once guard, the second stop_within() observes
+// the ORIGINAL shared_future and rethrows its stored exception. Without the
+// guard, it co_spawns a fresh stop(); stopped_ is already true so that one
+// returns normally, the exception is masked, and the first frame is abandoned.
+TEST(InteropEngineFixtureTeardown, StopIsSpawnedExactlyOnce) {
+    EXPECT_NONFATAL_FAILURE(
+        ([] {
+            fixpp::interop::InteropEngineFixture fx;
+            fx.start();
+            fx.engine().set_post_send_drain_hook([]() -> asio::awaitable<void> {
+                throw std::runtime_error("post-send-drain hook throws (gate-b/r2 P1-2)");
+                co_return;
+            });
+
+            // Spawn operation #1 and drive it far enough to reach the throwing
+            // hook, so its future is ready-with-exception rather than pending.
+            (void)fx.stop_within(std::chrono::milliseconds{0});
+            fx.ioc().restart();
+            fx.ioc().run_for(std::chrono::seconds{2});
+
+            // The second call must observe THAT operation and rethrow. A freshly
+            // spawned stop() would return normally (stopped_ is already true) and
+            // silently mask the first one's failure.
+            bool rethrew = false;
+            try {
+                (void)fx.stop_within(std::chrono::seconds{5});
+            } catch (const std::runtime_error&) {
+                rethrew = true;
+            }
+            EXPECT_TRUE(rethrew)
+                << "the second stop_within() did not rethrow the in-flight "
+                   "operation's exception, which means it spawned a SECOND stop() "
+                   "and abandoned the first — the frame is now unowned in ioc_";
+        }()),
+        "Engine::stop() did not complete successfully");
 }

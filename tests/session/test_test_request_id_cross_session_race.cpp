@@ -269,7 +269,15 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // Declared BEFORE `ioc` (#293), therefore destroyed AFTER it. The invariant
     // that matters is NOT "the arena outlives the guard" — that is the weaker
     // property, and it was all the previous comment here claimed. It is: THE
-    // ARENA MUST OUTLIVE EVERY COROUTINE FRAME `ioc` DESTROYS. `quiesce_on_exit`
+    // ARENA MUST OUTLIVE EVERY READ THROUGH THE BORROW — every resume of, and
+    // every cleanup that dereferences, a frame holding a span into it.
+    //
+    // Stated that way rather than as "outlives every frame `ioc` destroys"
+    // (gate-b/r2 P3-2), which is stronger than necessary and would misdescribe
+    // why this is safe: destroying a suspended frame destroys a `std::span` by
+    // value, and that trivial destructor does not touch the pointed-to bytes.
+    // Declaring the arena before `ioc` satisfies the requirement with margin —
+    // it outlives the frames themselves, hence every read through them. `quiesce_on_exit`
     // below only fixes the ORDER of destruction relative to itself; it cannot
     // force quiescence (see its definition — it reports residual work via
     // ADD_FAILURE rather than eliminating it). On the budget-exhausted path a
