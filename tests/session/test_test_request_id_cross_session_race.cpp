@@ -1349,15 +1349,26 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
 
     EXPECT_NONFATAL_FAILURE(
         ([&destructions, &destructions_b] {
-            // Setup runs with throw_on_failure at its ordinary (false) value,
-            // so a bounded-pump budget miss here (#284/#289 -- expected under
-            // CI load) is a normal ASSERT_TRUE failure, not std::terminate: if
-            // `guard` already existed at that point, unwinding through it
-            // would run ~quiesce_or_release_on_exit's own throwing ADD_FAILURE
-            // while the ASSERT_TRUE's exception is still in flight -- two
-            // exceptions in flight at once is std::terminate. Constructing
-            // `throw_scope` and `guard` only after every setup ASSERT_TRUE has
-            // already succeeded avoids that.
+            // Setup runs with throw_on_failure at its ordinary (false) value, so
+            // a bounded-pump budget miss here (#284/#289 -- expected under CI
+            // load) is a normal ASSERT_TRUE failure, not std::terminate. The
+            // reason is gtest's, not `guard`'s: gtest's own
+            // HandleExceptionsInMethodIfSupported deliberately RETHROWS a
+            // GoogleTestFailureException once GTEST_FLAG(throw_on_failure) is
+            // set, so *any* gtest failure inside `throw_on_failure_scope`'s
+            // window aborts the process, regardless of what else is in scope --
+            // this is NOT the "two exceptions unwinding at once" rule
+            // ([except.terminate] fires only when a function invoked during
+            // unwinding EXITS via an exception, and
+            // `~quiesce_or_release_on_exit`'s blanket `catch (...)` prevents
+            // that by construction; this enclosing test exists to pin exactly
+            // that swallow, and reproduces it with `guard` constructed but also
+            // with `guard` absent from scope entirely -- `guard`'s presence is
+            // not what makes the difference). Constructing `throw_scope` and
+            // `guard` only after every setup ASSERT_TRUE has already succeeded
+            // keeps the setup failure path entirely outside the flag's window,
+            // which is the actual reason it stays a named failure instead of a
+            // terminate.
             //
             // Same residual shape as ResidualPathReleasesTheFixtures (two
             // fixtures, 0 ms budget, real outstanding work) -- reused here rather
