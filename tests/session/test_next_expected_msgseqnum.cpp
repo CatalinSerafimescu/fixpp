@@ -472,13 +472,7 @@ static std::unique_ptr<Fixture> make_initiator(std::shared_ptr<MessageStoreFacto
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s)) {
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_initiator";
-        // Return the fixture, NOT nullptr. Callers do not null-check (6 of the 7
-        // call sites in this file do not), so nullptr would turn a miss into a
-        // null-dereference SEGFAULT — which reports worse than the hang this
-        // migration exists to remove, because a crashed leg emits no FAILED
-        // lines at all. Returning `fix` is safe: open()'s coroutine borrows
-        // nothing block-local, so ~Fixture's drain covers it, and the caller
-        // then fails loudly on its own state assertion instead.
+        // Return the fixture, NOT nullptr — same reasoning as make_acceptor above.
         return fix;
     }
     (void)open_fut.get();

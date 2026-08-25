@@ -182,8 +182,33 @@ template <class Fut>
 }
 
 // Drain `ioc` and REPORT whether it reached quiescence. The teardown half of
-// the shape above, for callers that have no `fixpp::core::Clock` and therefore
-// cannot use `quiesce_on_exit` (which requires a non-null `Clock&`, :168).
+// the shape above.
+//
+// A free function rather than an RAII guard like `quiesce_on_exit`, for THREE
+// reasons — the first is the obvious one and the other two are the load-bearing
+// ones:
+//   1. `quiesce_on_exit` requires a non-null `fixpp::core::Clock&` (:168) and
+//      these fixtures assign none.
+//   2. It must run ONLY on the miss branch. `quiesce_on_exit` drains
+//      unconditionally at scope exit; arming one per call at a site invoked 32
+//      times, each measured at ~27 us, would reintroduce exactly the per-call
+//      cost this shape exists to avoid.
+//   3. At a callee like `Fixture::feed`, the state that must stay alive is the
+//      CALLER'S expression-temporary. No guard the callee declares can extend
+//      that; only code running before the callee returns can drain it. A guard
+//      is the wrong shape there, not merely an unavailable one.
+//
+// ⚠️ DIVERGENCE FROM `quiesce_on_exit`, AND IT IS A KNOWN TRAP FOR THE REST OF
+// #289's MIGRATION: this does NOT close a transport. `quiesce_on_exit` grew its
+// `transport` field (:298) from a real defect (gate-b/r1 P1-1) — cancelling
+// clock sleeps does not unstick a coroutine parked in `async_write` /
+// `async_read_some`, which completes only when the transport itself is closed.
+// No caller here attaches a live Transport (this file has zero references to
+// one), so the gap is latent. It stops being latent for the FIRST migrated
+// fixture that has a live Transport and no Clock — precisely the combination
+// this helper is for. Such a caller must close the transport itself before
+// calling this, or use `quiesce_on_exit`. Do not assume this drain is
+// sufficient because it was sufficient here.
 //
 // Call this while EVERY object the suspended coroutine references is still
 // alive. That is not automatic: a fixture destructor body protects fixture
@@ -285,7 +310,7 @@ struct quiesce_on_exit {
     // aggregate initialisation's current 5s behaviour. A caller with a
     // deterministic reason to bound this tighter (e.g. a test whose only
     // purpose is to trigger the branch below) may supply a shorter budget.
-    std::chrono::steady_clock::duration budget = std::chrono::seconds{5};
+    std::chrono::steady_clock::duration budget = kQuiesceBudget;
     // A live transport under the caller's control, if any (gate-b/r1 P1-1).
     // Cancelling clock sleeps is not sufficient to unstick a coroutine parked
     // in async_write/async_read_some on a still-open transport — that op
