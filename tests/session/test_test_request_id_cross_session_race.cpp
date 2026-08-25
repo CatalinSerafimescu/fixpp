@@ -376,25 +376,45 @@ struct SessionFixture {
 // divergence between them would fail toward NOT releasing — silently, on the path
 // that is already failing.
 //
-// THE POPULATION, MEASURED RATHER THAN ASSUMED — because an earlier draft of this
-// comment justified staying file-local with "one site is not a pattern", and the
-// census says otherwise. `tests/session/test_live_outbound_serialized.cpp` has
-// SEVEN more `quiesce_on_exit` sites, each holding a `Session` BY VALUE that a
-// suspended frame references. The shape does repeat.
+// THE POPULATION, COUNTED — and counted TWICE, because the first two versions of
+// this paragraph were both wrong and each was wrong in the direction that made
+// staying file-local look better than the evidence supports.
 //
-// What those sites have and this one does not is a FORCING mechanism: each attaches
-// a live Transport to the guard (`teardown_guard.transport = ...`), and closing a
-// transport genuinely completes a coroutine parked in async_write/async_read_some
-// rather than merely observing that it is parked. This test drives a `mock_clock`
-// and a plain `transport_send` lambda, so it has no such lever — which is why it
-// needs the release and they may not. Whether they do is UNMEASURED; it is not
-// claimed either way here.
+//   v1 said "one site is not a pattern."          Wrong: the shape repeats.
+//   v2 said "SEVEN more sites, but each attaches
+//            a live Transport, so they have a
+//            forcing lever this one lacks."       Wrong twice over, below.
 //
-// So the reason this stays file-local is scope and ownership, not rarity:
-// `tests/support/pump_until_ready.hpp` is owned by an open PR, and hoisting also
-// means templating on the released type, which this one site does not justify
-// deciding for the other seven. Hoisting is the right end state once those seven
-// are measured.
+// The count is EIGHTEEN, not seven (`grep` for a `quiesce_on_exit` OBJECT
+// declaration, excluding the helper's own self-test):
+//
+//   tests/session/logout_exchange_test.cpp          11 sites
+//   tests/session/test_live_outbound_serialized.cpp  7 sites
+//
+// And the forcing-lever claim is false for most of them. `.transport = ` is set at
+// 6 sites, ALL of them in test_live_outbound_serialized.cpp; logout_exchange_test.cpp
+// sets it ZERO times. So its 11 sites each declare `Session sess(engine, cfg);`
+// followed immediately by `quiesce_on_exit quiesce{ioc, *clock};` with no transport
+// attached — which is exactly this file's shape, with exactly this file's absence of
+// a way to force quiescence.
+//
+// Stated plainly, because the understated version is the one that keeps getting
+// written: this is NOT a lone site. Whether those 18 can actually REACH the residual
+// branch is unmeasured, and that is the open question — not whether they have the
+// same shape, which they demonstrably do.
+//
+// PRIOR ART, named so nobody has to rediscover it: release-on-residual is not
+// invented here. `tests/interop/support/interop_fixture.cpp:95-160`
+// (`~InteropEngineFixture`) already does drive-to-completion, then `release()` +
+// `__lsan_ignore_object` + a named `ADD_FAILURE`, for a single `Engine`. This is the
+// mechanism's SECOND occurrence, not its first.
+//
+// So the reason this stays file-local is scope and ownership ALONE, and that reason
+// is sufficient on its own: `tests/support/pump_until_ready.hpp` is owned by an open
+// PR and cannot be edited from this branch. When it can be, the right hoist is NOT
+// templating on `SessionFixture` — it is a `std::vector<std::function<void()>>` of
+// release-closures, which decouples the guard from `SessionFixture` and `Engine`
+// alike and would let the interop fixture above collapse into the same seam.
 //
 // `quiesce_on_exit`'s `transport` arm is deliberately absent: it exists because
 // cancelling clock sleeps does not unstick a coroutine parked in
