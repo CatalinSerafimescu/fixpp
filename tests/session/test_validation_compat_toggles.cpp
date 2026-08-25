@@ -242,11 +242,14 @@ struct Fixture {
         auto fut = asio::co_spawn(
             ioc, session->on_inbound_frame(std::span<const std::byte>(frame)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 5s)) {
-            // Drain HERE, not in ~Fixture. `frame` is a CALLER'S TEMPORARY at every
-            // call site in this file, destroyed at the end of the caller's
-            // full-expression — long before the fixture. The suspended coroutine
-            // holds a span into it, so ~Fixture's drain would RESUME it over dead
-            // storage rather than protect it.
+            // Drain HERE, not in ~Fixture. `frame` binds to storage that is NOT a
+            // fixture member — at most call sites a caller's temporary, destroyed
+            // at the end of the caller's full-expression, but at some (the
+            // NoHeap_RelaxedDeliverPath alloc-guard witness, `too_low_frame`) a
+            // named local declared AFTER the fixture, which is destroyed BEFORE
+            // it too. Either shape dies long before the fixture. The suspended
+            // coroutine holds a span into it, so ~Fixture's drain would RESUME it
+            // over dead storage rather than protect it.
             fixpp::test_support::drain_or_report(ioc, "Fixture::feed");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Fixture::feed";
             return;

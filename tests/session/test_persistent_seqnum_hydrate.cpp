@@ -382,21 +382,24 @@ struct Fixture {
     // `quiesce_on_exit`'s comment in support/pump_until_ready.hpp). `ioc` STAYS
     // FIRST so it is destroyed LAST.
     //
-    // It protects fixture MEMBERS only. Storage that is not a member — notably a
-    // caller's temporary passed to feed(), which is what all 30 call sites in
-    // this file pass — dies BEFORE this runs and must be drained in its own
-    // scope instead. See feed() below.
+    // It protects fixture MEMBERS only. `frame` in feed() below binds to storage
+    // that is NOT a fixture member — dies BEFORE this runs and must be drained
+    // in its own scope instead. See feed() below.
     ~Fixture() { fixpp::test_support::drain_or_report(ioc, "Fixture::~Fixture"); }
 
     void feed(const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, session->on_inbound_frame(std::span<const std::byte>(frame)),
                                   asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 5s)) {
-            // Drain HERE, not in ~Fixture. `frame` is a CALLER'S TEMPORARY at every
-            // call site in this file (`fix->feed(make_logon(...))`), destroyed at the
-            // end of the caller's full-expression — long before the fixture. The
-            // suspended coroutine holds a span into it, so ~Fixture's drain would
-            // RESUME it over dead storage rather than protect it.
+            // Drain HERE, not in ~Fixture. `frame` binds to storage that is NOT a
+            // fixture member — at most call sites (`fix->feed(make_logon(...))`) a
+            // caller's temporary, destroyed at the end of the caller's
+            // full-expression, but at some (the NoHeap alloc-guard witness's
+            // `measured_frame`, the cross-session TestRequest witness's
+            // `test_req_frame`) a named local declared AFTER the fixture, which is
+            // destroyed BEFORE it too. Either shape dies long before the fixture.
+            // The suspended coroutine holds a span into it, so ~Fixture's drain
+            // would RESUME it over dead storage rather than protect it.
             fixpp::test_support::drain_or_report(ioc, "Fixture::feed");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Fixture::feed";
             return;
