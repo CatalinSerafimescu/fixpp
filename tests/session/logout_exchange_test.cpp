@@ -269,6 +269,49 @@ protected:
     }
 };
 
+// ── (gate-b/r1 F7) feed_inbound's arena copy, pinned ──────────────────────────
+//
+// 10 of this file's 11 `quiesce_on_exit` sites declare their inbound frame
+// AFTER the guard — the arrangement `pump_until_ready.hpp`'s own two-shape
+// taxonomy (:252-262) calls unsafe (a block-local declared after the guard
+// dies BEFORE it, since destruction runs in reverse declaration order). They
+// are safe only because `feed_inbound` (above) copies each frame into
+// `inbound_frames`, a fixture-owned deque declared before `ioc`, and spans
+// THAT — never the caller's own buffer. That invariant lives only in prose;
+// nothing pins it. Someone "removing a redundant copy" from `feed_inbound`
+// would leave this whole suite green today and flip all 10 sites from safe
+// to hazardous silently.
+//
+// Pointer identity, not contents alone: a contents-only assertion survives
+// exactly the change this exists to catch — in THIS test the caller's own
+// buffer happens to outlive the call, so an uncopied span would still read
+// correct bytes. Only comparing `data()` pointers proves the copy actually
+// ran.
+TEST_F(LogoutExchangeTest, FeedInboundCopiesIntoTheArenaNotTheCallersBuffer) {
+    auto cfg = make_cfg();
+    TransportDouble td;
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
+
+    Session sess(engine, cfg);
+    quiesce_on_exit quiesce{ioc, *clock};
+    ASSERT_TRUE(drive_to_active_initiator(sess));
+
+    auto caller_buffer = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
+    const std::byte* caller_data = caller_buffer.data();
+
+    auto r = feed_inbound(sess, caller_buffer);
+    ASSERT_TRUE(r.has_value())
+        << kPumpBudgetMiss << "FeedInboundCopiesIntoTheArenaNotTheCallersBuffer";
+
+    ASSERT_FALSE(inbound_frames.empty());
+    EXPECT_NE(inbound_frames.back().data(), caller_data)
+        << "feed_inbound must copy into inbound_frames, not span the caller's buffer "
+           "directly -- otherwise the 10 quiesce_on_exit sites in this file that declare "
+           "their inbound frame AFTER the guard would be unsafe.";
+    EXPECT_EQ(inbound_frames.back(), caller_buffer)
+        << "the arena copy must be byte-identical to what the caller passed";
+}
+
 // ── Test 1: GracefulBothDirections ────────────────────────────────────────────
 //
 // Active → initiate close(graceful) → Logout emitted → peer confirms Logout →
