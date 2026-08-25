@@ -1279,10 +1279,16 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
 
     EXPECT_NONFATAL_FAILURE(
         ([&destructions, &destructions_b] {
-            // Scope ends AFTER the guard's scope below, so throw_on_failure is
-            // still true when ~quiesce_or_release_on_exit's ADD_FAILURE() runs.
-            throw_on_failure_scope throw_scope;
-
+            // Setup runs with throw_on_failure at its ordinary (false) value,
+            // so a bounded-pump budget miss here (#284/#289 -- expected under
+            // CI load) is a normal ASSERT_TRUE failure, not std::terminate: if
+            // `guard` already existed at that point, unwinding through it
+            // would run ~quiesce_or_release_on_exit's own throwing ADD_FAILURE
+            // while the ASSERT_TRUE's exception is still in flight -- two
+            // exceptions in flight at once is std::terminate. Constructing
+            // `throw_scope` and `guard` only after every setup ASSERT_TRUE has
+            // already succeeded avoids that.
+            //
             // Same residual shape as ResidualPathReleasesTheFixtures (two
             // fixtures, 0 ms budget, real outstanding work) -- reused here rather
             // than simplified, so this witness forces the guard down the exact
@@ -1298,12 +1304,16 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
                 std::make_unique<SessionFixture>(ioc.get_executor(), clock, "SENDER_B", "TARGET_B");
             sB->destructions = &destructions_b;
 
-            quiesce_or_release_on_exit guard{ioc, *clock, {&sA, &sB}, std::chrono::milliseconds{0}};
-
             auto fut_open = asio::co_spawn(ioc, sA->session->open(), asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut_open))
                 << kPumpBudgetMiss << "opening the witness session";
             ASSERT_TRUE(fut_open.get().has_value());
+
+            // throw_scope is declared FIRST so it is destroyed AFTER guard:
+            // throw_on_failure is still true when ~quiesce_or_release_on_exit's
+            // ADD_FAILURE() runs, and is restored immediately afterward.
+            throw_on_failure_scope throw_scope;
+            quiesce_or_release_on_exit guard{ioc, *clock, {&sA, &sB}, std::chrono::milliseconds{0}};
 
             auto& logon =
                 frames.emplace_back(make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1));
