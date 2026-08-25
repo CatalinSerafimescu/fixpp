@@ -117,15 +117,130 @@ template <class Fut>
 inline constexpr const char* kPumpBudgetMiss =
     "#284: the operation did not complete within the bounded-pump budget. Site: ";
 
+// Failure text for a `run_window_then_ready` that missed. DELIBERATELY NOT
+// `kPumpBudgetMiss`: no bounded-pump budget was ever granted to this shape, so
+// that wording would misdescribe what happened (and legitimate budget-miss
+// callers still need it unchanged). Stream the site name after it.
+inline constexpr const char* kWindowMiss =
+    "#289: the operation was not ready when its preserved run window returned, and did "
+    "not become ready within one boundary grace slice. Site: ";
+
+// Budget for a teardown drain. Deliberately the same value as
+// `quiesce_on_exit`'s default below, so the two report on the same terms.
+inline constexpr auto kQuiesceBudget = std::chrono::seconds{5};
+
+// Run a caller's ORIGINAL fixed window, then report whether `fut` is ready.
+//
+// This is the #289 migration shape, and it is NOT `pump_until_ready`. The two
+// differ on purpose:
+//
+//   - No work guard. `pump_until` takes one (:64) so `run_for` cannot drain
+//     early, which is what gives that helper its documented COST FLOOR (:32-39:
+//     "1 ms slice = 124 ms" over 106 calls, ~1.17 ms/call). The #289 sites were
+//     measured at ~27 us, so adopting that floor would be a ~40x per-call
+//     regression at 32 sites. Here `run_for` keeps its normal early-drain
+//     behaviour and the window costs what it costs today.
+//   - The window is PRESERVED, not sliced. A site's first transition to Active
+//     co_spawns a DETACHED `run_liveness_loop()` (src/session/session.cpp:2733
+//     acceptor, :4187 initiator), and `co_spawn` POSTS its first resumption, so
+//     it lands on a LATER `run_one_until`. An early-exit pump that stopped at
+//     future-readiness would leave that detached task unserviced; running the
+//     original window to drain-or-deadline services it exactly as today.
+//
+// What it DOES take from `pump_until_ready` is the load-bearing property at
+// :79-81 — the caller must consult the bool BEFORE `fut.get()`. `[[nodiscard]]`
+// puts a compiler DIAGNOSTIC on ignoring it, rather than leaving it to a
+// reviewer or a lexical checker. Note that is a WARNING, not an error: this
+// repo does not build tests under a blanket `-Werror` (the one targeted use is
+// `-Werror=deprecated-declarations` at tests/session/CMakeLists.txt:2312), so
+// do not describe it as compiler-ENFORCED.
+//
+// The grace slice is not a "CI tolerance" and must not be grown into one.
+// `run_one_until` tests `now < abs_time` BEFORE dispatching (:50-52), so a
+// handler that became ready at the instant the window closed is left QUEUED.
+// One `kPumpSlice` gives exactly that handler a dispatch opportunity. It moves
+// the deadline by one slice; it does not make a slow runner safe, and no
+// statically-chosen value could.
+//
+// A false return means the awaited coroutine is still SUSPENDED holding
+// whatever the caller passed it. The caller MUST then drain while that state is
+// still alive — see `drain_or_report` and its warning about storage that is not
+// a fixture member.
+template <class Fut>
+[[nodiscard]] bool run_window_then_ready(asio::io_context& ioc, Fut& fut,
+                                         std::chrono::steady_clock::duration window,
+                                         std::chrono::steady_clock::duration grace = kPumpSlice) {
+    const auto ready = [&fut] {
+        return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
+    };
+    ioc.run_for(window);
+    ioc.restart();
+    if (ready()) return true;
+    ioc.run_for(grace);
+    ioc.restart();
+    return ready();
+}
+
+// Drain `ioc` and REPORT whether it reached quiescence. The teardown half of
+// the shape above, for callers that have no `fixpp::core::Clock` and therefore
+// cannot use `quiesce_on_exit` (which requires a non-null `Clock&`, :168).
+//
+// Call this while EVERY object the suspended coroutine references is still
+// alive. That is not automatic: a fixture destructor body protects fixture
+// MEMBERS, but a coroutine holding a span into a caller's temporary, or into a
+// block-local declared after the fixture, outlives its referent unless the
+// drain happens in THAT scope. Both shapes exist at the #289 sites.
+//
+// `ioc.stopped()` is a DISJUNCTION and is NOT authoritative — see :142-162.
+// A false return is evidence of residual work, not proof of its absence.
+inline void drain_or_report(asio::io_context& ioc, const char* site,
+                            std::chrono::steady_clock::duration budget = kQuiesceBudget) {
+    ioc.restart();
+    ioc.run_for(budget);
+    if (!ioc.stopped()) {
+        ADD_FAILURE() << "#289: the io_context did not run out of work within the teardown "
+                         "drain, so a coroutine frame is probably still suspended and will be "
+                         "destroyed while referencing objects that are about to die. This "
+                         "observes the residual, not its cause (stopped() is disjunctive — see "
+                         "pump_until_ready.hpp:142-162). Site: "
+                      << site;
+    }
+}
+
 // Best-effort attempt to destroy any still-suspended coroutine frames while the
 // objects they reference are alive.
 //
 // Declare AFTER the fixtures whose lifetimes are at stake, so it runs BEFORE
 // them, on every exit path including the early `return` an ASSERT_* performs.
-// Reordering the declarations instead cannot work: the clock's parked waiters
-// hold work guards on the io_context, so EITHER destruction order has a
-// dangling side. The only safe state is no pending state — but this guard only
-// OBSERVES whether that state was reached; it cannot force it (see below).
+//
+// Reordering the declarations instead cannot work, for TWO independent reasons.
+// An earlier revision of this comment gave only the second one and presented it
+// as the reason; that was incomplete, and the first is the load-bearing one
+// because it is unconditional rather than schedule-dependent:
+//
+//  1. NOTHING HOLDING A STRAND TAKEN FROM THE CONTEXT MAY OUTLIVE THE CONTEXT.
+//     `asio::strand`'s handle is a shared_ptr<strand_impl>, and
+//     `strand_impl::~strand_impl()` locks `service_->mutex_` and unlinks itself
+//     from `service_->impl_list_` (asio/detail/impl/strand_executor_service.ipp
+//     :83-94), where `service_` is a RAW pointer to a service owned by the
+//     io_context's registry. `~execution_context()` runs `shutdown()` then
+//     `destroy()`, and `destroy()` destroys every service
+//     (asio/impl/execution_context.ipp:60-64); `shutdown()` sets
+//     `impl->shutdown_` but never detaches `service_`
+//     (strand_executor_service.ipp:34-50). So destroying the context first and
+//     the strand after is a heap-use-after-free EVERY TIME, not on a race.
+//     This reaches further than it looks: under the default
+//     `threading_mode::per_session_strand` a Session's bound executor IS such a
+//     strand (session_config.hpp:101,168; core/session_executor.hpp:126,142),
+//     and so is `Engine::control_strand_` (session/engine.hpp:395). A BARE
+//     `io_context::executor_type` is NOT affected — it is untracked and its
+//     destructor touches nothing — so an `executor_override` may outlive the
+//     context safely. Measured both arms under ASan; only the strand faults.
+//  2. The clock's parked waiters hold work guards on the io_context, so on that
+//     path either destruction order has a dangling side.
+//
+// The only safe state is no pending state — but this guard only OBSERVES
+// whether that state was reached; it cannot force it (see below).
 //
 // `run_for` rather than a `run_one_for` loop deliberately: `run_one_until` also
 // tests its deadline before dispatching, so a slice-at-a-time drain can return
