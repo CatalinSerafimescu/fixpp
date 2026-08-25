@@ -140,9 +140,18 @@ private:
     // The pointer is here for the DESTRUCTOR's benefit only: on the
     // stop()-did-not-complete path it deliberately release()es, which does two
     // jobs at once — ~Engine never runs, so its stopped_ assert cannot abort and
-    // replace a named failure; and the Engine (with control_strand_) stays alive,
-    // so the suspended stop() frame that ~ioc_ destroys afterwards still has a
-    // live referent. On the normal path this is byte-for-byte the old behaviour.
+    // replace a named failure; and the Engine (with control_strand_ and its
+    // EngineConfig-owned clock) stays alive past ~ioc_.
+    //
+    // What that second job covers differs by path (gate-b/r8 P2-2), and this
+    // comment previously asserted only the first case: on the TIMEOUT path a
+    // stop() frame really is still suspended in ioc_ and ~ioc_ destroys it after
+    // the Engine is out of reach; on the THROWING path the operation has already
+    // completed and its frames are gone, but teardown stopped wherever it threw,
+    // so the surviving Engine is what keeps ~Engine from running against a
+    // possibly half-torn-down registry. On the normal path neither applies and
+    // this is byte-for-byte the old behaviour.
+
     std::unique_ptr<fixpp::session::Engine> engine_;
 
     // (#292) The single co_spawned Engine::stop() operation, kept as fixture

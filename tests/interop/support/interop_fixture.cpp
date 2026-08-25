@@ -128,33 +128,37 @@ InteropEngineFixture::~InteropEngineFixture() {
             return;
         }
 
-        // Already-failing path: stop() timed out, or it threw partway through
-        // teardown. Either way its frame may still be suspended inside ioc_
-        // holding Engine&. Letting ~Engine run would either trip its stopped_
-        // assert and ABORT (stop never entered), or — worse, because it is
-        // silent — pass that assert while teardown frames are still live (stop
-        // entered but did not finish). Leak on purpose: the Engine, its
-        // EngineConfig-owned clock and its control_strand_ then outlive ioc_, so
-        // the frames ~ioc_ destroys next still have live referents. See the
-        // header for why reordering members instead would be strictly worse.
+        // Already-failing path: stop() did not finish, either by timing out or by
+        // throwing. The two leave DIFFERENT residuals and the leak covers both
+        // (gate-b/r8 P2-2):
+        //   timeout  — the stop() frame is still suspended inside ioc_ holding
+        //              Engine&, so ~ioc_ will destroy it after this returns.
+        //   throw    — the operation is already complete and its frames are gone,
+        //              but teardown stopped wherever it threw, which may be
+        //              before OR after session close and registry clear.
+        // Letting ~Engine run would either trip its stopped_ assert and ABORT
+        // (stop never entered), or — worse, because it is silent — pass that
+        // assert with teardown incomplete. Leak on purpose: the Engine, its
+        // EngineConfig-owned clock and its control_strand_ outlive ioc_, so
+        // anything ~ioc_ destroys next still has a live referent, and no ~Engine
+        // runs against a half-torn-down registry. See the header for why
+        // reordering members instead would be strictly worse.
         auto* leaked = engine_.release();
         FIXPP_INTEROP_LSAN_IGNORE(leaked);
 
-        // The wording describes the condition SHARED by both ways of getting
-        // here (gate-b/r7 P2-1). It must not say the teardown frames are still
-        // suspended: that is true of the timeout path but false of the throwing
-        // one, where the operation completed exceptionally and its frames are
-        // gone. What both have in common is that teardown did not finish, so
-        // Engine-owned state may still be referenced.
+        // The wording states the shared condition and explicitly declines to name
+        // a residual it cannot guarantee (gate-b/r7 P2-1, r8 P2-1).
         ADD_FAILURE() << "InteropEngineFixture: Engine::stop() did not finish (it did not "
                          "complete within the "
                       << teardown_bound_.count()
-                      << " ms teardown bound, or it threw partway through). Teardown is "
-                         "incomplete, so Engine-owned state may still be referenced — by a "
-                         "frame still suspended in ioc_ on the timeout path, or by sessions "
-                         "and registry entries never closed on the throwing path. The Engine "
+                      << " ms teardown bound, or it threw). Teardown did not finish, so "
+                         "Engine-owned state may still be referenced. WHICH state is not "
+                         "asserted here: on the timeout path a stop() frame is still "
+                         "suspended in ioc_; on the throwing path the operation is already "
+                         "complete and what survives depends on where it threw — stop() can "
+                         "throw before OR after session close and registry clear. The Engine "
                          "was leaked deliberately so this failure is reported instead of "
-                         "~Engine running against that state (#292).";
+                         "~Engine running against whatever remains (#292).";
     } catch (...) {
         // Nothing may escape a noexcept destructor.
     }
