@@ -77,7 +77,7 @@ TEST(InteropEngineFixtureTeardown, BoundedStopMissReportsNamedFailure) {
             fixpp::interop::InteropEngineFixture fx{{}, std::chrono::milliseconds{0}};
             fx.start();
         }()),
-        "Engine::stop() did not complete successfully");
+        "Engine::stop() did not finish");
 }
 
 // Counter-direction: an engine that stops cleanly must leave the branch silent.
@@ -172,7 +172,7 @@ TEST(InteropEngineFixtureTeardown, StoppedFlagIsNotTreatedAsCompletion) {
             // stop_within here — NOT because it discriminates today.
             reached_window = fx.stopped() && !fx.stop_completed();
         }()),
-        "Engine::stop() did not complete successfully");
+        "Engine::stop() did not finish");
 
     EXPECT_TRUE(reached_window)
         << "could not reach the stopped()==true / stop_completed()==false window, "
@@ -229,7 +229,7 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
             // copies that are about to die anyway and would prove nothing.
             clock.reset();
         }()),
-        "Engine::stop() did not complete successfully");
+        "Engine::stop() did not finish");
 
     EXPECT_FALSE(weak_clock.expired())
         << "the Engine-owned clock did not survive the bounded-stop miss path: "
@@ -293,7 +293,7 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
             });
             clock.reset();
         }()),
-        "Engine::stop() did not complete successfully");
+        "Engine::stop() did not finish");
 
     EXPECT_FALSE(weak_clock.expired())
         << "a stop() that threw partway through teardown did not retain the "
@@ -387,7 +387,7 @@ TEST(InteropEngineFixtureTeardown, ExactlyOneTeardownBodyRunsAndItsFailureIsNotM
                    "respawning, so read it as 'the failure was masked', not as a "
                    "unique diagnosis (gate-b/r6 P2-3).";
         }()),
-        "Engine::stop() did not complete successfully");
+        "Engine::stop() did not finish");
 
     EXPECT_EQ(hook_entries.load(std::memory_order_relaxed), 1)
         << "Engine::stop()'s teardown body ran " << hook_entries.load(std::memory_order_relaxed)

@@ -140,12 +140,21 @@ InteropEngineFixture::~InteropEngineFixture() {
         auto* leaked = engine_.release();
         FIXPP_INTEROP_LSAN_IGNORE(leaked);
 
-        ADD_FAILURE() << "InteropEngineFixture: Engine::stop() did not complete successfully "
-                         "(it timed out within the "
+        // The wording describes the condition SHARED by both ways of getting
+        // here (gate-b/r7 P2-1). It must not say the teardown frames are still
+        // suspended: that is true of the timeout path but false of the throwing
+        // one, where the operation completed exceptionally and its frames are
+        // gone. What both have in common is that teardown did not finish, so
+        // Engine-owned state may still be referenced.
+        ADD_FAILURE() << "InteropEngineFixture: Engine::stop() did not finish (it did not "
+                         "complete within the "
                       << teardown_bound_.count()
-                      << " ms teardown bound, or it threw); the Engine was leaked deliberately "
-                         "so this failure is reported instead of ~Engine being destroyed while "
-                         "its teardown frames are still suspended (#292).";
+                      << " ms teardown bound, or it threw partway through). Teardown is "
+                         "incomplete, so Engine-owned state may still be referenced — by a "
+                         "frame still suspended in ioc_ on the timeout path, or by sessions "
+                         "and registry entries never closed on the throwing path. The Engine "
+                         "was leaked deliberately so this failure is reported instead of "
+                         "~Engine running against that state (#292).";
     } catch (...) {
         // Nothing may escape a noexcept destructor.
     }
