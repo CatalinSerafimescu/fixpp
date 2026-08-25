@@ -300,8 +300,10 @@ static std::unique_ptr<Fixture> make_acceptor(
         // — then pumps ioc resumes this frame over the destroyed Session.
         // Proven: heap-use-after-free, freed by
         // fix->session.reset() in CompID_KnobOff_MismatchAccepted, read in
-        // Session::open() (.resume) at src/session/session.cpp:937, resumed
-        // from the next run_window_then_ready. Keep returning the fixture
+        // Session::open()'s `if (state_ != lifecycle::never_opened)` lifecycle
+        // guard (.resume) — the first member read after the initial suspend
+        // point, resumed from the next run_window_then_ready. Keep returning
+        // the fixture
         // rather than nullptr — that part of the reasoning is unchanged.
         //
         // The drain's honest limit: drain_or_report is best-effort — if it
@@ -605,9 +607,10 @@ TEST(ValidationCompatToggles, CompID_KnobOff_AuthzAllowListStillEnforced) {
     // attached (`inject_live_identity` above installs a NullSinkTransport), and
     // `drain_or_report` deliberately does NOT close a transport — see its warning
     // in support/pump_until_ready.hpp. That gap is unreachable HERE and only here:
-    // NullSinkTransport::async_read_some reports EOF immediately and async_write
-    // swallows its bytes (tests/support/identity_injecting_transport.hpp:39-70),
-    // so no coroutine can park in either, which is the only thing closing the
+    // NullSinkTransport::async_read_some returns transport_read_eof and
+    // async_write returns buf.size(), both without suspending
+    // (tests/support/identity_injecting_transport.hpp), so no coroutine can
+    // park in either, which is the only thing closing the
     // transport would unstick. A transport that can genuinely block needs
     // `quiesce_on_exit` with `.transport` set instead; do not generalise from this
     // site to those.
