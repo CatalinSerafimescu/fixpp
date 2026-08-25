@@ -563,7 +563,21 @@ TEST(ValidationCompatToggles, CompID_KnobOff_AuthzAllowListStillEnforced) {
         ioc, session.on_inbound_frame(std::span<const std::byte>{logon_frame}), asio::use_future);
     // As above, and one degree sharper: the coroutine holds a span into
     // `logon_frame`, a block-local declared AFTER `ioc`, so it dies BEFORE the
-    // frame does. The drain must run here, inside `logon_frame`'s lifetime.
+    // frame does. The drain therefore runs here, inside `logon_frame`'s lifetime.
+    //
+    // ⚠️ This drain is DEFENSIVE, not load-bearing, and the difference was
+    // measured rather than assumed. Deleting it and forcing this site to miss
+    // (starve the 2s window under ASan) produces NO fault: with no fixture here,
+    // nothing ever RESUMES the frame — `ioc` destroys it still suspended at its
+    // initial suspend point, and a `std::span` parameter is trivially
+    // destructible, so the destruction is silent. The drain converts "frame
+    // destroyed unresumed" into "frame completed", which is better hygiene but
+    // is not preventing a demonstrated use-after-free. Contrast Fixture::feed
+    // above, where deleting the in-feed drain DOES fault, because ~Fixture's own
+    // drain is there to resume the frame over the dead temporary. Do not cite
+    // this site as evidence that a scope drain is required wherever a coroutine
+    // borrows a block-local; what makes it required is a LATER DRAIN that
+    // resumes the frame.
     //
     // This is also the one site in this PR whose Session has a live Transport
     // attached (`inject_live_identity` above installs a NullSinkTransport), and
