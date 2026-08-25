@@ -298,8 +298,8 @@ static std::unique_ptr<Fixture> make_acceptor(
         // only at fixture destruction, and a caller that destroys a fixture
         // MEMBER first — fix->session.reset() in CompID_KnobOff_MismatchAccepted
         // — then pumps ioc resumes this frame over the destroyed Session.
-        // Proven: heap-use-after-free, freed at
-        // test_validation_compat_toggles.cpp:365, read in
+        // Proven: heap-use-after-free, freed by
+        // fix->session.reset() in CompID_KnobOff_MismatchAccepted, read in
         // Session::open() (.resume) at src/session/session.cpp:937, resumed
         // from the next run_window_then_ready. Keep returning the fixture
         // rather than nullptr — that part of the reasoning is unchanged.
@@ -1324,20 +1324,24 @@ TEST(ValidationCompatToggles, Combination_Matrix_FourCells) {
         auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
         // Non-fatal: this is a value-returning LAMBDA, and a gtest FATAL assertion
         // is only valid in a void-returning function. Return the fixture, not
-        // nullptr — the four call sites below dereference the result without a
+        // nullptr — the call sites below dereference the result without a
         // null check, so nullptr would turn a miss into a SEGFAULT, which reports
         // strictly worse than the hang this migration removes.
         if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
             fixpp::test_support::drain_or_report(
                 fix->ioc, "Combination_Matrix_FourCells/make_acceptor_with_knobs");
-            // The drain above settles open() BEFORE the fixture escapes to the four
-            // call sites below. ~Fixture's drain is not sufficient for an escaping
-            // fixture on its own: it runs only at fixture destruction, and this
-            // lambda's fixture escapes past that point (returned, then
-            // dereferenced by its caller). See make_acceptor's comment above for
-            // the proven mechanism (heap-use-after-free, reproduced under ASan)
-            // and the drain's honest limits. Keep returning the fixture rather
-            // than nullptr — that part of the reasoning is unchanged.
+            // The drain above is DEFENSIVE, not currently load-bearing: none of
+            // the call sites below destroys a fixture member before ~Fixture
+            // runs (each dereferences the result, calls feed(), and lets the
+            // fixture die normally), so it enforces the factory-boundary
+            // invariant against future caller changes rather than preventing an
+            // active hazard today. The hazard it guards against only appears
+            // when a live fixture ESCAPES the miss branch to a caller that can
+            // destroy a member before ~Fixture runs — see make_acceptor's
+            // comment above for the mechanism (heap-use-after-free, proven under
+            // ASan there), not as a reproduction at this site. Keep returning
+            // the fixture rather than nullptr — that part of the reasoning is
+            // unchanged.
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "Combination_Matrix_FourCells/make_acceptor_with_knobs";
             return fix;
