@@ -366,7 +366,17 @@ struct CaptureTransport {
 };
 
 // ── TestReqID numeric extractor: "TR<N>" → N ──────────────────────────────────
-// Returns 0 if parsing fails.
+// Returns 0 if parsing fails. 0 is usable as the failure value because the
+// counter is pre-incremented, so a real TestReqID is never TR0.
+//
+// #309: this used to accumulate into a `std::uint32_t` with no overflow check and
+// to accept leading zeros, which made two DEGENERATE CORPORA parse as a clean
+// 1..N and satisfy every downstream check:
+//   - `TR4294967297 .. TR4294967306` wraps modulo 2^32 to 1..10;
+//   - `TR0001 .. TR0010` is 1..10 in a spelling the session never emits.
+// Both are rejected now. The emitter builds the id from an integer, so canonical
+// spelling is a property of the SUT this parser is entitled to require — and
+// requiring it is what stops the parser from laundering a corpus into validity.
 static std::uint32_t parse_tr_id(std::string_view s) {
     if (s.size() < 3) {
         return 0;
@@ -374,12 +384,19 @@ static std::uint32_t parse_tr_id(std::string_view s) {
     if (s[0] != 'T' || s[1] != 'R') {
         return 0;
     }
+    if (s[2] == '0' && s.size() > 3) {
+        return 0;  // non-canonical leading zero
+    }
     std::uint32_t v = 0;
     for (std::size_t i = 2; i < s.size(); ++i) {
         if (s[i] < '0' || s[i] > '9') {
             return 0;
         }
-        v = v * 10u + static_cast<std::uint32_t>(s[i] - '0');
+        const auto d = static_cast<std::uint32_t>(s[i] - '0');
+        if (v > (UINT32_MAX - d) / 10u) {
+            return 0;  // would wrap; a wrapped value is indistinguishable from a small one
+        }
+        v = v * 10u + d;
     }
     return v;
 }
@@ -411,9 +428,10 @@ using fixpp::test_support::pump_until_ready;
 // named `pump_*`: nothing here pumps anything, and the two must not be confused
 // at a call site where only one of them can be correct.
 //
-// The predicate must be safe to call from the test thread while pool threads run.
-// Every use below reads `CaptureTransport::collect_test_req_ids()`, which takes
-// the capture mutex, so it is.
+// CONTRACT: `ready` is called from the waiting thread while pool threads run, so
+// it must synchronise every shared access it makes. Stated as a condition rather
+// than as a survey of today's call sites — a survey is true until the next caller.
+// The corpus predicate below satisfies it through `CaptureTransport`'s mutex.
 template <class Ready>
 [[nodiscard]] static bool wait_until_observed(
     Ready ready, std::chrono::steady_clock::duration budget = std::chrono::seconds{10},
@@ -1233,11 +1251,13 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 // echo each TestReqID back as a Heartbeat so the session survives, wait on the
 // EMISSION rather than on a fixed window, and pin the count with an equality.
 //
-// #284 disposition: the six `fut.get()` calls below are NOT the #284 defect.
-// This test runs on a `thread_pool`, whose own threads service the work, so a
-// get() here waits on a context that is still being pumped. #284 is specific to
-// the single-threaded io_context in test 1, where the test thread was both the
-// only pump and the blocked waiter.
+// #284 disposition: the `fut.get()` calls below are NOT the #284 defect. This test
+// runs on a `thread_pool`, whose own threads service the work, so a get() here
+// waits on a context that is still being serviced. #284 is specific to the
+// single-threaded io_context in test 1, where the test thread was both the only
+// pump and the blocked waiter. Stated as the condition rather than as a count —
+// the count this sentence used to carry ("the six") was already false by the time
+// #309 added two more.
 TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // Arena for the inbound Heartbeat buffers (#309). `on_inbound_frame` takes its
     // span BY VALUE into the coroutine frame, so an iteration-scoped buffer would
@@ -1265,6 +1285,29 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     SessionFixture sA{pool.get_executor(), clock_a, "SENDER_A", "TARGET_A"};
     SessionFixture sB{pool.get_executor(), clock_b, "SENDER_B", "TARGET_B"};
 
+    // #309: `pool` is declared ABOVE the fixtures, so unwinding destroys sB and sA
+    // while the pool's four threads are still RUNNING. On the happy path the
+    // explicit join below closes that window, but every ASSERT_* in this test
+    // performs an early `return` — including the wait-budget miss that IS the
+    // acceptance mutant's path — and on those the sessions die under a live pool
+    // with their liveness coroutines suspended and holding `this`.
+    //
+    // This is NOT the #303 shape and a clean ASan run would not refute it: there,
+    // nothing resumed the surviving frames, so the dead `Session*` was never
+    // dereferenced. Here the pool threads are still executing, so a resume CAN
+    // happen concurrently with the destructor.
+    //
+    // Declared AFTER the fixtures, therefore it runs BEFORE them on every exit
+    // path. `thread_pool::join()` is safe to call twice (`thread_group::join`
+    // unlinks as it joins), so the explicit join on the happy path stands.
+    struct stop_pool_on_exit {
+        asio::thread_pool& pool;
+        ~stop_pool_on_exit() {
+            pool.stop();
+            pool.join();
+        }
+    } stop_pool{pool};
+
     // Open both sessions.
     {
         auto fa = asio::co_spawn(pool, sA.session->open(), asio::use_future);
@@ -1273,42 +1316,146 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         ASSERT_TRUE(fb.get().has_value()) << "Session B open failed";
     }
 
-    // Drive to Active (sequential to avoid concurrent on_inbound_frame calls
-    // on the same executor before the strand is fully set up).
+    // ── One type-erased executor handle per session, held for the whole test ──
+    //
+    // NOT a style choice, and not hoisted to save a conversion. `co_spawn(sX.session
+    // ->executor(), …)` converts the `session_executor` to an `any_io_executor` at
+    // EVERY call, and asio ref-counts that type-erased target
+    // (`shared_target_executor`, asio/execution/any_executor.hpp). The call-site
+    // temporary is then destroyed on the TEST thread while the spawned coroutine's
+    // own copy decrements to ZERO and `delete`s the target on a POOL thread.
+    //
+    // asio's refcount is the textbook idiom — `fetch_sub(release)`, then
+    // `atomic_thread_fence(acquire)` before the delete (asio/detail/atomic_count.hpp)
+    // — so this is correct C++. TSan reports it anyway, because it does not track
+    // the happens-before a STANDALONE FENCE establishes; it sees a plain `delete`
+    // write on one thread against an atomic decrement on another.
+    //
+    // MEASURED on this test, three runs each, tree otherwise identical:
+    //   converted at each call site          7 TSan reports per run
+    //   one handle per session (this)        0
+    //
+    // Holding the handle keeps each target's count above zero for the whole test, so
+    // the delete happens on the test thread after `join()` and the fence TSan cannot
+    // see is off the critical path. `Session::executor()` is valid only after a
+    // successful `open()`, which is why this sits here and not with the fixtures.
+    const asio::any_io_executor ex_a = sA.session->executor();
+    const asio::any_io_executor ex_b = sB.session->executor();
+
+    // Drive to Active. Spawned on each session's OWN executor — `Session::executor()`
+    // is the resolved per-session strand, valid once open() has succeeded.
+    //
+    // #309: this used to spawn on the bare `pool`, and that quietly falsified the
+    // premise of the whole test. `on_inbound_frame` is a session-strand-only
+    // surface (session.hpp's reentrancy contract), and the Active transition
+    // co_spawns `run_liveness_loop` on `co_await this_coro::executor`
+    // (src/session/session.cpp) — i.e. on whatever executor the caller used. Fed
+    // from the bare pool, BOTH liveness loops ran unstranded, so the "each session
+    // on its own strand" the doc block above claims was never true, and any race
+    // TSan saw here could have been the test's own contract violation rather than
+    // the shared-counter defect under test.
+    //
+    // The concurrency this test wants survives: two DISTINCT strands still run in
+    // parallel on the pool's four threads. What it loses is self-inflicted
+    // intra-session overlap, which was never the thing being measured.
     {
         auto logon_a = make_logon_frame("FIX.4.2", 1, "TARGET_A", "SENDER_A", 1);
-        auto fa = asio::co_spawn(pool,
+        auto fa = asio::co_spawn(ex_a,
                                  sA.session->on_inbound_frame(
                                      std::span<const std::byte>{logon_a.data(), logon_a.size()}),
                                  asio::use_future);
-        fa.get();
+        ASSERT_TRUE(fa.get().has_value()) << "Session A rejected its Logon-ack";
     }
     {
         auto logon_b = make_logon_frame("FIX.4.2", 1, "TARGET_B", "SENDER_B", 1);
-        auto fb = asio::co_spawn(pool,
+        auto fb = asio::co_spawn(ex_b,
                                  sB.session->on_inbound_frame(
                                      std::span<const std::byte>{logon_b.data(), logon_b.size()}),
                                  asio::use_future);
-        fb.get();
+        ASSERT_TRUE(fb.get().has_value()) << "Session B rejected its Logon-ack";
     }
 
     ASSERT_EQ(sA.session->state(), fixpp::session::fsm_state::Active);
     ASSERT_EQ(sB.session->state(), fixpp::session::fsm_state::Active);
 
-    // HeartBtInt=1s. Each iteration advances both clocks past the liveness
-    // window so both sessions emit this iteration's TestRequest, waits for BOTH
-    // emissions in one predicate (see the doc block above for why the wait is not
+    // HeartBtInt=1s. Each iteration advances both clocks past the liveness window
+    // so both sessions emit this iteration's TestRequest, waits for BOTH emissions
+    // in one predicate (see the doc block above for why the wait is not
     // per-session), then echoes each session's newest TestReqID back as a
     // Heartbeat. The reply is what clears the pending TestRequest; without it the
     // grace window expires on the next advance and the session disconnects.
     //
-    // The TSan stress is that both liveness loops run on the pool's threads, on
-    // separate strands, incrementing what used to be a `static tr_counter`.
+    // The TSan stress is that both liveness loops run concurrently on the pool's
+    // four threads, on their own per-session strands, incrementing what used to be
+    // a `static tr_counter`.
     std::uint32_t hb_seq_a = 2;  // peer (TARGET_A) inbound seqnum (Logon was 1)
     std::uint32_t hb_seq_b = 2;
     const int kIterations = 10;
 
-    for (int i = 0; i < kIterations; ++i) {
+    // Feed one Heartbeat carrying `tr_id` into `sx`, on THAT SESSION's strand, and
+    // return the pending disposition so the caller can spawn both before awaiting
+    // either. Returns rather than asserts because an ASSERT_* inside a lambda
+    // returns from the LAMBDA, not from the test — the failure would be recorded
+    // and then walked straight past.
+    auto feed_heartbeat = [&](SessionFixture& sx, const asio::any_io_executor& ex,
+                              std::uint32_t& hb_seq, std::string_view sender,
+                              std::string_view target, std::string_view tr_id) {
+        auto& hb = frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq++, sender, target, tr_id));
+        return asio::co_spawn(
+            ex, sx.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
+            asio::use_future);
+    };
+
+    // ── Iteration 0, SERIALIZED: the discriminator for a shared counter ────────
+    //
+    // Under full concurrency the corpus alone cannot separate the per-session
+    // counter from the historical shared `static tr_counter`. Two racing
+    // read-modify-writes on one word can LOSE an update and hand both sessions a
+    // clean 1..N, which satisfies every check below. TSan is expected to catch the
+    // race itself, but the plain and ASan legs would be green — so on three of the
+    // four legs the corpus oracle would be carrying no weight of its own.
+    //
+    // So session A's first emission is driven to completion AND acknowledged
+    // before session B's clock is touched at all. There is no concurrency in this
+    // phase, therefore no lost update is available: a shared counter MUST hand B a
+    // TR2. That is asserted directly below, by name, on every leg.
+    //
+    // The concurrent phase after this is unchanged and is still what opens the
+    // TSan window; this phase only removes the oracle's dependence on a lucky
+    // schedule.
+    clock_a->advance(std::chrono::milliseconds{1500});
+    ASSERT_TRUE(wait_until_observed([&] { return !sA.transport.collect_test_req_ids().empty(); }))
+        << kWaitBudgetMiss << "waiting for session A's first TestRequest";
+    ASSERT_TRUE(sB.transport.collect_test_req_ids().empty())
+        << "session B emitted a TestRequest before its clock was ever advanced; the "
+           "serialized discriminator below is only meaningful while B has not counted";
+    {
+        const std::string latest_a = sA.transport.collect_test_req_ids().back();
+        auto f = feed_heartbeat(sA, ex_a, hb_seq_a, "TARGET_A", "SENDER_A", latest_a);
+        ASSERT_TRUE(f.get().has_value()) << "session A rejected its first Heartbeat";
+    }
+
+    clock_b->advance(std::chrono::milliseconds{1500});
+    ASSERT_TRUE(wait_until_observed([&] { return !sB.transport.collect_test_req_ids().empty(); }))
+        << kWaitBudgetMiss << "waiting for session B's first TestRequest";
+    {
+        const std::string latest_b = sB.transport.collect_test_req_ids().back();
+        auto f = feed_heartbeat(sB, ex_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
+        ASSERT_TRUE(f.get().has_value()) << "session B rejected its first Heartbeat";
+    }
+
+    // The whole point of the serialization above. A is guaranteed to have counted
+    // exactly once before B counted at all, so a per-session counter gives B TR1
+    // and a process-global one gives B TR2.
+    ASSERT_EQ(sA.transport.collect_test_req_ids().front(), "TR1")
+        << "session A's first TestReqID is not TR1 — the per-session counter does not "
+           "start at 1";
+    ASSERT_EQ(sB.transport.collect_test_req_ids().front(), "TR1")
+        << "session B's first TestReqID is not TR1, and session A had already emitted "
+           "exactly one — the TestReqID counter is SHARED across sessions (FR-010)";
+
+    // ── Iterations 1..N-1, CONCURRENT: the TSan window ────────────────────────
+    for (int i = 1; i < kIterations; ++i) {
         clock_a->advance(std::chrono::milliseconds{1500});
         clock_b->advance(std::chrono::milliseconds{1500});
 
@@ -1320,38 +1467,40 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
             << "waiting for both TestRequests at iteration " << i;
 
         // `.back()` is unconditional by construction: the wait above returned
-        // true, so each session has at least `want` >= 1 IDs. A `!empty()` guard
+        // true, so each session has at least `want` >= 2 IDs. A `!empty()` guard
         // here would be the #309 defect back in its original spelling.
-        auto latest_a = sA.transport.collect_test_req_ids().back();
-        auto latest_b = sB.transport.collect_test_req_ids().back();
+        const std::string latest_a = sA.transport.collect_test_req_ids().back();
+        const std::string latest_b = sB.transport.collect_test_req_ids().back();
 
-        auto& hb_a = frames.emplace_back(
-            make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a));
-        auto& hb_b = frames.emplace_back(
-            make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b));
+        // Both spawned before either is awaited, so the two `on_inbound_frame`
+        // coroutines run concurrently on their two distinct strands.
+        auto fa = feed_heartbeat(sA, ex_a, hb_seq_a, "TARGET_A", "SENDER_A", latest_a);
+        auto fb = feed_heartbeat(sB, ex_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
 
-        // Spawned before either is awaited, so the two `on_inbound_frame`
-        // coroutines can run concurrently on their own strands.
-        auto fa = asio::co_spawn(
-            pool,
-            sA.session->on_inbound_frame(std::span<const std::byte>{hb_a.data(), hb_a.size()}),
-            asio::use_future);
-        auto fb = asio::co_spawn(
-            pool,
-            sB.session->on_inbound_frame(std::span<const std::byte>{hb_b.data(), hb_b.size()}),
-            asio::use_future);
-        fa.get();
-        fb.get();
+        // The disposition is asserted, not discarded. A Heartbeat rejected for a
+        // seqnum gap, a checksum, or a dictionary miss used to surface only as the
+        // NEXT iteration's 10-second wait-budget miss, which names the wrong thing.
+        //
+        // Deliberately NOT paired with an `ASSERT_EQ(session->state(), Active)`
+        // here: `state()` is a session-strand surface with a single writer on that
+        // strand, and the liveness loop is live on it throughout this loop, so
+        // reading it from the test thread would be the same contract violation this
+        // commit just removed from the frame feeds. A session that stops responding
+        // is caught by the exact-count equality after the loop.
+        ASSERT_TRUE(fa.get().has_value()) << "session A rejected its Heartbeat at iteration " << i;
+        ASSERT_TRUE(fb.get().has_value()) << "session B rejected its Heartbeat at iteration " << i;
     }
 
-    // Close both sessions cleanly (sequential to avoid concurrent close races).
+    // Close both sessions cleanly, each on its own strand (#309 — same reason as
+    // the frame feeds above; `close()` cancels the liveness loop through the root
+    // cancellation slot, which is session state).
     {
-        auto fa = asio::co_spawn(pool, sA.session->close(fixpp::session::close_mode::terminal),
+        auto fa = asio::co_spawn(ex_a, sA.session->close(fixpp::session::close_mode::terminal),
                                  asio::use_future);
         fa.get();
     }
     {
-        auto fb = asio::co_spawn(pool, sB.session->close(fixpp::session::close_mode::terminal),
+        auto fb = asio::co_spawn(ex_b, sB.session->close(fixpp::session::close_mode::terminal),
                                  asio::use_future);
         fb.get();
     }
