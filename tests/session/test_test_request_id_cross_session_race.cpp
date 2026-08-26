@@ -1500,9 +1500,13 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
 // handler, and does so from inside the same inner `try`.
 TEST(CrossSessionTeardown, ThrowingPumpStillReleasesTheFixtures) {
     std::atomic<int> destructions{0};
+    // (gate-b/r1 A2) ResidualPathReleasesTheFixtures above pins this with TWO
+    // fixtures; a mutant gated on `fixtures.size() == 2` survives it and would
+    // still destroy the io_context on this one-fixture throwing-pump path.
+    std::atomic<int> ioc_destructions{0};
 
     EXPECT_NONFATAL_FAILURE(
-        ([&destructions] {
+        ([&destructions, &ioc_destructions] {
             // Heap-owned so ~quiesce_or_release_on_exit can RELEASE it on the residual
             // path (see its `ioc` member for why that is mandatory on Windows). `ioc`
             // aliases the same object, so every use below is unchanged.
@@ -1516,6 +1520,7 @@ TEST(CrossSessionTeardown, ThrowingPumpStillReleasesTheFixtures) {
 
             asio::post(ioc, [] { throw std::runtime_error("gate-b/r1 F6: injected pump fault"); });
 
+            ioc_owner->destructions = &ioc_destructions;
             quiesce_or_release_on_exit guard{
                 ioc_owner, *clock, {&sA}, std::chrono::milliseconds{0}};
         }()),
@@ -1529,6 +1534,10 @@ TEST(CrossSessionTeardown, ThrowingPumpStillReleasesTheFixtures) {
            "catch(...) must treat a mid-pump exception as residual (quiesced=false) and "
            "release, not destroy, since the exception leaves the outstanding work in an "
            "unknown state.";
+    EXPECT_EQ(ioc_destructions.load(std::memory_order_relaxed), 0)
+        << "~io_context RAN on the throwing-pump residual path. See "
+           "ResidualPathReleasesTheFixtures for why this must be 0 rather than destroyed "
+           "(#311).";
 }
 
 // ── (gate-b/r2 finding 4) the OUTER `catch(...)` is reachable and swallows a ──
@@ -1556,9 +1565,12 @@ struct throw_on_failure_scope {
 TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
     std::atomic<int> destructions{0};
     std::atomic<int> destructions_b{0};
+    // (gate-b/r1 A3) The last residual witness with no io_context assertion --
+    // see ResidualPathReleasesTheFixtures and ThrowingPumpStillReleasesTheFixtures.
+    std::atomic<int> ioc_destructions{0};
 
     EXPECT_NONFATAL_FAILURE(
-        ([&destructions, &destructions_b] {
+        ([&destructions, &destructions_b, &ioc_destructions] {
             // Setup runs with throw_on_failure at its ordinary (false) value, so
             // a bounded-pump budget miss here (#284/#289 -- expected under CI
             // load) is a normal ASSERT_TRUE failure, not std::terminate. The
@@ -1605,6 +1617,7 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
             // throw_on_failure is still true when ~quiesce_or_release_on_exit's
             // ADD_FAILURE() runs, and is restored immediately afterward.
             throw_on_failure_scope throw_scope;
+            ioc_owner->destructions = &ioc_destructions;
             quiesce_or_release_on_exit guard{
                 ioc_owner, *clock, {&sA, &sB}, std::chrono::milliseconds{0}};
 
@@ -1640,6 +1653,10 @@ TEST(CrossSessionTeardown, OuterCatchSwallowsAThrowingAddFailure) {
     EXPECT_EQ(destructions_b.load(std::memory_order_relaxed), 0)
         << "the SECOND SessionFixture was destroyed even though "
            "~quiesce_or_release_on_exit throws under --gtest_throw_on_failure.";
+    EXPECT_EQ(ioc_destructions.load(std::memory_order_relaxed), 0)
+        << "~io_context RAN on the residual path even though the outer catch(...) had "
+           "to swallow a throwing ADD_FAILURE(). See ResidualPathReleasesTheFixtures for "
+           "why this must be 0 rather than destroyed (#311).";
 }
 
 // ── Direction 2: QUIESCED ⇒ the fixture is DESTROYED, and nothing is reported ─

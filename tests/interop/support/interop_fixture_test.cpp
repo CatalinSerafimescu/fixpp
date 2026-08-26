@@ -322,9 +322,15 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
 // Both are recorded as gaps rather than waived silently.
 TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwnedClock) {
     std::weak_ptr<fixpp::core::Clock> weak_clock;
+    // (gate-b/r1 A1) The two polarity tests above (MissPathReleasesThe...,
+    // CleanStopDestroysThe...) only observe a ZERO-ms bound / clean stop. A
+    // mutant that releases ioc_ ONLY when teardown_bound_ == 0ms survives both
+    // of them yet still releases unconditionally on the throwing (non-zero
+    // bound) miss below. This counter closes that gap.
+    std::atomic<int> ioc_destructions{0};
 
     EXPECT_NONFATAL_FAILURE(
-        ([&weak_clock] {
+        ([&weak_clock, &ioc_destructions] {
             asio::io_context probe_ioc;
             auto clock = std::make_shared<fixpp::core::system_clock_source>(
                 probe_ioc.get_executor());
@@ -333,6 +339,7 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
             cfg.clock = clock;
 
             fixpp::interop::InteropEngineFixture fx{std::move(cfg)};
+            fx.observe_io_context_destruction(&ioc_destructions);
             fx.start();
             fx.engine().set_post_send_drain_hook([]() -> asio::awaitable<void> {
                 throw std::runtime_error("post-send-drain hook throws (gate-b/r2 P1-1)");
@@ -350,6 +357,10 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
            "exceptionally, so its frames are no longer suspended in ioc_. What is "
            "unsafe is that teardown stopped before session close and registry "
            "clear, so Engine-owned state may still be referenced.)";
+    EXPECT_EQ(ioc_destructions.load(std::memory_order_relaxed), 0)
+        << "~io_context RAN on the throwing-stop miss path. See "
+           "MissPathReleasesTheIoContextInsteadOfDestroyingIt for why this must be "
+           "0 rather than destroyed (#311).";
 }
 
 // ── #292 — exactly one teardown body runs, and its failure is not masked ─────
