@@ -70,6 +70,7 @@
 #include <vector>
 
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/transport_double.hpp"
 #include "support/validation_test_dictionary.hpp"
 
@@ -246,6 +247,21 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 }
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
+//
+// The `run_for(W); restart(); fut.get()` sites in this file use
+// `run_window_then_ready` (tests/support/pump_until_ready.hpp). The window is
+// PRESERVED: the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed
+// window. On a manually-driven io_context a `get()` the window did not satisfy
+// blocks with nothing left to pump it — a deadlock ctest reports as a timeout.
+//
+// Teardown is deliberately NOT a fixture-destructor drain, which is the shape
+// PRs #301 and #307 used for fixtures that OWN their Session. Here every
+// `Session`, and every frame a coroutine spans, is a block-local declared AFTER
+// the fixture, so it dies BEFORE a fixture destructor body could run — and a
+// drain is what RESUMES a suspended frame, so a destructor drain would resume it
+// over the destroyed Session. The drain runs on the MISS branch instead, in the
+// scope that still owns that storage. Both arms measured; see
+// `decisions/speckit/pr4-289-clocked-capture-migration-oracle.md`.
 
 struct LogonArmFixture {
     asio::io_context ioc;
@@ -296,31 +312,49 @@ struct LogonArmFixture {
     // The validator_ is built at open() time, so the validate gate is active.
     void open_acceptor_then_feed(Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "LogonArmFixture::open_acceptor_then_feed/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LogonArmFixture::open_acceptor_then_feed/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed for acceptor";
         ASSERT_EQ(sess.state(), fsm_state::NotConnected)
             << "acceptor should stay in NotConnected after open()";
 
         transport.reset();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "LogonArmFixture::open_acceptor_then_feed/frame");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LogonArmFixture::open_acceptor_then_feed/frame";
+            return;
+        }
         (void)fut2.get();
     }
 
     // Open session (→ LogonSent), then feed a frame.
     void open_then_feed(Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::drain_or_report(ioc, "LogonArmFixture::open_then_feed/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LogonArmFixture::open_then_feed/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
         ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
         transport.reset();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            fixpp::test_support::drain_or_report(ioc, "LogonArmFixture::open_then_feed/frame");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LogonArmFixture::open_then_feed/frame";
+            return;
+        }
         (void)fut2.get();
     }
 
@@ -461,15 +495,23 @@ TEST(ValidateGateLogonArm, Row_F_InboundReject_NoRejectLoop) {
 
     // Open to Active.
     auto fut = asio::co_spawn(fix.ioc, sess.open(), asio::use_future);
-    fix.ioc.run_for(200ms);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 200ms)) {
+        fixpp::test_support::drain_or_report(fix.ioc, "Row_F_InboundReject_NoRejectLoop/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Row_F_InboundReject_NoRejectLoop/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value());
 
     auto logon_ack = make_valid_logon("FIX.4.2", 1, "TW", "ISLD");
     fix.transport.reset();
     auto fut2 = asio::co_spawn(fix.ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
-    fix.ioc.run_for(200ms);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut2, 200ms)) {
+        fixpp::test_support::drain_or_report(fix.ioc, "Row_F_InboundReject_NoRejectLoop/logon-ack");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Row_F_InboundReject_NoRejectLoop/logon-ack";
+        return;
+    }
     ASSERT_TRUE(fut2.get().has_value());
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -498,8 +540,13 @@ TEST(ValidateGateLogonArm, Row_F_InboundReject_NoRejectLoop) {
 
     fix.transport.reset();
     auto fut3 = asio::co_spawn(fix.ioc, sess.on_inbound_frame(reject_frame), asio::use_future);
-    fix.ioc.run_for(200ms);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut3, 200ms)) {
+        fixpp::test_support::drain_or_report(fix.ioc,
+                                             "Row_F_InboundReject_NoRejectLoop/reject-frame");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Row_F_InboundReject_NoRejectLoop/reject-frame";
+        return;
+    }
     (void)fut3.get();
 
     EXPECT_FALSE(fix.has_any_reject())
@@ -517,15 +564,23 @@ TEST(ValidateGateLogonArm, Row_F_InboundLogout_NoRejectLoop) {
 
     // Open to Active.
     auto fut = asio::co_spawn(fix.ioc, sess.open(), asio::use_future);
-    fix.ioc.run_for(200ms);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 200ms)) {
+        fixpp::test_support::drain_or_report(fix.ioc, "Row_F_InboundLogout_NoRejectLoop/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Row_F_InboundLogout_NoRejectLoop/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value());
 
     auto logon_ack = make_valid_logon("FIX.4.2", 1, "TW", "ISLD");
     fix.transport.reset();
     auto fut2 = asio::co_spawn(fix.ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
-    fix.ioc.run_for(200ms);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut2, 200ms)) {
+        fixpp::test_support::drain_or_report(fix.ioc, "Row_F_InboundLogout_NoRejectLoop/logon-ack");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Row_F_InboundLogout_NoRejectLoop/logon-ack";
+        return;
+    }
     ASSERT_TRUE(fut2.get().has_value());
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -553,8 +608,13 @@ TEST(ValidateGateLogonArm, Row_F_InboundLogout_NoRejectLoop) {
 
     fix.transport.reset();
     auto fut3 = asio::co_spawn(fix.ioc, sess.on_inbound_frame(logout_frame), asio::use_future);
-    fix.ioc.run_for(200ms);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut3, 200ms)) {
+        fixpp::test_support::drain_or_report(fix.ioc,
+                                             "Row_F_InboundLogout_NoRejectLoop/logout-frame");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Row_F_InboundLogout_NoRejectLoop/logout-frame";
+        return;
+    }
     (void)fut3.get();
 
     EXPECT_FALSE(fix.has_any_reject())

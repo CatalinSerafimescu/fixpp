@@ -47,6 +47,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/store_double.hpp"
 #include "support/transport_double.hpp"
 
@@ -109,6 +110,21 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 }
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
+//
+// The `run_for(W); restart(); fut.get()` sites in this file use
+// `run_window_then_ready` (tests/support/pump_until_ready.hpp). The window is
+// PRESERVED: the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed
+// window. On a manually-driven io_context a `get()` the window did not satisfy
+// blocks with nothing left to pump it — a deadlock ctest reports as a timeout.
+//
+// Teardown is deliberately NOT a fixture-destructor drain, which is the shape
+// PRs #301 and #307 used for fixtures that OWN their Session. Here every
+// `Session`, and every frame a coroutine spans, is a block-local declared AFTER
+// the fixture, so it dies BEFORE a fixture destructor body could run — and a
+// drain is what RESUMES a suspended frame, so a destructor drain would resume it
+// over the destroyed Session. The drain runs on the MISS branch instead, in the
+// scope that still owns that storage. Both arms measured; see
+// `decisions/speckit/pr4-289-clocked-capture-migration-oracle.md`.
 
 struct SendingTimeConformanceFixture {
     asio::io_context ioc;
@@ -149,8 +165,13 @@ struct SendingTimeConformanceFixture {
     // Drive session to Active with a valid (fresh) SendingTime.
     void open_to_active(fixpp::session::Session& sess, std::string_view begin_string = "FIX.4.2") {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::drain_or_report(
+                ioc, "SendingTimeConformanceFixture::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "SendingTimeConformanceFixture::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         // Valid Logon with fresh SendingTime matching mock clock now.
@@ -159,16 +180,25 @@ struct SendingTimeConformanceFixture {
                                                   "98=0\x01"
                                                   "108=30\x01");
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            fixpp::test_support::drain_or_report(
+                ioc, "SendingTimeConformanceFixture::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "SendingTimeConformanceFixture::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
 
     void feed(fixpp::session::Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::drain_or_report(ioc, "SendingTimeConformanceFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "SendingTimeConformanceFixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 };
@@ -194,8 +224,12 @@ TEST(TCSendingTime, Fix42_1d_InvalidLogonBadSendingTime) {
 
     // open() → LogonSent
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
+        fixpp::test_support::drain_or_report(f.ioc, "Fix42_1d_InvalidLogonBadSendingTime/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Fix42_1d_InvalidLogonBadSendingTime/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value());
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
 
@@ -239,8 +273,12 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime) {
     fixpp::session::Session sess(f.engine, cfg);
 
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
+        fixpp::test_support::drain_or_report(f.ioc, "Fix44_1d_InvalidLogonBadSendingTime/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Fix44_1d_InvalidLogonBadSendingTime/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value());
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
 
@@ -279,8 +317,13 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime_SeqnumOverflow_SurfacesE
     fixpp::session::Session sess(f.engine, cfg);
 
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
+        fixpp::test_support::drain_or_report(
+            f.ioc, "Fix44_1d_InvalidLogonBadSendingTime_SeqnumOverflow/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Fix44_1d_InvalidLogonBadSendingTime_SeqnumOverflow/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value());
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
 
@@ -295,8 +338,13 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime_SeqnumOverflow_SurfacesE
                                                     "98=0\x01"
                                                     "108=30\x01");
     auto fut2 = asio::co_spawn(f.ioc, sess.on_inbound_frame(stale_logon), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut2, 200ms)) {
+        fixpp::test_support::drain_or_report(
+            f.ioc, "Fix44_1d_InvalidLogonBadSendingTime_SeqnumOverflow/stale-logon");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Fix44_1d_InvalidLogonBadSendingTime_SeqnumOverflow/stale-logon";
+        return;
+    }
     auto inbound_r = fut2.get();
 
     EXPECT_FALSE(inbound_r.has_value())
@@ -424,8 +472,13 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange_SeqnumOverflow_SurfacesE
     auto stale_hb = make_frame_with_sending_time("FIX.4.4", "0", next_inbound, "TW", "ISLD",
                                                  "20231231-23:55:00.000");
     auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(stale_hb), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
+        fixpp::test_support::drain_or_report(
+            f.ioc, "Fix44_2o_SendingTimeValueOutOfRange_SeqnumOverflow/stale-heartbeat");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Fix44_2o_SendingTimeValueOutOfRange_SeqnumOverflow/stale-heartbeat";
+        return;
+    }
     auto inbound_r = fut.get();
 
     EXPECT_FALSE(inbound_r.has_value())
