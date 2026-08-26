@@ -53,6 +53,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
@@ -112,6 +113,37 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 }  // namespace
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
+//
+// The `run_for(W); restart(); fut.get()` sites in this file use
+// `run_window_then_ready` (tests/support/pump_until_ready.hpp). The window is
+// PRESERVED: the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed
+// window. On a manually-driven io_context a `get()` the window did not satisfy
+// blocks with nothing left to pump it — a deadlock ctest reports as a timeout.
+//
+// Teardown is deliberately NOT a fixture-destructor drain, which is the shape
+// PRs #301 and #307 used for fixtures that OWN their Session. Here every
+// `Session`, and every frame a coroutine spans, is a block-local declared AFTER
+// the fixture, so it dies BEFORE a fixture destructor body could run — and a
+// drain is what RESUMES a suspended frame, so a destructor drain would resume it
+// over the destroyed Session. The drain runs on the MISS branch instead, in the
+// scope that still owns that storage, and it CANCELS THE MOCK CLOCK'S SLEEPS
+// first: the first transition to Active co_spawns a detached
+// `run_liveness_loop()` that parks on `sleep_until`, which holds a work guard
+// that `drain_or_report` cannot release (only a Clock can). `cancel_sleeps()`
+// releases the waiters that exist WHEN IT RUNS, and nothing more: a miss whose
+// drain itself performs the Active transition registers a NEW liveness waiter
+// AFTER the cancellation, and the drain then burns its 5 s budget and reports an
+// honest residual (measured: 0 ms at a pre-Active miss, 5000 ms at a logon-ack
+// miss; ASan clean in both). Nothing dangles on either branch. The surviving
+// frame is the detached liveness loop, a Session member coroutine borrowing
+// nothing from the helper's frame: a later `close()` RESUMES it, over a
+// still-live Session, via that close's own `cancel_sleeps()`, then joins it on
+// `liveness_counter_`; with no later close it is destroyed with the waiter map.
+// `on_inbound_frame` — the only frame borrowing the helper-local buffer —
+// completes during the drain.
+// A documented limitation of the primitive, `pump_until_ready.hpp:392-403`.
+// Both teardown-shape arms measured; see
+// `decisions/speckit/pr4-289-clocked-capture-migration-oracle.md`.
 
 class CancellationTwoPhaseTest : public ::testing::Test {
 protected:
@@ -144,15 +176,27 @@ protected:
 
     void drive_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "CancellationTwoPhaseTest::drive_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "CancellationTwoPhaseTest::drive_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
         ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "CancellationTwoPhaseTest::drive_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "CancellationTwoPhaseTest::drive_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
         ASSERT_EQ(sess.state(), fsm_state::Active);
     }
@@ -175,8 +219,12 @@ TEST_F(CancellationTwoPhaseTest, CloseTerminalSkipsPhase1) {
     const std::size_t sent_before = td.sent_count();
 
     auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms)) {
+        clock->cancel_sleeps();
+        fixpp::test_support::drain_or_report(ioc, "CloseTerminalSkipsPhase1/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "CloseTerminalSkipsPhase1/close";
+        return;
+    }
     auto close_r = close_fut.get();
 
     // close(terminal) must complete ok.
@@ -215,8 +263,22 @@ TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
 
     // Advance clock past timeout to complete.
     clock->advance(std::chrono::seconds{3});
-    ioc.run_for(200ms);
-    ioc.restart();
+    // ONE preserved window serves BOTH futures — the second close attaches to the in-flight
+    // result, so they resolve in the same handler chain. `run_window_then_ready` only inspects
+    // the future it is given, so fut2's readiness is checked explicitly rather than assumed.
+    // The check is what carries the difference between `run_for`'s two exits, and it is stated
+    // as that condition rather than as a property: on the WORK-EXHAUSTED exit fut1's completion
+    // having been dispatched implies fut2's was too, and on the DEADLINE exit it does not — fut1
+    // can be ready with fut2 still pending. The explicit check is why that case reports a miss
+    // and drains instead of reaching `fut2.get()` with nothing left to pump it.
+    const bool both_ready = fixpp::test_support::run_window_then_ready(ioc, fut1, 200ms) &&
+                            fut2.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
+    if (!both_ready) {
+        clock->cancel_sleeps();
+        fixpp::test_support::drain_or_report(ioc, "CloseIdempotent/both-closes");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "CloseIdempotent/both-closes";
+        return;
+    }
 
     auto r1 = fut1.get();
     auto r2 = fut2.get();
@@ -280,8 +342,13 @@ TEST_F(CancellationTwoPhaseTest, ChildCancellationStateIsolatesLogout) {
     // run_logout_phase1 returns session_logout_timeout, then phase-2
     // fires root_cancel_.emit(total) to cancel the liveness loop.
     clock->advance(std::chrono::seconds{3});
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        clock->cancel_sleeps();
+        fixpp::test_support::drain_or_report(ioc, "ChildCancellationStateIsolatesLogout/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ChildCancellationStateIsolatesLogout/close";
+        return;
+    }
 
     auto close_r = fut.get();
 
@@ -313,17 +380,32 @@ TEST_F(CancellationTwoPhaseTest, GracefulCloseFromAlreadyClosed) {
     // sleep_until is registered (same pattern as NeverConfirmedForceDisconnect
     // in logout_exchange_test.cpp: run_for(100ms) → advance → run_for again).
     auto fut1 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+    // NOT migrated, deliberately. `fut1` is NOT expected to be ready here — this window exists
+    // so `run_logout_phase1` reaches its `sleep_until`, which the advance below then fires.
+    // `run_window_then_ready` here would report a miss on the one outcome the test requires.
+    // It matched the #289 census only lexically, because `fut1.get()` happened to sit within
+    // six lines; the pump that waits for `fut1` is the migrated one below.
     ioc.run_for(100ms);  // let close() start; run_logout_phase1 registers sleep
     ioc.restart();
     clock->advance(std::chrono::seconds{3});  // fire the 2s sleep
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut1, 200ms)) {
+        clock->cancel_sleeps();
+        fixpp::test_support::drain_or_report(ioc, "GracefulCloseFromAlreadyClosed/first-close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "GracefulCloseFromAlreadyClosed/first-close";
+        return;
+    }
     (void)fut1.get();
 
     // Second close on already-closed session.
     auto fut2 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+        clock->cancel_sleeps();
+        fixpp::test_support::drain_or_report(ioc, "GracefulCloseFromAlreadyClosed/second-close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "GracefulCloseFromAlreadyClosed/second-close";
+        return;
+    }
     auto r2 = fut2.get();
 
     ASSERT_FALSE(r2.has_value());
