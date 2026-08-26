@@ -408,13 +408,16 @@ static std::uint32_t parse_tr_id(std::string_view s) {
 // gap (TR1, TR3, TR5, ...) or a non-1 start.
 //
 // File-scope, not a lambda per test: both tests below need it, and this file's own
-// history is the argument. Its two copies had DRIFTED — one carried an
-// empty-corpus early return that made the TSan-stress test vacuous (#309), the
-// other did not. Two spellings of one predicate, one safe only by accident, is how
-// that survived unnoticed; there is now one spelling and nowhere for the next one
-// to hide. No empty-corpus branch: every caller pins the size with a fatal equality
-// first, so such a branch would be unreachable — and it is the exact branch that
-// made this file's oracle answer true for nothing at all.
+// history is the argument. Its two copies had drifted on other axes — one took a
+// `session_name` parameter it never used; the other materialised an intermediate
+// `std::vector<std::uint32_t>` and rejected `n == 0` explicitly, a check the first
+// gets for free because `parse_tr_id` returning 0 already fails the `!= i + 1`
+// comparison. BOTH copies carried the same empty-corpus early return (#309);
+// neither was safe by it — unifying them removes one spelling of the predicate,
+// not a defect unique to either copy. No empty-corpus branch here: every caller
+// now pins the size with a fatal equality first, so such a branch would be
+// unreachable — it is the branch that WOULD make this file's oracle answer true
+// for nothing at all, and the size pins are what make it unreachable.
 static bool check_contiguous(const std::vector<std::string>& ids) {
     for (std::size_t i = 0; i < ids.size(); ++i) {
         if (parse_tr_id(ids[i]) != static_cast<std::uint32_t>(i + 1)) {
@@ -1096,31 +1099,27 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
         auto tr_ids_a = sA->transport.collect_test_req_ids();
         auto tr_ids_b = sB->transport.collect_test_req_ids();
 
-        if (!tr_ids_a.empty()) {
-            std::string latest_a = tr_ids_a.back();
-            auto& hb = frames.emplace_back(
-                make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a));
-            auto fut = asio::co_spawn(
-                ioc,
-                sA->session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
-                asio::use_future);
-            ASSERT_TRUE(pump_until_ready(ioc, fut))
-                << kPumpBudgetMiss << "feeding session A's Heartbeat at iteration " << i;
-            (void)fut.get();
-        }
+        std::string latest_a = tr_ids_a.back();
+        auto& hb_a = frames.emplace_back(
+            make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a));
+        auto fut_a = asio::co_spawn(
+            ioc,
+            sA->session->on_inbound_frame(std::span<const std::byte>{hb_a.data(), hb_a.size()}),
+            asio::use_future);
+        ASSERT_TRUE(pump_until_ready(ioc, fut_a))
+            << kPumpBudgetMiss << "feeding session A's Heartbeat at iteration " << i;
+        (void)fut_a.get();
 
-        if (!tr_ids_b.empty()) {
-            std::string latest_b = tr_ids_b.back();
-            auto& hb = frames.emplace_back(
-                make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b));
-            auto fut = asio::co_spawn(
-                ioc,
-                sB->session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
-                asio::use_future);
-            ASSERT_TRUE(pump_until_ready(ioc, fut))
-                << kPumpBudgetMiss << "feeding session B's Heartbeat at iteration " << i;
-            (void)fut.get();
-        }
+        std::string latest_b = tr_ids_b.back();
+        auto& hb_b = frames.emplace_back(
+            make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b));
+        auto fut_b = asio::co_spawn(
+            ioc,
+            sB->session->on_inbound_frame(std::span<const std::byte>{hb_b.data(), hb_b.size()}),
+            asio::use_future);
+        ASSERT_TRUE(pump_until_ready(ioc, fut_b))
+            << kPumpBudgetMiss << "feeding session B's Heartbeat at iteration " << i;
+        (void)fut_b.get();
     }
 
     // Close both sessions before analysis.
@@ -1236,12 +1235,22 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 // reply fed back. MEASURED on that shape (linux-clang-asan, 3 runs): each session
 // emitted exactly ONE TestRequest and both were `Disconnected` by the analysis —
 // the unanswered TestRequest's grace window expires on the second advance and the
-// session tears down, so iterations 2..10 drove nothing at all. Every assertion
-// still passed, because each result check was guarded by `if (!ids.empty())` and
-// `check_contiguous` returned true for an empty sequence; the same corpus-collapse
-// vacuity class as #283/#286. It is now fixed the way `CrossSessionDisjoint` was:
-// echo each TestReqID back as a Heartbeat so the session survives, wait on the
-// EMISSION rather than on a fixed window, and pin the count with an equality.
+// session tears down, so iterations 2..10 drove nothing at all. On that measured
+// one-element corpus every assertion still passed — not because an empty-corpus
+// guard fired (it never entered: the corpus had exactly one element, so
+// `!ids.empty()` was true), but because every predicate the test carried is
+// TRIVIAL at n = 1: contiguity and monotonicity over a single element hold for
+// any parseable `TR1`. The empty-corpus early return this file used to carry
+// (`if (!ids.empty())`, `check_contiguous` returning true for an empty sequence)
+// was a second, latent vacuity path this run never took — the same corpus-collapse
+// vacuity class as #283/#286, just not the one this particular run exercised.
+// Note also: with a shared counter the second session to emit would have produced
+// `TR2`, and `check_contiguous(["TR2"])` returns false — so this run was
+// schedule-dependent on which session emitted first, not wholly vacuous, which is
+// why iteration 0 is now serialized below. It is now fixed the way
+// `CrossSessionDisjoint` was: echo each TestReqID back as a Heartbeat so the
+// session survives, wait on the EMISSION rather than on a fixed window, and pin
+// the count with an equality.
 //
 // #284 disposition: the `fut.get()` calls below are NOT the #284 defect. This test
 // runs on a `thread_pool`, whose own threads service the work, so a get() here
