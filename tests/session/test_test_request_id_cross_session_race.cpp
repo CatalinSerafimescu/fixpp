@@ -459,7 +459,7 @@ struct counting_io_context : asio::io_context {
 // fixtures are destroyed, and only afterwards does `~io_context` destroy coroutine
 // frames that borrowed them. This guard closes that by making the same observation
 // DECIDE something: if the context did not quiesce, the fixtures are deliberately
-// released (leaked) so the frames `~io_context` destroys still have live referents.
+// released (leaked).
 //
 // WHY LEAKING IS THE FIX AND NOT A SHORTCUT. The obvious symmetry — declare the
 // fixtures before `ioc` so they outlive it — is REFUTED by measurement.
@@ -810,21 +810,6 @@ struct quiesce_or_release_on_exit {
     }
 };
 
-// ── Probe: did the guard release the io_context, or destroy it? ──────────────
-//
-// Declared BEFORE a `quiesce_or_release_on_exit` and therefore destroyed AFTER
-// it, which is the whole trick: it reads the caller's owner in its POST-release
-// state, from inside the same scope, without the witnesses having to restructure
-// their blocks around the observation.
-//
-// Needed because the effect being pinned is a NON-EVENT on the platform that
-// can see it. Without the release, `~io_context` spins forever inside
-// `win_iocp_io_context::shutdown`, so the Windows symptom is a 120 s ctest
-// timeout -- an instrument that reports "the binary died" and cannot say why,
-// and which is unavailable on Linux at any price since `scheduler::shutdown`
-// ignores the stranded work count entirely. `owner == nullptr` is the same
-// decision observed one step earlier, and it is observable everywhere.
-
 }  // anonymous namespace
 
 // ── Test 1: CrossSessionDisjoint ──────────────────────────────────────────────
@@ -860,9 +845,10 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // it outlives the frames themselves, hence every read through them. `quiesce_on_exit`
     // below only fixes the ORDER of destruction relative to itself; it cannot
     // force quiescence (see its definition — it reports residual work via
-    // ADD_FAILURE rather than eliminating it). On the budget-exhausted path a
-    // suspended frame survives the guard and is destroyed by ~io_context, so
-    // only storage declared before `ioc` is guaranteed to still be alive then.
+    // ADD_FAILURE rather than eliminating it). On the budget-exhausted path the
+    // guard now releases the context rather than destroying it (#311), so no
+    // frame is destroyed at all here and this declaration order is
+    // belt-and-braces rather than load-bearing.
     //
     // `frames` is pure storage — it holds no executor and no strand — so it is
     // safe for it to outlive `ioc`. That is NOT true of `sA`/`sB` below, which

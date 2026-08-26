@@ -133,16 +133,15 @@ InteropEngineFixture::~InteropEngineFixture() {
         // throwing. The two leave DIFFERENT residuals and the leak covers both
         // (gate-b/r8 P2-2):
         //   timeout  — the stop() frame is still suspended inside ioc_ holding
-        //              Engine&, so ~ioc_ will destroy it after this returns.
+        //              Engine&.
         //   throw    — the operation is already complete and its frames are gone,
         //              but teardown stopped wherever it threw, which may be
         //              before OR after session close and registry clear.
         // Letting ~Engine run would either trip its stopped_ assert and ABORT
         // (stop never entered), or — worse, because it is silent — pass that
         // assert with teardown incomplete. Leak on purpose: the Engine, its
-        // EngineConfig-owned clock and its control_strand_ outlive ioc_, so
-        // anything ~ioc_ destroys next still has a live referent, and no ~Engine
-        // runs against a half-torn-down registry. See the header for why
+        // EngineConfig-owned clock and its control_strand_ are retained, and no
+        // ~Engine runs against a half-torn-down registry. See the header for why
         // reordering members instead would be strictly worse.
         auto* leaked = engine_.release();
         FIXPP_INTEROP_LSAN_IGNORE(leaked);
@@ -184,10 +183,11 @@ InteropEngineFixture::~InteropEngineFixture() {
                       << teardown_bound_.count()
                       << " ms teardown bound, or it threw). Teardown did not finish, so "
                          "Engine-owned state may still be referenced. WHICH state is not "
-                         "asserted here: on the timeout path a stop() frame is still "
-                         "suspended in ioc_; on the throwing path the operation is already "
-                         "complete and what survives depends on where it threw — stop() can "
-                         "throw before OR after session close and registry clear. The Engine "
+                         "asserted here: on the timeout path a stop() frame is still suspended "
+                         "in the leaked io_context; on the throwing path the operation is "
+                         "already complete and what survives depends on where it threw — "
+                         "stop() can throw before OR after session close and registry clear. "
+                         "The Engine "
                          "was leaked deliberately so this failure is reported instead of "
                          "~Engine running against whatever remains (#292), and the io_context "
                          "was released with it (#311) -- releasing only the Engine can strand "
