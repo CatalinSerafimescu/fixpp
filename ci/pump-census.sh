@@ -35,6 +35,26 @@
 # LEXICAL candidates, not a hand-verified semantic set) but is named here so
 # nobody rediscovers it as a surprise.
 #
+# ── PRESERVED SITES THIS PIN CANNOT SPEAK ABOUT ──────────────────────────────
+# A site that is deliberately NOT migrated can still LEAVE this census, because
+# migrating a NEIGHBOURING site inserts lines and pushes the `.get()` past the
+# six-line lookahead above. Such a site is then invisible here -- absent, and
+# indistinguishable from migrated. Both known cases are staging windows, kept
+# because the awaited op is REQUIRED to still be pending when the window
+# returns (a `clock->advance()` sits between the window and the `get()`);
+# migrating one reports a miss on the one outcome the test requires. Measured,
+# not reasoned: migrating the second below turns a 2/2 passing binary into 2/2
+# FAILED at that exact site.
+#
+#   tests/session/cancellation_two_phase_test.cpp   (PR #313; 8 rows -> 7 migrated)
+#   tests/session/conformance/tc_liveness_test.cpp  (the conformance-directory
+#                                                    migration; 6 rows -> 5 migrated,
+#                                                    the `close(graceful)` 50 ms
+#                                                    staging window in `do_close`)
+#
+# Each carries a comment at the line itself. Add to this list, do not renumber
+# it -- a line number here would rot exactly as the census row did.
+#
 # ── EXACT SET, NOT A COUNT ────────────────────────────────────────────────────
 # Comparison is by exact set equality against ci/expected-pump-sites.txt, in
 # BOTH directions. A count alone is satisfied by one site removed plus one
