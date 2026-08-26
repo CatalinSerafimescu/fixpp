@@ -51,6 +51,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 
@@ -371,11 +372,38 @@ struct Fixture {
     fixpp::session::SessionConfig cfg;
     std::unique_ptr<fixpp::session::Session> session;
 
+    // A destructor BODY runs before ANY member is destroyed, i.e. at the one
+    // moment when ioc/session/cfg/capture are all still alive. That covers every
+    // exit path out of a test, including the early `return` an ASSERT_* performs,
+    // without reordering anything — and reordering is not an option regardless:
+    // `session`'s bound executor is a strand on `ioc` under the default
+    // `per_session_strand`, and destroying a strand after its context is an
+    // unconditional heap-use-after-free (see the numbered strand rule in
+    // `quiesce_on_exit`'s comment in support/pump_until_ready.hpp). `ioc` STAYS
+    // FIRST so it is destroyed LAST.
+    //
+    // It protects fixture MEMBERS only. `frame` in feed() below binds to storage
+    // that is NOT a fixture member — dies BEFORE this runs and must be drained
+    // in its own scope instead. See feed() below.
+    ~Fixture() { fixpp::test_support::drain_or_report(ioc, "Fixture::~Fixture"); }
+
     void feed(const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, session->on_inbound_frame(std::span<const std::byte>(frame)),
                                   asio::use_future);
-        ioc.run_for(5s);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 5s)) {
+            // Drain HERE, not in ~Fixture. `frame` binds to storage that is NOT a
+            // fixture member — at most call sites (`fix->feed(make_logon(...))`) a
+            // caller's temporary, destroyed at the end of the caller's
+            // full-expression, but at some (the NoHeap alloc-guard witness's
+            // `measured_frame`, the cross-session TestRequest witness's
+            // `test_req_frame`) a named local declared AFTER the fixture, which is
+            // destroyed BEFORE it too. Either shape dies long before the fixture.
+            // The suspended coroutine holds a span into it, so ~Fixture's drain
+            // would RESUME it over dead storage rather than protect it.
+            fixpp::test_support::drain_or_report(ioc, "Fixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Fixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 
@@ -410,8 +438,33 @@ static std::unique_ptr<Fixture> make_acceptor(
 
     // open() — sets NotConnected for acceptor.
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
+        fixpp::test_support::drain_or_report(fix->ioc, "make_acceptor");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_acceptor";
+        // Return the fixture, NOT nullptr: no call site in this file
+        // null-checks the result, so nullptr would turn a miss into a
+        // null-dereference SEGFAULT, which reports strictly worse than
+        // the hang this migration removes (a crashed leg emits no FAILED
+        // lines at all).
+        //
+        // The drain above settles open() BEFORE the fixture escapes.
+        // ~Fixture's drain is NOT sufficient for an escaping fixture: it
+        // runs only at fixture destruction, and a caller that destroys a
+        // fixture MEMBER before that point would resume this frame over
+        // dead storage instead — proven in
+        // test_validation_compat_toggles.cpp's CompID_KnobOff_MismatchAccepted
+        // (heap-use-after-free, reproduced under ASan; see that file's
+        // make_acceptor comment for the full trace). This file has no such
+        // caller today, but the invariant the drain protects is the same one,
+        // not a per-file exemption. Keep returning the fixture rather than
+        // nullptr — that part of the reasoning is unchanged.
+        //
+        // The drain's honest limit: drain_or_report is best-effort — if it
+        // reports a residual, the frame is still suspended and the hazard
+        // returns; it converts unconditional UB into an observed-and-reported
+        // residual, not a guaranteed absence of one.
+        return fix;
+    }
     (void)open_fut.get();
 
     // Feed peer Logon to reach Active.
@@ -452,8 +505,19 @@ static std::unique_ptr<Fixture> make_initiator(
 
     // open() emits the initiator Logon and transitions to LogonSent.
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(2s);
-    fix->ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s)) {
+        fixpp::test_support::drain_or_report(fix->ioc, "make_initiator");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_initiator";
+        // Return the fixture, NOT nullptr: no call site in this file
+        // null-checks the result, so nullptr would turn a miss into a
+        // null-dereference SEGFAULT, which reports strictly worse than
+        // the hang this migration removes (a crashed leg emits no FAILED
+        // lines at all). The drain above settles open() BEFORE the
+        // fixture escapes — see make_acceptor's comment above for the
+        // proven mechanism (heap-use-after-free, reproduced under ASan)
+        // and the drain's honest limits.
+        return fix;
+    }
     (void)open_fut.get();
 
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
@@ -985,8 +1049,8 @@ TEST(PersistentSeqnumHydrate, Inbound_DurableTrack_AdminInclusive_Resumes6) {
     fix2->session = std::make_unique<fixpp::session::Session>(fix2->eng, fix2->cfg);
 
     auto open_fut = asio::co_spawn(fix2->ioc, fix2->session->open(), asio::use_future);
-    fix2->ioc.run_for(1s);
-    fix2->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix2->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "Inbound_DurableTrack_AdminInclusive_Resumes6";
     (void)open_fut.get();
 
     ASSERT_EQ(fix2->session->state(), fixpp::session::fsm_state::NotConnected)
@@ -1095,8 +1159,8 @@ TEST(PersistentSeqnumHydrate, Acceptor_ColdResume_BothDirections) {
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "Acceptor_ColdResume_BothDirections";
     (void)open_fut.get();
 
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::NotConnected)
@@ -1159,8 +1223,8 @@ TEST(PersistentSeqnumHydrate, InboundPersistFailure_Fatal_LowerBound_FirstWrite)
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "InboundPersistFailure_Fatal_LowerBound_FirstWrite";
     (void)open_fut.get();
 
     // Feed peer Logon at seq=1. The accept path runs ensure_hydrated_ (2 reads) then
@@ -1305,8 +1369,8 @@ TEST(PersistentSeqnumHydrate, Hydrate_HappensBefore_FirstCheckInbound_Acceptor) 
     observer_app->session_ptr = fix->session.get();
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "Hydrate_HappensBefore_FirstCheckInbound_Acceptor";
     (void)open_fut.get();
 
     // Feed peer Logon at seq=37.
@@ -1353,8 +1417,8 @@ TEST(PersistentSeqnumHydrate, Hydrate_HappensBefore_FirstCheckInbound_Initiator)
     observer_app->session_ptr = fix->session.get();
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(2s);
-    fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
+        << fixpp::test_support::kWindowMiss << "Hydrate_HappensBefore_FirstCheckInbound_Initiator";
     (void)open_fut.get();
 
     // toAdmin must have fired for the outbound Logon.
@@ -1510,8 +1574,8 @@ TEST(PersistentSeqnumHydrate, PostGapFill_LowerBound_RecoveryPrecondition) {
     fix2->session = std::make_unique<fixpp::session::Session>(fix2->eng, fix2->cfg);
 
     auto open2_fut = asio::co_spawn(fix2->ioc, fix2->session->open(), asio::use_future);
-    fix2->ioc.run_for(1s);
-    fix2->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix2->ioc, open2_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "PostGapFill_LowerBound_RecoveryPrecondition";
     (void)open2_fut.get();
 
     // Feed peer Logon at seq=10 (post-GapFill manager value):
@@ -1569,8 +1633,8 @@ TEST(PersistentSeqnumHydrate, Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFa
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFatal";
     (void)open_fut.get();
 
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::NotConnected)
@@ -1725,8 +1789,8 @@ TEST(PersistentSeqnumHydrate, ValidateOff_35eq4_PersistSplit) {
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "ValidateOff_35eq4_PersistSplit";
     (void)open_fut.get();
 
     // Feed peer Logon at seq=1. With validate_off, Logon is accepted.
@@ -2039,6 +2103,11 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
         make_heartbeat_frame("FIX.4.4", static_cast<std::uint32_t>(measured_seq), "CLI", "SRV");
 
     // ── Guarded window: one persist_inbound_advance_ invocation ──────────────
+    // NB: feed()'s miss branch now allocates inside this window (drain_or_report's
+    // run_for and ADD_FAILURE), so a miss here would make alloc_guard_end() exit(1)
+    // rather than report under LD_PRELOAD=libmallocnesia.so. Currently unreachable:
+    // this file's mallocnesia companion is if(FALSE)-disabled (REMAINING-WORK item
+    // 13), and this is not a regression — a miss here hung on main.
     if (alloc_guard_start) alloc_guard_start();
 
     fix->feed(measured_frame);
@@ -2296,8 +2365,8 @@ TEST(PersistentSeqnumHydrate, INV_H1_Acceptor_789BehindSide_NoOverPersist) {
         std::make_unique<fixpp::session::Session>(manual_fix->eng, manual_fix->cfg);
 
     auto open_fut = asio::co_spawn(manual_fix->ioc, manual_fix->session->open(), asio::use_future);
-    manual_fix->ioc.run_for(1s);
-    manual_fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(manual_fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "INV_H1_Acceptor_789BehindSide_NoOverPersist";
     (void)open_fut.get();
 
     ASSERT_EQ(manual_fix->session->state(), fixpp::session::fsm_state::NotConnected)
@@ -2482,8 +2551,8 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
         std::make_unique<fixpp::session::Session>(manual_fix->eng, manual_fix->cfg);
 
     auto open_fut = asio::co_spawn(manual_fix->ioc, manual_fix->session->open(), asio::use_future);
-    manual_fix->ioc.run_for(2s);
-    manual_fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(manual_fix->ioc, open_fut, 2s))
+        << fixpp::test_support::kWindowMiss << "W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous141Y";
     (void)open_fut.get();
 
     ASSERT_EQ(manual_fix->session->state(), fixpp::session::fsm_state::LogonSent)

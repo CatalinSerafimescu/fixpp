@@ -48,6 +48,7 @@
 #include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 
@@ -223,11 +224,36 @@ struct Fixture {
     fixpp::session::SessionConfig cfg;
     std::unique_ptr<fixpp::session::Session> session;
 
+    // A destructor BODY runs before ANY member is destroyed, i.e. at the one
+    // moment when ioc/session/cfg/capture are all still alive. That covers every
+    // exit path out of a test, including the early `return` an ASSERT_* performs,
+    // without reordering anything — and reordering is not an option regardless:
+    // `session`'s bound executor is a strand on `ioc` under the default
+    // `per_session_strand`, and destroying a strand after its context is an
+    // unconditional heap-use-after-free (see the numbered strand rule in
+    // `quiesce_on_exit`'s comment in support/pump_until_ready.hpp). `ioc` STAYS
+    // FIRST so it is destroyed LAST.
+    //
+    // It protects fixture MEMBERS only. A caller's temporary passed to feed()
+    // dies BEFORE this runs and must be drained in its own scope instead.
+    ~Fixture() { fixpp::test_support::drain_or_report(ioc, "Fixture::~Fixture"); }
+
     void feed(const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(
             ioc, session->on_inbound_frame(std::span<const std::byte>(frame)), asio::use_future);
-        ioc.run_for(5s);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 5s)) {
+            // Drain HERE, not in ~Fixture. `frame` binds to storage that is NOT a
+            // fixture member — at most call sites a caller's temporary, destroyed
+            // at the end of the caller's full-expression, but at some (the
+            // NoHeap_RelaxedDeliverPath alloc-guard witness, `too_low_frame`) a
+            // named local declared AFTER the fixture, which is destroyed BEFORE
+            // it too. Either shape dies long before the fixture. The suspended
+            // coroutine holds a span into it, so ~Fixture's drain would RESUME it
+            // over dead storage rather than protect it.
+            fixpp::test_support::drain_or_report(ioc, "Fixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Fixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 
@@ -258,8 +284,34 @@ static std::unique_ptr<Fixture> make_acceptor(
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
+        fixpp::test_support::drain_or_report(fix->ioc, "make_acceptor");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_acceptor";
+        // Return the fixture, NOT nullptr: no call site in this file
+        // null-checks the result, so nullptr would turn a miss into a
+        // null-dereference SEGFAULT, which reports strictly worse than the
+        // hang this migration removes (a crashed leg emits no FAILED lines
+        // at all).
+        //
+        // The drain above settles open() BEFORE the fixture escapes.
+        // ~Fixture's drain is NOT sufficient for an escaping fixture: it runs
+        // only at fixture destruction, and a caller that destroys a fixture
+        // MEMBER first — fix->session.reset() in CompID_KnobOff_MismatchAccepted
+        // — then pumps ioc resumes this frame over the destroyed Session.
+        // Proven: heap-use-after-free, freed by
+        // fix->session.reset() in CompID_KnobOff_MismatchAccepted, read in
+        // Session::open()'s `if (state_ != lifecycle::never_opened)` lifecycle
+        // guard (.resume) — the first member read after the initial suspend
+        // point, resumed from the next run_window_then_ready. Keep returning
+        // the fixture
+        // rather than nullptr — that part of the reasoning is unchanged.
+        //
+        // The drain's honest limit: drain_or_report is best-effort — if it
+        // reports a residual, the frame is still suspended and the hazard
+        // returns; it converts unconditional UB into an observed-and-reported
+        // residual, not a guaranteed absence of one.
+        return fix;
+    }
     (void)open_fut.get();
 
     fix->feed(make_logon("FIX.4.4", peer_logon_seq, "CLI", "SRV"));
@@ -293,8 +345,19 @@ static std::unique_ptr<Fixture> make_initiator(
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(2s);
-    fix->ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s)) {
+        fixpp::test_support::drain_or_report(fix->ioc, "make_initiator");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_initiator";
+        // Return the fixture, NOT nullptr: no call site in this file
+        // null-checks the result, so nullptr would turn a miss into a
+        // null-dereference SEGFAULT, which reports strictly worse than the
+        // hang this migration removes (a crashed leg emits no FAILED lines
+        // at all). The drain above settles open() BEFORE the fixture escapes
+        // — see make_acceptor's comment above for the proven mechanism
+        // (heap-use-after-free, reproduced under ASan) and the drain's
+        // honest limits.
+        return fix;
+    }
     (void)open_fut.get();
 
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
@@ -327,8 +390,8 @@ TEST(ValidationCompatToggles, CompID_KnobOff_MismatchAccepted) {
     auto& f = *fix;
     f.session = std::make_unique<fixpp::session::Session>(f.eng, f.cfg);
     auto open_fut = asio::co_spawn(f.ioc, f.session->open(), asio::use_future);
-    f.ioc.run_for(1s);
-    f.ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(f.ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "CompID_KnobOff_MismatchAccepted";
     (void)open_fut.get();
     fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
@@ -396,8 +459,8 @@ TEST(ValidationCompatToggles, CompID_KnobOff_MatchingPathUnchanged) {
 
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "CompID_KnobOff_MatchingPathUnchanged";
     (void)open_fut.get();
     fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
@@ -437,8 +500,8 @@ TEST(ValidationCompatToggles, CompID_KnobOff_BeginStringStillStrict) {
 
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "CompID_KnobOff_BeginStringStillStrict";
     (void)open_fut.get();
     fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
@@ -500,8 +563,17 @@ TEST(ValidationCompatToggles, CompID_KnobOff_AuthzAllowListStillEnforced) {
     fixpp::session::Session session{eng, cfg};
 
     auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
-    ioc.run_for(1s);
-    ioc.restart();
+    // Not ASSERT_TRUE: this test builds its objects as BLOCK-LOCALS, with no
+    // Fixture and therefore no destructor drain. `ioc` is declared FIRST, so it is
+    // destroyed LAST — a suspended frame it still owns would be destroyed after
+    // every object it references. The drain has to happen here, while they are all
+    // alive, and an ASSERT_* would `return` past it.
+    if (!fixpp::test_support::run_window_then_ready(ioc, open_fut, 1s)) {
+        fixpp::test_support::drain_or_report(ioc, "CompID_KnobOff_AuthzAllowListStillEnforced/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "CompID_KnobOff_AuthzAllowListStillEnforced/open";
+        return;
+    }
     (void)open_fut.get();
 
     // Inject a peer identity that is NOT on the allow-list.
@@ -513,8 +585,41 @@ TEST(ValidationCompatToggles, CompID_KnobOff_AuthzAllowListStillEnforced) {
     auto logon_frame = make_logon("FIX.4.4", 1, "CLI", "SRV");
     auto feed_fut = asio::co_spawn(
         ioc, session.on_inbound_frame(std::span<const std::byte>{logon_frame}), asio::use_future);
-    ioc.run_for(2s);
-    ioc.restart();
+    // As above, and one degree sharper: the coroutine holds a span into
+    // `logon_frame`, a block-local declared AFTER `ioc`, so it dies BEFORE the
+    // frame does. The drain therefore runs here, inside `logon_frame`'s lifetime.
+    //
+    // ⚠️ This drain is DEFENSIVE, not load-bearing, and the difference was
+    // measured rather than assumed. Deleting it and forcing this site to miss
+    // (starve the 2s window under ASan) produces NO fault: with no fixture here,
+    // nothing ever RESUMES the frame — `ioc` destroys it still suspended at its
+    // initial suspend point, and a `std::span` parameter is trivially
+    // destructible, so the destruction is silent. The drain converts "frame
+    // destroyed unresumed" into "frame completed", which is better hygiene but
+    // is not preventing a demonstrated use-after-free. Contrast Fixture::feed
+    // above, where deleting the in-feed drain DOES fault, because ~Fixture's own
+    // drain is there to resume the frame over the dead temporary. Do not cite
+    // this site as evidence that a scope drain is required wherever a coroutine
+    // borrows a block-local; what makes it required is a LATER DRAIN that
+    // resumes the frame.
+    //
+    // This is also the one site in this PR whose Session has a live Transport
+    // attached (`inject_live_identity` above installs a NullSinkTransport), and
+    // `drain_or_report` deliberately does NOT close a transport — see its warning
+    // in support/pump_until_ready.hpp. That gap is unreachable HERE and only here:
+    // NullSinkTransport::async_read_some returns transport_read_eof and
+    // async_write returns buf.size(), both without suspending
+    // (tests/support/identity_injecting_transport.hpp), so no coroutine can
+    // park in either, which is the only thing closing the
+    // transport would unstick. A transport that can genuinely block needs
+    // `quiesce_on_exit` with `.transport` set instead; do not generalise from this
+    // site to those.
+    if (!fixpp::test_support::run_window_then_ready(ioc, feed_fut, 2s)) {
+        fixpp::test_support::drain_or_report(ioc, "CompID_KnobOff_AuthzAllowListStillEnforced/feed");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "CompID_KnobOff_AuthzAllowListStillEnforced/feed";
+        return;
+    }
     (void)feed_fut.get();
 
     // Post-conditions (I-VCT-2, SC-004, C1.3):
@@ -550,8 +655,8 @@ TEST(ValidationCompatToggles, CompID_KnobOff_LogonTimeMismatchStillRefused) {
 
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "CompID_KnobOff_LogonTimeMismatchStillRefused";
     (void)open_fut.get();
 
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::NotConnected)
@@ -596,8 +701,19 @@ static std::unique_ptr<Fixture> make_acceptor_seqval_off(
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
+        fixpp::test_support::drain_or_report(fix->ioc, "make_acceptor_seqval_off");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_acceptor_seqval_off";
+        // Return the fixture, NOT nullptr: no call site in this file
+        // null-checks the result, so nullptr would turn a miss into a
+        // null-dereference SEGFAULT, which reports strictly worse than the
+        // hang this migration removes (a crashed leg emits no FAILED lines
+        // at all). The drain above settles open() BEFORE the fixture escapes
+        // — see make_acceptor's comment above for the proven mechanism
+        // (heap-use-after-free, reproduced under ASan) and the drain's
+        // honest limits.
+        return fix;
+    }
     (void)open_fut.get();
 
     fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
@@ -886,8 +1002,8 @@ TEST(ValidationCompatToggles, Seq_KnobOff_LogonTimeTooHighStillRefused) {
 
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(1s);
-    fix->ioc.restart();
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "Seq_KnobOff_LogonTimeTooHighStillRefused";
     (void)open_fut.get();
 
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::NotConnected)
@@ -1209,8 +1325,30 @@ TEST(ValidationCompatToggles, Combination_Matrix_FourCells) {
 
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
         auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-        fix->ioc.run_for(1s);
-        fix->ioc.restart();
+        // Non-fatal: this is a value-returning LAMBDA, and a gtest FATAL assertion
+        // is only valid in a void-returning function. Return the fixture, not
+        // nullptr — the call sites below dereference the result without a
+        // null check, so nullptr would turn a miss into a SEGFAULT, which reports
+        // strictly worse than the hang this migration removes.
+        if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
+            fixpp::test_support::drain_or_report(
+                fix->ioc, "Combination_Matrix_FourCells/make_acceptor_with_knobs");
+            // The drain above is DEFENSIVE, not currently load-bearing: none of
+            // the call sites below destroys a fixture member before ~Fixture
+            // runs (each dereferences the result, calls feed(), and lets the
+            // fixture die normally), so it enforces the factory-boundary
+            // invariant against future caller changes rather than preventing an
+            // active hazard today. The hazard it guards against only appears
+            // when a live fixture ESCAPES the miss branch to a caller that can
+            // destroy a member before ~Fixture runs — see make_acceptor's
+            // comment above for the mechanism (heap-use-after-free, proven under
+            // ASan there), not as a reproduction at this site. Keep returning
+            // the fixture rather than nullptr — that part of the reasoning is
+            // unchanged.
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "Combination_Matrix_FourCells/make_acceptor_with_knobs";
+            return fix;
+        }
         (void)open_fut.get();
         fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
         return fix;
@@ -1345,8 +1483,28 @@ TEST(ValidationCompatToggles, Inbound_Only_OutboundUnchanged) {
 
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
         auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-        fix->ioc.run_for(1s);
-        fix->ioc.restart();
+        // Non-fatal for the same reason as the lambda above: a value-returning
+        // lambda cannot carry a gtest FATAL assertion. Return whatever was
+        // captured; the caller compares the four vectors and fails loudly on its
+        // own assertion, which is a better report than an empty vector silently
+        // comparing equal to another empty vector would be.
+        //
+        // No drain needed on this branch, unlike `Combination_Matrix_FourCells`'s
+        // lambda above: `fix` here is a lambda-local `unique_ptr<Fixture>`,
+        // destroyed at the `return` two lines below — no caller holds it past
+        // that point. `~Fixture`'s drain therefore runs microseconds later with
+        // every member still alive; it merely completes a frame nothing else
+        // would resume, and is harmless here because every referent it touches
+        // is a fixture member (cf. the `CompID_KnobOff_AuthzAllowListStillEnforced`
+        // block-local drain comment above: what makes a drain required is a
+        // LATER DRAIN that resumes the frame). The hazard only appears when a
+        // live fixture ESCAPES the miss branch to a caller that can destroy a
+        // member before `~Fixture` runs.
+        if (!fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s)) {
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "Inbound_Only_OutboundUnchanged/capture_outbound_logon";
+            return std::vector<std::vector<std::byte>>(fix->capture.frames);
+        }
         (void)open_fut.get();
         fix->feed(make_logon("FIX.4.4", 1, "CLI", "SRV"));
         // Return copies of outbound frames (the Logon-ack and any other admin).
@@ -1457,6 +1615,11 @@ TEST(ValidationCompatToggles, NoHeap_RelaxedDeliverPath) {
     const int from_app_snapshot = app->from_app_count;
 
     // ── Guarded window: one S4 deliver-without-advance invocation ────────────
+    // NB: feed()'s miss branch now allocates inside this window (drain_or_report's
+    // run_for and ADD_FAILURE), so a miss here would make alloc_guard_end() exit(1)
+    // rather than report under LD_PRELOAD=libmallocnesia.so. Currently unreachable:
+    // this file's mallocnesia companion is if(FALSE)-disabled (REMAINING-WORK item
+    // 13), and this is not a regression — a miss here hung on main.
     if (alloc_guard_start) alloc_guard_start();
 
     fix->feed(too_low_frame);
