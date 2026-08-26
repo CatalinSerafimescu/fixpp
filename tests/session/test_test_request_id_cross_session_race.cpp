@@ -1029,6 +1029,20 @@ TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
                       reinterpret_cast<const std::byte*>(resume_frame.data()), resume_frame.size()},
                   112),
               "TR1");
+
+    // F3a frame start: the boundary rule also ACCEPTS a hit at byte 0 (`pos != 0`
+    // in the guard). Tag 8 is mandatorily the first field of a FIX frame, so this
+    // is the branch that keeps the helper a general FIX-tag extractor.
+    const std::string start_frame =
+        "8=FIX.4.2\x01"
+        "35=1\x01"
+        "112=TR1\x01"
+        "10=000\x01";
+    EXPECT_EQ(extract_tag(
+                  std::span<const std::byte>{reinterpret_cast<const std::byte*>(start_frame.data()),
+                                             start_frame.size()},
+                  8),
+              "FIX.4.2");
 }
 
 // ── Test 1: CrossSessionDisjoint ──────────────────────────────────────────────
