@@ -421,11 +421,13 @@ static std::uint32_t parse_tr_id(std::string_view s) {
 // gets for free because `parse_tr_id` returning 0 already fails the `!= i + 1`
 // comparison. BOTH copies carried the same empty-corpus early return (#309);
 // neither was safe by it — unifying them removes one spelling of the predicate,
-// not a defect unique to either copy. No empty-corpus branch here: every caller
-// now pins the size with a fatal equality first, so such a branch would be
-// unreachable — it is the branch that WOULD make this file's oracle answer true
-// for nothing at all, and the size pins are what make it unreachable.
+// not a defect unique to either copy. An empty corpus is a collapse, not a
+// pass: the first line of the function rejects it directly, so no caller has
+// to pin the size for this oracle to be sound.
 static bool check_contiguous(const std::vector<std::string>& ids) {
+    if (ids.empty()) {
+        return false;  // an empty corpus is a COLLAPSE, not a pass (#309)
+    }
     for (std::size_t i = 0; i < ids.size(); ++i) {
         if (parse_tr_id(ids[i]) != static_cast<std::uint32_t>(i + 1)) {
             return false;
@@ -979,6 +981,10 @@ TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
     EXPECT_FALSE(check_contiguous({"TR0001"}));
     EXPECT_FALSE(check_contiguous({"TR4294967297"}));
 
+    // #309 Gate B round 2, P1-1(b): an empty corpus must not read as a pass —
+    // the zero-iteration loop falls through to `true` unless rejected directly.
+    EXPECT_FALSE(check_contiguous({}));
+
     // Cheap positive/negative table for parse_tr_id.
     struct Case {
         std::string_view input;
@@ -1307,10 +1313,11 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 // guard fired (it never entered: the corpus had exactly one element, so
 // `!ids.empty()` was true), but because every predicate the test carried is
 // TRIVIAL at n = 1: contiguity and monotonicity over a single element hold for
-// any parseable `TR1`. The empty-corpus early return this file used to carry
-// (`if (!ids.empty())`, `check_contiguous` returning true for an empty sequence)
-// was a second, latent vacuity path this run never took — the same corpus-collapse
-// vacuity class as #283/#286, just not the one this particular run exercised.
+// any parseable `TR1`. This file used to carry a second, latent vacuity path
+// this run never took: the `!empty()` wrapper guards (removed) and
+// `check_contiguous` itself returning `true` for an empty sequence (now
+// rejected outright, see the guard above) — the same corpus-collapse vacuity
+// class as #283/#286, just not the one this particular run exercised.
 // Note also: with a shared counter the second session to emit would have produced
 // `TR2`, and `check_contiguous(["TR2"])` returns false — so this run was
 // schedule-dependent on which session emitted first, not wholly vacuous, which is
