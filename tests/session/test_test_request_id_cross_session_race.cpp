@@ -1538,6 +1538,8 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     clock_a->advance(std::chrono::milliseconds{1500});
     ASSERT_TRUE(wait_until_observed([&] { return !sA.transport.collect_test_req_ids().empty(); }))
         << kWaitBudgetMiss << "waiting for session A's first TestRequest";
+    ASSERT_EQ(sA.transport.collect_test_req_ids().size(), 1u)
+        << "session A emitted more than one TestRequest before its first Heartbeat";
     ASSERT_TRUE(sB.transport.collect_test_req_ids().empty())
         << "session B emitted a TestRequest before its clock was ever advanced; the "
            "serialized discriminator below is only meaningful while B has not counted";
@@ -1550,6 +1552,8 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     clock_b->advance(std::chrono::milliseconds{1500});
     ASSERT_TRUE(wait_until_observed([&] { return !sB.transport.collect_test_req_ids().empty(); }))
         << kWaitBudgetMiss << "waiting for session B's first TestRequest";
+    ASSERT_EQ(sB.transport.collect_test_req_ids().size(), 1u)
+        << "session B emitted more than one TestRequest before its first Heartbeat";
     {
         const std::string latest_b = sB.transport.collect_test_req_ids().back();
         auto f = feed_heartbeat(sB, ex_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
