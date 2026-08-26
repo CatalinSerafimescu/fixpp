@@ -126,9 +126,14 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 // scope that still owns that storage, and it CANCELS THE MOCK CLOCK'S SLEEPS
 // first: the first transition to Active co_spawns a detached
 // `run_liveness_loop()` that parks on `sleep_until`, which holds a work guard
-// that `drain_or_report` cannot release (only a Clock can). Measured — without
-// the `cancel_sleeps()` the drain burns its whole 5 s budget and then reports a
-// residual it had no lever to clear. Both arms measured; see
+// that `drain_or_report` cannot release (only a Clock can). `cancel_sleeps()`
+// releases the waiters that exist WHEN IT RUNS, and nothing more: a miss whose
+// drain itself performs the Active transition registers a NEW liveness waiter
+// AFTER the cancellation, and the drain then burns its 5 s budget and reports an
+// honest residual (measured: 0 ms at a pre-Active miss, 5000 ms at a logon-ack
+// miss; ASan clean in both — the surviving frame is destroyed, not resumed).
+// A documented limitation of the primitive, `pump_until_ready.hpp:392-403`.
+// Both teardown-shape arms measured; see
 // `decisions/speckit/pr4-289-clocked-capture-migration-oracle.md`.
 
 struct SendingTimeConformanceFixture {
