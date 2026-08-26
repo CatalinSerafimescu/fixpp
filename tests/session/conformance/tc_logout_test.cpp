@@ -346,6 +346,17 @@ TEST(TC009Logout, GracefulLogoutTimeout) {
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogoutSent)
         << "After emitting Logout, FSM should be LogoutSent";
 
+    // #289 NOT MIGRATED, and NOT because the census said so -- the census never saw
+    // this site. `close_fut.get()` below sits SEVEN lines under this window and
+    // `ci/pump-census.sh`'s lookahead is SIX, so this row was never in
+    // `ci/expected-pump-sites.txt` and cannot leave it. It is the #289 shape in full:
+    // a fixed window, no `clock->advance()` between it and the `get()`, and an
+    // unconditional `get()` that blocks with nothing left to pump it if the window
+    // does not complete the close. Pre-existing on `main`, untouched by the
+    // conformance-directory migration, deferred to the next batch of the sequence
+    // with its own RED arm. This file's pin being empty is a statement about the
+    // CENSUS, not about the file.
+
     // Peer never confirms: advance clock past 2 s timeout.
     f.clock->advance(std::chrono::seconds{3});
     f.ioc.run_for(200ms);
@@ -370,6 +381,13 @@ TEST(TC009Logout, GracefulLogoutBothDirections) {
     auto close_fut =
         asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
 
+    // #289 NOT MIGRATED -- same class as the site above, and invisible to the census
+    // for the same reason (`close_fut.get()` is twenty-one lines below). WEAKER than
+    // that one, deliberately stated as such: the intervening `f.feed(...)` IS
+    // migrated, and on its miss branch `drain_or_report` pumps for up to
+    // `kQuiesceBudget` (5 s), which will usually complete `close_fut` before the
+    // `get()` is reached. The hazard is attenuated, not removed -- nothing checks
+    // `close_fut`'s readiness. Deferred with the site above.
     f.ioc.run_for(100ms);
     f.ioc.restart();
 

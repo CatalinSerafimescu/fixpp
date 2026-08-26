@@ -55,6 +55,12 @@
 # Each carries a comment at the line itself. Add to this list, do not renumber
 # it -- a line number here would rot exactly as the census row did.
 #
+# A SECOND blind spot, different mechanism: a site whose `.get()` was ALWAYS more
+# than six lines below its window was never in the pin at all, so it cannot leave
+# it. `tests/session/conformance/tc_logout_test.cpp` holds two (seven and
+# twenty-one lines). A file's absence from the pin is therefore never evidence
+# that the file has no unguarded `get()` -- only a per-`.get()` sweep answers that.
+#
 # ── EXACT SET, NOT A COUNT ────────────────────────────────────────────────────
 # Comparison is by exact set equality against ci/expected-pump-sites.txt, in
 # BOTH directions. A count alone is satisfied by one site removed plus one
