@@ -182,15 +182,28 @@ static std::vector<std::byte> make_unknown_msgtype_frame(std::string_view begin_
 // #289 harness sentinel: what the value-returning pump helpers below return
 // when the preserved run window misses.
 //
-// It is deliberately NOT load-bearing. The `ADD_FAILURE()` on the
-// same branch fails the test UNCONDITIONALLY, so a window miss can never read
-// as a pass whatever this value is. That is a property of `ADD_FAILURE`, not a
-// survey of the callers in this file, so it does not re-arm itself when a
-// caller is added. The sentinel exists for one narrower reason: a caller that
-// checks `has_value()` must not proceed on a fabricated success.
+// It is deliberately NOT load-bearing under ordinary GoogleTest execution: the
+// `ADD_FAILURE()` on the same branch records a nonfatal failure that the
+// enclosing test retains, so a window miss cannot read as a pass whatever this
+// value is. `--gtest_throw_on_failure` does not change that -- it throws AFTER
+// reporting.
 //
-// Named rather than inlined so the other value-returning #289 sites (89 of the
-// 262 remaining when this landed) adopt one greppable decision. Folding it into
+// The CONDITION that holds under, stated rather than counted: NO CALLER
+// INTERCEPTS THE FAILURE. `EXPECT_NONFATAL_FAILURE` /
+// `ScopedFakeTestPartResultReporter` (gtest-spi.h) install a fake reporter that
+// absorbs the failure and lets the enclosing test pass. The first caller that
+// does makes this value the ONLY remaining signal -- and `dispatch_aborted` is
+// then ambiguous with a real `open()` / `on_inbound_frame()` outcome
+// ([2d §6.5], src/session/session.cpp:521-544), so an assertion on the error
+// could be satisfied by this synthetic one. The remedy at that point is a
+// distinct harness result (`std::optional<expected_t<void>>`), not a different
+// production code.
+//
+// The sentinel exists for one narrower reason that holds either way: a caller
+// that checks `has_value()` must not proceed on a fabricated success.
+//
+// Named rather than inlined so the other value-returning #289 sites adopt one
+// greppable decision. Folding it into
 // `tests/support/pump_until_ready.hpp` is deliberately deferred to the header PR
 // that also closes the class-4 transport-teardown gap, so that header is touched
 // once rather than twice.
