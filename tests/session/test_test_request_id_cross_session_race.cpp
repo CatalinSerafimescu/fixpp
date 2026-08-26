@@ -1014,6 +1014,20 @@ TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
                                                frame.size()},
                     112),
         "");
+
+    // F3a resume: a rejected lookalike must not abort the search — the later
+    // boundary-anchored 112= is the real tag.
+    const std::string resume_frame =
+        "8=FIX.4.2\x01"
+        "35=1\x01"
+        "9112=decoy\x01"
+        "112=TR1\x01"
+        "10=000\x01";
+    EXPECT_EQ(extract_tag(
+                  std::span<const std::byte>{
+                      reinterpret_cast<const std::byte*>(resume_frame.data()), resume_frame.size()},
+                  112),
+              "TR1");
 }
 
 // ── Test 1: CrossSessionDisjoint ──────────────────────────────────────────────
