@@ -1557,6 +1557,17 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         })) << kWaitBudgetMiss
             << "waiting for both TestRequests at iteration " << i;
 
+        // #309 Gate B F2: `>= want` alone tolerates a batched emission cadence
+        // (e.g. +2 this iteration, +0 the next) while the cumulative equality
+        // after the loop only reports a confusing final count. Safe to assert as
+        // an equality here: after the wait returns, each emitter is parked on its
+        // grace sleep (session.cpp:4924-4926) and the only clock advancer is this
+        // blocked test thread, so the size is stable at exactly `want`.
+        ASSERT_EQ(sA.transport.collect_test_req_ids().size(), want)
+            << "session A emitted more than one TestRequest at iteration " << i;
+        ASSERT_EQ(sB.transport.collect_test_req_ids().size(), want)
+            << "session B emitted more than one TestRequest at iteration " << i;
+
         // `.back()` is unconditional by construction: the wait above returned
         // true, so each session has at least `want` >= 2 IDs. A `!empty()` guard
         // here would be the #309 defect back in its original spelling.
