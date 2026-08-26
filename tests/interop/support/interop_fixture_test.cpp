@@ -325,8 +325,8 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
     // (gate-b/r1 A1) The two polarity tests above (MissPathReleasesThe...,
     // CleanStopDestroysThe...) only observe a ZERO-ms bound / clean stop. A
     // mutant that releases ioc_ ONLY when teardown_bound_ == 0ms survives both
-    // of them yet still releases unconditionally on the throwing (non-zero
-    // bound) miss below. This counter closes that gap.
+    // of them yet fails to release on the throwing (non-zero bound) miss
+    // below -- which is what this counter catches.
     std::atomic<int> ioc_destructions{0};
 
     EXPECT_NONFATAL_FAILURE(

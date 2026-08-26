@@ -1435,9 +1435,9 @@ TEST(CrossSessionTeardown, ResidualPathReleasesTheFixtures) {
     // THE DIRECT OBSERVATION. A mutant that deletes the release() while keeping the
     // message above passes the SPI matcher and fails here.
     EXPECT_EQ(destructions.load(std::memory_order_relaxed), 0)
-        << "the SessionFixture was DESTROYED on the residual teardown path. Its Session's "
-           "strand handle is then destroyed after ~io_context destroys the frames that "
-           "borrow it, which is the ordering #303 exists to prevent.";
+        << "the SessionFixture was DESTROYED on the residual teardown path, while residual "
+           "async frames may still reference its graph, which is the ordering #303 exists "
+           "to prevent.";
 
     // The n>1 case: a loop that stops after the first owner (an off-by-one, or a
     // stray `break`) would release sA and leave sB destroyed — this is the only
