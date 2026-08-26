@@ -152,8 +152,6 @@
 // was short by 40 B per fixture. A split is a second set of figures to keep true,
 // on the same moving target, for no decision anyone makes from this block. The
 // per-witness table below is the measurement; this paragraph is the invariant.
-// Everything else below is derived from how many fixtures each witness releases,
-// and is therefore a function of the test list, not of the code.
 //
 // Measured on `linux-clang-asan` (clang 22, libstdc++, `-fsanitize=address`). Not
 // pinned to a specific commit as "the last code-affecting one" -- an earlier
@@ -175,9 +173,7 @@
 // The three fixture-releasing rows each also release one io_context, which is
 // why every one of them grew against the previous measurement while the fixture
 // column did not. The new row (gate-b/r2 C1) releases no fixture at all -- it
-// exists specifically to reach the release with an empty `fixtures` vector -- so
-// its 485 B / 5 allocations is the io_context-alone cost that was folded into
-// each of the three rows above.
+// exists specifically to reach the release with an empty `fixtures` vector.
 //
 // Three cross-checks that make the table self-auditing, and that a future reader
 // should re-run rather than trust: the per-witness bytes sum EXACTLY to the total
@@ -786,7 +782,8 @@ struct quiesce_or_release_on_exit {
             // And the io_context itself. Releasing the fixtures without releasing
             // this one is the shape that wedges `~io_context` on Windows forever —
             // see the member's own comment for the measurement. The two releases
-            // are ONE decision and must not be separated.
+            // are ONE decision and must not be separated, and neither is
+            // conditional on anything but `quiesced`.
             //
             // The release is its own statement, exactly as the loop above does it,
             // and NOT `FIXPP_XSESSION_LSAN_IGNORE(ioc.release())`. That spelling
@@ -1742,26 +1739,9 @@ TEST(CrossSessionTeardown, ZeroBudgetOnAnEmptyContextIsNotResidual) {
 
 // ── (gate-b/r2 C1) a positive budget with an EMPTY `fixtures` is still residual ──
 //
-// The three counter witnesses above (ResidualPathReleasesTheFixtures,
-// ThrowingPumpStillReleasesTheFixtures, OuterCatchSwallowsAThrowingAddFailure) all
-// construct the guard with `budget == std::chrono::milliseconds{0}`, and the only
-// `fixtures == {}` site (ZeroBudgetOnAnEmptyContextIsNotResidual, above) quiesces,
-// so it never reaches the release. Two axes of the release statement's visible
-// state — `budget` and `fixtures` emptiness — are therefore unpinned: a mutant
-// that narrows the io_context release to `budget == zero`, or to
-// `!fixtures.empty()`, survives every existing witness in this file.
-//
-// This witness closes BOTH axes with one test: a POSITIVE budget (1ms — enough
-// that `run_for` genuinely elapses without dispatching anything) AND an EMPTY
-// `fixtures` vector. Neither narrowing mutant above can satisfy this call site.
-//
-// STOPPING RULE (gate-b/r2 C3), so a future round asks the right question. No
-// finite witness set closes this class against an enumerating mutant
-// (`budget == 0 || budget == 1ms || ...`). What IS closable, and is closed as of
-// this witness: every axis the release statement's visible state exposes — the
-// guard's members (`ioc`, `clock`, `fixtures`, `budget`) plus the branch
-// condition (`quiesced`) — has a witness on each side. A future round should ask
-// "did a member get added to the guard?", not "is there another witness?".
+// This witness reaches the release with a positive budget (1 ms) and an empty
+// `fixtures` vector, so a release narrowed to `budget == zero` or to
+// `!fixtures.empty()` fails here.
 //
 // The residual is forced by a stack-scoped `executor_work_guard`, not by timing:
 // with outstanding work permanently held, `run_for` returns only because its
