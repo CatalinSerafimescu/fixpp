@@ -134,7 +134,13 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 // drain itself performs the Active transition registers a NEW liveness waiter
 // AFTER the cancellation, and the drain then burns its 5 s budget and reports an
 // honest residual (measured: 0 ms at a pre-Active miss, 5000 ms at a logon-ack
-// miss; ASan clean in both — the surviving frame is destroyed, not resumed).
+// miss; ASan clean in both). Nothing dangles on either branch. The surviving
+// frame is the detached liveness loop, a Session member coroutine borrowing
+// nothing from the helper's frame: a later `close()` RESUMES it, over a
+// still-live Session, via that close's own `cancel_sleeps()`, then joins it on
+// `liveness_counter_`; with no later close it is destroyed with the waiter map.
+// `on_inbound_frame` — the only frame borrowing the helper-local buffer —
+// completes during the drain.
 // A documented limitation of the primitive, `pump_until_ready.hpp:392-403`.
 // Both teardown-shape arms measured; see
 // `decisions/speckit/pr4-289-clocked-capture-migration-oracle.md`.
