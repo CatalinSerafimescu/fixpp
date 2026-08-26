@@ -6,8 +6,9 @@
 //
 // Scenarios (spec.md FR-010 / SC-003 / [const §XI.4]):
 //
-//   1. CrossSessionDisjoint — two concurrent sessions' TestReqID sequences are
-//      disjoint (FR-010: per-session counter, not process-global static).
+//   1. CrossSessionDisjoint — each of two concurrent sessions' TestReqID
+//      sequences is contiguous from TR1 (FR-010: per-session counter, not
+//      process-global static); duplicate values ACROSS sessions are expected.
 //
 //   2. WithinSessionMonotone — within each session, TestReqIDs increment
 //      monotonically from TR1 upward (no gaps, no reset).
@@ -33,7 +34,7 @@
 // (sequences interleave) AND TSan will fire a data race on the static.
 //
 // GREEN phase (after T020): ++next_test_request_id_ is per-session on the
-// session strand → disjoint, monotone, race-free.
+// session strand → per-session contiguous, monotone, race-free.
 //
 // Anchors:
 //   spec.md FR-010, SC-003
@@ -1032,15 +1033,18 @@ TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
 
 // ── Test 1: CrossSessionDisjoint ──────────────────────────────────────────────
 //
-// RED assertion (a): session A's TestReqID set is disjoint from session B's.
-// With a `static tr_counter`, both sessions share the counter so IDs interleave
-// → the assertion fails in the RED phase.
-// With `++next_test_request_id_` (per-session), the sequences are disjoint.
+// RED assertion (a): session A's TestReqID sequence is contiguous from TR1,
+// and so is session B's. With a `static tr_counter`, both sessions share the
+// counter so IDs interleave → each session's own sequence has GAPS and the
+// assertion fails in the RED phase.
+// With `++next_test_request_id_` (per-session), each sequence is contiguous
+// (the two sequences are IDENTICAL, not disjoint — see the note below).
 //
 // GREEN assertion (b): within each session, IDs increment monotonically.
 //
-// SC-003: we advance the clock enough for each session to emit ≥ 100
-// TestRequests (fast test; TSan is the stress mechanism, not the count).
+// SC-003 quantifies 10^4 TestRequests per session; this test pins its own
+// smaller corpus with a fatal equality at `kIterations` below (fast test;
+// TSan is the stress mechanism, not the count).
 TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // Arena for inbound frame buffers. `on_inbound_frame` takes its span by
     // value into the coroutine frame, so a block-scoped buffer dies with its
