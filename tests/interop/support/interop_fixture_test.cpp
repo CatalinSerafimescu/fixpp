@@ -85,6 +85,52 @@ TEST(InteropEngineFixtureTeardown, BoundedStopMissReportsNamedFailure) {
 // Without this, the test above is satisfied by a destructor that fails
 // unconditionally. Any non-fatal failure here fails this test outright, which is
 // exactly the assertion.
+// ── (#311) polarity pair: the io_context is RELEASED on a miss, DESTROYED on a ─
+//    clean stop ───────────────────────────────────────────────────────────────
+//
+// The property is a NON-EVENT -- on the miss path `~io_context` must not run --
+// and `ioc_` is private and dies with the fixture, so there is nothing left to
+// inspect afterwards. `counting_io_context` reports its own destruction instead;
+// see its comment for the two weaker probes that were tried first and the mutant
+// each of them admits. Both directions are needed: the miss assertion alone is
+// satisfied by an unconditional release, which would leak an io_context per
+// fixture on every ordinary interop run.
+TEST(InteropEngineFixtureTeardown, MissPathReleasesTheIoContextInsteadOfDestroyingIt) {
+    std::atomic<int> ioc_destructions{0};
+
+    EXPECT_NONFATAL_FAILURE(
+        ([&ioc_destructions] {
+            fixpp::interop::InteropEngineFixture fx{{}, std::chrono::milliseconds{0}};
+            fx.observe_io_context_destruction(&ioc_destructions);
+            fx.start();
+        }()),
+        "Engine::stop() did not finish");
+
+    EXPECT_EQ(ioc_destructions.load(std::memory_order_relaxed), 0)
+        << "~io_context RAN on the teardown-miss path. The Engine is leaked on that path, so "
+           "its outstanding-work count may no longer be backed by any operation asio's "
+           "shutdown can find -- POSIX ignores such a count, but "
+           "win_iocp_io_context::shutdown loops while (outstanding_work_ > 0) and never "
+           "returns. The io_context must be released alongside the Engine (#311).";
+}
+
+TEST(InteropEngineFixtureTeardown, CleanStopDestroysTheIoContext) {
+    std::atomic<int> ioc_destructions{0};
+
+    {
+        // A real teardown bound and nothing keeping the Engine busy, so stop()
+        // completes and the destructor takes its early return.
+        fixpp::interop::InteropEngineFixture fx{{}, std::chrono::seconds{5}};
+        fx.observe_io_context_destruction(&ioc_destructions);
+        fx.start();
+    }
+
+    EXPECT_EQ(ioc_destructions.load(std::memory_order_relaxed), 1)
+        << "the io_context survived a CLEAN teardown, so the release is unconditional rather "
+           "than the miss branch's decision. That leaks an io_context per fixture on every "
+           "successful run.";
+}
+
 TEST(InteropEngineFixtureTeardown, CleanStopReportsNothing) {
     // Non-vacuity control for MissPathRetainsTheEngineOwnedClock below: the SAME
     // weak_ptr probe must read the OPPOSITE way here. Without this, a probe that
@@ -276,9 +322,15 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
 // Both are recorded as gaps rather than waived silently.
 TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwnedClock) {
     std::weak_ptr<fixpp::core::Clock> weak_clock;
+    // (gate-b/r1 A1) The two polarity tests above (MissPathReleasesThe...,
+    // CleanStopDestroysThe...) only observe a ZERO-ms bound / clean stop. A
+    // mutant that releases ioc_ ONLY when teardown_bound_ == 0ms survives both
+    // of them yet fails to release on the throwing (non-zero bound) miss
+    // below -- which is what this counter catches.
+    std::atomic<int> ioc_destructions{0};
 
     EXPECT_NONFATAL_FAILURE(
-        ([&weak_clock] {
+        ([&weak_clock, &ioc_destructions] {
             asio::io_context probe_ioc;
             auto clock = std::make_shared<fixpp::core::system_clock_source>(
                 probe_ioc.get_executor());
@@ -287,6 +339,7 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
             cfg.clock = clock;
 
             fixpp::interop::InteropEngineFixture fx{std::move(cfg)};
+            fx.observe_io_context_destruction(&ioc_destructions);
             fx.start();
             fx.engine().set_post_send_drain_hook([]() -> asio::awaitable<void> {
                 throw std::runtime_error("post-send-drain hook throws (gate-b/r2 P1-1)");
@@ -304,6 +357,10 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
            "exceptionally, so its frames are no longer suspended in ioc_. What is "
            "unsafe is that teardown stopped before session close and registry "
            "clear, so Engine-owned state may still be referenced.)";
+    EXPECT_EQ(ioc_destructions.load(std::memory_order_relaxed), 0)
+        << "~io_context RAN on the throwing-stop miss path. See "
+           "MissPathReleasesTheIoContextInsteadOfDestroyingIt for why this must be "
+           "0 rather than destroyed (#311).";
 }
 
 // ── #292 — exactly one teardown body runs, and its failure is not masked ─────

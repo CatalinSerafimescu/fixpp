@@ -29,9 +29,39 @@
 #include <fixpp/session/engine.hpp>
 #include <functional>
 #include <future>
+#include <atomic>
 #include <memory>
 
 namespace fixpp::interop {
+
+// (#311) An `io_context` that reports its own destruction, so a test can pin the
+// NON-EVENT this fixture's teardown depends on: on the miss path `~io_context`
+// must not run at all.
+//
+// Why a counter and not something cheaper. Two weaker probes were tried and both
+// admit a mutant:
+//   - inspecting the owning `unique_ptr` for null proves only that release() was
+//     CALLED; `auto* p = ioc_.release(); delete p;` passes it while destroying the
+//     context;
+//   - a shared_ptr sentinel captured by a handler queued on the context dies when
+//     the handler is DISPATCHED as readily as when it is destroyed, and the clean
+//     path pumps -- so it cannot see an unconditional release. Measured: that
+//     version passed 21/21 against exactly that mutant.
+// Destruction is the property, so destruction is what gets counted.
+//
+// Derives from `asio::io_context`, which has no virtual destructor: this type is
+// only ever owned by `std::unique_ptr<counting_io_context>` and only ever deleted
+// through that, never through a base pointer. `~counting_io_context` runs before
+// `~io_context`, so the count is taken at the start of destruction.
+struct counting_io_context : asio::io_context {
+    std::atomic<int>* destructions = nullptr;
+
+    ~counting_io_context() {
+        if (destructions != nullptr) {
+            destructions->fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+};
 
 class InteropEngineFixture {
 public:
@@ -50,7 +80,15 @@ public:
     InteropEngineFixture(const InteropEngineFixture&) = delete;
     InteropEngineFixture& operator=(const InteropEngineFixture&) = delete;
 
-    asio::io_context& ioc() noexcept { return ioc_; }
+    asio::io_context& ioc() noexcept { return *ioc_; }
+
+    // (#311) Test-only seam: point this at a counter to observe whether
+    // ~io_context runs. Used by the teardown polarity witnesses; nullptr, and
+    // therefore inert, everywhere else. The counter must outlive this fixture --
+    // it is read after the fixture has been destroyed.
+    void observe_io_context_destruction(std::atomic<int>* counter) noexcept {
+        ioc_->destructions = counter;
+    }
     fixpp::session::Engine& engine() noexcept { return *engine_; }
 
     // Engine::start() — non-blocking; co_spawns one loop per registered session.
@@ -103,7 +141,38 @@ public:
     [[nodiscard]] bool stop_completed() const noexcept { return stop_completed_; }
 
 private:
-    asio::io_context ioc_;
+    // (#311) HEAP-OWNED so the destructor can RELEASE it on the teardown-miss
+    // path, exactly as it already releases `engine_`. The two releases are ONE
+    // decision; separating them is the bug.
+    //
+    // `~io_context` is not symmetric across platforms. POSIX
+    // `scheduler::shutdown` drains its own op queue and RETURNS, ignoring an
+    // outstanding-work count that nothing will ever decrement. Windows
+    // `win_iocp_io_context::shutdown` runs `while (outstanding_work_ > 0)` and
+    // can only decrement by DESTROYING operations it can find -- its timer
+    // queues, `completed_ops_`, and whatever `GetQueuedCompletionStatus` hands
+    // back. Leaking the Engine is precisely what can strand a count no longer
+    // reachable that way, so destroying this context after that leak may spin
+    // forever. PR #304's twin site did exactly that: 120 s timeouts on all three
+    // MSVC legs, against a green Tier 1 and Tier 3.
+    //
+    // An earlier draft of this change did NOT release the context, on the ground
+    // that this fixture's clock is a `system_clock_source` whose sleeps are real
+    // asio timers -- findable at shutdown, therefore drained. That argument was
+    // WRONG, and instructively so: `with_clock()` honours an explicit
+    // caller-supplied `EngineConfig::clock` and the public constructor accepts
+    // one, so the Engine's clock is an ARGUMENT, not a property of this class.
+    // `MissPathRetainsTheEngineOwnedClock` passes one in itself. "Safe because of
+    // the clock" was a survey of what callers happen to pass today, written up as
+    // an invariant.
+    //
+    // Nor is a clock the only way to strand the count: a leaked
+    // `executor_work_guard` does it with no parked handler at all. The general
+    // condition is just "the count is not backed by any operation shutdown can
+    // find", and this class cannot decide that from the inside. So it stops
+    // trying, and retains the context -- on an already-failing path where the
+    // Engine is being leaked anyway.
+    std::unique_ptr<counting_io_context> ioc_;
     // A real wall-clock source so outbound admin messages carry a populated
     // SendingTime(52). Without it effective_clock_ is null and the session emits an
     // EMPTY 52= — tolerated by mock peers (test_reconnect_live_happy_path) but REJECTED
@@ -141,16 +210,15 @@ private:
     // stop()-did-not-complete path it deliberately release()es, which does two
     // jobs at once — ~Engine never runs, so its stopped_ assert cannot abort and
     // replace a named failure; and the Engine (with control_strand_ and its
-    // EngineConfig-owned clock) stays alive past ~ioc_.
+    // EngineConfig-owned clock) is retained.
     //
     // What that second job covers differs by path (gate-b/r8 P2-2), and this
     // comment previously asserted only the first case: on the TIMEOUT path a
-    // stop() frame really is still suspended in ioc_ and ~ioc_ destroys it after
-    // the Engine is out of reach; on the THROWING path the operation has already
-    // completed and its frames are gone, but teardown stopped wherever it threw,
-    // so the surviving Engine is what keeps ~Engine from running against a
-    // possibly half-torn-down registry. On the normal path neither applies and
-    // this is byte-for-byte the old behaviour.
+    // stop() frame really is still suspended in ioc_; on the THROWING path the
+    // operation has already completed and its frames are gone, but teardown
+    // stopped wherever it threw, so the surviving Engine is what keeps ~Engine
+    // from running against a possibly half-torn-down registry. On the normal
+    // path neither applies and this is byte-for-byte the old behaviour.
 
     std::unique_ptr<fixpp::session::Engine> engine_;
 
