@@ -242,19 +242,26 @@ namespace {
 //
 // Extract the value of a FIX tag from a SOH-delimited frame.
 // Returns "" if the tag is not present.
+//
+// #309 Gate B F3a: `wire.find(needle)` alone matches inside a numeric suffix
+// (e.g. "9112=" contains "112="), laundering the wrong tag into the corpus. A
+// hit is only accepted at a field boundary: frame-start or immediately after
+// an SOH. On a rejected hit, resume searching past it rather than returning {}.
 static std::string extract_tag(std::span<const std::byte> frame, std::uint32_t tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
-    auto pos = wire.find(needle);
-    if (pos == std::string::npos) {
-        return {};
+    for (auto pos = wire.find(needle); pos != std::string::npos; pos = wire.find(needle, pos + 1)) {
+        if (pos != 0 && wire[pos - 1] != '\x01') {
+            continue;  // e.g. "9112=" is not tag 112
+        }
+        const auto vstart = pos + needle.size();
+        const auto end = wire.find('\x01', vstart);
+        if (end == std::string::npos) {
+            return {};
+        }
+        return wire.substr(vstart, end - vstart);
     }
-    pos += needle.size();
-    auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) {
-        return {};
-    }
-    return wire.substr(pos, end - pos);
+    return {};
 }
 
 // ── Build a minimal Logon frame for feeding into a session ────────────────────
@@ -942,6 +949,66 @@ struct quiesce_or_release_on_exit {
 };
 
 }  // anonymous namespace
+
+// ── CrossSessionTestReqIDParser — proves the hardening guards can fail (#309) ─
+//
+// #309 Gate B F5: `parse_tr_id`'s leading-zero and overflow guards (added in
+// this PR) shipped with no instrument that could see them fail — deleting
+// either guard left the whole binary green. The two EXPECT_FALSE lines below
+// are the minimum discriminating instrument, verified by hand and by deleting
+// each guard in turn and confirming this test goes RED (see the commit message
+// for both RED runs). A small positive/negative table around them pins
+// `parse_tr_id` more broadly; the two lines above it are what matter.
+//
+// #309 Gate B F3a: also proves `extract_tag`'s field-boundary anchoring — a
+// tag-112 lookalike (`9112=`) must not be laundered into the corpus as tag 112.
+//
+// LSan-block discharge (see the CAPS-LOCKED rule above
+// `FIXPP_XSESSION_HAVE_LSAN`): this test constructs no `SessionFixture`, no
+// `io_context`/`counting_io_context`, and no `quiesce_or_release_on_exit`
+// guard — it calls only the pure file-local helpers `parse_tr_id`,
+// `check_contiguous`, and `extract_tag`. It cannot reach the fixture-release
+// path, so the witness list, the fixture column, and the byte/allocation
+// totals in that block stay valid unchanged.
+TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
+    // The two discriminating lines (F5). With the guards in place, parse_tr_id
+    // returns 0 for both inputs and 0 != 1 fails contiguity. Without the
+    // leading-zero guard, "0001" accumulates to 1; without the overflow guard,
+    // "4294967297" wraps mod 2^32 to 1 — either way check_contiguous would
+    // return true and these EXPECT_FALSE would fire.
+    EXPECT_FALSE(check_contiguous({"TR0001"}));
+    EXPECT_FALSE(check_contiguous({"TR4294967297"}));
+
+    // Cheap positive/negative table for parse_tr_id.
+    struct Case {
+        std::string_view input;
+        std::uint32_t want;
+    };
+    const Case cases[] = {
+        {"TR1", 1},  {"TR10", 10}, {"TR4294967295", 4294967295u},
+        {"TR0", 0},  {"TR01", 0},  {"TR", 0},
+        {"TRx", 0},  {"XR1", 0},   {"TR1x", 0},
+        {"TR1 ", 0},
+    };
+    for (const auto& c : cases) {
+        EXPECT_EQ(parse_tr_id(c.input), c.want) << "input: " << c.input;
+    }
+
+    // F3a: a tag-112 lookalike ("9112=") must not be laundered into the corpus.
+    // Before the field-boundary fix, extract_tag's `wire.find("112=")` matched
+    // inside "9112=" and returned "TR1"; after the fix it returns "" because
+    // "9112=" has no frame-start / SOH immediately before "112=".
+    const std::string frame =
+        "8=FIX.4.2\x01"
+        "35=1\x01"
+        "9112=TR1\x01"
+        "10=000\x01";
+    EXPECT_EQ(
+        extract_tag(std::span<const std::byte>{reinterpret_cast<const std::byte*>(frame.data()),
+                                               frame.size()},
+                    112),
+        "");
+}
 
 // ── Test 1: CrossSessionDisjoint ──────────────────────────────────────────────
 //
