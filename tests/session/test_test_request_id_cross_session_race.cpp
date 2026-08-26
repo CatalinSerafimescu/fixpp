@@ -1396,18 +1396,24 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // `.underlying()` is the established answer here, not a discovery of this commit.
     // `tests/capi/error_live_test.cpp` names this race by its asio frame
     // (`any_executor.hpp:475`) and takes `.underlying()` for it; so does
-    // `tests/capi/send_recv_test.cpp`, in a poll loop. Both cite `src/session/engine.cpp`,
-    // and that plus `src/capi/session.cpp` are the ONLY production call sites of
-    // `executor()` — both `.underlying()`. So the erasure path is reachable from tests
-    // alone. That is the client-path analysis; it is what justifies this, not an
-    // assumption that TSan is crying wolf. (asio's refcount does read as correct —
-    // `fetch_sub(release)` then `atomic_thread_fence(acquire)`, atomic_count.hpp — so a
-    // fence TSan cannot see is the likely reason it fires at all. That half is an
-    // inference and nothing here rests on it.)
+    // `tests/capi/send_recv_test.cpp`, in a poll loop. Current in-repository
+    // production callers (`src/session/engine.cpp`, `src/capi/session.cpp`) also
+    // take `.underlying()`. The condition that justifies this is merge-order
+    // independent, not a count of today's callers: spawn on the resolved
+    // underlying strand so session operations stay serialized without
+    // type-erasing the wrapper at each call site. (asio's refcount does read as
+    // correct — `fetch_sub(release)` then `atomic_thread_fence(acquire)`,
+    // atomic_count.hpp — so a fence TSan cannot see is the likely reason it fires
+    // at all. That half is an inference and nothing here rests on it.)
     //
-    // MEASURED here, five full-binary runs each, tree otherwise identical:
-    //   co_spawn on `executor()`      7 TSan reports per run
-    //   co_spawn on `.underlying()`   0
+    // A repo-wide caller census and a specific TSan-report count were measured
+    // for this decision at one commit; both rot the moment a new caller lands or
+    // the toolchain changes, so neither lives here — see the PR/gate record for
+    // the identified measurement. `codegraph callers 'Session::executor'` cannot
+    // stand in for a fresh count either: at this HEAD it misses both real `src/`
+    // call sites and fabricates a third (`Session::open`, which contains only
+    // `make_session_executor`, a name collision) — use `rg 'executor\(\)' src/`
+    // for any future caller question on this symbol.
     //
     // Bound as references to a Session-owned member: no second owner, so no
     // cross-thread release of one. Valid only after a successful `open()`, which is why
