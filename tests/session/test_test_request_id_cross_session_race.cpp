@@ -401,6 +401,29 @@ static std::uint32_t parse_tr_id(std::string_view s) {
     return v;
 }
 
+// ── Is the corpus exactly TR1, TR2, ... TRN, in order? ───────────────────────
+//
+// The per-session isolation oracle. A per-session counter gives each session a
+// sequence contiguous from 1; a process-global one gives at least one session a
+// gap (TR1, TR3, TR5, ...) or a non-1 start.
+//
+// File-scope, not a lambda per test: both tests below need it, and this file's own
+// history is the argument. Its two copies had DRIFTED — one carried an
+// empty-corpus early return that made the TSan-stress test vacuous (#309), the
+// other did not. Two spellings of one predicate, one safe only by accident, is how
+// that survived unnoticed; there is now one spelling and nowhere for the next one
+// to hide. No empty-corpus branch: every caller pins the size with a fatal equality
+// first, so such a branch would be unreachable — and it is the exact branch that
+// made this file's oracle answer true for nothing at all.
+static bool check_contiguous(const std::vector<std::string>& ids) {
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        if (parse_tr_id(ids[i]) != static_cast<std::uint32_t>(i + 1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // ── Bounded pump (#284) ───────────────────────────────────────────────────────
 //
 // Every `co_spawn(..., use_future)` → `run_for(window)` → `restart()` →
@@ -1149,45 +1172,14 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // TR1, TR2, TR3... with per-session counters (expected duplicate values
     // across sessions; uniqueness is NOT the isolation invariant — isolation means
     // each session's sequence is contiguous within itself).
-    {
-        // Extract numeric values and verify they form a contiguous sequence 1..N.
-        // No empty-corpus early return: the ASSERT_EQ above has already pinned the
-        // size at kIterations, so such a branch is unreachable here. It is deleted
-        // rather than left in place because the identical branch in this file's
-        // TSan-stress twin WAS reachable and made that test vacuous (#309); two
-        // spellings of the same helper, one safe by accident, is how that survived.
-        auto check_contiguous = [](const std::vector<std::string>& ids,
-                                   const char* session_name) -> bool {
-            std::vector<std::uint32_t> ns;
-            ns.reserve(ids.size());
-            for (const auto& id : ids) {
-                std::uint32_t n = parse_tr_id(id);
-                if (n == 0) {
-                    return false;
-                }
-                ns.push_back(n);
-            }
-            // Sequence must start at 1 and be strictly increasing by 1.
-            for (std::size_t i = 0; i < ns.size(); ++i) {
-                if (ns[i] != static_cast<std::uint32_t>(i + 1)) {
-                    return false;
-                }
-            }
-            return true;
-        };
-
-        bool a_contiguous = check_contiguous(ids_a, "A");
-        bool b_contiguous = check_contiguous(ids_b, "B");
-
-        EXPECT_TRUE(a_contiguous)
-            << "Session A's TestReqID sequence is not contiguous 1..N — "
-            << "the counter may be shared with another session (static tr_counter bug). "
-            << "IDs: " << ids_a.size() << " total";
-        EXPECT_TRUE(b_contiguous)
-            << "Session B's TestReqID sequence is not contiguous 1..N — "
-            << "the counter may be shared with another session (static tr_counter bug). "
-            << "IDs: " << ids_b.size() << " total";
-    }
+    EXPECT_TRUE(check_contiguous(ids_a))
+        << "Session A's TestReqID sequence is not contiguous 1..N — "
+        << "the counter may be shared with another session (static tr_counter bug). "
+        << "IDs: " << ids_a.size() << " total";
+    EXPECT_TRUE(check_contiguous(ids_b))
+        << "Session B's TestReqID sequence is not contiguous 1..N — "
+        << "the counter may be shared with another session (static tr_counter bug). "
+        << "IDs: " << ids_b.size() << " total";
 
     // ── Assertion (b): monotone within each session ────────────────────────
     // IDs within each session must be strictly increasing (1, 2, 3, ...).
@@ -1316,31 +1308,36 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         ASSERT_TRUE(fb.get().has_value()) << "Session B open failed";
     }
 
-    // ── One type-erased executor handle per session, held for the whole test ──
+    // ── Spawn on the session's UNDERLYING strand, not on the wrapper (#309) ───
     //
-    // NOT a style choice, and not hoisted to save a conversion. `co_spawn(sX.session
-    // ->executor(), …)` converts the `session_executor` to an `any_io_executor` at
-    // EVERY call, and asio ref-counts that type-erased target
-    // (`shared_target_executor`, asio/execution/any_executor.hpp). The call-site
-    // temporary is then destroyed on the TEST thread while the spawned coroutine's
-    // own copy decrements to ZERO and `delete`s the target on a POOL thread.
+    // `Session::executor()` returns a `session_executor`, which WRAPS the resolved
+    // inner strand. `co_spawn(session_executor, …)` is supported (session_executor.hpp
+    // "seam 21"), but it erases the WRAPPER into a fresh ref-counted
+    // `shared_target_executor<session_executor>` per call site; the call-site temporary
+    // is then released on the TEST thread while the spawned coroutine's copy deletes
+    // the target on a POOL thread, and TSan reports that, deterministically.
     //
-    // asio's refcount is the textbook idiom — `fetch_sub(release)`, then
-    // `atomic_thread_fence(acquire)` before the delete (asio/detail/atomic_count.hpp)
-    // — so this is correct C++. TSan reports it anyway, because it does not track
-    // the happens-before a STANDALONE FENCE establishes; it sees a plain `delete`
-    // write on one thread against an atomic decrement on another.
+    // `.underlying()` is the established answer here, not a discovery of this commit.
+    // `tests/capi/error_live_test.cpp` names this race by its asio frame
+    // (`any_executor.hpp:475`) and takes `.underlying()` for it; so does
+    // `tests/capi/send_recv_test.cpp`, in a poll loop. Both cite `src/session/engine.cpp`,
+    // and that plus `src/capi/session.cpp` are the ONLY production call sites of
+    // `executor()` — both `.underlying()`. So the erasure path is reachable from tests
+    // alone. That is the client-path analysis; it is what justifies this, not an
+    // assumption that TSan is crying wolf. (asio's refcount does read as correct —
+    // `fetch_sub(release)` then `atomic_thread_fence(acquire)`, atomic_count.hpp — so a
+    // fence TSan cannot see is the likely reason it fires at all. That half is an
+    // inference and nothing here rests on it.)
     //
-    // MEASURED on this test, three runs each, tree otherwise identical:
-    //   converted at each call site          7 TSan reports per run
-    //   one handle per session (this)        0
+    // MEASURED here, five full-binary runs each, tree otherwise identical:
+    //   co_spawn on `executor()`      7 TSan reports per run
+    //   co_spawn on `.underlying()`   0
     //
-    // Holding the handle keeps each target's count above zero for the whole test, so
-    // the delete happens on the test thread after `join()` and the fence TSan cannot
-    // see is off the critical path. `Session::executor()` is valid only after a
-    // successful `open()`, which is why this sits here and not with the fixtures.
-    const asio::any_io_executor ex_a = sA.session->executor();
-    const asio::any_io_executor ex_b = sB.session->executor();
+    // Bound as references to a Session-owned member: no second owner, so no
+    // cross-thread release of one. Valid only after a successful `open()`, which is why
+    // this sits here and not with the fixtures.
+    const asio::any_io_executor& ex_a = sA.session->executor().underlying();
+    const asio::any_io_executor& ex_b = sB.session->executor().underlying();
 
     // Drive to Active. Spawned on each session's OWN executor — `Session::executor()`
     // is the resolved per-session strand, valid once open() has succeeded.
@@ -1375,6 +1372,14 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         ASSERT_TRUE(fb.get().has_value()) << "Session B rejected its Logon-ack";
     }
 
+    // Pre-existing, and deliberately not multiplied. `state()` is a strand-owned
+    // single-writer surface, so reading it from the test thread is the same contract
+    // violation the frame feeds above just stopped committing — see the loop below,
+    // which declines to add more of these for exactly that reason. These two are kept
+    // because they are the establishment pin the whole test rests on and they read a
+    // state that is quiescent at this instant: each Logon disposition has already been
+    // awaited, and the liveness loop cannot leave Active until a clock advance, which
+    // has not happened yet. Inside the loop that argument does not hold.
     ASSERT_EQ(sA.session->state(), fixpp::session::fsm_state::Active);
     ASSERT_EQ(sB.session->state(), fixpp::session::fsm_state::Active);
 
@@ -1390,6 +1395,10 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // a `static tr_counter`.
     std::uint32_t hb_seq_a = 2;  // peer (TARGET_A) inbound seqnum (Logon was 1)
     std::uint32_t hb_seq_b = 2;
+    // Total corpus per session, and the value the final equality pins. The serialized
+    // prologue below contributes 1 and the concurrent loop contributes kIterations - 1;
+    // stated because the loop starts at 1, and a reader who "fixes" that to 0 breaks
+    // the equality rather than the loop.
     const int kIterations = 10;
 
     // Feed one Heartbeat carrying `tr_id` into `sx`, on THAT SESSION's strand, and
@@ -1511,13 +1520,11 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     auto ids_a = sA.transport.collect_test_req_ids();
     auto ids_b = sB.transport.collect_test_req_ids();
 
-    // #309: pin the corpus size FIRST. The previous form asserted nothing on an
-    // empty corpus — each result check was wrapped in `if (!ids.empty())` and
-    // `check_contiguous` answered true for an empty sequence — so a collapse to
-    // zero read as a pass. An EQUALITY is only assertable because the loop above
-    // waits on the emission rather than on a fixed window; a tolerance band wide
-    // enough to survive that window would admit the very collapse it claims to
-    // detect (`CrossSessionDisjoint` records the same reasoning).
+    // #309: pin the corpus size FIRST — see the block above this TEST for how the old
+    // form read a collapsed corpus as a pass. An EQUALITY is only assertable because
+    // the loop above waits on the emission rather than on a fixed window; a tolerance
+    // band wide enough to survive that window would admit the very collapse it claims
+    // to detect (`CrossSessionDisjoint` records the same reasoning).
     ASSERT_EQ(ids_a.size(), static_cast<std::size_t>(kIterations))
         << "Session A emitted " << ids_a.size() << " TestRequests, expected exactly " << kIterations
         << " — check clock/liveness wiring";
@@ -1525,45 +1532,17 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         << "Session B emitted " << ids_b.size() << " TestRequests, expected exactly " << kIterations
         << " — check clock/liveness wiring";
 
-    // Per-session isolation: each session's sequence must be contiguous 1..N.
-    // No empty-corpus early return: the ASSERT_EQ above has already established a
-    // non-zero size, so such a branch would be unreachable — and it is exactly the
-    // branch that made this test vacuous.
-    auto check_contiguous = [](const std::vector<std::string>& ids) -> bool {
-        for (std::size_t i = 0; i < ids.size(); ++i) {
-            if (parse_tr_id(ids[i]) != static_cast<std::uint32_t>(i + 1)) {
-                return false;
-            }
-        }
-        return true;
-    };
-
     EXPECT_TRUE(check_contiguous(ids_a))
         << "Session A TestReqID sequence has gaps (shared static counter?)";
     EXPECT_TRUE(check_contiguous(ids_b))
         << "Session B TestReqID sequence has gaps (shared static counter?)";
 
-    // Monotone within each session (assertion (b)).
-    //
-    // #309: an unparseable ID (`parse_tr_id` == 0) now FAILS rather than being
-    // skipped. The old `if (n > 0)` form let a corpus of nothing but garbage IDs
-    // pass the monotonicity check — the same "satisfiable by a degenerate corpus"
-    // shape as the empty guards, one layer in. `CrossSessionDisjoint`'s twin
-    // already treated 0 as a failure; these two now agree.
-    auto check_monotone = [](const std::vector<std::string>& ids) -> bool {
-        std::uint32_t prev = 0;
-        for (const auto& id : ids) {
-            auto n = parse_tr_id(id);
-            if (n == 0 || n <= prev) {
-                return false;
-            }
-            prev = n;
-        }
-        return true;
-    };
-
-    EXPECT_TRUE(check_monotone(ids_a)) << "Session A TestReqID sequence is not monotone";
-    EXPECT_TRUE(check_monotone(ids_b)) << "Session B TestReqID sequence is not monotone";
+    // No separate monotonicity check here. `check_contiguous` requires the corpus to
+    // be positionally EQUAL to 1..N, which is strictly increasing by construction, so
+    // a monotonicity predicate over the same vector can only fail where contiguity has
+    // already failed. `CrossSessionDisjoint` above still carries its own inline
+    // assertion-(b) loops, which are dead for the same reason; they are pre-existing
+    // and left alone rather than deleted here — flagged, not folded in.
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
