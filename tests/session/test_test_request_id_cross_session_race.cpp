@@ -21,9 +21,12 @@
 //     mutex-protected vector.
 //   - After enough clock ticks, close both sessions and analyse captures.
 //
-// SC-003 quantified threshold: 10^4 TestRequests per session.
-// In practice we use a smaller count (100) to keep the test fast; the TSan
-// stress comes from the pool threads, not the TestRequest count.
+// SC-003 quantifies 10^4 TestRequests per session. Both tests below use a far
+// smaller corpus to stay fast, on the basis that the stress is the concurrency,
+// not the count. Each pins its own corpus size with an equality at its own
+// `kIterations` — read that, not this header: a figure repeated here is a second
+// thing to keep true, and the one that used to sit in this paragraph described
+// neither test (#309).
 //
 // RED phase (before T020): the existing `static tr_counter` in
 // run_liveness_loop is shared across all sessions → assertion (a) will fail
@@ -288,6 +291,48 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
     return result;
 }
 
+// ── Build a Heartbeat (35=0) carrying a TestReqID (112) ───────────────────────
+//
+// Echoing the session's own TestReqID back clears the pending TestRequest, so
+// the grace window does not expire and the session stays Active. WITHOUT this
+// reply a session emits exactly ONE TestRequest and then disconnects — which is
+// what capped `ConcurrentSessionsTSanStress`'s corpus at one (#309).
+//
+// File-local rather than a lambda inside `CrossSessionDisjoint`, because both
+// emission-driving tests now need it and a second copy is a second thing to keep
+// in step with the seqnum bookkeeping its callers do.
+static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq,
+                                             std::string_view sender, std::string_view target,
+                                             std::string_view tr_id) {
+    std::string body;
+    body += "35=0\x01";
+    body += "34=" + std::to_string(seq) + "\x01";
+    body += "49=" + std::string(sender) + "\x01";
+    body += "52=20240101-00:00:00.000\x01";
+    body += "56=" + std::string(target) + "\x01";
+    if (!tr_id.empty()) {
+        body += "112=" + std::string(tr_id) + "\x01";
+    }
+    std::string hdr;
+    hdr += "8=" + std::string(bs) + "\x01";
+    hdr += "9=" + std::to_string(body.size()) + "\x01";
+    std::string full = hdr + body;
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
+    cs &= 0xFFu;
+    char csbuf[8];
+    std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
+    full += "10=" + std::string(csbuf) + "\x01";
+    std::vector<std::byte> result;
+    result.reserve(full.size());
+    for (char c : full) {
+        result.push_back(static_cast<std::byte>(c));
+    }
+    return result;
+}
+
 // ── CaptureTransport: thread-safe outbound frame capture ────────────────────────
 //
 // The session's transport_send is called from the session strand; we collect all
@@ -350,6 +395,44 @@ static std::uint32_t parse_tr_id(std::string_view s) {
 using fixpp::test_support::kPumpBudgetMiss;
 using fixpp::test_support::pump_until;
 using fixpp::test_support::pump_until_ready;
+
+// ── Bounded wait for a SELF-DRIVING executor (#309) ───────────────────────────
+//
+// `pump_until` above does not apply to `ConcurrentSessionsTSanStress`: it runs on
+// an `asio::thread_pool`, whose own threads service the work, so there is nothing
+// for the test thread to pump and calling `run_for` on it is not even expressible.
+// The waiting still has to be on the OBSERVABLE EVENT rather than on a fixed
+// `sleep_for`, for the reason #284 records: a fixed window that under-serves does
+// not hang, it silently shortens the corpus every assertion downstream runs over.
+//
+// So this is the thread_pool twin of `pump_until` — same contract (wait for the
+// predicate, bounded by a real-time budget, report which happened), different
+// mechanism (poll-and-yield, because the pool drives itself). Deliberately NOT
+// named `pump_*`: nothing here pumps anything, and the two must not be confused
+// at a call site where only one of them can be correct.
+//
+// The predicate must be safe to call from the test thread while pool threads run.
+// Every use below reads `CaptureTransport::collect_test_req_ids()`, which takes
+// the capture mutex, so it is.
+template <class Ready>
+[[nodiscard]] static bool wait_until_observed(
+    Ready ready, std::chrono::steady_clock::duration budget = std::chrono::seconds{10},
+    std::chrono::milliseconds slice = std::chrono::milliseconds{1}) {
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    while (!ready()) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(slice);
+    }
+    return true;
+}
+
+// Failure text for a `wait_until_observed` that ran out of budget. Distinct from
+// `kPumpBudgetMiss` because the mechanism is distinct: a miss here means the pool
+// never produced the event, not that this thread failed to drive a context.
+inline constexpr const char* kWaitBudgetMiss =
+    "#309: the pool did not produce the awaited event within the wait budget. Site: ";
 
 // ── Session fixture helper ─────────────────────────────────────────────────────
 
@@ -942,39 +1025,6 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // Strategy: advance 1s → session emits TestRequest → feed Heartbeat reply to
     // both sessions → repeat 50 times. Each session emits one TR per iteration → 50 each.
     //
-    // Heartbeat frame (35=0) with TestReqID (112) to clear the pending TR.
-    auto make_heartbeat = [](std::string_view bs, std::uint32_t seq, std::string_view sender,
-                             std::string_view target,
-                             std::string_view tr_id) -> std::vector<std::byte> {
-        std::string body;
-        body += "35=0\x01";
-        body += "34=" + std::to_string(seq) + "\x01";
-        body += "49=" + std::string(sender) + "\x01";
-        body += "52=20240101-00:00:00.000\x01";
-        body += "56=" + std::string(target) + "\x01";
-        if (!tr_id.empty()) {
-            body += "112=" + std::string(tr_id) + "\x01";
-        }
-        std::string hdr;
-        hdr += "8=" + std::string(bs) + "\x01";
-        hdr += "9=" + std::to_string(body.size()) + "\x01";
-        std::string full = hdr + body;
-        unsigned int cs = 0;
-        for (unsigned char c : full) {
-            cs += c;
-        }
-        cs &= 0xFFu;
-        char csbuf[8];
-        std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
-        full += "10=" + std::string(csbuf) + "\x01";
-        std::vector<std::byte> result;
-        result.reserve(full.size());
-        for (char c : full) {
-            result.push_back(static_cast<std::byte>(c));
-        }
-        return result;
-    };
-
     // Advance clock and feed Heartbeat replies to keep sessions alive.
     // Each iteration generates one TestRequest per session.
     std::uint32_t hb_seq_a = 2;  // peer (TARGET_A) inbound seqnum (Logon was 1)
@@ -1083,11 +1133,13 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // each session's sequence is contiguous within itself).
     {
         // Extract numeric values and verify they form a contiguous sequence 1..N.
+        // No empty-corpus early return: the ASSERT_EQ above has already pinned the
+        // size at kIterations, so such a branch is unreachable here. It is deleted
+        // rather than left in place because the identical branch in this file's
+        // TSan-stress twin WAS reachable and made that test vacuous (#309); two
+        // spellings of the same helper, one safe by accident, is how that survived.
         auto check_contiguous = [](const std::vector<std::string>& ids,
                                    const char* session_name) -> bool {
-            if (ids.empty()) {
-                return true;
-            }
             std::vector<std::uint32_t> ns;
             ns.reserve(ids.size());
             for (const auto& id : ids) {
@@ -1162,10 +1214,24 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 // GREEN (after T020): ++next_test_request_id_ is per-session on the session
 // strand; no shared state → TSan clean.
 //
-// Clock advances are sequential (one session's clock advanced at a time) to
-// avoid races on the mock_clock's internal state (which is a test concern,
-// not the SUT concern). The TSan stress comes from both sessions running
-// their liveness loops concurrently on the pool threads.
+// Clock advances are issued from the test thread, one call at a time, to avoid
+// racing on the mock_clock's internal state (a test concern, not the SUT's).
+// They are NOT interleaved with the waiting: both clocks are advanced back to
+// back and only then is the emission awaited, so the two liveness loops overlap
+// on the pool threads. Advancing A, waiting for A, feeding A, then doing the
+// same for B would serialise them and delete the very window this test exists to
+// open.
+//
+// #309: this test used to advance both clocks and then `sleep_for(5ms)`, with no
+// reply fed back. MEASURED on that shape (linux-clang-asan, 3 runs): each session
+// emitted exactly ONE TestRequest and both were `Disconnected` by the analysis —
+// the unanswered TestRequest's grace window expires on the second advance and the
+// session tears down, so iterations 2..10 drove nothing at all. Every assertion
+// still passed, because each result check was guarded by `if (!ids.empty())` and
+// `check_contiguous` returned true for an empty sequence; the same corpus-collapse
+// vacuity class as #283/#286. It is now fixed the way `CrossSessionDisjoint` was:
+// echo each TestReqID back as a Heartbeat so the session survives, wait on the
+// EMISSION rather than on a fixed window, and pin the count with an equality.
 //
 // #284 disposition: the six `fut.get()` calls below are NOT the #284 defect.
 // This test runs on a `thread_pool`, whose own threads service the work, so a
@@ -1173,6 +1239,18 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 // the single-threaded io_context in test 1, where the test thread was both the
 // only pump and the blocked waiter.
 TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
+    // Arena for the inbound Heartbeat buffers (#309). `on_inbound_frame` takes its
+    // span BY VALUE into the coroutine frame, so an iteration-scoped buffer would
+    // die at the end of its iteration while a frame the pool has not finished with
+    // still held a span over it. `deque::emplace_back` never invalidates references
+    // to existing elements, so a span over an earlier element stays valid for the
+    // arena's whole lifetime.
+    //
+    // Declared BEFORE `pool`, therefore destroyed AFTER it — including on the early
+    // `return` an ASSERT_* performs, where `~thread_pool` may still be destroying
+    // frames that borrow from it.
+    std::deque<std::vector<std::byte>> frames;
+
     asio::thread_pool pool{4};
 
     using sc = std::chrono::system_clock;
@@ -1217,21 +1295,53 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     ASSERT_EQ(sA.session->state(), fixpp::session::fsm_state::Active);
     ASSERT_EQ(sB.session->state(), fixpp::session::fsm_state::Active);
 
-    // Advance both clocks sequentially (not concurrently) to avoid races on
-    // the mock_clock's internals. The TSan stress is on the `tr_counter` that
-    // both sessions' liveness loops (running on separate pool strands) access.
+    // HeartBtInt=1s. Each iteration advances both clocks past the liveness
+    // window so both sessions emit this iteration's TestRequest, waits for BOTH
+    // emissions in one predicate (see the doc block above for why the wait is not
+    // per-session), then echoes each session's newest TestReqID back as a
+    // Heartbeat. The reply is what clears the pending TestRequest; without it the
+    // grace window expires on the next advance and the session disconnects.
     //
-    // Each clock advance triggers the respective session's liveness loop to
-    // emit a TestRequest. The two liveness loops may run concurrently on the
-    // pool's threads → TSan window for `static tr_counter` race.
-    for (int i = 0; i < 10; ++i) {
-        // Advance session A's clock.
+    // The TSan stress is that both liveness loops run on the pool's threads, on
+    // separate strands, incrementing what used to be a `static tr_counter`.
+    std::uint32_t hb_seq_a = 2;  // peer (TARGET_A) inbound seqnum (Logon was 1)
+    std::uint32_t hb_seq_b = 2;
+    const int kIterations = 10;
+
+    for (int i = 0; i < kIterations; ++i) {
         clock_a->advance(std::chrono::milliseconds{1500});
-        // Advance session B's clock.
         clock_b->advance(std::chrono::milliseconds{1500});
-        // Allow both liveness loops to process (they run on pool threads
-        // concurrently; we don't block here, TSan instruments the actual access).
-        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+
+        const auto want = static_cast<std::size_t>(i + 1);
+        ASSERT_TRUE(wait_until_observed([&] {
+            return sA.transport.collect_test_req_ids().size() >= want &&
+                   sB.transport.collect_test_req_ids().size() >= want;
+        })) << kWaitBudgetMiss
+            << "waiting for both TestRequests at iteration " << i;
+
+        // `.back()` is unconditional by construction: the wait above returned
+        // true, so each session has at least `want` >= 1 IDs. A `!empty()` guard
+        // here would be the #309 defect back in its original spelling.
+        auto latest_a = sA.transport.collect_test_req_ids().back();
+        auto latest_b = sB.transport.collect_test_req_ids().back();
+
+        auto& hb_a = frames.emplace_back(
+            make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a));
+        auto& hb_b = frames.emplace_back(
+            make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b));
+
+        // Spawned before either is awaited, so the two `on_inbound_frame`
+        // coroutines can run concurrently on their own strands.
+        auto fa = asio::co_spawn(
+            pool,
+            sA.session->on_inbound_frame(std::span<const std::byte>{hb_a.data(), hb_a.size()}),
+            asio::use_future);
+        auto fb = asio::co_spawn(
+            pool,
+            sB.session->on_inbound_frame(std::span<const std::byte>{hb_b.data(), hb_b.size()}),
+            asio::use_future);
+        fa.get();
+        fb.get();
     }
 
     // Close both sessions cleanly (sequential to avoid concurrent close races).
@@ -1252,11 +1362,25 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     auto ids_a = sA.transport.collect_test_req_ids();
     auto ids_b = sB.transport.collect_test_req_ids();
 
+    // #309: pin the corpus size FIRST. The previous form asserted nothing on an
+    // empty corpus — each result check was wrapped in `if (!ids.empty())` and
+    // `check_contiguous` answered true for an empty sequence — so a collapse to
+    // zero read as a pass. An EQUALITY is only assertable because the loop above
+    // waits on the emission rather than on a fixed window; a tolerance band wide
+    // enough to survive that window would admit the very collapse it claims to
+    // detect (`CrossSessionDisjoint` records the same reasoning).
+    ASSERT_EQ(ids_a.size(), static_cast<std::size_t>(kIterations))
+        << "Session A emitted " << ids_a.size() << " TestRequests, expected exactly " << kIterations
+        << " — check clock/liveness wiring";
+    ASSERT_EQ(ids_b.size(), static_cast<std::size_t>(kIterations))
+        << "Session B emitted " << ids_b.size() << " TestRequests, expected exactly " << kIterations
+        << " — check clock/liveness wiring";
+
     // Per-session isolation: each session's sequence must be contiguous 1..N.
+    // No empty-corpus early return: the ASSERT_EQ above has already established a
+    // non-zero size, so such a branch would be unreachable — and it is exactly the
+    // branch that made this test vacuous.
     auto check_contiguous = [](const std::vector<std::string>& ids) -> bool {
-        if (ids.empty()) {
-            return true;
-        }
         for (std::size_t i = 0; i < ids.size(); ++i) {
             if (parse_tr_id(ids[i]) != static_cast<std::uint32_t>(i + 1)) {
                 return false;
@@ -1265,46 +1389,32 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         return true;
     };
 
-    if (!ids_a.empty()) {
-        EXPECT_TRUE(check_contiguous(ids_a))
-            << "Session A TestReqID sequence has gaps (shared static counter?)";
-    }
-    if (!ids_b.empty()) {
-        EXPECT_TRUE(check_contiguous(ids_b))
-            << "Session B TestReqID sequence has gaps (shared static counter?)";
-    }
+    EXPECT_TRUE(check_contiguous(ids_a))
+        << "Session A TestReqID sequence has gaps (shared static counter?)";
+    EXPECT_TRUE(check_contiguous(ids_b))
+        << "Session B TestReqID sequence has gaps (shared static counter?)";
 
     // Monotone within each session (assertion (b)).
-    if (!ids_a.empty()) {
+    //
+    // #309: an unparseable ID (`parse_tr_id` == 0) now FAILS rather than being
+    // skipped. The old `if (n > 0)` form let a corpus of nothing but garbage IDs
+    // pass the monotonicity check — the same "satisfiable by a degenerate corpus"
+    // shape as the empty guards, one layer in. `CrossSessionDisjoint`'s twin
+    // already treated 0 as a failure; these two now agree.
+    auto check_monotone = [](const std::vector<std::string>& ids) -> bool {
         std::uint32_t prev = 0;
-        bool ok = true;
-        for (const auto& id : ids_a) {
+        for (const auto& id : ids) {
             auto n = parse_tr_id(id);
-            if (n > 0 && n <= prev) {
-                ok = false;
-                break;
+            if (n == 0 || n <= prev) {
+                return false;
             }
-            if (n > 0) {
-                prev = n;
-            }
+            prev = n;
         }
-        EXPECT_TRUE(ok) << "Session A TestReqID sequence is not monotone";
-    }
-    if (!ids_b.empty()) {
-        std::uint32_t prev = 0;
-        bool ok = true;
-        for (const auto& id : ids_b) {
-            auto n = parse_tr_id(id);
-            if (n > 0 && n <= prev) {
-                ok = false;
-                break;
-            }
-            if (n > 0) {
-                prev = n;
-            }
-        }
-        EXPECT_TRUE(ok) << "Session B TestReqID sequence is not monotone";
-    }
+        return true;
+    };
+
+    EXPECT_TRUE(check_monotone(ids_a)) << "Session A TestReqID sequence is not monotone";
+    EXPECT_TRUE(check_monotone(ids_b)) << "Session B TestReqID sequence is not monotone";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
