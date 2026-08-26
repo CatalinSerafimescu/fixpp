@@ -255,8 +255,11 @@ TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
     // ONE preserved window serves BOTH futures — the second close attaches to the in-flight
     // result, so they resolve in the same handler chain. `run_window_then_ready` only inspects
     // the future it is given, so fut2's readiness is checked explicitly rather than assumed.
-    // It is checked AFTER the window (not given a window of its own) because `run_for` returns
-    // when the context runs out of work: if fut1's completion was dispatched, fut2's was too.
+    // The check is what carries the difference between `run_for`'s two exits, and it is stated
+    // as that condition rather than as a property: on the WORK-EXHAUSTED exit fut1's completion
+    // having been dispatched implies fut2's was too, and on the DEADLINE exit it does not — fut1
+    // can be ready with fut2 still pending. The explicit check is why that case reports a miss
+    // and drains instead of reaching `fut2.get()` with nothing left to pump it.
     const bool both_ready = fixpp::test_support::run_window_then_ready(ioc, fut1, 200ms) &&
                             fut2.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
     if (!both_ready) {
