@@ -1430,11 +1430,7 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // A repo-wide caller census and a specific TSan-report count were measured
     // for this decision at one commit; both rot the moment a new caller lands or
     // the toolchain changes, so neither lives here — see the PR/gate record for
-    // the identified measurement. `codegraph callers 'Session::executor'` cannot
-    // stand in for a fresh count either: at this HEAD it misses both real `src/`
-    // call sites and fabricates a third (`Session::open`, which contains only
-    // `make_session_executor`, a name collision) — use `rg 'executor\(\)' src/`
-    // for any future caller question on this symbol.
+    // the identified measurement.
     //
     // Bound as references to a Session-owned member: no second owner, so no
     // cross-thread release of one. Valid only after a successful `open()`, which is why
