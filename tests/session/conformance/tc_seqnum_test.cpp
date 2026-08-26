@@ -194,7 +194,8 @@ static std::vector<std::byte> make_unknown_msgtype_frame(std::string_view begin_
 // absorbs the failure and lets the enclosing test pass. The first caller that
 // does makes this value the ONLY remaining signal -- and `dispatch_aborted` is
 // then ambiguous with a real `open()` / `on_inbound_frame()` outcome
-// ([2d §6.5], src/session/session.cpp:521-544), so an assertion on the error
+// ([2d §6.5]; the `dispatch_aborted` returns in `Session::live_write_serialized_`),
+// so an assertion on the error
 // could be satisfied by this synthetic one. The remedy at that point is a
 // distinct harness result (`std::optional<expected_t<void>>`), not a different
 // production code.
