@@ -42,6 +42,7 @@
 
 #include <algorithm>
 #include <asio/co_spawn.hpp>
+#include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/thread_pool.hpp>
@@ -167,19 +168,25 @@
 //   OuterCatchSwallowsAThrowingAddFailure            2           674846 B / 68
 //   QuiescedPathDestroysTheFixtures                  0           none
 //   ZeroBudgetOnAnEmptyContextIsNotResidual          0           none
+//   PositiveBudgetWithNoFixturesIsStillResidual      0           485 B / 5
 //   ------------------------------------------------------------------------
-//   total (DERIVED, not the claim)                   5          1683745 B / 153
+//   total (DERIVED, not the claim)                   5          1684230 B / 158
 //
-// The three non-empty rows each also release one io_context, which is why every
-// row grew against the previous measurement while the fixture column did not.
+// The three fixture-releasing rows each also release one io_context, which is
+// why every one of them grew against the previous measurement while the fixture
+// column did not. The new row (gate-b/r2 C1) releases no fixture at all -- it
+// exists specifically to reach the release with an empty `fixtures` vector -- so
+// its 485 B / 5 allocations is the io_context-alone cost that was folded into
+// each of the three rows above.
 //
 // Three cross-checks that make the table self-auditing, and that a future reader
 // should re-run rather than trust: the per-witness bytes sum EXACTLY to the total
-// (674846 + 334053 + 674846 = 1683745); so do the allocation counts
-// (68 + 17 + 68 = 153) -- together these are what license "nothing else in the
-// binary leaks"; and `grep -c 'leak of 266272 byte'` on the run reports 5, matching
-// the fixture column. If any identity breaks, the table is wrong, not the
-// allocator.
+// (674846 + 334053 + 674846 + 485 = 1684230); so do the allocation counts
+// (68 + 17 + 68 + 5 = 158) -- together these are what license "nothing else in
+// the binary leaks"; and `grep -c 'leak of 266272 byte'` on the run reports 5,
+// unchanged, matching the fixture column (the new row releases no fixture, so it
+// contributes no 266272-byte entry). If any identity breaks, the table is wrong,
+// not the allocator.
 //
 // Also measured, and NOT derivable from the table: the two real tests
 // (`--gtest_filter=CrossSessionTestReqID.*`) leak NOTHING with the suppression
@@ -1731,6 +1738,85 @@ TEST(CrossSessionTeardown, ZeroBudgetOnAnEmptyContextIsNotResidual) {
     // report a residual is the deadline artefact its poll_one() probe exists to close.
     quiesce_or_release_on_exit guard{ioc_owner, *clock, {}, std::chrono::milliseconds{0}};
     // ~guard runs here and must add no failure.
+}
+
+// ── (gate-b/r2 C1) a positive budget with an EMPTY `fixtures` is still residual ──
+//
+// The three counter witnesses above (ResidualPathReleasesTheFixtures,
+// ThrowingPumpStillReleasesTheFixtures, OuterCatchSwallowsAThrowingAddFailure) all
+// construct the guard with `budget == std::chrono::milliseconds{0}`, and the only
+// `fixtures == {}` site (ZeroBudgetOnAnEmptyContextIsNotResidual, above) quiesces,
+// so it never reaches the release. Two axes of the release statement's visible
+// state — `budget` and `fixtures` emptiness — are therefore unpinned: a mutant
+// that narrows the io_context release to `budget == zero`, or to
+// `!fixtures.empty()`, survives every existing witness in this file.
+//
+// This witness closes BOTH axes with one test: a POSITIVE budget (1ms — enough
+// that `run_for` genuinely elapses without dispatching anything) AND an EMPTY
+// `fixtures` vector. Neither narrowing mutant above can satisfy this call site.
+//
+// STOPPING RULE (gate-b/r2 C3), so a future round asks the right question. No
+// finite witness set closes this class against an enumerating mutant
+// (`budget == 0 || budget == 1ms || ...`). What IS closable, and is closed as of
+// this witness: every axis the release statement's visible state exposes — the
+// guard's members (`ioc`, `clock`, `fixtures`, `budget`) plus the branch
+// condition (`quiesced`) — has a witness on each side. A future round should ask
+// "did a member get added to the guard?", not "is there another witness?".
+//
+// The residual is forced by a stack-scoped `executor_work_guard`, not by timing:
+// with outstanding work permanently held, `run_for` returns only because its
+// deadline elapsed and `poll_one()` cannot call `stop()` (asio only stops when
+// the work count is zero), so `stopped() == false` deterministically — no flake
+// surface from the real-clock `run_for` racing a dispatch.
+//
+// `ioc_destructions` is declared OUTSIDE the lambda and `ioc_owner` INSIDE it
+// (the same shape `ThrowingPumpStillReleasesTheFixtures` uses above), not merely
+// stylistically: it is what makes the counter observation safe under a mutant
+// that skips the release. `ioc_owner`, and anything it may still own, is fully
+// torn down at the closing brace of the immediately-invoked lambda, which runs
+// to completion before control returns to this scope — so `ioc_destructions`
+// outlives `ioc_owner` regardless of whether the release actually ran. Declaring
+// `ioc_owner` in this outer scope instead measurably breaks that: under a mutant
+// that skips the release, `ioc_owner`'s natural (non-released) destruction would
+// then run at THIS function's end, after `ioc_destructions` -- declared later in
+// the same scope, so destroyed first -- had already gone out of scope
+// (stack-use-after-scope, caught by ASan while preparing this witness).
+//
+// Declaration order inside the lambda matters too, and is the reason
+// `work_guard` sits between `ioc_owner` and the guard: `guard` is the
+// innermost-declared local, so ~guard runs first (work count still > 0,
+// residual branch taken, `ioc_owner` released via `ioc.release()` — NOT
+// destroyed); ~work_guard runs next, decrementing the work count on the
+// still-alive, merely-released io_context, which is safe precisely because
+// release() did not delete it; ~ioc_owner then runs on an already-released
+// unique_ptr, a no-op. No new suppression is needed beyond the existing
+// FIXPP_XSESSION_LSAN_IGNORE(leaked_ioc) call the release path already makes.
+TEST(CrossSessionTeardown, PositiveBudgetWithNoFixturesIsStillResidual) {
+    std::atomic<int> ioc_destructions{0};
+
+    EXPECT_NONFATAL_FAILURE(
+        ([&ioc_destructions] {
+            auto ioc_owner = std::make_unique<counting_io_context>();
+            asio::io_context& ioc = *ioc_owner;
+            auto clock = make_witness_clock(ioc);
+            ioc_owner->destructions = &ioc_destructions;
+
+            asio::executor_work_guard<asio::io_context::executor_type> work_guard(
+                ioc.get_executor());
+
+            quiesce_or_release_on_exit guard{
+                ioc_owner, *clock, {}, std::chrono::milliseconds{1}};
+        }()),
+        "was not observed to run out of work");
+
+    // THE DIRECT OBSERVATION. A mutant narrowed on `budget == zero` or on
+    // `!fixtures.empty()` would still destroy (rather than release) the
+    // io_context at this call site, and this assertion catches that.
+    EXPECT_EQ(ioc_destructions.load(std::memory_order_relaxed), 0)
+        << "~io_context RAN on a positive-budget, empty-fixtures residual path. "
+           "The release decision must not be narrowed to `budget == zero` or to "
+           "`!fixtures.empty()` -- either narrowing silently restores the Windows "
+           "wedge (#304) for any call site shaped like this one.";
 }
 
 }  // namespace fixpp::session::test
