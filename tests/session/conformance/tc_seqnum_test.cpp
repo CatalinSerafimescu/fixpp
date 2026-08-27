@@ -175,9 +175,10 @@ static std::vector<std::byte> make_unknown_msgtype_frame(std::string_view begin_
 // `sleep_until`, holding a work guard that `drain_or_report` cannot release
 // (only a Clock can). `cancel_sleeps()` releases the waiters that exist WHEN IT
 // RUNS and nothing more, so a miss whose drain itself performs the Active
-// transition registers a NEW waiter afterwards and the drain then reports an
-// honest residual. This is a documented limitation of the primitive
-// (`pump_until_ready.hpp`), carried over from PR #313 unchanged.
+// transition registers a NEW waiter afterwards. That WAS a documented limitation of
+// the primitive, carried unchanged from PR #313; it is now FIXED. These sites call
+// `cancel_and_drain_or_report` (`pump_until_ready.hpp`), which alternates the cancel
+// with the drain and releases exactly that waiter.
 
 // #289 harness sentinel: what the value-returning pump helpers below return
 // when the preserved run window misses.
@@ -242,8 +243,7 @@ protected:
     fixpp::core::expected_t<void> open_sync(fixpp::session::Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "TcSeqnumTest::open_sync");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "TcSeqnumTest::open_sync");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "TcSeqnumTest::open_sync";
             return std::unexpected(kWindowMissSentinel);
         }
@@ -254,8 +254,7 @@ protected:
                                             std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "TcSeqnumTest::feed_sync");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "TcSeqnumTest::feed_sync");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "TcSeqnumTest::feed_sync";
             return std::unexpected(kWindowMissSentinel);
         }
