@@ -329,9 +329,8 @@ struct LogonArmFixture {
     void open_acceptor_then_feed(Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc,
-                                                 "LogonArmFixture::open_acceptor_then_feed/open");
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "LogonArmFixture::open_acceptor_then_feed/open");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "LogonArmFixture::open_acceptor_then_feed/open";
             return;
@@ -343,9 +342,8 @@ struct LogonArmFixture {
         transport.reset();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc,
-                                                 "LogonArmFixture::open_acceptor_then_feed/frame");
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "LogonArmFixture::open_acceptor_then_feed/frame");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "LogonArmFixture::open_acceptor_then_feed/frame";
             return;
@@ -357,8 +355,8 @@ struct LogonArmFixture {
     void open_then_feed(Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "LogonArmFixture::open_then_feed/open");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "LogonArmFixture::open_then_feed/open");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "LogonArmFixture::open_then_feed/open";
             return;
@@ -369,8 +367,8 @@ struct LogonArmFixture {
         transport.reset();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "LogonArmFixture::open_then_feed/frame");
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "LogonArmFixture::open_then_feed/frame");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "LogonArmFixture::open_then_feed/frame";
             return;
@@ -516,8 +514,8 @@ TEST(ValidateGateLogonArm, Row_F_InboundReject_NoRejectLoop) {
     // Open to Active.
     auto fut = asio::co_spawn(fix.ioc, sess.open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 200ms)) {
-        fix.clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(fix.ioc, "Row_F_InboundReject_NoRejectLoop/open");
+        fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
+                                                        "Row_F_InboundReject_NoRejectLoop/open");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "Row_F_InboundReject_NoRejectLoop/open";
         return;
@@ -528,8 +526,8 @@ TEST(ValidateGateLogonArm, Row_F_InboundReject_NoRejectLoop) {
     fix.transport.reset();
     auto fut2 = asio::co_spawn(fix.ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut2, 200ms)) {
-        fix.clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(fix.ioc, "Row_F_InboundReject_NoRejectLoop/logon-ack");
+        fixpp::test_support::cancel_and_drain_or_report(
+            fix.ioc, *fix.clock, "Row_F_InboundReject_NoRejectLoop/logon-ack");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "Row_F_InboundReject_NoRejectLoop/logon-ack";
         return;
@@ -563,9 +561,8 @@ TEST(ValidateGateLogonArm, Row_F_InboundReject_NoRejectLoop) {
     fix.transport.reset();
     auto fut3 = asio::co_spawn(fix.ioc, sess.on_inbound_frame(reject_frame), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut3, 200ms)) {
-        fix.clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(fix.ioc,
-                                             "Row_F_InboundReject_NoRejectLoop/reject-frame");
+        fixpp::test_support::cancel_and_drain_or_report(
+            fix.ioc, *fix.clock, "Row_F_InboundReject_NoRejectLoop/reject-frame");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "Row_F_InboundReject_NoRejectLoop/reject-frame";
         return;
@@ -588,8 +585,8 @@ TEST(ValidateGateLogonArm, Row_F_InboundLogout_NoRejectLoop) {
     // Open to Active.
     auto fut = asio::co_spawn(fix.ioc, sess.open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 200ms)) {
-        fix.clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(fix.ioc, "Row_F_InboundLogout_NoRejectLoop/open");
+        fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
+                                                        "Row_F_InboundLogout_NoRejectLoop/open");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "Row_F_InboundLogout_NoRejectLoop/open";
         return;
@@ -600,8 +597,8 @@ TEST(ValidateGateLogonArm, Row_F_InboundLogout_NoRejectLoop) {
     fix.transport.reset();
     auto fut2 = asio::co_spawn(fix.ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut2, 200ms)) {
-        fix.clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(fix.ioc, "Row_F_InboundLogout_NoRejectLoop/logon-ack");
+        fixpp::test_support::cancel_and_drain_or_report(
+            fix.ioc, *fix.clock, "Row_F_InboundLogout_NoRejectLoop/logon-ack");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "Row_F_InboundLogout_NoRejectLoop/logon-ack";
         return;
@@ -634,9 +631,8 @@ TEST(ValidateGateLogonArm, Row_F_InboundLogout_NoRejectLoop) {
     fix.transport.reset();
     auto fut3 = asio::co_spawn(fix.ioc, sess.on_inbound_frame(logout_frame), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut3, 200ms)) {
-        fix.clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(fix.ioc,
-                                             "Row_F_InboundLogout_NoRejectLoop/logout-frame");
+        fixpp::test_support::cancel_and_drain_or_report(
+            fix.ioc, *fix.clock, "Row_F_InboundLogout_NoRejectLoop/logout-frame");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "Row_F_InboundLogout_NoRejectLoop/logout-frame";
         return;

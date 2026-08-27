@@ -226,8 +226,7 @@ struct Harness {
     fixpp::core::expected_t<void> open_session(fixpp::session::Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200})) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "Harness::open_session");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Harness::open_session");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Harness::open_session";
             return std::unexpected(kWindowMissSentinel);
         }
@@ -238,8 +237,7 @@ struct Harness {
                                              std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200})) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "Harness::feed_frame");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Harness::feed_frame");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Harness::feed_frame";
             return std::unexpected(kWindowMissSentinel);
         }

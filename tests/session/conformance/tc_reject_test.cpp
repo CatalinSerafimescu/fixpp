@@ -230,9 +230,8 @@ struct RejectConformanceFixture {
                                   std::string_view begin_string = "FIX.4.2") {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(
-                ioc, "RejectConformanceFixture::open_and_drive_to_active/open");
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "RejectConformanceFixture::open_and_drive_to_active/open");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "RejectConformanceFixture::open_and_drive_to_active/open";
             return;
@@ -242,9 +241,8 @@ struct RejectConformanceFixture {
         auto logon = make_logon_frame(begin_string, 1, "TW", "ISLD", 30);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(
-                ioc, "RejectConformanceFixture::open_and_drive_to_active/logon-ack");
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "RejectConformanceFixture::open_and_drive_to_active/logon-ack");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "RejectConformanceFixture::open_and_drive_to_active/logon-ack";
             return;
@@ -256,8 +254,8 @@ struct RejectConformanceFixture {
     void feed(fixpp::session::Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "RejectConformanceFixture::feed");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "RejectConformanceFixture::feed");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "RejectConformanceFixture::feed";
             return;
         }

@@ -177,9 +177,8 @@ protected:
     void drive_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc,
-                                                 "CancellationTwoPhaseTest::drive_to_active/open");
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "CancellationTwoPhaseTest::drive_to_active/open");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "CancellationTwoPhaseTest::drive_to_active/open";
             return;
@@ -190,9 +189,8 @@ protected:
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc,
-                                                 "CancellationTwoPhaseTest::drive_to_active/logon");
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "CancellationTwoPhaseTest::drive_to_active/logon");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "CancellationTwoPhaseTest::drive_to_active/logon";
             return;
@@ -220,8 +218,8 @@ TEST_F(CancellationTwoPhaseTest, CloseTerminalSkipsPhase1) {
 
     auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms)) {
-        clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(ioc, "CloseTerminalSkipsPhase1/close");
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "CloseTerminalSkipsPhase1/close");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "CloseTerminalSkipsPhase1/close";
         return;
     }
@@ -274,8 +272,7 @@ TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
     const bool both_ready = fixpp::test_support::run_window_then_ready(ioc, fut1, 200ms) &&
                             fut2.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
     if (!both_ready) {
-        clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(ioc, "CloseIdempotent/both-closes");
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "CloseIdempotent/both-closes");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "CloseIdempotent/both-closes";
         return;
     }
@@ -343,8 +340,8 @@ TEST_F(CancellationTwoPhaseTest, ChildCancellationStateIsolatesLogout) {
     // fires root_cancel_.emit(total) to cancel the liveness loop.
     clock->advance(std::chrono::seconds{3});
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-        clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(ioc, "ChildCancellationStateIsolatesLogout/close");
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "ChildCancellationStateIsolatesLogout/close");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "ChildCancellationStateIsolatesLogout/close";
         return;
@@ -389,8 +386,8 @@ TEST_F(CancellationTwoPhaseTest, GracefulCloseFromAlreadyClosed) {
     ioc.restart();
     clock->advance(std::chrono::seconds{3});  // fire the 2s sleep
     if (!fixpp::test_support::run_window_then_ready(ioc, fut1, 200ms)) {
-        clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(ioc, "GracefulCloseFromAlreadyClosed/first-close");
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "GracefulCloseFromAlreadyClosed/first-close");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "GracefulCloseFromAlreadyClosed/first-close";
         return;
@@ -400,8 +397,8 @@ TEST_F(CancellationTwoPhaseTest, GracefulCloseFromAlreadyClosed) {
     // Second close on already-closed session.
     auto fut2 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
-        clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(ioc, "GracefulCloseFromAlreadyClosed/second-close");
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "GracefulCloseFromAlreadyClosed/second-close");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "GracefulCloseFromAlreadyClosed/second-close";
         return;

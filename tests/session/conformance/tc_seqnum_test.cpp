@@ -242,8 +242,7 @@ protected:
     fixpp::core::expected_t<void> open_sync(fixpp::session::Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "TcSeqnumTest::open_sync");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "TcSeqnumTest::open_sync");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "TcSeqnumTest::open_sync";
             return std::unexpected(kWindowMissSentinel);
         }
@@ -254,8 +253,7 @@ protected:
                                             std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "TcSeqnumTest::feed_sync");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "TcSeqnumTest::feed_sync");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "TcSeqnumTest::feed_sync";
             return std::unexpected(kWindowMissSentinel);
         }

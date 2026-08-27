@@ -182,8 +182,8 @@ protected:
     void drive_to_active(Session& sess, TransportDouble& td) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "TC004Liveness::drive_to_active/open");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "TC004Liveness::drive_to_active/open");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "TC004Liveness::drive_to_active/open";
             return;
@@ -197,8 +197,8 @@ protected:
                                     "108=30\001");
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "TC004Liveness::drive_to_active/logon-ack");
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "TC004Liveness::drive_to_active/logon-ack");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "TC004Liveness::drive_to_active/logon-ack";
             return;
@@ -231,8 +231,7 @@ protected:
         ioc.restart();
         clock->advance(std::chrono::seconds{3});
         if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms)) {
-            clock->cancel_sleeps();
-            fixpp::test_support::drain_or_report(ioc, "TC004Liveness::do_close");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "TC004Liveness::do_close");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "TC004Liveness::do_close";
             return;
         }
@@ -267,8 +266,8 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest) {
     auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD", "112=HELLO\x01");
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(tr_frame), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-        clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(ioc, "Fix42_4b_ReceivedTestRequest/test-request");
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "Fix42_4b_ReceivedTestRequest/test-request");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "Fix42_4b_ReceivedTestRequest/test-request";
         return;
@@ -322,9 +321,8 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest_EchoIsExact) {
     auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD", "112=LIVENESS_PROBE_42\x01");
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(tr_frame), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-        clock->cancel_sleeps();
-        fixpp::test_support::drain_or_report(
-            ioc, "Fix42_4b_ReceivedTestRequest_EchoIsExact/test-request");
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "Fix42_4b_ReceivedTestRequest_EchoIsExact/test-request");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "Fix42_4b_ReceivedTestRequest_EchoIsExact/test-request";
         return;
