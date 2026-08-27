@@ -145,9 +145,10 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 // `sleep_until`, holding a work guard that `drain_or_report` cannot release
 // (only a Clock can). `cancel_sleeps()` releases the waiters that exist WHEN IT
 // RUNS and nothing more, so a miss whose drain itself performs the Active
-// transition registers a NEW waiter afterwards and the drain then reports an
-// honest residual. This is a documented limitation of the primitive
-// (`pump_until_ready.hpp`), carried over from PR #313 unchanged.
+// transition registers a NEW waiter afterwards. That WAS a documented limitation of
+// the primitive, carried unchanged from PR #313; it is now FIXED. These sites call
+// `cancel_and_drain_or_report` (`pump_until_ready.hpp`), which alternates the cancel
+// with the drain and releases exactly that waiter.
 
 class TC004Liveness : public ::testing::Test {
 protected:

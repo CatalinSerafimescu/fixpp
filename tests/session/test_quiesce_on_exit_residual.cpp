@@ -190,7 +190,7 @@ TEST(DrainOrReportWitness, ReportsWhenIocNeverDrains) {
         asio::make_work_guard(ioc);  // keeps ioc.stopped()==false for the whole budget
 
     EXPECT_NONFATAL_FAILURE(fixpp::test_support::drain_or_report(ioc, "probe", 1ms),
-                            "did not run out of work within the teardown drain");
+                            "teardown drain, so a coroutine frame");
 }
 
 // Negative control: an otherwise-empty io_context drains and stops within the
@@ -337,7 +337,7 @@ TEST(DrainOrReportWitness, ZeroBudgetProbeDispatchesAtMostOneHandler) {
         asio::post(ioc, [&ran] { ++ran; });
         EXPECT_NONFATAL_FAILURE(
             ([&] { fixpp::test_support::drain_or_report(ioc, "probe", 0ms); }()),
-            "did not run out of work within the teardown drain");
+            "teardown drain, so a coroutine frame");
     }
     EXPECT_EQ(ran, 1) << "the probe dispatched more than one handler; poll_one() may have "
                          "become poll(), which drains an unbounded queue during teardown";
@@ -410,19 +410,10 @@ void post_throwing_handler(asio::io_context& ioc) {
 // `~quiesce_on_exit` is the only one of the three that is a destructor itself, and
 // it was the only one that died. These two guards restore the real caller shape:
 // `~Fixture` at test_next_expected_msgseqnum.cpp:374 is exactly this.
-struct DrainFromDestructor {
-    asio::io_context& ioc;
-    std::chrono::steady_clock::duration budget;
-    ~DrainFromDestructor() { fixpp::test_support::drain_or_report(ioc, "probe", budget); }
-};
-
-struct CancelAndDrainFromDestructor {
-    asio::io_context& ioc;
-    fixpp::core::Clock& clock;
-    std::chrono::steady_clock::duration budget;
-    ~CancelAndDrainFromDestructor() {
-        fixpp::test_support::cancel_and_drain_or_report(ioc, clock, "probe", budget);
-    }
+template <class F>
+struct CallOnDestruct {
+    F f;
+    ~CallOnDestruct() { f(); }
 };
 
 }  // namespace
@@ -440,7 +431,11 @@ TEST(DrainOrReportWitness, ReportsWhenAHandlerThrows) {
     asio::io_context ioc;
     post_throwing_handler(ioc);
 
-    EXPECT_NONFATAL_FAILURE(([&] { DrainFromDestructor drain{ioc, 50ms}; }()), "witness-boom");
+    EXPECT_NONFATAL_FAILURE(
+        ([&] {
+            CallOnDestruct d{[&] { fixpp::test_support::drain_or_report(ioc, "probe", 50ms); }};
+        }()),
+        "witness-boom");
 }
 
 TEST(CancelAndDrainOrReportWitness, ReportsWhenAHandlerThrows) {
@@ -448,7 +443,12 @@ TEST(CancelAndDrainOrReportWitness, ReportsWhenAHandlerThrows) {
     auto clock = make_mock_clock(ioc);
     post_throwing_handler(ioc);
 
-    EXPECT_NONFATAL_FAILURE(([&] { CancelAndDrainFromDestructor drain{ioc, *clock, 50ms}; }()),
+    EXPECT_NONFATAL_FAILURE(([&] {
+                                CallOnDestruct d{[&] {
+                                    fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                                                    "probe", 50ms);
+                                }};
+                            }()),
                             "witness-boom");
 }
 
@@ -464,7 +464,11 @@ TEST(DrainOrReportWitness, ThrowingHandlerReportsOnceNotTwice) {
     auto keep_alive = asio::make_work_guard(ioc);
     post_throwing_handler(ioc);
 
-    EXPECT_NONFATAL_FAILURE(([&] { DrainFromDestructor drain{ioc, 50ms}; }()), "witness-boom");
+    EXPECT_NONFATAL_FAILURE(
+        ([&] {
+            CallOnDestruct d{[&] { fixpp::test_support::drain_or_report(ioc, "probe", 50ms); }};
+        }()),
+        "witness-boom");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -516,7 +520,7 @@ TEST(CancelAndDrainOrReportWitness, OneShotCancelThenDrainCannotReleaseTheSleep)
 
     clock->cancel_sleeps();  // one-shot: nothing is registered yet
     EXPECT_NONFATAL_FAILURE(fixpp::test_support::drain_or_report(ioc, "probe", 100ms),
-                            "did not run out of work within the teardown drain");
+                            "teardown drain, so a coroutine frame");
 
     // Leave nothing suspended for the fixture teardown to trip over.
     clock->cancel_sleeps();
@@ -540,6 +544,29 @@ TEST(CancelAndDrainOrReportWitness, ReleasesASleepArmedDuringItsOwnDrain) {
     EXPECT_TRUE(ioc.stopped()) << "the drain reported success but left work outstanding";
 }
 
+// The THIRD copy of the #305 zero-budget artefact, and the twin the other two
+// helpers already carry (QuiesceOnExitResidualWitness / DrainOrReportWitness
+// .ZeroBudgetOnEmptyContextIsNotResidual, above).
+//
+// This is the cell whose ABSENCE let the defect in. Written the obvious way — test
+// the deadline at the top of the loop and `break` — this helper exits before
+// `poll_one()` has ever run, so the `restart()` leaves `stopped()` false on a
+// context holding NO work and it reports a residual that does not exist. Both
+// sibling helpers were fixed for exactly that in #305; the third copy reintroduced
+// it, and nothing caught it because the third copy had no zero-budget witness.
+// Emptiness is asserted rather than assumed: without that, a context quietly
+// holding work would make this pass for the wrong reason.
+TEST(CancelAndDrainOrReportWitness, ZeroBudgetOnEmptyContextIsNotResidual) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+
+    ASSERT_EQ(ioc.poll(), 0u) << "context is not empty at entry, so this test would no "
+                                 "longer isolate the deadline artefact";
+    ioc.restart();
+
+    fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "probe", 0ms);
+}
+
 // Negative control: an otherwise-empty io_context must drain and stay silent.
 // Without this, a primitive that never reports anything would pass the arm above.
 TEST(CancelAndDrainOrReportWitness, SilentWhenIocDrainsNormally) {
@@ -550,7 +577,20 @@ TEST(CancelAndDrainOrReportWitness, SilentWhenIocDrainsNormally) {
 }
 
 // The residual branch must still FIRE for work no clock lever can release — the
-// primitive gained a second lever, not immunity. An explicit work guard is
+// primitive gained a second lever, not immunity — AND it must fire AT MOST ONCE
+// across the whole budget rather than once per slice.
+//
+// Both axes live in this one cell deliberately. An earlier draft had a separate
+// `ReportsAtMostOnceAcrossManySlices` passing `1ms` explicitly, which is
+// `kPumpSlice`'s own value (pump_until_ready.hpp) — so it was a byte-for-byte
+// duplicate of this test that could never go red independently. The cardinality
+// assertion is already here for free: `EXPECT_NONFATAL_FAILURE` fails when it
+// intercepts MORE than one failure, and at a 50ms budget with the 1ms default
+// slice a per-slice mutant emits ~47, so the margin is wide rather than a
+// boundary. Measured under exactly that mutant: "Expected: 1 non-fatal failure.
+// Actual: 47 failures."
+//
+// An explicit work guard is
 // unreleasable by construction, which is the point: cancelling sleeps forever
 // cannot clear it, so this pins that the helper reports rather than spins to the
 // budget silently.
@@ -561,20 +601,5 @@ TEST(CancelAndDrainOrReportWitness, ReportsWhenIocNeverDrains) {
 
     EXPECT_NONFATAL_FAILURE(
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "probe", 50ms),
-        "even with clock sleeps released on every slice");
-}
-
-// Reports AT MOST ONCE across the whole budget, not once per slice.
-// EXPECT_NONFATAL_FAILURE fails if it intercepts more than one failure, so a
-// per-slice report makes this red. At a 50ms budget and the 1ms default slice
-// that is ~50 reports under the mutant, so the cell has wide margin rather than
-// depending on a boundary.
-TEST(CancelAndDrainOrReportWitness, ReportsAtMostOnceAcrossManySlices) {
-    asio::io_context ioc;
-    auto clock = make_mock_clock(ioc);
-    auto keep_alive = asio::make_work_guard(ioc);
-
-    EXPECT_NONFATAL_FAILURE(
-        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "probe", 50ms, 1ms),
         "even with clock sleeps released on every slice");
 }

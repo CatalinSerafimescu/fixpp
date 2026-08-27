@@ -126,6 +126,19 @@ inline constexpr const char* kWindowMiss =
     "#289: the operation was not ready when its preserved run window returned, and did "
     "not become ready within one boundary grace slice. Site: ";
 
+// Shared stem for a teardown drain's residual report. The two drains below
+// diverge IMMEDIATELY after it, and the divergence is load-bearing for their
+// witnesses, not decorative: `EXPECT_NONFATAL_FAILURE` matches a SUBSTRING, so a
+// stem that both messages carried in full would make every matcher bound to it
+// pass whichever helper reported. `drain_or_report` continues ", so a coroutine";
+// `cancel_and_drain_or_report` continues " even with clock sleeps released on
+// every slice, so a coroutine". A witness must match past the stem to
+// discriminate. (The header already publishes kWindowMiss / kPumpBudgetMiss /
+// kDrainThrew for exactly this reason; this stem was inlined prose in two places
+// and had already drifted on punctuation at birth.)
+inline constexpr const char* kDrainResidual =
+    "#289: the io_context did not run out of work within the teardown drain";
+
 // Budget for a teardown drain. Deliberately the same value as
 // `quiesce_on_exit`'s default below, so the two report on the same terms.
 inline constexpr auto kQuiesceBudget = std::chrono::seconds{5};
@@ -373,10 +386,10 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
         return;
     }
     if (!ioc.stopped()) {
-        ADD_FAILURE() << "#289: the io_context did not run out of work within the teardown "
-                         "drain, so a coroutine frame is probably still suspended and will be "
+        ADD_FAILURE() << kDrainResidual
+                      << ", so a coroutine frame is probably still suspended and will be "
                          "destroyed while referencing objects that are about to die. This "
-                         "observes the residual, not its cause (stopped() is disjunctive — see "
+                         "observes the residual, not its cause (stopped() is disjunctive -- see "
                          "quiesce_on_exit's comment on the disjunction, below). Site: "
                       << site;
     }
@@ -443,7 +456,6 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
                                        const char* site,
                                        std::chrono::steady_clock::duration budget = kQuiesceBudget,
                                        std::chrono::steady_clock::duration slice = kPumpSlice) {
-    bool quiesced = false;
     // (#308) Guarded for the same reason the two drains above are: this is called
     // from miss branches and destructor bodies, and a throwing handler would
     // terminate rather than fail the test.
@@ -456,7 +468,18 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
                     clock.cancel_sleeps();
                     ioc.restart();
                     const auto now = std::chrono::steady_clock::now();
-                    if (now >= deadline) break;
+                    // ⚠️ THE DEADLINE TEST IS AT THE BOTTOM, AND THAT IS THE #305 FIX,
+                    // NOT A STYLE CHOICE. Testing it here and `break`ing would exit
+                    // before `poll_one()` had ever run, so at a zero or already-expired
+                    // budget the `restart()` above would leave `stopped()` false on a
+                    // context holding NO work -- reporting a residual that does not
+                    // exist. That is exactly the artefact #305 removed from the two
+                    // drains above, and writing this loop the obvious way reintroduced
+                    // it in the THIRD copy. `std::min` yields a negative duration once
+                    // the deadline has passed and `run_for` then returns without
+                    // dispatching, so the pass costs nothing but still reaches the probe.
+                    // Pinned by ZeroBudgetOnEmptyContextIsNotResidual, the twin of the
+                    // witnesses the other two helpers already carry.
                     ioc.run_for(std::min(slice, deadline - now));
                     // The same probe the two drains above carry, and for the same
                     // reason: `run_for` can return WITHOUT ever consulting the work
@@ -464,18 +487,19 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
                     // on outstanding work. At a sliced drain that is not an edge case
                     // -- every slice that expires with work pending reaches it.
                     (void)ioc.poll_one();
-                    if (ioc.stopped()) {
-                        quiesced = true;
-                        break;
-                    }
+                    if (ioc.stopped() || now >= deadline) break;
                 }
             },
             site)) {
         return;
     }
-    if (!quiesced) {
-        ADD_FAILURE() << "#289: the io_context did not run out of work within the teardown "
-                         "drain, even with clock sleeps released on every slice, so a coroutine "
+    // `quiesced` used to be tracked in a bool threaded out of the lambda. It is
+    // derivable: every exit path runs `restart()` then the probe, so `stopped()`
+    // after the loop IS the verdict -- and saying it this way makes the shape
+    // identical to the two sibling drains, which both end in `if (!ioc.stopped())`.
+    if (!ioc.stopped()) {
+        ADD_FAILURE() << kDrainResidual
+                      << " even with clock sleeps released on every slice, so a coroutine "
                          "frame is probably still suspended and will be destroyed while "
                          "referencing objects that are about to die. This observes the residual, "
                          "not its cause (stopped() is disjunctive -- see quiesce_on_exit's "
