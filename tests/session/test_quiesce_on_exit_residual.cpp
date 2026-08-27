@@ -472,6 +472,100 @@ TEST(DrainOrReportWitness, ThrowingHandlerReportsOnceNotTwice) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// (gate-b/r1 F1) The report ITSELF is not a no-throw operation
+//
+// ADD_FAILURE() cannot be made non-throwing: under --gtest_throw_on_failure,
+// gtest's AddTestPartResult records the failure and THEN throws
+// GoogleTestFailureException -- downstream of the record, so
+// EXPECT_NONFATAL_FAILURE's ScopedFakeTestPartResultReporter does not absorb it.
+// Pre-fix that escaped every one of the three teardown drains' implicitly-noexcept
+// frames and reached std::terminate; each drain now wraps its whole body in one
+// outer `catch (...)`, matching this header's own argument that a single catch is
+// correct HERE (see `pump_or_report_throw`'s comment: "this helper has no release
+// branch to lose"). The no-throw contract is unconditional BY DESIGN -- including
+// when a free drain is called directly from a test body, where propagation would
+// otherwise be legal -- because the exception policy for every drain in this
+// header is decided ONCE, not per call site.
+//
+// Pinned IN-PROCESS with a scoped throw_on_failure flag, not a subprocess: the
+// residual path's own ADD_FAILURE() is enough to drive the throw, and driving it
+// is exactly what exercises the swallow. Modelled on
+// test_test_request_id_cross_session_race.cpp's
+// CrossSessionTeardown.OuterCatchSwallowsAThrowingAddFailure (:1925-2020).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// RAII-scoped `GTEST_FLAG_SET(throw_on_failure, true)`. Copied verbatim from
+// test_test_request_id_cross_session_race.cpp:1919-1924 -- restoring the previous
+// value is mandatory, or every later EXPECT_* in this binary would throw instead
+// of merely failing.
+struct throw_on_failure_scope {
+    bool previous = GTEST_FLAG_GET(throw_on_failure);
+    throw_on_failure_scope() { GTEST_FLAG_SET(throw_on_failure, true); }
+    ~throw_on_failure_scope() { GTEST_FLAG_SET(throw_on_failure, previous); }
+};
+
+}  // namespace
+
+// `throw_scope` is declared FIRST in each witness below, so it is destroyed
+// LAST -- the flag must still be true when the drain's own ADD_FAILURE() runs,
+// or the swallow this witness exists to pin is never exercised. If the fix
+// regresses (the outer catch removed from pump_until_ready.hpp), this test does
+// not merely go RED: the process TERMINATES, taking the rest of the binary with
+// it -- exactly like the #308 throw witnesses above, which is why this is proven
+// by running under the flag rather than by a checked-in mutant.
+TEST(QuiesceOnExitResidualWitness, OuterCatchSwallowsAThrowingAddFailure) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+
+    EXPECT_NONFATAL_FAILURE(([&] {
+                                throw_on_failure_scope throw_scope;
+                                auto keep_alive = asio::make_work_guard(ioc);
+                                quiesce_on_exit quiesce{ioc, *clock, 1ms};
+                                // ~quiesce runs here, throw_on_failure still true: its residual
+                                // ADD_FAILURE() records the failure then throws
+                                // GoogleTestFailureException, caught by the outer catch(...) this
+                                // round added to ~quiesce_on_exit's body.
+                            }()),
+                            "quiesce_on_exit: the io_context did not run out of work");
+
+    SUCCEED() << "control reached past ~quiesce_on_exit without std::terminate, "
+                 "so the outer catch(...) swallowed the throwing ADD_FAILURE";
+}
+
+TEST(DrainOrReportWitness, OuterCatchSwallowsAThrowingAddFailure) {
+    asio::io_context ioc;
+    auto keep_alive = asio::make_work_guard(ioc);
+
+    EXPECT_NONFATAL_FAILURE(([&] {
+                                throw_on_failure_scope throw_scope;
+                                fixpp::test_support::drain_or_report(ioc, "probe", 1ms);
+                            }()),
+                            "teardown drain, so a coroutine frame");
+
+    SUCCEED() << "control reached past drain_or_report without std::terminate, so "
+                 "the outer catch(...) swallowed the throwing ADD_FAILURE";
+}
+
+TEST(CancelAndDrainOrReportWitness, OuterCatchSwallowsAThrowingAddFailure) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+    auto keep_alive = asio::make_work_guard(ioc);
+
+    EXPECT_NONFATAL_FAILURE(([&] {
+                                throw_on_failure_scope throw_scope;
+                                fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                                                "probe", 50ms);
+                            }()),
+                            "even with clock sleeps released on every slice");
+
+    SUCCEED() << "control reached past cancel_and_drain_or_report without "
+                 "std::terminate, so the outer catch(...) swallowed the throwing "
+                 "ADD_FAILURE";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // (#289 tail) cancel_and_drain_or_report — the sleep armed during the drain itself
 //
 // The defect is one of ORDER, not of power. A single `cancel_sleeps()` DOES
