@@ -7,9 +7,12 @@
 // Hoisted (issue #320) from TWELVE independent file-local copies. That census is
 // the reason this exists: the copies had DIVERGED, and not cosmetically —
 // 11 of the 12 lacked field-boundary anchoring and 9 of the 12 returned the rest
-// of the buffer for an unterminated value. PR #314 fixed both defects in exactly
-// one copy and PR #319 added the mutation-tested corpus for it, so the only copy
-// that was instrumented was the only one that was already correct.
+// of the buffer for an unterminated value. Exactly one copy was clean on BOTH
+// axes, and not because one PR made it so: PR #314 supplied its boundary
+// anchoring, while its unterminated arm already returned `{}` before #314
+// (verbatim in a7680342's removed hunk). PR #319 added the mutation-tested
+// corpus for that copy, so the only copy that was instrumented was the only one
+// that was already correct.
 //
 // ── The semantics, and why THIS pair ────────────────────────────────────────
 //
