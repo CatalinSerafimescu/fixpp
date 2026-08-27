@@ -79,6 +79,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/extract_tag.hpp"
 #include "support/pump_until_ready.hpp"
 
 // (#303) The teardown guard below deliberately LEAKS the SessionFixtures on the
@@ -230,7 +231,6 @@
 
 #if defined(FIXPP_XSESSION_HAVE_LSAN)
 #include <sanitizer/lsan_interface.h>
-#include "support/extract_tag.hpp"
 #define FIXPP_XSESSION_LSAN_IGNORE(p) __lsan_ignore_object(p)
 #else
 #define FIXPP_XSESSION_LSAN_IGNORE(p) ((void)(p))
