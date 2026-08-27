@@ -67,6 +67,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/extract_tag.hpp"
 
 using namespace std::chrono_literals;
 
@@ -78,19 +79,7 @@ static std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-// extract_tag: parse a tag value from a raw FIX frame.
-// Returns "" if the tag is not present. Mirrors 029 harness.
-static std::string extract_tag(const std::vector<std::byte>& frame, int tag) {
-    const auto* data = reinterpret_cast<const char*>(frame.data());
-    std::string sv(data, frame.size());
-    const std::string needle = std::to_string(tag) + "=";
-    auto pos = sv.find(needle);
-    if (pos == std::string::npos) return "";
-    pos += needle.size();
-    auto end = sv.find('\x01', pos);
-    if (end == std::string::npos) return sv.substr(pos);
-    return sv.substr(pos, end - pos);
-}
+using fixpp::test_support::extract_tag;
 
 static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
                                              std::string_view msg_type, std::uint32_t seq,

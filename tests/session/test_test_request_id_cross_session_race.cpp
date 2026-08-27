@@ -230,6 +230,7 @@
 
 #if defined(FIXPP_XSESSION_HAVE_LSAN)
 #include <sanitizer/lsan_interface.h>
+#include "support/extract_tag.hpp"
 #define FIXPP_XSESSION_LSAN_IGNORE(p) __lsan_ignore_object(p)
 #else
 #define FIXPP_XSESSION_LSAN_IGNORE(p) ((void)(p))
@@ -241,31 +242,7 @@ namespace fixpp::session::test {
 
 namespace {
 
-// ── Wire-field extractor (local copy avoids TARGET_OBJECTS dependency) ─────────
-//
-// Extract the value of a FIX tag from a SOH-delimited frame.
-// Returns "" if the tag is not present.
-//
-// #309 Gate B F3a: `wire.find(needle)` alone matches inside a numeric suffix
-// (e.g. "9112=" contains "112="), laundering the wrong tag into the corpus. A
-// hit is only accepted at a field boundary: frame-start or immediately after
-// an SOH. On a rejected hit, resume searching past it rather than returning {}.
-static std::string extract_tag(std::span<const std::byte> frame, std::uint32_t tag) {
-    std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    std::string needle = std::to_string(tag) + "=";
-    for (auto pos = wire.find(needle); pos != std::string::npos; pos = wire.find(needle, pos + 1)) {
-        if (pos != 0 && wire[pos - 1] != '\x01') {
-            continue;  // e.g. "9112=" is not tag 112
-        }
-        const auto vstart = pos + needle.size();
-        const auto end = wire.find('\x01', vstart);
-        if (end == std::string::npos) {
-            return {};
-        }
-        return wire.substr(vstart, end - vstart);
-    }
-    return {};
-}
+using fixpp::test_support::extract_tag;
 
 // ── Build a minimal Logon frame for feeding into a session ────────────────────
 static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
@@ -1193,6 +1170,16 @@ TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
                               unterminated_frame.size()},
                           35),
               "1");
+
+    // #320: the EMPTY-frame arm, which the hoisted helper added and none of the
+    // twelve file-local copies had. `std::string(ptr, 0)` is UB when `ptr` is null,
+    // and `std::span{}.data()` is null — so this is a guard against UB, not a
+    // convenience. Instrumented because an unexercised branch in a helper twelve
+    // call sites now share is exactly the shape this issue was filed about.
+    // Mutating the `frame.empty()` guard away makes this line UB rather than a
+    // clean failure, so it is proven by removing the guard under ASan, not by a
+    // value comparison alone.
+    EXPECT_EQ(extract_tag(std::span<const std::byte>{}, 112), "");
 
     // F3a frame start: the boundary rule also ACCEPTS a hit at byte 0 (`pos != 0`
     // in the guard). Tag 8 is mandatorily the first field of a FIX frame, so this
