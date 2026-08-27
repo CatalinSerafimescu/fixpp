@@ -498,11 +498,14 @@ inline void cancel_and_drain_or_report(
                         // witnesses the other two helpers already carry.
                         ioc.run_for(std::min(std::chrono::steady_clock::duration{kPumpSlice},
                                              deadline - now));
-                        // The same probe the two drains above carry, and for the same
+                        // The same probe the drains above carry, and for the same
                         // reason: `run_for` can return WITHOUT ever consulting the work
                         // count, so `stopped()` alone reports on the DEADLINE rather than
                         // on outstanding work. At a sliced drain that is not an edge case
-                        // -- every slice that expires with work pending reaches it.
+                        // -- every slice that expires with work pending reaches it. The
+                        // zero-budget resumption capability binds identically here -- it
+                        // is witnessed, not merely described, for this drain too (see the
+                        // zero-budget cases in tests/session/test_quiesce_on_exit_residual.cpp).
                         (void)ioc.poll_one();
                         if (ioc.stopped() || now >= deadline) break;
                     }
@@ -667,7 +670,8 @@ struct quiesce_on_exit {
             // where a caller chose a zero budget because it wanted nothing run. The
             // obligation that follows is the usual one and it now binds a path it did not
             // bind before: storage a suspended frame borrowed must outlive this guard.
-            // Witnessed directly rather than described — see the zero-budget cases in
+            // Witnessed directly rather than described — every drain in this header
+            // that carries this probe has a zero-budget resumption case in
             // tests/session/test_quiesce_on_exit_residual.cpp.
             //
             // (#308) The whole teardown is guarded. This destructor has no exception
