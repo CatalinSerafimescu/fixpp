@@ -317,7 +317,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
 // which is the seed instant of the tests' mock_clock (1704067200 = 2024-01-01T00:00Z).
 // That is correct only while the clock has not moved. `Session` checks inbound
 // SendingTime against a threshold that defaults to 120 s
-// (`src/session/session.cpp:2267`, `cfg_.sending_time_threshold`), so a test that
+// (`cfg_.sending_time_threshold`), so a test that
 // advances its own clock past that and keeps stamping the seed instant has its
 // frames REJECTED as stale — correctly, by a guard doing its job.
 //
@@ -325,6 +325,18 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
 // reads keeps the guard ARMED (the threshold is left at its default) while making
 // the peer behave like a peer. It is what lifts the ~80-iteration ceiling measured
 // on `ConcurrentSessionsTSanStress`; see that test's header for the numbers.
+//
+// WHICH guard, established by ISOLATION rather than by reading. There are three
+// `check_sending_time` call sites and ALL THREE carry the same 120 s default, so
+// picking one by inspection is exactly how a citation lands on a plausible twin.
+// Raising ONLY the acceptor-Logon site's default to 24 h left the ceiling exactly
+// where it was (still iteration 81); raising ONLY the ESTABLISHED-SESSION site's
+// let 100 iterations through. So it is the established-session guard — "Guard (3):
+// SendingTime MaxLatency", the Reject(10)/Logout/Disconnect path — that these
+// Heartbeats meet, because both sessions are Active before any Heartbeat is fed.
+// Named by its guard label rather than by line number, because line numbers move.
+// (Gate: Codex review of this branch, P3. The first version of this comment cited
+// the acceptor-Logon site; the isolation above falsifies that.)
 // ⚠️ FIFTH copy of this format-a-SendingTime shape in tests/: the same body is
 // hand-rolled at engine_acceptor_test.cpp:75, engine_acceptor_failclosed_test.cpp:77,
 // engine_connect_test.cpp:89 and engine_readpump_test.cpp:89. Those four format
@@ -456,12 +468,23 @@ struct CaptureTransport {
     // the rescan AND the 1 ms slice that put a floor of `kIterations` milliseconds
     // under the test no matter how fast the pool was.
     //
-    // The count only ever grows, so waiting for A then B is equivalent to waiting
-    // for both and costs max(A, B), not their sum.
+    // Takes an ABSOLUTE deadline, not a relative budget, and that is load-bearing
+    // rather than stylistic.
+    //
+    // The count only ever grows, so waiting for A and then for B reaches the same
+    // state as one predicate over both. But `cv.wait_for(lock, budget, pred)`
+    // computes a FRESH deadline per call, so two sequential relative waits admit a
+    // schedule the single predicate they replace would have failed: A ready at
+    // 9.5 s, B at 19 s, both waits return, ~19 s against a 10 s contract. Passing
+    // one deadline computed before the first wait restores the bound.
+    //
+    // (Gate: Codex review of this branch, P2. The earlier form claimed the two
+    // shapes were equivalent; they are equivalent in READINESS and not in the
+    // BOUNDED-WAIT contract, which is the half this test relies on.)
     [[nodiscard]] bool await_test_req_ids(std::size_t want,
-                                          std::chrono::steady_clock::duration budget) {
+                                          std::chrono::steady_clock::time_point deadline) {
         std::unique_lock<std::mutex> lock{mtx};
-        return cv.wait_for(lock, budget, [&] { return test_req_ids.size() >= want; });
+        return cv.wait_until(lock, deadline, [&] { return test_req_ids.size() >= want; });
     }
 };
 
@@ -1703,7 +1726,8 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // TSan window; this phase only removes the oracle's dependence on a lucky
     // schedule.
     clock_a->advance(std::chrono::milliseconds{1500});
-    ASSERT_TRUE(sA.transport.await_test_req_ids(1, kWaitBudget))
+    ASSERT_TRUE(
+        sA.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
         << kWaitBudgetMiss << "waiting for session A's first TestRequest";
     ASSERT_EQ(sA.transport.collect_test_req_ids().size(), 1u)
         << "session A emitted more than one TestRequest before its first Heartbeat";
@@ -1717,7 +1741,8 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     }
 
     clock_b->advance(std::chrono::milliseconds{1500});
-    ASSERT_TRUE(sB.transport.await_test_req_ids(1, kWaitBudget))
+    ASSERT_TRUE(
+        sB.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
         << kWaitBudgetMiss << "waiting for session B's first TestRequest";
     ASSERT_EQ(sB.transport.collect_test_req_ids().size(), 1u)
         << "session B emitted more than one TestRequest before its first Heartbeat";
@@ -1744,11 +1769,12 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
 
         const auto want = static_cast<std::size_t>(i + 1);
         // #317: two sequential blocking waits, not one polling predicate over both.
-        // The counts only grow, so this is equivalent to waiting for both and costs
-        // max(A, B) rather than A + B.
-        ASSERT_TRUE(sA.transport.await_test_req_ids(want, kWaitBudget))
+        // ONE deadline spans both, so the pair carries the same 10 s bound the single
+        // predicate did — see `await_test_req_ids`.
+        const auto deadline = std::chrono::steady_clock::now() + kWaitBudget;
+        ASSERT_TRUE(sA.transport.await_test_req_ids(want, deadline))
             << kWaitBudgetMiss << "waiting for session A's TestRequest at iteration " << i;
-        ASSERT_TRUE(sB.transport.await_test_req_ids(want, kWaitBudget))
+        ASSERT_TRUE(sB.transport.await_test_req_ids(want, deadline))
             << kWaitBudgetMiss << "waiting for session B's TestRequest at iteration " << i;
 
         // #309 Gate B F2: `>= want` alone tolerates a batched emission cadence
