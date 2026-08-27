@@ -53,6 +53,7 @@
 #include "_fixtures_/store_temp_dir.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/extract_tag.hpp"
 
 using namespace std::chrono_literals;
 
@@ -129,17 +130,7 @@ std::vector<std::byte> make_app_payload(std::string_view clordid) {
     return v;
 }
 
-std::string extract_tag(const std::vector<std::byte>& frame, int tag) {
-    const auto* data = reinterpret_cast<const char*>(frame.data());
-    std::string sv(data, frame.size());
-    const std::string needle = std::to_string(tag) + "=";
-    auto pos = sv.find(needle);
-    if (pos == std::string::npos) return "";
-    pos += needle.size();
-    auto end = sv.find('\x01', pos);
-    if (end == std::string::npos) return sv.substr(pos);
-    return sv.substr(pos, end - pos);
-}
+using fixpp::test_support::extract_tag;
 
 bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());

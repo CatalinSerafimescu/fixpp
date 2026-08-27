@@ -55,6 +55,7 @@ using namespace std::chrono_literals;
 // mallocnesia weak-symbol hooks — replaced by LD_PRELOAD; no-ops otherwise.
 // Must be at file scope for the LD_PRELOAD override to bind.
 #include "support/alloc_guard_markers.hpp"
+#include "support/extract_tag.hpp"
 
 namespace {
 
@@ -93,19 +94,7 @@ public:
 
 // ── Frame-scanning helper ────────────────────────────────────────────────────
 
-// extract_tag: find the value of tag N in a raw FIX frame.
-// Returns "" if absent. (Mirrors test_next_expected_msgseqnum.cpp:205.)
-static std::string extract_tag(const std::vector<std::byte>& frame, int tag) {
-    const auto* data = reinterpret_cast<const char*>(frame.data());
-    std::string sv(data, frame.size());
-    const std::string needle = std::to_string(tag) + "=";
-    auto pos = sv.find(needle);
-    if (pos == std::string::npos) return "";
-    pos += needle.size();
-    auto end = sv.find('\x01', pos);
-    if (end == std::string::npos) return sv.substr(pos);
-    return sv.substr(pos, end - pos);
-}
+using fixpp::test_support::extract_tag;
 
 // count_frames_with_msgtype: returns the number of captured frames whose 35= equals mt.
 static int count_frames_with_msgtype(const std::vector<std::vector<std::byte>>& frames,

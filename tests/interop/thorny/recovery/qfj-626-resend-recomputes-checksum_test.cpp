@@ -53,6 +53,7 @@
 #include <fixpp/session/session_fsm.hpp>
 
 #include "parity/parity_support.hpp"
+#include "support/extract_tag.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::direction_t;
@@ -171,17 +172,7 @@ private:
     seqnum_t seq_;
 };
 
-// Helper: extract the value of a FIX tag from a frame (e.g., extract_tag(frame, 9) → "72").
-static std::string extract_tag(std::span<const std::byte> frame, int tag) {
-    std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    std::string needle = std::to_string(tag) + "=";
-    auto pos = wire.find(needle);
-    if (pos == std::string::npos) return {};
-    pos += needle.size();
-    auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) return {};
-    return wire.substr(pos, end - pos);
-}
+using fixpp::test_support::extract_tag;
 
 // Compute the correct BodyLength for a FIX message body (fields after 9= up to
 // and including the SOH before 10=). Per FIX spec: body = bytes from first

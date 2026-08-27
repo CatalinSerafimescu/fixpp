@@ -51,6 +51,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/extract_tag.hpp"
 
 using namespace std::chrono_literals;
 
@@ -58,22 +59,7 @@ namespace fixpp::session::test {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Extract the value of a FIX tag from a raw wire frame (SOH-delimited).
-// Returns empty string if not found.
-static std::string extract_tag(std::span<const std::byte> frame, int tag) {
-    std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    std::string needle = std::to_string(tag) + "=";
-    auto pos = wire.find(needle);
-    if (pos == std::string::npos) {
-        return {};
-    }
-    pos += needle.size();
-    auto end = wire.find('\x01', pos);
-    if (end == std::string::npos) {
-        return {};
-    }
-    return wire.substr(pos, end - pos);
-}
+using fixpp::test_support::extract_tag;
 
 // ── Fixture ───────────────────────────────────────────────────────────────────
 

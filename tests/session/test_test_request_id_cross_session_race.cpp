@@ -22,12 +22,12 @@
 //     mutex-protected vector.
 //   - After enough clock ticks, close both sessions and analyse captures.
 //
-// SC-003 quantifies 10^4 TestRequests per session. Both tests below use a far
-// smaller corpus to stay fast, on the basis that the stress is the concurrency,
-// not the count. Each pins its own corpus size with an equality at its own
-// `kIterations` — read that, not this header: a figure repeated here is a second
-// thing to keep true, and the one that used to sit in this paragraph described
-// neither test (#309).
+// SC-003 quantifies 10^4 TestRequests per session. `ConcurrentSessionsTSanStress`
+// now pins exactly that (#317); `CrossSessionDisjoint` deliberately keeps a far
+// smaller corpus, on the basis that ITS stress is the concurrency, not the count.
+// Each pins its own corpus size with an equality at its own `kIterations` — read
+// that, not this header: a figure repeated here is a second thing to keep true,
+// and the one that used to sit in this paragraph described neither test (#309).
 //
 // RED phase (before T020): the existing `static tr_counter` in
 // run_liveness_loop is shared across all sessions → assertion (a) will fail
@@ -53,12 +53,14 @@
 #include <asio/use_future.hpp>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <deque>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -77,6 +79,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/extract_tag.hpp"
 #include "support/pump_until_ready.hpp"
 
 // (#303) The teardown guard below deliberately LEAKS the SessionFixtures on the
@@ -239,31 +242,7 @@ namespace fixpp::session::test {
 
 namespace {
 
-// ── Wire-field extractor (local copy avoids TARGET_OBJECTS dependency) ─────────
-//
-// Extract the value of a FIX tag from a SOH-delimited frame.
-// Returns "" if the tag is not present.
-//
-// #309 Gate B F3a: `wire.find(needle)` alone matches inside a numeric suffix
-// (e.g. "9112=" contains "112="), laundering the wrong tag into the corpus. A
-// hit is only accepted at a field boundary: frame-start or immediately after
-// an SOH. On a rejected hit, resume searching past it rather than returning {}.
-static std::string extract_tag(std::span<const std::byte> frame, std::uint32_t tag) {
-    std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    std::string needle = std::to_string(tag) + "=";
-    for (auto pos = wire.find(needle); pos != std::string::npos; pos = wire.find(needle, pos + 1)) {
-        if (pos != 0 && wire[pos - 1] != '\x01') {
-            continue;  // e.g. "9112=" is not tag 112
-        }
-        const auto vstart = pos + needle.size();
-        const auto end = wire.find('\x01', vstart);
-        if (end == std::string::npos) {
-            return {};
-        }
-        return wire.substr(vstart, end - vstart);
-    }
-    return {};
-}
+using fixpp::test_support::extract_tag;
 
 // ── Build a minimal Logon frame for feeding into a session ────────────────────
 static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
@@ -309,14 +288,60 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
 // File-local rather than a lambda inside `CrossSessionDisjoint`, because both
 // emission-driving tests now need it and a second copy is a second thing to keep
 // in step with the seqnum bookkeeping its callers do.
+// ── SendingTime(52) for a peer-authored frame ─────────────────────────────────
+//
+// #317: this used to be the literal "20240101-00:00:00.000" in both builders,
+// which is the seed instant of the tests' mock_clock (1704067200 = 2024-01-01T00:00Z).
+// That is correct only while the clock has not moved. `Session` checks inbound
+// SendingTime against a threshold that defaults to 120 s
+// (`cfg_.sending_time_threshold`), so a test that
+// advances its own clock past that and keeps stamping the seed instant has its
+// frames REJECTED as stale — correctly, by a guard doing its job.
+//
+// A real peer stamps the time it sent at. Stamping from the same clock the session
+// reads keeps the guard ARMED (the threshold is left at its default) while making
+// the peer behave like a peer. It is what lifts the ~80-iteration ceiling measured
+// on `ConcurrentSessionsTSanStress`; see that test's header for the numbers.
+//
+// WHICH guard, established by ISOLATION rather than by reading. There are three
+// `check_sending_time` call sites and ALL THREE carry the same 120 s default, so
+// picking one by inspection is exactly how a citation lands on a plausible twin.
+// Raising ONLY the acceptor-Logon site's default to 24 h left the ceiling exactly
+// where it was (still iteration 81); raising ONLY the ESTABLISHED-SESSION site's
+// let 100 iterations through. So it is the established-session guard — "Guard (3):
+// SendingTime MaxLatency", the Reject(10)/Logout/Disconnect path — that these
+// Heartbeats meet, because both sessions are Active before any Heartbeat is fed.
+// Named by its guard label rather than by line number, because line numbers move.
+// (Gate: Codex review of this branch, P3. The first version of this comment cited
+// the acceptor-Logon site; the isolation above falsifies that.)
+// ⚠️ FIFTH copy of this format-a-SendingTime shape in tests/: the same body is
+// hand-rolled at engine_acceptor_test.cpp:75, engine_acceptor_failclosed_test.cpp:77,
+// engine_connect_test.cpp:89 and engine_readpump_test.cpp:89. Those four format
+// `system_clock::now()`; this one takes the time point, because a mock-clock test
+// must stamp the clock the SESSION reads, not the wall clock. Not hoisted here —
+// that is #315's class of work and would inflate this review target — but recorded
+// so the census does not have to be rediscovered.
+static std::string fix_sending_time(fixpp::core::utc_time_point tp) {
+    char buf[32];
+    auto r = fixpp::core::utc_time_to_fix_string(tp, fixpp::core::fix_time_precision::millis, buf);
+    // A formatting failure here would silently produce an empty 52= and surface as
+    // an unrelated rejection several layers away, so it is reported at its source.
+    if (!r) {
+        ADD_FAILURE() << "#317: utc_time_to_fix_string failed while stamping SendingTime";
+        return {};
+    }
+    return std::string(r->data(), r->size());
+}
+
 static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq,
                                              std::string_view sender, std::string_view target,
-                                             std::string_view tr_id) {
+                                             std::string_view tr_id,
+                                             std::string_view sending_time) {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
-    body += "52=20240101-00:00:00.000\x01";
+    body += "52=" + std::string(sending_time) + "\x01";
     body += "56=" + std::string(target) + "\x01";
     if (!tr_id.empty()) {
         body += "112=" + std::string(tr_id) + "\x01";
@@ -349,27 +374,105 @@ static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t 
 // annotations on the session's own counters.
 struct CaptureTransport {
     std::mutex mtx;
+    std::condition_variable cv;
     std::vector<std::vector<std::byte>> frames;
+    // #317: the TestReqID corpus, classified ONCE on the writer side. Was rebuilt
+    // from `frames` on every read; see `await_test_req_ids` for why that mattered.
+    std::vector<std::string> test_req_ids;
 
     void capture(std::span<const std::byte> frame) {
         std::lock_guard<std::mutex> lock{mtx};
         frames.emplace_back(frame.begin(), frame.end());
-    }
-
-    // Collect all 112= (TestReqID) values from frames where 35=1 (TestRequest).
-    std::vector<std::string> collect_test_req_ids() {
-        std::lock_guard<std::mutex> lock{mtx};
-        std::vector<std::string> ids;
-        for (const auto& f : frames) {
-            auto sp = std::span<const std::byte>{f.data(), f.size()};
-            if (extract_tag(sp, 35) == "1") {
-                auto id = extract_tag(sp, 112);
-                if (!id.empty()) {
-                    ids.push_back(std::move(id));
-                }
+        // Classify here, under the lock this function already takes, rather than in
+        // every reader. Same predicate as the old `collect_test_req_ids` body, so
+        // the corpus this test asserts on is byte-for-byte what it was.
+        auto sp = std::span<const std::byte>{frames.back().data(), frames.back().size()};
+        if (extract_tag(sp, 35) == "1") {
+            auto id = extract_tag(sp, 112);
+            if (!id.empty()) {
+                test_req_ids.push_back(std::move(id));
+                cv.notify_all();
             }
         }
-        return ids;
+    }
+
+    // Snapshot of the 112= (TestReqID) values from frames where 35=1 (TestRequest).
+    // O(corpus) COPY, no rescan. Kept as the analysis surface; the hot path is
+    // `await_test_req_ids` / `test_req_id_count` below.
+    std::vector<std::string> collect_test_req_ids() {
+        std::lock_guard<std::mutex> lock{mtx};
+        return test_req_ids;
+    }
+
+    std::size_t test_req_id_count() {
+        std::lock_guard<std::mutex> lock{mtx};
+        return test_req_ids.size();
+    }
+
+    // Newest TestReqID. Copies ONE string; `collect_test_req_ids().back()` copied
+    // the whole corpus to reach it, which is a second O(iterations^2) term and was
+    // measurable on its own: with only the rescan fixed, 10^4 iterations still took
+    // 40.7 s and the curve was still superlinear (2x N -> 3.3x time). Replacing
+    // these two loop-body calls took it to 11.5 s and 2x N -> ~2.1x time.
+    std::string latest_test_req_id() {
+        std::lock_guard<std::mutex> lock{mtx};
+        // The callers reach here only after an `await_test_req_ids` returned true,
+        // so the corpus is non-empty by construction — the same property the
+        // `collect_test_req_ids().back()` this replaces relied on. Reported rather
+        // than returned silently: an empty string here becomes a Heartbeat with no
+        // 112 field, which the session accepts, so the miss would surface several
+        // iterations later as an unrelated wait-budget failure naming the wrong
+        // thing. A bare `return {}` would be that silent path.
+        if (test_req_ids.empty()) {
+            ADD_FAILURE() << "#317: latest_test_req_id() on an empty corpus — a wait "
+                             "was skipped or returned false unchecked";
+            return {};
+        }
+        return test_req_ids.back();
+    }
+
+    // Block until at least `want` TestReqIDs have been emitted, or `budget`
+    // elapses. Returns false on budget exhaustion.
+    //
+    // #317: this replaces a 1 ms sleep-poll whose predicate rebuilt the whole
+    // corpus — `extract_tag` copies each frame into a std::string, so the wait cost
+    // was O(corpus) per tick and the test's total work was O(iterations^2).
+    // Measured on the unfixed code with the #317 SendingTime ceiling already
+    // lifted: doubling `kIterations` cost ~3.9x wall-clock (300 -> 3.0 s,
+    // 600 -> 11.0 s, 1200 -> 41.9 s, 2400 -> 163.5 s).
+    //
+    // Waiting on the writer's notification rather than polling removes BOTH terms:
+    // the rescan AND the 1 ms slice that put a floor of `kIterations` milliseconds
+    // under the test no matter how fast the pool was.
+    //
+    // Takes an ABSOLUTE deadline, not a relative budget, and that is load-bearing
+    // rather than stylistic.
+    //
+    // The count only ever grows, so waiting for A and then for B reaches the same
+    // state as one predicate over both. But `cv.wait_for(lock, budget, pred)`
+    // computes a FRESH deadline per call, so two sequential relative waits admit a
+    // schedule the single predicate they replace would have failed: A ready at
+    // 9.5 s, B at 19 s, both waits return, ~19 s against a 10 s contract. Passing
+    // one deadline computed before the first wait restores the bound.
+    //
+    // (Gate: Codex review of this branch, P2. The earlier form claimed the two
+    // shapes were equivalent; they are equivalent in READINESS and not in the
+    // BOUNDED-WAIT contract, which is the half this test relies on.)
+    //
+    // ⚠️ AND THE EVIDENCE FOR THIS IS CONSTRUCTION, NOT MEASUREMENT. The commit that
+    // made this change cited the zero-advance and reply-never-sent mutants still
+    // failing at 10010 ms. That is CONSISTENT with a shared deadline but does not
+    // discriminate: in both mutants session A never emits, so the FIRST wait spends
+    // the whole deadline and the second never runs — the old per-call budget would
+    // have produced the same 10010 ms. The schedule that would tell them apart (A
+    // ready at 9.5 s, B at 19 s) is not one those mutants produce, and no mutant
+    // here produces it. The bound holds because one `time_point` is computed before
+    // the first wait and both `wait_until` calls take it, which is checkable by
+    // reading — not because it was seen to fail at 10 s rather than 20 s.
+    [[nodiscard]] bool await_test_req_ids(std::size_t want,
+                                          std::chrono::steady_clock::time_point deadline) {
+        std::unique_lock<std::mutex> lock{mtx};
+        return cv.wait_until(lock, deadline, [&] { return test_req_ids.size() >= want; });
     }
 };
 
@@ -449,7 +552,7 @@ using fixpp::test_support::kPumpBudgetMiss;
 using fixpp::test_support::pump_until;
 using fixpp::test_support::pump_until_ready;
 
-// ── Bounded wait for a SELF-DRIVING executor (#309) ───────────────────────────
+// ── Bounded wait for a SELF-DRIVING executor (#309/#317) ─────────────────────
 //
 // `pump_until` above does not apply to `ConcurrentSessionsTSanStress`: it runs on
 // an `asio::thread_pool`, whose own threads service the work, so there is nothing
@@ -458,31 +561,27 @@ using fixpp::test_support::pump_until_ready;
 // `sleep_for`, for the reason #284 records: a fixed window that under-serves does
 // not hang, it silently shortens the corpus every assertion downstream runs over.
 //
-// So this is the thread_pool twin of `pump_until` — same contract (wait for the
-// predicate, bounded by a real-time budget, report which happened), different
-// mechanism (poll-and-yield, because the pool drives itself). Deliberately NOT
-// named `pump_*`: nothing here pumps anything, and the two must not be confused
-// at a call site where only one of them can be correct.
+// #317 REPLACED the generic `wait_until_observed(pred, budget, slice)` that used to
+// live here — a 1 ms sleep-poll over a caller-supplied predicate — with
+// `CaptureTransport::await_test_req_ids`, which blocks on the writer's own
+// condition_variable. The poll had two costs, and only the first is the one #317
+// was filed about:
+//   1. its predicate rebuilt the whole TestReqID corpus per tick (O(corpus) per
+//      tick => O(iterations^2) overall);
+//   2. the 1 ms slice put a floor of ~1 ms x iterations under the test regardless
+//      of how fast the pool actually was.
+// Notifying from the writer removes both. Nothing else in this file waited on that
+// helper, so it is deleted rather than left as a second way to do this.
 //
-// CONTRACT: `ready` is called from the waiting thread while pool threads run, so
-// it must synchronise every shared access it makes. Stated as a condition rather
-// than as a survey of today's call sites — a survey is true until the next caller.
-// The corpus predicate below satisfies it through `CaptureTransport`'s mutex.
-template <class Ready>
-[[nodiscard]] static bool wait_until_observed(
-    Ready ready, std::chrono::steady_clock::duration budget = std::chrono::seconds{10},
-    std::chrono::milliseconds slice = std::chrono::milliseconds{1}) {
-    const auto deadline = std::chrono::steady_clock::now() + budget;
-    while (!ready()) {
-        if (std::chrono::steady_clock::now() >= deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(slice);
-    }
-    return true;
-}
+// ⚠️ This deletion removes ONE of the three file-local copies #315 catalogues
+// (`wait_pred_nodrive` in test_engine_session_strand.cpp and
+// `wait_for_pred_nodrive` in test_business_messages_roundtrip.cpp remain). It does
+// NOT close #315, and it is not a template for it: the cv works here only because
+// this file's waiter and its writer are the same object. A hoisted general helper
+// still needs the poll-and-yield shape for predicates with no writer to hook.
+inline constexpr auto kWaitBudget = std::chrono::seconds{10};
 
-// Failure text for a `wait_until_observed` that ran out of budget. Distinct from
+// Failure text for a wait that ran out of budget. Distinct from
 // `kPumpBudgetMiss` because the mechanism is distinct: a miss here means the pool
 // never produced the event, not that this thread failed to drive a context.
 inline constexpr const char* kWaitBudgetMiss =
@@ -1030,6 +1129,60 @@ TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
                   112),
               "TR1");
 
+    // #318: the UNTERMINATED-VALUE arm. An accepted, boundary-anchored tag whose
+    // value has no closing SOH must extract to "" rather than to the rest of the
+    // buffer. Inherited from before #314 (verbatim in a7680342's removed hunk,
+    // under a bare `wire.find(needle)` with no boundary check), and named as the
+    // excluded mutant by #314's Gate B stopping bound.
+    //
+    // A SEPARATELY NAMED frame, not an extension of `frame` / `resume_frame` /
+    // `start_frame`: each of those is the only instrument killing its own mutant,
+    // so extending one in place would trade a surviving mutant for another.
+    //
+    // WHAT THIS KILLS, enumerated rather than declared exhaustive:
+    //   - deleting the `end == npos` guard  → `substr(vstart, npos - vstart)`
+    //     yields the rest of the buffer, "TR1" != "". KILLED by the 112 line.
+    //   - `return {}` → `return wire.substr(vstart)`. Same, KILLED.
+    //   - `return {}` → `continue` / `break`. These are EQUIVALENT mutants, not a
+    //     gap, and no assertion can kill them. Proof: `end == npos` means there is
+    //     no SOH at or after `vstart`. A later hit at `pos' > pos` is accepted only
+    //     if `wire[pos' - 1] == '\x01'`. If `pos' - 1 >= vstart` that contradicts
+    //     the npos. Otherwise `pos' - 1` lies inside the needle span
+    //     [pos, vstart), whose bytes are the needle's own ("112=") and none is SOH.
+    //     So no later hit is ever accepted; `continue` falls through to the
+    //     function's trailing `return {}` and yields "" too. Recorded as an
+    //     argument because a test claiming to kill it would be a false instrument.
+    //
+    // The tag-35 line is the NON-VACUITY control: it proves this frame is
+    // parseable and that the "" above comes from the unterminated arm, not from a
+    // malformed corpus that would return "" for every tag.
+    const std::string unterminated_frame =
+        "8=FIX.4.2\x01"
+        "35=1\x01"
+        "112=TR1";  // deliberately NO trailing SOH
+    EXPECT_EQ(extract_tag(std::span<const std::byte>{
+                              reinterpret_cast<const std::byte*>(unterminated_frame.data()),
+                              unterminated_frame.size()},
+                          112),
+              "");
+    EXPECT_EQ(extract_tag(std::span<const std::byte>{
+                              reinterpret_cast<const std::byte*>(unterminated_frame.data()),
+                              unterminated_frame.size()},
+                          35),
+              "1");
+
+    // #320: the EMPTY-span CONTRACT for the hoisted helper — an empty frame yields
+    // "". Worth pinning because twelve call sites now share this function.
+    //
+    // ⚠️ THIS IS A CONTRACT ASSERTION, NOT A MUTATION-KILLING INSTRUMENT, and the
+    // distinction is measured rather than asserted: deleting the helper's
+    // `frame.empty()` guard leaves this line PASSING (verified by deleting it and
+    // re-running). `std::string(nullptr, 0)` builds an empty string silently on
+    // this toolchain even under -fsanitize=address,undefined, so there is no fault
+    // for this assertion to observe. An earlier version of this comment claimed it
+    // proved the guard; it does not. Do not cite it as evidence for the guard.
+    EXPECT_EQ(extract_tag(std::span<const std::byte>{}, 112), "");
+
     // F3a frame start: the boundary rule also ACCEPTS a hit at byte 0 (`pos != 0`
     // in the guard). Tag 8 is mandatorily the first field of a FIX frame, so this
     // is the branch that keeps the helper a general FIX-tag extractor.
@@ -1206,7 +1359,8 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
         std::string latest_a = tr_ids_a.back();
         auto& hb_a = frames.emplace_back(
-            make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a));
+            make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a,
+                           fix_sending_time(clock->now())));
         auto fut_a = asio::co_spawn(
             ioc,
             sA->session->on_inbound_frame(std::span<const std::byte>{hb_a.data(), hb_a.size()}),
@@ -1217,7 +1371,8 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
         std::string latest_b = tr_ids_b.back();
         auto& hb_b = frames.emplace_back(
-            make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b));
+            make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b,
+                           fix_sending_time(clock->now())));
         auto fut_b = asio::co_spawn(
             ioc,
             sB->session->on_inbound_frame(std::span<const std::byte>{hb_b.data(), hb_b.size()}),
@@ -1501,9 +1656,11 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     ASSERT_EQ(sB.session->state(), fixpp::session::fsm_state::Active);
 
     // HeartBtInt=1s. Each iteration advances both clocks past the liveness window
-    // so both sessions emit this iteration's TestRequest, waits for BOTH emissions
-    // in one predicate (see the doc block above for why the wait is not
-    // per-session), then echoes each session's newest TestReqID back as a
+    // so both sessions emit this iteration's TestRequest, waits for both emissions
+    // through two per-session `await_test_req_ids` calls sharing ONE absolute
+    // deadline (see `await_test_req_ids` for why the SHARED deadline, not the
+    // single predicate, is what carries the bound), then echoes each session's
+    // newest TestReqID back as a
     // Heartbeat. The reply is what clears the pending TestRequest; without it the
     // grace window expires on the next advance and the session disconnects.
     //
@@ -1516,17 +1673,38 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // prologue below contributes 1 and the concurrent loop contributes kIterations - 1;
     // stated because the loop starts at 1, and a reader who "fixes" that to 0 breaks
     // the equality rather than the loop.
-    const int kIterations = 10;
+    //
+    // #317: this was 10 (a 9-iteration window) against SC-003's quantified 10^4 per
+    // session. The shortfall was waived at Gate B on PR #314 with a named structural
+    // prerequisite, and TWO independent ceilings had to come down before the sample
+    // could be raised at all — see the SendingTime commit and `await_test_req_ids`.
+    //
+    // MEASURED, not projected, on linux-clang-tsan (ctest TIMEOUT is 120 s):
+    //     N=1200  0.86 s   N=2400  1.57 s   N=5000  3.52 s   N=10000  6.70 s
+    // i.e. linear, with ~18x headroom to the timeout at the shipped value. The same
+    // sweep before this work: N=1200 43.6 s, N=2400 163.5 s (already over timeout),
+    // and 10^4 extrapolates to ~47 min.
+    //
+    // Raise it further only WITH a fresh sweep. The per-iteration clock advance is
+    // NOT freely raisable as a shortcut: at 3000 ms one jump clears both the
+    // liveness and grace windows and the session disconnects at iteration 2.
+    const int kIterations = 10000;
 
     // Feed one Heartbeat carrying `tr_id` into `sx`, on THAT SESSION's strand, and
     // return the pending disposition so the caller can spawn both before awaiting
     // either. Returns rather than asserts because an ASSERT_* inside a lambda
     // returns from the LAMBDA, not from the test — the failure would be recorded
     // and then walked straight past.
+    // #317: `clk` is THIS session's clock, not either one that happens to be in
+    // scope. The two clocks advance together here, but a peer stamps the time its
+    // OWN counterparty reads, and pinning that at the parameter keeps it true if
+    // they ever diverge.
     auto feed_heartbeat = [&](SessionFixture& sx, const asio::any_io_executor& ex,
-                              std::uint32_t& hb_seq, std::string_view sender,
-                              std::string_view target, std::string_view tr_id) {
-        auto& hb = frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq++, sender, target, tr_id));
+                              fixpp::core::mock_clock& clk, std::uint32_t& hb_seq,
+                              std::string_view sender, std::string_view target,
+                              std::string_view tr_id) {
+        auto& hb = frames.emplace_back(
+            make_heartbeat("FIX.4.2", hb_seq++, sender, target, tr_id, fix_sending_time(clk.now())));
         return asio::co_spawn(
             ex, sx.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
             asio::use_future);
@@ -1550,7 +1728,12 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // TSan window; this phase only removes the oracle's dependence on a lucky
     // schedule.
     clock_a->advance(std::chrono::milliseconds{1500});
-    ASSERT_TRUE(wait_until_observed([&] { return !sA.transport.collect_test_req_ids().empty(); }))
+    // Its own deadline, deliberately NOT shared with session B's wait below. These
+    // two are sequential but UNRELATED — B's clock is not advanced until after A's
+    // emission is observed — so there is no single event for one deadline to bound.
+    // The loop's paired wait is the opposite case and does share one; see it.
+    ASSERT_TRUE(
+        sA.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
         << kWaitBudgetMiss << "waiting for session A's first TestRequest";
     ASSERT_EQ(sA.transport.collect_test_req_ids().size(), 1u)
         << "session A emitted more than one TestRequest before its first Heartbeat";
@@ -1559,18 +1742,19 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
            "serialized discriminator below is only meaningful while B has not counted";
     {
         const std::string latest_a = sA.transport.collect_test_req_ids().back();
-        auto f = feed_heartbeat(sA, ex_a, hb_seq_a, "TARGET_A", "SENDER_A", latest_a);
+        auto f = feed_heartbeat(sA, ex_a, *clock_a, hb_seq_a, "TARGET_A", "SENDER_A", latest_a);
         ASSERT_TRUE(f.get().has_value()) << "session A rejected its first Heartbeat";
     }
 
     clock_b->advance(std::chrono::milliseconds{1500});
-    ASSERT_TRUE(wait_until_observed([&] { return !sB.transport.collect_test_req_ids().empty(); }))
+    ASSERT_TRUE(
+        sB.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
         << kWaitBudgetMiss << "waiting for session B's first TestRequest";
     ASSERT_EQ(sB.transport.collect_test_req_ids().size(), 1u)
         << "session B emitted more than one TestRequest before its first Heartbeat";
     {
         const std::string latest_b = sB.transport.collect_test_req_ids().back();
-        auto f = feed_heartbeat(sB, ex_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
+        auto f = feed_heartbeat(sB, ex_b, *clock_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
         ASSERT_TRUE(f.get().has_value()) << "session B rejected its first Heartbeat";
     }
 
@@ -1590,11 +1774,14 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         clock_b->advance(std::chrono::milliseconds{1500});
 
         const auto want = static_cast<std::size_t>(i + 1);
-        ASSERT_TRUE(wait_until_observed([&] {
-            return sA.transport.collect_test_req_ids().size() >= want &&
-                   sB.transport.collect_test_req_ids().size() >= want;
-        })) << kWaitBudgetMiss
-            << "waiting for both TestRequests at iteration " << i;
+        // #317: two sequential blocking waits, not one polling predicate over both.
+        // ONE deadline spans both, so the pair carries the same 10 s bound the single
+        // predicate did — see `await_test_req_ids`.
+        const auto deadline = std::chrono::steady_clock::now() + kWaitBudget;
+        ASSERT_TRUE(sA.transport.await_test_req_ids(want, deadline))
+            << kWaitBudgetMiss << "waiting for session A's TestRequest at iteration " << i;
+        ASSERT_TRUE(sB.transport.await_test_req_ids(want, deadline))
+            << kWaitBudgetMiss << "waiting for session B's TestRequest at iteration " << i;
 
         // #309 Gate B F2: `>= want` alone tolerates a batched emission cadence
         // (e.g. +2 this iteration, +0 the next) while the cumulative equality
@@ -1602,21 +1789,21 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         // an equality here: after the wait returns, each emitter is parked on its
         // grace sleep (session.cpp:4924-4926) and the only clock advancer is this
         // blocked test thread, so the size is stable at exactly `want`.
-        ASSERT_EQ(sA.transport.collect_test_req_ids().size(), want)
+        ASSERT_EQ(sA.transport.test_req_id_count(), want)
             << "session A emitted more than one TestRequest at iteration " << i;
-        ASSERT_EQ(sB.transport.collect_test_req_ids().size(), want)
+        ASSERT_EQ(sB.transport.test_req_id_count(), want)
             << "session B emitted more than one TestRequest at iteration " << i;
 
         // `.back()` is unconditional by construction: the wait above returned
         // true, so each session has at least `want` >= 2 IDs. A `!empty()` guard
         // here would be the #309 defect back in its original spelling.
-        const std::string latest_a = sA.transport.collect_test_req_ids().back();
-        const std::string latest_b = sB.transport.collect_test_req_ids().back();
+        const std::string latest_a = sA.transport.latest_test_req_id();
+        const std::string latest_b = sB.transport.latest_test_req_id();
 
         // Both spawned before either is awaited, so the two `on_inbound_frame`
         // coroutines run concurrently on their two distinct strands.
-        auto fa = feed_heartbeat(sA, ex_a, hb_seq_a, "TARGET_A", "SENDER_A", latest_a);
-        auto fb = feed_heartbeat(sB, ex_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
+        auto fa = feed_heartbeat(sA, ex_a, *clock_a, hb_seq_a, "TARGET_A", "SENDER_A", latest_a);
+        auto fb = feed_heartbeat(sB, ex_b, *clock_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
 
         // The disposition is asserted, not discarded. A Heartbeat rejected for a
         // seqnum gap, a checksum, or a dictionary miss used to surface only as the
