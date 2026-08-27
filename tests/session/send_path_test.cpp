@@ -243,14 +243,20 @@ private:
 // awaited coroutine is still SUSPENDED, and `get()` would block on a future nothing
 // will complete.
 //
-// THIRD COPY. The span above -- from the `── #289:` heading through the line ending
-// "once rather than twice." -- is byte-identical in all three files, so `diff`-ing it
-// is the audit that detects real divergence. (Anchored by those two lines rather than
-// by a line COUNT: a count inside a comment about drift is itself a thing that
-// drifts, and the first revision of this addendum stated one that was already wrong.)
-// The audit only works if this copy stays VERBATIM, not paraphrased -- an earlier
-// revision paraphrased it and silently dropped the sentinel's precondition. Keep it
-// verbatim; put anything file-specific under this addenda heading instead.
+// THIRD COPY, of TWO different populations -- the closing anchor picked below tells
+// them apart. The `── #289:` heading through "...releases exactly that waiter." is
+// byte-identical in SIX files: `tc_establishment`, `tc_liveness`, `tc_logout`,
+// `tc_reject`, `tc_seqnum`, and this one. The full span, through "...once rather than
+// twice." (additionally carrying the `kWindowMissSentinel` doc block below), is
+// byte-identical in the THREE that define that constant: `tc_establishment`,
+// `tc_seqnum`, and this one. `diff`-ing against the closing anchor you mean to audit
+// is what detects real divergence in that population; diffing against the other
+// anchor over the wrong file set will just report noise. (Anchored by those lines
+// rather than by a line COUNT: a count inside a comment about drift is itself a thing
+// that drifts, and the first revision of this addendum stated one that was already
+// wrong.) The audit only works if this copy stays VERBATIM, not paraphrased -- an
+// earlier revision paraphrased it and silently dropped the sentinel's precondition.
+// Keep it verbatim; put anything file-specific under this addenda heading instead.
 //
 // ⚠️ ONE CLAUSE OF THE QUOTED TEXT IS ALREADY SPENT, and it is reproduced above only
 // because the audit requires byte-identity -- not because it still holds. "so that
@@ -262,6 +268,23 @@ private:
 // the class-4 gap is open, and a call-site batch is the wrong place to touch a shared
 // header. Correcting the quoted clause means editing all three files at once, which
 // is the hoist-to-the-header change rather than this one -- recorded as follow-up.
+//
+// ⚠️ A SECOND CLAUSE OF THE QUOTED TEXT IS INAPPLICABLE IN THIS FILE, and it too is
+// reproduced above only because the audit requires byte-identity. The quoted text says
+// the first transition to Active co_spawns a detached `run_liveness_loop()` that
+// "parks on `sleep_until`, holding a work guard that `drain_or_report` cannot release
+// (only a Clock can)". `make_cfg()` sets `cfg.heartbeat_interval = 0s` ("disable
+// liveness loop", above), and `Session::run_liveness_loop()` (session.cpp) resolves
+// `heartbt_int` from that config value and `co_return`s as soon as it is zero --
+// BEFORE the `effective_clock_` null guard and before the first `sleep_until` --
+// so no clock waiter is ever registered here. What still holds: the loop is still
+// `co_spawn`ed (session.cpp, both the initiator and acceptor establishment paths),
+// and `co_spawn` POSTS its first resumption, so the detached task still needs
+// servicing before it reaches that `co_return` -- only the *parking* is absent, not
+// the need to drain. `cancel_sleeps()` on zero registered waiters is a no-op, so
+// `cancel_and_drain_or_report` is a harmless superset here, kept for uniformity with
+// every other file in the series and for the day this fixture's heartbeat is
+// parameterised.
 inline constexpr auto kWindowMissSentinel = fixpp::core::error::dispatch_aborted;
 
 class SendPathTest : public ::testing::Test {
@@ -332,6 +355,17 @@ protected:
     // a future DIRECT caller of `feed` would get `ADD_FAILURE` plus an unfed session
     // and would have to check the state itself — or give this the `expected_t<void>`
     // treatment `open_sync` has.
+    //
+    // ⚠️ There is also a residual LIFETIME condition, pre-existing and series-wide, not
+    // introduced here: if this drain ever reports a residual, `feed` still returns (it
+    // is `void`), and `drive_to_active`'s block-local `peer_logon` then dies while the
+    // suspended `on_inbound_frame` frame still holds a `std::span` into it -- a later
+    // pump in the test body can resume that frame over dead storage. This is the same
+    // condition `pump_until_ready.hpp`'s `⚠️ (gate-b/r2) SAFE ABOVE IS CONDITIONAL`
+    // paragraph documents, reached through a different later resumer: that paragraph's
+    // own exculpation ("this fixture has no clock and no transport") does not carry
+    // over -- this fixture HAS a clock, and the later resumer here is the test body's
+    // next pump, not a fixture destructor.
     void feed(Session& s, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
