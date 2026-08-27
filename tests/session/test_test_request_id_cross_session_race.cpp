@@ -325,6 +325,13 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
 // reads keeps the guard ARMED (the threshold is left at its default) while making
 // the peer behave like a peer. It is what lifts the ~80-iteration ceiling measured
 // on `ConcurrentSessionsTSanStress`; see that test's header for the numbers.
+// ⚠️ FIFTH copy of this format-a-SendingTime shape in tests/: the same body is
+// hand-rolled at engine_acceptor_test.cpp:75, engine_acceptor_failclosed_test.cpp:77,
+// engine_connect_test.cpp:89 and engine_readpump_test.cpp:89. Those four format
+// `system_clock::now()`; this one takes the time point, because a mock-clock test
+// must stamp the clock the SESSION reads, not the wall clock. Not hoisted here —
+// that is #315's class of work and would inflate this review target — but recorded
+// so the census does not have to be rediscovered.
 static std::string fix_sending_time(fixpp::core::utc_time_point tp) {
     char buf[32];
     auto r = fixpp::core::utc_time_to_fix_string(tp, fixpp::core::fix_time_precision::millis, buf);
@@ -420,7 +427,19 @@ struct CaptureTransport {
     // these two loop-body calls took it to 11.5 s and 2x N -> ~2.1x time.
     std::string latest_test_req_id() {
         std::lock_guard<std::mutex> lock{mtx};
-        return test_req_ids.empty() ? std::string{} : test_req_ids.back();
+        // The callers reach here only after an `await_test_req_ids` returned true,
+        // so the corpus is non-empty by construction — the same property the
+        // `collect_test_req_ids().back()` this replaces relied on. Reported rather
+        // than returned silently: an empty string here becomes a Heartbeat with no
+        // 112 field, which the session accepts, so the miss would surface several
+        // iterations later as an unrelated wait-budget failure naming the wrong
+        // thing. A bare `return {}` would be that silent path.
+        if (test_req_ids.empty()) {
+            ADD_FAILURE() << "#317: latest_test_req_id() on an empty corpus — a wait "
+                             "was skipped or returned false unchecked";
+            return {};
+        }
+        return test_req_ids.back();
     }
 
     // Block until at least `want` TestReqIDs have been emitted, or `budget`
