@@ -43,6 +43,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/store_double.hpp"
 #include "support/transport_double.hpp"
 
@@ -154,6 +155,61 @@ static std::vector<std::byte> make_unknown_msgtype_frame(std::string_view begin_
 
 // ── Fixture ───────────────────────────────────────────────────────────────────
 
+//
+// ── #289: the `run_for(W); restart(); fut.get()` migration ───────────────────
+//
+// The sites in this file use `run_window_then_ready`
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard
+// #289 names is the UNCONDITIONAL `get()`, not the fixed window. On a
+// manually-driven io_context a `get()` the window did not satisfy blocks with
+// nothing left to pump it -- a deadlock ctest reports as a timeout.
+//
+// Teardown is deliberately NOT a fixture-destructor drain, which is the shape
+// PRs #301 and #307 used for fixtures that OWN their Session. Here every
+// `Session` is a block-local declared AFTER the fixture, so it dies BEFORE a
+// fixture destructor body could run -- and a drain is what RESUMES a suspended
+// frame, so a destructor drain would resume it over the destroyed Session. The
+// drain runs on the MISS branch instead, in the scope that still owns that
+// storage, and it CANCELS THE MOCK CLOCK'S SLEEPS first: the first transition
+// to Active co_spawns a detached `run_liveness_loop()` that parks on
+// `sleep_until`, holding a work guard that `drain_or_report` cannot release
+// (only a Clock can). `cancel_sleeps()` releases the waiters that exist WHEN IT
+// RUNS and nothing more, so a miss whose drain itself performs the Active
+// transition registers a NEW waiter afterwards and the drain then reports an
+// honest residual. This is a documented limitation of the primitive
+// (`pump_until_ready.hpp`), carried over from PR #313 unchanged.
+
+// #289 harness sentinel: what the value-returning pump helpers below return
+// when the preserved run window misses.
+//
+// It is deliberately NOT load-bearing under ordinary GoogleTest execution: the
+// `ADD_FAILURE()` on the same branch records a nonfatal failure that the
+// enclosing test retains, so a window miss cannot read as a pass whatever this
+// value is. `--gtest_throw_on_failure` does not change that -- it throws AFTER
+// reporting.
+//
+// The CONDITION that holds under, stated rather than counted: NO CALLER
+// INTERCEPTS THE FAILURE. `EXPECT_NONFATAL_FAILURE` /
+// `ScopedFakeTestPartResultReporter` (gtest-spi.h) install a fake reporter that
+// absorbs the failure and lets the enclosing test pass. The first caller that
+// does makes this value the ONLY remaining signal -- and `dispatch_aborted` is
+// then ambiguous with a real `open()` / `on_inbound_frame()` outcome
+// ([2d §6.5]; the `dispatch_aborted` returns in `Session::live_write_serialized_`),
+// so an assertion on the error
+// could be satisfied by this synthetic one. The remedy at that point is a
+// distinct harness result (`std::optional<expected_t<void>>`), not a different
+// production code.
+//
+// The sentinel exists for one narrower reason that holds either way: a caller
+// that checks `has_value()` must not proceed on a fabricated success.
+//
+// Named rather than inlined so the other value-returning #289 sites adopt one
+// greppable decision. Folding it into
+// `tests/support/pump_until_ready.hpp` is deliberately deferred to the header PR
+// that also closes the class-4 transport-teardown gap, so that header is touched
+// once rather than twice.
+inline constexpr auto kWindowMissSentinel = fixpp::core::error::dispatch_aborted;
+
 class TcSeqnumTest : public ::testing::Test {
 protected:
     asio::io_context ioc;
@@ -185,16 +241,24 @@ protected:
 
     fixpp::core::expected_t<void> open_sync(fixpp::session::Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(ioc, "TcSeqnumTest::open_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "TcSeqnumTest::open_sync";
+            return std::unexpected(kWindowMissSentinel);
+        }
         return fut.get();
     }
 
     fixpp::core::expected_t<void> feed_sync(fixpp::session::Session& s,
                                             std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(ioc, "TcSeqnumTest::feed_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "TcSeqnumTest::feed_sync";
+            return std::unexpected(kWindowMissSentinel);
+        }
         return fut.get();
     }
 

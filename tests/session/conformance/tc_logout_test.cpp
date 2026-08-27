@@ -54,6 +54,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/store_double.hpp"
 #include "support/transport_double.hpp"
 
@@ -145,6 +146,30 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
 
+//
+// ── #289: the `run_for(W); restart(); fut.get()` migration ───────────────────
+//
+// The sites in this file use `run_window_then_ready`
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard
+// #289 names is the UNCONDITIONAL `get()`, not the fixed window. On a
+// manually-driven io_context a `get()` the window did not satisfy blocks with
+// nothing left to pump it -- a deadlock ctest reports as a timeout.
+//
+// Teardown is deliberately NOT a fixture-destructor drain, which is the shape
+// PRs #301 and #307 used for fixtures that OWN their Session. Here every
+// `Session` is a block-local declared AFTER the fixture, so it dies BEFORE a
+// fixture destructor body could run -- and a drain is what RESUMES a suspended
+// frame, so a destructor drain would resume it over the destroyed Session. The
+// drain runs on the MISS branch instead, in the scope that still owns that
+// storage, and it CANCELS THE MOCK CLOCK'S SLEEPS first: the first transition
+// to Active co_spawns a detached `run_liveness_loop()` that parks on
+// `sleep_until`, holding a work guard that `drain_or_report` cannot release
+// (only a Clock can). `cancel_sleeps()` releases the waiters that exist WHEN IT
+// RUNS and nothing more, so a miss whose drain itself performs the Active
+// transition registers a NEW waiter afterwards and the drain then reports an
+// honest residual. This is a documented limitation of the primitive
+// (`pump_until_ready.hpp`), carried over from PR #313 unchanged.
+
 struct SessionFixture {
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
@@ -181,22 +206,38 @@ struct SessionFixture {
     void open_and_drive_to_active(fixpp::session::Session& sess,
                                   std::string_view begin_string = "FIX.4.2") {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "SessionFixture::open_and_drive_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "SessionFixture::open_and_drive_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_logon_frame(begin_string, 1, "TW", "ISLD", 30);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(
+                ioc, "SessionFixture::open_and_drive_to_active/logon-ack");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "SessionFixture::open_and_drive_to_active/logon-ack";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
 
     void feed(fixpp::session::Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(ioc, "SessionFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SessionFixture::feed";
+            return;
+        }
         auto r = fut.get();
         EXPECT_TRUE(r.has_value()) << "on_inbound_frame returned error";
     }
@@ -305,6 +346,17 @@ TEST(TC009Logout, GracefulLogoutTimeout) {
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogoutSent)
         << "After emitting Logout, FSM should be LogoutSent";
 
+    // #289 NOT MIGRATED, and NOT because the census said so -- the census never saw
+    // this site. `close_fut.get()` below sits SEVEN lines under this window and
+    // `ci/pump-census.sh`'s lookahead is SIX, so this row was never in
+    // `ci/expected-pump-sites.txt` and cannot leave it. It is the #289 shape in full:
+    // a fixed window, no `clock->advance()` between it and the `get()`, and an
+    // unconditional `get()` that blocks with nothing left to pump it if the window
+    // does not complete the close. Pre-existing on `main`, untouched by the
+    // conformance-directory migration, deferred to the next batch of the sequence
+    // with its own RED arm. This file's pin being empty is a statement about the
+    // CENSUS, not about the file.
+
     // Peer never confirms: advance clock past 2 s timeout.
     f.clock->advance(std::chrono::seconds{3});
     f.ioc.run_for(200ms);
@@ -329,6 +381,13 @@ TEST(TC009Logout, GracefulLogoutBothDirections) {
     auto close_fut =
         asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
 
+    // #289 NOT MIGRATED -- same class as the site above, and invisible to the census
+    // for the same reason (`close_fut.get()` is twenty-one lines below). WEAKER than
+    // that one, deliberately stated as such: the intervening `f.feed(...)` IS
+    // migrated, and on its miss branch `drain_or_report` pumps for up to
+    // `kQuiesceBudget` (5 s), which will usually complete `close_fut` before the
+    // `get()` is reached. The hazard is attenuated, not removed -- nothing checks
+    // `close_fut`'s readiness. Deferred with the site above.
     f.ioc.run_for(100ms);
     f.ioc.restart();
 

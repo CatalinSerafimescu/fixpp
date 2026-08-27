@@ -74,6 +74,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/store_double.hpp"
 #include "support/transport_double.hpp"
 
@@ -169,6 +170,30 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
 
+//
+// ── #289: the `run_for(W); restart(); fut.get()` migration ───────────────────
+//
+// The sites in this file use `run_window_then_ready`
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard
+// #289 names is the UNCONDITIONAL `get()`, not the fixed window. On a
+// manually-driven io_context a `get()` the window did not satisfy blocks with
+// nothing left to pump it -- a deadlock ctest reports as a timeout.
+//
+// Teardown is deliberately NOT a fixture-destructor drain, which is the shape
+// PRs #301 and #307 used for fixtures that OWN their Session. Here every
+// `Session` is a block-local declared AFTER the fixture, so it dies BEFORE a
+// fixture destructor body could run -- and a drain is what RESUMES a suspended
+// frame, so a destructor drain would resume it over the destroyed Session. The
+// drain runs on the MISS branch instead, in the scope that still owns that
+// storage, and it CANCELS THE MOCK CLOCK'S SLEEPS first: the first transition
+// to Active co_spawns a detached `run_liveness_loop()` that parks on
+// `sleep_until`, holding a work guard that `drain_or_report` cannot release
+// (only a Clock can). `cancel_sleeps()` releases the waiters that exist WHEN IT
+// RUNS and nothing more, so a miss whose drain itself performs the Active
+// transition registers a NEW waiter afterwards and the drain then reports an
+// honest residual. This is a documented limitation of the primitive
+// (`pump_until_ready.hpp`), carried over from PR #313 unchanged.
+
 struct RejectConformanceFixture {
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
@@ -204,22 +229,38 @@ struct RejectConformanceFixture {
     void open_and_drive_to_active(fixpp::session::Session& sess,
                                   std::string_view begin_string = "FIX.4.2") {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(
+                ioc, "RejectConformanceFixture::open_and_drive_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "RejectConformanceFixture::open_and_drive_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_logon_frame(begin_string, 1, "TW", "ISLD", 30);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(
+                ioc, "RejectConformanceFixture::open_and_drive_to_active/logon-ack");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "RejectConformanceFixture::open_and_drive_to_active/logon-ack";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
 
     void feed(fixpp::session::Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(ioc, "RejectConformanceFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "RejectConformanceFixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 };

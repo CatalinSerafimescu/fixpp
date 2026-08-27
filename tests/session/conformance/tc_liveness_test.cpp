@@ -62,6 +62,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
@@ -124,6 +125,30 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
 
+//
+// ── #289: the `run_for(W); restart(); fut.get()` migration ───────────────────
+//
+// The sites in this file use `run_window_then_ready`
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard
+// #289 names is the UNCONDITIONAL `get()`, not the fixed window. On a
+// manually-driven io_context a `get()` the window did not satisfy blocks with
+// nothing left to pump it -- a deadlock ctest reports as a timeout.
+//
+// Teardown is deliberately NOT a fixture-destructor drain, which is the shape
+// PRs #301 and #307 used for fixtures that OWN their Session. Here every
+// `Session` is a block-local declared AFTER the fixture, so it dies BEFORE a
+// fixture destructor body could run -- and a drain is what RESUMES a suspended
+// frame, so a destructor drain would resume it over the destroyed Session. The
+// drain runs on the MISS branch instead, in the scope that still owns that
+// storage, and it CANCELS THE MOCK CLOCK'S SLEEPS first: the first transition
+// to Active co_spawns a detached `run_liveness_loop()` that parks on
+// `sleep_until`, holding a work guard that `drain_or_report` cannot release
+// (only a Clock can). `cancel_sleeps()` releases the waiters that exist WHEN IT
+// RUNS and nothing more, so a miss whose drain itself performs the Active
+// transition registers a NEW waiter afterwards and the drain then reports an
+// honest residual. This is a documented limitation of the primitive
+// (`pump_until_ready.hpp`), carried over from PR #313 unchanged.
+
 class TC004Liveness : public ::testing::Test {
 protected:
     asio::io_context ioc;
@@ -156,8 +181,13 @@ protected:
     // Drive session to Active state (open + peer Logon-ack).
     void drive_to_active(Session& sess, TransportDouble& td) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(ioc, "TC004Liveness::drive_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "TC004Liveness::drive_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
         ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
@@ -166,8 +196,13 @@ protected:
                                     "98=0\001"
                                     "108=30\001");
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(ioc, "TC004Liveness::drive_to_active/logon-ack");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "TC004Liveness::drive_to_active/logon-ack";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
         ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -179,11 +214,28 @@ protected:
     // Clean-up close: advance clock past timeout and drain.
     void do_close(Session& sess) {
         auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+        // #289 PRESERVED SITE -- deliberately NOT migrated. This `run_for` is a
+        // STAGING window, not a completion window: `close(graceful)` is REQUIRED to
+        // still be pending when it returns, because the Logout timeout it is waiting
+        // on only elapses at the `clock->advance` two lines below. Migrating it would
+        // report a miss on the one outcome this helper requires -- the same lexical
+        // homograph PR #313 found in `cancellation_two_phase_test.cpp` and preserved
+        // for the same reason. The discriminator is the `clock->advance()` BETWEEN
+        // the window and the `get()`.
+        //
+        // NOTE FOR #289 TRACKING: migrating the terminal window below pushes
+        // `close_fut.get()` past `ci/pump-census.sh`'s six-line lookahead, so THIS
+        // line leaves the census pin as a side effect of that edit rather than by
+        // being migrated. This comment is the record the census can no longer be.
         ioc.run_for(50ms);
         ioc.restart();
         clock->advance(std::chrono::seconds{3});
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms)) {
+            clock->cancel_sleeps();
+            fixpp::test_support::drain_or_report(ioc, "TC004Liveness::do_close");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "TC004Liveness::do_close";
+            return;
+        }
         (void)close_fut.get();
     }
 };
@@ -214,8 +266,13 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest) {
     // Oracle step: send inbound TestRequest(35=1, 34=2, 112=HELLO).
     auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD", "112=HELLO\x01");
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(tr_frame), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        clock->cancel_sleeps();
+        fixpp::test_support::drain_or_report(ioc, "Fix42_4b_ReceivedTestRequest/test-request");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Fix42_4b_ReceivedTestRequest/test-request";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value()) << "on_inbound_frame(TestRequest) failed";
 
     // Session must remain Active.
@@ -264,8 +321,14 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest_EchoIsExact) {
     // Send TestRequest with a non-trivial TestReqID.
     auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD", "112=LIVENESS_PROBE_42\x01");
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(tr_frame), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        clock->cancel_sleeps();
+        fixpp::test_support::drain_or_report(
+            ioc, "Fix42_4b_ReceivedTestRequest_EchoIsExact/test-request");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Fix42_4b_ReceivedTestRequest_EchoIsExact/test-request";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value());
     EXPECT_EQ(sess.state(), fsm_state::Active);
 
