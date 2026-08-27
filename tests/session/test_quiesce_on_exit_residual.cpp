@@ -50,6 +50,8 @@
 #include <fixpp/transport/transport.hpp>
 #include <memory>
 #include <span>
+#include <stdexcept>
+#include <system_error>
 
 #include "support/pump_until_ready.hpp"
 
@@ -365,4 +367,214 @@ TEST(DrainOrReportWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
         << "the zero-budget probe did not resume the suspended coroutine. If the probe was "
            "removed, ZeroBudgetOnEmptyContextIsNotResidual should also be red; if it is not, "
            "the probe is present but no longer dispatching.";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// (#308) A throwing handler must FAIL the test, not kill the process
+//
+// Pumping dispatches arbitrary ready handlers and a handler may throw.
+// `~quiesce_on_exit` is implicitly `noexcept`, so pre-fix an escaping exception was
+// `std::terminate`: no gtest failure, no test name, no indication of which guard
+// died. `drain_or_report` and `cancel_and_drain_or_report` are not themselves
+// `noexcept`, but both are called from destructor BODIES, so the exception meets an
+// implicitly-noexcept frame one level up and terminates just the same.
+//
+// ⚠️ HOW THESE WERE PROVEN NON-VACUOUS, and it is not by a mutation these tests can
+// perform on themselves. Reverting the `pump_or_report_throw` guard in
+// `pump_until_ready.hpp` does not turn these RED -- it makes the BINARY DIE, taking
+// every later test with it, which is precisely the undiagnosable outcome #308 is
+// about. So the RED arm is a manual revert-and-run recorded in the gate record, not
+// a checked-in mutant, and each of the three was forced INDIVIDUALLY: a process
+// death on the first one masks the other two entirely, exactly the way an early
+// return masked 8 of 15 forced arms in #316.
+//
+// All three deliberately assert on `kDrainThrew`'s text AND on `what()`. Losing the
+// exception text would trade a terminate for a silent pass, which is worse than
+// either.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// A handler that throws a std::exception carrying identifiable text.
+void post_throwing_handler(asio::io_context& ioc) {
+    asio::post(ioc, [] { throw std::runtime_error("witness-boom"); });
+}
+
+// ⚠️ THE DRAIN MUST BE CALLED FROM A DESTRUCTOR BODY, and an earlier draft of these
+// witnesses got this wrong in a way that read as a pass. `drain_or_report` and
+// `cancel_and_drain_or_report` are not themselves `noexcept`, so calling either
+// DIRECTLY from a test body lets the exception reach GoogleTest, which catches it
+// and reports a normal test failure -- the mutant run then shows "1 FAILED TEST"
+// and looks like proof, while the mechanism #308 is actually about (an
+// implicitly-noexcept frame one level up) was never exercised at all.
+// `~quiesce_on_exit` is the only one of the three that is a destructor itself, and
+// it was the only one that died. These two guards restore the real caller shape:
+// `~Fixture` at test_next_expected_msgseqnum.cpp:374 is exactly this.
+struct DrainFromDestructor {
+    asio::io_context& ioc;
+    std::chrono::steady_clock::duration budget;
+    ~DrainFromDestructor() { fixpp::test_support::drain_or_report(ioc, "probe", budget); }
+};
+
+struct CancelAndDrainFromDestructor {
+    asio::io_context& ioc;
+    fixpp::core::Clock& clock;
+    std::chrono::steady_clock::duration budget;
+    ~CancelAndDrainFromDestructor() {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, clock, "probe", budget);
+    }
+};
+
+}  // namespace
+
+TEST(QuiesceOnExitResidualWitness, ReportsWhenAHandlerThrows) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+    post_throwing_handler(ioc);
+
+    EXPECT_NONFATAL_FAILURE(([&] { quiesce_on_exit quiesce{ioc, *clock, 50ms}; }()),
+                            "witness-boom");
+}
+
+TEST(DrainOrReportWitness, ReportsWhenAHandlerThrows) {
+    asio::io_context ioc;
+    post_throwing_handler(ioc);
+
+    EXPECT_NONFATAL_FAILURE(([&] { DrainFromDestructor drain{ioc, 50ms}; }()), "witness-boom");
+}
+
+TEST(CancelAndDrainOrReportWitness, ReportsWhenAHandlerThrows) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+    post_throwing_handler(ioc);
+
+    EXPECT_NONFATAL_FAILURE(([&] { CancelAndDrainFromDestructor drain{ioc, *clock, 50ms}; }()),
+                            "witness-boom");
+}
+
+// The throwing path must SKIP the residual report rather than emit it as well.
+// EXPECT_NONFATAL_FAILURE fails when it intercepts more than one failure, so this
+// asserts the cardinality directly: pre-fix-of-this-detail the guard would report
+// "a handler threw" AND "work is still outstanding", describing a consequence as if
+// it were an independent finding. The context genuinely IS non-quiescent here (the
+// work guard keeps it so), which is what makes the cell non-vacuous -- without the
+// guard variable the residual branch would stay silent for the wrong reason.
+TEST(DrainOrReportWitness, ThrowingHandlerReportsOnceNotTwice) {
+    asio::io_context ioc;
+    auto keep_alive = asio::make_work_guard(ioc);
+    post_throwing_handler(ioc);
+
+    EXPECT_NONFATAL_FAILURE(([&] { DrainFromDestructor drain{ioc, 50ms}; }()), "witness-boom");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// (#289 tail) cancel_and_drain_or_report — the sleep armed during the drain itself
+//
+// The defect is one of ORDER, not of power. A single `cancel_sleeps()` DOES
+// terminate a sleeping liveness loop: it completes the waiter with
+// operation_aborted, `mock_clock::sleep_until`'s `void(std::error_code)` initiation
+// under `use_awaitable` throws `std::system_error`, and `run_liveness_loop`'s catch
+// sits OUTSIDE its `while (fsm_state_ == Active)` loop, so the throw crosses the
+// loop boundary into a clean `co_return`. What the one-shot pair misses is only a
+// sleep armed AFTER it ran -- and a miss-branch drain that itself completes a state
+// transition arms exactly that.
+//
+// `arm_sleep_when_first_resumed` reproduces that shape with no Session at all:
+// `co_spawn` POSTS the initial resumption, so the sleep is armed by the DRAIN,
+// never before it. The catch mirrors `run_liveness_loop`'s conversion of the
+// cancellation throw into a clean return.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+asio::awaitable<void> arm_sleep_when_first_resumed(fixpp::core::Clock* clock) {
+    try {
+        // Far enough out that mock_clock parks rather than firing immediately
+        // (it completes inline when deadline <= its current steady time).
+        co_await clock->sleep_until(fixpp::core::steady_time_point{} + 1h);
+    } catch (const std::system_error&) {
+        // cancel_sleeps() aborts the wait. Mirrors run_liveness_loop's conversion.
+    }
+    co_return;
+}
+
+}  // namespace
+
+// RED ARM — pins the defect on the shape #313/#316 shipped at ~40 sites. The
+// one-shot cancel runs while there is nothing to cancel; the drain then resumes the
+// coroutine, which arms a sleep nothing will ever release. The context cannot
+// quiesce and the caller is handed a residual report it has no lever to clear.
+//
+// This test PASSES on correct code — the failure it intercepts is the defect being
+// present, and it is deliberately kept so that a future change which "fixes"
+// drain_or_report instead would show up here rather than silently making the new
+// primitive redundant.
+TEST(CancelAndDrainOrReportWitness, OneShotCancelThenDrainCannotReleaseTheSleep) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+    asio::co_spawn(ioc, arm_sleep_when_first_resumed(clock.get()), asio::detached);
+
+    clock->cancel_sleeps();  // one-shot: nothing is registered yet
+    EXPECT_NONFATAL_FAILURE(fixpp::test_support::drain_or_report(ioc, "probe", 100ms),
+                            "did not run out of work within the teardown drain");
+
+    // Leave nothing suspended for the fixture teardown to trip over.
+    clock->cancel_sleeps();
+    ioc.restart();
+    ioc.run_for(50ms);
+}
+
+// GREEN ARM — the same shape, released. Alternating the cancel with the drain means
+// the sleep armed by slice N is cancelled by slice N+1, the coroutine resumes,
+// unwinds, and the context runs out of work. Any nonfatal failure here fails this
+// test outright, which IS the assertion.
+//
+// The two arms differ in exactly one call, so the cell isolates the primitive
+// rather than the scenario.
+TEST(CancelAndDrainOrReportWitness, ReleasesASleepArmedDuringItsOwnDrain) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+    asio::co_spawn(ioc, arm_sleep_when_first_resumed(clock.get()), asio::detached);
+
+    fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "probe", 5s);
+    EXPECT_TRUE(ioc.stopped()) << "the drain reported success but left work outstanding";
+}
+
+// Negative control: an otherwise-empty io_context must drain and stay silent.
+// Without this, a primitive that never reports anything would pass the arm above.
+TEST(CancelAndDrainOrReportWitness, SilentWhenIocDrainsNormally) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+
+    fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "probe", 50ms);
+}
+
+// The residual branch must still FIRE for work no clock lever can release — the
+// primitive gained a second lever, not immunity. An explicit work guard is
+// unreleasable by construction, which is the point: cancelling sleeps forever
+// cannot clear it, so this pins that the helper reports rather than spins to the
+// budget silently.
+TEST(CancelAndDrainOrReportWitness, ReportsWhenIocNeverDrains) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+    auto keep_alive = asio::make_work_guard(ioc);
+
+    EXPECT_NONFATAL_FAILURE(
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "probe", 50ms),
+        "even with clock sleeps released on every slice");
+}
+
+// Reports AT MOST ONCE across the whole budget, not once per slice.
+// EXPECT_NONFATAL_FAILURE fails if it intercepts more than one failure, so a
+// per-slice report makes this red. At a 50ms budget and the 1ms default slice
+// that is ~50 reports under the mutant, so the cell has wide margin rather than
+// depending on a boundary.
+TEST(CancelAndDrainOrReportWitness, ReportsAtMostOnceAcrossManySlices) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+    auto keep_alive = asio::make_work_guard(ioc);
+
+    EXPECT_NONFATAL_FAILURE(
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "probe", 50ms, 1ms),
+        "even with clock sleeps released on every slice");
 }
