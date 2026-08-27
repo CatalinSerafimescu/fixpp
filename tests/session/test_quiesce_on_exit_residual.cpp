@@ -372,13 +372,14 @@ TEST(DrainOrReportWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
 // ── (gate-b/r2 N1) cancel_and_drain_or_report's missing cardinality twin ──────
 //
 // Both siblings above pin "the probe dispatches at most one handler"; this
-// third copy did not, and `poll_one() -> poll()` at pump_until_ready.hpp:506
-// left the whole binary green. Modelled on
+// third copy did not, and `poll_one() -> poll()` in `cancel_and_drain_or_report`'s
+// zero-budget probe left the whole binary green. Modelled on
 // QuiesceOnExitResidualWitness.ZeroBudgetProbeDispatchesAtMostOneHandler
 // (:316-328), not the DrainOrReportWitness copy, because this drain also needs
 // a mock clock. The matcher is the substring unique to this drain's residual
-// message (pump_until_ready.hpp:520) -- the shared stem alone would pass
-// whichever drain reported (pump_until_ready.hpp:129-138).
+// message (the `cancel_and_drain_or_report` branch of the shared residual
+// report, immediately after its `kDrainResidual` stem) -- the shared stem
+// alone would pass whichever drain reported (pump_until_ready.hpp:129-138).
 TEST(CancelAndDrainOrReportWitness, ZeroBudgetProbeDispatchesAtMostOneHandler) {
     int ran = 0;
     {
@@ -487,9 +488,9 @@ struct CallOnDestruct {
 
 }  // namespace
 
-// `~quiesce_on_exit`'s site is hardcoded "quiesce_on_exit"
-// (pump_until_ready.hpp:695) -- already distinct from the two free functions'
-// sites below, so no parameter is introduced for it.
+// `~quiesce_on_exit`'s site is hardcoded "quiesce_on_exit" (the site argument
+// passed to its `pump_or_report_throw` call) -- already distinct from the two
+// free functions' sites below, so no parameter is introduced for it.
 TEST(QuiesceOnExitResidualWitness, ReportsWhenAHandlerThrows) {
     asio::io_context ioc;
     auto clock = make_mock_clock(ioc);
@@ -555,7 +556,7 @@ TEST(CancelAndDrainOrReportWitness, ReportsWhenAHandlerThrows) {
 // guard variable the residual branch would stay silent for the wrong reason.
 //
 // (gate-b/r1 F2c) Twinned below for `cancel_and_drain_or_report` and
-// `~quiesce_on_exit` -- their `return`s (pump_until_ready.hpp:510, :696) were
+// `~quiesce_on_exit` -- their `return`s after `pump_or_report_throw` were
 // REACHED by the pre-existing ReportsWhenAHandlerThrows witnesses above (no work
 // guard there, so the context quiesces after the throw), but nothing pinned that
 // the residual report is SKIPPED rather than silent for the wrong reason. Each
