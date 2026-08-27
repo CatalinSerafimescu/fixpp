@@ -481,6 +481,17 @@ struct CaptureTransport {
     // (Gate: Codex review of this branch, P2. The earlier form claimed the two
     // shapes were equivalent; they are equivalent in READINESS and not in the
     // BOUNDED-WAIT contract, which is the half this test relies on.)
+    //
+    // ⚠️ AND THE EVIDENCE FOR THIS IS CONSTRUCTION, NOT MEASUREMENT. The commit that
+    // made this change cited the zero-advance and reply-never-sent mutants still
+    // failing at 10010 ms. That is CONSISTENT with a shared deadline but does not
+    // discriminate: in both mutants session A never emits, so the FIRST wait spends
+    // the whole deadline and the second never runs — the old per-call budget would
+    // have produced the same 10010 ms. The schedule that would tell them apart (A
+    // ready at 9.5 s, B at 19 s) is not one those mutants produce, and no mutant
+    // here produces it. The bound holds because one `time_point` is computed before
+    // the first wait and both `wait_until` calls take it, which is checkable by
+    // reading — not because it was seen to fail at 10 s rather than 20 s.
     [[nodiscard]] bool await_test_req_ids(std::size_t want,
                                           std::chrono::steady_clock::time_point deadline) {
         std::unique_lock<std::mutex> lock{mtx};
@@ -1726,6 +1737,10 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // TSan window; this phase only removes the oracle's dependence on a lucky
     // schedule.
     clock_a->advance(std::chrono::milliseconds{1500});
+    // Its own deadline, deliberately NOT shared with session B's wait below. These
+    // two are sequential but UNRELATED — B's clock is not advanced until after A's
+    // emission is observed — so there is no single event for one deadline to bound.
+    // The loop's paired wait is the opposite case and does share one; see it.
     ASSERT_TRUE(
         sA.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
         << kWaitBudgetMiss << "waiting for session A's first TestRequest";
