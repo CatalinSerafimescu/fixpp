@@ -388,9 +388,18 @@ TEST(DrainOrReportWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
 // death on the first one masks the other two entirely, exactly the way an early
 // return masked 8 of 15 forced arms in #316.
 //
-// All three deliberately assert on `kDrainThrew`'s text AND on `what()`. Losing the
-// exception text would trade a terminate for a silent pass, which is worse than
-// either.
+// (gate-b/r1 F2b) All three std-exception witnesses below match the FULL composed
+// message -- `kDrainThrew` + that witness's own `site` + " -- what(): " + `what()`
+// -- not merely the bare `what()` text. A bare-`what()` matcher cannot discriminate:
+// `pump_or_report_throw` composes ONE shared stem for every drain, varying only by
+// `site`, and two of the three call sites used to pass the identical literal
+// `"probe"`, making `drain_or_report`'s and `cancel_and_drain_or_report`'s failure
+// messages byte-identical. Fixed with BOTH halves, per this header's own
+// prescription for the residual messages (pump_until_ready.hpp:129-138): distinct
+// `site` strings per witness AND full-message matching -- either half alone is a
+// no-op (a bare-`what()` matcher still passes with distinct sites; distinct sites
+// with a bare-`what()` matcher still collide on the shared stem+what() alone since
+// nothing forces the matcher to consult `site`).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 namespace {
@@ -398,6 +407,17 @@ namespace {
 // A handler that throws a std::exception carrying identifiable text.
 void post_throwing_handler(asio::io_context& ioc) {
     asio::post(ioc, [] { throw std::runtime_error("witness-boom"); });
+}
+
+// (gate-b/r1 F2a) A handler that throws a NON-std value. `pump_or_report_throw`'s
+// `catch (...)` (pump_until_ready.hpp:190-191) has been new code with no witness
+// since this PR added it -- every checked-in throwing handler threw
+// std::runtime_error, so only the `catch (const std::exception&)` arm ever ran.
+// asio's scheduler rethrows a handler's exception unchanged out of
+// `io_context::run_for` (it does not require std::exception), so `throw 42;`
+// reaches the non-std arm exactly as a std::exception would reach the other one.
+void post_non_std_throwing_handler(asio::io_context& ioc) {
+    asio::post(ioc, [] { throw 42; });
 }
 
 // ⚠️ THE DRAIN MUST BE CALLED FROM A DESTRUCTOR BODY, and an earlier draft of these
@@ -418,24 +438,48 @@ struct CallOnDestruct {
 
 }  // namespace
 
+// `~quiesce_on_exit`'s site is hardcoded "quiesce_on_exit"
+// (pump_until_ready.hpp:695) -- already distinct from the two free functions'
+// sites below, so no parameter is introduced for it.
 TEST(QuiesceOnExitResidualWitness, ReportsWhenAHandlerThrows) {
     asio::io_context ioc;
     auto clock = make_mock_clock(ioc);
     post_throwing_handler(ioc);
 
     EXPECT_NONFATAL_FAILURE(([&] { quiesce_on_exit quiesce{ioc, *clock, 50ms}; }()),
-                            "witness-boom");
+                            "#308: a handler threw during the teardown drain, so the drain did not "
+                            "complete. Site: quiesce_on_exit -- what(): witness-boom");
 }
 
 TEST(DrainOrReportWitness, ReportsWhenAHandlerThrows) {
     asio::io_context ioc;
     post_throwing_handler(ioc);
 
+    EXPECT_NONFATAL_FAILURE(([&] {
+                                CallOnDestruct d{[&] {
+                                    fixpp::test_support::drain_or_report(
+                                        ioc, "drain_or_report/witness", 50ms);
+                                }};
+                            }()),
+                            "#308: a handler threw during the teardown drain, so the drain did not "
+                            "complete. Site: drain_or_report/witness -- what(): witness-boom");
+}
+
+// (gate-b/r1 F2a) The catch(...) arm, witnessed for the first time. Same
+// destructor-body shape as the std-exception witness above -- see the comment
+// on CallOnDestruct.
+TEST(DrainOrReportWitness, ReportsWhenANonStdHandlerThrows) {
+    asio::io_context ioc;
+    post_non_std_throwing_handler(ioc);
+
     EXPECT_NONFATAL_FAILURE(
         ([&] {
-            CallOnDestruct d{[&] { fixpp::test_support::drain_or_report(ioc, "probe", 50ms); }};
+            CallOnDestruct d{
+                [&] { fixpp::test_support::drain_or_report(ioc, "drain_or_report/nonstd", 50ms); }};
         }()),
-        "witness-boom");
+        "#308: a handler threw during the teardown drain, so the drain did not "
+        "complete. Site: drain_or_report/nonstd -- a non-std exception, so no text "
+        "is available.");
 }
 
 TEST(CancelAndDrainOrReportWitness, ReportsWhenAHandlerThrows) {
@@ -445,11 +489,12 @@ TEST(CancelAndDrainOrReportWitness, ReportsWhenAHandlerThrows) {
 
     EXPECT_NONFATAL_FAILURE(([&] {
                                 CallOnDestruct d{[&] {
-                                    fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
-                                                                                    "probe", 50ms);
+                                    fixpp::test_support::cancel_and_drain_or_report(
+                                        ioc, *clock, "cancel_and_drain/witness", 50ms);
                                 }};
                             }()),
-                            "witness-boom");
+                            "#308: a handler threw during the teardown drain, so the drain did not "
+                            "complete. Site: cancel_and_drain/witness -- what(): witness-boom");
 }
 
 // The throwing path must SKIP the residual report rather than emit it as well.
@@ -459,16 +504,55 @@ TEST(CancelAndDrainOrReportWitness, ReportsWhenAHandlerThrows) {
 // it were an independent finding. The context genuinely IS non-quiescent here (the
 // work guard keeps it so), which is what makes the cell non-vacuous -- without the
 // guard variable the residual branch would stay silent for the wrong reason.
+//
+// (gate-b/r1 F2c) Twinned below for `cancel_and_drain_or_report` and
+// `~quiesce_on_exit` -- their `return`s (pump_until_ready.hpp:510, :696) were
+// REACHED by the pre-existing ReportsWhenAHandlerThrows witnesses above (no work
+// guard there, so the context quiesces after the throw), but nothing pinned that
+// the residual report is SKIPPED rather than silent for the wrong reason. Each
+// twin is proven non-vacuous by deleting its corresponding `return` and confirming
+// it reports 2 failures instead of 1 -- see the gate record for the individual
+// mutation runs.
 TEST(DrainOrReportWitness, ThrowingHandlerReportsOnceNotTwice) {
     asio::io_context ioc;
     auto keep_alive = asio::make_work_guard(ioc);
     post_throwing_handler(ioc);
 
-    EXPECT_NONFATAL_FAILURE(
-        ([&] {
-            CallOnDestruct d{[&] { fixpp::test_support::drain_or_report(ioc, "probe", 50ms); }};
-        }()),
-        "witness-boom");
+    EXPECT_NONFATAL_FAILURE(([&] {
+                                CallOnDestruct d{[&] {
+                                    fixpp::test_support::drain_or_report(
+                                        ioc, "drain_or_report/witness", 50ms);
+                                }};
+                            }()),
+                            "#308: a handler threw during the teardown drain, so the drain did not "
+                            "complete. Site: drain_or_report/witness -- what(): witness-boom");
+}
+
+TEST(CancelAndDrainOrReportWitness, ThrowingHandlerReportsOnceNotTwice) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+    auto keep_alive = asio::make_work_guard(ioc);
+    post_throwing_handler(ioc);
+
+    EXPECT_NONFATAL_FAILURE(([&] {
+                                CallOnDestruct d{[&] {
+                                    fixpp::test_support::cancel_and_drain_or_report(
+                                        ioc, *clock, "cancel_and_drain/witness", 50ms);
+                                }};
+                            }()),
+                            "#308: a handler threw during the teardown drain, so the drain did not "
+                            "complete. Site: cancel_and_drain/witness -- what(): witness-boom");
+}
+
+TEST(QuiesceOnExitResidualWitness, ThrowingHandlerReportsOnceNotTwice) {
+    asio::io_context ioc;
+    auto clock = make_mock_clock(ioc);
+    auto keep_alive = asio::make_work_guard(ioc);
+    post_throwing_handler(ioc);
+
+    EXPECT_NONFATAL_FAILURE(([&] { quiesce_on_exit quiesce{ioc, *clock, 50ms}; }()),
+                            "#308: a handler threw during the teardown drain, so the drain did not "
+                            "complete. Site: quiesce_on_exit -- what(): witness-boom");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
