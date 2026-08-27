@@ -59,6 +59,7 @@
 #include <deque>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -309,14 +310,41 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
 // File-local rather than a lambda inside `CrossSessionDisjoint`, because both
 // emission-driving tests now need it and a second copy is a second thing to keep
 // in step with the seqnum bookkeeping its callers do.
+// ── SendingTime(52) for a peer-authored frame ─────────────────────────────────
+//
+// #317: this used to be the literal "20240101-00:00:00.000" in both builders,
+// which is the seed instant of the tests' mock_clock (1704067200 = 2024-01-01T00:00Z).
+// That is correct only while the clock has not moved. `Session` checks inbound
+// SendingTime against a threshold that defaults to 120 s
+// (`src/session/session.cpp:2267`, `cfg_.sending_time_threshold`), so a test that
+// advances its own clock past that and keeps stamping the seed instant has its
+// frames REJECTED as stale — correctly, by a guard doing its job.
+//
+// A real peer stamps the time it sent at. Stamping from the same clock the session
+// reads keeps the guard ARMED (the threshold is left at its default) while making
+// the peer behave like a peer. It is what lifts the ~80-iteration ceiling measured
+// on `ConcurrentSessionsTSanStress`; see that test's header for the numbers.
+static std::string fix_sending_time(fixpp::core::utc_time_point tp) {
+    char buf[32];
+    auto r = fixpp::core::utc_time_to_fix_string(tp, fixpp::core::fix_time_precision::millis, buf);
+    // A formatting failure here would silently produce an empty 52= and surface as
+    // an unrelated rejection several layers away, so it is reported at its source.
+    if (!r) {
+        ADD_FAILURE() << "#317: utc_time_to_fix_string failed while stamping SendingTime";
+        return {};
+    }
+    return std::string(r->data(), r->size());
+}
+
 static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq,
                                              std::string_view sender, std::string_view target,
-                                             std::string_view tr_id) {
+                                             std::string_view tr_id,
+                                             std::string_view sending_time) {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
-    body += "52=20240101-00:00:00.000\x01";
+    body += "52=" + std::string(sending_time) + "\x01";
     body += "56=" + std::string(target) + "\x01";
     if (!tr_id.empty()) {
         body += "112=" + std::string(tr_id) + "\x01";
@@ -1248,7 +1276,8 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
         std::string latest_a = tr_ids_a.back();
         auto& hb_a = frames.emplace_back(
-            make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a));
+            make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a,
+                           fix_sending_time(clock->now())));
         auto fut_a = asio::co_spawn(
             ioc,
             sA->session->on_inbound_frame(std::span<const std::byte>{hb_a.data(), hb_a.size()}),
@@ -1259,7 +1288,8 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
 
         std::string latest_b = tr_ids_b.back();
         auto& hb_b = frames.emplace_back(
-            make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b));
+            make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b,
+                           fix_sending_time(clock->now())));
         auto fut_b = asio::co_spawn(
             ioc,
             sB->session->on_inbound_frame(std::span<const std::byte>{hb_b.data(), hb_b.size()}),
@@ -1565,10 +1595,16 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // either. Returns rather than asserts because an ASSERT_* inside a lambda
     // returns from the LAMBDA, not from the test — the failure would be recorded
     // and then walked straight past.
+    // #317: `clk` is THIS session's clock, not either one that happens to be in
+    // scope. The two clocks advance together here, but a peer stamps the time its
+    // OWN counterparty reads, and pinning that at the parameter keeps it true if
+    // they ever diverge.
     auto feed_heartbeat = [&](SessionFixture& sx, const asio::any_io_executor& ex,
-                              std::uint32_t& hb_seq, std::string_view sender,
-                              std::string_view target, std::string_view tr_id) {
-        auto& hb = frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq++, sender, target, tr_id));
+                              fixpp::core::mock_clock& clk, std::uint32_t& hb_seq,
+                              std::string_view sender, std::string_view target,
+                              std::string_view tr_id) {
+        auto& hb = frames.emplace_back(
+            make_heartbeat("FIX.4.2", hb_seq++, sender, target, tr_id, fix_sending_time(clk.now())));
         return asio::co_spawn(
             ex, sx.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
             asio::use_future);
@@ -1601,7 +1637,7 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
            "serialized discriminator below is only meaningful while B has not counted";
     {
         const std::string latest_a = sA.transport.collect_test_req_ids().back();
-        auto f = feed_heartbeat(sA, ex_a, hb_seq_a, "TARGET_A", "SENDER_A", latest_a);
+        auto f = feed_heartbeat(sA, ex_a, *clock_a, hb_seq_a, "TARGET_A", "SENDER_A", latest_a);
         ASSERT_TRUE(f.get().has_value()) << "session A rejected its first Heartbeat";
     }
 
@@ -1612,7 +1648,7 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         << "session B emitted more than one TestRequest before its first Heartbeat";
     {
         const std::string latest_b = sB.transport.collect_test_req_ids().back();
-        auto f = feed_heartbeat(sB, ex_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
+        auto f = feed_heartbeat(sB, ex_b, *clock_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
         ASSERT_TRUE(f.get().has_value()) << "session B rejected its first Heartbeat";
     }
 
@@ -1657,8 +1693,8 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
 
         // Both spawned before either is awaited, so the two `on_inbound_frame`
         // coroutines run concurrently on their two distinct strands.
-        auto fa = feed_heartbeat(sA, ex_a, hb_seq_a, "TARGET_A", "SENDER_A", latest_a);
-        auto fb = feed_heartbeat(sB, ex_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
+        auto fa = feed_heartbeat(sA, ex_a, *clock_a, hb_seq_a, "TARGET_A", "SENDER_A", latest_a);
+        auto fb = feed_heartbeat(sB, ex_b, *clock_b, hb_seq_b, "TARGET_B", "SENDER_B", latest_b);
 
         // The disposition is asserted, not discarded. A Heartbeat rejected for a
         // seqnum gap, a checksum, or a dictionary miss used to surface only as the
