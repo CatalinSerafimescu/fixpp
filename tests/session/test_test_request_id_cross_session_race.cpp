@@ -1030,6 +1030,48 @@ TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
                   112),
               "TR1");
 
+    // #318: the UNTERMINATED-VALUE arm. An accepted, boundary-anchored tag whose
+    // value has no closing SOH must extract to "" rather than to the rest of the
+    // buffer. Inherited from before #314 (verbatim in a7680342's removed hunk,
+    // under a bare `wire.find(needle)` with no boundary check), and named as the
+    // excluded mutant by #314's Gate B stopping bound.
+    //
+    // A SEPARATELY NAMED frame, not an extension of `frame` / `resume_frame` /
+    // `start_frame`: each of those is the only instrument killing its own mutant,
+    // so extending one in place would trade a surviving mutant for another.
+    //
+    // WHAT THIS KILLS, enumerated rather than declared exhaustive:
+    //   - deleting the `end == npos` guard  → `substr(vstart, npos - vstart)`
+    //     yields the rest of the buffer, "TR1" != "". KILLED by the 112 line.
+    //   - `return {}` → `return wire.substr(vstart)`. Same, KILLED.
+    //   - `return {}` → `continue` / `break`. These are EQUIVALENT mutants, not a
+    //     gap, and no assertion can kill them. Proof: `end == npos` means there is
+    //     no SOH at or after `vstart`. A later hit at `pos' > pos` is accepted only
+    //     if `wire[pos' - 1] == '\x01'`. If `pos' - 1 >= vstart` that contradicts
+    //     the npos. Otherwise `pos' - 1` lies inside the needle span
+    //     [pos, vstart), whose bytes are the needle's own ("112=") and none is SOH.
+    //     So no later hit is ever accepted; `continue` falls through to the
+    //     function's trailing `return {}` and yields "" too. Recorded as an
+    //     argument because a test claiming to kill it would be a false instrument.
+    //
+    // The tag-35 line is the NON-VACUITY control: it proves this frame is
+    // parseable and that the "" above comes from the unterminated arm, not from a
+    // malformed corpus that would return "" for every tag.
+    const std::string unterminated_frame =
+        "8=FIX.4.2\x01"
+        "35=1\x01"
+        "112=TR1";  // deliberately NO trailing SOH
+    EXPECT_EQ(extract_tag(std::span<const std::byte>{
+                              reinterpret_cast<const std::byte*>(unterminated_frame.data()),
+                              unterminated_frame.size()},
+                          112),
+              "");
+    EXPECT_EQ(extract_tag(std::span<const std::byte>{
+                              reinterpret_cast<const std::byte*>(unterminated_frame.data()),
+                              unterminated_frame.size()},
+                          35),
+              "1");
+
     // F3a frame start: the boundary rule also ACCEPTS a hit at byte 0 (`pos != 0`
     // in the guard). Tag 8 is mandatorily the first field of a FIX frame, so this
     // is the branch that keeps the helper a general FIX-tag extractor.
