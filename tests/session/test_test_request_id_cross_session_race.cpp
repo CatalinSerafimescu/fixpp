@@ -22,12 +22,12 @@
 //     mutex-protected vector.
 //   - After enough clock ticks, close both sessions and analyse captures.
 //
-// SC-003 quantifies 10^4 TestRequests per session. Both tests below use a far
-// smaller corpus to stay fast, on the basis that the stress is the concurrency,
-// not the count. Each pins its own corpus size with an equality at its own
-// `kIterations` — read that, not this header: a figure repeated here is a second
-// thing to keep true, and the one that used to sit in this paragraph described
-// neither test (#309).
+// SC-003 quantifies 10^4 TestRequests per session. `ConcurrentSessionsTSanStress`
+// now pins exactly that (#317); `CrossSessionDisjoint` deliberately keeps a far
+// smaller corpus, on the basis that ITS stress is the concurrency, not the count.
+// Each pins its own corpus size with an equality at its own `kIterations` — read
+// that, not this header: a figure repeated here is a second thing to keep true,
+// and the one that used to sit in this paragraph described neither test (#309).
 //
 // RED phase (before T020): the existing `static tr_counter` in
 // run_liveness_loop is shared across all sessions → assertion (a) will fail
@@ -1656,9 +1656,11 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     ASSERT_EQ(sB.session->state(), fixpp::session::fsm_state::Active);
 
     // HeartBtInt=1s. Each iteration advances both clocks past the liveness window
-    // so both sessions emit this iteration's TestRequest, waits for BOTH emissions
-    // in one predicate (see the doc block above for why the wait is not
-    // per-session), then echoes each session's newest TestReqID back as a
+    // so both sessions emit this iteration's TestRequest, waits for both emissions
+    // through two per-session `await_test_req_ids` calls sharing ONE absolute
+    // deadline (see `await_test_req_ids` for why the SHARED deadline, not the
+    // single predicate, is what carries the bound), then echoes each session's
+    // newest TestReqID back as a
     // Heartbeat. The reply is what clears the pending TestRequest; without it the
     // grace window expires on the next advance and the session disconnects.
     //
