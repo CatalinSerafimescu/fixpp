@@ -271,6 +271,7 @@ TEST(EngineFirstFrameTest, NonTlsSilentPeerClosedByHandshakeBound) {
     }
 
     ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
     // Run briefly to let the accept loop bind the listener (OS port assignment).
     ioc.run_for(std::chrono::milliseconds{50});
     ioc.restart();
@@ -318,6 +319,7 @@ TEST(EngineFirstFrameTest, NonTlsPeerWithPayloadClosedByHandshakeBound) {
     }
 
     ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
     ioc.run_for(std::chrono::milliseconds{50});
     ioc.restart();
     uint16_t port = harness->server_endpoint().port;
@@ -365,6 +367,7 @@ TEST(EngineFirstFrameTest, AcceptLoopRunsContinuously) {
     }
 
     ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
     ioc.run_for(std::chrono::milliseconds{50});
     ioc.restart();
     uint16_t port = harness->server_endpoint().port;
@@ -435,6 +438,7 @@ TEST(EngineFirstFrameTest, PostHandshakeStallClosedByFirstFrameDeadline) {
     }
 
     ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
     ioc.run_for(std::chrono::milliseconds{50});
     ioc.restart();
     uint16_t port = harness->server_endpoint().port;
@@ -526,6 +530,7 @@ TEST(EngineFirstFrameTest, PostHandshakeOverBudgetClosedByByteBudget) {
     }
 
     ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
     ioc.run_for(std::chrono::milliseconds{50});
     ioc.restart();
     uint16_t port = harness->server_endpoint().port;
@@ -597,6 +602,7 @@ TEST(EngineFirstFrameTest, PostHandshakeRejectionDoesNotStopTheAcceptLoop) {
     }
 
     ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
     ioc.run_for(std::chrono::milliseconds{50});
     ioc.restart();
     uint16_t port = harness->server_endpoint().port;

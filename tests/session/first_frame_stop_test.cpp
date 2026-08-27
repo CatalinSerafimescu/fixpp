@@ -153,6 +153,7 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
     }
 
     ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
     ioc.run_for(50ms);
     ioc.restart();
     std::uint16_t const port = harness->server_endpoint().port;

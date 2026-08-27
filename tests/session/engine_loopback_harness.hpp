@@ -179,3 +179,65 @@ private:
 };
 
 }  // namespace fixpp::test_support
+
+namespace fixpp::test_support {
+
+// Stops the engine on EVERY exit path from a test body. (#323)
+//
+// THE DEFECT IT REMOVES. `GTEST_SKIP()` and a failed `ASSERT_*` both RETURN from
+// the test body. Any such return positioned between `engine().start()` and
+// `engine().stop()` skips the stop, and `~Engine()` asserts
+// `stopped_ && "Engine destroyed without calling co_await stop() first"` --
+// so a path whose whole purpose is to SKIP a test aborts the entire binary
+// instead. Measured on Tier 3 `linux-clang-libc++-ubsan`:
+// `135 - engine_firstframe (Subprocess aborted)`, triggered by the
+// `port == 0` / "acceptor listener did not bind" skip.
+//
+// It was 7 tests across 2 files, every one with the identical shape. The OTHER
+// skip in each test ("FIXPP_TLS_FIXTURE_DIR not set") is safe only because it
+// happens to precede `start()` -- a positional accident that nothing enforced.
+// Declaring this guard immediately after `start()` makes the stop unconditional,
+// so position stops mattering and a future skip cannot reintroduce the abort.
+//
+// Safe to combine with an explicit `stop()`: `Engine::stop()` carries an
+// idempotency guard (`if (stopped_) co_return;`), so the second call returns
+// without re-tearing-down. Tests that measure stop PROMPTNESS are therefore
+// unaffected -- this runs after their measurement, and returns immediately.
+class engine_stop_guard {
+public:
+    engine_stop_guard(EngineLoopbackHarness& h, asio::io_context& ioc) noexcept
+        : h_{&h}, ioc_{&ioc} {}
+    engine_stop_guard(const engine_stop_guard&) = delete;
+    engine_stop_guard& operator=(const engine_stop_guard&) = delete;
+
+    ~engine_stop_guard() {
+        // ⚠️ NOTHING MAY ESCAPE THIS DESTRUCTOR, and the report is itself a throw
+        // site -- this is #308's lesson applied one layer out. A destructor is
+        // implicitly `noexcept`; driving an io_context here dispatches arbitrary
+        // handlers, and `ADD_FAILURE()` RECORDS the failure and then THROWS
+        // `GoogleTestFailureException` under GoogleTest's supported
+        // `--gtest_throw_on_failure`. So the inner catch reports and the OUTER
+        // catch swallows the report's own throw. Reporting inside a single catch
+        // would trade this abort for a different one -- which is exactly the
+        // mistake #308's first fix shipped.
+        try {
+            try {
+                auto fut = asio::co_spawn(*ioc_, h_->engine().stop(), asio::use_future);
+                ioc_->restart();
+                ioc_->run();
+                fut.get();
+            } catch (const std::exception& e) {
+                ADD_FAILURE() << "engine_stop_guard: engine teardown threw -- what(): " << e.what();
+            } catch (...) {
+                ADD_FAILURE() << "engine_stop_guard: engine teardown threw a non-std exception.";
+            }
+        } catch (...) {  // NOLINT(bugprone-empty-catch) -- see the paragraph above
+        }
+    }
+
+private:
+    EngineLoopbackHarness* h_;
+    asio::io_context* ioc_;
+};
+
+}  // namespace fixpp::test_support
