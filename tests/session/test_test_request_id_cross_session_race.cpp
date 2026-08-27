@@ -53,6 +53,7 @@
 #include <asio/use_future.hpp>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -377,27 +378,71 @@ static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t 
 // annotations on the session's own counters.
 struct CaptureTransport {
     std::mutex mtx;
+    std::condition_variable cv;
     std::vector<std::vector<std::byte>> frames;
+    // #317: the TestReqID corpus, classified ONCE on the writer side. Was rebuilt
+    // from `frames` on every read; see `await_test_req_ids` for why that mattered.
+    std::vector<std::string> test_req_ids;
 
     void capture(std::span<const std::byte> frame) {
         std::lock_guard<std::mutex> lock{mtx};
         frames.emplace_back(frame.begin(), frame.end());
-    }
-
-    // Collect all 112= (TestReqID) values from frames where 35=1 (TestRequest).
-    std::vector<std::string> collect_test_req_ids() {
-        std::lock_guard<std::mutex> lock{mtx};
-        std::vector<std::string> ids;
-        for (const auto& f : frames) {
-            auto sp = std::span<const std::byte>{f.data(), f.size()};
-            if (extract_tag(sp, 35) == "1") {
-                auto id = extract_tag(sp, 112);
-                if (!id.empty()) {
-                    ids.push_back(std::move(id));
-                }
+        // Classify here, under the lock this function already takes, rather than in
+        // every reader. Same predicate as the old `collect_test_req_ids` body, so
+        // the corpus this test asserts on is byte-for-byte what it was.
+        auto sp = std::span<const std::byte>{frames.back().data(), frames.back().size()};
+        if (extract_tag(sp, 35) == "1") {
+            auto id = extract_tag(sp, 112);
+            if (!id.empty()) {
+                test_req_ids.push_back(std::move(id));
+                cv.notify_all();
             }
         }
-        return ids;
+    }
+
+    // Snapshot of the 112= (TestReqID) values from frames where 35=1 (TestRequest).
+    // O(corpus) COPY, no rescan. Kept as the analysis surface; the hot path is
+    // `await_test_req_ids` / `test_req_id_count` below.
+    std::vector<std::string> collect_test_req_ids() {
+        std::lock_guard<std::mutex> lock{mtx};
+        return test_req_ids;
+    }
+
+    std::size_t test_req_id_count() {
+        std::lock_guard<std::mutex> lock{mtx};
+        return test_req_ids.size();
+    }
+
+    // Newest TestReqID. Copies ONE string; `collect_test_req_ids().back()` copied
+    // the whole corpus to reach it, which is a second O(iterations^2) term and was
+    // measurable on its own: with only the rescan fixed, 10^4 iterations still took
+    // 40.7 s and the curve was still superlinear (2x N -> 3.3x time). Replacing
+    // these two loop-body calls took it to 11.5 s and 2x N -> ~2.1x time.
+    std::string latest_test_req_id() {
+        std::lock_guard<std::mutex> lock{mtx};
+        return test_req_ids.empty() ? std::string{} : test_req_ids.back();
+    }
+
+    // Block until at least `want` TestReqIDs have been emitted, or `budget`
+    // elapses. Returns false on budget exhaustion.
+    //
+    // #317: this replaces a 1 ms sleep-poll whose predicate rebuilt the whole
+    // corpus — `extract_tag` copies each frame into a std::string, so the wait cost
+    // was O(corpus) per tick and the test's total work was O(iterations^2).
+    // Measured on the unfixed code with the #317 SendingTime ceiling already
+    // lifted: doubling `kIterations` cost ~3.9x wall-clock (300 -> 3.0 s,
+    // 600 -> 11.0 s, 1200 -> 41.9 s, 2400 -> 163.5 s).
+    //
+    // Waiting on the writer's notification rather than polling removes BOTH terms:
+    // the rescan AND the 1 ms slice that put a floor of `kIterations` milliseconds
+    // under the test no matter how fast the pool was.
+    //
+    // The count only ever grows, so waiting for A then B is equivalent to waiting
+    // for both and costs max(A, B), not their sum.
+    [[nodiscard]] bool await_test_req_ids(std::size_t want,
+                                          std::chrono::steady_clock::duration budget) {
+        std::unique_lock<std::mutex> lock{mtx};
+        return cv.wait_for(lock, budget, [&] { return test_req_ids.size() >= want; });
     }
 };
 
@@ -477,7 +522,7 @@ using fixpp::test_support::kPumpBudgetMiss;
 using fixpp::test_support::pump_until;
 using fixpp::test_support::pump_until_ready;
 
-// ── Bounded wait for a SELF-DRIVING executor (#309) ───────────────────────────
+// ── Bounded wait for a SELF-DRIVING executor (#309/#317) ─────────────────────
 //
 // `pump_until` above does not apply to `ConcurrentSessionsTSanStress`: it runs on
 // an `asio::thread_pool`, whose own threads service the work, so there is nothing
@@ -486,31 +531,27 @@ using fixpp::test_support::pump_until_ready;
 // `sleep_for`, for the reason #284 records: a fixed window that under-serves does
 // not hang, it silently shortens the corpus every assertion downstream runs over.
 //
-// So this is the thread_pool twin of `pump_until` — same contract (wait for the
-// predicate, bounded by a real-time budget, report which happened), different
-// mechanism (poll-and-yield, because the pool drives itself). Deliberately NOT
-// named `pump_*`: nothing here pumps anything, and the two must not be confused
-// at a call site where only one of them can be correct.
+// #317 REPLACED the generic `wait_until_observed(pred, budget, slice)` that used to
+// live here — a 1 ms sleep-poll over a caller-supplied predicate — with
+// `CaptureTransport::await_test_req_ids`, which blocks on the writer's own
+// condition_variable. The poll had two costs, and only the first is the one #317
+// was filed about:
+//   1. its predicate rebuilt the whole TestReqID corpus per tick (O(corpus) per
+//      tick => O(iterations^2) overall);
+//   2. the 1 ms slice put a floor of ~1 ms x iterations under the test regardless
+//      of how fast the pool actually was.
+// Notifying from the writer removes both. Nothing else in this file waited on that
+// helper, so it is deleted rather than left as a second way to do this.
 //
-// CONTRACT: `ready` is called from the waiting thread while pool threads run, so
-// it must synchronise every shared access it makes. Stated as a condition rather
-// than as a survey of today's call sites — a survey is true until the next caller.
-// The corpus predicate below satisfies it through `CaptureTransport`'s mutex.
-template <class Ready>
-[[nodiscard]] static bool wait_until_observed(
-    Ready ready, std::chrono::steady_clock::duration budget = std::chrono::seconds{10},
-    std::chrono::milliseconds slice = std::chrono::milliseconds{1}) {
-    const auto deadline = std::chrono::steady_clock::now() + budget;
-    while (!ready()) {
-        if (std::chrono::steady_clock::now() >= deadline) {
-            return false;
-        }
-        std::this_thread::sleep_for(slice);
-    }
-    return true;
-}
+// ⚠️ This deletion removes ONE of the three file-local copies #315 catalogues
+// (`wait_pred_nodrive` in test_engine_session_strand.cpp and
+// `wait_for_pred_nodrive` in test_business_messages_roundtrip.cpp remain). It does
+// NOT close #315, and it is not a template for it: the cv works here only because
+// this file's waiter and its writer are the same object. A hoisted general helper
+// still needs the poll-and-yield shape for predicates with no writer to hook.
+inline constexpr auto kWaitBudget = std::chrono::seconds{10};
 
-// Failure text for a `wait_until_observed` that ran out of budget. Distinct from
+// Failure text for a wait that ran out of budget. Distinct from
 // `kPumpBudgetMiss` because the mechanism is distinct: a miss here means the pool
 // never produced the event, not that this thread failed to drive a context.
 inline constexpr const char* kWaitBudgetMiss =
@@ -1588,7 +1629,22 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // prologue below contributes 1 and the concurrent loop contributes kIterations - 1;
     // stated because the loop starts at 1, and a reader who "fixes" that to 0 breaks
     // the equality rather than the loop.
-    const int kIterations = 10;
+    //
+    // #317: this was 10 (a 9-iteration window) against SC-003's quantified 10^4 per
+    // session. The shortfall was waived at Gate B on PR #314 with a named structural
+    // prerequisite, and TWO independent ceilings had to come down before the sample
+    // could be raised at all — see the SendingTime commit and `await_test_req_ids`.
+    //
+    // MEASURED, not projected, on linux-clang-tsan (ctest TIMEOUT is 120 s):
+    //     N=1200  0.86 s   N=2400  1.57 s   N=5000  3.52 s   N=10000  6.70 s
+    // i.e. linear, with ~18x headroom to the timeout at the shipped value. The same
+    // sweep before this work: N=1200 43.6 s, N=2400 163.5 s (already over timeout),
+    // and 10^4 extrapolates to ~47 min.
+    //
+    // Raise it further only WITH a fresh sweep. The per-iteration clock advance is
+    // NOT freely raisable as a shortcut: at 3000 ms one jump clears both the
+    // liveness and grace windows and the session disconnects at iteration 2.
+    const int kIterations = 10000;
 
     // Feed one Heartbeat carrying `tr_id` into `sx`, on THAT SESSION's strand, and
     // return the pending disposition so the caller can spawn both before awaiting
@@ -1628,7 +1684,7 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // TSan window; this phase only removes the oracle's dependence on a lucky
     // schedule.
     clock_a->advance(std::chrono::milliseconds{1500});
-    ASSERT_TRUE(wait_until_observed([&] { return !sA.transport.collect_test_req_ids().empty(); }))
+    ASSERT_TRUE(sA.transport.await_test_req_ids(1, kWaitBudget))
         << kWaitBudgetMiss << "waiting for session A's first TestRequest";
     ASSERT_EQ(sA.transport.collect_test_req_ids().size(), 1u)
         << "session A emitted more than one TestRequest before its first Heartbeat";
@@ -1642,7 +1698,7 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     }
 
     clock_b->advance(std::chrono::milliseconds{1500});
-    ASSERT_TRUE(wait_until_observed([&] { return !sB.transport.collect_test_req_ids().empty(); }))
+    ASSERT_TRUE(sB.transport.await_test_req_ids(1, kWaitBudget))
         << kWaitBudgetMiss << "waiting for session B's first TestRequest";
     ASSERT_EQ(sB.transport.collect_test_req_ids().size(), 1u)
         << "session B emitted more than one TestRequest before its first Heartbeat";
@@ -1668,11 +1724,13 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         clock_b->advance(std::chrono::milliseconds{1500});
 
         const auto want = static_cast<std::size_t>(i + 1);
-        ASSERT_TRUE(wait_until_observed([&] {
-            return sA.transport.collect_test_req_ids().size() >= want &&
-                   sB.transport.collect_test_req_ids().size() >= want;
-        })) << kWaitBudgetMiss
-            << "waiting for both TestRequests at iteration " << i;
+        // #317: two sequential blocking waits, not one polling predicate over both.
+        // The counts only grow, so this is equivalent to waiting for both and costs
+        // max(A, B) rather than A + B.
+        ASSERT_TRUE(sA.transport.await_test_req_ids(want, kWaitBudget))
+            << kWaitBudgetMiss << "waiting for session A's TestRequest at iteration " << i;
+        ASSERT_TRUE(sB.transport.await_test_req_ids(want, kWaitBudget))
+            << kWaitBudgetMiss << "waiting for session B's TestRequest at iteration " << i;
 
         // #309 Gate B F2: `>= want` alone tolerates a batched emission cadence
         // (e.g. +2 this iteration, +0 the next) while the cumulative equality
@@ -1680,16 +1738,16 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         // an equality here: after the wait returns, each emitter is parked on its
         // grace sleep (session.cpp:4924-4926) and the only clock advancer is this
         // blocked test thread, so the size is stable at exactly `want`.
-        ASSERT_EQ(sA.transport.collect_test_req_ids().size(), want)
+        ASSERT_EQ(sA.transport.test_req_id_count(), want)
             << "session A emitted more than one TestRequest at iteration " << i;
-        ASSERT_EQ(sB.transport.collect_test_req_ids().size(), want)
+        ASSERT_EQ(sB.transport.test_req_id_count(), want)
             << "session B emitted more than one TestRequest at iteration " << i;
 
         // `.back()` is unconditional by construction: the wait above returned
         // true, so each session has at least `want` >= 2 IDs. A `!empty()` guard
         // here would be the #309 defect back in its original spelling.
-        const std::string latest_a = sA.transport.collect_test_req_ids().back();
-        const std::string latest_b = sB.transport.collect_test_req_ids().back();
+        const std::string latest_a = sA.transport.latest_test_req_id();
+        const std::string latest_b = sB.transport.latest_test_req_id();
 
         // Both spawned before either is awaited, so the two `on_inbound_frame`
         // coroutines run concurrently on their two distinct strands.
