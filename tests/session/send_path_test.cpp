@@ -53,6 +53,7 @@
 #include "support/frame_field_extract.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
@@ -173,6 +174,119 @@ private:
 
 // ── Fixture ──────────────────────────────────────────────────────────────────
 
+//
+// ── #289: the `run_for(W); restart(); fut.get()` migration ───────────────────
+//
+// The sites in this file use `run_window_then_ready`
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard
+// #289 names is the UNCONDITIONAL `get()`, not the fixed window. On a
+// manually-driven io_context a `get()` the window did not satisfy blocks with
+// nothing left to pump it -- a deadlock ctest reports as a timeout.
+//
+// Teardown is deliberately NOT a fixture-destructor drain, which is the shape
+// PRs #301 and #307 used for fixtures that OWN their Session. Here every
+// `Session` is a block-local declared AFTER the fixture, so it dies BEFORE a
+// fixture destructor body could run -- and a drain is what RESUMES a suspended
+// frame, so a destructor drain would resume it over the destroyed Session. The
+// drain runs on the MISS branch instead, in the scope that still owns that
+// storage, and it CANCELS THE MOCK CLOCK'S SLEEPS first: the first transition
+// to Active co_spawns a detached `run_liveness_loop()` that parks on
+// `sleep_until`, holding a work guard that `drain_or_report` cannot release
+// (only a Clock can). `cancel_sleeps()` releases the waiters that exist WHEN IT
+// RUNS and nothing more, so a miss whose drain itself performs the Active
+// transition registers a NEW waiter afterwards. That WAS a documented limitation of
+// the primitive, carried unchanged from PR #313; it is now FIXED. These sites call
+// `cancel_and_drain_or_report` (`pump_until_ready.hpp`), which alternates the cancel
+// with the drain and releases exactly that waiter.
+
+// #289 harness sentinel: what the value-returning pump helpers below return
+// when the preserved run window misses.
+//
+// It is deliberately NOT load-bearing under ordinary GoogleTest execution: the
+// `ADD_FAILURE()` on the same branch records a nonfatal failure that the
+// enclosing test retains, so a window miss cannot read as a pass whatever this
+// value is. `--gtest_throw_on_failure` does not change that -- it throws AFTER
+// reporting.
+//
+// The CONDITION that holds under, stated rather than counted: NO CALLER
+// INTERCEPTS THE FAILURE. `EXPECT_NONFATAL_FAILURE` /
+// `ScopedFakeTestPartResultReporter` (gtest-spi.h) install a fake reporter that
+// absorbs the failure and lets the enclosing test pass. The first caller that
+// does makes this value the ONLY remaining signal -- and `dispatch_aborted` is
+// then ambiguous with a real `open()` / `on_inbound_frame()` outcome
+// ([2d §6.5]; the `dispatch_aborted` returns in `Session::live_write_serialized_`),
+// so an assertion on the error
+// could be satisfied by this synthetic one. The remedy at that point is a
+// distinct harness result (`std::optional<expected_t<void>>`), not a different
+// production code.
+//
+// The sentinel exists for one narrower reason that holds either way: a caller
+// that checks `has_value()` must not proceed on a fabricated success.
+//
+// Named rather than inlined so the other value-returning #289 sites adopt one
+// greppable decision. Folding it into
+// `tests/support/pump_until_ready.hpp` is deliberately deferred to the header PR
+// that also closes the class-4 transport-teardown gap, so that header is touched
+// once rather than twice.
+//
+// ── FILE-SPECIFIC ADDENDA (everything above is verbatim from the siblings) ───
+//
+// `open_sync` and `feed` take the `Session&` from their caller, so their drains also
+// run while the caller's `sess` is alive -- the same "scope that still owns that
+// storage" rule, reached through a parameter rather than a block-local.
+//
+// `cfg.transport_send` here is a synchronous `std::function` and cannot park a
+// coroutine, so no `transport` is in play and the class-4 teardown gap does not apply
+// to this file.
+//
+// A miss returns rather than falling through to `fut.get()`: on the false path the
+// awaited coroutine is still SUSPENDED, and `get()` would block on a future nothing
+// will complete.
+//
+// THIRD COPY, of TWO different populations -- the closing anchor picked below tells
+// them apart. The `── #289:` heading through "...releases exactly that waiter." is
+// byte-identical in SIX files: `tc_establishment`, `tc_liveness`, `tc_logout`,
+// `tc_reject`, `tc_seqnum`, and this one. The full span, through "...once rather than
+// twice." (additionally carrying the `kWindowMissSentinel` doc block below), is
+// byte-identical in the THREE that define that constant: `tc_establishment`,
+// `tc_seqnum`, and this one. `diff`-ing against the closing anchor you mean to audit
+// is what detects real divergence in that population; diffing against the other
+// anchor over the wrong file set will just report noise. (Anchored by those lines
+// rather than by a line COUNT: a count inside a comment about drift is itself a thing
+// that drifts, and the first revision of this addendum stated one that was already
+// wrong.) The audit only works if this copy stays VERBATIM, not paraphrased -- an
+// earlier revision paraphrased it and silently dropped the sentinel's precondition.
+// Keep it verbatim; put anything file-specific under this addenda heading instead.
+//
+// ⚠️ ONE CLAUSE OF THE QUOTED TEXT IS ALREADY SPENT, and it is reproduced above only
+// because the audit requires byte-identity -- not because it still holds. "so that
+// header is touched once rather than twice" was overtaken by `47ee7b80` (#308/#321),
+// which changed `pump_until_ready.hpp` by 364 insertions WITHOUT closing the class-4
+// gap; that commit is an ancestor of this branch. Folding the constant in would be a
+// third touch either way, so the economy the deferral was buying no longer exists.
+// The narrower reason DOES still hold and is why this batch keeps the constant local:
+// the class-4 gap is open, and a call-site batch is the wrong place to touch a shared
+// header. Correcting the quoted clause means editing all three files at once, which
+// is the hoist-to-the-header change rather than this one -- recorded as follow-up.
+//
+// ⚠️ A SECOND CLAUSE OF THE QUOTED TEXT IS INAPPLICABLE IN THIS FILE, and it too is
+// reproduced above only because the audit requires byte-identity. The quoted text says
+// the first transition to Active co_spawns a detached `run_liveness_loop()` that
+// "parks on `sleep_until`, holding a work guard that `drain_or_report` cannot release
+// (only a Clock can)". `make_cfg()` sets `cfg.heartbeat_interval = 0s` ("disable
+// liveness loop", above), and `Session::run_liveness_loop()` (session.cpp) resolves
+// `heartbt_int` from that config value and `co_return`s as soon as it is zero --
+// BEFORE the `effective_clock_` null guard and before the first `sleep_until` --
+// so no clock waiter is ever registered here. What still holds: the loop is still
+// `co_spawn`ed (session.cpp, both the initiator and acceptor establishment paths),
+// and `co_spawn` POSTS its first resumption, so the detached task still needs
+// servicing before it reaches that `co_return` -- only the *parking* is absent, not
+// the need to drain. `cancel_sleeps()` on zero registered waiters is a no-op, so
+// `cancel_and_drain_or_report` is a harmless superset here, kept for uniformity with
+// every other file in the series and for the day this fixture's heartbeat is
+// parameterised.
+inline constexpr auto kWindowMissSentinel = fixpp::core::error::dispatch_aborted;
+
 class SendPathTest : public ::testing::Test {
 protected:
     asio::io_context ioc;
@@ -207,18 +321,58 @@ protected:
     }
 
     // Open session (run ioc until open completes).
+    //
+    // Returns the sentinel on a miss rather than staying `void` like `feed` below,
+    // because it has a direct caller OUTSIDE `drive_to_active`
+    // (`Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsumed`). Both callers
+    // consume the result with a fatal `ASSERT_TRUE(...has_value())`, so a miss cannot
+    // be mistaken for a successful open.
     fixpp::core::expected_t<void> open_sync(Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "SendPathTest::open_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SendPathTest::open_sync";
+            return std::unexpected(kWindowMissSentinel);
+        }
         return fut.get();
     }
 
     // Feed an inbound frame to the session (run ioc).
+    //
+    // Stays `void` rather than adopting `open_sync`'s sentinel, and the reason is a
+    // property of its call graph rather than a preference: `feed` is reached ONLY from
+    // `drive_to_active`, whose `ASSERT_EQ(s.state(), fsm_state::Active)` on the line after
+    // the call fails the test when the feed did not land.
+    //
+    // ⚠️ That covers the VERDICT, not the CONTROL FLOW, and the difference is worth
+    // stating exactly. `drive_to_active` is itself `void`, so its fatal `ASSERT_*`
+    // returns from `drive_to_active` -- not from the TEST_F -- and no caller here
+    // checks `HasFatalFailure()`. A test whose drive failed therefore keeps running
+    // against a session that never reached Active. It cannot end up GREEN (the failure
+    // is already recorded), but it can produce further, noisier failures downstream.
+    //
+    // ⚠️ It is also a condition on TODAY'S callers, not an invariant of this function:
+    // a future DIRECT caller of `feed` would get `ADD_FAILURE` plus an unfed session
+    // and would have to check the state itself — or give this the `expected_t<void>`
+    // treatment `open_sync` has.
+    //
+    // ⚠️ There is also a residual LIFETIME condition, pre-existing and series-wide, not
+    // introduced here: if this drain ever reports a residual, `feed` still returns (it
+    // is `void`), and `drive_to_active`'s block-local `peer_logon` then dies while the
+    // suspended `on_inbound_frame` frame still holds a `std::span` into it -- a later
+    // pump in the test body can resume that frame over dead storage. This is the same
+    // condition `pump_until_ready.hpp`'s `⚠️ (gate-b/r2) SAFE ABOVE IS CONDITIONAL`
+    // paragraph documents, reached through a different later resumer: that paragraph's
+    // own exculpation ("this fixture has no clock and no transport") does not carry
+    // over -- this fixture HAS a clock, and the later resumer here is the test body's
+    // next pump, not a fixture destructor.
     void feed(Session& s, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "SendPathTest::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SendPathTest::feed";
+            return;
+        }
         (void)fut.get();
     }
 
@@ -265,8 +419,13 @@ TEST_F(SendPathTest, Fix44_Active_Send_IncrementsSeqnum_And_StampsFields) {
     auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "Fix44_Active_Send_IncrementsSeqnum_And_StampsFields/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Fix44_Active_Send_IncrementsSeqnum_And_StampsFields/send";
+        return;
+    }
     auto result = fut.get();
 
     // FR-001 step (d): result must be ok (no error on successful send).
@@ -331,8 +490,13 @@ TEST_F(SendPathTest, Fix42_Active_Send_CarriesNegotiatedBeginString) {
     auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "Fix42_Active_Send_CarriesNegotiatedBeginString/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Fix42_Active_Send_CarriesNegotiatedBeginString/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_TRUE(result.has_value()) << "Session::send must return ok";
@@ -387,8 +551,13 @@ TEST_F(SendPathTest, CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitte
     auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitted/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "CancelledTransport_ReturnsDefinedError_StoreAlreadyCommitted/send";
+        return;
+    }
     // RC#B: transport throw now surfaces as dispatch_aborted (not unconditional ok).
     (void)fut.get();
 
@@ -510,8 +679,13 @@ TEST_F(SendPathTest, Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsum
     auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsumed/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Send_NotInActive_ReturnsError_NoFrameEmitted_NoSeqnumConsumed/send";
+        return;
+    }
     auto result = fut.get();
 
     // F4: must return an error (not ok) when not in Active state.
@@ -619,8 +793,13 @@ TEST_F(SendPathTest, Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerm
     auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerminate/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Send_StoreThrowsOperationAborted_ReturnsDefinedError_NoTerminate/send";
+        return;
+    }
 
     // F5: must return a defined error (not std::terminate, not hang).
     // If the noexcept window is broken, fut.get() rethrows std::terminate-induced
@@ -653,8 +832,13 @@ TEST_F(SendPathTest, Send_ThrowFromStore_SessionReachesDisconnected) {
     auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "Send_ThrowFromStore_SessionReachesDisconnected/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Send_ThrowFromStore_SessionReachesDisconnected/send";
+        return;
+    }
     (void)fut.get();
 
     // F9: after a cancellation/abort from store, session must reach Disconnected.
@@ -697,16 +881,26 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
     {
         auto fut =
             asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums/send1");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums/send1";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "First send failed";
     }
     // Second send.
     {
         auto fut =
             asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums/send2");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums/send2";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "Second send failed";
     }
 
@@ -779,8 +973,13 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo) {
     {
         auto fut =
             asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo/send");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo/send";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "Session::send failed";
     }
 
@@ -817,16 +1016,26 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree) {
     {
         auto fut =
             asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree/send1");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree/send1";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "First send failed";
     }
     // Second send.
     {
         auto fut =
             asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree/send2");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree/send2";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "Second send failed";
     }
 
@@ -885,8 +1094,12 @@ TEST_F(SendPathTest, Send_TransportThrowsAfterStore_ReturnsDefinedError_StateDis
     auto payload = make_min_app_payload();
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "Send_TransportThrowsAfterStore/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Send_TransportThrowsAfterStore/send";
+        return;
+    }
     auto result = fut.get();
 
     // RC#B / F-03 bug: store_then_emit swallows transport throw and returns ok.
@@ -978,8 +1191,13 @@ TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_Reaches
 
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>{tr_frame}),
                               asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "AdminEmit_HeartbeatReply_SeqnumOverflow/inbound");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "AdminEmit_HeartbeatReply_SeqnumOverflow/inbound";
+        return;
+    }
     auto inbound_result = fut.get();
 
     // (a) on_inbound_frame must return an error — the session-fatal overflow
@@ -1033,9 +1251,15 @@ TEST_F(SendPathTest, Send_SeqnumOverflow_ReturnsError_ReachesDisconnected_NoTran
     mgr.set_counters_for_test(mgr.next_inbound_unsafe(), seqnum_max);
 
     auto payload = make_min_app_payload();
-    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    auto fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "Send_SeqnumOverflow_ReturnsError_ReachesDisconnected_NoTransmit/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Send_SeqnumOverflow_ReturnsError_ReachesDisconnected_NoTransmit/send";
+        return;
+    }
     auto send_r = fut.get();
 
     EXPECT_FALSE(send_r.has_value()) << "Session::send must fail when the outbound "
