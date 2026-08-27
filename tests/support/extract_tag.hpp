@@ -58,6 +58,23 @@ namespace fixpp::test_support {
 // `std::vector<std::byte>` converts implicitly, so callers holding a captured
 // frame can pass it directly.
 [[nodiscard]] inline std::string extract_tag(std::span<const std::byte> frame, std::uint32_t tag) {
+    // An empty span short-circuits rather than reaching the `std::string` ctor
+    // below with a null pointer. Stated precisely, because the first version of
+    // this comment overstated it and a reviewer was right to push back:
+    //
+    //   - `std::string(nullptr, 0)` is CONTESTED, not demonstrably UB. Measured on
+    //     this toolchain it constructs an empty string and emits NO diagnostic,
+    //     under `-fsanitize=address,undefined` as well as plain. So this guard is
+    //     defensive against a construct whose validity is arguable — it is not
+    //     closing a reproduced fault.
+    //   - None of the twelve copies this header replaces had the guard, and no
+    //     current caller passes an empty span. It is here because twelve call
+    //     sites now share this function and a future one might.
+    //
+    // The assertion in RejectsNonCanonicalAndOverflowCorpora pins the CONTRACT
+    // (empty span yields ""), which is worth pinning for a shared helper. It does
+    // NOT kill a mutant: removing this guard leaves that assertion passing, and
+    // that was verified by removing it. Do not cite it as evidence for the guard.
     if (frame.empty()) {
         return {};
     }

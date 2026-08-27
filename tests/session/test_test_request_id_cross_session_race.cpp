@@ -1171,14 +1171,16 @@ TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
                           35),
               "1");
 
-    // #320: the EMPTY-frame arm, which the hoisted helper added and none of the
-    // twelve file-local copies had. `std::string(ptr, 0)` is UB when `ptr` is null,
-    // and `std::span{}.data()` is null — so this is a guard against UB, not a
-    // convenience. Instrumented because an unexercised branch in a helper twelve
-    // call sites now share is exactly the shape this issue was filed about.
-    // Mutating the `frame.empty()` guard away makes this line UB rather than a
-    // clean failure, so it is proven by removing the guard under ASan, not by a
-    // value comparison alone.
+    // #320: the EMPTY-span CONTRACT for the hoisted helper — an empty frame yields
+    // "". Worth pinning because twelve call sites now share this function.
+    //
+    // ⚠️ THIS IS A CONTRACT ASSERTION, NOT A MUTATION-KILLING INSTRUMENT, and the
+    // distinction is measured rather than asserted: deleting the helper's
+    // `frame.empty()` guard leaves this line PASSING (verified by deleting it and
+    // re-running). `std::string(nullptr, 0)` builds an empty string silently on
+    // this toolchain even under -fsanitize=address,undefined, so there is no fault
+    // for this assertion to observe. An earlier version of this comment claimed it
+    // proved the guard; it does not. Do not cite it as evidence for the guard.
     EXPECT_EQ(extract_tag(std::span<const std::byte>{}, 112), "");
 
     // F3a frame start: the boundary rule also ACCEPTS a hit at byte 0 (`pos != 0`
