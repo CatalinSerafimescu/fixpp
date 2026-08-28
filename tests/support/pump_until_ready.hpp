@@ -136,13 +136,12 @@ inline constexpr const char* kWindowMiss =
 // discriminate. ⚠️ They then RE-CONVERGE: everything after that clause up to the
 // divergent tail is `kDrainResidualCause` below, shared by both. "Diverge
 // immediately" describes the next few words, not the rest of the message.
-// A witness must therefore match past the stem -- either the divergent clause, or
-// a span that STRADDLES from the stem into the shared cause below, which is what the
-// witnesses in test_quiesce_on_exit_residual.cpp happen to do (see
-// kDrainResidualCause's own comment for how to re-derive that, and note it is a
-// property of how those matchers are written, not a requirement). Matching only
-// WITHIN the shared cause, without also covering the stem or the divergence, is no
-// more discriminating than matching the stem alone.
+// What follows from that is only this: matching the shared stem ALONE cannot
+// discriminate, and neither can matching only WITHIN the shared cause. Anything
+// further -- which spans the existing witnesses actually use, and how many there are
+// of each shape -- is a measurement, not a fact to cache here; see
+// kDrainResidualCause's comment below for the procedure. An earlier version of this
+// sentence enumerated the shapes and got the enumeration wrong.
 //
 // (#322) And past the DIVERGENCE too, where the caller is
 // `~quiesce_on_exit`: it delegates to `cancel_and_drain_or_report`, so guard and
@@ -170,23 +169,24 @@ inline constexpr const char* kDrainResidual =
 // remove, in a stem this file already records above as having drifted on punctuation at
 // birth once already. Not adopted for that reason; see below for what is actually bound.
 //
-// The bound region is this constant's OPENING CLAUSE, "so a coroutine frame". It is bound
-// because `drain_or_report`'s only divergence from `cancel_and_drain_or_report` is the comma
-// immediately following the stem above, leaving a discriminating matcher almost nothing to
-// anchor on but that seam; the existing witnesses in
-// test_quiesce_on_exit_residual.cpp carry past it into this constant. ⚠️ The straddle is not
-// FORCED -- `"teardown drain,"` discriminates perfectly and binds zero bytes of this constant;
-// none of the written matchers happens to stop there. Past the opening clause, this comment
-// records no cached answer: re-derive on demand.
+// ⚠️ BYTES IN THIS CONSTANT ARE WITNESS-BOUND. That is the whole claim, and it is
+// deliberately the whole claim: this comment records NO cached answer about WHICH bytes,
+// which matchers, or how many. Four rounds of Gate B review each found a different such
+// answer to be false, every one of them written by the round that had just deleted the
+// previous wrong one. A procedure may be written down; a result may not.
 //
-// To re-derive whether any witness binds bytes in this constant, mutate the bytes you care
-// about, rebuild `session_pure_tests`, run the WHOLE binary with no `--gtest_filter`, and
-// confirm the mutated bytes are actually present in the built binary before believing a green
-// result, for example with `strings build/linux-clang-asan/bin/session_pure_tests | grep`.
+// ⚠️ THE STRADDLE IS NOT FORCED -- a design observation, not a coverage result, which is
+// why it is kept: `"teardown drain,"` discriminates the two drains perfectly and binds
+// zero bytes of this constant. Nothing about the message shapes REQUIRES a matcher to
+// carry into this text; whether any does is a property of how the matchers happen to be
+// written, and is therefore a thing to measure, not to remember.
 //
-// Contrast the divergent TAIL below, whose witnesses are re-derived the same way. The
-// asymmetry survives, narrowed: the opening clause here is pinned by straddle, and
-// everything else in this constant is free to reword.
+// To measure it: mutate the bytes you care about, rebuild `session_pure_tests`, run the
+// WHOLE binary with no `--gtest_filter`, and -- before believing a green -- confirm the
+// mutated bytes are actually in the built binary, e.g.
+// `strings build/linux-clang-asan/bin/session_pure_tests | grep`. That last step is not
+// optional: a stale binary is this procedure's only failure mode, and it fails toward
+// clean. The same procedure answers the same question for the divergent TAIL below.
 //
 // Composition, in order: kDrainResidual + <the drain's own divergent clause> +
 // kDrainResidualCause + <optional divergent tail> + "Site: " + site.
