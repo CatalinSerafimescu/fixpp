@@ -3,13 +3,9 @@
 //
 // Gate B round 1, #326: `wait_until_observed` did not honor its advertised
 // budget when `slice` outlives the remaining time to the deadline -- it slept
-// the FULL slice regardless, so `budget=1ms, slice=1s` returned ~1s late.
+// the FULL slice regardless.
 // `pump_until` in pump_until_ready.hpp already clamps its own sleep to
 // `min(slice, deadline - now)`; `wait_until_observed` did not.
-//
-// One focused test, not a suite (Gate B waived the seven-case ask: no other
-// tests/support/*.hpp in this repo carries a dedicated unit test, and this is
-// the one path the clamp fix touches).
 
 #include "support/wait_until.hpp"
 
