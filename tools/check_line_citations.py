@@ -194,8 +194,8 @@ def census(root, json_out, quiet=False):
                 tl = read_lines(root, cands[0], cache)
                 rec["tp"] = cands[0]
                 rec["tn"] = len(tl)
-                rec["inrange"] = num <= len(tl)
-                rec["at"] = tl[num - 1].strip() if num <= len(tl) else "<OUT OF RANGE>"
+                rec["inrange"] = 1 <= num <= len(tl)
+                rec["at"] = tl[num - 1].strip() if rec["inrange"] else "<OUT OF RANGE>"
                 resolved.append(rec)
 
     oor = [r for r in resolved if not r["inrange"]]
@@ -329,25 +329,33 @@ def self_test():
         os.makedirs(os.path.join(d, "include"))
         # 3 lines long, so :99 cannot resolve and :2 can.
         open(os.path.join(d, "include", "target.hpp"), "w").write("a\nb\nc\n")
+        # 0 lines long: any citation into it is out of range, including :0.
+        open(os.path.join(d, "include", "empty.hpp"), "w").write("")
         open(os.path.join(d, "src", "citer.cpp"), "w").write(
             "// rotted past EOF: target.hpp:99\n"
             "// resolves fine: target.hpp:2\n"
             "// foreign: DataDictionary.cpp:271 via QuickFIX\n"
-            "// exempted: target.hpp:99 citation-ok\n")
+            "// exempted: target.hpp:99 citation-ok\n"
+            "// line zero is not a line: target.hpp:0\n"
+            "// empty target file: empty.hpp:1\n")
         for a in (["init", "-q"], ["add", "-A"]):
             subprocess.run(["git"] + a, cwd=d, capture_output=True, check=True)
         r = census(d, None, quiet=True)
         checks = [
-            ("out-of-range found",   len(r["oor"]) == 1),
-            ("in-range not flagged", len(r["resolved"]) == 2),
-            ("foreign excluded",     len(r["foreign"]) == 1),
-            ("citation-ok bucketed", len(r["exempt"]) == 1),
+            ("out-of-range found",     len(r["oor"]) == 3),
+            ("in-range not flagged",   len(r["resolved"]) == 4),
+            ("foreign excluded",       len(r["foreign"]) == 1),
+            ("citation-ok bucketed",   len(r["exempt"]) == 1),
+            (":0 is out of range",     any(x["target"] == "target.hpp" and x["n"] == 0
+                                            for x in r["oor"])),
+            ("empty target is out of range",
+             any(x["target"] == "empty.hpp" and x["n"] == 1 for x in r["oor"])),
         ]
         for label, ok in checks:
             bad += not ok
             print(f"  {'ok  ' if ok else 'FAIL'} {label}")
 
-    total = len(FORM_CASES) + 4
+    total = len(FORM_CASES) + 6
     print(f"\nself-test: {total - bad}/{total} pass")
     if bad:
         print("SELF-TEST FAILED -- the instrument does not behave as documented.")
