@@ -84,6 +84,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -143,8 +144,9 @@ template <class Ready>
     const auto deadline = std::chrono::steady_clock::now() + budget;
     for (;;) {
         if (ready()) return true;
-        if (std::chrono::steady_clock::now() >= deadline) return false;
-        std::this_thread::sleep_for(slice);
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) return false;
+        std::this_thread::sleep_for(std::min(slice, deadline - now));
     }
 }
 

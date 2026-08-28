@@ -1023,6 +1023,21 @@ set_tests_properties(engine_session_id PROPERTIES
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;foundational;session_id")
 
+# ── Gate B #326 — wait_until_observed's slice/deadline clamp ────────────────
+# One focused test, not a suite: no other tests/support/*.hpp in this repo
+# carries a dedicated unit test. CTest filter: ctest -R 'wait_until_clamp'
+add_executable(wait_until_clamp_test
+  wait_until_clamp_test.cpp
+)
+target_link_libraries(wait_until_clamp_test PRIVATE
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(wait_until_clamp_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME wait_until_clamp COMMAND wait_until_clamp_test)
+
 # ── 015-runtime-engine Phase 2 (T007) — Engine harness compile smoke ─────────
 # Proves engine_loopback_harness.hpp compiles and the Engine ctor/stop() shape
 # is correct. Behavioral coverage is provided by US1/US2/US3 live tests.
