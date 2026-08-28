@@ -55,6 +55,31 @@ void open_session(Session& s, asio::thread_pool& pool) {
     ASSERT_TRUE(fut.get().has_value());
 }
 
+// A precise sub-millisecond window, for widening the race an unserialised
+// implementation would lose.
+//
+// NOT `sleep_for`. A sleep shorter than the system timer granularity does not
+// sleep for the requested duration -- it sleeps for the granularity. On Windows
+// that is ~15.6 ms by default, so a LOOP of N such sleeps costs N x granularity
+// rather than N x the requested window, and the callbacks below are serialized
+// on one strand, so the cost is paid end to end. That is a property of the
+// platform's timer, not of anything this test asserts, and it made the bounded
+// drain below miss its budget on the MSVC lane while the code under test was
+// behaving correctly.
+//
+// A spin costs the requested duration on every platform. Only one strand runs
+// at a time here, so exactly one thread spins.
+//
+// Re-derive rather than trust a number: compile a loop of
+// `sleep_for(microseconds{5})` and divide the elapsed time by the iteration
+// count, on the platform in question.
+void busy_window(std::chrono::steady_clock::duration d) {
+    const auto until = std::chrono::steady_clock::now() + d;
+    while (std::chrono::steady_clock::now() < until) {
+        // spin
+    }
+}
+
 TEST(SeamStrandSerialisation, NoOverlapWithinSessionUnderMultiThreadPool) {
     asio::thread_pool pool{8};
     EngineConfig engine = make_engine(pool.get_executor());
@@ -75,7 +100,7 @@ TEST(SeamStrandSerialisation, NoOverlapWithinSessionUnderMultiThreadPool) {
                 s.dispatch_app_callback([&log, &done] {
                     observed_callback span{log, fsm_label::new_order_single};
                     // small window so an unserialised impl would overlap
-                    std::this_thread::sleep_for(std::chrono::microseconds{5});
+                    busy_window(std::chrono::microseconds{5});
                     done.fetch_add(1, std::memory_order_relaxed);
                 });
             }
@@ -120,7 +145,7 @@ TEST(SeamStrandSerialisation, CrossSessionConcurrentSamEngineExecutor) {
         a.dispatch_app_callback([&] {
             observed_callback span{la, fsm_label::execution_report};
             a_inside.store(true, std::memory_order_release);
-            std::this_thread::sleep_for(std::chrono::microseconds{10});
+            busy_window(std::chrono::microseconds{10});
             a_inside.store(false, std::memory_order_release);
             done.fetch_add(1, std::memory_order_relaxed);
         });
