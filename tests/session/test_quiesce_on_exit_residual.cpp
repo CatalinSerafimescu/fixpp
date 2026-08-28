@@ -526,9 +526,12 @@ struct CallOnDestruct {
 
 }  // namespace
 
-// `~quiesce_on_exit`'s site is hardcoded "quiesce_on_exit" (the site argument
-// passed to its `pump_or_report_throw` call) -- already distinct from the two
-// free functions' sites below, so no parameter is introduced for it.
+// `~quiesce_on_exit`'s site is hardcoded "quiesce_on_exit" -- already distinct
+// from the two free functions' sites below, so no parameter is introduced for it.
+// (#322) It is the site argument of the destructor's `cancel_and_drain_or_report`
+// call, which forwards it to `pump_or_report_throw`. This used to say the
+// destructor passed it to `pump_or_report_throw` directly; that stopped being
+// true when the guard began delegating, and the string is unchanged either way.
 TEST(QuiesceOnExitResidualWitness, ReportsWhenAHandlerThrows) {
     asio::io_context ioc;
     auto clock = make_mock_clock(ioc);

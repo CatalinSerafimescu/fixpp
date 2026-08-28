@@ -133,7 +133,13 @@ inline constexpr const char* kWindowMiss =
 // pass whichever helper reported. `drain_or_report` continues ", so a coroutine";
 // `cancel_and_drain_or_report` continues " even with clock sleeps released on
 // every slice, so a coroutine". A witness must match past the stem to
-// discriminate. (#322) And past the DIVERGENCE too, where the caller is
+// discriminate. ⚠️ They then RE-CONVERGE: everything after that clause up to the
+// divergent tail is `kDrainResidualCause` below, shared by both. "Diverge
+// immediately" describes the next few words, not the rest of the message.
+// A witness must therefore match the DIVERGENT clause specifically -- matching
+// anywhere in the shared cause is no more discriminating than matching the stem.
+//
+// (#322) And past the DIVERGENCE too, where the caller is
 // `~quiesce_on_exit`: it delegates to `cancel_and_drain_or_report`, so guard and
 // primitive now compose byte-identical text apart from the trailing `site` -- a
 // witness for one of them must bind that site. (The header already publishes kWindowMiss /
@@ -141,6 +147,34 @@ inline constexpr const char* kWindowMiss =
 // and had already drifted on punctuation at birth.)
 inline constexpr const char* kDrainResidual =
     "#289: the io_context did not run out of work within the teardown drain";
+
+// (#322) The two drains RE-CONVERGE after their divergent clause, and the stem
+// comment above used to imply they never do. This is the shared middle: 251
+// bytes that were byte-identical in both `ADD_FAILURE`s. Hoisted for exactly the
+// reason `kDrainResidual` was -- a fragment duplicated in two places drifts, and
+// this one is four times longer than the stem that had already drifted on
+// punctuation at birth.
+//
+// Safe to hoist because it is PRODUCER-side only: no matcher anywhere under
+// tests/ binds any part of it. Derived AND demonstrated, because a grep proves
+// only that a search found nothing:
+//   - `git grep "suspended and will be destroyed\|observes the residual\|disjunctive"
+//     -- tests` returns nothing outside this header;
+//   - and rewording inside this constant ("cause" -> "reason") leaves all 29
+//     cells in test_quiesce_on_exit_residual.cpp GREEN, which is the same claim
+//     stated as an experiment rather than as an absence.
+// So this text is deliberately UNWITNESSED and freely rewordable. Contrast the
+// divergent TAIL below, which witnesses DO bind -- rewording that reds cells --
+// and which must therefore stay spelled out at its producer. The asymmetry is
+// the point: discriminating fragments are pinned, explanatory prose is not.
+//
+// Composition, in order: kDrainResidual + <the drain's own divergent clause> +
+// kDrainResidualCause + <optional divergent tail> + "Site: " + site.
+inline constexpr const char* kDrainResidualCause =
+    "so a coroutine frame is probably still suspended and will be destroyed while "
+    "referencing objects that are about to die. This observes the residual, not its "
+    "cause (stopped() is disjunctive -- see quiesce_on_exit's comment on the "
+    "disjunction, below). ";
 
 // Budget for a teardown drain. Deliberately the same value as
 // `quiesce_on_exit`'s default below -- and since #322 that guard DELEGATES to
@@ -165,12 +199,22 @@ inline constexpr const char* kDrainThrew =
 // try/catch would re-arm the same "fixed one of two identical shapes" class this
 // header keeps paying for.
 //
-// (#322) THE DRAIN CORE NOW HAS TWO COPIES IN THIS HEADER, NOT THREE.
-// `~quiesce_on_exit` delegates to `cancel_and_drain_or_report` instead of
-// carrying its own `restart`/`run_for`/`poll_one`/`stopped`/`ADD_FAILURE`. That
-// count is not tidiness: #321 shipped the third copy with the #305 deadline
-// artefact reintroduced, and it was caught only because the two siblings carried
-// a zero-budget witness the third lacked.
+// (#322) `~quiesce_on_exit` delegates to `cancel_and_drain_or_report` instead of
+// carrying its own `restart`/`run_for`/`poll_one`/`stopped`/`ADD_FAILURE`. #321
+// shipped that third copy with the #305 deadline artefact reintroduced, caught
+// only because the two siblings carried a zero-budget witness it lacked.
+//
+// ⚠️ WHAT REMAINS IS NOT A COUNT TO KEEP DRIVING DOWN, and stating it as one
+// ("two copies, not three") invites the next reader to try for one. The
+// CONDITION: there is one drain per DRAIN ALGORITHM. `drain_or_report` is a
+// single full-budget `run_for`; `cancel_and_drain_or_report` is a 1 ms-sliced
+// loop that re-cancels sleeps every pass. Neither is a copy of the other -- they
+// share only a `try` / `pump_or_report_throw` / `if (!ioc.stopped())` skeleton
+// whose exception half is ALREADY factored out into this function. Folding them
+// would impose the sliced loop's per-call floor on `drain_or_report`'s callers,
+// which is the objection `run_window_then_ready` above already accepted against
+// adopting `pump_until_ready`'s floor. A third drain is warranted only by a third
+// algorithm, and a duplicated one never is.
 //
 // WHY A DRAIN NEEDS THIS AT ALL. Pumping dispatches arbitrary ready handlers, and
 // a handler may throw. `~quiesce_on_exit` has no exception specification and no
@@ -404,12 +448,7 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
         }
         if (!ioc.stopped()) {
             ADD_FAILURE()
-                << kDrainResidual
-                << ", so a coroutine frame is probably still suspended and will be "
-                   "destroyed while referencing objects that are about to die. This "
-                   "observes the residual, not its cause (stopped() is disjunctive -- see "
-                   "quiesce_on_exit's comment on the disjunction, below). Site: "
-                << site;
+                << kDrainResidual << ", " << kDrainResidualCause << "Site: " << site;
         }
     } catch (...) {
         // (gate-b/r1) Nothing may escape a teardown frame -- see pump_or_report_throw's
@@ -597,23 +636,21 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
         // identical to the two sibling drains, which both end in `if (!ioc.stopped())`.
         if (!ioc.stopped()) {
             ADD_FAILURE()
-                << kDrainResidual
-                << " even with clock sleeps released on every slice, so a coroutine "
-                   "frame is probably still suspended and will be destroyed while "
-                   "referencing objects that are about to die. This observes the residual, "
-                   "not its cause (stopped() is disjunctive -- see quiesce_on_exit's "
-                   "comment on the disjunction, below). A transport parked in "
-                   "async_write/async_read_some is a residual this drain clears only when "
-                   // ⚠️ THIS TAIL IS BOUND BY WITNESSES IN ANOTHER FILE. The three
-                   // `quiesce_on_exit` residual matchers in
-                   // tests/session/test_quiesce_on_exit_residual.cpp bind
-                   // "warning above. Site: quiesce_on_exit" -- deliberately spelled out
-                   // rather than sharing a constant with this producer, so a reworded
-                   // message REDS them instead of silently agreeing (see that file's
-                   // note on why matchers do not bind published constants). Reword the
-                   // fragment below and expect three failures there; that is the cell
-                   // working, not a defect.
-                   "a transport was passed to it; see the transport warning above. Site: "
+                << kDrainResidual << " even with clock sleeps released on every slice, "
+                << kDrainResidualCause
+                // ⚠️ THIS TAIL IS BOUND BY WITNESSES IN ANOTHER FILE, which is why it
+                // stays spelled out here while the shared cause above is a constant.
+                // EVERY `quiesce_on_exit` residual matcher in
+                // tests/session/test_quiesce_on_exit_residual.cpp binds
+                // "warning above. Site: quiesce_on_exit". Binding a producer-side
+                // CONSTANT instead would make a reworded message agree with its own
+                // matcher silently; spelling it out means a reword REDS those cells.
+                // So: reword the fragment below and expect them to fail. That is the
+                // coupling working as intended, not a defect -- re-derive which cells
+                // with `git grep -n "warning above. Site: quiesce_on_exit" -- tests`.
+                << "A transport parked in async_write/async_read_some is a residual this "
+                   "drain clears only when a transport was passed to it; see the transport "
+                   "warning above. Site: "
                 << site;
         }
     } catch (...) {
