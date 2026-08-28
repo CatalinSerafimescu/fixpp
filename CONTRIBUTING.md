@@ -73,8 +73,8 @@ pre-commit run --all-files
 
 ## The line-number citation gate (issue #310)
 
-`check-line-citations` blocks a commit that ADDS a line-number citation to a
-comment — `file.cpp:1258`, `at line 2234`, or a bare `(:64)`. <!-- citation-ok: worked example, not a real citation -->
+`check-line-citations` blocks a commit that ADDS a line-number citation —
+`file.cpp:1258`, `at line 2234`, or a bare `(:64)`. <!-- citation-ok: worked example, not a real citation -->
 
 A line number is a claim about a file that keeps moving. Nobody has to touch the
 citing file for it to become false: the target drifts and the citation rots in
