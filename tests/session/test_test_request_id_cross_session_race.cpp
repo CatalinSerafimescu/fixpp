@@ -693,10 +693,14 @@ struct counting_io_context : asio::io_context {
 
 // ── (#303) Teardown guard: quiesce, or RELEASE the fixtures ───────────────────
 //
-// Replaces `quiesce_on_exit` at this one site. The shared guard only OBSERVES
-// residual work and says so itself; on the budget-exhausted path it returns, the
-// fixtures are destroyed, and only afterwards does `~io_context` destroy coroutine
-// frames that borrowed them. This guard closes that by making the same observation
+// Replaces `quiesce_on_exit` at this one site. (#322) The premise here used to be
+// "the shared guard only OBSERVES residual work and says so itself", citing a
+// header sentence that has since been deleted -- the guard now carries forcing
+// levers (a per-slice `cancel_sleeps()`, and a transport close when one is set)
+// and its comment says so. What it still does NOT have, which is the whole reason
+// this seam exists, is a RELEASE branch: on the budget-exhausted path it returns,
+// the fixtures are destroyed, and only afterwards does `~io_context` destroy
+// coroutine frames that borrowed them. This guard closes that by making the same observation
 // DECIDE something: if the context did not quiesce, the fixtures are deliberately
 // released (leaked).
 //
@@ -778,13 +782,21 @@ struct counting_io_context : asio::io_context {
 // q(...)`), a declaration split across lines, and `auto`/alias-typed forms, so a
 // future absence of those forms is not itself evidence none exist.
 //
-// And the forcing-lever claim is false for MOST of the population: `.transport = `
+// And the TRANSPORT lever is absent for most of the population: `.transport = `
 // is set only in `test_live_outbound_serialized.cpp` — `logout_exchange_test.cpp`
 // sets it nowhere. So `logout_exchange_test.cpp`'s sites each declare
 // `Session sess(engine, cfg);` followed immediately by
 // `quiesce_on_exit quiesce{ioc, *clock};` with no transport attached — which is
-// exactly this file's shape, with exactly this file's absence of a way to force
-// quiescence.
+// exactly this file's shape.
+//
+// ⚠️ (#322) NARROWED FROM "no way to force quiescence", WHICH IS NOW FALSE. Every
+// guard, two-argument included, forces one thing: it delegates to
+// `cancel_and_drain_or_report`, whose alternating cancel-then-drain loop releases
+// a clock sleep armed DURING the drain. What a transport-less site lacks is only
+// the lever for a coroutine parked in async_write/async_read_some, which no
+// amount of sleep-cancelling reaches. The distinction matters here because this
+// paragraph is a POPULATION argument: the old wording made every site it
+// enumerates sound leverless.
 //
 // Stated plainly, because the understated version is the one that keeps getting
 // written: this is NOT a lone site. What was actually measured (below) is the

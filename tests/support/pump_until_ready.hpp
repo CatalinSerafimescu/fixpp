@@ -177,11 +177,11 @@ inline constexpr const char* kDrainResidualCause =
     "disjunction, below). ";
 
 // Budget for a teardown drain. Deliberately the same value as
-// `quiesce_on_exit`'s default below -- and since #322 that guard DELEGATES to
-// `cancel_and_drain_or_report`, so a two-argument `{ioc, clock}` guard and a
-// defaulted-budget call to the primitive run the SAME loop over the SAME 5 s.
-// Not the same call, though: the guard also forwards its `transport`, so the two
-// diverge whenever one is set.
+// `quiesce_on_exit`'s default below, and since #322 that guard DELEGATES to
+// `cancel_and_drain_or_report` -- so where no transport is set, a two-argument
+// `{ioc, clock}` guard and a defaulted-budget call to the primitive are the same
+// loop over the same 5 s. Where one IS set the guard forwards it and the two
+// diverge.
 inline constexpr auto kQuiesceBudget = std::chrono::seconds{5};
 
 // Failure text for a teardown drain that a handler threw out of (#308). Stream
@@ -731,8 +731,12 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
 // `stopped()==false` here really does mean session/coroutine work is still
 // outstanding.
 //
-// ⚠️ (#305) THAT LAST SENTENCE WAS AN OVER-CLAIM, AND THE PROBE BELOW IS WHAT
-// MAKES IT TRUE. The work-guard census above is sound as far as it goes, but it
+// ⚠️ (#305) THAT LAST SENTENCE WAS AN OVER-CLAIM, AND THE PROBE IS WHAT MAKES IT
+// TRUE. (#322) The probe is ABOVE now, in `cancel_and_drain_or_report`; this
+// headline still said "below" after the body was repointed, which is the
+// fixed-one-of-two-identical-shapes class this very paragraph memorialises.
+//
+// The work-guard census above is sound as far as it goes, but it
 // reasons only about who can hold work OPEN — it never asks whether the work
 // count was CONSULTED. `run_for` can return without consulting it at all (see the
 // probe in `cancel_and_drain_or_report`), and then `stopped()==false` means "the
@@ -769,8 +773,10 @@ struct quiesce_on_exit {
     fixpp::core::Clock& clock;
     // Defaulted to preserve every existing two-argument {ioc, clock}
     // aggregate initialisation's current 5s behaviour. A caller with a
-    // deterministic reason to bound this tighter (e.g. a test whose only
-    // purpose is to trigger the branch below) may supply a shorter budget.
+    // deterministic reason to bound this tighter (e.g. a test whose only purpose
+    // is to trigger the residual report) may supply a shorter budget. (#322) That
+    // report is no longer "the branch below" -- it is `cancel_and_drain_or_report`'s
+    // `ADD_FAILURE`, which this guard reaches by delegating.
     std::chrono::steady_clock::duration budget = kQuiesceBudget;
     // A live transport under the caller's control, if any (gate-b/r1 P1-1).
     // Cancelling clock sleeps is not sufficient to unstick a coroutine parked
