@@ -625,12 +625,14 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
                     // for `ioc.restart()`, `run_for()`, `poll_one()` and every handler
                     // they dispatch, none of which is `noexcept` -- and that holds no
                     // matter where `close()` sits. `close()` and `cancel_sleeps()` are
-                    // *declared* `virtual ... noexcept = 0`, so a throwing override is
-                    // ill-formed; `noexcept` is a property of the CALLEE, so a
-                    // violation calls `std::terminate` at THAT function's own boundary
-                    // regardless of which frame calls it -- moving `close()` outside
-                    // this lambda changes nothing today. It stays inside anyway, per
-                    // #308's refusal and #322's requirement: containment is already
+                    // *declared* `virtual ... noexcept = 0`: an override declared with a
+                    // LOOSER exception specification is ill-formed, so every override is
+                    // itself `noexcept`. That is a signature-time guarantee, not a runtime
+                    // one -- `noexcept` is a property of the CALLEE, so an override whose
+                    // BODY throws is still well-formed, and calls `std::terminate` at THAT
+                    // function's own boundary regardless of which frame calls it -- moving
+                    // `close()` outside this lambda changes nothing today. It stays inside
+                    // anyway, per #308's refusal and #322's requirement: containment is already
                     // correct if either interface is ever relaxed to
                     // potentially-throwing, and it costs nothing to have it now.
                     //
@@ -809,11 +811,17 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
 // zero times, so 19 drains totalling 19 slices means every drain currently in
 // the suites quiesces inside a single `kPumpSlice`. That is a CONDITION, not a
 // property of the loop -- a site whose work takes longer than `kPumpSlice` to
-// quiesce takes ⌈work / kPumpSlice⌉ slices, and even at one slice this is NOT
-// the same op sequence the old single-`run_for` destructor did plus one `now()`:
-// the per-slice delta is `cancel_sleeps()` + `ioc.restart()` + two
-// `steady_clock::now()` + a `min` + `poll_one()`, and `run_for(5s)` became
-// `run_for(<=1ms)`.
+// quiesce takes roughly proportionally more slices, not an exact ⌈work / kPumpSlice⌉:
+// per-slice overhead (measured above at ~18-24 us per pass)
+// and the trailing `poll_one()` both affect which slice actually completes the
+// work, so the count is an approximation, not arithmetic.
+//
+// And even at ONE slice this is NOT the same op sequence the old single-`run_for`
+// destructor did: `cancel_sleeps()`, `ioc.restart()` and `poll_one()` were each
+// ALREADY performed once by the old destructor -- they are not new at one slice,
+// only REPEATED by every additional one. What one slice genuinely adds over the
+// old destructor is two `steady_clock::now()`, a `std::min`, and a `stopped()` +
+// deadline comparison -- plus `run_for(5s)` becoming `run_for(<=1ms)`.
 //
 // This is a DATED, SCOPED MEASUREMENT, not a property of the loop: the 19/19
 // count above and the 83-slice figure below came from a manual debugger session
@@ -925,8 +933,10 @@ struct quiesce_on_exit {
     // ⚠️ IT MUST STAY ONE CALL. "Close the transport, then call the primitive"
     // would put `transport->close()` back in THIS frame -- and that changes
     // nothing today either way: `close()` and `cancel_sleeps()` are *declared*
-    // `virtual ... noexcept = 0`, so a throwing override is ill-formed, and
-    // `noexcept` is a property of the CALLEE -- a violation calls
+    // `virtual ... noexcept = 0`: an override declared with a LOOSER exception
+    // specification is ill-formed, so every override is itself `noexcept`. That is
+    // a signature-time guarantee, not a runtime one -- `noexcept` is a property of
+    // the CALLEE, so an override whose BODY throws is still well-formed, and calls
     // `std::terminate` at THAT function's own boundary whether it is called
     // from here or from inside the primitive's lambda (see the primitive's own
     // ⚠️ THE CLOSE IS INSIDE THE GUARD paragraph). It stays inside the
