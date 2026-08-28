@@ -377,7 +377,73 @@ def self_test():
             bad += not ok
             print(f"  {'ok  ' if ok else 'FAIL'} {label}")
 
-    total = len(FORM_CASES) + 6
+    print("\ngate() via --staged and --range on a throwaway repo -- the ENFORCEMENT path:")
+    gate_checks = 0
+    with tempfile.TemporaryDirectory() as d:
+        subprocess.run(["git", "init", "-q"], cwd=d, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=d, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=d, capture_output=True, check=True)
+        os.makedirs(os.path.join(d, "tests"))
+        sample = os.path.join(d, "tests", "sample.cpp")
+        open(sample, "w").write("// baseline, no citations\n")
+        subprocess.run(["git", "add", "-A"], cwd=d, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=d, capture_output=True, check=True)
+
+        class Args:
+            def __init__(self, staged=False, range=None):
+                self.staged = staged
+                self.range = range
+
+        positives = (
+            "// one per form, self-citing this file:\n"
+            "// see sample.cpp:1\n"                 # A -- resolves in-tree
+            "// silent-drop at line 2234\n"          # B
+            "// returns the status error (:532)\n"  # C
+        )
+
+        # --staged: dirty the index, gate() must fire; clean it, gate() must not.
+        open(sample, "a").write(positives)
+        subprocess.run(["git", "add", "-A"], cwd=d, capture_output=True, check=True)
+        gate_checks += 1
+        ok = gate(d, Args(staged=True)) == 1
+        bad += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'} --staged fires on a staged A/B/C positive")
+
+        subprocess.run(["git", "reset", "-q", "--hard", "HEAD"], cwd=d, capture_output=True, check=True)
+        gate_checks += 1
+        ok = gate(d, Args(staged=True)) == 0
+        bad += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'} --staged is clean once the positive is gone")
+
+        # --range: same shape across a commit range instead of the index.
+        open(sample, "a").write(positives)
+        subprocess.run(["git", "add", "-A"], cwd=d, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "add citations"], cwd=d, capture_output=True, check=True)
+        gate_checks += 1
+        ok = gate(d, Args(range="HEAD~1..HEAD")) == 1
+        bad += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'} --range fires on a committed A/B/C positive")
+
+        open(sample, "w").write("// baseline, no citations\n")
+        subprocess.run(["git", "add", "-A"], cwd=d, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "remove citations"], cwd=d, capture_output=True, check=True)
+        gate_checks += 1
+        ok = gate(d, Args(range="HEAD~1..HEAD")) == 0
+        bad += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'} --range is clean once the positive is removed")
+
+        # An invalid ref must RAISE, not report a clean tree -- a swallowed git
+        # failure here would make the gate pass on a broken invocation.
+        gate_checks += 1
+        try:
+            gate(d, Args(range="not-a-real-ref..HEAD"))
+            ok = False
+        except SystemExit:
+            ok = True
+        bad += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'} an invalid --range raises rather than reporting clean")
+
+    total = len(FORM_CASES) + 6 + gate_checks
     print(f"\nself-test: {total - bad}/{total} pass")
     if bad:
         print("SELF-TEST FAILED -- the instrument does not behave as documented.")

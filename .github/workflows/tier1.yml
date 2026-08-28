@@ -2082,6 +2082,28 @@ jobs:
       - name: "Regression pin — run_for/get pump census (#289)"
         run: bash ci/test-pump-census.sh
 
+      # Gate B round 1 (#326) found this checker had NO CI-visible signal at
+      # all: the gate itself only runs as a local pre-commit hook (nothing in
+      # .github/ invokes pre-commit), and `gate()` explicitly skips its own
+      # file (`if path == SELF: continue`). A commit that broke every regex
+      # in the checker would pass its own hook and nothing in CI would ever
+      # notice. This step is the fix -- it runs unconditionally on every PR,
+      # unlike the checker's own gate, which is behind a hook a developer must
+      # have installed. Buildless -- no compiler, no ctest, python3 only.
+      - name: "Regression pin — line-citation checker self-test (#310, #326)"
+        run: python3 tools/check_line_citations.py --self-test
+
+      # Gate B round 1 (#326) found this checker had NO CI-visible signal at
+      # all: the gate itself only runs as a local pre-commit hook (nothing in
+      # .github/ invokes pre-commit), and `gate()` explicitly skips its own
+      # file (`if path == SELF: continue`). A commit that broke every regex
+      # in the checker would pass its own hook and nothing in CI would ever
+      # notice. This step is the fix -- it runs unconditionally on every PR,
+      # unlike the checker's own gate, which is behind a hook a developer must
+      # have installed. Buildless -- no compiler, no ctest, python3 only.
+      - name: "Regression pin — line-citation checker self-test (#310, #326)"
+        run: python3 tools/check_line_citations.py --self-test
+
   check-layers:
     name: check-layers
     runs-on: ubuntu-24.04
