@@ -101,10 +101,6 @@ namespace fixpp::test_support {
 //       that quietly slows a wait is a regression nobody would ever notice;
 //   (b) it matches `kPumpSlice`, so a reader carries one number, not two.
 //
-// Unlike `kPumpSlice` this is NOT a cost floor. `run_for` on a context with
-// outstanding work burns its whole slice however fast the work is; a sleeping
-// thread that gets woken does not. Here the slice bounds the OVERSHOOT past
-// the moment the predicate became true (expected slice/2 on success).
 inline constexpr auto kWaitSlice = std::chrono::milliseconds{1};
 
 // Wait until `ready()` is true, or `budget` elapses. Returns whether it became
