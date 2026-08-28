@@ -137,10 +137,12 @@ inline constexpr const char* kWindowMiss =
 // divergent tail is `kDrainResidualCause` below, shared by both. "Diverge
 // immediately" describes the next few words, not the rest of the message.
 // A witness must therefore match past the stem -- either the divergent clause, or
-// a span that STRADDLES from the stem into the shared cause below (as all four
-// existing witnesses in test_quiesce_on_exit_residual.cpp do; see kDrainResidualCause's
-// own comment). Matching only WITHIN the shared cause, without also covering the stem
-// or the divergence, is no more discriminating than matching the stem alone.
+// a span that STRADDLES from the stem into the shared cause below, which is what the
+// witnesses in test_quiesce_on_exit_residual.cpp happen to do (see
+// kDrainResidualCause's own comment for how to re-derive that, and note it is a
+// property of how those matchers are written, not a requirement). Matching only
+// WITHIN the shared cause, without also covering the stem or the divergence, is no
+// more discriminating than matching the stem alone.
 //
 // (#322) And past the DIVERGENCE too, where the caller is
 // `~quiesce_on_exit`: it delegates to `cancel_and_drain_or_report`, so guard and
@@ -168,43 +170,23 @@ inline constexpr const char* kDrainResidual =
 // remove, in a stem this file already records above as having drifted on punctuation at
 // birth once already. Not adopted for that reason; see below for what is actually bound.
 //
-// The bound region, measured rather than assumed: test_quiesce_on_exit_residual.cpp binds
-// only this constant's OPENING CLAUSE, "so a coroutine frame" -- 20 of its 249 bytes. It is
-// bound because `drain_or_report`'s only divergence from `cancel_and_drain_or_report` is
-// the comma immediately following the stem above, leaving a discriminating matcher almost
-// nothing to anchor on but that seam; all four existing matchers in that file (at :222,
-// :396, :753 and :825) carry past it into this constant. Reword the opening clause and
-// expect those four to red. ⚠️ The straddle is not FORCED -- `"teardown drain,"`
-// discriminates perfectly and binds zero bytes of this constant; none of the four written
-// matchers happens to stop there. Past the opening clause, nothing under tests/ binds
-// anything: rewording the middle ("cause" -> "reason") leaves all 29 cells in
-// test_quiesce_on_exit_residual.cpp GREEN, because that byte lands past every bound byte,
-// not because the constant is unwitnessed as a whole.
+// The bound region is this constant's OPENING CLAUSE, "so a coroutine frame". It is bound
+// because `drain_or_report`'s only divergence from `cancel_and_drain_or_report` is the comma
+// immediately following the stem above, leaving a discriminating matcher almost nothing to
+// anchor on but that seam; the existing witnesses in
+// test_quiesce_on_exit_residual.cpp carry past it into this constant. ⚠️ The straddle is not
+// FORCED -- `"teardown drain,"` discriminates perfectly and binds zero bytes of this constant;
+// none of the written matchers happens to stop there. Past the opening clause, this comment
+// records no cached answer: re-derive on demand.
 //
-// Demonstrated in both directions. Rewording the opening clause ("so a coroutine frame" ->
-// "so a coroutine STACK") and running the WHOLE session_pure_tests binary with no
-// --gtest_filter (the claim below is about every cell under tests/, so it must be measured
-// at that scope) reds exactly DrainOrReportWitness.{ReportsWhenIocNeverDrains,
-// ZeroBudgetProbeDispatchesAtMostOneHandler, OuterCatchSwallowsAThrowingAddFailure} and
-// CancelAndDrainOrReportWitness.OneShotCancelThenDrainCannotReleaseTheSleep -- exactly the
-// four matchers named above, nothing else. Rewording "cause" -> "reason" instead is
-// structurally incapable of failing: it lands ~154 bytes in, past every bound byte, so
-// 29/29 GREEN there is an instrument that could not have reported anything else.
+// To re-derive whether any witness binds bytes in this constant, mutate the bytes you care
+// about, rebuild `session_pure_tests`, run the WHOLE binary with no `--gtest_filter`, and
+// confirm the mutated bytes are actually present in the built binary before believing a green
+// result, for example with `strings build/linux-clang-asan/bin/session_pure_tests | grep`.
 //
-// The generalizable lesson: to test whether anything binds a constant, grep its FIRST and
-// LAST clause, not a phrase from its middle. A distinctive-mid-phrase grep selects
-// systematically AGAINST the boundary, because distinctiveness and boundary-sharing are
-// opposites -- the boundary is exactly where a constant shares text with its neighbours.
-// That is why `git grep "suspended and will be destroyed\|observes the residual\|disjunctive"
-// -- tests` (this header's own prior recipe) finds nothing outside this header, while
-// `git grep -n "so a coroutine frame" -- tests` finds the four consumers above plus this
-// producer.
-//
-// Contrast the divergent TAIL below, which witnesses bind starting at its very first byte
-// -- rewording it reds cells immediately -- and which must therefore stay spelled out at
-// its producer. The asymmetry survives, narrowed: the opening clause here is pinned by
-// straddle, the tail below is pinned outright, and everything else in this constant is
-// free to reword.
+// Contrast the divergent TAIL below, whose witnesses are re-derived the same way. The
+// asymmetry survives, narrowed: the opening clause here is pinned by straddle, and
+// everything else in this constant is free to reword.
 //
 // Composition, in order: kDrainResidual + <the drain's own divergent clause> +
 // kDrainResidualCause + <optional divergent tail> + "Site: " + site.
@@ -722,10 +704,10 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
                 // tests/session/test_quiesce_on_exit_residual.cpp binds
                 // "warning above. Site: quiesce_on_exit". Binding a producer-side
                 // CONSTANT instead would make a reworded message agree with its own
-                // matcher silently; spelling it out means a reword REDS those cells.
-                // So: reword the fragment below and expect them to fail. That is the
-                // coupling working as intended, not a defect -- re-derive which cells
-                // with `git grep -n "warning above. Site: quiesce_on_exit" -- tests`.
+                // matcher silently; spelling it out means re-derive by mutating the
+                // fragment below, rebuilding `session_pure_tests`, running the WHOLE
+                // binary with no `--gtest_filter`, and confirming the mutated bytes
+                // are actually present in the built binary before believing a green.
                 << "A transport parked in async_write/async_read_some is a residual this "
                    "drain clears only when a transport was passed to it; see the transport "
                    "warning above. Site: "
