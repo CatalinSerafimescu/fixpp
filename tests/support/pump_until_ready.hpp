@@ -510,6 +510,25 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // transition) took 5000 ms and reported two failures; the pre-Active control
 // `Row_F_InboundReject_NoRejectLoop/open` took 0 ms and reported one.
 //
+// ⚠️ (#322) THE PER-SLICE CANCEL IS SAFE FOR A REAL CLOCK TOO, AND THAT IS NOT
+// OBVIOUS FROM THE PARAGRAPH ABOVE, which reasons entirely about `mock_clock`.
+// The delegation brought `system_clock_source` sites under this loop for the
+// first time (`test_live_outbound_serialized.cpp` builds one purely for the
+// guard at three sites), and that implementation does something `mock_clock`
+// does not: `cancel_sleeps()` does not complete waiters inline, it walks an
+// in-flight map and `asio::post`s a `sp->cancel()` onto each live timer's own
+// executor (src/core/system_clock_source.cpp, `cancel_sleeps`). Posting new work
+// on EVERY slice is exactly the shape that could keep a context from ever
+// draining.
+//
+// It terminates, for two independent reasons, both read from the source rather
+// than inferred from a green suite: the map holds `weak_ptr`, and only entries
+// that still lock get a post; and `sleep_until` installs an RAII `dereg` guard
+// that erases its entry on scope exit, covering the deadline-reached, cancelled
+// and exception paths alike. So a cancelled sleep de-registers as its frame
+// unwinds and later slices post nothing. The cost is one lock and one empty map
+// walk per slice thereafter.
+//
 // ⚠️ DIAGNOSTIC QUALITY ON AN ALREADY-FAILING PATH, not a lifetime fix. Both arms
 // above are ASan-clean. This does not make a missed window safe and must not be
 // described as doing so; it stops the report from misdescribing why the context
