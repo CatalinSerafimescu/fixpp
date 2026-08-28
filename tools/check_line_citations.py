@@ -67,13 +67,9 @@ RE_B = re.compile(r"~?\blines?\s+\d{2,}", re.IGNORECASE)
 # Form C.
 RE_C = re.compile(r"\(:\d+")
 
-# Forms B and C name no target, so nothing can be resolved for them and the only
-# available signal is the citing line. Restricted to tokens that name a foreign
-# PROJECT or a vendored include root. Deliberately NOT `gtest` or `/usr/`: those
-# appear on ordinary in-tree lines, and a line-scoped exemption keyed on them
-# silently swallows real citations that happen to share the line.
-RE_FOREIGN_LINE = re.compile(r"QuickFIX|QFJ|QFcpp|reference-engines|asio/|boost/",
-                             re.IGNORECASE)
+# A `#line` preprocessor directive is not a citation -- form B's {2,}-digit
+# pattern matches its line number.
+RE_LINE_DIRECTIVE = re.compile(r"^\s*#\s*line\s")
 
 # Deliberate, reviewed exception. `--census` reports these as their own bucket:
 # the marker is itself a claim (that this number will not rot), so it has to stay
@@ -136,15 +132,16 @@ def forms_on(line, files=None, by_base=None):
     """
     if RE_PRAGMA.search(line):
         return []
+    if RE_LINE_DIRECTIVE.search(line):
+        return []
     found = []
     for m in RE_A.finditer(line):
         if files is None or resolve(m.group(1), files, by_base):
             found.append("A")
             break
-    foreign_line = RE_FOREIGN_LINE.search(line)
-    if RE_B.search(line) and not foreign_line:
+    if RE_B.search(line):
         found.append("B")
-    if RE_C.search(line) and not foreign_line:
+    if RE_C.search(line):
         found.append("C")
     return found
 
@@ -303,6 +300,13 @@ FORM_CASES = [
     # Genuinely foreign: no such file in this tree.
     ("// mirroring QuickFIX's DataDictionary.cpp:271-273",           []),
     ("// asio/impl/io_context.hpp:88 tests now < abs",               []),
+    # Forms B/C name no target, so a foreign token elsewhere on the line must
+    # NOT exempt them -- a line-scoped exemption here previously swallowed the
+    # `at line 99` citation because the unrelated `boost/asio/` token shared it.
+    ("// our workaround at line 99 handles boost/asio/",             ["B"]),
+    # A `#line` directive is not a citation -- form B's {2,}-digit rule would
+    # otherwise match its line number.
+    ('#line 86 "generated.cpp"',                                     []),
     # Exemptions and near-misses that must NOT fire.
     ("// session.cpp:1258 citation-ok reviewed 2026-08-28",          []),
     ("// the ratio is 3:2 across the board",                         []),
