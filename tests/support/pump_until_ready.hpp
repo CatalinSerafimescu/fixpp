@@ -521,13 +521,23 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // on EVERY slice is exactly the shape that could keep a context from ever
 // draining.
 //
-// It terminates, for two independent reasons, both read from the source rather
-// than inferred from a green suite: the map holds `weak_ptr`, and only entries
-// that still lock get a post; and `sleep_until` installs an RAII `dereg` guard
-// that erases its entry on scope exit, covering the deadline-reached, cancelled
-// and exception paths alike. So a cancelled sleep de-registers as its frame
-// unwinds and later slices post nothing. The cost is one lock and one empty map
-// walk per slice thereafter.
+// It terminates, for reasons read from the source rather than inferred from a
+// green suite, and the strongest one is structural. At those three sites
+// `teardown_clock` is a freshly-constructed source that nothing but the guard
+// holds, and the guard only ever calls `cancel_sleeps()` on it — so nothing can
+// register a sleep there and `inflight` is empty BY CONSTRUCTION, not by
+// observation. Two mechanisms back that up in the general case: the map holds
+// `weak_ptr`, and only entries that still lock get a post; and `sleep_until`
+// installs an RAII `dereg` guard that erases its entry on scope exit, covering
+// the deadline-reached, cancelled and exception paths alike. So even a shared
+// clock's cancelled sleep de-registers as its frame unwinds and later slices post
+// nothing.
+//
+// Cost, measured at -O0 with ASan (the preset that actually runs this): on an
+// empty container both clock types are indistinguishable from a loop with no
+// cancel at all — under ~2 us against an 18-24 us slice, below the noise floor.
+// The pathological never-erased case is bounded and linear, ~+18 us per slice per
+// live entry, not runaway.
 //
 // ⚠️ DIAGNOSTIC QUALITY ON AN ALREADY-FAILING PATH, not a lifetime fix. Both arms
 // above are ASan-clean. This does not make a missed window safe and must not be
@@ -735,6 +745,28 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
 // neither lever reaches keeps the context non-empty for the full budget, and the
 // drain returns with that frame still pending — sufficient for the case this guard
 // exists for, not a general fix.
+//
+// WHAT THE SLICING COSTS, measured rather than argued, because a per-slice loop
+// at 20 teardown sites is exactly the shape that quietly gets expensive.
+// Instrumented by breaking on the loop's own `restart()`, so the slice count is
+// exact rather than a proxy:
+//
+//   session_logout_exchange (12 sites, mock_clock)        12 drains / 12 slices
+//   LiveOutboundSerializedTest (7 sites, 3 real-clock)     7 drains /  7 slices
+//
+// One slice per drain, everywhere. That is the whole cost argument: the loop body
+// cannot run zero times, so 19 drains totalling 19 slices FORCES every drain to
+// exactly one, and at one slice this runs the same op sequence the old
+// single-`run_for` destructor did, plus one `steady_clock::now()`. No site is
+// even a second slice away from flat. The instrument is not pinned at 1 by
+// construction — the witness suites, which DO burn budget, count 83 slices across
+// 9 drains.
+//
+// The cost that does exist is confined to the already-failing path, and it is
+// CPU, not wall: at a 5 s budget both loop shapes are budget-bound at 5000 ms
+// wall, and the sliced one spends ~89 ms CPU idle / ~136 ms against a re-arming
+// sleeper, versus <1 ms for the single `run_for`. A test on that path is already
+// reporting `kDrainResidual`.
 //
 // `io_context::stopped()` is a DISJUNCTION, not an exact detector: it is true
 // either because the context ran out of work or because something called
