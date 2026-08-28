@@ -136,8 +136,11 @@ inline constexpr const char* kWindowMiss =
 // discriminate. ⚠️ They then RE-CONVERGE: everything after that clause up to the
 // divergent tail is `kDrainResidualCause` below, shared by both. "Diverge
 // immediately" describes the next few words, not the rest of the message.
-// A witness must therefore match the DIVERGENT clause specifically -- matching
-// anywhere in the shared cause is no more discriminating than matching the stem.
+// A witness must therefore match past the stem -- either the divergent clause, or
+// a span that STRADDLES from the stem into the shared cause below (as all four
+// existing witnesses in test_quiesce_on_exit_residual.cpp do; see kDrainResidualCause's
+// own comment). Matching only WITHIN the shared cause, without also covering the stem
+// or the divergence, is no more discriminating than matching the stem alone.
 //
 // (#322) And past the DIVERGENCE too, where the caller is
 // `~quiesce_on_exit`: it delegates to `cancel_and_drain_or_report`, so guard and
@@ -155,18 +158,53 @@ inline constexpr const char* kDrainResidual =
 // this one is four times longer than the stem that had already drifted on
 // punctuation at birth.
 //
-// Safe to hoist because it is PRODUCER-side only: no matcher anywhere under
-// tests/ binds any part of it. Derived AND demonstrated, because a grep proves
-// only that a search found nothing:
-//   - `git grep "suspended and will be destroyed\|observes the residual\|disjunctive"
-//     -- tests` returns nothing outside this header;
-//   - and rewording inside this constant ("cause" -> "reason") leaves all 29
-//     cells in test_quiesce_on_exit_residual.cpp GREEN, which is the same claim
-//     stated as an experiment rather than as an absence.
-// So this text is deliberately UNWITNESSED and freely rewordable. Contrast the
-// divergent TAIL below, which witnesses DO bind -- rewording that reds cells --
-// and which must therefore stay spelled out at its producer. The asymmetry is
-// the point: discriminating fragments are pinned, explanatory prose is not.
+// Byte-identity of the hoist is INTACT, measured against origin/main: `drain_or_report`'s
+// composed message is 327 bytes at base and at HEAD, byte-for-byte identical, and
+// `cancel_and_drain_or_report`'s composed message is identical through byte 421 -- the
+// only difference is inside the tail this PR deliberately rewrote. So the hoist changed
+// no byte any matcher can see. ⚠️ Splitting this fragment back into each producer
+// (undoing the hoist) would make it genuinely unbound, but at the cost of re-duplicating
+// "so a coroutine frame" across two producers -- exactly the drift this hoist exists to
+// remove, in a stem this file already records above as having drifted on punctuation at
+// birth once already. Not adopted for that reason; see below for what is actually bound.
+//
+// The bound region, measured rather than assumed: test_quiesce_on_exit_residual.cpp binds
+// only this constant's OPENING CLAUSE, "so a coroutine frame" -- 20 of its 249 bytes. It is
+// bound because `drain_or_report`'s only divergence from `cancel_and_drain_or_report` is
+// the comma immediately following the stem above, leaving a discriminating matcher almost
+// nothing to anchor on but that seam; all four existing matchers in that file (at :222,
+// :396, :753 and :825) carry past it into this constant. Reword the opening clause and
+// expect those four to red. ⚠️ The straddle is not FORCED -- `"teardown drain,"`
+// discriminates perfectly and binds zero bytes of this constant; none of the four written
+// matchers happens to stop there. Past the opening clause, nothing under tests/ binds
+// anything: rewording the middle ("cause" -> "reason") leaves all 29 cells in
+// test_quiesce_on_exit_residual.cpp GREEN, because that byte lands past every bound byte,
+// not because the constant is unwitnessed as a whole.
+//
+// Demonstrated in both directions. Rewording the opening clause ("so a coroutine frame" ->
+// "so a coroutine STACK") and running the WHOLE session_pure_tests binary with no
+// --gtest_filter (the claim below is about every cell under tests/, so it must be measured
+// at that scope) reds exactly DrainOrReportWitness.{ReportsWhenIocNeverDrains,
+// ZeroBudgetProbeDispatchesAtMostOneHandler, OuterCatchSwallowsAThrowingAddFailure} and
+// CancelAndDrainOrReportWitness.OneShotCancelThenDrainCannotReleaseTheSleep -- exactly the
+// four matchers named above, nothing else. Rewording "cause" -> "reason" instead is
+// structurally incapable of failing: it lands ~154 bytes in, past every bound byte, so
+// 29/29 GREEN there is an instrument that could not have reported anything else.
+//
+// The generalizable lesson: to test whether anything binds a constant, grep its FIRST and
+// LAST clause, not a phrase from its middle. A distinctive-mid-phrase grep selects
+// systematically AGAINST the boundary, because distinctiveness and boundary-sharing are
+// opposites -- the boundary is exactly where a constant shares text with its neighbours.
+// That is why `git grep "suspended and will be destroyed\|observes the residual\|disjunctive"
+// -- tests` (this header's own prior recipe) finds nothing outside this header, while
+// `git grep -n "so a coroutine frame" -- tests` finds the four consumers above plus this
+// producer.
+//
+// Contrast the divergent TAIL below, which witnesses bind starting at its very first byte
+// -- rewording it reds cells immediately -- and which must therefore stay spelled out at
+// its producer. The asymmetry survives, narrowed: the opening clause here is pinned by
+// straddle, the tail below is pinned outright, and everything else in this constant is
+// free to reword.
 //
 // Composition, in order: kDrainResidual + <the drain's own divergent clause> +
 // kDrainResidualCause + <optional divergent tail> + "Site: " + site.
@@ -757,7 +795,9 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
 //
 // WHAT THE SLICING COSTS, measured rather than argued, because a per-slice loop
 // at every plain `quiesce_on_exit` teardown site (population and re-derivation
-// recipe: `test_test_request_id_cross_session_race.cpp:754-782`) is exactly the
+// recipe: the "THE POPULATION" paragraph in
+// `test_test_request_id_cross_session_race.cpp`, and its
+// `grep -rn 'quiesce_on_exit [a-zA-Z_]*{' tests/` recipe) is exactly the
 // shape that quietly gets expensive.
 // Instrumented by breaking on the loop's own `restart()`, so the slice count is
 // exact rather than a proxy:
