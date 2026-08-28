@@ -755,7 +755,7 @@ struct counting_io_context : asio::io_context {
 //            a live Transport, so they have a
 //            forcing lever this one lacks."       Wrong twice over, below.
 //
-// A third number would go stale the same way: this very PR added a site to the
+// A third number would go stale the same way: #319 added a site to the
 // population it counts (see `logout_exchange_test.cpp`'s doc comment on
 // `FeedInboundSpansTheArenaCopyNotTheCallersBuffer`). So this states the
 // CONDITION instead of a count: the population is every PLAIN `quiesce_on_exit`

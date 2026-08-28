@@ -149,7 +149,7 @@ inline constexpr const char* kDrainResidual =
     "#289: the io_context did not run out of work within the teardown drain";
 
 // (#322) The two drains RE-CONVERGE after their divergent clause, and the stem
-// comment above used to imply they never do. This is the shared middle: 251
+// comment above used to imply they never do. This is the shared middle: 249
 // bytes that were byte-identical in both `ADD_FAILURE`s. Hoisted for exactly the
 // reason `kDrainResidual` was -- a fragment duplicated in two places drifts, and
 // this one is four times longer than the stem that had already drifted on
@@ -513,8 +513,9 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // ⚠️ (#322) THE PER-SLICE CANCEL IS SAFE FOR A REAL CLOCK TOO, AND THAT IS NOT
 // OBVIOUS FROM THE PARAGRAPH ABOVE, which reasons entirely about `mock_clock`.
 // The delegation brought `system_clock_source` sites under this loop for the
-// first time (`test_live_outbound_serialized.cpp` builds one purely for the
-// guard at three sites), and that implementation does something `mock_clock`
+// first time (`test_live_outbound_serialized.cpp` binds one at all seven of
+// its guard sites -- five built purely for the guard, two shared with the
+// session's own clock), and that implementation does something `mock_clock`
 // does not: `cancel_sleeps()` does not complete waiters inline, it walks an
 // in-flight map and `asio::post`s a `sp->cancel()` onto each live timer's own
 // executor (src/core/system_clock_source.cpp, `cancel_sleeps`). Posting new work
@@ -522,16 +523,19 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // draining.
 //
 // It terminates, for reasons read from the source rather than inferred from a
-// green suite, and the strongest one is structural. At those three sites
+// green suite, and the strongest one is structural, though it covers only five
+// of the seven sites. At those five (`:461`, `:759`, `:829`, `:1087`, `:1174`)
 // `teardown_clock` is a freshly-constructed source that nothing but the guard
 // holds, and the guard only ever calls `cancel_sleeps()` on it — so nothing can
-// register a sleep there and `inflight` is empty BY CONSTRUCTION, not by
-// observation. Two mechanisms back that up in the general case: the map holds
-// `weak_ptr`, and only entries that still lock get a post; and `sleep_until`
-// installs an RAII `dereg` guard that erases its entry on scope exit, covering
-// the deadline-reached, cancelled and exception paths alike. So even a shared
-// clock's cancelled sleep de-registers as its frame unwinds and later slices post
-// nothing.
+// register a sleep there and `inflight` is empty BY CONSTRUCTION, and the
+// per-slice cancel is INERT at those five sites, with nothing for it to do. The
+// other two (`:706`, `:933`) share their clock with the session (`eng.clock =
+// clock`), so the lever is live there, and it rests on two mechanisms that hold
+// in the general case: the map holds `weak_ptr`, and only entries that still
+// lock get a post; and `sleep_until` installs an RAII `dereg` guard that erases
+// its entry on scope exit, covering the deadline-reached, cancelled and
+// exception paths alike. So even a shared clock's cancelled sleep de-registers
+// as its frame unwinds and later slices post nothing.
 //
 // Cost, measured at -O0 with ASan (the preset that actually runs this): on an
 // empty container both clock types are indistinguishable from a loop with no
@@ -752,20 +756,32 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
 // exists for, not a general fix.
 //
 // WHAT THE SLICING COSTS, measured rather than argued, because a per-slice loop
-// at 20 teardown sites is exactly the shape that quietly gets expensive.
+// at every plain `quiesce_on_exit` teardown site (population and re-derivation
+// recipe: `test_test_request_id_cross_session_race.cpp:754-782`) is exactly the
+// shape that quietly gets expensive.
 // Instrumented by breaking on the loop's own `restart()`, so the slice count is
 // exact rather than a proxy:
 //
 //   session_logout_exchange (12 sites, mock_clock)        12 drains / 12 slices
-//   LiveOutboundSerializedTest (7 sites, 3 real-clock)     7 drains /  7 slices
+//   LiveOutboundSerializedTest (7 sites: 5 inert / 2 live)  7 drains /  7 slices
 //
-// One slice per drain, everywhere. That is the whole cost argument: the loop body
-// cannot run zero times, so 19 drains totalling 19 slices FORCES every drain to
-// exactly one, and at one slice this runs the same op sequence the old
-// single-`run_for` destructor did, plus one `steady_clock::now()`. No site is
-// even a second slice away from flat. The instrument is not pinned at 1 by
-// construction — the witness suites, which DO burn budget, count 83 slices across
-// 9 drains.
+// One slice per drain, at every site measured so far: the loop body cannot run
+// zero times, so 19 drains totalling 19 slices means every drain currently in
+// the suites quiesces inside a single `kPumpSlice`. That is a CONDITION, not a
+// property of the loop -- a site whose work takes longer than `kPumpSlice` to
+// quiesce takes ⌈work / kPumpSlice⌉ slices, and even at one slice this is NOT
+// the same op sequence the old single-`run_for` destructor did plus one `now()`:
+// the per-slice delta is `cancel_sleeps()` + `ioc.restart()` + two
+// `steady_clock::now()` + a `min` + `poll_one()`, and `run_for(5s)` became
+// `run_for(<=1ms)`.
+//
+// This is a DATED, SCOPED MEASUREMENT, not a property of the loop: the 19/19
+// count above and the 83-slice figure below came from a manual debugger session
+// (a breakpoint on the loop's own `restart()`), not a checked-in instrument, and
+// both describe the CURRENT suites only. A future site whose quiescing spans
+// several slices would still be correct, merely slower, and would not
+// contradict this paragraph. The witness suites, which DO burn budget, counted
+// 83 slices across 9 drains at that same session.
 //
 // The cost that does exist is confined to the already-failing path, and it is
 // CPU, not wall: at a 5 s budget both loop shapes are budget-bound at 5000 ms
