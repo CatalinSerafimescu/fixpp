@@ -604,6 +604,15 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
                    "not its cause (stopped() is disjunctive -- see quiesce_on_exit's "
                    "comment on the disjunction, below). A transport parked in "
                    "async_write/async_read_some is a residual this drain clears only when "
+                   // ⚠️ THIS TAIL IS BOUND BY WITNESSES IN ANOTHER FILE. The three
+                   // `quiesce_on_exit` residual matchers in
+                   // tests/session/test_quiesce_on_exit_residual.cpp bind
+                   // "warning above. Site: quiesce_on_exit" -- deliberately spelled out
+                   // rather than sharing a constant with this producer, so a reworded
+                   // message REDS them instead of silently agreeing (see that file's
+                   // note on why matchers do not bind published constants). Reword the
+                   // fragment below and expect three failures there; that is the cell
+                   // working, not a defect.
                    "a transport was passed to it; see the transport warning above. Site: "
                 << site;
         }
@@ -732,16 +741,25 @@ struct quiesce_on_exit {
     // completes only when the transport itself is closed. nullptr (default)
     // when no such transport is in play; set it (this struct is a plain
     // aggregate, so the field may be assigned after construction, e.g. once
-    // the caller attaches the transport) whenever one is. Assumes
-    // Transport::close() is noexcept and idempotent (true of every transport
-    // in this suite) — safe to call even if the caller already closed it. Since
-    // #322 this field is simply forwarded to `cancel_and_drain_or_report`'s
-    // `transport` argument, which is where the `close()` happens. The
-    // pointee must also OUTLIVE this guard: `~quiesce_on_exit` dereferences it
-    // unconditionally, on every exit path. The condition is simply that the
-    // pointee is declared BEFORE the guard — whether it is a `Session`-owned
-    // transport or a plain block-local does not matter, and both shapes exist.
-    // Declaring the guard first leaves this dangling.
+    // the caller attaches the transport) whenever one is — which is how every
+    // real caller does it, so a two-argument `{ioc, clock}` aggregate init is
+    // NOT evidence the lever is unset.
+    //
+    // (#322) THE CONTRACT IS THE PRIMITIVE'S, NOT THIS FIELD'S. Since the
+    // destructor delegates, this is a forwarding slot: it is passed straight to
+    // `cancel_and_drain_or_report`'s `transport` argument, which is what
+    // dereferences it and where the `close()` happens. Requirements on the
+    // pointee — it must outlive the call, `close()` is assumed noexcept and
+    // idempotent, it is closed once before the first slice — are stated there
+    // (see its ⚠️ IT CLOSES A TRANSPORT ONLY IF YOU PASS ONE paragraph) and are
+    // deliberately NOT restated here; an earlier copy of them at this field had
+    // already drifted into naming the wrong dereferencing frame.
+    //
+    // What is local to the guard, and only this: the pointee must be declared
+    // BEFORE the guard, since the guard's own destruction is what triggers the
+    // forwarding. Whether it is a `Session`-owned transport or a plain
+    // block-local does not matter, and both shapes exist. Declaring the guard
+    // first leaves this dangling.
     fixpp::transport::Transport* transport = nullptr;
 
     // (#322) ONE DELEGATING CALL, and every part of the teardown this destructor
