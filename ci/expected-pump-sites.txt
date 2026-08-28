@@ -102,8 +102,8 @@ tests/session/test_application_outbound.cpp:509
 tests/session/test_application_outbound.cpp:519
 tests/session/test_application_strand.cpp:452
 tests/session/test_application_strand.cpp:467
-tests/session/test_business_messages_roundtrip.cpp:276
-tests/session/test_business_messages_roundtrip.cpp:282
+tests/session/test_business_messages_roundtrip.cpp:277
+tests/session/test_business_messages_roundtrip.cpp:283
 tests/session/test_compid_binding_default_deny.cpp:176
 tests/session/test_compid_binding_default_deny.cpp:184
 tests/session/test_compid_binding_mtls_fail_closed.cpp:132
