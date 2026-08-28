@@ -74,7 +74,7 @@ pre-commit run --all-files
 ## The line-number citation gate (issue #310)
 
 `check-line-citations` blocks a commit that ADDS a line-number citation to a
-comment — `file.cpp:1258`, `at line 2234`, or a bare `(:64)`.
+comment — `file.cpp:1258`, `at line 2234`, or a bare `(:64)`. <!-- citation-ok: worked example, not a real citation -->
 
 A line number is a claim about a file that keeps moving. Nobody has to touch the
 citing file for it to become false: the target drifts and the citation rots in
@@ -84,11 +84,12 @@ plausible.
 
 **Fix a flagged line by DELETING the number, not by correcting it.** Re-pointing
 `session.cpp:1258` at `session.cpp:1265` re-arms the same defect with a fresh
-half-life. Cite a function/struct name plus a short quoted phrase instead — that
-survives arbitrary line motion, and `grep` finds it if the quoted text changes:
+half-life. <!-- citation-ok: worked example, not a real citation --> Cite a
+function/struct name plus a short quoted phrase instead — that survives
+arbitrary line motion, and `grep` finds it if the quoted text changes:
 
 ```
-before:  the residual ADD_FAILURE branch (pump_until_ready.hpp:225-232)
+before:  the residual ADD_FAILURE branch (pump_until_ready.hpp:225-232)  [worked example; citation-ok]
 after:   drain_or_report's residual ADD_FAILURE ("#289: the io_context did not
          run out of work")
 ```

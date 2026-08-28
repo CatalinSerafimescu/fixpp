@@ -51,6 +51,7 @@ import tempfile
 # abort a commit that merely added a corpus seed.
 SCAN_DIRS = [
     "tests/", "src/", "include/",
+    "tools/", "bench/", "bindings/", "cmake/", ":(glob,top)*.md",
     ":(exclude)tests/fuzz/corpus/",
     ":(exclude)tests/abi/baseline/",
 ]
@@ -98,6 +99,22 @@ def tracked(root):
             "check-line-citations: git ls-files matched ZERO files under "
             f"{SCAN_DIRS[:3]}. Refusing to interpret an empty measurement as a "
             "clean tree -- check the repo root.")
+    return files
+
+
+def all_tracked(root):
+    """Every tracked file in the repo -- the universe for RESOLVING a form-A
+    target, kept separate from SCAN_DIRS (which bounds only what gets
+    SCANNED/GATED). tools/codegen/fixpp-codegen/*.cpp is a legitimate
+    citation target that lives outside SCAN_DIRS; resolving against the
+    SCAN_DIRS-only file list bucketed it 'foreign / unresolvable', a false
+    clean for an in-tree file."""
+    files = git(["ls-files"], root, "ls-files").split()
+    if not files:
+        raise SystemExit(
+            "check-line-citations: git ls-files matched ZERO files. Refusing "
+            "to interpret an empty measurement as a clean tree -- check the "
+            "repo root.")
     return files
 
 
@@ -158,7 +175,8 @@ def read_lines(root, path, cache):
 
 def census(root, json_out, quiet=False):
     files = tracked(root)
-    by_base = basename_map(files)
+    resolve_files = all_tracked(root)
+    resolve_by_base = basename_map(resolve_files)
     cache = {}
     resolved, foreign, ambiguous = [], [], []
     b_hits, c_hits, pragma_hits = [], [], []
@@ -171,7 +189,7 @@ def census(root, json_out, quiet=False):
             if RE_PRAGMA.search(ln):
                 pragma_hits.append({"cf": p, "cl": i + 1, "text": ln.strip()})
                 continue
-            forms = forms_on(ln, files, by_base)
+            forms = forms_on(ln, resolve_files, resolve_by_base)
             if "B" in forms:
                 b_hits.append({"cf": p, "cl": i + 1, "text": ln.strip()})
             if "C" in forms:
@@ -180,7 +198,7 @@ def census(root, json_out, quiet=False):
                 target, num = m.group(1), int(m.group(2))
                 rec = {"cf": p, "cl": i + 1, "text": ln.strip(),
                        "target": target, "n": num}
-                cands = resolve(target, files, by_base)
+                cands = resolve(target, resolve_files, resolve_by_base)
                 if not cands:
                     foreign.append(rec)
                     continue
@@ -250,13 +268,13 @@ def added_lines(root, args):
 
 
 def gate(root, args):
-    files = tracked(root)
-    by_base = basename_map(files)
+    resolve_files = all_tracked(root)
+    resolve_by_base = basename_map(resolve_files)
     findings = []
     for path, text in added_lines(root, args):
         if path == SELF:
             continue
-        for form in forms_on(text, files, by_base):
+        for form in forms_on(text, resolve_files, resolve_by_base):
             findings.append((path, form, text.strip()))
     if not findings:
         print("check-line-citations: no new line-number citations in added lines. OK")
