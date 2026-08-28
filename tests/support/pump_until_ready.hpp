@@ -24,6 +24,12 @@
 #include <fixpp/transport/transport.hpp>
 #include <future>
 
+// The self-driving-executor twin (#315). Included here, not defined here, so
+// that every existing pump caller sees `wait_until_observed` through the include it
+// already has -- without this header's asio/gtest/Clock dependencies leaking
+// into the tests/capi callers that also need it. See wait_until.hpp for why.
+#include "support/wait_until.hpp"
+
 namespace fixpp::test_support {
 
 // Default budget for a bounded pump. Generous by design: it converts a wedge

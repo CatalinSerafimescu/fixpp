@@ -68,6 +68,7 @@
 
 #include "_fixtures_/store_temp_dir.hpp"
 #include "_fixtures_/test_double_fsm.hpp"
+#include "support/wait_until.hpp"
 
 // ── Thread-id probe state ─────────────────────────────────────────────────────
 //
@@ -307,10 +308,24 @@ TEST_F(FileStoreOffloadThreadTest, Store_SaturatedPool_Suspends_NotBlocks) {
         }
     });
 
-    // Wait until the pool thread is actually spinning.
-    while (!pool_entered.load(std::memory_order_acquire)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    // Wait until the pool thread is actually spinning. Bounded (#315): this was
+    // an unbounded spin, so a pool thread that never entered wedged the test out
+    // to the ctest timeout instead of naming what failed.
+    //
+    // NOT a bare ASSERT_*: an early return here would destroy `latch` and
+    // `pool_entered` while the posted lambda is still spinning on them, because
+    // `saturated_pool` is declared FIRST and therefore joins LAST. Release the
+    // latch and join first, so nothing outlives what it references.
+    const bool pool_spinning = fixpp::test_support::wait_until_observed(
+        [&pool_entered] { return pool_entered.load(std::memory_order_acquire); },
+        std::chrono::seconds{5});
+    if (!pool_spinning) {
+        latch.store(false, std::memory_order_release);
+        saturated_pool.join();
     }
+    ASSERT_TRUE(pool_spinning)
+        << fixpp::test_support::kWaitBudgetMiss
+        << "Store_SaturatedPool_Suspends_NotBlocks: the pool thread never entered the latch";
 
     // Issue store() on the strand (it should co_await suspend, NOT block).
     auto frame = make_test_frame(1, direction_t::outbound);
@@ -385,16 +400,14 @@ TEST_F(FileStoreOffloadThreadTest, Store_StrandProgresses_BeforeSyscallReturns) 
     auto poster_thread = std::thread([&] {
         // Wait for syscall to enter — with a 5s timeout.
         // g_offload_syscall_entered is set by the probe installed above.
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (!g_offload_syscall_entered.load(std::memory_order_acquire)) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                // Entered never fired (inert code or hook not called).
-                // We do NOT set strand_marker_promise here — leave it unset
-                // so the wait_for below times out and we record a SKIP.
-                poster_done.store(true, std::memory_order_release);
-                return;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (!fixpp::test_support::wait_until_observed(
+                [] { return g_offload_syscall_entered.load(std::memory_order_acquire); },
+                std::chrono::seconds{5})) {
+            // Entered never fired (inert code or hook not called).
+            // We do NOT set strand_marker_promise here — leave it unset
+            // so the wait_for below times out and we record a SKIP.
+            poster_done.store(true, std::memory_order_release);
+            return;
         }
         // Syscall is now running on the pool; post strand marker.
         asio::post(strand_exec_, [&marker_ran, &strand_marker_promise] {

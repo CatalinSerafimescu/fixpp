@@ -37,6 +37,7 @@
 #include "capi_loopback_support.hpp"
 
 #include "support/fix44_group_frame_bodies.hpp"
+#include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
@@ -124,10 +125,7 @@ TEST(GroupMembershipCloneIdentity, CloneTrailingFieldAbsentFromLastInstance) {
     auto payload = fixpp_test_support::make_execution_report_app_payload(suffix);
     ASSERT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_OK);
 
-    const auto until = std::chrono::steady_clock::now() + 5s;
-    while (!ctx.fired.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < until) {
-        std::this_thread::sleep_for(5ms);
-    }
+    (void)fixpp::test_support::wait_for_flag(ctx.fired, 5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
 
     ASSERT_TRUE(ctx.fired.load()) << "the group-bearing ExecutionReport must reach the acceptor's "
                                      "registered receive callback";
@@ -236,10 +234,7 @@ TEST(GroupMembershipCloneIdentity, CloneInteriorTruncationMatchesSource) {
     auto payload = fixpp_test_support::make_execution_report_app_payload(suffix);
     ASSERT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_OK);
 
-    const auto until = std::chrono::steady_clock::now() + 5s;
-    while (!ctx.fired.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < until) {
-        std::this_thread::sleep_for(5ms);
-    }
+    (void)fixpp::test_support::wait_for_flag(ctx.fired, 5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
 
     ASSERT_TRUE(ctx.fired.load()) << "the interior-undeclared-tag ExecutionReport must reach the "
                                      "acceptor's registered receive callback";

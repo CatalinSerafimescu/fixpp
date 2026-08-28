@@ -107,7 +107,7 @@ endfunction()
 # potential cross-file symbol collisions were already anonymous-namespace- or
 # static-scoped in the source). Reference precedent: tests/dictionary/CMakeLists.txt.
 
-# ── Grouped bucket: session_pure_tests (41 .cpp → 1 binary) ─────────────────
+# ── Grouped bucket: session_pure_tests ──────────────────────────────────────
 # Single-threaded co_spawn(ioc,...)+ioc.run() FSM/builder/handshake/reconnect/
 # compid-binding witnesses — no thread_pool/std::thread spawn, no LABELS
 # override (each was previously an unlabeled add_threading_test entry), same
@@ -160,6 +160,7 @@ add_executable(session_pure_tests
   test_live_outbound_serialized.cpp
   test_quiesce_on_exit_residual.cpp                                     # gate-b/r1 P1-3 (Art. VII §8)
   test_enum_validation_logon.cpp                                        # T030 (075)
+  wait_until_clamp_test.cpp                                             # gate-b/r2 P1-1 (Art. VII §8)
   $<TARGET_OBJECTS:session_test_support>
 )
 target_link_libraries(session_pure_tests PRIVATE

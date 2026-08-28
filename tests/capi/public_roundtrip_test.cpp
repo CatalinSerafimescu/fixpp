@@ -43,6 +43,14 @@ static constexpr const char* kDictPath = FIXPP_DICT_DIR "/FIX42.xml";
 namespace {
 
 // ── Poll helpers (public API only) ────────────────────────────────────────────
+//
+// These three are NOT migrated to fixpp::test_support::wait_until_observed, and
+// #315's consolidation deliberately stops short of them. `capi_public_roundtrip_test`
+// declares no target_include_directories at all: it links fixpp_capi and gtest and
+// sees nothing else in the tree, which is the property this test exists to
+// demonstrate -- that the public C API is usable with nothing else in scope.
+// Reaching into tests/support/ for a poll helper would quietly retire that proof
+// to save a dozen lines. Keep these local.
 
 // Spin until fixpp_session_acceptor_bound_endpoint returns a non-zero port or
 // the deadline elapses.  Returns 0 on timeout.

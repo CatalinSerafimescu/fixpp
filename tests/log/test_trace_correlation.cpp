@@ -36,6 +36,8 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/core/trace_context.hpp>
+#include "support/wait_until.hpp"
+
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
@@ -115,12 +117,7 @@ LoggerBundle make_logger(std::uint32_t capacity = 4096) {
 // Wait (busy-poll max 2 s) for at least `n` records in the sink.
 bool wait_for_records(CaptureSink* sink, std::size_t n,
                       std::chrono::milliseconds timeout = std::chrono::seconds{2}) {
-    auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (sink->count() >= n) return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds{5});
-    }
-    return false;
+    return fixpp::test_support::wait_until_observed([sink, n] { return sink->count() >= n; }, timeout);
 }
 
 // Helper: convert std::array<std::byte,16> to std::array<std::uint8_t,16>

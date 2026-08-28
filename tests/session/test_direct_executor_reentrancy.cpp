@@ -23,6 +23,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/wait_until.hpp"
 
 namespace {
 
@@ -81,10 +82,16 @@ TEST(SeamDirectExecutorReentrancy, CorrectAttestationDoesNotTripGuard) {
     for (int i = 0; i < kN; ++i) {
         s.dispatch_app_callback([&done] { done.fetch_add(1, std::memory_order_relaxed); });
     }
-    while (done.load(std::memory_order_relaxed) < kN)
-        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    // Bounded (#315) — this was an unbounded spin, so a dropped callback wedged the
+    // test out to the ctest timeout. Reported AFTER runner.join(): `runner` is
+    // declared BEFORE `done`, so an early return would destroy `done` while the
+    // runner thread is still incrementing it.
+    const bool drained = fixpp::test_support::wait_until_observed(
+        [&done] { return done.load(std::memory_order_relaxed) >= kN; }, std::chrono::seconds{10});
     wg.reset();
     runner.join();
+    ASSERT_TRUE(drained) << fixpp::test_support::kWaitBudgetMiss
+                         << "DirectExecutorAttestedSerialised: not all dispatched callbacks ran";
     SUCCEED() << "debug strand-invariant guard not tripped under correct "
                  "direct_executor attestation";
 }

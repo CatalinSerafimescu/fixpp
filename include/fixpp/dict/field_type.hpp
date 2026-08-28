@@ -27,7 +27,7 @@
 //   XmlData (duplicate above)
 //   DialectExtension            → String   (safe default)
 //
-// Promoted from `tests/support/mock_dict_table.hpp:30` to the production
+// Promoted from `tests/support/mock_dict_table.hpp` to the production
 // `dict/` layer so `validator.hpp` has a complete-type include that does NOT
 // depend on the mock being included first (RC-A, 041-validation-gate-wiring).
 //
@@ -46,9 +46,12 @@ namespace fixpp::dict {
 // 7-value structural type category used by `dictionary_driven_validator` and
 // by the `table_view` method `field_type_of(tag)`.
 //
-// Values match the mock (`tests/support/mock_dict_table.hpp:30`) byte-for-byte
-// so that existing test TUs that use the mock continue to compile unchanged
-// once this header is the sole definition (T009 removes the mock's enum).
+// Values match the mock's ORIGINAL enum byte-for-byte, so that existing test TUs
+// that use the mock continue to compile unchanged once this header is the sole
+// definition. T009 then removed that enum: `tests/support/mock_dict_table.hpp`
+// is now a compatibility shim that includes THIS header, so there is no second
+// definition left to agree with -- the byte-for-byte match is history, not a
+// live invariant, and nothing downstream can drift from it.
 enum class field_type : std::uint8_t {
     String,   // STRING + all timestamp/date/currency/geographic/dialect types
     Int,      // INT, SEQNUM, NUMINGROUP

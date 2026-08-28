@@ -40,6 +40,7 @@
 #include "fixpp/session/session_config.hpp"  // SessionId::from_config
 #include "fixpp/transport/endpoint.hpp"
 #include "support/minimal_dictionary.hpp"
+#include "support/wait_until.hpp"
 
 namespace fixpp::capi_test {
 
@@ -92,14 +93,18 @@ inline std::uint16_t acceptor_bound_port(fixpp_engine_t* engine,
 inline std::uint16_t wait_for_bound_port(
     fixpp_engine_t* engine, const fixpp::session::SessionId& id,
     std::chrono::milliseconds deadline = std::chrono::milliseconds{3000}) {
-    using clock = std::chrono::steady_clock;
-    const auto until = clock::now() + deadline;
-    for (;;) {
-        std::uint16_t p = acceptor_bound_port(engine, id);
-        if (p != 0) return p;
-        if (clock::now() >= until) return 0;
-        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    // The predicate CAPTURES what it observed, so the port is read exactly once
+    // per poll and the read that succeeded is the one returned.
+    std::uint16_t p = 0;
+    if (!fixpp::test_support::wait_until_observed(
+            [&] {
+                p = acceptor_bound_port(engine, id);
+                return p != 0;
+            },
+            deadline)) {
+        return 0;
     }
+    return p;
 }
 
 // Poll fixpp_session_is_established(session) until true or the deadline elapses.
@@ -108,14 +113,12 @@ inline std::uint16_t wait_for_bound_port(
 inline bool wait_for_established(
     fixpp_session_t* session,
     std::chrono::milliseconds deadline = std::chrono::milliseconds{4000}) {
-    using clock = std::chrono::steady_clock;
-    const auto until = clock::now() + deadline;
-    for (;;) {
-        bool est = false;
-        if (fixpp_session_is_established(session, &est) == FIXPP_ERR_OK && est) return true;
-        if (clock::now() >= until) return false;
-        std::this_thread::sleep_for(std::chrono::milliseconds{2});
-    }
+    return fixpp::test_support::wait_until_observed(
+        [&] {
+            bool est = false;
+            return fixpp_session_is_established(session, &est) == FIXPP_ERR_OK && est;
+        },
+        deadline);
 }
 
 // Build a minimal valid FIX application payload for fixpp_session_send.

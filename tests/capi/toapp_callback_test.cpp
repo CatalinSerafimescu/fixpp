@@ -42,6 +42,7 @@
 
 #include "capi_internal.hpp"      // fixpp_msg (check tag_/view directly)
 #include "capi_loopback_support.hpp"
+#include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
@@ -52,16 +53,6 @@ namespace {
 // downgraded to FIXPP_ERR_UNKNOWN.  (See T004 in error_block_test.cpp.)
 fixpp_error_t make_engine_v4(fixpp_engine_t** out) {
     return fixpp_engine_create(make_engine_cfg(), 1, 4, out);
-}
-
-// Poll until `received` is true or the deadline elapses.
-bool poll_until(std::atomic<bool>& flag, std::chrono::milliseconds ms = 2000ms) {
-    const auto until = std::chrono::steady_clock::now() + ms;
-    while (!flag.load(std::memory_order_acquire)) {
-        if (std::chrono::steady_clock::now() >= until) return false;
-        std::this_thread::sleep_for(5ms);
-    }
-    return true;
 }
 
 // ── Shared loopback pair ───────────────────────────────────────────────────
@@ -145,7 +136,7 @@ TEST(ToappCallback, SendVerdictTransmits) {
     EXPECT_EQ(rc, FIXPP_ERR_OK) << "SEND verdict should return FIXPP_ERR_OK";
 
     // B should receive the message.
-    EXPECT_TRUE(poll_until(b_received, 3000ms))
+    EXPECT_TRUE(fixpp::test_support::wait_for_flag(b_received, 3000ms))
         << "acceptor B did not receive the message (SEND verdict must transmit)";
 
     // The callback must have been called at least once.

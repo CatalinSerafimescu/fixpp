@@ -84,6 +84,7 @@
 
 #include "_fixtures_/store_temp_dir.hpp"
 #include "sync/sync_test_support.hpp"
+#include "support/wait_until.hpp"
 
 namespace {
 
@@ -125,13 +126,11 @@ static void plain_probe(std::thread::id) noexcept {
 // Bounded spin (max 10 s) prevents a deadlock from becoming a hang.
 static void hold_probe(std::thread::id) noexcept {
     g_probe_entered.store(true, std::memory_order_release);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
-    while (!g_arm_a_release.load(std::memory_order_acquire)) {
-        if (std::chrono::steady_clock::now() > deadline) {
-            break;  // safety valve — test will FAIL on the subsequent assertions
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds{1});
-    }
+    // Result deliberately discarded: the bound is a safety valve, and on a miss
+    // the test FAILs on the subsequent assertions rather than hanging here.
+    (void)fixpp::test_support::wait_until_observed(
+        [] { return g_arm_a_release.load(std::memory_order_acquire); },
+        std::chrono::seconds{10});
 }
 
 // Slow probe: brief sleep (arm (b) no-wedge cell only).
