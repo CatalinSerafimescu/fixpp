@@ -133,14 +133,21 @@ inline constexpr const char* kWindowMiss =
 // pass whichever helper reported. `drain_or_report` continues ", so a coroutine";
 // `cancel_and_drain_or_report` continues " even with clock sleeps released on
 // every slice, so a coroutine". A witness must match past the stem to
-// discriminate. (The header already publishes kWindowMiss / kPumpBudgetMiss /
-// kDrainThrew for exactly this reason; this stem was inlined prose in two places
+// discriminate. (#322) And past the DIVERGENCE too, where the caller is
+// `~quiesce_on_exit`: it delegates to `cancel_and_drain_or_report`, so guard and
+// primitive now compose byte-identical text apart from the trailing `site` -- a
+// witness for one of them must bind that site. (The header already publishes kWindowMiss /
+// kPumpBudgetMiss / kDrainThrew for exactly this reason; this stem was inlined prose in two places
 // and had already drifted on punctuation at birth.)
 inline constexpr const char* kDrainResidual =
     "#289: the io_context did not run out of work within the teardown drain";
 
 // Budget for a teardown drain. Deliberately the same value as
-// `quiesce_on_exit`'s default below, so the two report on the same terms.
+// `quiesce_on_exit`'s default below -- and since #322 that guard DELEGATES to
+// `cancel_and_drain_or_report`, so a two-argument `{ioc, clock}` guard and a
+// defaulted-budget call to the primitive run the SAME loop over the SAME 5 s.
+// Not the same call, though: the guard also forwards its `transport`, so the two
+// diverge whenever one is set.
 inline constexpr auto kQuiesceBudget = std::chrono::seconds{5};
 
 // Failure text for a teardown drain that a handler threw out of (#308). Stream
@@ -156,8 +163,14 @@ inline constexpr const char* kDrainThrew =
 // added later than `quiesce_on_exit` and inherited that guard's #305 deadline
 // defect purely by being a structurally identical copy. A second copy of a
 // try/catch would re-arm the same "fixed one of two identical shapes" class this
-// header keeps paying for, and `cancel_and_drain_or_report` below would make it
-// three.
+// header keeps paying for.
+//
+// (#322) THE DRAIN CORE NOW HAS TWO COPIES IN THIS HEADER, NOT THREE.
+// `~quiesce_on_exit` delegates to `cancel_and_drain_or_report` instead of
+// carrying its own `restart`/`run_for`/`poll_one`/`stopped`/`ADD_FAILURE`. That
+// count is not tidiness: #321 shipped the third copy with the #305 deadline
+// artefact reintroduced, and it was caught only because the two siblings carried
+// a zero-budget witness the third lacked.
 //
 // WHY A DRAIN NEEDS THIS AT ALL. Pumping dispatches arbitrary ready handlers, and
 // a handler may throw. `~quiesce_on_exit` has no exception specification and no
@@ -282,7 +295,8 @@ template <class Fut>
 //
 //     A caller whose transport can PARK a coroutine — i.e. whose async_write /
 //     async_read_some can stay pending — MUST use `quiesce_on_exit` with
-//     `.transport` set, or close the transport itself before calling this.
+//     `.transport` set, or `cancel_and_drain_or_report` with its `transport`
+//     argument (#322), or close the transport itself before calling this.
 //     `drain_or_report` cannot close a transport and never will, whoever calls it.
 //
 // A transport that cannot park is unaffected: that is a property of the transport,
@@ -302,9 +316,11 @@ template <class Fut>
 inline void drain_or_report(asio::io_context& ioc, const char* site,
                             std::chrono::steady_clock::duration budget = kQuiesceBudget) {
     try {
-        // (#305) THE PROBE. See `quiesce_on_exit`'s destructor for the full argument;
-        // the short version is that `run_for` can return WITHOUT ever consulting the
-        // work count, so `stopped()` alone reports a residual that does not exist.
+        // (#305) THE PROBE. See `cancel_and_drain_or_report`'s probe below for the full
+        // argument — it moved there with #322, when `~quiesce_on_exit`, which used to
+        // hold it, became one delegating call. The short version is that `run_for` can
+        // return WITHOUT ever consulting the work count, so `stopped()` alone reports a
+        // residual that does not exist.
         // This helper is NEW (#301) and inherited the defect by having the identical
         // shape — fixed here in the same change rather than only in the older copy,
         // because a fix that lands on one of two identical shapes is how this repo's
@@ -419,6 +435,12 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // pair that #313 and #316 shipped at ~40 sites. That pair is ONE-SHOT, and the
 // gap is one of ORDER, not of power.
 //
+// (#322) It is ALSO the whole body of `~quiesce_on_exit` below, which is why this
+// function takes a `transport` and why the #305 probe's full argument lives here
+// rather than in that destructor. Read the two together: everything the guard
+// documents about WHEN a drain may be called binds every caller of this function,
+// and everything here about what the loop can and cannot force binds the guard.
+//
 // THE MECHANISM, stated as a chain because no single link is obvious. On the
 // working path `cancel_sleeps()` completes every registered waiter with
 // `asio::error::operation_aborted` (src/core/test/mock_clock.cpp:166-181);
@@ -454,12 +476,22 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // described as doing so; it stops the report from misdescribing why the context
 // would not quiesce.
 //
-// ⚠️ IT DOES NOT CLOSE A TRANSPORT, and a second lever does not make it the
-// transport-closing drain. `drain_or_report`'s ⚠️ DIVERGENCE paragraph above states
-// the binding CONDITION and it applies here unchanged: a caller whose transport can
-// PARK a coroutine -- i.e. whose async_write / async_read_some can stay pending --
-// MUST use `quiesce_on_exit` with `.transport` set, or close the transport itself
-// before calling this.
+// ⚠️ IT CLOSES A TRANSPORT ONLY IF YOU PASS ONE, and that is a CONDITION on the
+// call, not a property of the helper. `transport` defaults to nullptr, and at a
+// null transport this drain is exactly what it was before #322: two clock levers
+// and nothing that can complete a parked async_write/async_read_some.
+// `drain_or_report`'s ⚠️ DIVERGENCE paragraph above states the binding condition and
+// it applies here in that form: a caller whose transport can PARK a coroutine --
+// i.e. whose async_write / async_read_some can stay pending -- MUST pass it as
+// `transport` here (or set `quiesce_on_exit::transport`, which is the same lever
+// reached through the guard), or close the transport itself before calling this.
+//
+// The pointee must OUTLIVE the call: `close()` is invoked unconditionally when the
+// pointer is non-null. `Transport::close()` is assumed noexcept and idempotent
+// (true of every transport in this suite), so passing an already-closed transport
+// is safe. It is closed ONCE, before the first slice, and INSIDE
+// `pump_or_report_throw` -- see the body for why that placement is load-bearing
+// rather than incidental.
 //
 // Every caveat `drain_or_report` carries about WHEN to call a drain binds here too:
 // call this while every object the suspended coroutine references is still alive,
@@ -468,15 +500,31 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 //
 // Reports AT MOST ONCE, at the end. A per-slice report would emit thousands of
 // failures on precisely the path that is already failing.
-inline void cancel_and_drain_or_report(
-    asio::io_context& ioc, fixpp::core::Clock& clock, const char* site,
-    std::chrono::steady_clock::duration budget = kQuiesceBudget) {
+inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock& clock,
+                                       const char* site,
+                                       std::chrono::steady_clock::duration budget = kQuiesceBudget,
+                                       fixpp::transport::Transport* transport = nullptr) {
     try {
-        // (#308) Guarded for the same reason the two drains above are: this is called
-        // from miss branches and destructor bodies, and a throwing handler would
-        // terminate rather than fail the test.
+        // (#308) Guarded for the same reason the drain above is: this is called from
+        // miss branches and destructor bodies, and a throwing handler would terminate
+        // rather than fail the test.
         if (!pump_or_report_throw(
                 [&] {
+                    // ⚠️ THE CLOSE IS INSIDE THE GUARD, AND THAT IS #308'S FIX, NOT A
+                    // FORMATTING CHOICE. Hoisting it out -- "close the transport, then
+                    // call the primitive" -- would put `close()` back in the caller's
+                    // frame, which for `~quiesce_on_exit` is an implicitly-noexcept
+                    // destructor. `close()` is documented noexcept, so that adds no
+                    // path today; leaving it outside is what makes that documentation
+                    // load-bearing for process survival, and #308 deliberately refused
+                    // that dependency. `cancel_sleeps()` is inside for the same reason.
+                    //
+                    // Closed ONCE, before the first slice, rather than per pass: it is
+                    // idempotent, nothing here reopens it, and the witness that pins it
+                    // (ClosesTransportBeforeDraining) asserts ordering, not repetition.
+                    if (transport) {
+                        (void)transport->close();
+                    }
                     const auto deadline = std::chrono::steady_clock::now() + budget;
                     for (;;) {
                         // Cancel FIRST, and on every pass: the sleep this exists to
@@ -498,14 +546,44 @@ inline void cancel_and_drain_or_report(
                         // witnesses the other two helpers already carry.
                         ioc.run_for(std::min(std::chrono::steady_clock::duration{kPumpSlice},
                                              deadline - now));
-                        // The same probe the drains above carry, and for the same
-                        // reason: `run_for` can return WITHOUT ever consulting the work
-                        // count, so `stopped()` alone reports on the DEADLINE rather than
-                        // on outstanding work. At a sliced drain that is not an edge case
-                        // -- every slice that expires with work pending reaches it. The
-                        // zero-budget resumption capability binds identically here -- it
-                        // is witnessed, not merely described, for this drain too (see the
-                        // zero-budget cases in tests/session/test_quiesce_on_exit_residual.cpp).
+                        // ── (#305) THE PROBE, and it repairs a predicate this header
+                        // over-claimed. This is the canonical statement of the argument;
+                        // `drain_or_report` above points here, and so does
+                        // `~quiesce_on_exit` below, which held it until #322 reduced that
+                        // destructor to one delegating call. ─────────────────────────────
+                        //
+                        // `io_context::run_for` is `run_until`, which loops on
+                        // `run_one_until`, and `run_one_until` is
+                        // `while (now < abs_time) { ... }  return 0;`
+                        // (asio impl/io_context.hpp:112-131). If the deadline has ALREADY
+                        // arrived at entry the loop body never runs, `impl_.wait_one` is
+                        // never called, and nothing consults `outstanding_work_` or sets
+                        // `stopped_`. The `restart()` immediately above has just cleared
+                        // that flag. So `stopped()` reads false whether or not any work
+                        // exists -- unconditionally at a zero budget, and reachable at any
+                        // budget's deadline boundary. At a SLICED drain that is not an edge
+                        // case at all: every slice that expires with work pending reaches
+                        // it.
+                        //
+                        // `poll_one()` closes it: `scheduler::poll_one` is
+                        // `if (outstanding_work_ == 0) { stop(); return 0; }`
+                        // (asio detail/impl/scheduler.ipp:289-295), so after this line
+                        // `stopped()` reflects the WORK COUNT rather than the deadline.
+                        //
+                        // ⚠️ THIS IS A NEW CAPABILITY AT A ZERO BUDGET, NOT AN INHERITED
+                        // OBLIGATION, and the distinction is the one an earlier draft of
+                        // this comment got wrong. `run_for(budget)` already resumes
+                        // coroutines, so "a drain resumes frames" is nothing new at a
+                        // normal budget. But `run_for(0)` resumes NOTHING -- it returns
+                        // before entering the scheduler -- whereas `poll_one()` WILL
+                        // dispatch. So the expired-deadline path gains the ability to
+                        // resume a frame, in exactly the case where a caller chose a zero
+                        // budget because it wanted nothing run. The obligation that follows
+                        // is the usual one and it binds a path it did not bind before:
+                        // storage a suspended frame borrowed must outlive this drain.
+                        // Witnessed rather than described -- every drain in this header
+                        // has a zero-budget resumption case AND an at-most-one-dispatch
+                        // case in tests/session/test_quiesce_on_exit_residual.cpp.
                         (void)ioc.poll_one();
                         if (ioc.stopped() || now >= deadline) break;
                     }
@@ -525,14 +603,17 @@ inline void cancel_and_drain_or_report(
                    "referencing objects that are about to die. This observes the residual, "
                    "not its cause (stopped() is disjunctive -- see quiesce_on_exit's "
                    "comment on the disjunction, below). A transport parked in "
-                   "async_write/async_read_some is the residual this helper CANNOT clear; "
-                   "see the transport warning above. Site: "
+                   "async_write/async_read_some is a residual this drain clears only when "
+                   "a transport was passed to it; see the transport warning above. Site: "
                 << site;
         }
     } catch (...) {
         // (gate-b/r1) Nothing may escape a teardown frame -- see the identical
         // comment in `drain_or_report` above; the exception policy is decided ONCE
-        // for every drain in this header, this being the third.
+        // for every drain in this header. (#322) This catch also covers
+        // `~quiesce_on_exit`, which delegates here and deliberately adds no handler
+        // of its own -- so it is the LAST line of defence for a destructor, not just
+        // for a free function called from one.
     }
 }
 
@@ -568,20 +649,27 @@ inline void cancel_and_drain_or_report(
 //  2. The clock's parked waiters hold work guards on the io_context, so on that
 //     path either destruction order has a dangling side.
 //
-// The only safe state is no pending state — but this guard only OBSERVES
-// whether that state was reached; it cannot force it (see below).
+// The only safe state is no pending state, and this guard's job is to reach it
+// where it can and to REPORT where it cannot. It carries two forcing levers —
+// `transport` below, and the repeated `cancel_sleeps()` it inherits by delegating
+// — neither of which makes a residual impossible.
 //
-// `run_for` rather than a `run_one_for` loop deliberately: `run_one_until` also
-// tests its deadline before dispatching, so a slice-at-a-time drain can return
-// on "nothing was ready within the slice" and leave work queued — the very
-// mechanism documented above. `run_for` drains until the context genuinely runs
-// out of work OR its deadline elapses, whichever comes first — the difference
-// from a sliced drain is deadline LENGTH, not immunity to the mechanism. A
+// ⚠️ (#322) THIS USED TO SAY `run_for` WAS CHOSEN OVER A `run_one_for` LOOP
+// DELIBERATELY, AND THE ARGUMENT NO LONGER HOLDS. It read: a slice-at-a-time drain
+// can return on "nothing was ready within the slice" and leave work queued,
+// because `run_one_until` tests its deadline before dispatching. That objection is
+// sound against the OBVIOUS sliced loop and does not bind
+// `cancel_and_drain_or_report`'s, which never breaks on an empty slice: it breaks
+// only on `ioc.stopped()` AFTER `poll_one()` has consulted the work count, or on
+// the deadline. The paragraph predated that loop; it was never a considered
+// rejection of this shape. Kept as a correction rather than deleted, because a
+// reader who remembers the old rationale needs to see it retired.
+//
+// What survives from it is the LIMIT, which is unchanged by the delegation: a
 // co_spawn frame holds a tracked-work guard, so a coroutine parked on anything
-// other than a clock sleep (the common case, released by cancel_sleeps() above)
-// keeps the context non-empty for the full 5s, and `run_for` returns with that
-// frame still pending — sufficient for the case this guard exists for, not a
-// general fix.
+// neither lever reaches keeps the context non-empty for the full budget, and the
+// drain returns with that frame still pending — sufficient for the case this guard
+// exists for, not a general fix.
 //
 // `io_context::stopped()` is a DISJUNCTION, not an exact detector: it is true
 // either because the context ran out of work or because something called
@@ -601,24 +689,35 @@ inline void cancel_and_drain_or_report(
 // MAKES IT TRUE. The work-guard census above is sound as far as it goes, but it
 // reasons only about who can hold work OPEN — it never asks whether the work
 // count was CONSULTED. `run_for` can return without consulting it at all (see the
-// probe in the destructor), and then `stopped()==false` means "the deadline had
-// already passed", not "work is outstanding". The census could not have caught
-// that, because the defect is not in the population it enumerates. Kept, rather
-// than deleted and quietly rewritten, so the shape of the mistake stays visible:
-// an exhaustive sweep of the wrong axis reads exactly like proof.
+// probe in `cancel_and_drain_or_report`), and then `stopped()==false` means "the
+// deadline had already passed", not "work is outstanding". The census could not
+// have caught that, because the defect is not in the population it enumerates.
+// Kept, rather than deleted and quietly rewritten, so the shape of the mistake
+// stays visible: an exhaustive sweep of the wrong axis reads exactly like proof.
 //
-// It is also not authoritative: `mock_clock::sleep_until`
-// registers a new waiter whenever the deadline is still in the future
-// (`src/core/test/mock_clock.cpp:119-126`), and `cancel_sleeps()` above is a
-// ONE-SHOT drain that installs nothing to reject a later registration
-// (`src/core/test/mock_clock.cpp:166-181`) — so a coroutine whose first run
-// happens during this destructor's own `run_for` (the session liveness loop's
-// `sleep_until`, `src/session/session.cpp:4816`, is the concrete case) can arm
-// a sleep nothing will ever fire, and this guard cannot force that residual,
-// only observe it. Report what was observed rather than exit silently:
-// ADD_FAILURE (non-fatal — a fatal assertion in a destructor is an inert
-// `return`) so a guard that never quiesces shows up in CI instead of leaving a
-// dangling frame to fire nondeterministically later.
+// ⚠️ (#322) THE SLEEP ARMED DURING THE GUARD'S OWN DRAIN IS NOW FORCED, NOT MERELY
+// OBSERVED. This paragraph used to end "this guard cannot force that residual,
+// only observe it", and that stopped being true when #321 landed
+// `cancel_and_drain_or_report`. The mechanism it described is real and unchanged:
+// `mock_clock::sleep_until` registers a new waiter whenever the deadline is still
+// in the future (`src/core/test/mock_clock.cpp:119-126`), and a SINGLE
+// `cancel_sleeps()` installs nothing to reject a later registration
+// (`src/core/test/mock_clock.cpp:166-181`), so a coroutine whose first run happens
+// during the drain — the session liveness loop's `sleep_until`,
+// `src/session/session.cpp:4816`, is the concrete case — arms a sleep the one-shot
+// cancel has already missed. What changed is the lever: this destructor delegates
+// to `cancel_and_drain_or_report`, whose loop alternates the cancel with the
+// drain, so the sleep armed by slice N is released by slice N+1. Pinned by
+// CancelAndDrainOrReportWitness.{OneShotCancelThenDrainCannotReleaseTheSleep,
+// ReleasesASleepArmedDuringItsOwnDrain}.
+//
+// It remains an OBSERVER for every residual neither lever reaches — a coroutine
+// parked on something that is not a clock sleep and not this transport. Report
+// what was observed rather than exit silently: ADD_FAILURE (non-fatal — a fatal
+// assertion in a destructor is an inert `return`) so a guard that never quiesces
+// shows up in CI instead of leaving a dangling frame to fire nondeterministically
+// later. The report is emitted by the primitive and carries the site
+// `"quiesce_on_exit"`, which is what discriminates it from a direct call.
 struct quiesce_on_exit {
     asio::io_context& ioc;
     fixpp::core::Clock& clock;
@@ -635,7 +734,9 @@ struct quiesce_on_exit {
     // aggregate, so the field may be assigned after construction, e.g. once
     // the caller attaches the transport) whenever one is. Assumes
     // Transport::close() is noexcept and idempotent (true of every transport
-    // in this suite) — safe to call even if the caller already closed it. The
+    // in this suite) — safe to call even if the caller already closed it. Since
+    // #322 this field is simply forwarded to `cancel_and_drain_or_report`'s
+    // `transport` argument, which is where the `close()` happens. The
     // pointee must also OUTLIVE this guard: `~quiesce_on_exit` dereferences it
     // unconditionally, on every exit path. The condition is simply that the
     // pointee is declared BEFORE the guard — whether it is a `Session`-owned
@@ -643,76 +744,27 @@ struct quiesce_on_exit {
     // Declaring the guard first leaves this dangling.
     fixpp::transport::Transport* transport = nullptr;
 
+    // (#322) ONE DELEGATING CALL, and every part of the teardown this destructor
+    // used to spell out now lives in `cancel_and_drain_or_report`: the #308
+    // try/catch and `pump_or_report_throw` wrapping, the #305 probe, the residual
+    // `ADD_FAILURE`, and the transport close INSIDE the pump.
+    //
+    // ⚠️ IT MUST STAY ONE CALL. "Close the transport, then call the primitive"
+    // would put `transport->close()` back in THIS frame, which has no exception
+    // specification and no handler of its own and is therefore implicitly
+    // `noexcept` -- making "close() is noexcept" load-bearing for process survival
+    // in a destructor. That is precisely the dependency #308 refused; the primitive
+    // takes the transport so the refusal survives the delegation.
+    //
+    // Nothing may escape here either, and nothing does: every path through
+    // `cancel_and_drain_or_report` is inside its own unconditional `catch (...)`
+    // (its own comment: the exception policy for every drain in this header is
+    // decided ONCE), including the throwing `ADD_FAILURE()` that
+    // `--gtest_throw_on_failure` produces. So this destructor adds no handler of
+    // its own -- a second one would be the duplicated try/catch
+    // `pump_or_report_throw`'s comment argues against.
     ~quiesce_on_exit() {
-        try {
-            // ── (#305) THE PROBE, and it repairs a predicate this header over-claimed ──
-            //
-            // `io_context::run_for` is `run_until`, which loops on `run_one_until`, and
-            // `run_one_until` is `while (now < abs_time) { ... }  return 0;`
-            // (asio impl/io_context.hpp:112-131). If the deadline has ALREADY arrived at
-            // entry the loop body never runs, `impl_.wait_one` is never called, and
-            // nothing consults `outstanding_work_` or sets `stopped_`. The `restart()`
-            // immediately above has just cleared that flag. So `stopped()` reads false
-            // whether or not any work exists — unconditionally at a zero budget, and
-            // reachable at any budget's deadline boundary.
-            //
-            // `poll_one()` closes it: `scheduler::poll_one` is
-            // `if (outstanding_work_ == 0) { stop(); return 0; }`
-            // (asio detail/impl/scheduler.ipp:289-295), so after this line `stopped()`
-            // reflects the WORK COUNT rather than the deadline.
-            //
-            // ⚠️ THIS IS A NEW CAPABILITY AT A ZERO BUDGET, NOT AN INHERITED OBLIGATION,
-            // and the distinction is the one an earlier draft of this comment got wrong.
-            // `run_for(budget)` already resumes coroutines, so "a drain resumes frames" is
-            // nothing new at a normal budget. But `run_for(0)` resumes NOTHING — it returns
-            // before entering the scheduler — whereas `poll_one()` WILL dispatch. So the
-            // expired-deadline path gains the ability to resume a frame, in exactly the case
-            // where a caller chose a zero budget because it wanted nothing run. The
-            // obligation that follows is the usual one and it now binds a path it did not
-            // bind before: storage a suspended frame borrowed must outlive this guard.
-            // Witnessed directly rather than described — every drain in this header
-            // that carries this probe has a zero-budget resumption case in
-            // tests/session/test_quiesce_on_exit_residual.cpp.
-            //
-            // (#308) The whole teardown is guarded. This destructor has no exception
-            // specification and no handler of its own, so it is implicitly `noexcept`
-            // and a throwing handler dispatched by the pump below is `std::terminate` --
-            // the least diagnosable outcome available, and strictly worse than the
-            // ADD_FAILURE this guard exists to emit. `transport->close()` and
-            // `cancel_sleeps()` are inside the guard as well: both are documented
-            // `noexcept`, so they add no path today, but leaving them outside would make
-            // that documentation load-bearing for process survival, which is not a
-            // dependency worth taking in a destructor.
-            //
-            // On the throwing path the residual check is skipped -- see the same
-            // reasoning at `drain_or_report`.
-            if (!pump_or_report_throw(
-                    [&] {
-                        if (transport) {
-                            (void)transport->close();
-                        }
-                        clock.cancel_sleeps();
-                        ioc.restart();
-                        ioc.run_for(budget);
-                        (void)ioc.poll_one();
-                    },
-                    "quiesce_on_exit")) {
-                return;
-            }
-            if (!ioc.stopped()) {
-                ADD_FAILURE()
-                    << "quiesce_on_exit: the io_context did not run out of work within the "
-                       "configured quiesce window. At this caller that is expected to mean a "
-                       "coroutine frame is still suspended and will be destroyed while "
-                       "referencing objects that are about to be destructed, but this guard "
-                       "only observes the residual, not its cause.";
-            }
-        } catch (...) {
-            // (gate-b/r1) Nothing may escape a destructor -- see the identical comment
-            // in `drain_or_report` above; the exception policy is decided ONCE for
-            // every drain in this header, including this one, which is where #308
-            // originally landed the guard.
-        }
+        cancel_and_drain_or_report(ioc, clock, "quiesce_on_exit", budget, transport);
     }
 };
 
