@@ -21,11 +21,20 @@
 // (src/core/test/mock_clock.cpp:119), while `cancel_sleeps()` is a
 // one-shot drain of only the waiters present at the moment it runs
 // (src/core/test/mock_clock.cpp:166) — a coroutine whose first run happens
-// during the guard's own `run_for` drain (the session liveness loop's
-// `sleep_until`, src/session/session.cpp:4816, is the concrete production
-// case) can arm a sleep nothing will ever fire. This test does not exercise
-// that gap; it is a documented residual of the guard, not something proven
-// absent here.
+// during the guard's own drain (the session liveness loop's `sleep_until`,
+// src/session/session.cpp:4816, is the concrete production case) can arm a
+// sleep the one-shot cancel has already missed.
+//
+// (#322) THAT GAP IS NOW EXERCISED, and the paragraph above used to end "this
+// test does not exercise that gap; it is a documented residual of the guard".
+// `~quiesce_on_exit` delegates to `cancel_and_drain_or_report`, whose
+// alternating cancel-then-drain loop releases a sleep armed by a previous
+// slice, and both directions of that are pinned below —
+// CancelAndDrainOrReportWitness.OneShotCancelThenDrainCannotReleaseTheSleep
+// (the gap, on the one-shot drain) and .ReleasesASleepArmedDuringItsOwnDrain
+// (the release). What is still NOT proven here is a residual neither lever
+// reaches: a coroutine parked on something that is not a clock sleep and not
+// the guard's transport.
 //
 // Anchors: tests/support/pump_until_ready.hpp (quiesce_on_exit); #289 B2
 // design review c-Q1..c-Q4.
@@ -112,6 +121,18 @@ private:
 // itself, must be scoped INSIDE the macro's captured statement — declaring
 // quiesce_on_exit before EXPECT_NONFATAL_FAILURE would run its destructor
 // after the macro stopped intercepting failures, silently passing.
+//
+// (#322) THE MATCHER MOVED, AND WHERE IT MOVED TO IS THE ASSERTION. The guard no
+// longer composes its own residual text; it delegates to
+// `cancel_and_drain_or_report`, so the message is that drain's, ending in the
+// `site` the guard passes. `"warning above. Site: quiesce_on_exit"` is chosen to
+// span BOTH halves of what must hold, because `EXPECT_NONFATAL_FAILURE` matches a
+// substring and either half alone is weak: the tail of the residual sentence
+// discriminates the RESIDUAL report from the `#308` THROW report (which also
+// carries `Site: quiesce_on_exit`), and the site discriminates THIS guard's
+// delegation from a bare `cancel_and_drain_or_report` call. A matcher bound only
+// to the shared `kDrainResidual` stem would pass whichever drain reported — see
+// that constant's own comment in pump_until_ready.hpp.
 TEST(QuiesceOnExitResidualWitness, ReportsWhenIocNeverDrains) {
     asio::io_context ioc;
     auto clock = make_mock_clock(ioc);
@@ -120,7 +141,7 @@ TEST(QuiesceOnExitResidualWitness, ReportsWhenIocNeverDrains) {
                                 auto keep_alive = asio::make_work_guard(ioc);
                                 quiesce_on_exit quiesce{ioc, *clock, 1ms};
                             }()),
-                            "quiesce_on_exit: the io_context did not run out of work");
+                            "warning above. Site: quiesce_on_exit");
 }
 
 // Branch does not fire: an otherwise-empty io_context (no outstanding work,
@@ -158,6 +179,12 @@ TEST(QuiesceOnExitResidualWitness, DefaultBudgetIsFiveSeconds) {
 // Mutation: deleting the `quiesce.transport = &transport;` line below turns
 // this RED (ADD_FAILURE fires, caught by gtest as a normal test failure —
 // there is no SPI wrapper here because the passing path must be silent).
+//
+// (#322) The close now happens in `cancel_and_drain_or_report`, before its first
+// slice and inside `pump_or_report_throw`, with the guard forwarding its
+// `transport` field. This cell therefore also pins the FORWARDING: dropping the
+// argument from the destructor's delegating call reds it exactly as deleting the
+// assignment does.
 TEST(QuiesceOnExitResidualWitness, ClosesTransportBeforeDraining) {
     asio::io_context ioc;
     auto clock = make_mock_clock(ioc);
@@ -177,10 +204,12 @@ TEST(QuiesceOnExitResidualWitness, ClosesTransportBeforeDraining) {
 // has ever seen it fire — every existing
 // caller in this file's `Fixture` fixtures leaves `EngineConfig::clock` null,
 // so `run_liveness_loop()` co_returns immediately and nothing is ever
-// outstanding at the drain. `quiesce_on_exit`'s destructor body is
-// structurally identical and IS proven RED above
-// (QuiesceOnExitResidualWitness.ReportsWhenIocNeverDrains), but a copied body
-// is not a tested body — `drain_or_report` is a separate free function with
+// outstanding at the drain. The residual branch IS proven RED above
+// (QuiesceOnExitResidualWitness.ReportsWhenIocNeverDrains). (#322) That used to
+// read "`quiesce_on_exit`'s destructor body is structurally identical ... but a
+// copied body is not a tested body"; the copy is gone, the destructor is one
+// delegating call. The conclusion is unchanged and now rests on a different
+// fact — `drain_or_report` is a separate free function with
 // its own text and its own callers (Fixture::feed, Fixture::~Fixture in
 // tests/session/test_next_expected_msgseqnum.cpp). Prove both directions
 // directly.
@@ -214,11 +243,15 @@ TEST(DrainOrReportWitness, SilentWhenIocDrainsNormally) {
 // consults `outstanding_work_` or sets `stopped_` — while the `restart()` just
 // above has cleared it. `stopped()` then reads false on a context holding NO work.
 //
-// Both `quiesce_on_exit` and `drain_or_report` had that shape, so both are pinned
-// here. `drain_or_report` is the newer copy (#301) and inherited the defect by
-// being structurally identical; a fix landing on only the older one is how this
-// repo's "fixed some sites of a claim, missed another" class recurs, so the two
-// cases below are deliberately twins rather than one test.
+// Both `quiesce_on_exit` and `drain_or_report` had that shape when these cells
+// were written, so both are pinned here. `drain_or_report` is the newer copy
+// (#301) and inherited the defect by being structurally identical; a fix landing
+// on only the older one is how this repo's "fixed some sites of a claim, missed
+// another" class recurs, so the two cases below are deliberately twins rather
+// than one test. (#322) `quiesce_on_exit` no longer HAS that shape -- it
+// delegates -- so its cell now exercises `cancel_and_drain_or_report`'s probe
+// through the guard. Both cells are kept: they pin different propositions now,
+// the probe itself and the delegation reaching it.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 namespace {
@@ -250,8 +283,11 @@ TEST(QuiesceOnExitResidualWitness, ZeroBudgetOnEmptyContextIsNotResidual) {
 }
 
 // The twin, on the copy that inherited the defect. Deleting `drain_or_report`'s
-// probe reds this and not the one above; deleting `quiesce_on_exit`'s reds the
-// one above and not this. That separation is the point.
+// probe reds this and not the one above. (#322) The converse no longer names
+// anything deletable -- `quiesce_on_exit` has no probe of its own now -- but the
+// separation survives in the form that matters: this cell is blind to
+// `cancel_and_drain_or_report`, and the one above reaches it through the guard,
+// so a defect in either drain still reds exactly one of them.
 TEST(DrainOrReportWitness, ZeroBudgetOnEmptyContextIsNotResidual) {
     asio::io_context ioc;
 
@@ -313,6 +349,26 @@ TEST(QuiesceOnExitResidualWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
 // poll_one -> poll mutant both handlers run, the work count reaches zero, no
 // report is emitted — EXPECT_NONFATAL_FAILURE fails (no failure was intercepted)
 // and `ran == 2`: the cell kills the mutant on both axes.
+//
+// (#322) WHAT THIS CELL PINS CHANGED, and saying so is the point of keeping it.
+// The guard now delegates, so the probe it exercises is the one
+// CancelAndDrainOrReportWitness.ZeroBudgetProbeDispatchesAtMostOneHandler already
+// covers — the `poll_one -> poll` mutant reds both. The independent proposition
+// left here is the DELEGATION: that `~quiesce_on_exit` routes to the primitive
+// with this guard's own budget and site. Mutate `budget` to `kQuiesceBudget` in
+// the destructor's call and this reds (both handlers run within 5 s, no residual)
+// while the primitive's own twin stays green.
+//
+// ⚠️ THIS CELL IS THE ONLY ONE THAT PINS BUDGET FORWARDING -- measured, and an
+// earlier draft of this comment guessed otherwise. Under that mutant exactly ONE
+// of the ten QuiesceOnExitResidualWitness cells fails: this one. The three the
+// draft also named (ZeroBudgetProbeCanNowResumeACoroutine,
+// ThrowingHandlerReportsOnceNotTwice, OuterCatchSwallowsAThrowingAddFailure) all
+// stay GREEN, because a longer budget changes nothing for a coroutine that
+// resumes anyway, a handler that throws in the first slice, or a work guard that
+// is unreleasable at any budget. So deleting this cell as "redundant with the
+// primitive's twin" removes the only check that the guard's own budget reaches
+// the primitive at all.
 TEST(QuiesceOnExitResidualWitness, ZeroBudgetProbeDispatchesAtMostOneHandler) {
     int ran = 0;
     {
@@ -321,7 +377,7 @@ TEST(QuiesceOnExitResidualWitness, ZeroBudgetProbeDispatchesAtMostOneHandler) {
         asio::post(ioc, [&ran] { ++ran; });
         asio::post(ioc, [&ran] { ++ran; });
         EXPECT_NONFATAL_FAILURE(([&] { quiesce_on_exit quiesce{ioc, *clock, 0ms}; }()),
-                                "quiesce_on_exit: the io_context did not run out of work");
+                                "warning above. Site: quiesce_on_exit");
     }
     EXPECT_EQ(ran, 1) << "the probe dispatched more than one handler; poll_one() may have "
                          "become poll(), which drains an unbounded queue during teardown";
@@ -375,11 +431,15 @@ TEST(DrainOrReportWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
 // third copy did not, and `poll_one() -> poll()` in `cancel_and_drain_or_report`'s
 // zero-budget probe left the whole binary green. Modelled on
 // QuiesceOnExitResidualWitness.ZeroBudgetProbeDispatchesAtMostOneHandler
-// (:316-328), not the DrainOrReportWitness copy, because this drain also needs
+// (the QuiesceOnExitResidualWitness cell of that name above -- by name, since the
+// old pin :316-328 now lands on a sibling zero-budget witness), not the
+// DrainOrReportWitness copy, because this drain also needs
 // a mock clock. The matcher is the substring unique to this drain's residual
 // message (the `cancel_and_drain_or_report` branch of the shared residual
 // report, immediately after its `kDrainResidual` stem) -- the shared stem
-// alone would pass whichever drain reported (pump_until_ready.hpp:129-138).
+// alone would pass whichever drain reported (pump_until_ready.hpp,
+// `kDrainResidual`'s own comment -- by symbol, since that comment has grown and
+// any line range cuts off the clause about binding the `site`).
 TEST(CancelAndDrainOrReportWitness, ZeroBudgetProbeDispatchesAtMostOneHandler) {
     int ran = 0;
     {
@@ -445,7 +505,8 @@ TEST(CancelAndDrainOrReportWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
 // `site`, and two of the three call sites used to pass the identical literal
 // `"probe"`, making `drain_or_report`'s and `cancel_and_drain_or_report`'s failure
 // messages byte-identical. Fixed with BOTH halves, per this header's own
-// prescription for the residual messages (pump_until_ready.hpp:129-138): distinct
+// prescription for the residual messages (pump_until_ready.hpp,
+// `kDrainResidual`'s own comment -- by symbol, not a line range): distinct
 // `site` strings per witness AND full-message matching -- either half alone is a
 // no-op (a bare-`what()` matcher still passes with distinct sites; distinct sites
 // with a bare-`what()` matcher still collide on the shared stem+what() alone since
@@ -460,7 +521,10 @@ void post_throwing_handler(asio::io_context& ioc) {
 }
 
 // (gate-b/r1 F2a) A handler that throws a NON-std value. `pump_or_report_throw`'s
-// `catch (...)` (pump_until_ready.hpp:190-191) has been new code with no witness
+// `catch (...)` (pump_until_ready.hpp, `pump_or_report_throw`'s non-std arm --
+// cited by SYMBOL because the old line pin 190-191 drifted onto `kDrainThrew`'s
+// literal, which is also about a throw and so read as correct) has been new code
+// with no witness
 // since this PR added it -- every checked-in throwing handler threw
 // std::runtime_error, so only the `catch (const std::exception&)` arm ever ran.
 // asio's scheduler rethrows a handler's exception unchanged out of
@@ -488,9 +552,12 @@ struct CallOnDestruct {
 
 }  // namespace
 
-// `~quiesce_on_exit`'s site is hardcoded "quiesce_on_exit" (the site argument
-// passed to its `pump_or_report_throw` call) -- already distinct from the two
-// free functions' sites below, so no parameter is introduced for it.
+// `~quiesce_on_exit`'s site is hardcoded "quiesce_on_exit" -- already distinct
+// from the two free functions' sites below, so no parameter is introduced for it.
+// (#322) It is the site argument of the destructor's `cancel_and_drain_or_report`
+// call, which forwards it to `pump_or_report_throw`. This used to say the
+// destructor passed it to `pump_or_report_throw` directly; that stopped being
+// true when the guard began delegating, and the string is unchanged either way.
 TEST(QuiesceOnExitResidualWitness, ReportsWhenAHandlerThrows) {
     asio::io_context ioc;
     auto clock = make_mock_clock(ioc);
@@ -663,10 +730,13 @@ TEST(QuiesceOnExitResidualWitness, OuterCatchSwallowsAThrowingAddFailure) {
                                 quiesce_on_exit quiesce{ioc, *clock, 1ms};
                                 // ~quiesce runs here, throw_on_failure still true: its residual
                                 // ADD_FAILURE() records the failure then throws
-                                // GoogleTestFailureException, caught by the outer catch(...) this
-                                // round added to ~quiesce_on_exit's body.
+                                // GoogleTestFailureException, caught by the outer catch(...)
+                                // in `cancel_and_drain_or_report`, which since #322 IS
+                                // ~quiesce_on_exit's body. The destructor adds no handler of
+                                // its own; that the delegated one covers it is what this
+                                // pins, since a throw escaping here terminates the process.
                             }()),
-                            "quiesce_on_exit: the io_context did not run out of work");
+                            "warning above. Site: quiesce_on_exit");
 
     SUCCEED() << "control reached past ~quiesce_on_exit without std::terminate, "
                  "so the outer catch(...) swallowed the throwing ADD_FAILURE";
