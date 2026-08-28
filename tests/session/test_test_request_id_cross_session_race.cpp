@@ -990,9 +990,12 @@ struct quiesce_or_release_on_exit {
                 // This guard was written first, when the shared header still claimed
                 // that `stopped()==false` necessarily means outstanding work — a claim
                 // that omits this window. That defect is now fixed at the source
-                // (#305): both `quiesce_on_exit` and `drain_or_report` carry the same
-                // probe, and the header's claim is corrected in place. The probe stays
-                // duplicated here because this guard does not delegate to either of
+                // (#305), and (#322) the probe now lives in ONE place there:
+                // `cancel_and_drain_or_report`. `drain_or_report` carries its own copy
+                // and `~quiesce_on_exit` reaches it by DELEGATING — the guard no longer
+                // carries a probe of its own, so this is not a two-member list of
+                // copies. The header's claim is corrected in place. The probe stays
+                // duplicated here because this guard does not delegate to any of
                 // them — it computes the verdict itself so the release decision cannot
                 // drift from it — not because the shared version is still wrong.
                 (void)ioc->poll_one();
@@ -1232,9 +1235,12 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // value, and that trivial destructor does not touch the pointed-to bytes.
     // Declaring the arena before `ioc` satisfies the requirement with margin —
     // it outlives the frames themselves, hence every read through them. `quiesce_on_exit`
-    // below only fixes the ORDER of destruction relative to itself; it cannot
-    // force quiescence (see its definition — it reports residual work via
-    // ADD_FAILURE rather than eliminating it). On the budget-exhausted path the
+    // below fixes the ORDER of destruction relative to itself. (#322) It also has a
+    // forcing lever now, and this sentence used to deny it: the guard delegates to
+    // `cancel_and_drain_or_report`, whose alternating cancel-then-drain loop releases a
+    // clock sleep armed DURING the drain, which a one-shot cancel misses. It still only
+    // REPORTS a residual neither that lever nor a transport close can reach; either way
+    // this declaration order does not depend on it. On the budget-exhausted path the
     // guard now releases the context rather than destroying it (#311), so no
     // frame is destroyed at all here and this declaration order is
     // belt-and-braces rather than load-bearing.
