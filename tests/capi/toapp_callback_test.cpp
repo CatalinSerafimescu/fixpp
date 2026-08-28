@@ -42,6 +42,7 @@
 
 #include "capi_internal.hpp"      // fixpp_msg (check tag_/view directly)
 #include "capi_loopback_support.hpp"
+#include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
@@ -54,14 +55,9 @@ fixpp_error_t make_engine_v4(fixpp_engine_t** out) {
     return fixpp_engine_create(make_engine_cfg(), 1, 4, out);
 }
 
-// Poll until `received` is true or the deadline elapses.
+// Poll until `flag` is true or the deadline elapses.
 bool poll_until(std::atomic<bool>& flag, std::chrono::milliseconds ms = 2000ms) {
-    const auto until = std::chrono::steady_clock::now() + ms;
-    while (!flag.load(std::memory_order_acquire)) {
-        if (std::chrono::steady_clock::now() >= until) return false;
-        std::this_thread::sleep_for(5ms);
-    }
-    return true;
+    return fixpp::test_support::wait_until_observed([&flag] { return flag.load(std::memory_order_acquire); }, ms);
 }
 
 // ── Shared loopback pair ───────────────────────────────────────────────────

@@ -36,6 +36,7 @@
 
 #include "capi_dict066_loopback_support.hpp"
 #include "capi_loopback_support.hpp"
+#include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
@@ -183,10 +184,9 @@ TEST(NestedGroupMembershipCapiRed, TrailingMemberAbsentFromLastNestedInstance) {
     auto payload = make_nested_membership_app_payload();
     ASSERT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_OK);
 
-    const auto until = std::chrono::steady_clock::now() + 5s;
-    while (!ctx.fired.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < until) {
-        std::this_thread::sleep_for(5ms);
-    }
+    // Result discarded: the ASSERT_TRUE(ctx.fired...) below is the oracle.
+    (void)fixpp::test_support::wait_until_observed(
+        [&ctx] { return ctx.fired.load(std::memory_order_acquire); }, 5s);
 
     ASSERT_TRUE(ctx.fired.load()) << "the nested-group-bearing ExecutionReport must reach the "
                                      "acceptor's registered receive callback";

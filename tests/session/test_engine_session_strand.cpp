@@ -156,6 +156,7 @@
 #include "transport/asio_tls_transport.hpp"
 
 #include "support/minimal_dictionary.hpp"
+#include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
@@ -267,7 +268,7 @@ static uint16_t reserve_free_port(asio::io_context& ioc) {
 // Wait until pred() is true, driving ioc.run_for(50ms) per iteration.
 // Returns pred() at exit.
 // MUST NOT be called while other threads are in ioc.run() — restart() is UB then.
-// Use wait_pred_nodrive() instead when worker threads own the ioc.
+// Use wait_until_observed() instead when worker threads own the ioc.
 static bool wait_pred(asio::io_context& ioc, auto pred,
                       std::chrono::milliseconds budget) {
     auto end = std::chrono::steady_clock::now() + budget;
@@ -278,16 +279,12 @@ static bool wait_pred(asio::io_context& ioc, auto pred,
     return pred();
 }
 
-// Wait until pred() is true using sleep polling only — no ioc.run_for()/restart().
-// Use this when worker threads are already inside ioc.run(); calling restart() from
-// the main thread while workers are in run() is asio UB (SEGFAULT under gcc-release).
-static bool wait_pred_nodrive(auto pred, std::chrono::milliseconds budget) {
-    auto end = std::chrono::steady_clock::now() + budget;
-    while (!pred() && std::chrono::steady_clock::now() < end) {
-        std::this_thread::sleep_for(std::chrono::milliseconds{2});
-    }
-    return pred();
-}
+// Sleep-poll wait, for use once worker threads are already inside ioc.run():
+// calling restart() from the main thread while workers are in run() is asio UB
+// (SEGFAULT under gcc-release). This file's former `wait_until_observed` was one
+// of the three copies #315 hoisted; the shared helper polls on a 1 ms slice
+// where the local one used 2 ms, so every wait here detects at least as fast.
+using fixpp::test_support::wait_until_observed;
 
 // Wait for both sessions to reach fsm_state::Active via lookup + state() check.
 // Safer than counting onLogon callbacks because it directly observes the FSM state.
@@ -414,8 +411,8 @@ TEST(EngineSessionStrand, V1_PerSessionTeardown_TransportCloseSerializedWithRead
     {
         auto stop_fut = asio::co_spawn(
             ioc.get_executor(), engine->stop(), asio::use_future);
-        // wait_pred_nodrive: no ioc.run_for()/restart() while t1/t2 are in run().
-        bool stop_done = wait_pred_nodrive(
+        // wait_until_observed: no ioc.run_for()/restart() while t1/t2 are in run().
+        bool stop_done = wait_until_observed(
             [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; }, 8000ms);
         wg.reset();   // release guard → workers exit when queue drains
         t1.join();
@@ -670,8 +667,8 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
         auto send_fut = asio::co_spawn(ioc.get_executor(),
             engine->send(ini_id, std::span<const std::byte>(payload)),
             asio::use_future);
-        // wait_pred_nodrive: no restart() while t1/t2 are in ioc.run().
-        bool send_done = wait_pred_nodrive(
+        // wait_until_observed: no restart() while t1/t2 are in ioc.run().
+        bool send_done = wait_until_observed(
             [&]{ return send_fut.wait_for(0ms) == std::future_status::ready; }, 5000ms);
         if (!send_done) {
             ioc.stop();
@@ -687,13 +684,13 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     }
 
     // Wait for fromApp to fire on the acceptor.
-    bool fa_fired = wait_pred_nodrive(
+    bool fa_fired = wait_until_observed(
         [&]{ return app->from_app_count.load(std::memory_order_acquire) >= 1; }, 5000ms);
     EXPECT_TRUE(fa_fired) << "V-9(a): fromApp must fire on the acceptor after initiator send";
 
     if (fa_fired) {
         // Wait for re-entrant send to resolve (done OR error; MUST NOT hang).
-        bool re_resolved = wait_pred_nodrive(
+        bool re_resolved = wait_until_observed(
             [&]{
                 return app->reentrant_done.load(std::memory_order_acquire)
                     || app->reentrant_error.load(std::memory_order_acquire);
@@ -718,8 +715,8 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     // Stop the engine first.
     {
         auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
-        // wait_pred_nodrive: no restart() while t1/t2 are in ioc.run().
-        bool stop_done = wait_pred_nodrive(
+        // wait_until_observed: no restart() while t1/t2 are in ioc.run().
+        bool stop_done = wait_until_observed(
             [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; }, 8000ms);
         ioc.stop();   // safe: stop() from any thread is defined behaviour
         t1.join();
@@ -1328,8 +1325,8 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
 
     // Wait for the seam to be reached (transport created, pre-publish pause).
     // Budget: 8s (covers TLS handshake + Logon frame delivery).
-    // wait_pred_nodrive: no restart() while t1/t2 are in ioc.run().
-    bool seam_reached_ok = wait_pred_nodrive(
+    // wait_until_observed: no restart() while t1/t2 are in ioc.run().
+    bool seam_reached_ok = wait_until_observed(
         [&]{ return seam_reached.load(std::memory_order_acquire); },
         std::chrono::seconds{8});
 
@@ -1361,8 +1358,8 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
             ioc.get_executor(), engine->stop(), asio::use_future);
 
         // (b) Poll until stopped_ = true (stop() step 1 on control strand).
-        // wait_pred_nodrive: no restart() while t1/t2 are in ioc.run().
-        bool stopped_flag_set = wait_pred_nodrive(
+        // wait_until_observed: no restart() while t1/t2 are in ioc.run().
+        bool stopped_flag_set = wait_until_observed(
             [&]{ return engine->stopped(); },
             3000ms);
 
@@ -1370,7 +1367,7 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
         seam_release.store(true, std::memory_order_release);
 
         // (d) Poll until stop() coroutine fully completes.
-        bool done = wait_pred_nodrive(
+        bool done = wait_until_observed(
             [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
             10000ms);
 
@@ -1665,8 +1662,8 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     {
         auto stop_fut = asio::co_spawn(
             ioc.get_executor(), engine->stop(), asio::use_future);
-        // wait_pred_nodrive: no restart() while t1/t2 are in ioc.run().
-        bool done = wait_pred_nodrive(
+        // wait_until_observed: no restart() while t1/t2 are in ioc.run().
+        bool done = wait_until_observed(
             [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
             12000ms);
 
@@ -1945,8 +1942,8 @@ TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
     {
         auto stop_fut = asio::co_spawn(
             ioc.get_executor(), engine->stop(), asio::use_future);
-        // wait_pred_nodrive: no ioc.run_for()/restart() while workers are running.
-        bool done = wait_pred_nodrive(
+        // wait_until_observed: no ioc.run_for()/restart() while workers are running.
+        bool done = wait_until_observed(
             [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
             10000ms);
 
@@ -2184,8 +2181,8 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
     //           for all of them to complete → Engine stays alive → no UAF.
     auto stop_fut = asio::co_spawn(
         ioc.get_executor(), engine->stop(), asio::use_future);
-    // wait_pred_nodrive: no restart() while t1/t2/t3 are in ioc.run().
-    bool stop_done = wait_pred_nodrive(
+    // wait_until_observed: no restart() while t1/t2/t3 are in ioc.run().
+    bool stop_done = wait_until_observed(
         [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
         12000ms);
 
@@ -2309,8 +2306,8 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
     auto stop_fut = asio::co_spawn(
         ioc.get_executor(), engine->stop(), asio::use_future);
 
-    // wait_pred_nodrive: no restart() while t1/t2/t3 are in ioc.run().
-    bool seam_hit = wait_pred_nodrive(
+    // wait_until_observed: no restart() while t1/t2/t3 are in ioc.run().
+    bool seam_hit = wait_until_observed(
         [&]{ return post_drain_reached.load(std::memory_order_acquire); },
         12000ms);
     ASSERT_TRUE(seam_hit) << "V-16: stop() did not reach the post-send-drain seam";
@@ -2320,7 +2317,7 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
         ioc.get_executor(), engine->send(ini_id, std::span<const std::byte>{dummy}),
         asio::use_future);
 
-    bool late_send_done = wait_pred_nodrive(
+    bool late_send_done = wait_until_observed(
         [&]{ return late_send_fut.wait_for(0ms) == std::future_status::ready; },
         5000ms);
     ASSERT_TRUE(late_send_done) << "V-16: late send did not complete within 5s";
@@ -2333,7 +2330,7 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
 
     post_drain_release.store(true, std::memory_order_release);
 
-    bool stop_done = wait_pred_nodrive(
+    bool stop_done = wait_until_observed(
         [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
         12000ms);
 
@@ -2442,7 +2439,7 @@ TEST(EngineSessionStrand, V17_OrphanEntryStopEmit_NoUAF) {
     {
         auto stop_fut = asio::co_spawn(
             ioc.get_executor(), engine->stop(), asio::use_future);
-        bool done = wait_pred_nodrive(
+        bool done = wait_until_observed(
             [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
             10000ms);
 

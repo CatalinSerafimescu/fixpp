@@ -24,6 +24,8 @@
 #include <memory_resource>
 #include <mutex>
 #include <thread>
+
+#include "support/wait_until.hpp"
 #include <vector>
 
 #include <fixpp/log/level.hpp>
@@ -94,11 +96,8 @@ TEST(Log0RawThread, ZeroedTraceNoUB) {
     raw_thread.join();
 
     // Wait for the drain thread to deliver the record (max 2 s).
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (sink_ptr->count() >= 1u) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds{5});
-    }
+    // Result discarded: the ASSERT_GE below is the oracle.
+    (void)fixpp::test_support::wait_until_observed([&sink_ptr] { return sink_ptr->count() >= 1u; }, std::chrono::seconds{2});
     ASSERT_GE(sink_ptr->count(), 1u) << "FIXPP_LOG0 record not delivered within 2 s";
 
     auto rec = sink_ptr->get(0);

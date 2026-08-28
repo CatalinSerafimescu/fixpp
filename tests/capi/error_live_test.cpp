@@ -48,6 +48,7 @@
 #include "fixpp/session/session.hpp"         // Session::seqnum_mgr_test_access()
 
 #include "capi_loopback_support.hpp"
+#include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
@@ -99,11 +100,9 @@ TEST(CapiErrorLive, MalformedPayloadReturnsUnknownNoTransmit) {
     EXPECT_EQ(fixpp_session_send(ini_h, good_payload.data(), good_payload.size()), FIXPP_ERR_OK);
 
     // Wait for the good send to arrive (peer callback fires) — give it up to 3s.
-    const auto t_good = std::chrono::steady_clock::now() + 3s;
-    while (b_counter.count.load(std::memory_order_relaxed) == 0 &&
-           std::chrono::steady_clock::now() < t_good) {
-        std::this_thread::sleep_for(std::chrono::milliseconds{5});
-    }
+    // Result discarded: the ASSERT_GE below is the oracle.
+    (void)fixpp::test_support::wait_until_observed(
+        [&b_counter] { return b_counter.count.load(std::memory_order_relaxed) != 0; }, 3s);
     ASSERT_GE(b_counter.count.load(), 1) << "good send never delivered to peer callback";
     const int count_before_malformed = b_counter.count.load(std::memory_order_acquire);
 

@@ -260,13 +260,10 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     // it times out the reader is very likely to have already recorded a null
     // read anyway (nothing publishes until below), so the final assertions
     // below remain the honest oracle either way.
-    {
-        const auto deadline = std::chrono::steady_clock::now() + 2s;
-        while (!reader_saw_null.load(std::memory_order_acquire) &&
-               std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(1ms);
-        }
-    }
+    // Result deliberately ignored: nothing publishes until below, so the final
+    // assertions remain the honest oracle whether or not this was observed.
+    (void)fixpp::test_support::wait_until_observed(
+        [&reader_saw_null] { return reader_saw_null.load(std::memory_order_acquire); }, 2s);
 
     // ── Let the io_context run, witnessed concurrently by the reader ────────
     // Spawn the raw acceptor coroutine.  Hold window = kRunWindow so the socket

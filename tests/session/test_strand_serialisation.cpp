@@ -27,6 +27,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/scripted_fsm.hpp"
+#include "support/wait_until.hpp"
 
 namespace {
 
@@ -82,11 +83,17 @@ TEST(SeamStrandSerialisation, NoOverlapWithinSessionUnderMultiThreadPool) {
     }
     for (auto& th : drivers) th.join();
 
-    // Drain: wait until every posted callback ran.
-    while (done.load(std::memory_order_relaxed) < kThreads * kPerThread) {
-        std::this_thread::sleep_for(std::chrono::milliseconds{2});
-    }
+    // Drain: wait until every posted callback ran. Bounded (#315) — this was an
+    // unbounded spin, so a lost post wedged the test out to the ctest timeout.
+    // Reported AFTER pool.join(), not via ASSERT_*: `pool` is declared BEFORE
+    // `log` and `done`, so an early return would destroy them while the pool's
+    // threads are still running callbacks that reference both.
+    const bool drained = fixpp::test_support::wait_until_observed(
+        [&done] { return done.load(std::memory_order_relaxed) >= kThreads * kPerThread; },
+        std::chrono::seconds{10});
     pool.join();
+    ASSERT_TRUE(drained) << fixpp::test_support::kWaitBudgetMiss
+                         << "SingleSessionConcurrentDispatch: posted callbacks never all ran";
 
     EXPECT_TRUE(log.strictly_serialised())
         << "callbacks overlapped within a single session — strand contract broken";
@@ -124,9 +131,14 @@ TEST(SeamStrandSerialisation, CrossSessionConcurrentSamEngineExecutor) {
             done.fetch_add(1, std::memory_order_relaxed);
         });
     }
-    while (done.load(std::memory_order_relaxed) < 2 * kEach)
-        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    // Bounded (#315), reported after join for the same destruction-order reason
+    // as above: `pool` outlives `la`/`lb`/`done` only if we do not return early.
+    const bool drained = fixpp::test_support::wait_until_observed(
+        [&done] { return done.load(std::memory_order_relaxed) >= 2 * kEach; },
+        std::chrono::seconds{10});
     pool.join();
+    ASSERT_TRUE(drained) << fixpp::test_support::kWaitBudgetMiss
+                         << "CrossSessionConcurrentSamEngineExecutor: posted callbacks";
 
     EXPECT_TRUE(la.strictly_serialised());
     EXPECT_TRUE(lb.strictly_serialised());

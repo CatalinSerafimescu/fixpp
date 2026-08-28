@@ -47,6 +47,7 @@
 #include "capi_loopback_support.hpp"
 
 #include "fixpp/session/session.hpp"  // Session::is_drained_for_test (FIXPP_TEST_HOOKS)
+#include "support/wait_until.hpp"
 
 // Issue #151: poll the engine's RETAINED Session (a reaped session stays in lookup)
 // until it reaches lifecycle::closed_drained — the deterministic signal that
@@ -210,13 +211,16 @@ TEST(CapiSendRecv, TwoEngineRoundTripReplyFromDrainThread) {
     // exits ~9 ms in — the 5 s budget never applies — and reply_sent is read
     // false. Each named post-condition needs its own wait, not one that merely
     // correlates with it.
-    const auto until = std::chrono::steady_clock::now() + 5s;
-    while (!(a_got_reply.load(std::memory_order_acquire) &&
-             b_drain.reply_sent.load(std::memory_order_acquire) &&
-             b_ctx.got_order.load(std::memory_order_acquire)) &&
-           std::chrono::steady_clock::now() < until) {
-        std::this_thread::sleep_for(5ms);
-    }
+    // Result discarded: each named post-condition is asserted individually below,
+    // which is the point of waiting on their CONJUNCTION rather than on one of
+    // them that merely correlates with the others.
+    (void)fixpp::test_support::wait_until_observed(
+        [&] {
+            return a_got_reply.load(std::memory_order_acquire) &&
+                   b_drain.reply_sent.load(std::memory_order_acquire) &&
+                   b_ctx.got_order.load(std::memory_order_acquire);
+        },
+        5s);
 
     EXPECT_TRUE(b_ctx.got_order.load())
         << "acceptor B's on-strand callback never received A's order (SC-001)";
@@ -349,11 +353,9 @@ TEST(CapiSendRecv, InboundHandleUseAfterReturnCaughtUnderAsan) {
     const auto order = make_app_payload("UAFORDER");
     ASSERT_EQ(fixpp_session_send(ini_h, order.data(), order.size()), FIXPP_ERR_OK);
 
-    const auto until = std::chrono::steady_clock::now() + 3s;
-    while (!ctx.fired.load(std::memory_order_acquire) &&
-           std::chrono::steady_clock::now() < until) {
-        std::this_thread::sleep_for(5ms);
-    }
+    // Result discarded: the ASSERT_TRUE below is the oracle.
+    (void)fixpp::test_support::wait_until_observed(
+        [&ctx] { return ctx.fired.load(std::memory_order_acquire); }, 3s);
     ASSERT_TRUE(ctx.fired.load());
 
     // The dispatch window has closed; reading through the retained handle is the

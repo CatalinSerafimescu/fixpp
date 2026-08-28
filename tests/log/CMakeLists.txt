@@ -127,6 +127,9 @@ add_test(NAME log_syslog COMMAND log_syslog_test)
 # ── Phase 4: T031 (TS-6) — LOG-003 trace correlation (three macros) ──────────
 # Links fixpp_session (for Engine + Session) + fixpp_log + fixpp_mock_clock.
 add_executable(log_trace_correlation_test test_trace_correlation.cpp)
+target_include_directories(log_trace_correlation_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"   # support/wait_until.hpp (#315)
+)
 target_link_libraries(log_trace_correlation_test PRIVATE
   fixpp_log
   fixpp_session
@@ -138,6 +141,9 @@ add_test(NAME log_trace_correlation COMMAND log_trace_correlation_test)
 
 # ── Phase 4: T032 (TS-7) — FIXPP_LOG0 from a raw thread ─────────────────────
 add_executable(log_log0_raw_thread_test test_log0_raw_thread.cpp)
+target_include_directories(log_log0_raw_thread_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"   # support/wait_until.hpp (#315)
+)
 target_link_libraries(log_log0_raw_thread_test PRIVATE
   fixpp_log
   GTest::gtest

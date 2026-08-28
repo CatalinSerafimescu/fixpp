@@ -74,6 +74,7 @@
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/wait_until.hpp"
 #include "support/minimal_security_profile.hpp"
 
 // Live TLS headers — only needed for INV-7.
@@ -804,15 +805,12 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
 
     // Sleep-poll wait — no ioc.run_for()/restart(). Use once the worker threads
     // own the ioc: calling restart() from the main thread while t1/t2 are inside
-    // ioc.run() is asio UB (the BIO_ctrl SEGV under gcc-release). Mirrors
-    // wait_pred_nodrive in test_engine_session_strand.cpp.
-    const auto wait_for_pred_nodrive = [](auto pred, std::chrono::milliseconds budget) {
-        auto deadline = std::chrono::steady_clock::now() + budget;
-        while (!pred() && std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(2ms);
-        }
-        return pred();
-    };
+    // ioc.run() is asio UB (the BIO_ctrl SEGV under gcc-release). This local copy
+    // carried a comment saying it mirrored `wait_pred_nodrive` in
+    // test_engine_session_strand.cpp; #315 hoisted both to
+    // fixpp::test_support::wait_until_observed rather than keep an acknowledged
+    // duplicate. The shared helper polls on 1 ms where this used 2 ms.
+    using fixpp::test_support::wait_until_observed;
 
     // Phase 1: Establish sessions using single-thread driving (proven working).
     // This is the same pattern as the 019 engine tests (wait_until ioc.run_for).
@@ -831,7 +829,7 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
     // BIO_ctrl SEGV the 023 sweep missed — the old "restart() is safe here"
     // comment was wrong on both counts: run_for() expiry is not a stopped state,
     // and the precondition spans ALL threads). The main thread instead sleep-polls
-    // via wait_for_pred_nodrive; a work_guard keeps ioc.run() alive across lulls
+    // via wait_until_observed; a work_guard keeps ioc.run() alive across lulls
     // so the workers don't exit early, and wg.reset() drains them at teardown.
     // (Mirrors test_engine_session_strand.cpp V-9.)
     auto wg = asio::make_work_guard(ioc);
@@ -860,7 +858,7 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
                                        engine.send(ini_id, std::span<const std::byte>(payload)),
                                        asio::use_future);
 
-        bool send_done = wait_for_pred_nodrive(
+        bool send_done = wait_until_observed(
             [&send_fut] { return send_fut.wait_for(0ms) == std::future_status::ready; }, 3000ms);
         ASSERT_TRUE(send_done) << "engine.send(ini→acc) did not complete within 3s";
         auto result = send_fut.get();
@@ -869,12 +867,12 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
     }
 
     // Wait for fromApp to fire on the acceptor.
-    bool fa_fired = wait_for_pred_nodrive(
+    bool fa_fired = wait_until_observed(
         [&app] { return app->from_app_count.load(std::memory_order_acquire) >= 1; }, 3000ms);
     ASSERT_TRUE(fa_fired) << "fromApp must fire on the acceptor after initiator send";
 
     // Wait for the re-entrant send to complete.
-    bool re_done = wait_for_pred_nodrive(
+    bool re_done = wait_until_observed(
         [&app] { return app->reentrant_done.load(std::memory_order_acquire); }, 3000ms);
     EXPECT_TRUE(re_done)
         << "re-entrant Engine::send (from inside fromApp) must complete without deadlock/UAF";
@@ -882,7 +880,7 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
     // Teardown.
     {
         auto stop_fut = asio::co_spawn(ioc.get_executor(), engine.stop(), asio::use_future);
-        bool stop_done = wait_for_pred_nodrive(
+        bool stop_done = wait_until_observed(
             [&stop_fut] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 5000ms);
         EXPECT_TRUE(stop_done) << "engine.stop() did not complete within 5s";
         stop_fut.get();
