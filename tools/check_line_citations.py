@@ -105,10 +105,10 @@ def tracked(root):
 def all_tracked(root):
     """Every tracked file in the repo -- the universe for RESOLVING a form-A
     target, kept separate from SCAN_DIRS (which bounds only what gets
-    SCANNED/GATED). tools/codegen/fixpp-codegen/*.cpp is a legitimate
-    citation target that lives outside SCAN_DIRS; resolving against the
-    SCAN_DIRS-only file list bucketed it 'foreign / unresolvable', a false
-    clean for an in-tree file."""
+    SCANNED/GATED). A legitimate citation target can live in a directory this
+    tool deliberately does not scan; resolving against the SCAN_DIRS-only file
+    list would bucket it 'foreign / unresolvable', a false clean for an
+    in-tree file."""
     files = git(["ls-files"], root, "ls-files").split()
     if not files:
         raise SystemExit(
