@@ -353,9 +353,7 @@ TEST(CapiSendRecv, InboundHandleUseAfterReturnCaughtUnderAsan) {
     const auto order = make_app_payload("UAFORDER");
     ASSERT_EQ(fixpp_session_send(ini_h, order.data(), order.size()), FIXPP_ERR_OK);
 
-    // Result discarded: the ASSERT_TRUE below is the oracle.
-    (void)fixpp::test_support::wait_until_observed(
-        [&ctx] { return ctx.fired.load(std::memory_order_acquire); }, 3s);
+    (void)fixpp::test_support::wait_for_flag(ctx.fired, 3s);  // the ASSERT_TRUE below is the oracle
     ASSERT_TRUE(ctx.fired.load());
 
     // The dispatch window has closed; reading through the retained handle is the

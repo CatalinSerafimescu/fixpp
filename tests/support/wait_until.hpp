@@ -41,34 +41,32 @@
 // ── What belongs on this helper, and what does not ───────────────────────────
 //
 // #315 asked for "a repo-wide grep for a sleep-poll wait loop in tests/ finds
-// only the shared helper's own definition". That bar is not reachable and should
-// not be aimed for: a scan for `sleep_for` inside a loop matches 37 sites here,
-// and most are not this shape at all. A site migrates only if ALL FOUR hold:
+// only the shared helper's own definition". That bar is not reachable: scanning
+// for `sleep_for` inside a loop matches many sites that are not this shape, and
+// a count of them would rot the moment anyone adds a test. Re-derive the
+// population when you need it rather than trusting a number written here --
+// a loop header within a few lines of a `sleep_for` is the whole recipe.
 //
-//   1. the loop body does nothing but sleep. A body that also calls `drain(clk)`
-//      (test_sleep_cancel_race) or `publish(i++)` (test_atomic_shared_ptr_
-//      concurrency) is DRIVING something, and handing that work to a predicate
-//      would break the "ready only observes" contract above;
-//   2. the exit condition is predicate-or-DEADLINE -- not retry-on-error
-//      (store_temp_dir), not a producer loop, and not an ITERATION ceiling. The
-//      weak_ptr drain in test_atomic_shared_ptr_concurrency polls `!expired()`
-//      for 200 turns rather than for a duration; converting that bound to a
-//      wall-clock one would change what it asserts, so it stays;
-//   3. the target can reach tests/. `capi_public_roundtrip_test` declares no
-//      include directories at all, on purpose;
-//   4. the local copy is not load-bearing for what the test proves. Same target:
-//      its poll helpers ARE the demonstration that the public C API needs nothing
-//      else in scope, so consolidating them would quietly retire the proof.
+// A site migrates only if ALL FOUR hold:
 //
-// A `while (flag) sleep` loop that BLOCKS a pool thread rather than waits on one
-// (the latch in test_file_store_offload_thread) also fails (1): it is the thing
-// being blocked, not a waiter.
+//   1. the loop body does nothing but SLEEP. A body that also drives something
+//      -- pumping a clock, publishing a value -- would have to hand that work to
+//      the predicate, breaking the "ready only observes" contract above;
+//   2. the exit condition is predicate-or-DEADLINE. Not retry-on-error, not a
+//      producer loop, and not an ITERATION ceiling: a loop bounded by turns
+//      rather than by a duration asserts something different, and converting it
+//      would change what it claims. Criterion (2) is about the deadline, NOT
+//      about where the predicate is written -- `while (now < deadline) { if (p)
+//      break; }` reads like a fixed window at a glance and is not one;
+//   3. the target can reach tests/ at all. Some deliberately cannot;
+//   4. the local copy is not load-bearing for what the test proves. Where a
+//      test's whole point is that it needs nothing else in scope, its poll
+//      helper IS the demonstration, and consolidating it retires the proof.
 //
-// Applying this test took the tree from 37 sleep-poll loops to 15, of which one
-// IS this definition. Note criterion (2) is about the deadline, not about where
-// the predicate is written: two tests/log sites spelled it `while (now < deadline)
-// { if (p) break; }` and read as fixed windows at a glance. They were not, and
-// they migrated.
+// A `while (flag) sleep` that holds a worker thread open until someone releases
+// it fails (2), not (1): such a latch has no deadline, and giving it one would
+// change it from a hold into a wait. The same shape WITH a deadline is an
+// ordinary bounded wait and belongs here.
 
 // ── Naming ───────────────────────────────────────────────────────────────────
 //
@@ -86,6 +84,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <thread>
 
@@ -151,12 +150,30 @@ template <class Ready>
     }
 }
 
+// The overwhelmingly common predicate: one atomic flag another thread sets.
+// Written out at every call site this replaced, always identically.
+//
+// Still `[[nodiscard]]`. Most callers immediately ASSERT on the same flag and
+// legitimately discard this with `(void)` -- but that is a decision each site
+// makes visibly, not one this helper makes for them by returning void.
+template <class Flag>
+[[nodiscard]] bool wait_for_flag(const Flag& flag, std::chrono::steady_clock::duration budget,
+                                 std::chrono::steady_clock::duration slice = kWaitSlice) {
+    return wait_until_observed([&flag] { return flag.load(std::memory_order_acquire); },
+                               budget, slice);
+}
+
 // Failure text for a wait that ran out of budget. Stream the site name after it.
 //
 // DELIBERATELY NOT `kPumpBudgetMiss`: the mechanism differs, and so does the
 // thing to go looking at. A miss here means the executor never produced the
 // event; a pump miss means THIS thread failed to drive a context that nobody
 // else was driving.
+// A near-twin of this string lives in test_test_request_id_cross_session_race.cpp
+// under #309. That one describes a thread_pool specifically and predates this
+// header; it is left alone rather than folded in, because rewording another
+// test's failure text is not what #315 asked for. If you are touching that file
+// anyway, adopting this one is the tidier end state.
 inline constexpr const char* kWaitBudgetMiss =
     "#315: the self-driving executor did not produce the awaited event within the wait "
     "budget. Site: ";

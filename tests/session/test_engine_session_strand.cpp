@@ -281,9 +281,7 @@ static bool wait_pred(asio::io_context& ioc, auto pred,
 
 // Sleep-poll wait, for use once worker threads are already inside ioc.run():
 // calling restart() from the main thread while workers are in run() is asio UB
-// (SEGFAULT under gcc-release). This file's former `wait_until_observed` was one
-// of the three copies #315 hoisted; the shared helper polls on a 1 ms slice
-// where the local one used 2 ms, so every wait here detects at least as fast.
+// (SEGFAULT under gcc-release).
 using fixpp::test_support::wait_until_observed;
 
 // Wait for both sessions to reach fsm_state::Active via lookup + state() check.

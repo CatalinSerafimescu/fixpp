@@ -100,9 +100,7 @@ TEST(CapiErrorLive, MalformedPayloadReturnsUnknownNoTransmit) {
     EXPECT_EQ(fixpp_session_send(ini_h, good_payload.data(), good_payload.size()), FIXPP_ERR_OK);
 
     // Wait for the good send to arrive (peer callback fires) — give it up to 3s.
-    // Result discarded: the ASSERT_GE below is the oracle.
-    (void)fixpp::test_support::wait_until_observed(
-        [&b_counter] { return b_counter.count.load(std::memory_order_relaxed) != 0; }, 3s);
+    (void)fixpp::test_support::wait_for_flag(b_counter.count, 3s);  // the ASSERT_GE below is the oracle
     ASSERT_GE(b_counter.count.load(), 1) << "good send never delivered to peer callback";
     const int count_before_malformed = b_counter.count.load(std::memory_order_acquire);
 

@@ -30,14 +30,14 @@
 #include <memory_resource>
 #include <mutex>
 #include <thread>
-
-#include "support/wait_until.hpp"
 #include <vector>
 
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/core/trace_context.hpp>
+#include "support/wait_until.hpp"
+
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>

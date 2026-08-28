@@ -184,9 +184,7 @@ TEST(NestedGroupMembershipCapiRed, TrailingMemberAbsentFromLastNestedInstance) {
     auto payload = make_nested_membership_app_payload();
     ASSERT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_OK);
 
-    // Result discarded: the ASSERT_TRUE(ctx.fired...) below is the oracle.
-    (void)fixpp::test_support::wait_until_observed(
-        [&ctx] { return ctx.fired.load(std::memory_order_acquire); }, 5s);
+    (void)fixpp::test_support::wait_for_flag(ctx.fired, 5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
 
     ASSERT_TRUE(ctx.fired.load()) << "the nested-group-bearing ExecutionReport must reach the "
                                      "acceptor's registered receive callback";

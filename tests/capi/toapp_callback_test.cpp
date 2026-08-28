@@ -55,11 +55,6 @@ fixpp_error_t make_engine_v4(fixpp_engine_t** out) {
     return fixpp_engine_create(make_engine_cfg(), 1, 4, out);
 }
 
-// Poll until `flag` is true or the deadline elapses.
-bool poll_until(std::atomic<bool>& flag, std::chrono::milliseconds ms = 2000ms) {
-    return fixpp::test_support::wait_until_observed([&flag] { return flag.load(std::memory_order_acquire); }, ms);
-}
-
 // ── Shared loopback pair ───────────────────────────────────────────────────
 //
 // One acceptor (B) + one initiator (A) per test, both with consumer_minor=4.
@@ -141,7 +136,7 @@ TEST(ToappCallback, SendVerdictTransmits) {
     EXPECT_EQ(rc, FIXPP_ERR_OK) << "SEND verdict should return FIXPP_ERR_OK";
 
     // B should receive the message.
-    EXPECT_TRUE(poll_until(b_received, 3000ms))
+    EXPECT_TRUE(fixpp::test_support::wait_for_flag(b_received, 3000ms))
         << "acceptor B did not receive the message (SEND verdict must transmit)";
 
     // The callback must have been called at least once.

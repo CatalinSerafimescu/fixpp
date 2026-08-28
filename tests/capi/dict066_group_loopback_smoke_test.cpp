@@ -97,9 +97,7 @@ TEST(GroupScaffoldCapiSmoke, TwoLegsTrailingPayloadDeliveredToCallback) {
     auto payload = fixpp_test_support::make_execution_report_app_payload(suffix);
     ASSERT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_OK);
 
-    // Result discarded: the ASSERT_TRUE(ctx.fired...) below is the oracle.
-    (void)fixpp::test_support::wait_until_observed(
-        [&ctx] { return ctx.fired.load(std::memory_order_acquire); }, 5s);
+    (void)fixpp::test_support::wait_for_flag(ctx.fired, 5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
 
     EXPECT_TRUE(ctx.fired.load()) << "the group-bearing ExecutionReport must reach the acceptor's "
                                      "registered receive callback";

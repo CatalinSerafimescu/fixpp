@@ -24,9 +24,9 @@
 #include <memory_resource>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include "support/wait_until.hpp"
-#include <vector>
 
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>

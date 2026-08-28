@@ -805,11 +805,7 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
 
     // Sleep-poll wait — no ioc.run_for()/restart(). Use once the worker threads
     // own the ioc: calling restart() from the main thread while t1/t2 are inside
-    // ioc.run() is asio UB (the BIO_ctrl SEGV under gcc-release). This local copy
-    // carried a comment saying it mirrored `wait_pred_nodrive` in
-    // test_engine_session_strand.cpp; #315 hoisted both to
-    // fixpp::test_support::wait_until_observed rather than keep an acknowledged
-    // duplicate. The shared helper polls on 1 ms where this used 2 ms.
+    // ioc.run() is asio UB (the BIO_ctrl SEGV under gcc-release).
     using fixpp::test_support::wait_until_observed;
 
     // Phase 1: Establish sessions using single-thread driving (proven working).
