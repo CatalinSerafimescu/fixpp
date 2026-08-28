@@ -83,10 +83,9 @@ the wrong line and usually lands on an unrelated comment, which reads as
 plausible.
 
 **Fix a flagged line by DELETING the number, not by correcting it.** Re-pointing
-`session.cpp:1258` at `session.cpp:1265` re-arms the same defect with a fresh
-half-life. <!-- citation-ok: worked example, not a real citation --> Cite a
-function/struct name plus a short quoted phrase instead — that survives
-arbitrary line motion, and `grep` finds it if the quoted text changes:
+`session.cpp:1258` at `session.cpp:1265` re-arms the same defect with a fresh <!-- citation-ok: worked example, not a real citation -->
+half-life. Cite a function/struct name plus a short quoted phrase instead — that
+survives arbitrary line motion, and `grep` finds it if the quoted text changes:
 
 ```
 before:  the residual ADD_FAILURE branch (pump_until_ready.hpp:225-232)  [worked example; citation-ok]
