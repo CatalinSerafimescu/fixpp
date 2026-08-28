@@ -739,7 +739,8 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
 // ── SC-007 / R#C.2 — Session + FileStore graceful-close flush witness ─────────
 //
 // Proves contracts/file-offload.md §C5b: Session::close(close_mode::graceful)
-// invokes the A1 typed-thunk flush_for_session_close() (session.cpp:1258–1264)
+// invokes the A1 typed-thunk flush_for_session_close() (session.cpp's
+// `close_flush_hook_a1_` dispatch under `mode == close_mode::graceful`)
 // and co_awaits it to durable completion (C1 — never detached).
 //
 // Strategy (discriminating):

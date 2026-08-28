@@ -1442,7 +1442,7 @@ TEST(PersistentSeqnumHydrate, Hydrate_HappensBefore_FirstCheckInbound_Initiator)
 // Then restart:
 //   (i)  knob ON + peer Logon at seq=M: admitted via behind-side tolerance (knob on),
 //        session recovers; no fatal. [SC-004, 789 on]
-//   (ii) knob OFF + peer Logon at seq=M: too-high at Logon gate (:1615) → fatal →
+//   (ii) knob OFF + peer Logon at seq=M: too-high at Logon gate → fatal →
 //        Disconnected. [L-029-1 documented behavior]
 //
 // Pre-T010 RED for (i): no persist → durable=1 always; after GapFill jump to M, manager=M.
@@ -1756,8 +1756,8 @@ TEST(PersistentSeqnumHydrate, Hydrated_Initiator_Advertises789) {
 //     Post-T010: durable stays 3 (no advance → no persist).
 //
 // Note: with validate_sequence_numbers=false, reset-mode 35=4 bypasses apply_inbound_sequence_reset
-// (S6 path at line 2137) AND the GapFill exact-match bypasses apply_inbound_sequence_reset too
-// (S7 path at line 2461). The exact-match GapFill DOES advance via check_inbound first.
+// (the S6 path, marked `028 T010 (S6)` in session.cpp) AND the GapFill exact-match
+// bypasses apply_inbound_sequence_reset too (the S7 path, marked `028 T011 (S7)`). The exact-match GapFill DOES advance via check_inbound first.
 TEST(PersistentSeqnumHydrate, ValidateOff_35eq4_PersistSplit) {
     // Build acceptor with validate_sequence_numbers=false.
     auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/1);
@@ -1816,7 +1816,7 @@ TEST(PersistentSeqnumHydrate, ValidateOff_35eq4_PersistSplit) {
 
     // ── Case 2: Reset-mode 35=4 (no 123=Y), validate_off.
     // S6 path: runs BEFORE check_inbound → deliver-without-advance → NO-PERSIST.
-    // The reset-mode 35=4 with validate_off bypasses apply_inbound_sequence_reset at line 2137.
+    // The reset-mode 35=4 with validate_off bypasses apply_inbound_sequence_reset on the S6 path.
     // It is delivered to fromAdmin but the counter is NOT advanced → no persist.
     const seqnum_t durable_before_reset = store->durable_inbound;
     // Manager is currently at 3 (after Logon=1→2, GapFill-seq2→3).
@@ -2211,11 +2211,12 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_PeerAck141_NoOverPersist) {
 // LIVE-FOUND BUG (RL-{QFcpp,QFj}-init, both engines, 2026-06-11). A reset_on_logon
 // =true INITIATOR resets to {1,1}, emits Logon(141=Y) at 34=1 (outbound advances
 // 1→2), then receives the peer's Logon ack — which QuickFIX-cpp AND QuickFIX-J
-// echo with 141=Y. The peer_ack_sent_reset_flag arm (session.cpp:3185) calls
+// echo with 141=Y. The peer_ack_sent_reset_flag arm in session.cpp calls
 // reset_seqnums_to_one_durable(), which rebases BOTH counters to 1, so OUTBOUND
 // regresses 2→1. The next outbound frame would carry a duplicate MsgSeqNum=1 (both
 // real engines reject "MsgSeqNum too low"). 030 restored the INBOUND twin on this
-// exact arm (session.cpp:3210, logon_inbound_advanced_init → set_next_inbound(2))
+// exact arm (session.cpp's `if (logon_inbound_advanced_init)` guard, which calls
+// `set_next_inbound(seqnum_min + 1)`)
 // but left the OUTBOUND twin unfixed. This asserts the CORRECT outbound==2 → RED
 // on main (gets 1). DISABLED so it does not break ctest pending the 032 fix-feature.
 //
@@ -2251,7 +2252,7 @@ TEST(PersistentSeqnumHydrate, ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo
     // HARM (RED on main = got 1): outbound must stay 2 — the Logon already consumed seq
     // 1, so the next send is 2. main rebases it to 1, so the next outbound frame would
     // duplicate 34=1 (QuickFIX-cpp + QuickFIX-J both reject). The 030 inbound restore at
-    // session.cpp:3210 has no outbound twin.
+    // session.cpp's `logon_inbound_advanced_init` guard has no outbound twin.
     EXPECT_EQ(fix->session->seqnum_mgr_test_access().peek_outbound(),
               fixpp::session::seqnum_t{2})
         << "L-024-2: reset_on_logon initiator must keep outbound==2 after the peer's 141=Y "
@@ -2419,7 +2420,7 @@ TEST(PersistentSeqnumHydrate, INV_H1_Acceptor_789BehindSide_NoOverPersist) {
 // Peer Logon-ack at seq=5 with NO 789 field (bare too-high Logon-ack).
 //
 // check_inbound(5) against manager=2 → too-high → behind-side tolerance →
-// manager stays at 2. NO 789 field → initiator honor block (~line 3232) is skipped.
+// manager stays at 2. NO 789 field → initiator honor block (honor_peer_next_expected_) is skipped.
 //
 // Pre-fix (RED): logon_inbound_advanced_init not tracked → unconditional persist fires →
 //   durable_inbound goes 1→3 (next_inbound_ seeded at 2, persist writes 2→3).

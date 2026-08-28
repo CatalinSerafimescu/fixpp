@@ -18,6 +18,20 @@ repos:
         types_or: [c++, c]
         files: '\.(cpp|hpp|h|cc|cxx)$'
 
+  # ── Line-number citation gate (issue #310) ───────────────────────────────
+  # Blocks a NEWLY ADDED `file.cpp:NNN` / `at line NNN` / `(:NNN)` citation.
+  # Gates ADDED LINES ONLY, deliberately: the existing population is ~1100
+  # candidates at a measured ~33% rot rate, so gating the whole tree would be
+  # noise. The fix for a flagged line is to DELETE the number and cite a name
+  # plus a quoted phrase -- never to re-point it at a fresh number.
+  - repo: local
+    hooks:
+      - id: check-line-citations
+        name: no new line-number citations (#310)
+        entry: python3 tools/check_line_citations.py --staged
+        language: system
+        pass_filenames: false
+
   # ── clang-tidy (manual stage — too slow for every commit; CI always runs) ─
   - repo: local
     hooks:

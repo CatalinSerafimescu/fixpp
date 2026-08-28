@@ -692,19 +692,19 @@ TEST(QuiesceOnExitResidualWitness, ThrowingHandlerReportsOnceNotTwice) {
 // residual path's own ADD_FAILURE() is enough to drive the throw, and driving it
 // is exactly what exercises the swallow. Modelled on
 // test_test_request_id_cross_session_race.cpp's
-// CrossSessionTeardown.OuterCatchSwallowsAThrowingAddFailure (:1925-2020).
+// CrossSessionTeardown.OuterCatchSwallowsAThrowingAddFailure.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 namespace {
 
 // RAII-scoped `GTEST_FLAG_SET(throw_on_failure, true)`. Copied verbatim from
-// test_test_request_id_cross_session_race.cpp:1919-1924 -- restoring the previous
-// value is mandatory, or every later EXPECT_* in this test would throw instead
-// of merely failing. gtest constructs a flag saver per `Test` object, so a flag
-// set inside a test body cannot leak past that test; the restore below is
-// required within the test, not across the binary. (The pre-existing copy at
-// test_test_request_id_cross_session_race.cpp:1919-1924 carries the same
-// overstated "in this binary" wording -- out of scope here, left as-is.)
+// `throw_on_failure_scope` in test_test_request_id_cross_session_race.cpp --
+// restoring the previous value is mandatory, or every later EXPECT_* in this
+// test would throw instead of merely failing. gtest constructs a flag saver per
+// `Test` object, so a flag set inside a test body cannot leak past that test;
+// the restore below is required within the test, not across the binary. (That
+// file's own `throw_on_failure_scope` carries the same overstated "in this
+// binary" wording -- out of scope here, left as-is.)
 struct throw_on_failure_scope {
     bool previous = GTEST_FLAG_GET(throw_on_failure);
     throw_on_failure_scope() { GTEST_FLAG_SET(throw_on_failure, true); }

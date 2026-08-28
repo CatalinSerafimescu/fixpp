@@ -858,7 +858,8 @@ TEST(ValidationCompatToggles, Seq_KnobOff_AdminVsAppFanOut) {
 
     // Feed a too-low admin frame: Heartbeat(35=0) at seq=1.
     // NOTE: the C2.2 carve-out says too-low Heartbeat(35=0) is SILENTLY DROPPED
-    // (pre-existing too-low Heartbeat silent-drop at line 2234).
+    // (the pre-existing silent-drop, session.cpp's "Too-low Heartbeat: silently
+    // ignore (preserve Active, no echo)").
     // So we use a different admin type. 35=3 (Reject) is admin.
     // Use seq=1 (too-low) for the admin frame.
     fix->feed(make_fix_frame("FIX.4.4", "3", 1, "CLI", "SRV"));
@@ -890,8 +891,9 @@ TEST(ValidationCompatToggles, Seq_KnobOff_AdminVsAppFanOut) {
 // just like with the knob on, proving Stage-2 is still entered.
 // RED before T008+T009: currently the Stage-2 check runs on check_inbound failure;
 // after T009 we must preserve this (S4 new arm must check poss_dup_flag first,
-// but actually per the code structure: Stage-2 runs at line 2252 (poss_dup_flag=="Y")
-// BEFORE Arm B at line 2282 — so PossDup handling is already upstream of the S4 site).
+// but actually per the code structure: Stage-2 (session.cpp's "021 T005 Stage-2 —
+// Arm A") runs on poss_dup_flag=="Y" BEFORE Arm B ("Arm B: too-low non-Heartbeat
+// without 43=Y — fatal") — so PossDup handling is already upstream of the S4 site).
 // Therefore this test should already be GREEN after T009 only IF the knob-off arm is
 // placed AFTER the Stage-2 PossDup block (i.e. as a guard inside Arm B only).
 //
@@ -921,7 +923,7 @@ TEST(ValidationCompatToggles, Seq_KnobOff_PossDupRetained) {
 
 // T006 witness 7 — I-VCT-10, C2.5
 // Unparseable MsgSeqNum (seq==0) is still fatal even with validate_sequence_numbers=false.
-// The seq==0 check at line 2026 runs BEFORE the S2 too-high guard; the knob does NOT
+// The seq==0 check runs BEFORE the S2 too-high guard; the knob does NOT
 // apply to it.
 // Already GREEN: the seq==0 check is strictly before S2 and is not gated on any knob.
 // We confirm it as a carve-out assertion — it MUST remain green after T008/T009.
@@ -941,8 +943,8 @@ TEST(ValidationCompatToggles, Seq_KnobOff_SeqZeroStillFatal) {
 
 // T006 witness 8 — N3 carve-out, C2.2
 // Too-low Heartbeat(35=0) is silently dropped (not delivered) even with
-// validate_sequence_numbers=false. The pre-existing silent-drop at line 2237-2246
-// (hdr.msg_type == "0" check inside the check_inbound failure branch) runs before
+// validate_sequence_numbers=false. The pre-existing silent-drop
+// (the hdr.msg_type == "0" check inside the check_inbound failure branch) runs before
 // Arm B, so even when we add knob-off deliver-to-app, we must check that the
 // Heartbeat silent-drop is PRESERVED.
 // Already GREEN for the Heartbeat path: the silent-drop is upstream of S4 Arm B.
