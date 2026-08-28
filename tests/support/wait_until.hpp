@@ -136,7 +136,7 @@ inline constexpr auto kWaitSlice = std::chrono::milliseconds{1};
 // cost.
 template <class Ready>
 [[nodiscard]] bool wait_until_observed(Ready ready, std::chrono::steady_clock::duration budget,
-                              std::chrono::steady_clock::duration slice = kWaitSlice) {
+                                       std::chrono::steady_clock::duration slice = kWaitSlice) {
     const auto deadline = std::chrono::steady_clock::now() + budget;
     for (;;) {
         if (ready()) return true;
@@ -155,8 +155,8 @@ template <class Ready>
 template <class Flag>
 [[nodiscard]] bool wait_for_flag(const Flag& flag, std::chrono::steady_clock::duration budget,
                                  std::chrono::steady_clock::duration slice = kWaitSlice) {
-    return wait_until_observed([&flag] { return flag.load(std::memory_order_acquire); },
-                               budget, slice);
+    return wait_until_observed([&flag] { return flag.load(std::memory_order_acquire); }, budget,
+                               slice);
 }
 
 // Failure text for a wait that ran out of budget. Stream the site name after it.

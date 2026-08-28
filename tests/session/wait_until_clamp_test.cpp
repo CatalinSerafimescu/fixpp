@@ -7,11 +7,11 @@
 // `pump_until` in pump_until_ready.hpp already clamps its own sleep to
 // `min(slice, deadline - now)`; `wait_until_observed` did not.
 
-#include "support/wait_until.hpp"
-
 #include <gtest/gtest.h>
 
 #include <chrono>
+
+#include "support/wait_until.hpp"
 
 using fixpp::test_support::wait_until_observed;
 
