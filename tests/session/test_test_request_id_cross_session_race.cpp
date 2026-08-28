@@ -573,10 +573,8 @@ using fixpp::test_support::pump_until_ready;
 // Notifying from the writer removes both. Nothing else in this file waited on that
 // helper, so it is deleted rather than left as a second way to do this.
 //
-// ⚠️ This deletion removes ONE of the three file-local copies #315 catalogues
-// (`wait_pred_nodrive` in test_engine_session_strand.cpp and
-// `wait_for_pred_nodrive` in test_business_messages_roundtrip.cpp remain). It does
-// NOT close #315, and it is not a template for it: the cv works here only because
+// ⚠️ This deletion removes one of the file-local copies #315 catalogues. It is
+// not a template for a general helper: the cv approach works here only because
 // this file's waiter and its writer are the same object. A hoisted general helper
 // still needs the poll-and-yield shape for predicates with no writer to hook.
 inline constexpr auto kWaitBudget = std::chrono::seconds{10};

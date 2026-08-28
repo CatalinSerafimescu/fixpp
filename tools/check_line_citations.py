@@ -60,8 +60,9 @@ SCAN_DIRS = [
 RE_A = re.compile(
     r"(?<![\w/.-])([A-Za-z0-9_][A-Za-z0-9_/.-]*\.(?:hpp|cpp|ipp|hh|hxx|cc|h)):(\d+)"
 )
-# Form B. {2,} digits: `line 5` is nearly always prose about test data, `line 86`
-# is nearly always a citation.
+# Form B. {2,} digits: a deliberate recall/precision trade -- one-digit forms
+# are not gated, since they collide with prose about test data (`line 5`) far
+# more often than a real citation would.
 RE_B = re.compile(r"~?\blines?\s+\d{2,}", re.IGNORECASE)
 # Form C.
 RE_C = re.compile(r"\(:\d+")

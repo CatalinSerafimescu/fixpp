@@ -20,10 +20,11 @@ repos:
 
   # ── Line-number citation gate (issue #310) ───────────────────────────────
   # Blocks a NEWLY ADDED `file.cpp:NNN` / `at line NNN` / `(:NNN)` citation.
-  # Gates ADDED LINES ONLY, deliberately: the existing population is ~1100
-  # candidates at a measured ~33% rot rate, so gating the whole tree would be
-  # noise. The fix for a flagged line is to DELETE the number and cite a name
-  # plus a quoted phrase -- never to re-point it at a fresh number.
+  # Gates ADDED LINES ONLY, deliberately: the existing population is large and
+  # is being retired opportunistically, not in one sweep -- gating the whole
+  # tree would be noise. The fix for a flagged line is to DELETE the number and
+  # cite a name plus a quoted phrase -- never to re-point it at a fresh number.
+  # Re-derive the population with `python3 tools/check_line_citations.py --census`.
   - repo: local
     hooks:
       - id: check-line-citations

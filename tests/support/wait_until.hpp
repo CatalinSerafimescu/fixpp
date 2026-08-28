@@ -29,10 +29,10 @@
 // ── Why this is NOT in pump_until_ready.hpp, where #315 proposed it ───────────
 //
 // That header pulls in gtest, asio's io_context and work guard, fixpp's Clock
-// and Transport. tests/capi holds the largest group of call sites and includes
-// none of that -- those tests exercise the C ABI and deliberately stay clear of
-// the C++ internals. Putting the twin there would have forced asio into every
-// one of them to gain a function that uses no asio at all.
+// and Transport. tests/capi holds call sites that include none of that -- those
+// tests exercise the C ABI and deliberately stay clear of the C++ internals.
+// Putting the twin there would have forced asio into every one of them to gain
+// a function that uses no asio at all.
 //
 // `pump_until_ready.hpp` includes THIS header, so every existing pump caller
 // still sees `wait_until_observed` through the include it already has, which is the
@@ -95,17 +95,15 @@ namespace fixpp::test_support {
 // CHOSEN, not inherited: the migrated sites used 1 ms, 2 ms and 5 ms, and #315
 // records that nothing anywhere documented why any of them. 1 ms, because
 //
-//   (a) it is the FINEST value already in use, so the migration cannot lengthen
-//       any existing site's detection latency. A migration that quietly slows a
-//       wait is a regression nobody would ever notice;
-//   (b) it matches `kPumpSlice`, so a reader carries one number, not two;
-//   (c) what it trades away -- more wakeups while waiting -- is paid only on the
-//       timeout path, i.e. only when a test is already failing.
+//   (a) it was the finest value in use at the migration, so the migration
+//       cannot lengthen any existing site's detection latency. A migration
+//       that quietly slows a wait is a regression nobody would ever notice;
+//   (b) it matches `kPumpSlice`, so a reader carries one number, not two.
 //
 // Unlike `kPumpSlice` this is NOT a cost floor. `run_for` on a context with
 // outstanding work burns its whole slice however fast the work is; a sleeping
-// thread that gets woken does not. Here the slice bounds only the OVERSHOOT
-// past the moment the predicate became true (expected slice/2 on success).
+// thread that gets woken does not. Here the slice bounds the OVERSHOOT past
+// the moment the predicate became true (expected slice/2 on success).
 inline constexpr auto kWaitSlice = std::chrono::milliseconds{1};
 
 // Wait until `ready()` is true, or `budget` elapses. Returns whether it became
@@ -113,9 +111,9 @@ inline constexpr auto kWaitSlice = std::chrono::milliseconds{1};
 // pass, which is the failure this whole family exists to prevent.
 //
 // `budget` HAS NO DEFAULT, deliberately. Every site migrated onto this helper
-// arrived with its own (2 s, 3 s, 4 s, 5 s); a default would have silently
-// redefined each one, and shortening a budget is a flake while lengthening one
-// delays every failure. Stating it at the call site keeps that visible.
+// arrived with its own budget; a default would have silently redefined each
+// one, and shortening a budget is a flake while lengthening one delays every
+// failure. Stating it at the call site keeps that visible.
 //
 // CONTRACT: `ready` is called from the WAITING thread while other threads run,
 // so every shared access it makes must be race-free -- an atomic load, or a lock.

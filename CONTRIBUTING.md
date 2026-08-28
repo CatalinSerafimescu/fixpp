@@ -80,7 +80,7 @@ A line number is a claim about a file that keeps moving. Nobody has to touch the
 citing file for it to become false: the target drifts and the citation rots in
 place, silently, because nothing ever re-runs a comment. The reader is sent to
 the wrong line and usually lands on an unrelated comment, which reads as
-plausible. A measured sample put the rot rate at roughly a third.
+plausible.
 
 **Fix a flagged line by DELETING the number, not by correcting it.** Re-pointing
 `session.cpp:1258` at `session.cpp:1265` re-arms the same defect with a fresh
