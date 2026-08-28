@@ -579,13 +579,18 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
         if (!pump_or_report_throw(
                 [&] {
                     // ⚠️ THE CLOSE IS INSIDE THE GUARD, AND THAT IS #308'S FIX, NOT A
-                    // FORMATTING CHOICE. Hoisting it out -- "close the transport, then
-                    // call the primitive" -- would put `close()` back in the caller's
-                    // frame, which for `~quiesce_on_exit` is an implicitly-noexcept
-                    // destructor. `close()` is documented noexcept, so that adds no
-                    // path today; leaving it outside is what makes that documentation
-                    // load-bearing for process survival, and #308 deliberately refused
-                    // that dependency. `cancel_sleeps()` is inside for the same reason.
+                    // FORMATTING CHOICE. `pump_or_report_throw` is load-bearing here --
+                    // for `ioc.restart()`, `run_for()`, `poll_one()` and every handler
+                    // they dispatch, none of which is `noexcept` -- and that holds no
+                    // matter where `close()` sits. `close()` and `cancel_sleeps()` are
+                    // *declared* `virtual ... noexcept = 0`, so a throwing override is
+                    // ill-formed; `noexcept` is a property of the CALLEE, so a
+                    // violation calls `std::terminate` at THAT function's own boundary
+                    // regardless of which frame calls it -- moving `close()` outside
+                    // this lambda changes nothing today. It stays inside anyway, per
+                    // #308's refusal and #322's requirement: containment is already
+                    // correct if either interface is ever relaxed to
+                    // potentially-throwing, and it costs nothing to have it now.
                     //
                     // Closed ONCE, before the first slice, rather than per pass: it is
                     // idempotent, nothing here reopens it, and the witness that pins it
@@ -862,11 +867,17 @@ struct quiesce_on_exit {
     // `ADD_FAILURE`, and the transport close INSIDE the pump.
     //
     // ⚠️ IT MUST STAY ONE CALL. "Close the transport, then call the primitive"
-    // would put `transport->close()` back in THIS frame, which has no exception
-    // specification and no handler of its own and is therefore implicitly
-    // `noexcept` -- making "close() is noexcept" load-bearing for process survival
-    // in a destructor. That is precisely the dependency #308 refused; the primitive
-    // takes the transport so the refusal survives the delegation.
+    // would put `transport->close()` back in THIS frame -- and that changes
+    // nothing today either way: `close()` and `cancel_sleeps()` are *declared*
+    // `virtual ... noexcept = 0`, so a throwing override is ill-formed, and
+    // `noexcept` is a property of the CALLEE -- a violation calls
+    // `std::terminate` at THAT function's own boundary whether it is called
+    // from here or from inside the primitive's lambda (see the primitive's own
+    // ⚠️ THE CLOSE IS INSIDE THE GUARD paragraph). It stays inside the
+    // primitive anyway, per #308's refusal and #322's requirement: containment
+    // is already correct if either interface is ever relaxed to
+    // potentially-throwing, and the primitive taking the transport is what
+    // lets the refusal survive the delegation.
     //
     // Nothing may escape here either, and nothing does: every path through
     // `cancel_and_drain_or_report` is inside its own unconditional `catch (...)`
