@@ -35,6 +35,8 @@ maintained — this page exists because agents did not find them, not because th
 | Whether a limitation is **still open** | the same file — **resolved rows are moved out** to `spec/behaviors-and-limitations-closed.md`. Reading the live file alone gives you only open ones. | grepping `L-0NN-` repo-wide, which hits both |
 | Governing rules, citable as `[const §N.M]` | `.specify/constitution.md` | anywhere else |
 | **Why** something is the way it is, and what was rejected | **`components/` in this bundle**, then the decision records it names | a single design doc — see below |
+| **How the system is put together** — module layering, the dependency graph, public namespaces, per-module public surface, the plugin pattern, build layout, the service boundary, the glossary | **`.specify/architecture.md`** — the **spine**, cited as `[arch §N.m]` by 21 documents. ⚠️ **Same Status-header trap as the `2*.md` docs below, and it has at least one queued amendment that was never applied** (`2k` §D.3). Verify before citing | reconstructing it from the `2*` design docs, which own *subsystem* detail and explicitly do **not** own the spine |
+| **Which design doc owns a subsystem** | `[arch §10]`'s hand-off table — a closed 13-row list, `2a`–`2m` | guessing from filenames |
 | What is left to do for v1.0 | `../REMAINING-WORK.md` (parent) | this bundle |
 | History — what we used to believe | `history.md` (deliberately off this path) | — |
 
