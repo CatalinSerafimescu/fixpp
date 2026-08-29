@@ -238,6 +238,15 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
         },
         asio::use_future);
 
+    // The accept must still be pending here: poll() drives the coroutine to its
+    // first suspend, and nothing has connected yet. Without this the cell cannot
+    // tell "resumed because a client connected" from "resumed for any reason" --
+    // an async_accept that returned immediately would satisfy every assertion
+    // below, because the listening socket's backlog completes the connect anyway.
+    listener_ioc.poll();
+    ASSERT_EQ(fut.wait_for(std::chrono::seconds{0}), std::future_status::timeout)
+        << "async_accept resumed before any client connected";
+
     // Run the listener_ioc on a dedicated thread so the client can drive
     // its own ioc on the test thread.
     std::thread io_thread{[&] { listener_ioc.run(); }};
