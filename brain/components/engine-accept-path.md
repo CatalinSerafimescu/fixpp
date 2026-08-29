@@ -1,0 +1,67 @@
+---
+type: Component Decision Map
+title: Engine accept path — listener, accept loop, Session handoff
+description: Every document that claims to describe how the Engine hands an accepted connection to a Session, with the superseded ones flagged.
+status: stable
+refs:
+  - src/session/engine.cpp
+  - src/transport/asio_listener.hpp
+  - include/fixpp/transport/listener.hpp
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/speckit/pr331-330-asio-listener-executor-gateb.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/pr326-310-315-gateb.md
+codegraph_entry: [Engine, run_accept_loop, asio_listener, assert_transport_on_session_strand]
+constitution: ["§XI"]
+---
+
+# Engine accept path
+
+## Current state — what the code does
+
+`Engine::start()` `co_spawn`s `run_accept_loop` **on `*entry.session_strand`** — a **per-session**
+strand, one per acceptor `SessionEntry`. The loop reads `co_await this_coro::executor` at the top,
+builds the `asio_listener` with **that** executor, and asserts every accepted transport is on the same
+strand (**INV-7**, `assert_transport_on_session_strand`).
+
+The structural fact underneath: `asio_listener::async_accept()` is an ordinary coroutine that never
+dispatches onto its own stored executor, so **it resumes on whatever executor its awaiter runs on**.
+There is no listener-owned executor contract at all — the executor comes entirely from the `co_spawn`
+target.
+
+Also true, and easy to assume otherwise: **each acceptor session's loop serves exactly one peer and
+then returns.** There is no re-spin to `async_accept` after a successful handoff.
+
+## ⚠️ Documents that describe this component and are WRONG
+
+Listed because omitting them is the defect this page exists to prevent. **Do not fix code to match
+them.** Tracked by **issue #334**; the verdict there is that the docs are what should move.
+
+| Document | Claim | Status |
+|---|---|---|
+| `.specify/2j-controlplane.md` | *"The engine executor is shared with the engine's listener accept and engine-bootstrap coroutines"* — stated as a **threading invariant**, in a **signed-off** design doc, which is what makes it re-seed the model for new work | **SUPERSEDED / FALSE** |
+| `specs/015-runtime-engine/research.md` | *"Per registered acceptor session, `co_spawn` an accept loop on the engine executor that **repeatedly** `co_await listener.async_accept()`"* — recorded as a **Decision** | **SUPERSEDED / FALSE on two axes**: the executor *and* the "repeatedly" loop shape |
+| `specs/012-2h-transport/spec.md` | user-story narrative describing **one** `async_accept` loop on a service-strand executor for all counterparties | **STALE** — the engine ships one listener per session. Rewriting it is a spec change, not a citation fix; decide deliberately |
+
+⚠️ **Re-derive these before quoting them** — they are claims about a moving tree, and #334 says so in
+its own words.
+
+## Documents that are current
+
+| Document | Carries |
+|---|---|
+| `specs/023-engine-session-strand/research.md` | The governing decision set: **D0** control strand (rejected: a global mutex — banned by `[const §XI]`); **D1** one strand per session, created once; **D2** the entire role on that one strand (verified against asio's own `ssl/detail/io.hpp` — SSL BIO processing dispatches on whatever executor runs the coroutine); **D3-B** adopt the pre-made strand (**D3-A rejected as verified broken** — collides with a user's legitimate `lock_policy::spin`); **D4** teardown ordering; **D5/INV-7** accepted socket on the session strand; **D-PUB** publish `co_await`ed on the control strand *before* the read pump (**rejected**: an atomic `live_transport` pointer — makes the read well-defined but not the ordering); **D6/D-SNAP** atomic immutable snapshot for public synchronous readers |
+| `src/transport/asio_listener.hpp` header comment | The corrected statement of the no-executor-contract fact, after PR #331 deleted the "service strand" claim from ~10 files |
+| `pr331-330-asio-listener-executor-gateb.md` (private) | How that deletion converged — 4 rounds, every round replacing a false claim with a *new* false one until deletion closed it |
+
+## Why it is this way
+
+Two race classes on a multi-threaded `io_context`: an in-flight SSL read racing teardown `close()` (a
+real observed `BIO_ctrl` use-after-free), and engine-global maps read/written from uncoordinated
+frames. Single-strand placement is what serializes the first; the control strand serializes the second.
+
+## What breaks if the accept loop's executor changes
+
+INV-7's debug assert fires; D2's SSL-BIO serialization is lost, reopening the `BIO_ctrl` UAF on the
+acceptor path; D4's teardown dispatch no longer lands on the executor the loop actually runs on; and
+`asio_listener.hpp`'s corrected header comment becomes false again — the exact class of stale claim
+that cost PR #331 four Gate B rounds.
