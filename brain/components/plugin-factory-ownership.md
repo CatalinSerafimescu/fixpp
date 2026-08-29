@@ -50,6 +50,18 @@ already rotted in two places — read the headers.
 |---|---|---|
 | `.specify/2d-threading.md` §4.4 / §4.5 | `unique_ptr` for all three, *"unique ownership per `[arch §5.6]`"* | **SUPERSEDED.** Each affected line now carries an **in-place** marker pointing at the shipped header. Deliberately **not re-typed** — the block is cited by line number, and a retyped value is a fourth copy to keep in sync |
 | `.specify/2h-transport.md` Appendix D §D.1/§D.2 | Proposes the `shared_ptr → unique_ptr` flip, with *"Before"* blocks *"quoted verbatim"* from `2d` | **APPLIED, THEN SUPERSEDED.** Amended 2026-08-29 (v0.3 → v0.4). See its Appendix Z |
+| `.specify/2e-msgstore.md` Appendix D §D.1 | The **origin** of the flip for `store_factory` — argued `shared_ptr → unique_ptr` in round 1 | **APPLIED, THEN REVERSED IN CODE.** Amended 2026-08-29 (v0.5 → v0.6). ⚠️ **Its stale *"Before"* block matches shipped code better than its *"After"* does** — see below |
+
+### ⚠️ The trap in `2e` §D.1, worth knowing by shape
+
+A drop-in amendment block labels one half **"Before"** (stale) and the other **"After"** (the
+resolution). In `2e` §D.1 those labels now **invert** the truth: *"Before"* shows `shared_ptr`, which
+is what shipped; *"After"* shows `unique_ptr`, which did not. **A reader trusting the labels gets the
+answer exactly backwards** — worse than an obviously-stale document, which at least announces itself.
+
+The general shape: **once an amendment is applied and later reversed, a Before/After block is not
+merely stale — it is actively inverted.** Any `Appendix D` block in these design docs carries that
+risk once its amendment has landed.
 
 ## Why it is this way — the decision that won
 

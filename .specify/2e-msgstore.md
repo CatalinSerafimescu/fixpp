@@ -1,6 +1,6 @@
 # Design Doc 2e — `MessageStore` Async API + QuickFIX-Compat Shim Feasibility
 
-> **Status:** Draft v0.5 — post-sign-off targeted gap-closure pass (2026-05-20) added Appendix D §D.4 / §D.5 / §D.6 + cross-references; spine of v0.4 (4-pure-virtual `MessageStore`, awaitable visitor, single-log-per-session on-disk shape, atomic-rename `reset()`, exclusive `async_mutex`, `commit_per_message` default, the §3.1 inherited-primitives table, the §6.3.5 platform-portability table, the 21-seam list with seam 2 extended, the 10-variant §6.7 errors table with operator-doc tightening, the Appendix D §D.1 / §D.2 / §D.3 drop-ins) survives unchanged; **shipped via 008-message-store PR #77 (merged 2026-05-21, squash `718195f`)**.
+> **Status:** Draft v0.6 — post-sign-off targeted gap-closure pass (2026-05-20) added Appendix D §D.4 / §D.5 / §D.6 + cross-references; spine of v0.4 (4-pure-virtual `MessageStore`, awaitable visitor, single-log-per-session on-disk shape, atomic-rename `reset()`, exclusive `async_mutex`, `commit_per_message` default, the §3.1 inherited-primitives table, the §6.3.5 platform-portability table, the 21-seam list with seam 2 extended, the 10-variant §6.7 errors table with operator-doc tightening, the Appendix D §D.1 / §D.2 / §D.3 drop-ins) survives unchanged; **shipped via 008-message-store PR #77 (merged 2026-05-21, squash `718195f`)**. ⚠️ **Post-sign-off targeted amendment 2026-08-29 — Appendix D §D.1/§D.2 applied then partly superseded; see "Appendix Z" at the END of this file (placed there because 18 line-number citations point INTO this document).**
 > **Date:** 2026-05-20 (v0.5; v0.4 dated 2026-05-08)
 > **Owner:** Opus drafts; user approves.
 > **Headers:** `fixpp::session::MessageStore` (`include/fixpp/session/message_store.hpp`); default impls `fixpp::session::MemoryStore` (`include/fixpp/session/memory_store.hpp`), `fixpp::session::FileStore` (`include/fixpp/session/file_store.hpp`); `fixpp::session::MessageStoreFactory` (`include/fixpp/session/message_store_factory.hpp`); `fixpp::session::retrieve_visitor` (`include/fixpp/session/retrieve_visitor.hpp`); `fixpp::session::seqnum_t` consumed via `<fixpp/session/seqnum.hpp>` (placeholder; ownership re-pointed to the Phase-4 session-module spec per §3.1 / §10 Q9 — see N1 below); `<fixpp/session/quickfix_compat/cfg_loader.hpp>` (config-translation only — **no runtime adapter**, no `<…/quickfix_compat/message_store_adapter.hpp>`, **no `<…/quickfix_compat/sync_message_store_adapter.hpp>`** — round 2 retired the templated sync-store adapter per Codex C-R2-P2-1 escalation, see §4.8.B).
@@ -1638,7 +1638,7 @@ Sections **rewritten** (vs line-edited): the entire status block (header rewrite
 
 Per convergence rule 6 + the 2d v0.4 / 2c v1.3 sibling-doc-edit precedent, sibling-doc text touched by this rewrite is surfaced as drop-in amendment language for the orchestrator to apply at sign-off. The 2e rewrite agent does not edit `2d-threading.md` directly. Per `[const §VI.5]`, every reference uses the exact `[DocAbbrev §X.Y.Z] Title` form; review-internal IDs (e.g., "C-R2-P1-4 close", "round-2 root cause #2") are not carried into the sibling text.
 
-### D.1 `[2d §4.5] fixpp::session::SessionConfig — session-level frozen-at-open knobs` — `store_factory` field type (round 1, refined in round 2 per Opus N2-P3-1)
+### D.1 `[2d §4.5] fixpp::session::SessionConfig — session-level frozen-at-open knobs` — `store_factory` field type (round 1, refined in round 2 per Opus N2-P3-1) — ⚠️ **APPLIED, THEN REVERSED IN CODE (2026-08-29). Its "Before" block now matches the shipped type better than its "After" does. See Appendix Z at the END of this file.**
 
 **Tension:** `[2d §4.5]` v0.4 line 534 declares `std::shared_ptr<MessageStoreFactory> store_factory;` as a `SessionConfig` plugin-override field. Per N1 (round 1), `[arch §5.6]`'s mid-session-swap ban implies unique ownership of the factory (no shared-store-across-sessions, no second `shared_ptr` alive past `~Session`). 2e §4.4 ships `make()` returning `std::unique_ptr<MessageStore>` regardless; the field-type edit is the sibling-doc amendment owed by 2d at 2e sign-off.
 
@@ -1664,7 +1664,7 @@ Note: `cert_source` stays `shared_ptr` (its ownership is owned by 2g; not affect
 
 The orchestrator applies this edit at 2e sign-off; the amendment is recorded in `[2d-threading.md App C]` as a cross-doc edit driven by 2e's N1 finding (round 1) + Codex C-R2-P1-4 (round 2 — refinement to byte-exact diff form per Opus N2-P3-1).
 
-### D.2 `[2d §4.7] Cancellation propagation API — two-phase close` — `FileStore::flush_for_session_close()` row in the per-mode effect table (round 2 — NEW per Codex C-R2-P1-5 / round-2 root cause #2)
+### D.2 `[2d §4.7] Cancellation propagation API — two-phase close` — `FileStore::flush_for_session_close()` row in the per-mode effect table (round 2 — NEW per Codex C-R2-P1-5 / round-2 root cause #2) — ✅ **APPLIED and still correct; only the line citation is stale (the table is not at `2d` 798–809). See Appendix Z.**
 
 **Tension (NEW in round 2):** v0.2 §7.6 + status block cited `[2d §4.7]` for an engine-internal `FileStore::flush_for_session_close()` graceful-pre-phase-1 store-flush hook; the actual `[2d §4.7]` v0.4 per-mode effect table at lines 798–809 has **no such row**. Implementers reading `[2d §4.7]` alone do not see the hook; implementers reading `[2e §7.6]` alone read a phantom citation; the resulting Phase-4 session-module spec author cannot pick one side without re-running Gate A on 2d. Round 2 closes this by declaring the cross-doc edit explicitly: 2d v0.4 §4.7's per-mode effect table gains one row + a one-paragraph contract.
 
@@ -1843,3 +1843,63 @@ make(std::string_view sender_comp_id,
 - `specs/008-message-store/checklists/implementation-readiness.md` CHK030 — reclassified from WAIVED-with-fabricated-rationale to **SPEC-FIXED §D.6**.
 
 **Effective:** as of `008-message-store` Phase-4 pipeline-step-9 audit (2026-05-20). **Pre-applied at this rewrite** — the live `[2e §4.4]` paragraph + `[2e §6.1.1]` line-edit + `[2e §8]` line-edit carry the post-amendment shape, shipping inside the `008-message-store` PR bundle. This Appendix D §D.6 entry is retained as the normative record of the amendment.
+
+## Appendix Z — post-sign-off amendment, 2026-08-29 (Appendix D §D.1 / §D.2)
+
+*Appended at the END of the file on purpose: 18 line-number citations point into this document, and
+an insertion higher up rots every one below it. Every edit above is in-place and same-line-count.*
+
+### §D.1 — applied, then **reversed in the code**
+
+The arc, in order, because no single document contains it:
+
+1. `[2d §4.5]` v0.4 published `store_factory` as **`shared_ptr`**.
+2. **§D.1 (this doc, round 1/2) argued for `unique_ptr`** — *"unique ownership per `[arch §5.6]` /
+   `[2e §4.4]`"* — and the amendment **was applied**: `2d` §4.5 says `unique_ptr` today.
+3. **Feature 010 `FR-001a` then flipped the shipped type back to `shared_ptr`**, to make
+   `SessionConfig` **copy-constructible** (the W-5 fix). Its reasoning: `unique_ptr` was chosen for
+   *polymorphic ownership through indirection*, **not** to forbid sharing; `MessageStoreFactory` is a
+   **stateless** interface whose only virtual method mints a fresh `MessageStore`, so sharing a
+   factory across Sessions is meaningful and the per-Session uniqueness invariant is untouched.
+
+> ⚠️ **The trap, which is the reason this note exists.** §D.1's **"Before" block — the one labelled
+> stale — shows `shared_ptr`, which is what actually shipped. Its "After" — the one presented as the
+> resolution — shows `unique_ptr`, which did not.** A reader who trusts the labels gets the answer
+> exactly backwards. Neither block is a statement about today's code; the header is.
+
+**Authoritative:** `include/fixpp/session/session_config.hpp`. **No type is re-copied here** — a copy
+is the failure mode being recorded. Rationale: `specs/010-session-cfg-lifetime/spec.md`, `FR-001a`.
+
+Same supersession, same cause, in `.specify/2h-transport.md` Appendix D §D.1/§D.2 (see its Appendix Z)
+and marked in place in `.specify/2d-threading.md`.
+
+### §D.2 — applied and still correct; only its **line citation** is stale
+
+The `FileStore::flush_for_session_close()` row **was** appended to `2d`'s `[2d §4.7]` per-mode effect
+table, together with the hook-contract paragraph, and `2d`'s own convergence log records it. The
+amendment is discharged.
+
+What is stale is the pointer: §D.2 locates the table at *"`2d-threading.md` … lines 798–809"*. It is
+not there. **No corrected line number is written here** — that is the defect, not the fix. Find it by
+content, which cannot go stale:
+
+```bash
+grep -n "flush_for_session_close()\` (engine-internal hook)" .specify/2d-threading.md
+```
+
+⚠️ This citation was stale **before** the 2026-08-29 amendments. Those were made line-shift-free
+(in-place, same-line-count edits plus an end-of-file appendix, audited so every diff hunk is `NcN`),
+precisely so they could not be blamed for a rot they did not cause. See
+[`brain/index.md`](../brain/index.md) and issue **#336**.
+
+### §D.3 – §D.6 — checked, and they shipped
+
+| | Claim | Shipped |
+|---|---|---|
+| **D.3** | `MessageStoreFactory::make()` extended 3-param → 5-param | ✅ the 5-parameter signature is in `include/fixpp/session/message_store_factory.hpp` |
+| **D.6** | `unique_ptr<MessageStore>` deleter pinned to `std::default_delete` | ✅ and the header **names §D.6 in a comment** — the convention that makes a supersession discoverable at all |
+
+**D.4 and D.5 were NOT re-checked — UNVERIFIED, not verified-clean.** Two of four were verified; the
+other two are simply unexamined. Saying "the rest look fine" would be a coverage claim nobody
+measured.
+
