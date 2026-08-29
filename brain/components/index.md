@@ -35,6 +35,9 @@ enforcement sites** — never a step narrative, which is the code and rots.
   made split-brain unrepresentable**
 - [`wire.md`](./wire.md) — the largest catalogue family; its **scope boundary** (what wire does *not*
   own) is the part that routes you correctly
+- [`session.md`](./session.md) — ⭐ **the only page that SUBSTITUTES for a missing design doc rather
+  than supplementing one.** The FIX engine has no `2*` owner and no row in `[arch §10]`; authority is
+  split across headers, Phase-4 spec bundles, and B&L
 
 **Coverage is derived, not listed here:** `python3 tools/brain_inventory.py --census` reports every
 long-lived coroutine and whether a page names it.
