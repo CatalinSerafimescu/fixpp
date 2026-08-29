@@ -1,6 +1,6 @@
 # 2h — Transport interface + ASIO TCP/TLS default impl + mock seam
 
-**Status:** Draft v0.3 — Gate A round 2 (Phase A) converged
+**Status:** Draft v0.4 — Gate A round 2 (Phase A) converged; **post-sign-off targeted amendment 2026-08-29 — Appendix D §D.1/§D.2 applied then superseded by feature 010 FR-001a; see "Appendix Z" at the END of this file (placed there because 12 line-number citations point INTO this document)**
 **Date:** 2026-05-09
 **Owner:** 2h-transport.md
 **Inherits from:** `[arch §1.1]` (test seams via plugin interfaces; SOCKETs/clocks/exporters pluggable), `[arch §1.2]` (no SHM/DPDK/Onload in v1.0 non-goals), `[arch §2.3]` (transport may include from `core/`, `tls/`, `log/` interfaces only — no `session/` back-edge), `[arch §3]` (public namespaces — `fixpp::transport`), `[arch §4.4]` (session module surface — recipient of transport callbacks), `[arch §4.5]` (transport module surface — the spine of this doc), `[arch §4.6]` (tls/ surface consumed by the TLS sub-interface), `[arch §4.10]` (capi/ surface delegation), `[arch §5.1]` (executor model — `awaitable<T>` everywhere; per-session strand; ASIO native cancellation slots), `[arch §5.2]` (allocator policy — PMR everywhere; mimalloc default), `[arch §5.3]` (error model — `expected_t<T>` hot path, no exceptions, construction-time carve-out), `[arch §5.5]` (lifetime model — `[[clang::lifetimebound]]` on every view-returning constructor and accessor), `[arch §5.6]` (frozen-config rule — `Transport` factory frozen at session open), `[arch §5.7]` (logging hook), `[arch §5.8]` (backpressure — `block` / `disconnect_and_recover` only on app/session paths), `[arch §6]` (plugin pattern — five rules: pure-virtual class, ≤5 pure-virtual methods, one default impl, factory taking `pmr::memory_resource*`, compile-time selection), `[arch §10]` row 2h ("Transport interface — ≤5 pure-virtual surface, ASIO TCP/TLS default impl, mock seam"), `[arch §11]` (no open architectural question scoped to 2h at draft time)
@@ -1701,7 +1701,7 @@ Engineering-judgment decisions whose primary driver is engineering judgment rath
 
 Per convergence rule 6 + the `[2c App D]` / `[2d App D]` / `[2e App D]` / `[2f App D]` / `[2g App D]` sibling-doc-edit precedent, sibling-doc text touched by this rewrite is surfaced as drop-in amendment language for the orchestrator to apply at sign-off. The 2h rewrite agent does not edit `architecture.md`, `2d-threading.md`, or `library/spec/coverage-index.md` directly. Per `[const §VI.5]`, every reference uses the exact `[DocAbbrev §X.Y.Z] Title` form; review-internal IDs (e.g., "RC#1", "Codex P1 #1", "Opus N-P1-1") are not carried into the sibling text.
 
-### D.1 `[2d §4.4] fixpp::core::EngineConfig — engine-level frozen-at-open knobs` — flip `default_transport_factory` from `shared_ptr` to `unique_ptr` (RC#1 close)
+### D.1 `[2d §4.4] fixpp::core::EngineConfig` — flip `default_transport_factory` from `shared_ptr` to `unique_ptr` (RC#1 close) — ⚠️ **APPLIED, THEN SUPERSEDED (2026-08-29) — see Appendix Z at the END of this file. The "Before" block below no longer exists in `2d`, and the "After" no longer matches shipped code.**
 
 **Tension:** `[2d §4.4]` v0.4 publishes `default_transport_factory` as `std::shared_ptr<fixpp::transport::TransportFactory>` (line 448) — but `[arch §5.6]` frozen-at-open + the `[2e §4.4]` precedent for `MessageStoreFactory` ownership (factory ownership = `unique_ptr`; no mid-session swap, no shared factory across sessions) demands `unique_ptr`. The 2e cross-doc amendment that landed `unique_ptr` for `MessageStoreFactory` (per `[2e App D §D.1]`) is the binding precedent; 2h applies the same edit for `TransportFactory`.
 
@@ -1727,7 +1727,7 @@ The diff is a single-token edit (`shared_ptr` → `unique_ptr`) on line 448; col
 
 The orchestrator applies this edit at 2h sign-off; the amendment is recorded in `[2d-threading.md App C]` as a cross-doc edit driven by 2h RC#1 / Codex P1 #1 / Opus N-P1-1.
 
-### D.2 `[2d §4.5] fixpp::session::SessionConfig — session-level frozen-at-open knobs` — append `transport_factory_override` field (RC#1 close)
+### D.2 `[2d §4.5] fixpp::session::SessionConfig` — append `transport_factory_override` (RC#1 close) — ⚠️ **APPLIED, THEN SUPERSEDED (2026-08-29) — see Appendix Z at the END of this file. Its line citation is stale too, and was stale before this amendment.**
 
 **Tension:** `[2d §4.5]` v0.4 publishes `SessionConfig` with the engine-anchor + session-`*_override` pattern across the dictionary, executor, clock, store-factory, cert-source axes — but no `transport_factory_override` field. 2h's §4.7.1 declares the field shape and queues the cross-doc amendment; v0.2 writes the byte-faithful drop-in. The "Before" block matches the live source at v0.2 authoring time: the post-2e-sign-off plugin-overrides block (`store_factory` as `std::unique_ptr<MessageStoreFactory>` per `[2e App D §D.1]`; `cert_source` as `std::shared_ptr<fixpp::tls::cert_source>`; `pinset` has NOT yet been applied per the live-source audit — `grep -n "pinset" 2d-threading.md` returns no field at line 536, only the `[2g App D §D.2]` queued amendment text).
 
@@ -1767,3 +1767,53 @@ The 2g v0.4 sign-off recorded the Appendix-D drop-in language but the orchestrat
 **No 2h-owned drop-in is queued** for the same three rows — that would duplicate `[2g App D §D.3]` and create a maintenance hazard at the next coverage-tooling regeneration. 2h's role here is to flag the orchestrator dependency at sign-off; the upstream owner (2g) carries the actual drop-in language.
 
 Per `[arch Appendix B]` precedent, the spec-section-level link to 2h's own section number for the T-039 wiring half (§7.3) and the T-041 delivery half (§7.2) is intentionally NOT named in the coverage-index Gap note column — the catalogue-ID-level cross-cut is preserved by the existing `T-039` / `T-040` / `T-041` Catalogue IDs entries and is fully traced via this doc's Appendix A.2.
+
+## Appendix Z — post-sign-off amendment, 2026-08-29 (Appendix D §D.1 / §D.2)
+
+*Appended at the END of the file on purpose: 12 line-number citations point into this document, and
+an insertion higher up rots every one below it.*
+
+### What happened to D.1 and D.2
+
+Both were **applied to `2d-threading.md`** — and then **superseded by feature 010 (`FR-001a`)**, which
+neither document absorbed. Three things are wrong with the Appendix D text as written, in different
+directions:
+
+| Appendix D says | Actually |
+|---|---|
+| D.1 **"Before"** — *"current `2d` v0.4 text … line 448 quoted verbatim"*, showing `std::shared_ptr<…TransportFactory>` | `2d` line 448 has said **`unique_ptr`** since the amendment was applied. The "Before" describes a state that no longer exists while calling itself *current* |
+| D.1 **"After"** — `std::unique_ptr<…TransportFactory> default_transport_factory` | **Shipped code is `shared_ptr`** (`include/fixpp/core/engine_config.hpp`). The proposal won in the doc and lost in the code |
+| D.2 **"Before"** — *"`2d` … plugin-overrides block at **lines 533–535**"* | That block is **not** at 533–535. The citation was already stale **before** this amendment — the 2026-08-29 Step-R edits to `2d` were made line-shift-free precisely so they could not be blamed for it |
+| D.2 **"After"** — `std::unique_ptr<…> transport_factory_override` | **Shipped code is `shared_ptr`** (`include/fixpp/session/session_config.hpp`) |
+
+### The supersession, stated once
+
+**Feature 010, `FR-001a`** flipped `SessionConfig::store_factory` from `unique_ptr` to `shared_ptr` to
+make `SessionConfig` **copy-constructible** (the W-5 fix). Its reasoning — *"the binding design used
+`unique_ptr` for polymorphic ownership through indirection, NOT to forbid sharing; the factory is a
+stateless interface, so sharing across Sessions is meaningful and the per-Session uniqueness
+invariant is unaffected"* — applies to **every** polymorphic factory member, and the shipped code
+followed it for all three. **2h's D.1/D.2 argued the opposite direction and the tree went the other
+way.**
+
+The authoritative declarations are the two headers. **No type is re-copied into this appendix**, for
+the reason this whole amendment exists: a copy is what rots.
+
+- `include/fixpp/core/engine_config.hpp` — `EngineConfig`
+- `include/fixpp/session/session_config.hpp` — `SessionConfig`
+- `specs/010-session-cfg-lifetime/spec.md` — `FR-001a`, with the rationale
+
+### Not corrected here, deliberately
+
+The `2d` code blocks now carry an **in-place** marker on each affected line pointing at the shipped
+header. They are **not re-typed**: `2d` §4.4/§4.5 is a *published design contract* others cite by line
+number, and rewriting the type would create a fourth copy to keep in sync. The marker is a pointer,
+which does not rot.
+
+### What still holds in Appendix D
+
+**D.3** is untouched by this and was not re-checked — **UNVERIFIED, not verified-clean.** The
+*Tension* paragraphs of D.1/D.2 remain a correct account of the ownership question as it stood at 2h
+sign-off; they are history and do not rot. Only the *Before*/*After* blocks and the line citation are
+stale.
+

@@ -445,7 +445,7 @@ struct EngineConfig {
     // ── Default plugin selections (a session may override each in SessionConfig) ─
     std::shared_ptr<fixpp::session::MessageStoreFactory> default_store_factory;
     std::shared_ptr<fixpp::tls::cert_source>             default_cert_source;
-    std::unique_ptr<fixpp::transport::TransportFactory>  default_transport_factory;
+    std::unique_ptr<fixpp::transport::TransportFactory>  default_transport_factory;  // ⚠️ 2026-08-29: SHIPPED TYPE DIFFERS — see include/fixpp/core/engine_config.hpp. Superseded by feature 010 FR-001a (copy-constructible config). Read the header; this line is NOT re-typed here, because a second copy is what rots.
 
     // ── Engine-level fallback trace_context (per N-P2-2) ────────────────
     // Storage: held by the engine in a `std::atomic<trace_context>` snapshot
@@ -549,9 +549,9 @@ struct SessionConfig {
     std::string                 begin_string;          // e.g. "FIX.4.4".
 
     // ── Plugin overrides (each null → inherit from EngineConfig) ────────
-    std::unique_ptr<MessageStoreFactory>           store_factory;   // unique ownership per [arch §5.6] / [2e §4.4]
+    std::unique_ptr<MessageStoreFactory>           store_factory;   // ⚠️ 2026-08-29: SHIPPED TYPE DIFFERS — feature 010 FR-001a. See include/fixpp/session/session_config.hpp.
     std::shared_ptr<fixpp::tls::cert_source>       cert_source;
-    std::unique_ptr<fixpp::transport::TransportFactory> transport_factory_override; // unique ownership per [arch §5.6] / [2e §4.4] / [2h §4.7.1].
+    std::unique_ptr<fixpp::transport::TransportFactory> transport_factory_override; // ⚠️ 2026-08-29: SHIPPED TYPE DIFFERS — feature 010 FR-001a. See include/fixpp/session/session_config.hpp.
 
     // SecurityProfile per [const §XII.5] — no implicit default; the type
     // must default-construct to a sentinel (e.g. `unset`) and the engine
