@@ -101,49 +101,19 @@ PHASE 4 — PUBLISH + MERGE
                                       via gh pr edit OR /gate-b's Post-loop §3 if re-run on PR
 18. gh pr merge                       user-driven
 
-19. MARK DONE — close-out bookkeeping  MANDATORY; nothing automates these,
-                                      each is updated from memory and gets
-                                      dropped if not enumerated. Update ALL
-                                      that exist for the feature:
-    a. feature-catalogue.md row(s) → `done` (+ coverage-index.md if a
-       baseline legitimately moved)
-    b. parent: submodule-pointer bump commit (post-merge)
-    c. gate-{a,b}-{done,waived} label via `gh api` REST on the merged PR
-       (post-PR gap recurs; `gh pr edit --add-label/--body` silently fails)
-    d. phases/phase-4.md is a STATUS dashboard ONLY — update only the
-       terse Track Log status cells (Phase status / Active module / Active
-       feature / Last action / Next gate) + the Module Status table row.
-       Do NOT write decision/convergence narrative here. The feature's
-       Gate A/B story + sign-off go in its per-feature sub-file
-       phases/phase-4/<module>/<feature>.md; cross-feature/cross-module
-       lessons go in phases/phase-4/cross-module-decisions.md; stable
-       process reference is phases/phase-4/methodology.md. (Split
-       2026-06-07 to stop phase-4.md re-bloating.)
-    e. phases/phase-4/<module>/README.md: feature progress + exit-criteria
-    f. controlling plan / decision-doc progress log if one governs this
-       work (e.g. .specify/decisions/<plan>.md progress table) — LOCAL-ONLY
-       (.specify/decisions/ gitignored); the most frequently forgotten one
-    g. <feature>-verify.md / lifecycle doc: final "User sign-off" line
-    h. project memory: update the relevant state note if the close changes
-       cross-session status
-    i. Phase-2 design-doc shipped-status pointer (when this feature
-       realizes a Phase-2 design doc): update `.specify/<2N>-*.md`'s Status
-       header with "+ shipped via <feature> PR #<N> (merged YYYY-MM-DD,
-       squash <SHA>)" AND extend the matching `phases/phase-2.md` Track Log
-       row with the same pointer. Precedents: 2c→003 PR #67, 2f→006 PR
-       #73, 2d→007 PR #74; bullet (i) added 2026-05-20 because the
-       previous three merges all silently dropped this surface —
-       `feature-catalogue.md` and phase-4 docs captured the
-       implementation-status delta, but the Phase-2 design-of-record kept
-       reading as "Draft, Gate-A-converged" indefinitely.
-    j. anti-pattern library — commit user-approved new entries from
-       /gate-b Post-loop §4 to `.claude/agents/phase-implementer-sonnet.md`
-       (parent repo). Only if §4 produced candidates AND the user
-       approved them in §5 sign-off; the common "no new candidates"
-       case is a no-op here. The orchestrator drafts; the user
-       approves; this bullet records. Skipped → the next feature's
-       implementer agent runs without the new entry and re-burns the
-       same trap.
+19. MARK DONE — close-out bookkeeping  MANDATORY. The surface list lives in
+                                      `.specify/close-out.md` — ONE source of
+                                      truth, not a second copy here. It splits
+                                      ALWAYS rows from CONDITIONAL ones (row +
+                                      trigger), tags each auto or manual, and
+                                      requires an explicit disposition per row:
+                                      DONE or N/A:<reason>. A blank row is an
+                                      unknown row, not a skipped one.
+                                      Paste its §3 template into the feature's
+                                      Gate B record and fill every row — a
+                                      filled instance per PR is the evidence
+                                      that close-out ran, which the old inline
+                                      list never produced.
 
 20. Review and close all issues for this phase
 ```
@@ -270,7 +240,10 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
   `.claude/agents/phase-implementer-sonnet.md`, and drafts candidate
   entries for any new burn classes. (2) Step 19 gains bullet `j` — commit
   the user-approved entries to the agent file as part of the post-merge
-  close-out. Root cause: the library is load-bearing (each entry
+  close-out. *(Annotation 2026-08-29: step 19's inline bullets were replaced
+  by `.specify/close-out.md`; this disposition is now §2 row 15 there. The
+  text above is left as written — it records what was decided then, and
+  editing an accepted record destroys that.)* Root cause: the library is load-bearing (each entry
   represents a prior burn the implementer agent now avoids), but
   capturing new entries has been manual transcription from memory and
   noted as a recurring maintenance burden in `pipeline/ai-sdd-pipeline.md`
