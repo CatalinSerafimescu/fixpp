@@ -75,7 +75,39 @@ class Engine {
 
 ## R3 — Accept loop & continuous inbound read-pump pattern
 
-**Decision**: Per registered acceptor session, `co_spawn` an **accept loop** on the engine executor that repeatedly `co_await listener.async_accept()`; on each accepted `Transport` (TCP-connected, **not yet TLS-handshaken** — see baseline), the loop must itself **drive the TLS handshake** (obtain the `TlsTransport`, `co_await async_handshake(...)`, harvest `handshake_result` / `peer_id`), then resolve the target session by reversed-CompID (R4), attach the transport (R7 acceptor attach primitive), and `co_spawn` a **read-pump** coroutine on that session's strand. The read-pump loops `transport.async_read_some(...)` -> `Framer::feed(...)` -> `co_await session.on_inbound_frame(frame)` until EOF/read-error/cancellation. The **initiator** side reuses 014's `ReconnectFsm::drive_reconnect_attempt` for connect+handshake (which already produces the `handshake_result`), then spawns the same read-pump.
+> ## ⚠️ SUPERSEDED IN PART — amended 2026-08-29, do not re-seed a design from the Decision below
+>
+> Feature **023 (T010)** changed the executor and the coroutine shape. **Two clauses of the R3
+> Decision are FALSE against the shipped engine**, and this note deletes them rather than
+> restating a corrected design — a restated design rots on the next threading change with nothing
+> to notice it, which is how this document reached today's state.
+>
+> | Clause as written | Shipped |
+> |---|---|
+> | *"`co_spawn` an accept loop **on the engine executor**"* | `co_spawn(*entry.session_strand, run_accept_loop, …)` — the **per-session strand** (itself `make_strand(exec_)`, so still over the engine executor at the *pool* level; what changed is the **serialisation domain**) |
+> | *"`co_spawn` a **read-pump coroutine** on that session's strand"* | the pump is **`co_await`ed inline** inside the accept loop, not spawned as a separate coroutine — the whole role already runs on that strand |
+>
+> *"Repeatedly `co_await listener.async_accept()`"* is **literally** true (`while (!engine.stopped())`)
+> but materially misleading: the loop only re-accepts **after** the previous connection's pump
+> returns. It is serialized, not concurrent.
+>
+> **Derive it from the spawn site**, which cannot go stale silently because it *is* the thing
+> described:
+> ```bash
+> grep -n "co_spawn" src/session/engine.cpp
+> grep -n "session_strand.emplace" src/session/engine.cpp
+> ```
+>
+> **What still holds:** the whole **Rationale** block below — the acceptor loop owns the TLS
+> handshake because `Listener::async_accept()` returns a TCP-connected transport with no
+> `handshake_result`/`peer_id`; one pump per session in-order on one strand; and the
+> **Cancellation** paragraph, which is if anything more load-bearing now. Those are unaffected.
+> The **Alternatives considered** are historical and do not rot.
+>
+> Governing record: `specs/023-engine-session-strand/research.md` (D0–D6). Same supersession is
+> noted in `.specify/2j-controlplane.md` §6.5 and `.specify/2d-threading.md`.
+
+**Decision** *(as written at 015 sign-off — see the note above for the two superseded clauses)*: Per registered acceptor session, `co_spawn` an **accept loop** that repeatedly `co_await listener.async_accept()`; on each accepted `Transport` (TCP-connected, **not yet TLS-handshaken** — see baseline), the loop must itself **drive the TLS handshake** (obtain the `TlsTransport`, `co_await async_handshake(...)`, harvest `handshake_result` / `peer_id`), then resolve the target session by reversed-CompID (R4), attach the transport (R7 acceptor attach primitive), and run a **read-pump** for that session. The read-pump loops `transport.async_read_some(...)` -> `Framer::feed(...)` -> `co_await session.on_inbound_frame(frame)` until EOF/read-error/cancellation. The **initiator** side reuses 014's `ReconnectFsm::drive_reconnect_attempt` for connect+handshake (which already produces the `handshake_result`), then spawns the same read-pump.
 
 **Rationale**:
 - `Listener::async_accept()` (`listener.hpp:45-53`) returns a TCP-connected `Transport` with **TLS NOT yet issued** ("the FSM issues `async_handshake` (TLS) immediately") and **no `handshake_result`/`peer_id`** — so the acceptor loop is responsible for running the handshake and harvesting the identity, symmetric to the initiator's `drive_reconnect_attempt`. (Gate A Codex-1 / New-1: this is the single source of `handshake_result.peer_id` on the acceptor path; T-041 closure depends on it.)
