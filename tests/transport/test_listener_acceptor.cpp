@@ -256,10 +256,17 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
     auto cr = sync_tcp_connect(client_ioc, "127.0.0.1", port, 500ms);
     EXPECT_FALSE(static_cast<bool>(cr.ec)) << "client connect failed: " << cr.ec.message();
 
-    // Wait briefly for the accept to resume.
-    fut.wait_for(500ms);
-    EXPECT_TRUE(accept_completed.load(std::memory_order_acquire))
-        << "async_accept did not resume after client connect";
+    // Bound the wait so a hang cannot wedge CI. This is a LIVENESS bound, NOT a
+    // latency expectation, and the distinction sets the budget: `wait_for` returns
+    // the moment the future is ready, so a generous bound costs a healthy run
+    // nothing and only delays the report of a genuine hang. A bound sized against
+    // how fast this normally resumes instead fails whenever the runner is merely
+    // slow (#328).
+    //
+    // Captured, not asserted. No fatal assertion runs before the join below —
+    // a std::thread must not be joinable when one fires (it would call
+    // std::terminate on unwind).
+    const auto status = fut.wait_for(10s);
 
     // Tear down.
     (void)listener.cancel();
@@ -267,6 +274,16 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
     if (io_thread.joinable()) {
         io_thread.join();
     }
+
+    ASSERT_EQ(status, std::future_status::ready)
+        << "async_accept did not resume after client connect";
+
+    // Not implied by the wait above: async_accept reports every failure it models
+    // through its expected<> channel, but the future also becomes ready if the
+    // coroutine frame itself throws (an allocation failure in the mint path), and
+    // that leaves this flag false.
+    EXPECT_TRUE(accept_completed.load(std::memory_order_acquire))
+        << "the accept coroutine completed without reaching its post-accept store";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
