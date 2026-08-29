@@ -295,8 +295,6 @@ auto listener_cfg = tx::asio_listener::Config{
 // [arch §5.3] carve-out (contracts/listener.hpp:109-111).
 auto listener = std::make_unique<tx::asio_listener>(
     /* exec */ acceptor_exec,         // caller's choice; the accepted socket is built on it
-                                       // engine-scoped row — DISTINCT from
-                                       // per-session strands.
     listener_cfg);
 ```
 

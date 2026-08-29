@@ -6,8 +6,7 @@
 //
 // Design anchors:
 //   [2h §4.6]      — Listener abstract surface (1 pure-virtual).
-//   [2h §6.4.1]   — per-mode cancellation effect table (its `async_accept`
-//                   row scopes Listener-owned cancel to the engine).
+//   [2h §6.4.1]   — see the anchor list in asio_listener.hpp.
 //   [2h §6.6]:1191 — transport_accept_cancelled error mapping.
 //   [2a §4.2]     — trap_throw envelope for engine-bootstrap throws.
 //   data-model E-10 — concrete asio_listener field set.
@@ -152,11 +151,8 @@ asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::asy
         co_return std::unexpected{E::transport_accept_cancelled};
     }
 
-    // Bind the accepted socket to `exec_` — the executor this listener was
-    // constructed with. The session bootstrap can rebind via
-    // socket.release() + assign() if it wants; v1.0 does not, so the
-    // accepted socket inherits whatever executor the constructing caller
-    // chose.
+    // `exec_` per the Thread-safety model note in asio_listener.hpp. A
+    // consumer may rebind via socket.release() + assign(); v1.0 does not.
     asio::error_code accept_ec;
     asio::ip::tcp::socket accepted_socket{exec_};
     co_await acceptor_.async_accept(accepted_socket,

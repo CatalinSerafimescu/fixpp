@@ -69,10 +69,10 @@ class asio_plain_transport_factory;
 //
 // Thread-safety model:
 //   `async_accept()` is an ordinary coroutine: it never dispatches onto
-//   `exec_`, so it resumes on whatever executor its awaiter runs on. The
-//   listener imposes no executor of its own on the accept path and cannot
-//   observe the caller's choice. `exec_` is the executor the ACCEPTED
-//   SOCKET is constructed on, and nothing more.
+//   `exec_`, so it resumes on whatever executor its awaiter runs on.
+//   `exec_` is the executor the ACCEPTED SOCKET is constructed on, and
+//   nothing more. This is the one place that fact is stated; §6.4.1 is a
+//   cancellation table and specifies no executor.
 //
 //   `cancel()` is the synchronous half — it may be called off-strand;
 //   `acceptor_.close()` and `acceptor_.cancel()` are thread-safe per ASIO
