@@ -188,6 +188,9 @@ Focus on high-signal findings. Limit to 50 findings total; aggregate remainder i
   engine executor as a **signed-off threading invariant**; the shipped engine asserts a per-session
   strand and is right (issue #334). Two further documents repeat it.
   ⚠️ Absence of a component page is **not** evidence a doc is current — most components have none yet.
+  ⚠️ And the page itself is **not authoritative — the code is.** It is a consultant: trust it to say
+  *which documents exist and which were superseded*, verify any claim about current behaviour
+  against source, and cite the source. A page trusted instead of read becomes the next fossil.
 
 ### 5. Severity Assignment
 

@@ -8,6 +8,19 @@ status: stable
 
 # SecondBrain — where to look
 
+> ## ⚠️ The CODE is authoritative. SecondBrain is not.
+>
+> This bundle is a **consultant**: it points you at the right files and explains **why** something was
+> decided and what was **rejected**. That half is historical — it does not change retroactively, and it
+> is the half you cannot get from reading code.
+>
+> It does **not** establish what the code does today. **Treat every description of current behaviour
+> here as a lead to check, then cite the source, not this page.**
+>
+> This bundle exists because signed-off design documents rotted. It has **no immunity** from that.
+> A page trusted instead of read becomes the next fossil — and a worse one, because it is where people
+> come for the fossil list.
+
 **Read this first.** It routes; it does not restate. Every surface below already exists and is
 maintained — this page exists because agents did not find them, not because they were missing.
 

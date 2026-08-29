@@ -14,6 +14,20 @@ constitution: ["§XV.4"]
 
 # `MessageStore` teardown — quiescence, not a drain call
 
+> ## ⚠️ The CODE is authoritative. This page is not.
+>
+> SecondBrain is a **consultant**, not a source of truth. It points you at the right files and explains
+> **why** a decision was taken and what was **rejected** — that half is historical and does not change
+> retroactively. It does **not** establish what the code does today.
+>
+> **Anything here describing current behaviour is a LEAD TO CHECK, not a fact to cite.** Verify against
+> source before you rely on it, and cite the source, not this page.
+>
+> This page exists because signed-off design documents rotted. **It has no immunity from that** — a page
+> trusted instead of read becomes the next fossil, and it would be a worse one, because it is the page
+> people come to for the fossil list.
+
+
 ## The question this answers
 
 `~MemoryStore` frees its slab and nothing else. `~FileStore` is `= default`. Neither calls
@@ -23,7 +37,7 @@ radius called it *"the most fragile dependency."*
 
 **It is not a defect.** The facts are right; the framing is wrong.
 
-## Current state
+## Current state — a LEAD, verify against source before citing
 
 `MessageStore` deliberately exposes **no public drain**. There is nothing for a caller to call, so
 the literal reading of *"callers must drain the mutex before destroying the store"*

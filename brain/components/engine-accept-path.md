@@ -16,7 +16,21 @@ constitution: ["§XI"]
 
 # Engine accept path
 
-## Current state — what the code does
+> ## ⚠️ The CODE is authoritative. This page is not.
+>
+> SecondBrain is a **consultant**, not a source of truth. It points you at the right files and explains
+> **why** a decision was taken and what was **rejected** — that half is historical and does not change
+> retroactively. It does **not** establish what the code does today.
+>
+> **Anything here describing current behaviour is a LEAD TO CHECK, not a fact to cite.** Verify against
+> source before you rely on it, and cite the source, not this page.
+>
+> This page exists because signed-off design documents rotted. **It has no immunity from that** — a page
+> trusted instead of read becomes the next fossil, and it would be a worse one, because it is the page
+> people come to for the fossil list.
+
+
+## Current state — a LEAD, verify against source before citing
 
 `Engine::start()` `co_spawn`s `run_accept_loop` **on `*entry.session_strand`** — a **per-session**
 strand, one per acceptor `SessionEntry`. The loop reads `co_await this_coro::executor` at the top,

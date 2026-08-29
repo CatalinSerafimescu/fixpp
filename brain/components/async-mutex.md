@@ -15,7 +15,21 @@ constitution: ["§XV.9"]
 
 # `async_mutex`
 
-## Current state
+> ## ⚠️ The CODE is authoritative. This page is not.
+>
+> SecondBrain is a **consultant**, not a source of truth. It points you at the right files and explains
+> **why** a decision was taken and what was **rejected** — that half is historical and does not change
+> retroactively. It does **not** establish what the code does today.
+>
+> **Anything here describing current behaviour is a LEAD TO CHECK, not a fact to cite.** Verify against
+> source before you rely on it, and cite the source, not this page.
+>
+> This page exists because signed-off design documents rotted. **It has no immunity from that** — a page
+> trusted instead of read becomes the next fossil, and it would be a worse one, because it is the page
+> people come to for the fossil list.
+
+
+## Current state — a LEAD, verify against source before citing
 
 `fixpp::sync::async_mutex` (`include/fixpp/core/sync/async_mutex.hpp`) is the only coroutine-aware
 mutual-exclusion primitive — an awaitable lock that never blocks an OS thread. It exists because
