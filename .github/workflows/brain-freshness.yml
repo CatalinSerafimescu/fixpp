@@ -1,0 +1,39 @@
+name: SecondBrain freshness
+
+# Standalone and deliberately NOT part of tier1.yml: it must inherit neither that
+# matrix's cost nor its label gating. All three tier matrices skip until BOTH gate
+# labels land, so a check living there would emit nothing during the review that
+# needs it.
+#
+# NOTE there is no `continue-on-error` here, on purpose — it makes an `exit 1`
+# inert, and a gate that cannot fail is the defect this bundle exists to catch.
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  brain-freshness:
+    name: brain/ refs + links + deprecated reachability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prove the instrument can report non-zero
+        # A green from a check never seen to fail is not evidence. Its own
+        # self-test seeds a positive for every rule, including the fail-closed
+        # exit-2 paths, and this repo's most recurring defect is an instrument
+        # that reports clean because it could not report anything else.
+        run: python3 tools/check_brain.py --self-test
+
+      - name: Gate
+        # refs only. refs_external point at the PRIVATE parent repo, which is
+        # absent from this checkout — checking them here would fail on every page
+        # and the "fix" would be to weaken fail-closed. They have their own local
+        # `sweep` subcommand.
+        run: python3 tools/check_brain.py gate
