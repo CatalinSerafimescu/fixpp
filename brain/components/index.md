@@ -29,6 +29,12 @@ enforcement sites** — never a step narrative, which is the code and rots.
 - [`inbound-message-path.md`](./inbound-message-path.md) — socket bytes → `Framer` → `fromApp`
 - [`session-liveness-and-reconnect.md`](./session-liveness-and-reconnect.md) — heartbeat, TestRequest
   escalation, reconnect
+- [`initiator-connect-path.md`](./initiator-connect-path.md) — lazy connect; the **R8 strand lynchpin**
+  assert, which is a tripwire on a named regression rather than a belt-and-braces check
+- [`graceful-logout.md`](./graceful-logout.md) — confirmation vs timeout, and the **field deletion that
+  made split-brain unrepresentable**
+- [`wire.md`](./wire.md) — the largest catalogue family; its **scope boundary** (what wire does *not*
+  own) is the part that routes you correctly
 
 **Coverage is derived, not listed here:** `python3 tools/brain_inventory.py --census` reports every
 long-lived coroutine and whether a page names it.
