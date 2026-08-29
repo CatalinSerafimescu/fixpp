@@ -1,6 +1,6 @@
 # Design Doc 2d — Application Threading Contract & `fixpp::core::Clock`
 
-> **Status:** Draft v0.4 — Gate A round 3 converged (post-cap line-edit pass — 2c precedent); **shipped via 007-threading-clock PR #74 (merged 2026-05-20, squash `9c39a275`) + layer-hotfix PR #75 (squash `dab5f6a`)**
+> **Status:** Draft v0.4 — Gate A round 3 converged (post-cap line-edit pass — 2c precedent); **shipped via 007-threading-clock PR #74 (merged 2026-05-20, squash `9c39a275`) + layer-hotfix PR #75 (squash `dab5f6a`)**; **post-sign-off targeted amendment 2026-08-29 → v0.5** (document-level note below — the "listener accept" parenthetical no longer means what it meant at sign-off)
 > **Date:** 2026-05-08
 > **Convergence-log pointer:** addresses Codex round-3 review (1 P1 / 0 P2 / 0 P3) and Opus round-3 adversarial review (combined post-judging 1 P1 / 0 P2 / 0 P3; 1 root cause), see Appendix C round 3 entry.
 > **Owner:** `fixpp::core` (`include/fixpp/core/clock.hpp`, `include/fixpp/core/engine_config.hpp`, `include/fixpp/core/session_executor.hpp`, `include/fixpp/core/session_local.hpp`, `include/fixpp/core/trace_context.hpp`); `fixpp::session` (`include/fixpp/session/session_config.hpp`); test surface co-owned with `tests/support/` (`include/fixpp/core/test/mock_clock.hpp`).
@@ -10,6 +10,51 @@
 > **Catalogue rows owned:** **NFR-015** — pluggable Clock interface (NEW row; to be added to `library/spec/feature-catalogue.md` and indexed in `library/spec/coverage-index.md` at sign-off per §11 — the orchestrator applies the drop-in amendment per the precedent in `[2c App D]`; 2d itself ships only Appendices A, B, C unless §11 needs a constitutional amendment).
 > **Catalogue rows touched (not owned) — clock-seam input only, no row discharge claimed by 2d (per C-P2-6 / Opus confirm):** **S-035** (session scheduling — owned by the session-module Phase-4 spec; consumes `Clock::sleep_until` via this doc's seam), **S-003 / S-004** (heartbeat — owned by the session-module Phase-4 spec; the timing seam is `effective_clock.steady_now()` + `effective_clock.sleep_until(...)`), **LOG-001..004** + **OBS-001..003** (owned by **2k**; this doc supplies the `effective_clock.now()` source for session-scoped records and `EngineConfig::clock->now()` for engine-scope records, with the `clock_scope` discriminator at §7.9 / §6.7).
 > **Convergence log:** see Appendix C — Round 1 (v0.1 → v0.2) populated below.
+
+---
+
+## ⚠️ Document-level amendment, 2026-08-29 — read before citing any "listener accept" parenthetical
+
+This document uses **"(listener accept, control-plane handlers, engine bootstrap)"** as a recurring
+parenthetical standing for *"code paths outside any session serialisation domain."* At sign-off that
+was structurally true. **Feature 023 (T010) falsified the first item**: the engine now `co_spawn`s the
+accept loop on the **per-session strand**, so accept work runs *inside* a session serialisation
+domain.
+
+**This note is deliberately the only edit.** The individual sites are NOT rewritten, and no corrected
+list is written here. Re-listing which paths are "outside session scope" would manufacture a fresh
+claim that goes stale on the next threading change with nothing to notice it — the failure mode this
+note exists to record. **What is durable is the condition:**
+
+> *the parenthetical is an ILLUSTRATION that was once a structural proxy, and is no longer one.
+> Treat every occurrence as a lead; derive membership from the spawn site, not from this list.*
+
+```bash
+grep -n "co_spawn" src/session/engine.cpp              # which executor each role loop is spawned on
+grep -rn "make_session_executor" src/                  # where the session_executor wrapper is bound
+```
+
+**Scope of what was checked, stated so it is not read as wider than it is.** Two questions were
+verified against source on 2026-08-29; everything else in this document is **UNVERIFIED, not
+verified-clean**:
+
+1. **Does the accept loop still hit the engine-fallback `current_trace_context`?** *Yes* — but for a
+   different reason than §7.8 gives. The engine spawns role loops on a bare
+   `asio::strand<asio::any_io_executor>`, not on a `core::session_executor` wrapper, so the awaiter's
+   wrapper-type recovery still misses and still falls through to the engine snapshot. §7.8's
+   behavioural conclusion survives; its stated *reason* ("outside any session serialisation domain")
+   does not.
+2. **Is the `session_executor` wrapper bound anywhere in production?** *Yes* — `Session::open` binds
+   it (`src/session/session.cpp`), adopting the strand the engine hands over. So the session-scoped
+   trace-correlation design is shipped, not vacuous; the accept loop simply runs *before* that
+   adoption on the same strand.
+
+The `clock_scope = engine` claims for listener-accept records (§7.9 / §6.7) were **not** re-verified
+and inherit the same falsified premise. Re-derive before relying on them.
+
+**Not amended here, deliberately:** `[const §XIII.3]` carries the same parenthetical. It is
+illustrative inside a `thread_local` prohibition whose rule is unaffected, and amending the
+constitution requires its own Gate A pass — so it is escalated, not silently edited.
 
 ---
 

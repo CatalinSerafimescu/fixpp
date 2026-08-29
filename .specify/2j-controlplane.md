@@ -1,6 +1,6 @@
 # 2j — Control-Plane Interface + gRPC Default Implementation
 
-**Status:** Draft v0.3 — Gate A round 2 converged (Phase A)
+**Status:** Draft v0.4 — Gate A round 2 converged (Phase A); post-sign-off targeted amendment 2026-08-29 (§6.5 executor topology deleted — superseded by feature 023 T010; see the §6.5 note)
 **Date:** 2026-05-09
 **Owner:** Opus (Phase A drafter)
 **Inherits:** `[arch §1.1]`, `[arch §1.2]`, `[arch §2.3]`, `[arch §3]`, `[arch §4.10]`, `[arch §4.11]`, `[arch §5.1]`, `[arch §5.2]`, `[arch §5.3]`, `[arch §5.4]`, `[arch §5.6]`, `[arch §5.7]`, `[arch §6]`, `[arch §7.4]`, `[arch §8]`, `[arch §8.1]`, `[arch §8.2]`, `[arch §9.1]`, `[arch §9.2]`, `[arch §9.3]`, `[arch §10] row 2j`, `[const §I.2]`, `[const §IV.4]`, `[const §V.1]`, `[const §V.3]`, `[const §VI.2]`, `[const §VI.5]`, `[const §VII.4]`, `[const §VIII.5]`, `[const §X.1]`, `[const §X.2]`, `[const §X.4]`, `[const §X.5]`, `[const §XI.1]`, `[const §XI.2]`, `[const §XI.3]`, `[const §XII.5]`, `[const §XIII.1]`, `[const §XIII.2]`, `[const §XIII.3]`, `[const §XIV.1]`, `[const §XIV.2]`, `[const §XIV.3]`, `[const §XIV.4]`, `[const §XV.5]`, `[const §XV.15]`, `[const §XVII.1]`, `[const §XVIII.1]`, `[const §XX.1]`, `[SYN §3.6 #20]`, `[SYN §3.6 #21]`, `[SYN §3.6 #22]`, `[2c §4.9]`, `[2c §7.2]`, `[2d §4.4]`, `[2d §4.5]`, `[2d §4.7]`, `[2d §4.8]`, `[2d §6.5]`, `[2d §6.7]`, `[2d §7.6]`, `[2d §7.8]`, `[2e §4.4]`, `[2e §6.1.4]`, `[2e §6.7]`, `[2g §4.3]`, `[2g §4.5]`, `[2g §6.5]`, `[2g §7.6]`, `[2g §7.7]`, `[2h §4.1]`, `[2h §4.2]`, `[2h §6.4]`, `[2h §7.6]`, `[2i §1.1]`, `[2i §1.2]`, `[2i §2]`, `[2i §4.2]`, `[2i §4.3]`, `[2i §4.5]`, `[2i §4.9]`, `[2i §4.10]`, `[2i §5.2]`, `[2i §6.5]`, `[2i §7.9]`
@@ -919,7 +919,36 @@ Per `[2d §7.8]` ("Control-plane handlers (gRPC `OpenSession`, `CloseSession`, `
 
 **Operator opt-in to a separate executor (without amending 2d).** The factory's `exec` parameter (§4.1 `ControlPlaneFactory::make`) is the binding point. Operators that want the control plane on a separate pool wrap the engine executor before passing it to the factory — for example, by binding a strand or an `asio::thread_pool::executor_type` to the factory at construction time per the `[2d §4.5]` `executor_override` pattern. The engine binds the wrapped executor as the handlers' `exec`; the wrapping is invisible to `[2d §7.8]`'s contract because the engine's IO executor remains the binding source. This pattern preserves the no-amendment property of v0.2 while letting an operator isolate the handler workload from the IO executor.
 
-**Threading invariant.** A control-plane RPC handler cannot block, stall, or starve a session strand. The engine executor is shared with the engine's listener accept and engine-bootstrap coroutines per `[2d §7.8]` — it is *not* shared with session strands. Handlers that need session state cross into the session strand via the `FIXPP_REQUIRES_SESSION_LOCK` C-ABI post-onto-strand discipline (per `[2i §4.10]`); the cross-strand handoff is bounded per §6.3.
+**Threading invariant.** A control-plane RPC handler cannot block, stall, or starve a session strand. Handlers that need session state cross into the session strand via the `FIXPP_REQUIRES_SESSION_LOCK` C-ABI post-onto-strand discipline (per `[2i §4.10]`).
+
+> ⚠️ **Amended 2026-08-29 — the executor-topology sentence that used to stand here is DELETED, not
+> refreshed.** It read: *"The engine executor is shared with the engine's listener accept and
+> engine-bootstrap coroutines per `[2d §7.8]` — it is not shared with session strands."* The second
+> clause was **falsified by feature 023 (T010)**: the accept loop is now `co_spawn`ed on the
+> **per-session strand**, so accept work runs *inside* a session serialisation domain. No corrected
+> topology is written in its place — restating it here would rot again on the next threading change,
+> and the doc has no mechanism that would notice. **Derive it from the spawn site**, which cannot go
+> stale silently because it is the thing being described:
+>
+> ```bash
+> grep -n "co_spawn" src/session/engine.cpp        # which executor each role loop is spawned on
+> grep -n "session_strand.emplace" src/session/engine.cpp   # what that strand is layered over
+> ```
+>
+> **What still holds and what does not.** The *claim above* — a control-plane handler cannot stall a
+> session strand — is 2j's own and is unaffected; it is a statement about the handler, not about the
+> accept loop. The deleted sentence was a *supporting* topology assertion borrowed from `[2d §7.8]`,
+> and borrowing is exactly how it went stale without anyone editing this file (same class as the
+> `[const §XII.5]` fossil in `2g-tls.md`).
+>
+> ⚠️ **§6.3's cross-strand handoff budget is now UNVERIFIED, not verified-clean.** The `≤ 100 µs p99`
+> idle / `≤ 5 ms p99` loaded figures were derived when the target session strand hosted no accept
+> work. It now hosts an accept loop whose handshake leg is bounded at `tls_handshake_timeout`
+> (`1500 ms` at `src/session/engine.cpp`) plus a bounded first-frame read. This is **not** a
+> statement that the budget is wrong — an ASIO strand is released across every `co_await`, so a
+> queued dispatch waits only for the current contiguous run, not for a whole handshake. It is a
+> statement that the **premise the number was derived under no longer holds and the number was never
+> re-derived.** Re-measure before citing it.
 
 **Cross-strand handoff.** A handler that needs session state invokes a C-ABI call (e.g., `fixpp_session_close` for the `CloseSession` handler). The C-ABI thunk for `FIXPP_REQUIRES_SESSION_LOCK` symbols (per `[2i §4.10]`) posts onto the session strand internally; the handler's coroutine suspends; resumes on the engine executor. The handler's executor identity does NOT leak into the session strand. Per `[2d §7.8]` the engine-fallback `current_trace_context` awaiter resolves the engine snapshot (no `session_executor` wrapper is in play on the engine executor) — this is the path control-plane handlers naturally take for OTel correlation.
 
