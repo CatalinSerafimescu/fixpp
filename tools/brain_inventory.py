@@ -106,7 +106,15 @@ def flows(root):
     return out
 
 
-def covered(name, pages):
+def named_by(name, pages):
+    """Pages whose text CONTAINS this name.
+
+    ⚠️ This is MENTION, not coverage, and the distinction matters. A flow listed among
+    a page's participants scores identically to one the page actually explains. The
+    tool cannot tell them apart and must not pretend to -- so the column says "named
+    by", and a name appearing here is a lead to read the page, not proof it is
+    documented. Deliberately not "renamed to covered" at some later date.
+    """
     return sorted(p for p, t in pages.items() if name in t)
 
 
@@ -124,12 +132,12 @@ def run(root, gaps_only=False):
 
     print("== COMPONENTS  (catalogue family -> bundles -> cited design docs -> brain page)")
     print("%-16s %6s  %-26s %-16s %s" % ("family", "rows", "cited design docs",
-                                         "bundles", "brain page"))
+                                         "bundles", "named by (NOT proof of coverage)"))
     ngap = 0
     for name in sorted(fam, key=lambda k: -fam[k]["rows"]):
         d = fam[name]
         dd = sorted(docs_for(root, d["bundles"]))
-        pg = covered(name, pages)
+        pg = named_by(name, pages)
         gap = not dd and not pg
         ngap += gap
         if gaps_only and not (gap or not dd):
@@ -140,11 +148,13 @@ def run(root, gaps_only=False):
 
     print("\n== FLOWS  (derived from long-lived coroutines; a new one appears here unedited)")
     for n in sorted(fl):
-        pg = covered(n, pages)
+        pg = named_by(n, pages)
         print("  %-30s %-34s %s" % (n, fl[n], ",".join(pg) or "-- no brain page --"))
 
-    print("\nA family with no cited design doc AND no brain page is where a component page "
-          "must carry the load alone -- that is the deliverable, not an error.")
+    print("\nA family with no cited design doc AND no page is where a component page must "
+          "carry the load alone -- that is the deliverable, not an error.")
+    print("⚠️  'named by' is MENTION, not coverage: a flow listed among a page's participants "
+          "scores the same as one the page explains. Read the page before believing the row.")
     return 0
 
 
@@ -185,13 +195,13 @@ def self_test():
         if set(f) != {"run_x", "drive_y", "run_nested"}:
             fails.append("flows parsed %s -- nested template dropped?" % sorted(f))
         pages = brain_pages(d)
-        if covered("wire", pages) != ["wire.md"]:
-            fails.append("coverage false negative")
-        if covered("orphan", pages):
-            fails.append("coverage FALSE POSITIVE -- would hide a gap")
-        if covered("drive_y", pages):
+        if named_by("wire", pages) != ["wire.md"]:
+            fails.append("mention false negative")
+        if named_by("orphan", pages):
+            fails.append("mention FALSE POSITIVE -- would hide a gap")
+        if named_by("drive_y", pages):
             fails.append("flow coverage false positive")
-        if covered("run_x", pages) != ["wire.md"]:
+        if named_by("run_x", pages) != ["wire.md"]:
             fails.append("flow coverage false negative")
         if columns(os.path.join(d, "spec/feature-catalogue.md"))["/specify"] == 9:
             fails.append("column resolver reproduced the old off-by-one")
