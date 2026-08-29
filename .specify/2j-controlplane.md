@@ -919,36 +919,7 @@ Per `[2d §7.8]` ("Control-plane handlers (gRPC `OpenSession`, `CloseSession`, `
 
 **Operator opt-in to a separate executor (without amending 2d).** The factory's `exec` parameter (§4.1 `ControlPlaneFactory::make`) is the binding point. Operators that want the control plane on a separate pool wrap the engine executor before passing it to the factory — for example, by binding a strand or an `asio::thread_pool::executor_type` to the factory at construction time per the `[2d §4.5]` `executor_override` pattern. The engine binds the wrapped executor as the handlers' `exec`; the wrapping is invisible to `[2d §7.8]`'s contract because the engine's IO executor remains the binding source. This pattern preserves the no-amendment property of v0.2 while letting an operator isolate the handler workload from the IO executor.
 
-**Threading invariant.** A control-plane RPC handler cannot block, stall, or starve a session strand. Handlers that need session state cross into the session strand via the `FIXPP_REQUIRES_SESSION_LOCK` C-ABI post-onto-strand discipline (per `[2i §4.10]`).
-
-> ⚠️ **Amended 2026-08-29 — the executor-topology sentence that used to stand here is DELETED, not
-> refreshed.** It read: *"The engine executor is shared with the engine's listener accept and
-> engine-bootstrap coroutines per `[2d §7.8]` — it is not shared with session strands."* The second
-> clause was **falsified by feature 023 (T010)**: the accept loop is now `co_spawn`ed on the
-> **per-session strand**, so accept work runs *inside* a session serialisation domain. No corrected
-> topology is written in its place — restating it here would rot again on the next threading change,
-> and the doc has no mechanism that would notice. **Derive it from the spawn site**, which cannot go
-> stale silently because it is the thing being described:
->
-> ```bash
-> grep -n "co_spawn" src/session/engine.cpp        # which executor each role loop is spawned on
-> grep -n "session_strand.emplace" src/session/engine.cpp   # what that strand is layered over
-> ```
->
-> **What still holds and what does not.** The *claim above* — a control-plane handler cannot stall a
-> session strand — is 2j's own and is unaffected; it is a statement about the handler, not about the
-> accept loop. The deleted sentence was a *supporting* topology assertion borrowed from `[2d §7.8]`,
-> and borrowing is exactly how it went stale without anyone editing this file (same class as the
-> `[const §XII.5]` fossil in `2g-tls.md`).
->
-> ⚠️ **§6.3's cross-strand handoff budget is now UNVERIFIED, not verified-clean.** The `≤ 100 µs p99`
-> idle / `≤ 5 ms p99` loaded figures were derived when the target session strand hosted no accept
-> work. It now hosts an accept loop whose handshake leg is bounded at `tls_handshake_timeout`
-> (`1500 ms` at `src/session/engine.cpp`) plus a bounded first-frame read. This is **not** a
-> statement that the budget is wrong — an ASIO strand is released across every `co_await`, so a
-> queued dispatch waits only for the current contiguous run, not for a whole handshake. It is a
-> statement that the **premise the number was derived under no longer holds and the number was never
-> re-derived.** Re-measure before citing it.
+**Threading invariant.** A control-plane RPC handler cannot block, stall, or starve a session strand. Handlers that need session state cross into the session strand via the `FIXPP_REQUIRES_SESSION_LOCK` C-ABI post-onto-strand discipline (per `[2i §4.10]`). ⚠️ **The executor-topology sentence that stood here is DELETED (2026-08-29), not refreshed — see "Appendix Z" at the END of this file. Placed there deliberately: line-number citations point INTO this document and an insertion here would rot every one below it.**
 
 **Cross-strand handoff.** A handler that needs session state invokes a C-ABI call (e.g., `fixpp_session_close` for the `CloseSession` handler). The C-ABI thunk for `FIXPP_REQUIRES_SESSION_LOCK` symbols (per `[2i §4.10]`) posts onto the session strand internally; the handler's coroutine suspends; resumes on the engine executor. The handler's executor identity does NOT leak into the session strand. Per `[2d §7.8]` the engine-fallback `current_trace_context` awaiter resolves the engine snapshot (no `session_executor` wrapper is in play on the engine executor) — this is the path control-plane handlers naturally take for OTel correlation.
 
@@ -1720,3 +1691,36 @@ Notes that supplement specific catalogue rows (`feature-catalogue.md`) without r
 The v0.1 §D.5 / §D.6 history is captured in Appendix C v0.1 → v0.2 entry; v0.2 consolidated those entries into the current four-drop-in shape (§D.1 / §D.2 / §D.3 / §D.4) and v0.3 preserves that consolidation.
 
 ---
+
+## Appendix Z — post-sign-off amendment, 2026-08-29 (§6.5 / §6.3)
+
+*Appended at the end of the file on purpose. An insertion higher up shifts every line-number
+citation into this document — a defect this very amendment exists to stop repeating.*
+
+> ⚠️ **§6.5's executor-topology sentence is DELETED, not refreshed.** It read: *"The engine executor is shared with the engine's listener accept and
+> engine-bootstrap coroutines per `[2d §7.8]` — it is not shared with session strands."* The second
+> clause was **falsified by feature 023 (T010)**: the accept loop is now `co_spawn`ed on the
+> **per-session strand**, so accept work runs *inside* a session serialisation domain. No corrected
+> topology is written in its place — restating it here would rot again on the next threading change,
+> and the doc has no mechanism that would notice. **Derive it from the spawn site**, which cannot go
+> stale silently because it is the thing being described:
+>
+> ```bash
+> grep -n "co_spawn" src/session/engine.cpp        # which executor each role loop is spawned on
+> grep -n "session_strand.emplace" src/session/engine.cpp   # what that strand is layered over
+> ```
+>
+> **What still holds and what does not.** The *claim above* — a control-plane handler cannot stall a
+> session strand — is 2j's own and is unaffected; it is a statement about the handler, not about the
+> accept loop. The deleted sentence was a *supporting* topology assertion borrowed from `[2d §7.8]`,
+> and borrowing is exactly how it went stale without anyone editing this file (same class as the
+> `[const §XII.5]` fossil in `2g-tls.md`).
+>
+> ⚠️ **§6.3's cross-strand handoff budget is now UNVERIFIED, not verified-clean.** The `≤ 100 µs p99`
+> idle / `≤ 5 ms p99` loaded figures were derived when the target session strand hosted no accept
+> work. It now hosts an accept loop whose handshake leg is bounded at `tls_handshake_timeout`
+> (`1500 ms` at `src/session/engine.cpp`) plus a bounded first-frame read. This is **not** a
+> statement that the budget is wrong — an ASIO strand is released across every `co_await`, so a
+> queued dispatch waits only for the current contiguous run, not for a whole handshake. It is a
+> statement that the **premise the number was derived under no longer holds and the number was never
+> re-derived.** Re-measure before citing it.

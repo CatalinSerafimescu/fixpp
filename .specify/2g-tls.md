@@ -1,8 +1,6 @@
 # 2g — TLS cert_source + Pinset rotation
 
-**Status:** Draft v0.5 — post-sign-off targeted amendment (2026-08-29): the reproduced `[const §XII.5]` text was **deleted**, not refreshed. Article XII §5 was amended by constitution **v0.3 (2026-06-17, feature 043)** adding a fourth `SecurityProfile`; the copy here had gone false with nothing linking it to the article. Prior: Draft v0.4 — Gate A round 3 converged via post-cap pass (Phase A).
-
-> ⚠️ **This document reproduces several constitutional articles verbatim** (§XII.3, §XII.5, §XII.6, §XII.8) and quotes `architecture.md` and `coverage-index.md` too. **Every one of those copies goes stale the moment its source is amended, and nothing links them** — that is exactly what happened to §XII.5. Only §XII.5 has been checked and corrected (2026-08-29); **the others are unverified, not verified-clean.** Re-read each against its source before relying on it.
+**Status:** Draft v0.5 — post-sign-off targeted amendment (2026-08-29): the reproduced `[const §XII.5]` text was **deleted**, not refreshed. Article XII §5 was amended by constitution **v0.3 (2026-06-17, feature 043)** adding a fourth `SecurityProfile`; the copy here had gone false with nothing linking it to the article. Prior: Draft v0.4 — Gate A round 3 converged via post-cap pass (Phase A). ⚠️ **This document reproduces several constitutional articles verbatim — see "Appendix Z" at the END of this file.**
 **Date:** 2026-05-09
 **Owner:** Opus (Phase A drafter)
 **Inherits:** constitution.md v0.2, architecture.md v0.2, 2a-decimal.md v0.3, 2b-wire.md v0.2, 2c-codegen.md v1.3, 2d-threading.md v0.4, 2e-msgstore.md v0.4, 2f-async-mutex.md v1.5
@@ -119,6 +117,10 @@ This is the architectural anchor for §4.3 and §6.5: `Pinset` is the single TLS
 §XII.5 SecurityProfile rule — **NOT reproduced here. Read `[const §XII.5]` in `.specify/constitution.md`.**
 
 > **Deleted 2026-08-29, deliberately not refreshed.** This block previously reproduced §XII.5 verbatim *"because the enum signature in §4.5 is normative"*, listing `mtls_ca` / `mtls_pinned` / `one_way_ca`. Article XII §5 was **amended** — constitution **v0.3, 2026-06-17**, Gate A folded into feature **043** — to add a fourth profile with **no TLS at all**. The copy stayed as written and so became false, and because it was labelled *normative* it read as more authoritative than an ordinary claim.
+>
+> The enumerated set lives in the constitution and in the shipped header; **this document deliberately
+> holds no copy of it.** A copy is what went stale here the last time, silently, because nothing links
+> a reproduction back to the article it reproduces.
 >
 > Refreshing the copy would re-arm the same trap for the next amendment, so it is **deleted** rather than updated: the enumerated set lives in the constitution, and the shipped type lives in `include/fixpp/session/security_profile.hpp`, whose header comment names the amendment that changed it. Read those two; do not re-copy them here.
 
@@ -644,14 +646,7 @@ namespace fixpp::tls {
 // v0.2 / Codex P2-2 close: [[deprecated]] is on the enumerator, not in a
 // comment. [const §XII.5]'s "compile-time [[deprecated]] diagnostic at
 // construction" is now actually emitted by the compiler when one_way_ca
-// crosses into user code.
-// ⚠️ SUPERSEDED 2026-06-17 by feature 043 (constitution v0.3 amended [const §XII.5]).
-// A FOURTH enumerator was added. This block is LEFT AS DESIGNED — it records what
-// 2g specified, which is the point of a design record — and is deliberately NOT
-// extended here: the shipped declaration is authoritative and lives at
-//   include/fixpp/session/security_profile.hpp   (namespace fixpp::session)
-// whose header comment names the amendment. Read it there; do not re-copy it here,
-// because a copy is what went stale the last time.
+// crosses into user code.  ⚠️ SUPERSEDED 2026-06-17 by feature 043 (constitution v0.3 amended [const §XII.5], adding a FOURTH enumerator). Block LEFT AS DESIGNED — it records what 2g specified. Shipped declaration is authoritative: include/fixpp/session/security_profile.hpp (namespace fixpp::session), whose header comment names the amendment. Do not re-copy it here — a copy is what went stale.
 enum class SecurityProfile : std::uint8_t {
     unset       = 0,   // sentinel — not a valid choice; rejected at Session::open.
     mtls_ca     = 1,
@@ -1518,3 +1513,44 @@ The diff is a three-row in-place edit on the §3.4 / §4.1 / §4.4 rows (Gap not
 Per `[arch Appendix B]` precedent, the spec-section-level link to 2h's section number (for the T-039 cross-cut wiring half) is intentionally NOT named in the Gap note column; the catalogue-ID-level cross-cut is preserved by the existing `T-039` entry in the Catalogue IDs column and is fully traced to 2g + 2h via 2g §A.2 (Owned cross-cuts) — the Gap note column points at 2g's policy-core half only, and the orchestrator may add the 2h reference at 2h sign-off without touching this drop-in.
 
 The orchestrator applies this edit at 2g sign-off; the amendment is recorded in `[library/spec/coverage-index.md]`'s versioning header (or the equivalent change-log location) as a cross-doc edit driven by 2g RC#3 / §11.
+
+## Appendix Z — post-sign-off amendment, 2026-08-29
+
+*Appended at the END of the file on purpose. This document is cited by line number from elsewhere in
+the tree; an insertion higher up silently rots every one of those citations. Every edit made by this
+amendment above is an **in-place, same-line-count** replacement for exactly that reason.*
+
+### What was deleted, and why deletion rather than a refresh
+
+`§3` reproduced **`[const §XII.5]` verbatim**, declaring the quote normative *"because the enum
+signature in §4.5 is normative"*. **Article XII §5 was amended by constitution v0.3 (2026-06-17,
+folded into feature 043)**, which appended a fourth profile — `insecure_plain_tcp`, no TLS at all,
+opt-in. The reproduction became false without anyone editing this file.
+
+The block is **deleted, not refreshed**. Refreshing it would restore a copy with no link back to the
+article, which is precisely the mechanism that failed — it would re-arm the trap for the next
+amendment. `[const §XII.5]` is one hop away and cannot go stale relative to itself.
+
+### The hazard is not confined to §XII.5
+
+This document reproduces **`[const §XII.3]`, `[const §XII.5]`, `[const §XII.6]`, `[const §XII.8]`**
+verbatim, and additionally quotes `architecture.md` and `spec/coverage-index.md`. **Six copies of
+governing text.** One of them demonstrably rotted.
+
+> ⚠️ **The other three articles are UNVERIFIED, not verified-clean.** One article was checked, not
+> four. Saying "the rest look fine" would be a coverage claim nobody measured — the failure this
+> repository keeps re-encountering. Check them against `.specify/constitution.md` before citing.
+
+### Also corrected in place
+
+The namespace: this document said **`fixpp::tls::SecurityProfile`** at three sites. The shipped
+declaration is `namespace fixpp::session` (`include/fixpp/session/security_profile.hpp`).
+
+### What was deliberately left alone
+
+The **§4.5 enum block** and the **§11 verification item** are *design records* — they state what 2g
+specified at sign-off, which is their whole value. They carry supersession markers and are **not**
+rewritten; editing them would destroy the account of what was believed when. The header
+`security_profile.hpp` names its own amendment in a comment, which is the convention that made this
+finding reachable at all.
+

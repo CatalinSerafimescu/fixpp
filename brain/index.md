@@ -76,6 +76,33 @@ No count is written here on purpose; it moves. The **condition** is what is dura
 whose Status header does not name the features that realized it tells you nothing about its currency,
 and reads as authoritative anyway.*
 
+## ⚠️ Amending a document that is cited BY LINE NUMBER
+
+**Append at the END of the file, and make every in-body edit an in-place, same-line-count
+replacement.** An insertion anywhere above a cited line shifts it, silently, and re-points the
+citation at the wrong content.
+
+This is not hypothetical and not someone else's mistake: the Step-R pass that exists to *stop*
+documents rotting broke **28 accurate line citations into `.specify/2d-threading.md`** by inserting a
+47-line note near the top. Caught only because the next document in the queue happened to cite the
+one just edited.
+
+> ⚠️ **`tools/check_line_citations.py` will NOT catch this.** Its gate is
+> `--staged` / `--range`: *fail if the diff **ADDS** a line-number citation*. An edit that
+> **INVALIDATES** existing citations adds none, so the gate passes. The instrument is aimed at growth,
+> not at rot — which is the opposite of what this case needs.
+
+**The check, which costs one command.** A pure line-shift audit — if every hunk is `NcN` (same count
+in, same count out) plus at most one append at the original last line, nothing moved:
+
+```bash
+diff <(git show <base>:<file>) <file> | grep -E '^[0-9]'
+```
+
+And to prove the citations actually still resolve, compare the **content** of each cited line before
+and after — a line number that still exists is not the same as a line number that still means what it
+meant.
+
 ## Two conventions that carry the same load, cheaply
 
 1. **A header comment naming the governing feature id** — `async_mutex.hpp`'s *"Erratum E-5 (048)"* is
