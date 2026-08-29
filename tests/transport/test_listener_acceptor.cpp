@@ -10,7 +10,6 @@
 //       (2) cancel in-flight async_accept → transport_accept_cancelled
 //       (3) already-resumed unique_ptr<Transport> UNAFFECTED
 //   - Endpoint::backlog honoured at OS level
-//   - async_accept runs on the listener's service executor per [2h §6.4.1]
 //
 // Cells 7-8 (gate-b/r2 RC#A) require a real TLS loopback fixture pair and
 // are guarded by FIXPP_TLS_FIXTURE_DIR (skipped when empty).
@@ -214,14 +213,11 @@ TEST(ListenerAcceptor, AcceptAfterCancelReturnsCancelled) {
 // ════════════════════════════════════════════════════════════════════════════
 // Cell 5 — async_accept reach the connected raw TCP socket. We don't exercise
 // the TLS mint path here (it requires real SSL_CTX fixtures); we verify that
-// the listener observes the connect AND that the awaitable resumes on the
-// listener's executor thread.
+// the listener observes the connect.
 //
-// This cell covers BOTH:
+// This cell covers:
 //   (a) FR-024 "fresh Transport minted per accept" — listener.async_accept
 //       returns (success or factory failure) AFTER a client connects.
-//   (b) [2h §6.4.1] service-strand semantics — the awaitable resumes on the
-//       listener's executor.
 // ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, AcceptObservesClientConnect) {
     asio::io_context listener_ioc;
@@ -229,7 +225,6 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
 
     const std::uint16_t port = listener.bound_endpoint().port;
 
-    // Capture the thread on which the accept awaitable resumes.
     std::atomic<bool> accept_completed{false};
     auto fut = asio::co_spawn(
         listener_ioc.get_executor(),
