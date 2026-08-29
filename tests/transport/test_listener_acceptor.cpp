@@ -10,7 +10,6 @@
 //       (2) cancel in-flight async_accept → transport_accept_cancelled
 //       (3) already-resumed unique_ptr<Transport> UNAFFECTED
 //   - Endpoint::backlog honoured at OS level
-//   - async_accept runs on the listener's service executor per [2h §6.4.1]
 //
 // Cells 7-8 (gate-b/r2 RC#A) require a real TLS loopback fixture pair and
 // are guarded by FIXPP_TLS_FIXTURE_DIR (skipped when empty).
@@ -23,7 +22,6 @@
 #include <asio/ip/tcp.hpp>
 #include <asio/post.hpp>
 #include <asio/redirect_error.hpp>
-#include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
@@ -94,33 +92,30 @@ struct ConnectResult {
 };
 
 ConnectResult sync_tcp_connect(asio::io_context& ioc, std::string const& host, std::uint16_t port,
-                               std::chrono::milliseconds timeout = 500ms) {
+                               std::chrono::milliseconds timeout = 10s) {
     asio::ip::tcp::socket sock{ioc};
     asio::error_code ec;
     asio::ip::tcp::endpoint ep{asio::ip::make_address(host), port};
 
-    asio::steady_timer timer{ioc};
-    timer.expires_after(timeout);
-    bool timed_out = false;
-    timer.async_wait([&](asio::error_code wec) {
-        if (!wec) {
-            timed_out = true;
-            asio::error_code ignored;
-            sock.close(ignored);
-        }
-    });
-
+    // Bounded with run_for(), not a steady_timer: a timer race can complete
+    // both the timer expiry and the connect in the same reactor pass, and
+    // cancel() cannot retract an already-dequeued handler — so a timer-based
+    // bound can convert a successful connect into a timeout.
+    bool done = false;
     sock.async_connect(ep, [&](asio::error_code cec) {
         ec = cec;
-        timer.cancel();
+        done = true;
     });
 
-    ioc.run();
-    ioc.restart();
-
-    if (timed_out && !ec) {
+    ioc.run_for(timeout);
+    if (!done) {
+        asio::error_code ignored;
+        sock.close(ignored);
+        ioc.run();  // let the aborted connect handler run
         ec = asio::error::timed_out;
     }
+    ioc.restart();
+
     return ConnectResult{std::move(sock), ec};
 }
 
@@ -218,14 +213,11 @@ TEST(ListenerAcceptor, AcceptAfterCancelReturnsCancelled) {
 // ════════════════════════════════════════════════════════════════════════════
 // Cell 5 — async_accept reach the connected raw TCP socket. We don't exercise
 // the TLS mint path here (it requires real SSL_CTX fixtures); we verify that
-// the listener observes the connect AND that the awaitable resumes on the
-// listener's executor thread.
+// the listener observes the connect.
 //
-// This cell covers BOTH:
+// This cell covers:
 //   (a) FR-024 "fresh Transport minted per accept" — listener.async_accept
 //       returns (success or factory failure) AFTER a client connects.
-//   (b) [2h §6.4.1] service-strand semantics — the awaitable resumes on the
-//       listener's executor.
 // ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, AcceptObservesClientConnect) {
     asio::io_context listener_ioc;
@@ -233,7 +225,6 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
 
     const std::uint16_t port = listener.bound_endpoint().port;
 
-    // Capture the thread on which the accept awaitable resumes.
     std::atomic<bool> accept_completed{false};
     auto fut = asio::co_spawn(
         listener_ioc.get_executor(),
@@ -247,19 +238,35 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
         },
         asio::use_future);
 
+    // The accept must still be pending here: poll() drives the coroutine to its
+    // first suspend, and nothing has connected yet. Without this the cell cannot
+    // tell "resumed because a client connected" from "resumed for any reason" --
+    // an async_accept that returned immediately would satisfy every assertion
+    // below, because the listening socket's backlog completes the connect anyway.
+    listener_ioc.poll();
+    ASSERT_EQ(fut.wait_for(std::chrono::seconds{0}), std::future_status::timeout)
+        << "async_accept resumed before any client connected";
+
     // Run the listener_ioc on a dedicated thread so the client can drive
     // its own ioc on the test thread.
     std::thread io_thread{[&] { listener_ioc.run(); }};
 
     // Connect a raw TCP client.
     asio::io_context client_ioc;
-    auto cr = sync_tcp_connect(client_ioc, "127.0.0.1", port, 500ms);
+    auto cr = sync_tcp_connect(client_ioc, "127.0.0.1", port, 10s);
     EXPECT_FALSE(static_cast<bool>(cr.ec)) << "client connect failed: " << cr.ec.message();
 
-    // Wait briefly for the accept to resume.
-    fut.wait_for(500ms);
-    EXPECT_TRUE(accept_completed.load(std::memory_order_acquire))
-        << "async_accept did not resume after client connect";
+    // Bound the wait so a hang cannot wedge CI. This is a LIVENESS bound, NOT a
+    // latency expectation, and the distinction sets the budget: `wait_for` returns
+    // the moment the future is ready, so a generous bound costs a healthy run
+    // nothing and only delays the report of a genuine hang. A bound sized against
+    // how fast this normally resumes instead fails whenever the runner is merely
+    // slow (#328).
+    //
+    // Captured, not asserted. No fatal assertion runs before the join below —
+    // a std::thread must not be joinable when one fires (it would call
+    // std::terminate on unwind).
+    const auto status = fut.wait_for(10s);
 
     // Tear down.
     (void)listener.cancel();
@@ -267,6 +274,16 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
     if (io_thread.joinable()) {
         io_thread.join();
     }
+
+    ASSERT_EQ(status, std::future_status::ready)
+        << "async_accept did not resume after client connect";
+
+    // Not implied by the wait above: async_accept reports every failure it models
+    // through its expected<> channel, but the future also becomes ready if the
+    // coroutine frame itself throws (an allocation failure in the mint path), and
+    // that leaves this flag false.
+    EXPECT_TRUE(accept_completed.load(std::memory_order_acquire))
+        << "the accept coroutine completed without reaching its post-accept store";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
