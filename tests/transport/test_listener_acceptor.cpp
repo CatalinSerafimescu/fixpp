@@ -23,7 +23,6 @@
 #include <asio/ip/tcp.hpp>
 #include <asio/post.hpp>
 #include <asio/redirect_error.hpp>
-#include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
@@ -94,33 +93,30 @@ struct ConnectResult {
 };
 
 ConnectResult sync_tcp_connect(asio::io_context& ioc, std::string const& host, std::uint16_t port,
-                               std::chrono::milliseconds timeout = 500ms) {
+                               std::chrono::milliseconds timeout = 10s) {
     asio::ip::tcp::socket sock{ioc};
     asio::error_code ec;
     asio::ip::tcp::endpoint ep{asio::ip::make_address(host), port};
 
-    asio::steady_timer timer{ioc};
-    timer.expires_after(timeout);
-    bool timed_out = false;
-    timer.async_wait([&](asio::error_code wec) {
-        if (!wec) {
-            timed_out = true;
-            asio::error_code ignored;
-            sock.close(ignored);
-        }
-    });
-
+    // Bounded with run_for(), not a steady_timer: a timer race can complete
+    // both the timer expiry and the connect in the same reactor pass, and
+    // cancel() cannot retract an already-dequeued handler — so a timer-based
+    // bound can convert a successful connect into a timeout.
+    bool done = false;
     sock.async_connect(ep, [&](asio::error_code cec) {
         ec = cec;
-        timer.cancel();
+        done = true;
     });
 
-    ioc.run();
-    ioc.restart();
-
-    if (timed_out && !ec) {
+    ioc.run_for(timeout);
+    if (!done) {
+        asio::error_code ignored;
+        sock.close(ignored);
+        ioc.run();  // let the aborted connect handler run
         ec = asio::error::timed_out;
     }
+    ioc.restart();
+
     return ConnectResult{std::move(sock), ec};
 }
 
@@ -253,7 +249,7 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
 
     // Connect a raw TCP client.
     asio::io_context client_ioc;
-    auto cr = sync_tcp_connect(client_ioc, "127.0.0.1", port, 500ms);
+    auto cr = sync_tcp_connect(client_ioc, "127.0.0.1", port, 10s);
     EXPECT_FALSE(static_cast<bool>(cr.ec)) << "client connect failed: " << cr.ec.message();
 
     // Bound the wait so a hang cannot wedge CI. This is a LIVENESS bound, NOT a
