@@ -34,9 +34,8 @@ Need bounded reconnect after a transient disconnect?
 
 Running an acceptor (server) — multiple inbound sessions on one bind?
 └── Scenario C — asio_listener wrapping asio::ip::tcp::acceptor. Each accept mints a fresh
-    Transport bound to the engine executor. Cancel surface is concrete (Option-A): close
-    the listening socket, in-flight accepts surface transport_accept_cancelled, already-
-    resumed Transports keep running.
+    Transport. Cancel surface is concrete (Option-A): close the listening socket, in-flight
+    accepts surface transport_accept_cancelled, already-resumed Transports keep running.
 
 Need to FSM-test the session module without a real socket?
 └── Scenario D — include <fixpp/transport/test/mock_transport.hpp> (guarded by
