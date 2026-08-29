@@ -1,4 +1,14 @@
 <!-- SPECKIT START -->
+
+**START HERE:** the routing index is [`brain/index.md`](./brain/index.md) — it maps a question to the surface that answers it, and states the boundary against the graph index (structure) in one table. `brain/components/<component>.md` lists EVERY document describing a component, including superseded ones flagged in place.
+
+**This file is a THIN POINTER — do not paste per-feature history here.** The authoritative records:
+- **Merged-feature changelog (newest first):** [`CLAUDE-history.md`](./CLAUDE-history.md).
+- **Per-feature status + evidence:** `spec/feature-catalogue.md` + `spec/coverage-index.md`.
+- **Per-feature Gate A/B convergence + sign-off:** parent `research/G19-fix-fpml-iso20022/phases/phase-4/<module>/<feature>.md` (+ `phases/phase-4.md` dashboard, `phases/phase-4/cross-module-decisions.md`).
+- **Behaviours & limitations (operator-facing):** `spec/behaviors-and-limitations.md` (B-* / L-* rows).
+- **Cross-session state + lessons:** project memory `project_*` / `feedback_*` (index `MEMORY.md`; older close-outs `MEMORY-archive.md`).
+
 **Last merged FEATURE: `082-structural-group-detection`** (PR #261, squash `998961c6`) — **closes #196**. Repeating-group detection moves from the count field's declared XML **datatype** (`FieldRef::type == NumInGroup`) to the **`<group>` element**, at every read/validate and codegen site. FIX 4.0/4.1/4.2 type their count fields as legacy `INT` and so registered **zero** groups; they now register **4 / 7 / 18**, and FIX 4.3 gains one its dictionary mis-types (`NoClearingInstructions(576)`); the other six dictionaries are pinned **byte-identical**. `fixpp::v42` therefore ships the **full typed builder/validator tier** (226 checked-in generated files) — the descope #196 tracked — and the Article VI silent-omission hazard that justified that descope is closed **by direct test**: all **14** required-repeating-group omissions across 12 messages are rejected. Retires carve-outs **L-063-1 / L-061-1 / L-066-1 / L-077-1** and inverts the 077 descope pins (including a third, `FR-016b`, the list never named). Constitution **v0.11**: Article XVIII §7's "`fixpp::v42` builders remain DEFERRED" → DELIVERED; **Article I §1 unchanged** (it already named FIX 4.2, so the amendment widens nothing).
 
 **Gate B converged at round 4 — `P1=0 P2=0 P3=0`, ZERO gate-level waivers**, fixer never escalated past Sonnet (no exhaustion flag commit, no Codex fixer round). 11 findings + 2 fixer-raised escalations, all resolved. Three are worth carrying:
@@ -43,12 +53,6 @@ Also open, no issue filed: **ApplExtID(1156)=303** differentiation + `version_re
 
 Orchestra read/dictionary tier DONE via 074 + runtime-load entry point via 080; typed **read** tier DONE via 076; typed **builder** tier DONE via 077 + split into per-version libs via 078 (**closed #198**); dictionary census hardening DONE via 072 (**closed #180**); live-wire validation DONE via 075, required-presence scope via 079, strict-validation residuals via 081 (**closed #203 + #205**), per-context group-delimiter resolution via 083 (**closed #210 + #208 + #212**), L-063-4 leg 2 via 085 (**closed #214**), **structural repeating-group detection + the `fixpp::v42` builder tier via 082 (closed #196, retiring L-063-1/L-061-1/L-066-1/L-077-1)**. C-ABI GA-frozen at `1.5.0`; Python PY-001..005 COMPLETE.
 
-**This file is a THIN POINTER — do not paste per-feature history here.** The authoritative records:
-- **Merged-feature changelog (newest first):** [`CLAUDE-history.md`](./CLAUDE-history.md).
-- **Per-feature status + evidence:** `spec/feature-catalogue.md` + `spec/coverage-index.md`.
-- **Per-feature Gate A/B convergence + sign-off:** parent `research/G19-fix-fpml-iso20022/phases/phase-4/<module>/<feature>.md` (+ `phases/phase-4.md` dashboard, `phases/phase-4/cross-module-decisions.md`).
-- **Behaviours & limitations (operator-facing):** `spec/behaviors-and-limitations.md` (B-* / L-* rows).
-- **Cross-session state + lessons:** project memory `project_*` / `feedback_*` (index `MEMORY.md`; older close-outs `MEMORY-archive.md`).
 
 **CI procedure (per [[project_ci_run_tier_labels]]):** branch protection REQUIRES `tier{1,2,3}-required` + `Gate A`/`Gate B` labels; all three tiers run on `pull_request`, gated on `(gate-a-done ∧ gate-b-done)`. Turn a PR green by satisfying both gates via `/gate-a` + `/gate-b` — the gate-label event co-fires all three matrices in pull_request context. Known exception: stale duplicate `tierN-required` check-runs (`[FAILURE,…,SUCCESS]`) can wedge the merge box at latest-green → merge `--admin` (PRs #177, #182; `required_approving_review_count` is 0). `push:main` re-runs all three post-merge (badge + gate).
 
