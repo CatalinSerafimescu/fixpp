@@ -278,7 +278,7 @@ Cancelled  → (~Listener)                → -
 | Field | Type | Notes |
 |---|---|---|
 | `cfg_` | `Config` (sub-type; see below) | acceptor-side knobs |
-| `exec_` | `asio::any_io_executor` | service strand executor (engine-scoped per `[2h §6.4.1]`) |
+| `exec_` | `asio::any_io_executor` | executor the caller constructed the listener with; the accepted socket is built on it. `async_accept` does NOT dispatch onto it — it resumes on the awaiter's executor. |
 | `acceptor_` | `asio::ip::tcp::acceptor` | OS-level TCP acceptor |
 
 **`asio_listener::Config` fields**:

@@ -14,9 +14,9 @@
 // Design anchors:
 //   [2h §4.6]      — Listener abstract surface (1 pure-virtual).
 //   [2h §4.6]:810 — verbatim async_accept signature.
-//   [2h §6.4.1]   — engine service-strand row (Listener-owned cancel is
-//                   engine-scoped; the FR-025 3-action concrete contract
-//                   binds here).
+//   [2h §6.4.1]   — per-mode cancellation effect table; its `async_accept`
+//                   row makes Listener-owned cancel engine-scoped (the
+//                   FR-025 3-action concrete contract binds here).
 //   [2h §6.6]:1191 — transport_accept_cancelled error mapping.
 //   data-model E-10 — concrete asio_listener fields (cfg_/exec_/acceptor_).
 //   [arch §5.3]    — engine-bootstrap throwing-ctor carve-out.
@@ -68,12 +68,17 @@ class asio_plain_transport_factory;
 //   surfaces transport_factory_failed.
 //
 // Thread-safety model:
-//   `async_accept()` runs on the engine service strand (`exec_`) per
-//   [2h §6.4.1]. `cancel()` is the synchronous half — it may be called
-//   off-strand; `acceptor_.close()` and `acceptor_.cancel()` are
-//   thread-safe per ASIO and surface operation_aborted on the in-flight
-//   awaitable. Already-resumed `unique_ptr<Transport>` results are owned
-//   by the caller and are NOT touched by cancel().
+//   `async_accept()` is an ordinary coroutine: it never dispatches onto
+//   `exec_`, so it resumes on whatever executor its awaiter runs on. The
+//   listener imposes no executor of its own on the accept path and cannot
+//   observe the caller's choice. `exec_` is the executor the ACCEPTED
+//   SOCKET is constructed on, and nothing more.
+//
+//   `cancel()` is the synchronous half — it may be called off-strand;
+//   `acceptor_.close()` and `acceptor_.cancel()` are thread-safe per ASIO
+//   and surface operation_aborted on the in-flight awaitable.
+//   Already-resumed `unique_ptr<Transport>` results are owned by the
+//   caller and are NOT touched by cancel().
 // ─────────────────────────────────────────────────────────────────────────────
 class asio_listener final : public Listener {
 public:
@@ -129,8 +134,8 @@ public:
     // ── Concrete-impl-only API per spec FR-023 / FR-025 ────────────────────
     //
     // NOT `override` — the abstract Listener base does NOT publish cancel().
-    // The engine-scoped Listener-cancel surface is published at
-    // [2h §6.4.1]:1124. Honours the 3-action contract per the file-level
+    // The engine-scoped Listener-cancel surface is published in the
+    // [2h §6.4.1] table. Honours the 3-action contract per the file-level
     // Option-A note above.
     [[nodiscard]] core::expected_t<void> cancel() noexcept;
 
