@@ -151,8 +151,6 @@ asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::asy
         co_return std::unexpected{E::transport_accept_cancelled};
     }
 
-    // `exec_` per the Thread-safety model note in asio_listener.hpp. A
-    // consumer may rebind via socket.release() + assign(); v1.0 does not.
     asio::error_code accept_ec;
     asio::ip::tcp::socket accepted_socket{exec_};
     co_await acceptor_.async_accept(accepted_socket,
