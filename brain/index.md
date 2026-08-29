@@ -58,6 +58,24 @@ component (what is it / how is it built / why / what breaks). Both were careful 
 **Rigor inside the chosen set does not compensate for an incomplete set.** A component page is the
 complete set.
 
+## ⚠️ A Phase-2 design doc's Status header does NOT tell you whether it shipped
+
+Most `.specify/2*.md` headers read *"Draft vN — Gate A round N converged"* whether or not features
+have since realized, changed, or superseded them. `pipeline.md` step 19 has a row for updating that
+pointer precisely because it kept being dropped — the surface was added after three consecutive merges
+silently skipped it, and it kept being skipped after that.
+
+**So a "Draft" header is not evidence a doc is unshipped, and a converged-Gate-A header is not evidence
+it is current.** Derive it instead — which features cite the doc:
+
+```bash
+grep -rl "2h-transport" specs/*/spec.md
+```
+
+No count is written here on purpose; it moves. The **condition** is what is durable: *a design doc
+whose Status header does not name the features that realized it tells you nothing about its currency,
+and reads as authoritative anyway.*
+
 ## Two conventions that carry the same load, cheaply
 
 1. **A header comment naming the governing feature id** — `async_mutex.hpp`'s *"Erratum E-5 (048)"* is
