@@ -1,6 +1,8 @@
 # 2g — TLS cert_source + Pinset rotation
 
-**Status:** Draft v0.4 — Gate A round 3 converged via post-cap pass (Phase A)
+**Status:** Draft v0.5 — post-sign-off targeted amendment (2026-08-29): the reproduced `[const §XII.5]` text was **deleted**, not refreshed. Article XII §5 was amended by constitution **v0.3 (2026-06-17, feature 043)** adding a fourth `SecurityProfile`; the copy here had gone false with nothing linking it to the article. Prior: Draft v0.4 — Gate A round 3 converged via post-cap pass (Phase A).
+
+> ⚠️ **This document reproduces several constitutional articles verbatim** (§XII.3, §XII.5, §XII.6, §XII.8) and quotes `architecture.md` and `coverage-index.md` too. **Every one of those copies goes stale the moment its source is amended, and nothing links them** — that is exactly what happened to §XII.5. Only §XII.5 has been checked and corrected (2026-08-29); **the others are unverified, not verified-clean.** Re-read each against its source before relying on it.
 **Date:** 2026-05-09
 **Owner:** Opus (Phase A drafter)
 **Inherits:** constitution.md v0.2, architecture.md v0.2, 2a-decimal.md v0.3, 2b-wire.md v0.2, 2c-codegen.md v1.3, 2d-threading.md v0.4, 2e-msgstore.md v0.4, 2f-async-mutex.md v1.5
@@ -16,7 +18,7 @@
 2. **Lock the `fixpp::tls::file_cert_source` default impl** as the v1.0-shipped reference: PEM/DER parse over a caller-supplied `cert_source::Config` (file-path + optional password callback for encrypted PEM); single CA bundle path; constitutional refusal to load anything outside the [const §XII.3] cipher / [const §XII.2] TLS-version / [const §XII.4] banned-cryptography envelope at chain-validation time. v0.2 publishes `make_file_cert_source(Config, std::pmr::memory_resource*) -> expected_t<std::shared_ptr<cert_source>>` as the [arch §6] rule-4 factory entry point.
 3. **Lock the `fixpp::tls::Pinset` rotation API** per [SYN §3.4 Q15] / [FIXS RC1 §5]: `add(cert)` and `remove(cert)` are **separate explicit operations**; old certs remain usable until `remove` returns; **no atomic-swap shortcut**. Rotation is mid-session-mutable per [arch §5.6] (the architecture explicitly carves Pinset out of the frozen-config rule). Concurrent reads during rotation are correct without taking a coroutine-suspending lock. v0.2 publishes `Pinset::find(...) -> pin_view` (a value-typed handle that carries the `shared_ptr<const pin_snapshot>` keeping the matched entry alive) instead of the v0.1 raw `pin const*`, eliminating the dangling-on-rotation hazard.
 4. **Lock the `fixpp::tls::CipherPolicy`** as a **compile-time** allow-list per [const §XII.3] — the engine refuses to load anything outside the four normative lists (TLS 1.3 suites, TLS 1.2 ECDHE-AEAD suites, key-exchange groups X25519 / secp256r1 / secp384r1, signature algorithms ECDSA P-256 / P-384, RSA-PSS over RSA keys of size ≥ 2048 bits). Banned suites per [const §XII.4] / [const §XV.11] (RC4, DES, 3DES, MD5, DH_anon, NULL, export-grade, CBC-mode TLS 1.2, SHA-1, 1024-bit RSA, TLS 1.3 0-RTT) are rejected at **compile** time. v0.2 also publishes `CipherPolicy::is_allowed(std::string_view) constexpr noexcept -> bool` for the C-ABI runtime path that 2i bridges into when an opaque profile-or-cipher string crosses the language boundary.
-5. **Lock the `fixpp::tls::SecurityProfile` enum** as the type the session uses to pick trust mode at construction per [const §XII.5]: `mtls_ca`, `mtls_pinned`, `one_way_ca [[deprecated]]`. The profile is consumed by the `SecurityProfile`-to-OpenSSL-`SSL_CTX`-config adapter that 2g publishes; the `SSL_CTX` itself is built and owned by the transport per [arch §4.5] / 2h. The `[[deprecated]]` attribute is on the *enumerator* declaration in v0.2 (not in a comment), satisfying [const §XII.5]'s compile-time-diagnostic-at-construction rule. v0.2 publishes a normative `SecurityProfile`-to-OpenSSL-mode mapping table (§4.5.1) so 2h's wiring is unambiguous.
+5. **Lock `SecurityProfile`** as the type the session uses to pick trust mode at construction per [const §XII.5]. ⚠️ **The member list is deliberately not enumerated here** — it is normative in §XII.5, which has since been amended (v0.3, 2026-06-17, feature 043); the shipped type is `include/fixpp/session/security_profile.hpp` (namespace `fixpp::session`, **not** `fixpp::tls` as earlier revisions of this document said). The profile is consumed by the `SecurityProfile`-to-OpenSSL-`SSL_CTX`-config adapter that 2g publishes; the `SSL_CTX` itself is built and owned by the transport per [arch §4.5] / 2h. The `[[deprecated]]` attribute is on the *enumerator* declaration in v0.2 (not in a comment), satisfying [const §XII.5]'s compile-time-diagnostic-at-construction rule. v0.2 publishes a normative `SecurityProfile`-to-OpenSSL-mode mapping table (§4.5.1) so 2h's wiring is unambiguous.
 6. **Stay zero-allocation on the handshake-read hot path** per [const §VIII.5]: Pinset *lookup* during TLS handshake is read-only and on the session strand and must allocate zero (the `shared_ptr` snapshot capture is one acquire-load + one refcount RMW; the `pin_view` is value-typed; no heap touch). Cert *load* (loading bytes from disk, parsing, building the chain) is **cold-path** and allowed PMR allocation (§6.1).
 7. **Stay exception-free across the session-handling window** per [arch §5.3]: every `expected_t<T>`-returning method is `[[nodiscard]]`; every accessor returning a non-owning view (`std::span<const Certificate>`, `std::string_view`, `pin_view`, the inner `span` of `load_credentials`'s awaitable result) carries `[[clang::lifetimebound]]` at the **declaration site of the abstract base** per [arch §5.5] and the [2b §6.4] precedent (v0.2 RC#1 close — the v0.1 "annotate only the override" workaround is retired). PMR throws are routed through `[2a §4.2]` `trap_throw` and surface as `error::tls_*` variants per §6.6. Construction-time configuration errors (bad cert file, malformed PEM at engine bootstrap before any session is open) are permitted to throw per the [arch §5.3] carve-out; the `make_file_cert_source(...)` factory wraps that boundary in `expected_t<...>` for non-construction-time callers (e.g., 2i's C ABI, future hot-reload).
 8. **Honour ASIO native cancellation slots** per [const §XI.2] / [SYN §3.2 Q6a] for the cold-path `cert_source::load_credentials(...)` awaitable; cancellation propagates through `[2d §6.5]`'s `cancellable_dispatch` precedent (§6.4 publishes the recipe verbatim — read `co_await asio::this_coro::executor`, recover `fixpp::core::session_executor`, read `co_await asio::this_coro::cancellation_state`, post any parse/file-work handoff via `cancellable_dispatch` before returning `tls_load_cancelled`); the awaitable completes with `expected_t::unexpected{tls_load_cancelled}` (§6.4 / §6.6).
@@ -45,7 +47,7 @@ The first six caps bound v1.0 default-impl resource budgets. The last three (RC#
 - The `fixpp::tls::file_cert_source` default impl (§4.2).
 - The `fixpp::tls::Pinset` value-typed class with `add` / `remove` / `find` / `contains` API (§4.3) and its add-then-remove invariants (§6.5).
 - The `fixpp::tls::CipherPolicy` compile-time allow-list (§4.4) and its `static_assert`-based banned-cipher refusal (§6.1).
-- The `fixpp::tls::SecurityProfile` enum and the `SecurityProfile`-to-`SSL_CTX`-config adapter shape (§4.5).
+- The `SecurityProfile` enum and the `SecurityProfile`-to-`SSL_CTX`-config adapter shape (§4.5).
 - The `fixpp::tls::Certificate` value-typed view + `fixpp::tls::peer_identity` (the parsed-cert subject + SAN value the session FSM consumes for T-041).
 - The `error::tls_*` variants per §6.7 and their per-doc-prefix `FIXPP_ERR_TLS_*` C-ABI coalescing groups (delegated to 2i).
 
@@ -114,15 +116,11 @@ This is the architectural anchor for §4.3 and §6.5: `Pinset` is the single TLS
 >
 > Anything not on these four lists — including TLS 1.3 0-RTT data, static RSA key exchange, CBC-mode suites, SHA-1 signatures, and 1024-bit RSA — is rejected at compile time.
 
-§XII.5 SecurityProfile rule (quoted verbatim because the enum signature in §4.5 is normative):
+§XII.5 SecurityProfile rule — **NOT reproduced here. Read `[const §XII.5]` in `.specify/constitution.md`.**
 
-> **`Session` construction requires an explicit `SecurityProfile` choice — there is no implicit default.** The profile selects the trust mode:
+> **Deleted 2026-08-29, deliberately not refreshed.** This block previously reproduced §XII.5 verbatim *"because the enum signature in §4.5 is normative"*, listing `mtls_ca` / `mtls_pinned` / `one_way_ca`. Article XII §5 was **amended** — constitution **v0.3, 2026-06-17**, Gate A folded into feature **043** — to add a fourth profile with **no TLS at all**. The copy stayed as written and so became false, and because it was labelled *normative* it read as more authoritative than an ordinary claim.
 >
-> - `mtls_ca` — mutual TLS with CA-chain trust on the peer cert. The recommended starting profile for v1.0 deployments.
-> - `mtls_pinned` — mutual TLS with leaf-cert pinning (FIXS RC1 strict profile). Required for FIXS-conformant deployments.
-> - `one_way_ca` — server-cert TLS only, CA trust; permitted for legacy interop where the counterparty does not present a client cert. Construction emits a compile-time `[[deprecated]]` diagnostic.
->
-> Pinset rotation (multiple valid peer certs per counterparty, FIXS §5) is supported under both `mtls_pinned` and `mtls_ca`.
+> Refreshing the copy would re-arm the same trap for the next amendment, so it is **deleted** rather than updated: the enumerated set lives in the constitution, and the shipped type lives in `include/fixpp/session/security_profile.hpp`, whose header comment names the amendment that changed it. Read those two; do not re-copy them here.
 
 §XII.8 cert_source rule (quoted verbatim):
 
@@ -620,7 +618,7 @@ struct CipherPolicy {
 
 The consteval refusal chain in §6.1 verifies `tls13_suites` ∩ `banned_tokens` = ∅ and similarly for the other three lists. The `SSL_CTX` adapter (§4.5) builds the cipher string by joining the allow-list arrays; banned ciphers cannot appear because they are not in any allow-list array. The `is_allowed(...)` accessor (v0.2 / N-P2-3 close) is the published runtime entry point that 2i's C-ABI string-validation path consumes — `tls_cipher_not_allowed` (§6.6) is now an *owned* runtime variant (the C-ABI calls `is_allowed`, refuses on `false`, and surfaces the variant); the v0.1 phantom-runtime-path defect is closed.
 
-### §4.5 `fixpp::tls::SecurityProfile` — enum + adapter
+### §4.5 `SecurityProfile` — enum + adapter
 
 ```cpp
 // include/fixpp/tls/security_profile.hpp
@@ -647,6 +645,13 @@ namespace fixpp::tls {
 // comment. [const §XII.5]'s "compile-time [[deprecated]] diagnostic at
 // construction" is now actually emitted by the compiler when one_way_ca
 // crosses into user code.
+// ⚠️ SUPERSEDED 2026-06-17 by feature 043 (constitution v0.3 amended [const §XII.5]).
+// A FOURTH enumerator was added. This block is LEFT AS DESIGNED — it records what
+// 2g specified, which is the point of a design record — and is deliberately NOT
+// extended here: the shipped declaration is authoritative and lives at
+//   include/fixpp/session/security_profile.hpp   (namespace fixpp::session)
+// whose header comment names the amendment. Read it there; do not re-copy it here,
+// because a copy is what went stale the last time.
 enum class SecurityProfile : std::uint8_t {
     unset       = 0,   // sentinel — not a valid choice; rejected at Session::open.
     mtls_ca     = 1,
@@ -1110,7 +1115,7 @@ Per `[arch §10]` requirement (4) and `[const §VII.4]`. v0.2 ships **17 seams**
 
 10. **Cipher allow-list rejection — value-based consteval `try_compile`.** Codex P1-7 close: write a CMake `try_compile` negative test that attempts to declare a `CipherPolicy` variant that includes `"ECDHE-RSA-AES128-CBC-SHA256"` (CBC is banned per [const §XII.3]); verify the build fails with the expected `static_assert` message. Companion positive `try_compile` test confirms that the published `tls13_suites` / `tls12_suites` / `kx_groups` / `sig_algs` arrays compile clean. The v0.2 consteval is value-based (P1-7 fix), so this test is the on-ramp that proves the implementation actually compiles. Lives in `tests/tls/test_cipher_allow_list_static_assert.cpp` (with companion `tests/tls/CMakeLists.txt` declaring both the negative- and positive-compile targets).
 
-11. **`SecurityProfile`-to-OpenSSL-mode mapping (Codex P2-5 close).** For each `SecurityProfile` value (`mtls_ca`, `mtls_pinned`, `one_way_ca`), invoke `make_ssl_ctx_config(...)` and verify (a) the resulting `SslCtxConfig::ciphers` contains exactly the `[const §XII.3]` lists; (b) the row in §4.5.1's normative table is honoured (OpenSSL `verify_mode` flags, local-cert-required, CA-anchors-required, pinset-required, pin-check-policy); (c) `SecurityProfile::unset` rejects with `tls_invalid_security_profile`; (d) `mtls_pinned` with null `Pinset` rejects; (e) `one_way_ca` with non-null `Pinset` rejects; (f) any profile with null `clock` rejects. Lives in `tests/tls/test_security_profile_mapping.cpp`.
+11. **`SecurityProfile`-to-OpenSSL-mode mapping (Codex P2-5 close).** ⚠️ *(2026-08-29: the value list below is the v0.2 set; feature 043 added a fourth — enumerate from the shipped header, not from this line.)* For each `SecurityProfile` value (`mtls_ca`, `mtls_pinned`, `one_way_ca`), invoke `make_ssl_ctx_config(...)` and verify (a) the resulting `SslCtxConfig::ciphers` contains exactly the `[const §XII.3]` lists; (b) the row in §4.5.1's normative table is honoured (OpenSSL `verify_mode` flags, local-cert-required, CA-anchors-required, pinset-required, pin-check-policy); (c) `SecurityProfile::unset` rejects with `tls_invalid_security_profile`; (d) `mtls_pinned` with null `Pinset` rejects; (e) `one_way_ca` with non-null `Pinset` rejects; (f) any profile with null `clock` rejects. Lives in `tests/tls/test_security_profile_mapping.cpp`.
 
 12. **Error-variant exercise.** Drive every `error::tls_*` variant from §6.6 (15 variants) through a unit test that synthesises the failing input (malformed PEM, fingerprint not in pinset, fingerprint already present, capacity exhausted, RSA-key-too-large, cert-DER-too-large, SAN-entries-exceeded, etc.) and verifies the returned `expected_t::unexpected{...}` carries the expected variant. Lives in `tests/tls/test_tls_error_variants.cpp`.
 
