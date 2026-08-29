@@ -72,9 +72,6 @@ class asio_plain_transport_factory;
 //   `exec_`, so it resumes on whatever executor its awaiter runs on.
 //   §6.4.1 is a cancellation table and specifies no executor.
 //
-//   `cancel()` is the synchronous half — it may be called off-strand;
-//   `acceptor_.close()` and `acceptor_.cancel()` are thread-safe per ASIO
-//   and surface operation_aborted on the in-flight awaitable.
 //   Already-resumed `unique_ptr<Transport>` results are owned by the
 //   caller and are NOT touched by cancel().
 // ─────────────────────────────────────────────────────────────────────────────
