@@ -179,6 +179,15 @@ Focus on high-signal findings. Limit to 50 findings total; aggregate remainder i
 - Data entities referenced in plan but absent in spec (or vice versa)
 - Task ordering contradictions (e.g., integration tasks before foundational setup tasks without dependency note)
 - Conflicting requirements (e.g., one requires Next.js while other specifies Vue)
+- **A cited design document that no longer describes what ships (LOCAL PATCH).** Before treating any
+  `.specify/` design doc or prior `specs/<id>/research.md` as authority, check
+  `brain/components/<component>.md` — it lists **every** document claiming to describe that component,
+  with superseded ones **flagged in place**. A spec is not inconsistent for disagreeing with a
+  *stale* anchor; the anchor is. Getting this backwards produces a CRITICAL that would make the spec
+  worse. Measured precedent: `.specify/2j-controlplane.md` records the engine accept loop on the
+  engine executor as a **signed-off threading invariant**; the shipped engine asserts a per-session
+  strand and is right (issue #334). Two further documents repeat it.
+  ⚠️ Absence of a component page is **not** evidence a doc is current — most components have none yet.
 
 ### 5. Severity Assignment
 
