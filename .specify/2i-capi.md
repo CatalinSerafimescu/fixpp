@@ -1,6 +1,6 @@
 # 2i — C ABI message representation + `fixpp_error_t` enum range
 
-**Status:** Draft v0.3 — Gate A round 2 converged (Phase A — Opus designer)
+**Status:** Draft v0.4 — Gate A round 2 converged (Phase A — Opus designer); **post-sign-off amendment 2026-08-29 — the Appendix D drop-in blocks are NOT a description of their targets; see "Appendix Z" at the END of this file**
 **Date:** 2026-05-09
 **Owner:** Opus (drafter)
 **Inherits:** `[const §I.2]`, `[const §IV.2]`, `[const §V.1]`, `[const §VIII.5]`, `[const §X]` (full article — every sub-clause), `[const §XI.2]`, `[const §XIII]`, `[const §XIV.2]`, `[const §XV.15]`, `[const §XVII.1]`, `[const §XVIII.1]`, `[arch §1.2]`, `[arch §3]`, `[arch §4.10]`, `[arch §5.3]`, `[arch §5.5]`, `[arch §5.6]`, `[arch §9.1]`, `[arch §9.2]`, `[arch §10] row 2i`, `[SYN §3.5 #17]`, `[SYN §3.5 #19]`, `[2a §5.1]`, `[2a §5.2]`, `[2a §7.3]`, `[2a §7.4]`, `[2b §4.2]`, `[2b §4.3]`, `[2b §6.4]`, `[2b §6.7]`, `[2c §4.7]`, `[2c §4.8]`, `[2c §5]`, `[2c §6.7]`, `[2d §4.7]`, `[2d §6.5]`, `[2d §6.7]`, `[2d §7.6]`, `[2e §4.4]`, `[2e §6.7]`, `[2f §4.5]`, `[2f §6.5]`, `[2g §5]`, `[2g §6.6]`, `[2g §7.6]`, `[2h §5]`, `[2h §6.6]`, `[2h §7.8]`
@@ -1995,3 +1995,47 @@ The current `[const §X.4]` (verified verbatim at `library/.specify/constitution
 **Why.** Per `[arch §5.3]` last bullet ("Out-of-range values from older consumers are tolerated; out-of-range values *to* a consumer are mapped to `FIXPP_ERR_UNKNOWN`") + `[SYN §3.5 #19]`: the constitutional rule already names both directions at the principle level; the operational detail (consumer-version stamp, downgrade trigger, audit trail, occupancy gate) is what 2i adds. The byte-faithful Before/After form follows the `[2g App D]` / `[2h App D]` precedent for Phase 2 sibling-doc edits. **The v0.1 framing — citing `[const §VI.5]` as the "exact-citation / byte-faithfulness rule" — was a category error: `[const §VI.5]` (verified at `library/.specify/constitution.md:80`) is the Normative-References rule, not a byte-faithful-drop-in rule.** The byte-faithful-drop-in convention is a Phase 2 repo precedent crystallised by `[2g App D]` / `[2h App D]`; it is binding by precedent for Phase 2 docs but not by an explicit constitutional clause. Codex P1-4 / Opus confirmed; corrected here at the head of Appendix D.
 
 (2i does NOT edit `library/.specify/constitution.md`, `library/.specify/architecture.md`, or any sibling `2X` doc directly per the brief's hard rule; the drop-ins are recorded above verbatim for the orchestrator. Per the rewriter rule at the head of Appendix D, the orchestrator MUST re-verify each Before block against `git show HEAD:library/...` at sign-off and re-quote if any drift has occurred between v0.2 authoring time and sign-off.)
+
+## Appendix Z — post-sign-off amendment, 2026-08-29 (Appendix D drop-in blocks)
+
+*Appended at the END of the file on purpose: line-number citations point into this document, and an
+insertion higher up rots every one below it. The Status-line edit above is in-place and
+same-line-count.*
+
+### Do not read this document's `Before`/`After` blocks as a description of its targets
+
+An Appendix-D drop-in quotes a **sibling document's** text and proposes a replacement, to be applied
+by the orchestrator at sign-off. **Nothing ever re-checks whether that happened.** A block can
+therefore sit here indefinitely in any of four states, and the reader cannot tell which by looking:
+
+| State | Meaning |
+|---|---|
+| `NOT-APPLIED` | the target still holds the *"Before"* text — legitimate **before** sign-off, a defect after a feature has shipped the design |
+| `APPLIED` | the target holds the *"After"* — normal; the *"Before"* half is stale **by definition**, which is what the word means |
+| `NEITHER` | **the interesting one** — the target moved to a **third** state that no document records |
+| `BOTH` | both halves found; usually the block is small enough to match incidentally |
+
+Two combinations are defects on their own: **`APPLIED` while the prose calls the stale half the
+*current* text of the target**, and **`NEITHER`**.
+
+### Re-derive it; no state is recorded here
+
+A state written down is a **result**, and results rot silently — the exact defect this amendment
+exists to record. The **procedure** does not:
+
+```bash
+python3 tools/check_dropin_blocks.py --self-test   # prove it can report all four states
+python3 tools/check_dropin_blocks.py --suspect     # then look at what carries a verdict
+```
+
+⚠️ **A verdict is a LEAD, not a finding.** The matcher is substring-based, so a whitespace reflow in a
+target is indistinguishable from a real edit. Confirm against the target **and** the shipped header
+before acting — and note that when they disagree, the *document* is not automatically the wrong one.
+
+**Confirmed instances of this class elsewhere in the tree**, each verified by hand against shipped
+code: `.specify/2k-log-otel.md` (drop-ins never applied though feature 017 shipped the design, leaving
+`[2d §4.5]` publishing a field that does not exist), `.specify/2e-msgstore.md` §D.1 and
+`.specify/2h-transport.md` §D.1 (applied, then **reversed** by feature 010 `FR-001a`, so the
+*"Before"* half now matches shipped code better than the *"After"* does). See
+`brain/components/plugin-factory-ownership.md`.
+

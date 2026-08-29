@@ -51,7 +51,7 @@ resumer (`B-006-2`) — a deliberate hard precondition, not an error return.
 
 | Document | Status |
 |---|---|
-| `decisions/2f-async-mutex.md` (the Phase-2 design doc) | **HISTORICAL.** Describes the pre-048 cross-thread drain: a `shared_ptr`-owned `drain_latch_state` over an `asio::experimental::concurrent_channel`, a Dekker-style publication handshake, `active_acquirers_count_` epoch counters |
+| ⚠️ `decisions/2f-async-mutex.md` — **the 9.6 KB decision record in the PRIVATE parent**, *not* the 309 KB design doc of the same basename at `.specify/2f-async-mutex.md`. Two different artifacts, one name. Check the size or the path before concluding anything | **HISTORICAL.** Describes the pre-048 cross-thread drain: a `shared_ptr`-owned `drain_latch_state` over an `asio::experimental::concurrent_channel`, a Dekker-style publication handshake, `active_acquirers_count_` epoch counters |
 | `specs/006-async-mutex/` — `spec.md`, `research.md`, `data-model.md`, `contracts/` | **HISTORICAL** for drain/cancellation. Frozen at the original feature; never updated after 048 |
 
 Feature **048** removed that machinery entirely. Reading 006-only docs gives a **materially wrong
@@ -88,3 +88,21 @@ line-number citation (#310).
 The stores are **never explicitly drained**, and that is correct — see
 [`message-store-quiescence.md`](./message-store-quiescence.md). The contract is discharged
 structurally, not by a call.
+
+## ✅ `.specify/2f-async-mutex.md` is the POSITIVE CONTROL for post-sign-off amendment
+
+Verified 2026-08-29 during the Step-R sweep, and worth stating because every other entry on this page
+is a failure: **this document did the thing correctly.**
+
+- It carries **in-document errata `E-1` … `E-5`**, each dated, each naming the feature and the
+  authority that approved it — appended rather than rewritten, so the original design and its
+  corrections both survive.
+- Its Status header names what shipped it (`006-async-mutex`), instead of leaving a bare *"Draft"*.
+- The shipped header **points back**: `include/fixpp/core/sync/async_mutex.hpp` says
+  *"Design anchor: `.specify/2f-async-mutex.md` v1.6 (errata E-1..E-5)"* — so the code and the doc
+  name each other, and neither can drift without the other becoming visibly wrong.
+
+That closed loop is why a blind agent found the 048 supersession here unaided, and did not find the
+engine accept-path one. **This is the shape to copy** — not a rule anyone wrote down, just a document
+whose author kept the pointer current.
+

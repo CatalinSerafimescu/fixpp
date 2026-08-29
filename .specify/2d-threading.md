@@ -601,7 +601,7 @@ struct SessionConfig {
     // is dropped (no callable to throw); replaced by validation on the
     // value-typed field at Session::open.
     fixpp::otel::trace_context  initial_trace_context {};
-    std::shared_ptr<fixpp::log::Sink> log_sink_override;       // null → engine default.
+    std::shared_ptr<fixpp::log::Sink> log_sink_override;       // ⚠️ 2026-08-29: THIS FIELD DOES NOT EXIST IN SHIPPED CODE. Feature 017 T012 replaced it with logger_override + tracer_override per [2k App D §D.1] — a drop-in this document never received. See include/fixpp/session/session_config.hpp, whose declaration cites [2d §4.5] and so points back HERE, at text contradicting it.
 
     // ── Tap (locked by 2l) ──────────────────────────────────────────────
     fixpp::tap::TapConsumer     tap_consumer;          // variant; default-constructed = no tap.

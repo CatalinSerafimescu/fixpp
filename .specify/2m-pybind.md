@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft v0.3 — Gate A round 2 converged (Phase A) |
+| **Status** | Draft v0.4 — Gate A round 2 converged (Phase A); **post-sign-off amendment 2026-08-29 — the Appendix D drop-in blocks are NOT a description of their targets; see "Appendix Z" at the END of this file** |
 | **Date** | 2026-05-10 |
 | **Owner** | Opus (drafter) |
 | **Inherits** | `[const §I.1]`, `[const §IV.3]`, `[const §IV.5]`, `[const §V.1]`, `[const §VII.2]`, `[const §VIII.5]`, `[const §X.1]`, `[const §X.3]`, `[const §X.4]`, `[const §X.5]`, `[const §XI.2]`, `[const §XII.1]`, `[const §XIV.2]`, `[const §XV.15]`, `[const §XVII.1]`, `[const §XVIII.1]`, `[arch §1.2]`, `[arch §2.3]`, `[arch §4.10]`, `[arch §4.12]`, `[arch §5.2]`, `[arch §5.3]`, `[arch §5.5]`, `[arch §5.6]`, `[arch §6]`, `[arch §7.1]`, `[arch §7.4]`, `[arch §8]`, `[arch §9.1]`, `[arch §10] row 2m`, `[SYN §3.5 #18]`, `[2a §5.1]`, `[2a §5.2]`, `[2b §6.4]`, `[2c §5]`, `[2d §4.4]`, `[2d §4.5]`, `[2d §6.7]`, `[2d §7.6]`, `[2e §4.4]`, `[2g §7.6]`, `[2h §7.8]`, `[2i §1.1]`, `[2i §1.2]`, `[2i §3.5]`, `[2i §4.2]`, `[2i §4.3]`, `[2i §4.4]`, `[2i §4.5]`, `[2i §4.6]`, `[2i §4.7]`, `[2i §4.9]`, `[2i §4.10]`, `[2i §5.2]`, `[2i §6.3]`, `[2i §6.5]`, `[2i §7.12]`, `[2i §10 Q5]`, `[2j §4.7]`, `[2j §1.2]`, `[2j §11]`, `[2k §1.1]`, `[2k §2]`, `[2l §1.1]` |
@@ -1851,3 +1851,47 @@ The 5 occupied variants are `FIXPP_ERR_BINDING_PYTHON_CALLBACK_RAISED = 1200`, `
 ### §D.6 `feature-catalogue.md` PY-001..PY-005 rows — add `Coverage` column references
 
 At sign-off, the Coverage column for PY-001..PY-005 in `library/spec/feature-catalogue.md` is updated from the placeholder `—` to `2m §X.Y` per the Appendix A table above. This mirrors the pattern used by 2k and 2l at their sign-offs.
+
+## Appendix Z — post-sign-off amendment, 2026-08-29 (Appendix D drop-in blocks)
+
+*Appended at the END of the file on purpose: line-number citations point into this document, and an
+insertion higher up rots every one below it. The Status-line edit above is in-place and
+same-line-count.*
+
+### Do not read this document's `Before`/`After` blocks as a description of its targets
+
+An Appendix-D drop-in quotes a **sibling document's** text and proposes a replacement, to be applied
+by the orchestrator at sign-off. **Nothing ever re-checks whether that happened.** A block can
+therefore sit here indefinitely in any of four states, and the reader cannot tell which by looking:
+
+| State | Meaning |
+|---|---|
+| `NOT-APPLIED` | the target still holds the *"Before"* text — legitimate **before** sign-off, a defect after a feature has shipped the design |
+| `APPLIED` | the target holds the *"After"* — normal; the *"Before"* half is stale **by definition**, which is what the word means |
+| `NEITHER` | **the interesting one** — the target moved to a **third** state that no document records |
+| `BOTH` | both halves found; usually the block is small enough to match incidentally |
+
+Two combinations are defects on their own: **`APPLIED` while the prose calls the stale half the
+*current* text of the target**, and **`NEITHER`**.
+
+### Re-derive it; no state is recorded here
+
+A state written down is a **result**, and results rot silently — the exact defect this amendment
+exists to record. The **procedure** does not:
+
+```bash
+python3 tools/check_dropin_blocks.py --self-test   # prove it can report all four states
+python3 tools/check_dropin_blocks.py --suspect     # then look at what carries a verdict
+```
+
+⚠️ **A verdict is a LEAD, not a finding.** The matcher is substring-based, so a whitespace reflow in a
+target is indistinguishable from a real edit. Confirm against the target **and** the shipped header
+before acting — and note that when they disagree, the *document* is not automatically the wrong one.
+
+**Confirmed instances of this class elsewhere in the tree**, each verified by hand against shipped
+code: `.specify/2k-log-otel.md` (drop-ins never applied though feature 017 shipped the design, leaving
+`[2d §4.5]` publishing a field that does not exist), `.specify/2e-msgstore.md` §D.1 and
+`.specify/2h-transport.md` §D.1 (applied, then **reversed** by feature 010 `FR-001a`, so the
+*"Before"* half now matches shipped code better than the *"After"* does). See
+`brain/components/plugin-factory-ownership.md`.
+

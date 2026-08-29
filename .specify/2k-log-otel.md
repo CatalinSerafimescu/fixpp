@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft v0.5 — Gate A round 4 converged (Phase A, post-cap pass) |
+| Status | Draft v0.6 — Gate A round 4 converged (Phase A, post-cap pass); **post-sign-off amendment 2026-08-29: the Appendix D drop-ins were NEVER APPLIED to their target documents although feature 017 shipped the design. See "Appendix Z" at the END of this file.** |
 | Date | 2026-05-09 |
 | Owner | Opus (Phase A) |
 | Inherits | `[const §XIII]`, `[const §XIV.2]`, `[const §XV.5]`, `[arch §4.7]`, `[arch §4.8]`, `[arch §5.4]`, `[arch §5.7]`, `[arch §5.8]`, `[arch §6]`, `[arch §10]`, `[arch §11]` row 4 |
@@ -1747,3 +1747,54 @@ Following the `[2j App D §D.4]` pattern: design-doc-rooted catalogue rows that 
 
 ---
 ```
+
+## Appendix Z — post-sign-off amendment, 2026-08-29 (Appendix D)
+
+*Appended at the END of the file on purpose: an insertion higher up rots every line-number citation
+into this document. The Status-line edit above is in-place and same-line-count.*
+
+### The finding: the code shipped, the documents did not
+
+`2k` was realized by feature **017-log-otel**, and the shipped `SessionConfig` matches this document's
+design exactly — `initial_trace_context`, `logger_override`, `tracer_override`, and `meter_override`
+deliberately omitted because metrics are engine-scoped. **The design is not in question.**
+
+What did not happen is Appendix D. Its drop-in amendments to `2d-threading.md`, `architecture.md` and
+`spec/feature-catalogue.md` were **never applied**. Mechanically: the *"Before"* halves still match
+their targets and the *"After"* halves appear nowhere. So the targets still publish the pre-2k text.
+
+**The sharpest consequence is in `[2d §4.5]`**, which still declares `log_sink_override` — a field
+that **does not exist in the shipped code**. And the shipped declaration in
+`include/fixpp/session/session_config.hpp` cites `[2d §4.5]` as its authority, so a reader who follows
+the header's own pointer lands on text that contradicts the header. That line now carries an in-place
+marker.
+
+### Why this is worth more than a correction
+
+This is issue **#334**'s class — *a decision that shipped in code never propagated back to the
+signed-off artifact* — reached by a different route. Not a gate finding that got lost: an amendment
+that was **written, reviewed, converged, and queued**, and then simply not applied. The close-out row
+that exists to catch it is `.specify/close-out.md` §2 row 11.
+
+**No count of affected blocks is written here.** That is a result and it rots. The procedure is:
+
+```bash
+python3 tools/check_dropin_blocks.py --suspect
+```
+
+which classifies every `Before`/`After` block in `.specify/` as `NOT-APPLIED` / `APPLIED` / `NEITHER` /
+`BOTH`, and flags only the two combinations that are defects on their own. Run
+`--self-test` first: it proves the classifier can report all four states, so a quiet run means quiet
+rather than broken.
+
+⚠️ **`NOT-APPLIED` is not automatically a defect** — it is the correct state for a document whose
+sign-off has not happened. It is a defect *here* because a feature shipped the design and the drop-in
+was still pending.
+
+### Scope of what was verified
+
+`§D.1`'s target text was read in `2d-threading.md` and compared against the shipped header **by hand**.
+The other Appendix D entries were classified **mechanically only** and are **leads, not confirmed
+findings** — the matcher is substring-based, so a whitespace reflow in a target is indistinguishable
+from a real edit. Confirm before acting.
+

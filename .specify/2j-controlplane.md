@@ -1724,3 +1724,19 @@ citation into this document — a defect this very amendment exists to stop repe
 > queued dispatch waits only for the current contiguous run, not for a whole handshake. It is a
 > statement that the **premise the number was derived under no longer holds and the number was never
 > re-derived.** Re-measure before citing it.
+
+### Cross-reference — Appendix D drop-in blocks (added 2026-08-29)
+
+This document's `Before`/`After` drop-in blocks describe **sibling** documents and are not re-checked
+by anything. Classify them rather than trusting them; no state is recorded here, because a recorded
+state rots:
+
+```bash
+python3 tools/check_dropin_blocks.py --self-test
+python3 tools/check_dropin_blocks.py --suspect
+```
+
+`APPLIED` + prose calling the stale half *"current"*, and `NEITHER` (target in a **third** state), are
+the two combinations that are defects on their own. Both are **leads** — the matcher is
+substring-based; confirm against the target and the shipped header.
+
