@@ -24,8 +24,13 @@ jobs:
         run: |
           # Files that belong in the Antreprenoriat research repo, never here.
           FORBIDDEN=$(git diff --name-only ${{ github.event.before || 'HEAD~1' }} HEAD 2>/dev/null || git ls-files)
+          # brain/ is a CONSULTANT bundle: pointers and rationale only. Gate-round
+          # transcripts, waiver narrative and triage belong in the private parent
+          # repo. This is a FILENAME guard, and filenames are all a path regex can
+          # see -- it CANNOT detect deliberation content inside a legitimately
+          # named page. Stated so the pass is not read as coverage it does not have.
           MATCHES=$(echo "$FORBIDDEN" | grep -E \
-            '^research/|^decisions/|^book/|.*-decisions\.md$|^opus_plan\.md$|^SYNTHESIS\.md$' \
+            '^research/|^decisions/|^book/|.*-decisions\.md$|^opus_plan\.md$|^SYNTHESIS\.md$|^brain/.*(gate-?[ab]|gateb|waiver|triage|round-?[0-9]|review|convergence|verdict|finding)' \
             || true)
           if [ -n "$MATCHES" ]; then
             echo "::error::Research/decision content detected in fixpp. These files must stay in the Antreprenoriat repo:"
