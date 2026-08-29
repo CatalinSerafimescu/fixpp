@@ -1,6 +1,6 @@
 # Design Doc 2f — Awaitable Mutex `fixpp::sync::async_mutex`
 
-> **Status:** Draft v0.1 — pre-Gate A
+> **Status:** Draft v0.1 — pre-Gate A  ⛔ **SUPERSEDED — ARCHIVED v0.1. DO NOT DESIGN FROM THIS FILE.** Read `.specify/2f-async-mutex.md` (v1.6 (errata E-1…E-5)) instead. `opus_2f_async-mutex_adversarial_review.md` closed with **"needs full rewrite / structural rethink"**; this file is the archived v0.1, reset 1/2. Marked 2026-08-29: the successor pointed here, but nothing here pointed forward, so a reader opening this file directly had no way to learn it holds a **rejected** design.
 > **Date:** 2026-05-08
 > **Owner:** Opus (Phase 2 design author)
 > **Headers:** `fixpp::sync::async_mutex` (`include/fixpp/core/sync/async_mutex.hpp`); RAII guard `fixpp::sync::async_lock_guard` (same header); CI-side enforcement of `[const §XV.9]` (`tools/check_no_std_mutex_in_awaitable_headers.sh` — grep gate; clang-tidy custom check is the post-v1 path per §10 Q3).

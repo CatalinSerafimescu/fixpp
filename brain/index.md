@@ -60,6 +60,26 @@ component (what is it / how is it built / why / what breaks). Both were careful 
 **Rigor inside the chosen set does not compensate for an incomplete set.** A component page is the
 complete set.
 
+## ⛔ Two files in `.specify/` hold designs that were REJECTED
+
+`2c-codegen.draft-r1.md` (959 lines) and `2f-async-mutex.draft-r1.md` (1,166 lines) are archived
+**v0.1** drafts. Each was replaced after an adversarial review closed with *"needs full rewrite /
+structural rethink"* — so it is not a stale document, it is **the design that was killed**, at full
+length, in the same directory as its replacement.
+
+Until 2026-08-29 **the pointer ran only one way**: each successor said *"v0.1 archived as
+`…draft-r1.md`"*, and neither draft said anything. A reader who opened a draft directly saw
+*"Status: Draft v0.1 — Pre-Gate-A"*, which reads as **early**, not as **rejected**. Both now carry a
+forward-pointing banner.
+
+> **The general rule this is an instance of: a supersession pointer must run FORWARD.** A successor
+> naming its predecessor helps nobody who started at the predecessor — and starting at the wrong file
+> is the whole failure mode. Compare `async_mutex.hpp`'s *"Erratum E-5 (048)"*, which points forward
+> from the superseded thing and is why that supersession was found unaided.
+
+⚠️ `2f-async-mutex.phase4-tests.md` is **not** in this class — it is a live Phase-4 input artifact,
+cited by `constitution.md`.
+
 ## ⚠️ A Phase-2 design doc's Status header does NOT tell you whether it shipped
 
 Most `.specify/2*.md` headers read *"Draft vN — Gate A round N converged"* whether or not features
