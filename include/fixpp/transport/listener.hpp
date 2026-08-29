@@ -8,8 +8,8 @@
 // (`async_accept`), well under the [const §XIV.2] ≤ 5 cap.
 //
 // `cancel()` is NOT a pure-virtual on the abstract base. The engine-scoped
-// Listener-cancel behaviour is published as a service row in
-// [2h §6.4.1]:1124; the FR-025 3-action contract binds as a CONCRETE-IMPL
+// Listener-cancel behaviour is published as the `async_accept` row of the
+// [2h §6.4.1] cancellation table; the FR-025 3-action contract binds as a CONCRETE-IMPL
 // method on `asio_listener` (see src/transport/asio_listener.hpp). This
 // preserves the [const §XIV.2] count and the inherited surface from
 // [2h §4.6] verbatim — Gate A round 1 RC#1 (Codex P1-2) close per Opus

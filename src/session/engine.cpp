@@ -731,7 +731,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // to the session strand. Auto-satisfied because:
         //   - The loop runs on *entry.session_strand (T010 — co_spawn on strand).
         //   - asio_listener was constructed with `exec` = co_await this_coro::executor
-        //     = the session strand (run_accept_loop:433).
+        //     = the session strand (read at the top of run_accept_loop).
         //   - async_accept() creates accepted_socket{exec_} = session strand.
         //   - make_accepted() adopts accepted_socket.get_executor() = session strand.
         // This assert fires if any site regresses to bare exec_ (R8 silent lynchpin).

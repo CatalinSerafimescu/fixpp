@@ -294,9 +294,7 @@ auto listener_cfg = tx::asio_listener::Config{
 // Throwing-on-failure constructor is permitted at engine bootstrap per
 // [arch §5.3] carve-out (contracts/listener.hpp:109-111).
 auto listener = std::make_unique<tx::asio_listener>(
-    /* exec */ service_strand_exec,   // SERVICE strand per [2h §6.4.1]
-                                       // engine-scoped row — DISTINCT from
-                                       // per-session strands.
+    /* exec */ acceptor_exec,         // caller's choice; the accepted socket is built on it
     listener_cfg);
 ```
 

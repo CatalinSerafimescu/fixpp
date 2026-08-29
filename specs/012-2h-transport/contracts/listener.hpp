@@ -14,7 +14,7 @@
 // asio_listener::cancel() Option-A contract per Clarifications 2026-05-27 Q4=A
 // — async-coroutine-natural ownership semantics (concrete-impl-only API per
 // spec FR-023 + FR-025; the engine-scoped Listener-cancel surface is
-// published at [2h §6.4.1]:1124):
+// published in the [2h §6.4.1] cancellation table):
 //   (1) Close the listening socket so no new TCP connections complete.
 //   (2) Complete any in-flight async_accept awaitable not yet resumed with
 //       transport_accept_cancelled per [2h §6.6]:1191.
@@ -55,8 +55,8 @@ namespace fixpp::transport {
 //
 // NOTE on cancel(): the design doc DOES NOT publish cancel() as a pure-virtual
 // on the abstract Listener base. The engine-scoped Listener-cancel behaviour
-// is published as a service row in [2h §6.4.1]:1124 (Listener-owned cancel is
-// engine-scoped). The FR-025 3-action contract binds as a CONCRETE-IMPL method
+// is published as the `async_accept` row of the [2h §6.4.1] cancellation
+// table (Listener-owned cancel is engine-scoped). The FR-025 3-action contract binds as a CONCRETE-IMPL method
 // on `asio_listener` (below) and on any third-party Listener impl that chooses
 // to expose one. This preserves the [const §XIV.2] count and the inherited
 // surface from [2h §4.6] verbatim — Gate A round 1 RC#1 (Codex P1-2) close
@@ -119,8 +119,8 @@ public:
     [[nodiscard]] asio::awaitable<core::expected_t<std::unique_ptr<Transport>>>
         async_accept() override;
 
-    // Concrete-impl-only API per spec FR-023 / FR-025 + [2h §6.4.1]:1124
-    // engine-scoped row. NOT `override` — the abstract Listener base does NOT
+    // Concrete-impl-only API per spec FR-023 / FR-025 + the [2h §6.4.1]
+    // engine-scoped cancel row. NOT `override` — the abstract Listener base does NOT
     // publish cancel(). Honours the 3-action contract per the class-level
     // Option-A note above.
     [[nodiscard]] core::expected_t<void> cancel() noexcept;

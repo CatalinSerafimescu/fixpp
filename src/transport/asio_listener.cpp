@@ -6,7 +6,7 @@
 //
 // Design anchors:
 //   [2h §4.6]      — Listener abstract surface (1 pure-virtual).
-//   [2h §6.4.1]   — engine service-strand row (Listener-owned cancel scope).
+//   [2h §6.4.1]   — see the anchor list in asio_listener.hpp.
 //   [2h §6.6]:1191 — transport_accept_cancelled error mapping.
 //   [2a §4.2]     — trap_throw envelope for engine-bootstrap throws.
 //   data-model E-10 — concrete asio_listener field set.
@@ -120,7 +120,7 @@ asio_listener::asio_listener(asio::any_io_executor exec, Config cfg)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// async_accept — listener accept loop body (per [2h §6.4.1] service strand).
+// async_accept — listener accept loop body.
 //
 // One call → one accept → one fresh Transport. The caller (engine session
 // bootstrap) typically wraps in its own per-counterparty co_spawn loop.
@@ -151,10 +151,6 @@ asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::asy
         co_return std::unexpected{E::transport_accept_cancelled};
     }
 
-    // Bind the accepted socket to the listener's service executor. The
-    // session bootstrap can rebind to the per-session strand via
-    // socket.release() + assign() if it wants; v1.0 keeps the socket on
-    // exec_ which is the [2h §6.4.1] service strand.
     asio::error_code accept_ec;
     asio::ip::tcp::socket accepted_socket{exec_};
     co_await acceptor_.async_accept(accepted_socket,
