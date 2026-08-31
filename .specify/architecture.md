@@ -1,6 +1,6 @@
 # fixpp Architecture
 
-> **Status:** v0.3 — user-signed-off v0.2 (2026-05-10, Phase 2 Gate A round 1 converged 2026-05-07, 2 P1 / 3 P2 resolved; see `decisions/architecture.md`) + a v0.2→v0.3 targeted `[const §XX]` amendment to §2.4 (2026-05-15, RC#3: the dictionary↔wire bridge-surface carve-out; applied at 003-dictionary-codegen re-`/plan`, pending the fresh Codex Gate A review + user sign-off per Article XX §2).
+> **Status:** v0.3 — user-signed-off v0.2 (2026-05-10, Phase 2 Gate A round 1 converged 2026-05-07, 2 P1 / 3 P2 resolved; see `decisions/architecture.md`) + a v0.2→v0.3 targeted `[const §XX]` amendment to §2.4 (2026-05-15, RC#3: the dictionary↔wire bridge-surface carve-out; applied at 003-dictionary-codegen re-`/plan`, pending the fresh Codex Gate A review + user sign-off per Article XX §2). ⚠️ **v0.3 dates from 2026-05-15 and this file has drifted since. Read [Appendix Z](#appendix-z--drift-found-against-the-shipped-tree-2026-08-31) at the END before trusting any section — it lists what the shipped tree contradicts, and what it deliberately does NOT claim. Markers `Z-1`..`Z-5` appear inline at the affected rows.**
 > **Authority:** Module layering, public namespaces, design patterns. This document operationalises the rules set by `constitution.md`. On conflict, the constitution wins (Article XX); architectural choices that cannot satisfy a constitutional rule trigger an amendment, never a silent override.
 > **Citation form:** other documents cite sections as `[arch §N.m]` (e.g., `[arch §3.2]`). This document cites the constitution as `[const §VIII.3]` and SYNTHESIS as `[SYN §3.1 Q5]`.
 > **Scope rule:** this document fixes the *spine*. Per-subsystem detail (decimal type, parser internals, dictionary codegen, threading contract, store API, awaitable mutex, TLS interfaces, transport interface, C ABI message representation, control-plane interface, observability surface, session-tap API, SWIG binding shape) lives in the sibling design docs `2a`–`2m` listed in §10. Anything *more specific than module-level* in this file is intentionally provisional and may be tightened in those docs.
@@ -153,7 +153,7 @@ The build enforces this graph at the include level via `include-what-you-use` co
 | `fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2`, `fixpp::vt11` (FIXT.1.1) | Generated typed messages, version-namespaced `[SYN §3.3 Q12]` | `dictionary` (codegen output) | One `Messages.hpp` per version. |
 | `fixpp::wire` | Parser, writer, offset table, validator, framer | `wire` | Low-level; most users go through typed messages. |
 | `fixpp::transport` | `Transport` interface, `asio_tls_transport`, `Endpoint`, reconnect policy types | `transport` | |
-| `fixpp::tls` | `cert_source`, `Pinset`, `CipherPolicy`, `SecurityProfile` enum | `tls` | |
+| `fixpp::tls` | `cert_source`, `Pinset`, `CipherPolicy`, `SecurityProfile` enum | `tls` | ⚠️ **Z-1: `SecurityProfile` is TWO live types in two namespaces — this row routes to only one.** |
 | `fixpp::session` | `Session`, `Application`, `MessageStore`, `MemoryStore`, `FileStore`, `SessionConfig` | `session` | |
 | `fixpp::log` | `Logger`, `Sink`, `Level`, `Record`, `LogConfig` | `log` | |
 | `fixpp::otel` | `TracerProvider`, `MeterProvider`, span helpers, exporter setup | `otel` | |
@@ -682,9 +682,9 @@ Each doc must:
 | 1 | Eager vs lazy offset table — measurement spike to confirm Instrument-heavy footprint | **2b** | DECIDED hybrid `[SYN §3.1 Q1]`; spike pending |
 | 2 | Coroutine HALO firing on inbound dispatch path across our compiler matrix | **2d**, **2f** | Verify by spike `[SYN §3.2 Q6]` |
 | 3 | QuickFIX-compat shim for synchronous `MessageStore` impls — feasible or document as known incompatibility | **2e** | CLOSED — Path B verdict per `[2e §4.8.A]`; v1.0 ships documented incompatibility + migration recipe + `quickfix_compat::cfg_loader` config-translation surface (no runtime adapter). Disposition applied by `008-message-store` Phase-4 Gate A convergence (2026-05-20) per FR-039. |
-| 4 | `quill` vs own async logger — adopt or build | **2k** | Bench-driven `[SYN §3.8]` |
-| 5 | ControlPlane interface shape — full surface to lock in 2j (SVC-005 row) | **2j** | Phase 2 |
-| 6 | TestRequestThreshold / SendingTimeThreshold defaults | session-module spec (Phase 4) | DEFERRED `[SYN §3.2 Q10]` |
+| 4 | `quill` vs own async logger — adopt or build | **2k** | Bench-driven `[SYN §3.8]` ⚠️ **Z-2: settled in the build — see Appendix Z** |
+| 5 | ControlPlane interface shape — full surface to lock in 2j (SVC-005 row) | **2j** | Phase 2 ⚠️ **Z-3: not locked; the module is empty — see Appendix Z** |
+| 6 | TestRequestThreshold / SendingTimeThreshold defaults | session-module spec (Phase 4) | DEFERRED `[SYN §3.2 Q10]` ⚠️ **Z-4: shipped — see Appendix Z** |
 | 7 | Add catalogue row `NFR-015 — pluggable Clock interface` to `feature-catalogue.md` | **2d** (along with threading contract decisions) | DONE — added in `feature-catalogue.md` by 2d v0.4 sign-off (2026-05-08); coverage-index entry links `[2d §4.1]` and `[arch §1.1]` to NFR-015. |
 
 The remaining `SYNTHESIS §3` items are decided shape-wise at `[const]` and are now operational design tasks owned by 2a–2m; they are not architectural questions.
@@ -764,3 +764,78 @@ The remaining `SYNTHESIS §3` items are decided shape-wise at `[const]` and are 
 | FIX-Latest application | `[FIX-Latest §...]` new MsgTypes A-035..A-065 | **Out of v1.0 scope**; v1.2 per `[const §XVIII.2]`; tracked in `coverage-index.md` Post-1.0 Gap Registry |
 
 Architectural decisions whose primary driver is engineering judgment rather than a specific spec section (the executor model, the ≤5-pure-virtual rule, the C-ABI legal isolation, the strand-stored trace context, the async-mutex discipline) cite `[const §X.y]` and `[SYN §3.x Q#]` inline at point of use; they are not spec normatives and are intentionally omitted from this appendix.
+
+
+---
+
+## Appendix Z — drift found against the shipped tree (2026-08-31)
+
+> **Why this is an appendix and not an edit in place.** This file is cited **by line number** from
+> dozens of other documents, headers and spec bundles. Inserting anything above this point silently
+> re-points every one of those citations at the wrong line — a defect I caused once already and had to
+> repair across 144 citations. So: markers above are **same-line-count replacements**, and everything
+> new lands here, at the end, where it shifts nothing.
+>
+> ⚠️ **Each entry is a CONDITION plus a re-derivation recipe, not a restated value.** A doc that
+> corrects a stale claim by writing a fresh claim just re-arms the trap for the next reader. Verify
+> against source; cite the source, not this appendix.
+
+### Z-1 — `SecurityProfile` is two distinct live types, and §4's table routes to only one
+
+`fixpp::tls::SecurityProfile` is an **`enum class`**; `fixpp::session::SecurityProfile` is a
+**`struct`** with a nested `enum class kind` carrying an additional member. Both are live and both are
+used heavily. §4's namespace inventory lists only the TLS one, so a reader routed by this file lands
+on the TLS enum even when the config-facing struct is what they want.
+
+> ⭐ **The difference in member sets is a deliberate type-level guarantee, not drift.** The extra
+> member means *no TLS context exists at all*; keeping it out of the TLS enum makes "plaintext
+> carrying a TLS profile" **unrepresentable**. Do not "align" the two enumerations. The mapping seam
+> short-circuits plaintext before the TLS enum is reached, and records the near-miss in a comment at
+> that spot.
+>
+> **Re-derive:** `grep -rn "SecurityProfile" include/fixpp/tls/ include/fixpp/session/` for the two
+> declarations, then read the mapping seam — `grep -rn "is_insecure_plain_tcp" src/session/`.
+
+### Z-2 — §11 row 4 (`quill` vs own logger) is answered in the build, and a drop-in for it was never applied
+
+The row still reads *"Bench-driven"*. Two things have happened since:
+
+1. **`2k-log-otel.md` §D.2 proposes a drop-in** flipping this row's disposition to *"PROVISIONAL: own
+   impl"*. **It was never applied** — the row is byte-identical to that drop-in's own "Before" block.
+   ⚠️ The drop-in cites this file **by line number**, and that citation no longer resolves to the row
+   it names.
+2. The build has moved past *provisional*: the dependency is pulled only behind an explicit spike
+   option, with a comment stating in terms that a default build must not require it.
+
+**Re-derive:** `grep -n quill conanfile.py`, and read `2k-log-otel.md` §D.2 against this table's row 4.
+
+### Z-3 — §11 row 5 (ControlPlane shape) is dispositioned "Phase 2"; the module is a directory with a build file in it
+
+`src/service/` contains no implementation. The interface shape this row tracks was never locked, and
+the surrounding scope has been revisited more than once since. ⚠️ **The disposition of the service
+rows is a live decision that is not this file's to make** — do not read Z-3 as "dropped". It records
+only that the row's stated disposition does not describe the tree.
+
+**Re-derive:** `ls src/service/`.
+
+### Z-4 — §11 row 6 (TestRequestThreshold / SendingTimeThreshold) says DEFERRED; both shipped
+
+Both are fields on the session configuration type, with a comment naming the feature that owns their
+values, and both are reachable as configuration-file keys.
+
+**Re-derive:** `grep -rn "test_request_threshold" include/fixpp/session/ src/config/`.
+
+### Z-5 — the header's own status line has been "pending sign-off" since 2026-05-15
+
+The Status block records a v0.2→v0.3 amendment as *"pending the fresh Codex Gate A review + user
+sign-off per Article XX §2"*. That sentence has not changed since it was written. It is either true
+and the review is long overdue, or it is stale and the file's version history is wrong about itself.
+**Not adjudicated here** — it needs whoever owns the Gate A record, not a grep.
+
+### What this appendix deliberately does NOT claim
+
+§11 rows 1 and 2 (the eager/lazy offset-table spike, and the coroutine-HALO spike) are **not** listed
+above. The artefacts they would produce are measurement results, and this file is not where a
+measurement result would have been recorded — so a grep finding nothing is **blind, not negative**.
+Calling them stale on that evidence would manufacture exactly the false claim this appendix exists to
+flag.
