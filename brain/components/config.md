@@ -34,7 +34,13 @@ codegraph_entry: [toml_config_loader, config_bundle, load_diagnostic]
 Two jobs, not one:
 
 1. **Scalars** — map keys onto configuration fields, with types and diagnostics.
-2. **Selection** — resolve a *name in a file* to a *plugin implementation*, via a resolver registry.
+2. **Selection** — resolve a *name in a file* to a *plugin implementation*.
+
+⚠️ **Corrected 2026-08-31: this is NOT a registry.** `selector_resolver.cpp` and `logger_resolver.cpp`
+are straight-line `if (kind == "memory") … else if (kind == "file") …` chains that construct the
+concrete factory directly. Calling it a registry implies a registration point that does not exist —
+and would send someone looking for the wrong thing. Found by the blind agent that *had* this bundle
+and checked the claim against source anyway, which is the bundle working as intended.
 
 Job 2 is the interesting half and is where most of the code is. It is what makes a config file able to
 choose a store, a logger or a transport without the host writing C++.

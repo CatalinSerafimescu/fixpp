@@ -839,3 +839,34 @@ above. The artefacts they would produce are measurement results, and this file i
 measurement result would have been recorded — so a grep finding nothing is **blind, not negative**.
 Calling them stale on that evidence would manufacture exactly the false claim this appendix exists to
 flag.
+### Z-6 — §4.2 lists `DialectOverlay` as shipped public surface; the type has no definition
+
+`SessionConfig` carries a `std::shared_ptr<const fixpp::dict::DialectOverlay>` field and a forward
+declaration, and the tests name the feature *deferred*. **No definition exists** in `include/` or
+`src/`. A `shared_ptr` to an incomplete type is legal, so this compiles — the public config surface
+advertises a capability that cannot be constructed.
+
+⚠️ **Do not repeat the sharper-sounding claim that it has "zero hits"** — it has several. The precise
+statement is *declared and referenced, never defined*. **Re-derive:**
+`grep -rn "class DialectOverlay {\|struct DialectOverlay {" include/ src/` — empty means still undefined.
+
+### Z-7 — §4.9 / §6 describe a tap subsystem that is not implemented
+
+`RingBufferTap`, `Iox2Tap`, `SyncCallbackTap`, `TapConfig` and the drop-oldest backpressure design are
+described here as surface. `src/tap/` contains only a `CMakeLists.txt`; `include/fixpp/tap/` is a
+field-less stub whose own comment defers the work to `2l`.
+
+**Re-derive:** `ls src/tap/` and `grep -rn "RingBufferTap\|Iox2Tap\|SyncCallbackTap" include/ src/`.
+
+### Z-8 — §6 justifies "six" `Application` methods; the header has seven
+
+The justification paragraph predates `onCreate`, added by a later feature. The count in the argument
+is stale even though the argument itself still holds. **Re-derive:**
+`grep -c "^\s*virtual" include/fixpp/session/application.hpp` (includes the destructor).
+
+### Provenance of Z-6..Z-8
+
+All three were found by **blind agents** during the A4 measurement, not by review — two by the arm
+that had this bundle, one by the arm that did not. ⭐ The control arm finding Z-8 is worth keeping in
+mind: **a reader with no bundle still catches things, and an appendix that only ever grows from
+in-house review will drift toward what the house already believes.**

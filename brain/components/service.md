@@ -40,8 +40,16 @@ default impls*, not these interface headers.
 ## The one architectural rule that is already live
 
 `[arch §8]`: the `fixppd` daemon and any default plugin implementations consume the engine **only
-through the C ABI**, never through engine-internal headers. `tools/check_layers.py` encodes it —
-`service` may include `capi` and its own interface headers, nothing else.
+through the C ABI**, never through engine-internal headers.
+
+⚠️ **Corrected 2026-08-31 — that rule is DECLARED, not currently enforced.** `check_layers.py` has a
+`service` row in its table, but it is an **`#include` lint over `src/` and `bindings/`**, and
+`src/service/` contains no sources for it to scan. Two consequences: it enforces nothing here today,
+and — being include-based — it could **never** catch a *target* that links both `fixpp::capi` and the
+C++ umbrella. That is a link-graph property, and nothing checks it.
+
+Found by a blind agent with **no access to this bundle**, during the A4 measurement. The page
+previously said the tool "encodes it", which is literally true and practically misleading.
 
 So whenever the service is built, it is a **C-ABI consumer like any other**, not a privileged insider.
 That is the same licence-seam reasoning as [`c-api.md`](./c-api.md).
