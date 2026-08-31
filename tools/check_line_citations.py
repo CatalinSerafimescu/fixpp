@@ -87,7 +87,11 @@ RE_C = re.compile(r"\(:\d+")
 # hides 26 targets, every one of them a `.specify/` design doc, which is exactly
 # the surface this mode exists to protect.
 RE_TARGET = re.compile(
-    r"(?<![\w/.-])([A-Za-z0-9_.][A-Za-z0-9_/.-]*\.(?:hpp|cpp|ipp|hh|hxx|cc|h|md)):(\d+)"
+    # `[0-9]`, NOT `\d`: Python's `\d` matches Unicode decimal digits, the ERE
+    # prefilter's `[0-9]` does not, and `int()` accepts them -- so `doc.md:١٢`
+    # would be decided by a matcher the prefilter had already dropped. A decider
+    # that out-matches its own prefilter is a silent drop.
+    r"(?<![\w/.-])([A-Za-z0-9_.][A-Za-z0-9_/.-]*\.(?:hpp|cpp|ipp|hh|hxx|cc|h|md)):([0-9]+)"
 )
 
 # `@@ -a[,b] +c[,d] @@`. git OMITS the count when it is 1, which is the common
@@ -477,6 +481,26 @@ def hunk_shifts(old_start, old_count, new_count, old_total):
     return old_count != new_count
 
 
+def mapped_base_line(hunks, n):
+    """Which BASE line does head line `n` come from? None if `n` is inside a hunk.
+
+    Content equality is not enough to say a citation still means what it meant.
+    Insert a line above two byte-identical `}` lines and head line 10 still reads
+    `}` -- but it is the OTHER brace; the one the author cited is now line 11.
+    Check [2] compares content and sees no change, and check [1] does not look at
+    source files at all, so the citation repoints in silence. This is the only
+    thing that catches it.
+    """
+    delta = 0
+    for a, b, c, d in hunks:
+        if d > 0 and c <= n <= c + d - 1:
+            return None           # inside changed content; the content check owns it
+        new_end = c + d - 1 if d > 0 else c
+        if new_end < n:
+            delta += d - b
+    return n - delta
+
+
 def resolve_cited(target, universe, by_base):
     """resolve(), plus the PARENT-REPO spelling of a path inside this submodule.
 
@@ -622,8 +646,14 @@ def shift_audit(root, spec, json_out=None):
             cites += index.get(old_path, [])
         n_amb = amb_targets.get(new_path, 0)
 
-        # ── [1] line-shift, for cited `.md` documents ────────────────────────
-        if new_path.endswith(".md") and (cites or n_amb) and st[0] not in ("A", "D"):
+        # ── [1] line-shift, for EVERY changed `.md` ──────────────────────────
+        # Not "every .md that a form-A citation resolves to". Gating on that made
+        # the check unable to cover the very case it is here for: a document cited
+        # only as `see the rule at line 18` names no file, so it resolves to
+        # nothing, gets bucketed "cited by NOTHING", and its shift goes unreported
+        # -- while the header claims form B is exactly what check [1] covers. The
+        # append-at-the-end discipline is document-wide, so the check is too.
+        if new_path.endswith(".md") and st[0] not in ("A", "D"):
             old = blob_lines(root, base, old_path, blobs)
             if old is None:
                 raise SystemExit(
@@ -632,7 +662,19 @@ def shift_audit(root, spec, json_out=None):
                     "measurement that failed.")
             md_targets_checked.append(new_path)
             amb_lines = [r["n"] for r in ambiguous if new_path in r["cands"]]
-            for a, b, _c, d in hunks_for(root, base, head, new_path):
+            md_hunks = hunks_for(root, base, head, new_path)
+            # C. A modified file that yields NO parsed hunk is a failed
+            # measurement, not a shift-free edit: `git diff -U0` prints "Binary
+            # files ... differ" with no `@@` line for anything git calls binary
+            # (a `binary` attribute, or a NUL byte), and this loop would then
+            # declare it clean having compared nothing.
+            if not md_hunks:
+                raise SystemExit(
+                    f"check-line-citations: {new_path} is status {st} in {spec} but "
+                    "`git diff -U0` yielded NO hunk header -- git is treating it as "
+                    "binary. Refusing to call it shift-free from a measurement that "
+                    "compared nothing.")
+            for a, b, _c, d in md_hunks:
                 if hunk_shifts(a, b, d, len(old)):
                     # Only citations AT OR BELOW the hunk actually move. This is
                     # a triage aid, NOT a filter: it counts the citations that
@@ -647,8 +689,8 @@ def shift_audit(root, spec, json_out=None):
                         "cited_by": len(cites), "cited_ambiguously_by": n_amb,
                         "resolved_citations_below": below,
                         "ambiguous_citations_below": sum(1 for n in amb_lines if n >= a)})
-        elif new_path.endswith(".md") and not cites and not n_amb:
-            skipped_non_target.append(new_path)
+            if not cites and not n_amb:
+                skipped_non_target.append(new_path)
 
         if not cites:
             continue
@@ -678,6 +720,7 @@ def shift_audit(root, spec, json_out=None):
                                f"OF RANGE ({len(new)} lines)",
                         before=None, after=None))
             continue
+        cite_hunks = hunks_for(root, base, head, new_path)
         for r in cites:
             n = r["n"]
             b_ok, a_ok = 1 <= n <= len(old), 1 <= n <= len(new)
@@ -694,6 +737,19 @@ def shift_audit(root, spec, json_out=None):
             elif before != after:
                 content_findings.append(dict(r, why="cited line CONTENT CHANGED",
                                              before=before, after=after))
+            else:
+                # Byte-identical, which is NOT the same as unmoved. If head line n
+                # came from a different base line, the citation now lands on a
+                # coincidental twin -- duplicate `}`, `#endif`, or a blank line --
+                # and the content check cannot see it. Applies to SOURCE files
+                # too, which check [1] deliberately does not cover.
+                m = mapped_base_line(cite_hunks, n)
+                if m is not None and m != n:
+                    content_findings.append(dict(
+                        r, why=f"SILENTLY REPOINTED: head line {n} was line {m} "
+                               "before; the content matches only by coincidence",
+                        before=old[m - 1] if 1 <= m <= len(old) else None,
+                        after=after))
 
     # ── report ───────────────────────────────────────────────────────────────
     print("── #336 shift audit " + "─" * 54)
@@ -1112,7 +1168,8 @@ def shift_self_test():
         open(os.path.join(d, "other", "twin.md"), "w").write("decoy\n")
         open(os.path.join(d, "src", "amb.cpp"), "w").write("// cited: twin.md:9\n")
         _sh_commit(d, "add an ambiguously-cited doc")
-        open(twin, "w").write("PREPENDED\n" + open(twin).read())
+        _prev = open(twin).read()
+        open(twin, "w").write("PREPENDED\n" + _prev)
         _sh_commit(d, "prepend to the ambiguously-cited doc")
         code, j = _sh_audit(d)
         checks.append(("ambiguously-cited .md is still shift-checked",
@@ -1170,6 +1227,48 @@ def shift_self_test():
                            r.returncode != 0
                            and "no new line-number citations" not in blob))
 
+        # 8f. Codex P1-1: a document cited ONLY by form B. `see the rule at line
+        #     18` names no file, so nothing resolves to doc2.md -- yet form B is
+        #     the reason check [1] exists, and the motivating incident was written
+        #     in it. Gating check [1] on a resolvable form-A citation made the
+        #     check blind to its own justification.
+        d2 = os.path.join(d, "doc2.md")
+        open(d2, "w").write("\n".join(f"D{i:02d}" for i in range(1, 21)) + "\n")
+        open(os.path.join(d, "src", "formb.cpp"), "w").write(
+            "// the rule is described at line 18 of the design doc\n")
+        _sh_commit(d, "add a form-B-only cited doc")
+        # Read BEFORE opening for write: `open(x,"w").write(... + open(x).read())`
+        # truncates x first, so the read returns "" and the fixture silently tests
+        # a whole-file replacement instead of the insertion it claims to test.
+        _prev = open(d2).read()
+        open(d2, "w").write("PRE\n" * 5 + _prev)
+        _sh_commit(d, "insert at the top of the form-B-only doc")
+        code, j = _sh_audit(d)
+        checks.append(("form-B-only doc IS shift-checked (not 'cited by NOTHING')",
+                       "doc2.md" in j["md_checked"]))
+        checks.append(("form-B-only doc's shift is REPORTED",
+                       code == 1 and any(f["file"] == "doc2.md" for f in j["shift"])))
+
+        # 8g. Codex P1-2: a SOURCE citation that repoints while the content stays
+        #     byte-identical. Two identical `}` lines; inserting one line above
+        #     makes head line 10 read `}` exactly as base line 10 did -- but it is
+        #     base line 9's brace. Check [1] does not cover .cpp and check [2]'s
+        #     content comparison sees nothing, so only the line map catches it.
+        tc = os.path.join(d, "src", "target.cpp")
+        open(tc, "w").write("\n".join(["A"] * 8 + ["}", "}"]) + "\n")
+        open(os.path.join(d, "src", "twincite.cpp"), "w").write(
+            "// the closing brace is at target.cpp:10\n")
+        _sh_commit(d, "add a target with two identical braces")
+        _prev = open(tc).read()
+        open(tc, "w").write("int f() {\n" + _prev)
+        _sh_commit(d, "insert a line above the identical braces")
+        code, j = _sh_audit(d)
+        rp = [c for c in j["content"] if "SILENTLY REPOINTED" in c["why"]]
+        checks.append(("byte-identical repoint in a SOURCE file is caught",
+                       code == 1 and len(rp) == 1 and rp[0]["n"] == 10))
+        checks.append(("...and it names the base line it actually came from",
+                       bool(rp) and "was line 9" in rp[0]["why"]))
+
         checks += prefilter_recall_check(d)
 
         # 8. A .md that nothing cites must be SKIPPED and said to be skipped --
@@ -1181,20 +1280,26 @@ def shift_self_test():
                        code == 0 and j["md_skipped_non_target"] == ["other.md"]))
 
         # 9/10. A failed or empty measurement must RAISE, never report clean.
-        for label, spec in (("an invalid range raises", "not-a-ref..HEAD"),
-                            ("an EMPTY --shift-audit value raises rather than "
-                             "falling through to the ADDITION gate", ""),
-                            ("an EMPTY range raises rather than reporting clean",
-                             "HEAD..HEAD"),
-                            ("a single rev (no `..`) is refused, not guessed",
-                             "HEAD")):
+        # Each case asserts WHICH diagnostic fired, not merely that something did.
+        # "any SystemExit" would be satisfied by the wrong one -- swallow a bad
+        # revision into an empty range and the later "ZERO changed files" guard
+        # still raises, so the revision bug reads as correctly handled.
+        for label, spec, want in (
+                ("an invalid range raises, naming the failed git call",
+                 "not-a-ref..HEAD", "rev-parse"),
+                ("an EMPTY --shift-audit value raises rather than falling "
+                 "through to the ADDITION gate", "", "wants a RANGE"),
+                ("an EMPTY range raises rather than reporting clean",
+                 "HEAD..HEAD", "ZERO changed files"),
+                ("a single rev (no `..`) is refused, not guessed",
+                 "HEAD", "wants a RANGE")):
             try:
                 buf = io.StringIO()
                 with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
                     shift_audit(d, spec, None)
                 ok = False
-            except SystemExit:
-                ok = True
+            except SystemExit as e:
+                ok = want in str(e)
             checks.append((label, ok))
 
     for label, ok in checks:
