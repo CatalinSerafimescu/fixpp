@@ -137,7 +137,7 @@ struct Script {
 // Strand-confined state (read_cursor_, outbound_seen_, closed_, handshaken_):
 // all reads/writes happen on `exec_`'s strand (consumer's responsibility to
 // run the methods on that strand; the tests use co_spawn on `exec_`).
-// `cancel()` is the only off-strand path and is idempotent.
+// `cancel()` off-strand-safe in THIS MOCK only (atomic body), NOT per contract — #333.
 // ─────────────────────────────────────────────────────────────────────────────
 class mock_transport final : public TlsTransport {
 public:
