@@ -7,7 +7,7 @@ refs:
   - include/fixpp/session/reconnect_fsm.hpp
   - include/fixpp/session/session.hpp
   - spec/behaviors-and-limitations.md
-codegraph_entry: [run_heartbeat_cadence, run_inbound_liveness_watch, drive_reconnect_attempt, ReconnectFsm]
+codegraph_entry: [run_liveness_loop, drive_reconnect_attempt, drive_reconnect, ReconnectFsm]
 constitution: ["§XI.2"]
 ---
 
