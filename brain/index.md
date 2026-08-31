@@ -42,9 +42,16 @@ maintained — this page exists because agents did not find them, not because th
 | Whether a limitation is **still open** | the same file — **resolved rows are moved out** to `spec/behaviors-and-limitations-closed.md`. Reading the live file alone gives you only open ones. | grepping `L-0NN-` repo-wide, which hits both |
 | Governing rules, citable as `[const §N.M]` | `.specify/constitution.md` | anywhere else |
 | **Why** something is the way it is, and what was rejected | **`components/` in this bundle**, then the decision records it names | a single design doc — see below |
-| **How the system is put together** — module layering, the dependency graph, public namespaces, per-module public surface, the plugin pattern, build layout, the service boundary, the glossary | **`.specify/architecture.md`** — the **spine**, cited as `[arch §N.m]` by 21 documents. ⚠️ **Same Status-header trap as the `2*.md` docs below, and it has at least one queued amendment that was never applied** (`2k` §D.3). Verify before citing | reconstructing it from the `2*` design docs, which own *subsystem* detail and explicitly do **not** own the spine |
+| **How the system is put together** — module layering, the dependency graph, public namespaces, per-module public surface, the plugin pattern, build layout, the service boundary, the glossary | **`.specify/architecture.md`** — the **spine**, cited as `[arch §N.m]` by 21 documents. ⚠️ **Read its `Appendix Z` FIRST** — it lists what the shipped tree contradicts, with inline `Z-1`..`Z-5` markers. Same Status-header trap as the `2*.md` docs below, and it has a queued amendment that was never applied (`2k` **§D.2**, not §D.3). Verify before citing | reconstructing it from the `2*` design docs, which own *subsystem* detail and explicitly do **not** own the spine |
 | **Which design doc owns a subsystem** | `[arch §10]`'s hand-off table — a closed 13-row list, `2a`–`2m` | guessing from filenames |
 | **The FIX session engine** — establishment, FSM, sequence numbers, resend, logout | ⭐ [`components/session.md`](./components/session.md). **`[arch §10]` has NO session row and no `2*` doc owns it**, so authority is split across headers, `specs/<id>/` bundles and B&L | any single design doc — there isn't one |
+| **The error taxonomy** — one C++ enum, a coarser C ABI, and why an old consumer sees `UNKNOWN` | [`components/errors.md`](./components/errors.md) | the enum alone, which does not show the downgrade |
+| **The C ABI** — the licence seam, why GA is `1.5.0`, and what the ABI gate does **not** prove | [`components/c-api.md`](./components/c-api.md) | assuming a green ABI gate means ABI-compatible |
+| **Logging / OpenTelemetry** | [`components/observability.md`](./components/observability.md) — ⚠️ trace *context* is plumbed; **spans have no engine call site** | "OTel shipped", which is true and misleading at once |
+| **Python bindings** | [`components/python-api.md`](./components/python-api.md) | widening the SWIG surface without widening e2e coverage |
+| **Configuration** — TOML loading and name→plugin resolution | [`components/config.md`](./components/config.md) | assuming a new plugin is reachable once the class exists |
+| **QuickFIX compatibility** | [`components/quickfix-compat.md`](./components/quickfix-compat.md) — translation, **not** emulation; the adapter was rejected | planning a runtime shim |
+| **The service wrapper** | [`components/service.md`](./components/service.md) — a stub **by decision**; `src/` has no implementation | treating the empty module as a gap to fill |
 | What is left to do for v1.0 | `../REMAINING-WORK.md` (parent) | this bundle |
 | History — what we used to believe | `history.md` (deliberately off this path) | — |
 
@@ -160,6 +167,14 @@ meant.
 > stale silently, and it goes stale in the one place people come to *find out what is stale*. What does
 > **not** rot is **why** a decision was taken and **what was rejected** — that half is historical and
 > is the entire reason this bundle exists.
+
+### ⭐ The local idiom: pin a decision with a `static_assert`, not a comment
+
+Seen in at least three unrelated places — a frozen error-code range, the trace-context size, and a
+compile-time guard that a QuickFIX-shaped synchronous store cannot bind to the awaitable
+`MessageStore` (*"the BUILD IS THE TEST"*). **A comment saying "do not do X" is a claim nobody
+re-checks; a `static_assert` is the same claim checked on every build.** Reach for it when a decision
+must not be undone by accident.
 
 ## Where evidence lives, and why you may not be able to open it
 
