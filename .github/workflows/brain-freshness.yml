@@ -14,6 +14,24 @@ on:
   push:
     branches: [main]
 
+  # E5a — a scheduled run from a CLEAN checkout, independent of any commit.
+  #
+  # ⚠️ Narrow, and worth being honest about why. `check_brain.py gate` walks the
+  # WHOLE bundle on every PR and every push to main, so there is no incremental
+  # state here for a rebuild to back up -- the "forced clean rebuild" framing does
+  # not apply to the refs tier the way it would to a cached index.
+  #
+  # What this DOES catch is drift with no commit behind it: a runner-image or
+  # Python change that breaks the instrument, and a bundle left un-exercised
+  # because no PR happened to touch the repo for a while. A gate that has not run
+  # in six weeks is not known-good, it is unobserved.
+  #
+  # The EXTERNAL tier is not covered here and cannot be -- see the parent repo's
+  # brain-external-freshness.yml, which is where the un-backstopped half lives.
+  schedule:
+    - cron: "17 6 * * 1"   # Mondays 06:17 UTC; offset off the hour to dodge the spike
+  workflow_dispatch:
+
 permissions:
   contents: read
 
