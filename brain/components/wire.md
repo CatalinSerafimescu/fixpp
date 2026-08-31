@@ -33,8 +33,12 @@ constitution: ["§VIII.5"]
 now had **no page**. Re-derive that standing with `python3 tools/brain_inventory.py --census`; the
 number above is a snapshot and will rot, the *rank* is the durable part.
 
-It cites exactly one design doc, **`2b-wire.md`**, which is `Draft v0.2 — Gate A round 1 converged`
-and **scanned clean** in the Step-R sweep (zero borrowed-claim markers, zero drop-in blocks).
+It cites exactly one design doc, **`2b-wire.md`**, which is `Draft v0.2 — Gate A round 1 converged`.
+It was **clean when the Step-R sweep ran** — no borrowed-claim markers, no drop-in blocks.
+⚠️ **That is a measurement of a moving document, not a property of it.** A count stated here goes stale
+silently, in the one place people come to find out what is stale. **Re-derive:** grep the doc for
+`verbatim` / `normative` / `quoted` (the borrowed-claim tell) and run
+`python3 tools/check_dropin_blocks.py`.
 
 ## ⭐ The scope boundary — the most useful thing here
 

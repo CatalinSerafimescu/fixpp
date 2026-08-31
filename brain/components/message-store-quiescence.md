@@ -47,6 +47,10 @@ the literal reading of *"callers must drain the mutex before destroying the stor
   awaited, never detached.
 - `Engine::stop()` **joins** every role loop (tracked by `outstanding_counter_`) **before** the step
   that clears the registry and thereby destroys the sessions and their stores.
+  ⚠️ **This ordering is a RESULT, and it is the load-bearing one on this page** — the whole "no drain
+  needed" argument collapses if the join ever moves after the clear, and nothing in this bundle would
+  notice. **Re-derive before relying on it:** read `Engine::stop()` in `src/session/engine.cpp` and
+  check that the `outstanding_counter_` wait precedes the registry clear.
 - With no store `co_await` in flight, the mutex has no holder and no waiters, so the destructor
   precondition holds **by construction** rather than by a call.
 
