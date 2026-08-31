@@ -317,8 +317,12 @@ public:
     [[nodiscard]] core::expected_t<void> cancel() noexcept override {
         // Mock cancel is a no-op signal — actual cancellation is driven by the
         // awaiter's cancellation_signal at the test layer (the tests use
-        // bind_cancellation_slot on co_spawn and emit on the signal). Per the
-        // Transport contract cancel() is documented synchronous + thread-safe.
+        // bind_cancellation_slot on co_spawn and emit on the signal).
+        // ⚠️ This cited "the Transport contract cancel() is documented
+        // synchronous + thread-safe" until 2026-08-31 (#333); that contract
+        // sentence has been corrected — cancel() is strand-confined. THIS
+        // mock's own off-strand safety is unaffected and self-supporting: the
+        // body only fetch_add's an atomic.
         cancels_observed_.fetch_add(1, std::memory_order_relaxed);
         return {};
     }

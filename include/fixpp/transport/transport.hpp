@@ -135,10 +135,33 @@ public:
         std::span<const std::byte> bytes [[clang::lifetimebound]]) = 0;
 
     // (4) Cancel any in-flight async_connect / async_read_some / async_write /
-    //     async_handshake. Synchronous; thread-safe (ASIO cancellation_signal
-    //     is thread-safe); idempotent on already-cancelled / never-issued ops.
-    //     Returns expected_t<void> for symmetry (only documented failure:
-    //     transport_already_closed when called after close()).
+    //     async_handshake. Synchronous; idempotent on already-cancelled /
+    //     never-issued ops. Returns expected_t<void> for symmetry (only
+    //     documented failure: transport_already_closed after close()).
+    //
+    //     ⚠️ CALL IT ON THE SESSION STRAND. This read "thread-safe (ASIO
+    //     cancellation_signal is thread-safe)" until 2026-08-31 (#333). Both
+    //     halves were wrong, in two different ways:
+    //
+    //       - MECHANISM MISNAMED. Every shipped impl cancels via
+    //         socket_.cancel(ec) (asio_plain_transport.cpp /
+    //         asio_tls_transport.cpp); none emits an asio::cancellation_signal
+    //         from cancel(). The stated reason named a mechanism that no
+    //         implementation of this method uses.
+    //
+    //       - GUARANTEE DOES NOT EXIST. asio's basic_stream_socket and
+    //         basic_socket_acceptor @par Thread Safety blocks both say
+    //         "Shared objects: Unsafe" and carve out only specific SYNCHRONOUS
+    //         operations (send/receive/connect/shutdown; accept) — cancel is
+    //         not among them. And asio/cancellation_signal.hpp carries no
+    //         @par Thread Safety block at all, so the cited guarantee is one
+    //         asio never makes.
+    //
+    //     NO off-strand caller is claimed to exist: this corrects the
+    //     documented contract, it does not report a live race.
+    //     Re-derive: read @par Thread Safety in asio/basic_stream_socket.hpp,
+    //     and grep asio/cancellation_signal.hpp for "Thread Safety" (expect
+    //     zero hits).
     //
     //     cancel() does NOT close the socket — the FSM may retry a cancelled
     //     connect/read/write. cancel() is the synchronous half of the

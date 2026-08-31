@@ -1642,9 +1642,9 @@ grep -n "co_spawn" src/session/engine.cpp              # which executor each rol
 grep -rn "make_session_executor" src/                  # where the session_executor wrapper is bound
 ```
 
-**Scope of what was checked, stated so it is not read as wider than it is.** Two questions were
-verified against source on 2026-08-29; everything else in this document is **UNVERIFIED, not
-verified-clean**:
+**Scope of what was checked, stated so it is not read as wider than it is.** Questions 1-2 were
+verified against source on 2026-08-29 and question 3 on 2026-08-31; everything else in this document
+is **UNVERIFIED, not verified-clean**:
 
 1. **Does the accept loop still hit the engine-fallback `current_trace_context`?** *Yes* — but for a
    different reason than §7.8 gives. The engine spawns role loops on a bare
@@ -1657,9 +1657,39 @@ verified-clean**:
    trace-correlation design is shipped, not vacuous; the accept loop simply runs *before* that
    adoption on the same strand.
 
-The `clock_scope = engine` claims for listener-accept records (§7.9 / §6.7) were **not** re-verified
-and inherit the same falsified premise. Re-derive before relying on them.
+3. **Do the `clock_scope = engine` claims for listener-accept records hold?** *Re-verified
+   2026-08-31 — this item was carried as unverified above and is now closed.* Two corrections and a
+   finding.
 
-**Not amended here, deliberately:** `[const §XIII.3]` carries the same parenthetical. It is
-illustrative inside a `thread_local` prohibition whose rule is unaffected, and amending the
-constitution requires its own Gate A pass — so it is escalated, not silently edited.
+   **Where they are.** §7.9 (the engine-scope record list) and **§11** (the 2k hand-off, twice: the
+   NFR-015 drop-in and the `clock_scope` drop-in). An earlier revision of this note cited them as
+   "§7.9 / §6.7"; §6.7 is the error-variant section and carries no such claim.
+
+   **Nothing here is falsified by observation, because `clock_scope` is unimplemented.**
+   `git grep -n clock_scope -- src include tests` returns nothing, and `log::Record` carries an
+   `effective_clock.now()` timestamp with no scope field (`include/fixpp/log/record.hpp`). 2k owns
+   the schema and has not landed, so there is no shipped behaviour to be wrong.
+
+   **What IS falsified is the classifier these sites use to reach `engine`** — the same "outside any
+   session strand" premise as §7.8. Unlike §7.8, here the premise is load-bearing rather than
+   illustrative: listener accept is now attributable to a *registered session*, whose `SessionConfig`
+   may carry a `clock_override`. Classifying its records `engine` would read `EngineConfig::clock`
+   while every other record on that same strand reads the session's mock — **reintroducing exactly
+   the conformance-corpus mismatch §7.9 exists to close (§10 Q5)**.
+
+   **No corrected classification is written here**, for the usual reason plus one specific to this
+   site: the choice belongs to 2k, against a schema that does not exist yet: a value written now
+   would be a decision taken on 2k's behalf by a document that cannot implement it. The durable part
+   is the condition:
+
+   > *the `engine`/`session` split is stated over "which strand" but is load-bearing over "which
+   > clock". Any path that runs on a session strand and can reach a `clock_override` breaks that
+   > equivalence. Settle it when the schema lands, deriving membership from the spawn site — not
+   > from the role list in §7.9.*
+
+**`[const §XIII.3]` — escalated 2026-08-29, actioned the same day; recorded here 2026-08-31 so
+this note does not read as an open thread it no longer is.** The constitution carries the same
+parenthetical, illustrative inside a `thread_local` prohibition whose rule is unaffected. It now
+carries an **inline non-normative editorial note** that ages the illustration, states the rule is
+untouched, and points back here. The illustration itself is still **not** rewritten: that is a
+normative edit needing its own Gate A pass.

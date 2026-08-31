@@ -317,11 +317,16 @@ void asio_plain_transport::apply_socket_options_() noexcept {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// cancel — synchronous, thread-safe, idempotent (FR-005)
+// cancel — synchronous, strand-confined, idempotent (FR-005; #333)
 // ─────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] core::expected_t<void> asio_plain_transport::cancel() noexcept {
-    // socket_.cancel() is thread-safe per ASIO docs — the only operation safe
-    // to call off-strand. Does NOT close the socket (FR-005).
+    // Does NOT close the socket (FR-005). ⚠️ This read "socket_.cancel() is
+    // thread-safe per ASIO docs — the only operation safe to call off-strand"
+    // until 2026-08-31 (#333). asio's basic_stream_socket @par Thread Safety
+    // block says "Shared objects: Unsafe" and carves out only specific
+    // SYNCHRONOUS operations (send/receive/connect/shutdown) — cancel is not
+    // among them.
+    // Call on the session strand. See Transport::cancel() for the disposition.
     asio::error_code ec;
     socket_.cancel(ec);
     return {};

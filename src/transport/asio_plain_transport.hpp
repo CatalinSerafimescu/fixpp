@@ -48,8 +48,8 @@ namespace fixpp::transport {
 //
 // Thread-safety: all async methods and the strand-confined flags
 // (read_in_flight_, write_in_flight_) are confined to the session strand
-// provided at construction. cancel() is the ONLY method that may be called
-// off-strand; it calls socket_.cancel() which is ASIO-documented thread-safe.
+// provided at construction. ⚠️ cancel() was documented off-strand-safe here;
+// struck 2026-08-31 (#333) — see Transport::cancel(). Treat as strand-confined.
 // ─────────────────────────────────────────────────────────────────────────────
 class asio_plain_transport final : public Transport {
 public:
@@ -121,7 +121,8 @@ public:
         std::span<const std::byte> bytes [[clang::lifetimebound]]) override;
 
     // (4) Cancel in-flight operations. socket_.cancel(); does NOT close.
-    //     Thread-safe per ASIO docs.
+    //     Strand-confined — asio withholds its thread-safety carve-out from
+    //     cancel (#333; see Transport::cancel() for the vendored-header cite).
     [[nodiscard]] core::expected_t<void> cancel() noexcept override;
 
     // (5) Close: socket_.close() directly. NO TLS bidi shutdown, NO

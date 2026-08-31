@@ -26,9 +26,9 @@
 //     Implementation note: `read_in_flight_` / `write_in_flight_` are
 //     strand-confined booleans (NOT atomics) — all Transport coroutines run
 //     on `exec_`'s strand per [2d §4.8], so unlocked reads are safe.
-//     `cancel()` is synchronous and thread-safe; it only modifies the
-//     `cancel_signal_` (whose emission is thread-safe per ASIO docs) and
-//     does NOT touch the flags or state.
+//     `cancel()` is synchronous and does NOT touch the flags or state.
+//     ⚠️ Its "only modifies `cancel_signal_`" claim was struck 2026-08-31
+//     (#333) — no such member exists. See the Thread-safety model note below.
 //
 //   FR-026  PINSET CAPTURE CACHING CONTRACT
 //     `cfg.pinset->snapshot()` is captured ONCE at `async_handshake` start
@@ -96,8 +96,8 @@ namespace fixpp::transport {
 // Thread-safety model:
 //   All async methods and the strand-confined flags (read_in_flight_,
 //   write_in_flight_) are confined to the session strand provided at
-//   construction. cancel() is the ONLY method that may be called off-strand;
-//   it emits cancel_signal_ which is thread-safe per ASIO.
+//   construction. ⚠️ cancel() was documented off-strand-safe via a
+//   `cancel_signal_` that does not exist; struck 2026-08-31 (#333).
 // ─────────────────────────────────────────────────────────────────────────────
 class asio_tls_transport final : public TlsTransport {
 public:
@@ -319,8 +319,11 @@ private:
     // ── In-flight exclusivity flags (strand-confined — NOT atomics) ─────────
     //
     // These booleans are read and written exclusively from coroutines running
-    // on exec_'s strand. cancel() is the only off-strand writer and it does
-    // NOT touch these flags — it only fires cancel_signal_.
+    // on exec_'s strand. cancel() does NOT touch these flags. ⚠️ This read
+    // "cancel() is the only off-strand writer … it only fires cancel_signal_"
+    // until 2026-08-31 (#333): there is no cancel_signal_ member, and cancel()
+    // is not documented off-strand-safe. The flags stay strand-confined either
+    // way — that part of the note was never load-bearing on cancel().
     bool read_in_flight_{false};
     bool write_in_flight_{false};
 
@@ -333,9 +336,12 @@ private:
 
     // ── Cancellation ────────────────────────────────────────────────────────
     //
-    // cancel() propagates via asio::ip::tcp::socket::cancel(ec) — which is
-    // thread-safe and triggers operation_aborted on every in-flight read /
-    // write / connect / handshake bound to socket_. Each public coroutine
+    // cancel() propagates via asio::ip::tcp::socket::cancel(ec), which
+    // triggers operation_aborted on every in-flight read / write / connect /
+    // handshake bound to socket_. ⚠️ "which is thread-safe" was struck
+    // 2026-08-31 (#333): asio's basic_stream_socket @par Thread Safety block
+    // says "Shared objects: Unsafe" and carves out only specific SYNCHRONOUS
+    // operations (send/receive/connect/shutdown) — cancel is not among them. Each public coroutine
     // also calls reset_cancellation_state(enable_total_cancellation()) at
     // entry (D-17), allowing FSM-emitted cancellation_type::total to fire
     // through the awaiter's native slot. No per-transport cancellation_signal

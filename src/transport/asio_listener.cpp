@@ -224,7 +224,14 @@ asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::asy
 // ─────────────────────────────────────────────────────────────────────────────
 // cancel — Option-A 3-action contract per FR-025.
 //
-// Synchronous; thread-safe. Idempotent on already-closed acceptors.
+// Synchronous; strand-confined. Idempotent on already-closed acceptors.
+// ⚠️ Read "Synchronous; thread-safe" until 2026-08-31 (#333). asio's
+// basic_socket_acceptor @par Thread Safety block says "Shared objects: Unsafe",
+// carves out only SYNCHRONOUS accept, and names close explicitly as NOT thread
+// safe — and close() is exactly what this method calls. No production caller of
+// Listener::cancel() exists (unfiltered sweep of src include tests, 2026-08-31;
+// the only callers are in tests/), so this is a contract correction, not a
+// race report.
 //   (1) `acceptor_.close()` — closing the OS handle. Subsequent client
 //       connects receive TCP RST or ECONNREFUSED.
 //   (2) `acceptor_.cancel()` is implied by close() per ASIO docs (cancels

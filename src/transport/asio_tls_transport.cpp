@@ -1299,13 +1299,17 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// cancel — synchronous, thread-safe, idempotent (FR-005)
+// cancel — synchronous, strand-confined, idempotent (FR-005; #333)
 // ─────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] core::expected_t<void> asio_tls_transport::cancel() noexcept {
-    // Cancel the socket directly. asio::ip::tcp::socket::cancel() is
-    // documented thread-safe and triggers operation_aborted on every in-flight
-    // read / write / connect / handshake bound to socket_. The error_code
-    // overload prevents any throw from escaping this noexcept method.
+    // Cancel the socket directly: triggers operation_aborted on every
+    // in-flight read / write / connect / handshake bound to socket_. The
+    // error_code overload prevents any throw from escaping this noexcept
+    // method. ⚠️ "is documented thread-safe" was struck 2026-08-31 (#333) —
+    // asio's basic_stream_socket @par Thread Safety block says "Shared
+    // objects: Unsafe" and does not carve out cancel. Call on the session
+    // strand. Note this method emits no cancellation_signal, contrary to the
+    // three class-header comments corrected in the same pass.
     // MUST NOT close the socket (FR-005) — close() is a separate API.
     asio::error_code ec;
     socket_.cancel(ec);
