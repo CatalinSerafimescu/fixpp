@@ -764,9 +764,14 @@ def shift_audit(root, spec, json_out=None):
     print(f"  form B/C lines tree-wide, INVISIBLE    : {form_bc}   "
           "(name no file; check [1] is their only cover)")
     n_non_md = sum(1 for _st, _o, n in rows if not n.endswith(".md"))
-    print(f"[1] .md citation targets shift-checked   : {len(md_targets_checked)}")
-    print(f"    .md changed but cited by NOTHING     : {len(skipped_non_target)}"
-          "   [not checked]")
+    print(f"[1] .md files shift-checked              : {len(md_targets_checked)}"
+          "   [EVERY changed .md]")
+    print(f"    of which nothing RESOLVABLE cites    : {len(skipped_non_target)}"
+          "   [still checked -- form B")
+    print("                                             names no file, so absence "
+          "of a form-A citation")
+    print("                                             is not absence of a "
+          "citation]")
     print(f"    non-.md changed files                : {n_non_md}   [check [1] "
           "does not apply: the append-at-the-end")
     print("                                             discipline is a DOCUMENT "
@@ -820,7 +825,7 @@ def shift_audit(root, spec, json_out=None):
             json.dump({"base": base, "head": head, "shift": shift_findings,
                        "content": content_findings, "ambiguous": ambiguous,
                        "md_checked": md_targets_checked,
-                       "md_skipped_non_target": skipped_non_target,
+                       "md_checked_but_no_resolvable_citation": skipped_non_target,
                        "form_bc_tree_wide": form_bc}, f, indent=1)
         print(f"audit table -> {json_out}")
 
@@ -1276,8 +1281,8 @@ def shift_self_test():
         open(os.path.join(d, "other.md"), "a").write("more\n")
         _sh_commit(d, "edit an uncited doc")
         code, j = _sh_audit(d)
-        checks.append(("uncited .md: clean AND declared skipped",
-                       code == 0 and j["md_skipped_non_target"] == ["other.md"]))
+        checks.append(("uncited .md: clean, and declared as having no resolvable citer",
+                       code == 0 and j["md_checked_but_no_resolvable_citation"] == ["other.md"]))
 
         # 9/10. A failed or empty measurement must RAISE, never report clean.
         # Each case asserts WHICH diagnostic fired, not merely that something did.
