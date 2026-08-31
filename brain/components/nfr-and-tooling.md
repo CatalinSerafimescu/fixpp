@@ -39,27 +39,56 @@ They constrain **every** subsystem and are owned by none, so a component page wo
 to describe. Their real homes are `.specify/constitution.md` (the rules), the CI workflows (the
 enforcement), and `bench/baselines/` (the perf gate).
 
-### ⚠️ Its Status column is unreliable — in an UNKNOWN direction
+### ⚠️ A `backlog` cell here is NOT evidence the capability is absent
 
-**Every `nfr` row reads `backlog`**, which the catalogue defines as *not started*. Yet the practice
-demonstrably ships: sanitizer legs run in CI, `bench/baselines/` exists, `.clang-tidy` exists, and the
-no-exceptions rule is constitutional.
+The catalogue defines `backlog` as *not started*. For this family that definition is not being
+honoured: rows sit at `backlog` while the practice they describe demonstrably ships — sanitizer legs
+run in CI, `bench/baselines/` exists, `.clang-tidy` exists, the no-exceptions rule is constitutional.
 
-Two readings, and **the repository does not say which is true**:
+**Adjudicated 2026-08-31 (user).** The question used to be open here in two readings — *stale status*
+versus *an NFR is continuous and so never flips*. It is closed in favour of **stale status**, on two
+independent grounds:
 
-1. **Stale** — the work landed and nobody flipped the rows.
-2. **Deliberate** — an NFR is *continuous* and never becomes `done`, so `backlog` is a parking value
-   rather than a claim.
+- The "never flips" reading is **refutable from the catalogue alone**: it predicts that no `nfr` row
+  can ever read `done`. Run the recipe below and look for one.
+- An out-of-repo planning tracker names a set of these rows as *delivered practice, never flipped*,
+  and schedules the flip as a catalogue edit with **zero code**.
 
-> ⭐ **The uniformity is the evidence, and it points at (2).** All rows sit at the same value, whereas
-> `dictionary` is mixed — and mixed status is what per-row tracking looks like. But uniformity is
-> suggestive, **not decisive**, and these rows are discharged nowhere else either — not in
-> `spec/coverage-index.md`, not in the constitution.
->
-> **So the honest statement is that the column means something undocumented here.** Do not cite an
-> `nfr` row's status as evidence of anything in either direction until someone writes the convention
-> down. ⚠️ Note this cuts *against* the intuitive read: the rows most likely to look like a damning
-> backlog are the ones most likely to be a bookkeeping convention.
+So the correct handling is not "distrust this column in an unknown direction" — it is:
+
+> ⭐ **A `backlog` cell in this family is a lead, not a fact. Verify against the tree before
+> concluding anything is missing, and never cite the cell as evidence of absence.** The rows most
+> likely to look like a damning backlog are the ones most likely to be merely unflipped. The
+> converse is not symmetric: a `done` cell went through the catalogue's own closure bar.
+
+⚠️ **This is a property of the STATUS COLUMN, not of the `nfr` family.** `dictionary` carries the
+same defect — see [`dictionary.md`](dictionary.md). Do not read "nfr is unreliable, the others are
+fine".
+
+**Recipe — derive the family's status breakdown yourself** (resolve columns *by name*; they have been
+off-by-one here before):
+
+```bash
+python3 - <<'EOF'
+import collections
+lines = open('spec/feature-catalogue.md', encoding='utf-8').read().split('\n')
+i, hdr = next((i, [c.strip() for c in l.strip().strip('|').split('|')])
+              for i, l in enumerate(lines)
+              if l.strip().startswith('|') and 'Status' in l and 'Category' in l)
+ci, si = hdr.index('Category'), hdr.index('Status')
+cnt = collections.Counter()
+for l in lines[i + 2:]:
+    if not l.strip().startswith('|'):
+        continue
+    c = [x.strip() for x in l.strip().strip('|').split('|')]
+    if len(c) >= len(hdr):
+        cnt[(c[ci], c[si])] += 1
+for k in sorted(cnt):
+    print(k, cnt[k])
+EOF
+```
+
+`tools/brain_inventory.py --census` prints the same breakdown per family.
 
 ## `tooling` — genuinely future work
 

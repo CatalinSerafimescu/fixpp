@@ -57,6 +57,15 @@ contains the thing:
 > flattened all three into "the catalogue is stale" would be manufacturing exactly the false claim this
 > bundle exists to prevent.
 
+> **Adjudicated 2026-08-31 (user), for the COLUMN not for these rows.** The same question was open
+> on `nfr` and is now closed: a `backlog` cell in this catalogue can be **merely unflipped**, not
+> unbuilt. See [`nfr-and-tooling.md`](nfr-and-tooling.md) for the reasoning and the derivation recipe.
+> An out-of-repo planning tracker additionally names **D-001, D-003 and D-008** in its
+> *delivered-practice-never-flipped* set. ⚠️ **That is a lead and nothing more.** It is planning
+> material, not a source of truth, and this page's own probe for D-003/D-008 was *blind* rather than
+> negative — so the two rows above stay **not concluded**. Resolve them by reading the configure-time
+> codegen output, not by believing either document.
+
 **This needs per-row adjudication against source, not a bulk verdict.** See the sibling note on `nfr`
 in [`nfr-and-tooling`](./nfr-and-tooling.md), where the same status column is unreliable for a
 different and possibly legitimate reason.

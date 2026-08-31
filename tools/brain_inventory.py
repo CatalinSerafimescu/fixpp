@@ -131,8 +131,9 @@ def run(root, gaps_only=False):
         return 2
 
     print("== COMPONENTS  (catalogue family -> bundles -> cited design docs -> brain page)")
-    print("%-16s %6s  %-26s %-16s %s" % ("family", "rows", "cited design docs",
-                                         "bundles", "named by (NOT proof of coverage)"))
+    print("%-16s %6s  %-18s %-24s %-14s %s" % ("family", "rows", "status",
+                                               "cited design docs", "bundles",
+                                               "named by (NOT proof of coverage)"))
     ngap = 0
     for name in sorted(fam, key=lambda k: -fam[k]["rows"]):
         d = fam[name]
@@ -142,9 +143,15 @@ def run(root, gaps_only=False):
         ngap += gap
         if gaps_only and not (gap or not dd):
             continue
-        print("%-16s %6d  %-26s %-16s %s%s" % (
-            name, d["rows"], ",".join(dd) or "-- NONE --", len(d["bundles"]),
-            ",".join(pg) or "-- none --", "   <<< GAP" if gap else ""))
+        # The status breakdown is PRINTED, not just collected. It was collected and
+        # discarded once, and a hand-read of the table then put "every nfr row reads
+        # backlog" into a brain page -- false, and invisible because the instrument was
+        # silent on the only axis that could contradict it.
+        st = ",".join("%s=%d" % kv for kv in sorted(d["status"].items()))
+        print("%-16s %6d  %-18s %-24s %-14s %s%s" % (
+            name, d["rows"], st or "-- none --", ",".join(dd) or "-- NONE --",
+            len(d["bundles"]), ",".join(pg) or "-- none --",
+            "   <<< GAP" if gap else ""))
 
     print("\n== FLOWS  (derived from long-lived coroutines; a new one appears here unedited)")
     for n in sorted(fl):
@@ -153,6 +160,8 @@ def run(root, gaps_only=False):
 
     print("\nA family with no cited design doc AND no page is where a component page must "
           "carry the load alone -- that is the deliverable, not an error.")
+    print("⚠️  'backlog' in the status column can mean UNFLIPPED, not unbuilt -- it is a lead, "
+          "never evidence of absence. See brain/components/nfr-and-tooling.md.")
     print("⚠️  'named by' is MENTION, not coverage: a flow listed among a page's participants "
           "scores the same as one the page explains. Read the page before believing the row.")
     return 0
