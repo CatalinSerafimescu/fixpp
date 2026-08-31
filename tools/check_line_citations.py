@@ -299,7 +299,12 @@ def added_lines(root, args):
     cmd = ["diff", "-U0"]
     if args.staged:
         cmd.append("--cached")
-    if args.range:
+    if args.range is not None:
+        if not args.range.strip():
+            raise SystemExit(
+                "check-line-citations: --range was given an EMPTY value. Without "
+                "it this would silently diff the working tree against the index "
+                "and report clean; refusing to gate the wrong thing.")
         cmd.append(args.range)
     diff = git(cmd + ["--"] + SCAN_DIRS, root, "diff")
     path = None
@@ -370,6 +375,18 @@ def gate(root, args):
 #       it meant. Precise where it applies; blind to form B and to ambiguous
 #       basenames, which is why [1] is not redundant with it.
 #
+# TWO KNOWN FALSE-POSITIVE DIRECTIONS, documented rather than fixed, because both
+# are rare under the "delete the number, do not renumber it" discipline and both
+# over-report (the lucky direction):
+#
+#   * check [2] scores citations found at `head` against content at `base`. A
+#     citation ADDED or renumbered INSIDE the range therefore reads as rotted:
+#     its line means something new because the citation is new, not because the
+#     target moved. `--staged` / `--range` already gate that direction.
+#   * `resolve_cited` strips a `library/` prefix. If a genuinely foreign path
+#     happens to have an in-tree twin under the stripped name, it resolves to the
+#     twin and check [2] compares against a file the citation never meant.
+#
 # WHAT A CLEAN RUN DOES NOT MEAN. Every report prints its own denominator, so a
 # zero here is readable as "no rot among the citations this mode could RESOLVE"
 # rather than "no rot". Ambiguous-basename citations are listed and deliberately
@@ -397,7 +414,13 @@ def range_endpoints(root, spec):
 
 def changed_in_range(root, base, head):
     """[(status, old_path, new_path)] -- M/A/D/R/C across the range."""
-    out = git(["diff", "--name-status", "-M", base, head], root, "diff --name-status")
+    # --no-renames on purpose (and explicitly, since diff.renames defaults ON).
+    # A rename handled as one row would need check [1] to diff a path that does
+    # not exist at `base`, yielding a whole-file "INSERTION after line 0" with an
+    # impossible line number. As D+A it is already correct: citations into the old
+    # name no longer resolve, which is exactly what rot means here.
+    out = git(["diff", "--name-status", "--no-renames", base, head],
+              root, "diff --name-status")
     rows = []
     for ln in out.splitlines():
         parts = ln.split("\t")
@@ -684,9 +707,14 @@ def shift_audit(root, spec, json_out=None):
     print(f"  ambiguous basename, NOT adjudicated    : {len(ambiguous)}")
     print(f"  form B/C lines tree-wide, INVISIBLE    : {form_bc}   "
           "(name no file; check [1] is their only cover)")
+    n_non_md = sum(1 for _st, _o, n in rows if not n.endswith(".md"))
     print(f"[1] .md citation targets shift-checked   : {len(md_targets_checked)}")
     print(f"    .md changed but cited by NOTHING     : {len(skipped_non_target)}"
           "   [not checked]")
+    print(f"    non-.md changed files                : {n_non_md}   [check [1] "
+          "does not apply: the append-at-the-end")
+    print("                                             discipline is a DOCUMENT "
+          "discipline, not a source one]")
     print()
 
     print(f"[1] LINE-SHIFT AUDIT -- {len(shift_findings)} shifting hunk(s)")
@@ -1109,6 +1137,38 @@ def shift_self_test():
                        code == 1 and any(c["n"] == 99 and "OUT OF RANGE" in c["why"]
                                          for c in j["content"])))
 
+        # 8d. A RENAMED cited target must not produce a whole-file "INSERTION
+        #     after line 0". Citations into the old name stop resolving, which is
+        #     rot; the new name is an add, which is not.
+        os.makedirs(os.path.join(d, "mv"), exist_ok=True)
+        open(os.path.join(d, "mv", "before.md"), "w").write(
+            "\n".join(f"R{i:02d}" for i in range(1, 13)) + "\n")
+        open(os.path.join(d, "src", "mvcite.cpp"), "w").write("// see mv/before.md:5\n")
+        _sh_commit(d, "add a renamable cited doc")
+        _sh_run(d, "mv", os.path.join(d, "mv", "before.md"),
+                os.path.join(d, "mv", "after.md"))
+        _sh_commit(d, "rename the cited doc")
+        code, j = _sh_audit(d)
+        checks.append(("rename: no impossible 'after line 0' shift finding",
+                       not any(f["old_start"] == 0 for f in j["shift"])))
+        checks.append(("rename: the citation into the OLD name is reported rotted",
+                       code == 1 and any("DELETED" in c["why"] for c in j["content"])))
+
+        # 8e. The dispatch in main() is its own failure surface: an empty range is
+        #     FALSY, so `if args.shift_audit:` fell through to gate(), which with
+        #     neither --staged nor --range diffs the working tree against the
+        #     index and prints "no new line-number citations ... OK". A clean
+        #     verdict FROM ANOTHER MODE. Pinned through the CLI, because calling
+        #     shift_audit() directly cannot see a dispatch bug.
+        for flag in ("--shift-audit", "--range"):
+            r = subprocess.run([sys.executable, os.path.abspath(__file__),
+                                flag, "", "--root", d],
+                               capture_output=True, text=True)
+            blob = r.stdout + r.stderr
+            checks.append((f"CLI: an empty {flag} value never reports clean",
+                           r.returncode != 0
+                           and "no new line-number citations" not in blob))
+
         checks += prefilter_recall_check(d)
 
         # 8. A .md that nothing cites must be SKIPPED and said to be skipped --
@@ -1121,6 +1181,8 @@ def shift_self_test():
 
         # 9/10. A failed or empty measurement must RAISE, never report clean.
         for label, spec in (("an invalid range raises", "not-a-ref..HEAD"),
+                            ("an EMPTY --shift-audit value raises rather than "
+                             "falling through to the ADDITION gate", ""),
                             ("an EMPTY range raises rather than reporting clean",
                              "HEAD..HEAD"),
                             ("a single rev (no `..`) is refused, not guessed",
@@ -1285,7 +1347,12 @@ def main():
     if args.census:
         census(root, args.json)
         return 0
-    if args.shift_audit:
+    # `is not None`, not truthiness: `--shift-audit ""` is falsy and would fall
+    # through to gate(), which with neither --staged nor --range diffs the working
+    # tree against the index and prints "no new line-number citations ... OK". A
+    # mistyped invocation would report clean FROM ANOTHER MODE. `--range ""` had
+    # the same shape and is fixed with it.
+    if args.shift_audit is not None:
         return shift_audit(root, args.shift_audit, args.json)
     return gate(root, args)
 
