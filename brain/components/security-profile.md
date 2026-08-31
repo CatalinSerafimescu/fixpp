@@ -32,15 +32,51 @@ default. It lives in **`fixpp::session`** (`include/fixpp/session/security_profi
 shipped set has **four** members: `mtls_ca`, `mtls_pinned`, `one_way_ca` (deprecated), and
 `insecure_plain_tcp` — no TLS at all, opt-in, appended by feature **043**.
 
-## ⚠️ `.specify/2g-tls.md` is a fossil, on two axes
+## ⚠️ `.specify/2g-tls.md` is a fossil on ONE axis — the verbatim constitutional quote
 
-**This is a sharper class than issue #334, and worth understanding as a pattern.**
+**This is a sharper class than issue #334, and worth understanding as a pattern.** ⚠️ It was written
+as *two* axes; the second did not survive re-derivation. The correction is kept in place below rather
+than quietly deleted, because how a fossil list over-reports is itself worth knowing.
 
 | Claim in `2g-tls.md` | Refuted by |
 |---|---|
-| *"**Lock the `fixpp::tls::SecurityProfile` enum** … `mtls_ca`, `mtls_pinned`, `one_way_ca [[deprecated]]`"* — three members, presented as locked | The shipped header carries a **fourth**, `insecure_plain_tcp`. `2g-tls.md` does not contain the string at all |
-| The namespace `fixpp::tls::SecurityProfile` | The shipped header declares `namespace fixpp::session` |
+| *"**Lock the `fixpp::tls::SecurityProfile` enum** … `mtls_ca`, `mtls_pinned`, `one_way_ca [[deprecated]]`"* — three members, presented as locked | ⚠️ **NOT a fossil — see the correction below.** This describes the TLS-layer enum accurately, and its three members are still three by design |
 | §XII.5 **quoted verbatim, "because the enum signature in §4.5 is normative"** | **Article XII §5 was amended** — constitution **v0.3, 2026-06-17**, Gate A folded into feature 043. The article now lists four profiles. The verbatim quote is a quote of a **superseded** article |
+
+### ⛔ CORRECTION 2026-08-31 — I had this wrong, and the wrong version was the dangerous one
+
+**Two of the rows above previously read that `2g-tls.md`'s enum had gained a fourth member and moved
+to `namespace fixpp::session`. Both were false.** Re-derived from the headers:
+
+| | `fixpp::tls::SecurityProfile` | `fixpp::session::SecurityProfile` |
+|---|---|---|
+| Shape | `enum class : uint8_t` | **`struct`**, with a nested `enum class kind` |
+| Members | `unset`, `mtls_ca`, `mtls_pinned`, `one_way_ca [[deprecated]]` | those four **plus `insecure_plain_tcp`** |
+| Role | the **TLS-layer** type, consumed by `SslCtxConfig` | the **config / user-facing** type, carried on `SessionConfig` |
+
+Both exist. Both are live. `2g-tls.md` was describing the first one, and about *that* one it is
+**correct** — its header even says it is re-emitted verbatim from `2g §4.5`. Feature 043 added
+`insecure_plain_tcp` to the **session struct's `kind`**, not to the TLS enum.
+
+> ⭐ **The missing member is a deliberate type-level guarantee, not an omission.** `insecure_plain_tcp`
+> means *there is no TLS context at all*. Keeping it out of the TLS enum makes "plaintext carrying a
+> TLS profile" **unrepresentable** rather than merely wrong. The mapping seam detects plaintext first
+> and short-circuits; only the remaining three kinds map onto the TLS enum. The near-miss is recorded
+> at the seam itself: *"insecure_plain_tcp MUST NOT fall through to the else→mtls_ca arm below — that
+> would silently build a TLS listener and reject every plain connection."*
+>
+> **So the earlier version of this page would have caused the defect it existed to prevent.** Someone
+> "fixing" the TLS enum to match a page claiming it should have four members destroys the guarantee.
+> Verify the seam in `src/session/engine.cpp` (search `is_insecure_plain_tcp`), not this table.
+
+**What survives unchanged:** the third row. The verbatim `[const §XII.5]` quote *is* a quote of a
+superseded article, and that is the finding this page is actually about.
+
+⚠️ **The lesson about this page, not about the code:** the false rows were a **correction that
+over-reached** — I found one real supersession (the constitution quote) and let it recruit two
+neighbouring claims that were never checked against the headers. A fossil list that over-reports is
+not the safe direction: it spends the reader's trust and, here, pointed at a "fix" that would have
+broken a working invariant.
 
 ### Why this class is worse than #334's
 
