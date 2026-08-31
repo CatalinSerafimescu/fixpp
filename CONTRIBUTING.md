@@ -108,7 +108,9 @@ python3 tools/check_line_citations.py --self-test       # prove the detector fir
 The gate above catches citations you ADD. It cannot catch an edit that
 INVALIDATES the ones already there — inserting a paragraph near the top of a
 line-cited document re-points every citation below it, and adds none. Before
-pushing a change that touches a `.md` other files cite:
+pushing a change that touches ANY `.md` — every changed one is checked, cited or
+not, because the commonest citation form (`see the rule at line 18`) names no
+file and so can never be traced back to the document it means:
 
 ```bash
 python3 tools/check_line_citations.py --shift-audit origin/main..HEAD
