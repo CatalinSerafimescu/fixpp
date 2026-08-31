@@ -105,6 +105,19 @@ python3 tools/check_line_citations.py --census          # candidates + out-of-ra
 python3 tools/check_line_citations.py --self-test       # prove the detector fires
 ```
 
+The gate above catches citations you ADD. It cannot catch an edit that
+INVALIDATES the ones already there — inserting a paragraph near the top of a
+line-cited document re-points every citation below it, and adds none. Before
+pushing a change that touches a `.md` other files cite:
+
+```bash
+python3 tools/check_line_citations.py --shift-audit origin/main..HEAD
+```
+
+The fix for a finding is to reshape the EDIT, not to renumber the citations:
+append narrative at the END of the file, and make every in-body edit an
+in-place, same-line-count replacement.
+
 ## Slow / manual hooks
 
 Some hooks are marked `stages: [manual]` because they are too slow for every

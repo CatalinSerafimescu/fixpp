@@ -133,10 +133,10 @@ documents rotting broke **28 accurate line citations into `.specify/2d-threading
 47-line note near the top. Caught only because the next document in the queue happened to cite the
 one just edited.
 
-> ⚠️ **`tools/check_line_citations.py` will NOT catch this.** Its gate is
-> `--staged` / `--range`: *fail if the diff **ADDS** a line-number citation*. An edit that
-> **INVALIDATES** existing citations adds none, so the gate passes. The instrument is aimed at growth,
-> not at rot — which is the opposite of what this case needs.
+> ✅ **`tools/check_line_citations.py --shift-audit A..B` now checks this** (issue #336). Its other
+> three modes cannot: they *fail a diff that **ADDS** a line-number citation*, and an edit that
+> **INVALIDATES** existing ones adds none. `--shift-audit` runs both checks below mechanically, and
+> reports its own denominator — a clean run means "no rot among the citations it could RESOLVE".
 
 **The check, which costs one command.** A pure line-shift audit — if every hunk is `NcN` (same count
 in, same count out) plus at most one append at the original last line, nothing moved:

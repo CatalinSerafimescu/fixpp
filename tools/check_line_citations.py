@@ -18,7 +18,7 @@
 #                             sweep, AND ambiguous about which file it means
 #   C  `(:64)`             -- bare self-citation, same blindness as B
 #
-# TWO MODES, and the distinction is the point:
+# THREE MODES, and the distinctions are the point:
 #
 #   --census  reports CANDIDATES with the cited line's ACTUAL content beside the
 #             claim, for a human to adjudicate. It does NOT emit a rot verdict:
@@ -30,6 +30,11 @@
 #             be noise; gating additions stops the bleeding without demanding a
 #             tree-wide migration first.
 #
+#   --shift-audit  the OPPOSITE direction (#336). The three modes above are all
+#             aimed at GROWTH, so an edit that INVALIDATES existing citations --
+#             which adds none -- passes all three. This one asks whether a range
+#             MOVED the lines other files already cite.
+#
 # THE FIX FOR A FLAGGED CITATION IS TO DELETE THE NUMBER, NOT TO CORRECT IT.
 # Re-pointing `session.cpp:1258` at `session.cpp:1265` re-arms the same defect
 # with a fresh half-life. Cite a function/struct name plus a short quoted phrase
@@ -38,6 +43,8 @@
 
 import argparse
 import collections
+import contextlib
+import io
 import json
 import os
 import re
@@ -67,6 +74,29 @@ RE_A = re.compile(
 RE_B = re.compile(r"~?\blines?\s+\d{2,}", re.IGNORECASE)
 # Form C.
 RE_C = re.compile(r"\(:\d+")
+
+# Form A's target pattern, WIDENED with `md` -- used ONLY by --shift-audit, to
+# decide which changed files are cited by line number. RE_A is deliberately left
+# alone: widening the ADDITION gate to `.md` would start failing every future
+# spec commit that writes a `constitution.md:456`-style ref, of which the tree
+# already holds hundreds. Rot-detection and addition-gating want different
+# populations, so they get different patterns rather than one compromise.
+# The leading `.` is not cosmetic: RE_A's first-character class excludes it, so
+# `.specify/2j-controlplane.md:902` matches NOTHING -- not at the dot (wrong
+# class) and not one character in (the lookbehind rejects it). That silently
+# hides 26 targets, every one of them a `.specify/` design doc, which is exactly
+# the surface this mode exists to protect.
+RE_TARGET = re.compile(
+    r"(?<![\w/.-])([A-Za-z0-9_.][A-Za-z0-9_/.-]*\.(?:hpp|cpp|ipp|hh|hxx|cc|h|md)):(\d+)"
+)
+
+# `@@ -a[,b] +c[,d] @@`. git OMITS the count when it is 1, which is the common
+# single-line-replacement shape -- defaulting a missing count to 1 is where the
+# off-by-one in a shift predicate hides.
+RE_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+# Citations cannot live in these, and they are binary.
+CITE_SCAN_SKIP = ("tests/fuzz/corpus/", "tests/abi/baseline/")
 
 # A `#line` preprocessor directive is not a citation -- form B's {2,}-digit
 # pattern matches its line number.
@@ -297,6 +327,424 @@ def gate(root, args):
     return 1
 
 
+# ── --shift-audit: the ROT direction ─────────────────────────────────────────
+#
+# Issue #336. The three modes above are all aimed at GROWTH -- they fail a diff
+# that ADDS a line-number citation. An edit that INVALIDATES existing citations
+# adds none, so all three pass clean. Insert a paragraph near the top of a
+# document that is cited by line number and every citation into it below the
+# insertion point silently re-points at the wrong content: no diff hunk anywhere
+# near the citing files, no error, no warning.
+#
+# That is not hypothetical. Commit 9e0b332d inserted a 47-line note ~12 lines
+# from the top of `.specify/2d-threading.md`, a file cited by line number from
+# more than a dozen others; 4afaed04 restored them by making every amendment
+# line-shift-free. The citation gate ran and passed throughout.
+#
+# TWO CHECKS, and they see different things:
+#
+#   [1] LINE-SHIFT  -- did a changed document move its own line numbers? Needs
+#       no citation to resolve, so it is the ONLY check that can cover form B
+#       (`at line 448`, which names no file and is unattributable by any tool).
+#       The motivating citation was form B, so this check carries that case
+#       alone. Scoped to `.md` citation targets: the append-at-the-end / edit-
+#       in-place discipline is a DOCUMENT discipline, and applying it to source
+#       would demand every code edit preserve its line count.
+#
+#   [2] CITED-LINE CONTENT -- for each resolvable `file:NNN` citation into a
+#       changed file, is the content of line NNN the same before and after? A
+#       line number that still exists is not a line number that still means what
+#       it meant. Precise where it applies; blind to form B and to ambiguous
+#       basenames, which is why [1] is not redundant with it.
+#
+# WHAT A CLEAN RUN DOES NOT MEAN. Every report prints its own denominator, so a
+# zero here is readable as "no rot among the citations this mode could RESOLVE"
+# rather than "no rot". Ambiguous-basename citations are listed and deliberately
+# do NOT affect the exit code -- over-reporting them would train the reader to
+# ignore the section, and they cannot be adjudicated mechanically.
+
+
+def range_endpoints(root, spec):
+    """(base_sha, head_sha) for `A..B` / `A...B` / `A..` / `..B`."""
+    if "..." in spec:
+        a, b = spec.split("...", 1)
+        a, b = a or "HEAD", b or "HEAD"
+        a = git(["merge-base", a, b], root, f"merge-base {a} {b}").strip()
+    elif ".." in spec:
+        a, b = spec.split("..", 1)
+        a, b = a or "HEAD", b or "HEAD"
+    else:
+        raise SystemExit(
+            f"check-line-citations: --shift-audit wants a RANGE (A..B), got {spec!r}. "
+            "A single rev is ambiguous about which side is the baseline; refusing "
+            "to guess and report a clean tree from the wrong comparison.")
+    return (git(["rev-parse", a], root, f"rev-parse {a}").strip(),
+            git(["rev-parse", b], root, f"rev-parse {b}").strip())
+
+
+def changed_in_range(root, base, head):
+    """[(status, old_path, new_path)] -- M/A/D/R/C across the range."""
+    out = git(["diff", "--name-status", "-M", base, head], root, "diff --name-status")
+    rows = []
+    for ln in out.splitlines():
+        parts = ln.split("\t")
+        if len(parts) < 2:
+            continue
+        st = parts[0]
+        if st[0] in ("R", "C") and len(parts) >= 3:
+            rows.append((st, parts[1], parts[2]))
+        else:
+            rows.append((st, parts[1], parts[1]))
+    return rows
+
+
+def blob_lines(root, rev, path, cache):
+    """Lines of `rev:path`, or None if the blob does not exist at that rev.
+
+    Absence is a legitimate answer here (an ADDED file has no base blob), so this
+    cannot route through git() -- but the CALLER must know which absences it
+    expected, or a broken invocation reads as `no citations to check`.
+    """
+    key = (rev, path)
+    if key not in cache:
+        r = subprocess.run(["git", "show", f"{rev}:{path}"],
+                           cwd=root, capture_output=True)
+        cache[key] = (None if r.returncode != 0
+                      else r.stdout.decode("utf-8", "replace").splitlines())
+    return cache[key]
+
+
+def hunks_for(root, base, head, path):
+    """[(old_start, old_count, new_start, new_count)] from a -U0 diff."""
+    diff = git(["diff", "-U0", base, head, "--", path], root, f"diff -U0 {path}")
+    out = []
+    for ln in diff.splitlines():
+        m = RE_HUNK.match(ln)
+        if m:
+            out.append((int(m.group(1)),
+                        1 if m.group(2) is None else int(m.group(2)),
+                        int(m.group(3)),
+                        1 if m.group(4) is None else int(m.group(4))))
+    return out
+
+
+def hunk_shifts(old_start, old_count, new_count, old_total):
+    """Does this hunk move the line numbers below it?
+
+    Shift-free means the hunk is either an in-place same-line-count replacement
+    (`NcN`) or an append at the ORIGINAL last line. `old_count == 0` is an
+    INSERTION after `old_start`; that only fails to shift anything when there is
+    nothing below it, i.e. `old_start == old_total`.
+    """
+    if old_count == 0:
+        return old_start != old_total
+    return old_count != new_count
+
+
+def resolve_cited(target, universe, by_base):
+    """resolve(), plus the PARENT-REPO spelling of a path inside this submodule.
+
+    The submodule is mounted at `.../library/` in the parent, and citations
+    written from up there spell the same file `library/.specify/2j-...md`. Run
+    from inside the submodule that path resolves to nothing, so the citation is
+    bucketed 'foreign / out of scope' -- a false clean on an in-tree file.
+    """
+    hits = resolve(target, universe, by_base)
+    if not hits and target.startswith("library/"):
+        return resolve(target[len("library/"):], universe, by_base)
+    return hits
+
+
+def files_at(root, rev):
+    """Every tracked path at `rev`. -z, because paths may contain spaces."""
+    out = git(["ls-tree", "-r", "-z", "--name-only", rev], root, f"ls-tree {rev}")
+    files = [p for p in out.split("\0") if p]
+    if not files:
+        raise SystemExit(
+            f"check-line-citations: `git ls-tree {rev}` listed ZERO files. "
+            "Refusing to audit against an empty universe.")
+    return files
+
+
+def build_citation_index(root, wanted, rev):
+    """target path -> [citation records], for targets in `wanted` only.
+
+    Reads the citing files AT `rev`, not from the working tree: a range that does
+    not end at HEAD would otherwise be scored with today's citing files against a
+    historical target, mixing eras and manufacturing findings.
+
+    The population is EVERY tracked file, not SCAN_DIRS -- the motivating rot was
+    `.specify/` citing `.specify/`, and neither end is inside the population the
+    addition gate scans.
+
+    `wanted` is folded into the RESOLUTION universe, not merely used to filter it.
+    A file DELETED or RENAMED in the range is gone from the tree at `rev`, so
+    every citation into it would resolve to nothing and the audit would report
+    clean on the one case where every citation is certainly rotted.
+    """
+    universe = sorted(set(files_at(root, rev)) | set(wanted))
+    by_base = basename_map(universe)
+    at_rev = set(universe)
+    memo = {}
+
+    def rz(target):
+        if target not in memo:
+            memo[target] = resolve_cited(target, universe, by_base)
+        return memo[target]
+
+    # One rev-scoped grep instead of 6k blob reads. The patterns are a PREFILTER
+    # only -- deliberately looser than RE_TARGET/RE_B/RE_C, which then decide.
+    # `-i` widens it further; that costs nothing, since Python re-decides.
+    r = subprocess.run(
+        ["git", "grep", "-nI", "--no-color", "-i", "-E",
+         "-e", r"\.(hpp|cpp|ipp|hh|hxx|cc|h|md):[0-9]",
+         "-e", r"lines?[[:space:]]+[0-9][0-9]",
+         "-e", r"\(:[0-9]",
+         rev, "--", ".",
+         ":(exclude)tests/fuzz/corpus/", ":(exclude)tests/abi/baseline/"],
+        cwd=root, capture_output=True)
+    if r.returncode > 1:
+        raise SystemExit(
+            "check-line-citations: git grep failed "
+            f"(exit {r.returncode}): {r.stderr.decode('utf-8', 'replace')[:300]}\n"
+            "Refusing to report a clean audit from a failed measurement.")
+    hits = r.stdout.decode("utf-8", "replace").splitlines()
+    if not hits:
+        raise SystemExit(
+            f"check-line-citations: the citation prefilter matched ZERO lines at "
+            f"{rev[:12]}. This repo holds thousands; refusing to interpret an "
+            "empty measurement as a clean audit.")
+
+    index = collections.defaultdict(list)
+    ambiguous, form_bc = [], 0
+    seen_files = set()
+    prefix = rev + ":"
+    for h in hits:
+        if not h.startswith(prefix):
+            raise SystemExit(
+                f"check-line-citations: unparseable git grep row {h[:120]!r}. "
+                "Refusing to audit from a measurement I cannot read.")
+        rest = h[len(prefix):]
+        try:
+            cf, cl, text = rest.split(":", 2)
+        except ValueError:
+            continue
+        if cf not in at_rev:
+            raise SystemExit(
+                f"check-line-citations: git grep named {cf!r}, absent from "
+                f"`git ls-tree {rev[:12]}` -- a path containing a colon would do "
+                "this. Refusing to audit from a misparsed measurement.")
+        seen_files.add(cf)
+        if RE_PRAGMA.search(text) or RE_LINE_DIRECTIVE.search(text):
+            continue
+        if RE_B.search(text) or RE_C.search(text):
+            form_bc += 1
+        for m in RE_TARGET.finditer(text):
+            target, num = m.group(1), int(m.group(2))
+            cands = rz(target)
+            rec = {"cf": cf, "cl": int(cl), "target": target, "n": num,
+                   "text": text.strip()}
+            if len(cands) == 1:
+                if cands[0] in wanted:
+                    index[cands[0]].append(rec)
+            elif len(cands) > 1 and any(c in wanted for c in cands):
+                rec["cands"] = cands
+                ambiguous.append(rec)
+    return index, ambiguous, len(seen_files), form_bc
+
+
+def shift_audit(root, spec, json_out=None):
+    base, head = range_endpoints(root, spec)
+    rows = changed_in_range(root, base, head)
+    if not rows:
+        raise SystemExit(
+            f"check-line-citations: --shift-audit {spec} names a range with ZERO "
+            "changed files. Refusing to interpret an empty measurement as a "
+            "clean audit -- check the range.")
+
+    # BOTH sides of every row: a citation into a path that a rename or a delete
+    # removed is exactly the citation most certainly rotted.
+    wanted = {p for _st, old, new in rows for p in (old, new)}
+    index, ambiguous, scanned, form_bc = build_citation_index(root, wanted, head)
+
+    blobs = {}
+    shift_findings, content_findings = [], []
+    md_targets_checked, skipped_non_target = [], []
+
+    # For check [1]'s predicate ONLY, an AMBIGUOUS citation still counts as
+    # evidence that a file is cited by line number: `spec.md:88` names some
+    # spec.md, and if this one is a candidate it may well be the one. Over-
+    # reporting is the lucky direction for "should this document be edited
+    # shift-free?". Check [2] must NOT do this -- comparing a line against a file
+    # the citation may not mean would manufacture rot.
+    amb_targets = collections.Counter()
+    for r in ambiguous:
+        for c in r["cands"]:
+            if c in wanted:
+                amb_targets[c] += 1
+
+    for st, old_path, new_path in rows:
+        cites = list(index.get(new_path, []))
+        if old_path != new_path:
+            cites += index.get(old_path, [])
+        n_amb = amb_targets.get(new_path, 0)
+
+        # ── [1] line-shift, for cited `.md` documents ────────────────────────
+        if new_path.endswith(".md") and (cites or n_amb) and st[0] not in ("A", "D"):
+            old = blob_lines(root, base, old_path, blobs)
+            if old is None:
+                raise SystemExit(
+                    f"check-line-citations: {old_path} is status {st} in {spec} but "
+                    f"has no blob at {base[:8]}. Refusing to audit from a "
+                    "measurement that failed.")
+            md_targets_checked.append(new_path)
+            amb_lines = [r["n"] for r in ambiguous if new_path in r["cands"]]
+            for a, b, _c, d in hunks_for(root, base, head, new_path):
+                if hunk_shifts(a, b, d, len(old)):
+                    # Only citations AT OR BELOW the hunk actually move. This is
+                    # a triage aid, NOT a filter: it counts the citations that
+                    # can be POSITIONED, and form B/C name no file, so they
+                    # cannot be. A hunk with `below == 0` is therefore "no known
+                    # citation moved", never "nothing moved" -- which is why it
+                    # is still reported and still fails.
+                    below = sum(1 for r in cites if r["n"] >= a)
+                    shift_findings.append({
+                        "file": new_path, "old_start": a, "old_count": b,
+                        "new_count": d, "old_total": len(old),
+                        "cited_by": len(cites), "cited_ambiguously_by": n_amb,
+                        "resolved_citations_below": below,
+                        "ambiguous_citations_below": sum(1 for n in amb_lines if n >= a)})
+        elif new_path.endswith(".md") and not cites and not n_amb:
+            skipped_non_target.append(new_path)
+
+        if not cites:
+            continue
+
+        # ── [2] cited-line content ───────────────────────────────────────────
+        if st[0] == "D":
+            for r in cites:
+                content_findings.append(dict(r, why="target DELETED in range",
+                                             before=None, after=None))
+            continue
+        old = blob_lines(root, base, old_path, blobs)
+        new = blob_lines(root, head, new_path, blobs)
+        if new is None:
+            raise SystemExit(
+                f"check-line-citations: {new_path} is status {st} in {spec} but has "
+                f"no blob at {head[:8]}. Refusing to audit from a failed measurement.")
+        if old is None:
+            for r in cites:
+                content_findings.append(dict(r, why="target ADDED in range (cited "
+                                             "line had no prior content)",
+                                             before=None,
+                                             after=new[r["n"] - 1]
+                                             if 1 <= r["n"] <= len(new) else None))
+            continue
+        for r in cites:
+            n = r["n"]
+            b_ok, a_ok = 1 <= n <= len(old), 1 <= n <= len(new)
+            before = old[n - 1] if b_ok else None
+            after = new[n - 1] if a_ok else None
+            if not a_ok:
+                content_findings.append(dict(r, why=f"line {n} is now OUT OF RANGE "
+                                             f"({len(new)} lines)",
+                                             before=before, after=None))
+            elif not b_ok:
+                content_findings.append(dict(r, why="line was out of range BEFORE "
+                                             "(already rotted)",
+                                             before=None, after=after))
+            elif before != after:
+                content_findings.append(dict(r, why="cited line CONTENT CHANGED",
+                                             before=before, after=after))
+
+    # ── report ───────────────────────────────────────────────────────────────
+    print("── #336 shift audit " + "─" * 54)
+    print(f"range                    : {base[:12]}..{head[:12]}  ({spec})")
+    print(f"files changed in range   : {len(rows)}")
+    print(f"citation index           : {scanned} file(s) hold a citation-shaped "
+          f"line at {head[:8]}")
+    print("                           (population: EVERY tracked file, not SCAN_DIRS)")
+    print(f"  citations INTO changed files, resolved : "
+          f"{sum(len(v) for v in index.values())}")
+    print(f"  ambiguous basename, NOT adjudicated    : {len(ambiguous)}")
+    print(f"  form B/C lines tree-wide, INVISIBLE    : {form_bc}   "
+          "(name no file; check [1] is their only cover)")
+    print(f"[1] .md citation targets shift-checked   : {len(md_targets_checked)}")
+    print(f"    .md changed but cited by NOTHING     : {len(skipped_non_target)}"
+          "   [not checked]")
+    print()
+
+    print(f"[1] LINE-SHIFT AUDIT -- {len(shift_findings)} shifting hunk(s)")
+    for f in shift_findings:
+        kind = ("INSERTION of %d line(s) after line %d" % (f["new_count"], f["old_start"])
+                if f["old_count"] == 0
+                else "REPLACEMENT of %d line(s) by %d at line %d"
+                     % (f["old_count"], f["new_count"], f["old_start"]))
+        amb = (f", + {f['cited_ambiguously_by']} ambiguous"
+               if f.get("cited_ambiguously_by") else "")
+        print(f"  {f['file']}  ({f['cited_by']} resolved citation(s){amb} into it, "
+              f"{f['old_total']} lines before)")
+        below = f["resolved_citations_below"] + f["ambiguous_citations_below"]
+        print(f"      {kind} -- every line below it moved")
+        print(f"      {below} citation(s) sit at or below it and MOVED"
+              + ("   [none that can be POSITIONED -- form B/C cannot be]"
+                 if below == 0 else ""))
+    if not shift_findings:
+        print("  none -- every hunk is an in-place same-line-count replacement or an")
+        print("  append at the original last line.")
+    print()
+
+    print(f"[2] CITED-LINE CONTENT CHECK -- {len(content_findings)} rotted citation(s)")
+    for f in content_findings:
+        print(f"  {f['cf']}:{f['cl']}  ->  {f['target']}:{f['n']}   {f['why']}")
+        if f.get("before") is not None:
+            print(f"      before: {f['before'].strip()[:110]}")
+        if f.get("after") is not None:
+            print(f"      after : {f['after'].strip()[:110]}")
+    if not content_findings:
+        print("  none -- every resolvable cited line holds byte-identical content.")
+    print()
+
+    if ambiguous:
+        print(f"AMBIGUOUS ({len(ambiguous)}) -- basename resolves to several tracked "
+              "files, so the")
+        print("target is undecidable. Listed, NOT counted against the exit code.")
+        for r in ambiguous[:40]:
+            print(f"  {r['cf']}:{r['cl']}  ->  {r['target']}:{r['n']}  "
+                  f"({len(r['cands'])} candidates)")
+        if len(ambiguous) > 40:
+            print(f"  ... and {len(ambiguous) - 40} more (--json for all)")
+        print()
+
+    if json_out:
+        with open(json_out, "w") as f:
+            json.dump({"base": base, "head": head, "shift": shift_findings,
+                       "content": content_findings, "ambiguous": ambiguous,
+                       "md_checked": md_targets_checked,
+                       "md_skipped_non_target": skipped_non_target,
+                       "form_bc_tree_wide": form_bc}, f, indent=1)
+        print(f"audit table -> {json_out}")
+
+    if shift_findings or content_findings:
+        print("A line number is a claim about a file that keeps moving. Do NOT "
+              "renumber the", file=sys.stderr)
+        print("citations -- that produces N fresh claims that rot on the next edit. "
+              "Reshape", file=sys.stderr)
+        print("the EDIT instead: append narrative at the END of the file, make every "
+              "in-body", file=sys.stderr)
+        print("edit an in-place same-line-count replacement, fold or pad a comment "
+              "block back", file=sys.stderr)
+        print("to its original count. (issue #336; brain/index.md, 'Amending a "
+              "document that", file=sys.stderr)
+        print("is cited BY LINE NUMBER')", file=sys.stderr)
+        return 1
+    print("check-line-citations: shift audit clean for the citations it could "
+          "RESOLVE. See")
+    print("the denominators above -- form B/C citations name no file and cannot be "
+          "checked.")
+    return 0
+
+
 # ── Self-test ────────────────────────────────────────────────────────────────
 #
 # Before believing any zero, prove the instrument can report non-zero. Both
@@ -332,6 +780,259 @@ FORM_CASES = [
     ("// std::array<std::uint16_t, 16> group_view",                  []),
     ("// timeout is 120s and the port is 8080",                      []),
 ]
+
+
+# `hunk_shifts` cases, derived from the RULE stated in #336 -- "each diff hunk is
+# NcN (same line count in and out) or an append at the original last line" -- and
+# NOT from what the parser happens to do. The two entries with `old_count == 0`
+# are the whole point: an insertion shifts everything below it, and an append at
+# EOF has nothing below it.
+HUNK_CASES = [
+    # (old_start, old_count, new_count, old_total) -> shifts?
+    ((1515, 0, 41, 1515), False, "append at the original last line"),
+    ((12,   0, 47, 1620), True,  "47-line note inserted near the top (9e0b332d)"),
+    ((0,    0,  5,   20), True,  "insertion before line 1"),
+    ((500,  0,  3, 1515), True,  "insertion mid-document"),
+    ((3,    1,  1,  100), False, "NcN, the omitted-count `@@ -3 +3 @@` form"),
+    ((121,  3,  3, 1515), False, "NcN over three lines"),
+    ((50,   2,  5,  100), True,  "2 lines replaced by 5"),
+    ((80,   5,  2,  100), True,  "5 lines replaced by 2"),
+    ((96,   5,  0,  100), True,  "trailing deletion still changes the count"),
+]
+
+
+# RE_TARGET / resolve_cited cases. Both entries with a leading dot and both with
+# a `library/` prefix are REGRESSION pins: each was silently invisible, and each
+# hid a `.specify/` design doc -- the exact surface --shift-audit protects.
+TARGET_CASES = [
+    ("(`.specify/2j-controlplane.md:902`)", [(".specify/2j-controlplane.md", 902)]),
+    ("per `library/.specify/2j-controlplane.md:22` the lint extends",
+     [("library/.specify/2j-controlplane.md", 22)]),
+    ("cites 2d-threading.md:448 for the block", [("2d-threading.md", 448)]),
+    ("// see session.cpp:1258 for the thunk", [("session.cpp", 1258)]),
+    # The lookbehind must still stop one path matching three times.
+    ("// (src/wire/offset_table.cpp:440-443)", [("src/wire/offset_table.cpp", 440)]),
+    ("// the ratio is 3:2 across the board", []),
+]
+
+RESOLVE_CASES = [
+    (".specify/2d.md",          [".specify/2d.md"], "leading-dot path"),
+    ("library/.specify/2d.md",  [".specify/2d.md"], "parent-repo `library/` spelling"),
+    ("2d.md",                   [".specify/2d.md"], "bare basename"),
+    ("src/a.cpp",               ["src/a.cpp"],      "ordinary path"),
+    ("library/src/a.cpp",       ["src/a.cpp"],      "`library/` prefix on a source path"),
+    ("QuickFIX/DataDictionary.cpp", [],             "genuinely foreign, stays foreign"),
+    ("library/QuickFIX/Foo.cpp",    [],             "`library/` rewrite must not invent a hit"),
+]
+
+
+def _sh_run(d, *args):
+    subprocess.run(["git"] + list(args), cwd=d, capture_output=True, check=True)
+
+
+def _sh_commit(d, msg):
+    _sh_run(d, "add", "-A")
+    _sh_run(d, "commit", "-q", "-m", msg)
+
+
+def _sh_audit(d):
+    """shift_audit over HEAD~1..HEAD, silenced -> (exit code, json payload).
+
+    The audit table is written OUTSIDE the fixture repo on purpose: it embeds the
+    citation text it found, so writing it inside would make the next `git add -A`
+    commit a file that cites the fixture and quietly inflate every later count.
+    """
+    fd, out = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        code = shift_audit(d, "HEAD~1..HEAD", out)
+    with open(out) as f:
+        payload = json.load(f)
+    os.unlink(out)
+    return code, payload
+
+
+def shift_self_test():
+    """Both halves of #336's requirement: the audit must fire on a real shift AND
+    on a same-line-count mutation of a cited line, and must stay silent on the
+    two edit shapes the discipline permits."""
+    bad = 0
+    print("RE_TARGET -- which `file:NNN` spellings are SEEN at all:")
+    for text, want in TARGET_CASES:
+        got = [(m.group(1), int(m.group(2))) for m in RE_TARGET.finditer(text)]
+        ok = got == want
+        bad += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'} {len(got)} match(es)  {text[:58]}")
+
+    print("\nresolve_cited() -- which spellings reach the file they name:")
+    _u = [".specify/2d.md", "src/a.cpp"]
+    _b = basename_map(_u)
+    for target, want, label in RESOLVE_CASES:
+        got = resolve_cited(target, _u, _b)
+        ok = got == want
+        bad += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}")
+
+    print("\nhunk_shifts() -- the shift predicate, per #336's stated rule:")
+    for (a, b, d_, total), want, label in HUNK_CASES:
+        got = hunk_shifts(a, b, d_, total)
+        ok = got == want
+        bad += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'} shifts={got!s:5} want={want!s:5}  {label}")
+
+    print("\nshift_audit() end-to-end on a throwaway repo:")
+    checks = []
+    with tempfile.TemporaryDirectory() as d:
+        _sh_run(d, "init", "-q")
+        _sh_run(d, "config", "user.email", "t@t")
+        _sh_run(d, "config", "user.name", "t")
+        os.makedirs(os.path.join(d, "src"))
+        doc = os.path.join(d, "doc.md")
+        lines = [f"L{i:02d}" for i in range(1, 21)]
+
+        def write_doc():
+            open(doc, "w").write("\n".join(lines) + "\n")
+
+        write_doc()
+        # Two citations INTO doc.md, at lines 10 and 18.
+        open(os.path.join(d, "src", "citer.cpp"), "w").write(
+            "// the widget is at doc.md:10\n"
+            "// the gadget is at doc.md:18\n")
+        # A .md nothing cites -- must be reported as skipped, never as clean-checked.
+        open(os.path.join(d, "other.md"), "w").write("uncited\n")
+        _sh_commit(d, "base")
+
+        # 1. Insertion at the top: the 9e0b332d shape. Both checks must fire.
+        lines = ["NEW"] * 5 + lines
+        write_doc(); _sh_commit(d, "insert at top")
+        code, j = _sh_audit(d)
+        checks.append(("top insertion: exit non-zero", code == 1))
+        checks.append(("top insertion: [1] reports a shifting hunk", len(j["shift"]) >= 1))
+        checks.append(("top insertion: [2] reports BOTH citations rotted",
+                       len(j["content"]) == 2))
+        checks.append(("top insertion: rot is a CONTENT change, not out-of-range",
+                       all("CONTENT CHANGED" in c["why"] for c in j["content"])))
+
+        # 2. Append at EOF: the permitted shape. Both checks must stay silent.
+        lines = lines + ["APPENDIX", "Z", "text"]
+        write_doc(); _sh_commit(d, "append at EOF")
+        code, j = _sh_audit(d)
+        checks.append(("EOF append: exit zero", code == 0))
+        checks.append(("EOF append: no shift, no rot",
+                       not j["shift"] and not j["content"]))
+        checks.append(("EOF append: doc.md WAS shift-checked, not skipped",
+                       j["md_checked"] == ["doc.md"]))
+
+        # 3. In-place replacement of an UNCITED line -- exercises the hunk form
+        #    where git omits both counts (`@@ -3 +3 @@`).
+        lines[2] = "L03-edited"
+        write_doc(); _sh_commit(d, "in-place edit, uncited line")
+        code, j = _sh_audit(d)
+        checks.append(("in-place edit of an uncited line: clean",
+                       code == 0 and not j["shift"] and not j["content"]))
+
+        # 4. #336's mandated control: mutate ONE cited line, same line count. The
+        #    shift check CANNOT see this -- only the content check can.
+        lines[9] = "L10-mutated"
+        write_doc(); _sh_commit(d, "mutate the cited line")
+        code, j = _sh_audit(d)
+        checks.append(("mutated cited line: exit non-zero", code == 1))
+        checks.append(("mutated cited line: [1] sees NOTHING (line count kept)",
+                       not j["shift"]))
+        checks.append(("mutated cited line: [2] reports exactly the :10 citation",
+                       len(j["content"]) == 1 and j["content"][0]["n"] == 10))
+
+        # 5. Mid-document insertion -- must NOT be confused with an EOF append.
+        lines = lines[:5] + ["MID"] * 4 + lines[5:]
+        write_doc(); _sh_commit(d, "insert mid-document")
+        code, j = _sh_audit(d)
+        checks.append(("mid-document insertion: [1] fires", code == 1 and j["shift"]))
+        checks.append(("mid-document insertion: reported as an INSERTION",
+                       any(f["old_count"] == 0 for f in j["shift"])))
+
+        # 5b. A shift BELOW every citation still fails -- but must say that zero
+        #     POSITIONABLE citations moved, so a reviewer can triage it. Form B/C
+        #     citations cannot be positioned, which is why it is not filtered out.
+        lines = lines[:25] + ["LATE"] * 2 + lines[25:]
+        write_doc(); _sh_commit(d, "insert below every citation")
+        code, j = _sh_audit(d)
+        checks.append(("shift below every citation: still fails",
+                       code == 1 and len(j["shift"]) == 1))
+        checks.append(("...annotated as 0 positionable citations moved",
+                       j["shift"][0]["resolved_citations_below"] == 0
+                       and not j["content"]))
+
+        # 5c. ...and the same shift ABOVE the citations reports them as moved.
+        lines = ["EARLY"] * 2 + lines
+        write_doc(); _sh_commit(d, "insert above every citation")
+        code, j = _sh_audit(d)
+        checks.append(("shift above every citation: both reported as moved",
+                       code == 1 and j["shift"][0]["resolved_citations_below"] == 2))
+
+        # 6. Truncation below a cited line: the citation survives as a number and
+        #    stops existing as a location.
+        lines = lines[:8]
+        write_doc(); _sh_commit(d, "truncate")
+        code, j = _sh_audit(d)
+        checks.append(("truncation: out-of-range is reported as such",
+                       code == 1 and any("OUT OF RANGE" in c["why"]
+                                         for c in j["content"])))
+
+        # 7. Deleting the target rots every citation into it.
+        os.remove(doc); _sh_commit(d, "delete the target")
+        code, j = _sh_audit(d)
+        checks.append(("deleted target: every citation into it is a finding",
+                       code == 1 and len(j["content"]) == 2
+                       and all("DELETED" in c["why"] for c in j["content"])))
+
+        # 8b. A doc cited only by an AMBIGUOUS basename must still be shift-
+        #     checked: `sub/doc.md:10` where two doc.md exist names one of them,
+        #     and skipping both is a false clean on whichever it meant.
+        os.makedirs(os.path.join(d, "sub"))
+        twin = os.path.join(d, "sub", "twin.md")
+        open(twin, "w").write("\n".join(f"T{i:02d}" for i in range(1, 16)) + "\n")
+        os.makedirs(os.path.join(d, "other"))
+        open(os.path.join(d, "other", "twin.md"), "w").write("decoy\n")
+        open(os.path.join(d, "src", "amb.cpp"), "w").write("// cited: twin.md:9\n")
+        _sh_commit(d, "add an ambiguously-cited doc")
+        open(twin, "w").write("PREPENDED\n" + open(twin).read())
+        _sh_commit(d, "prepend to the ambiguously-cited doc")
+        code, j = _sh_audit(d)
+        checks.append(("ambiguously-cited .md is still shift-checked",
+                       code == 1 and any(f["file"] == "sub/twin.md"
+                                         for f in j["shift"])))
+        checks.append(("...and the ambiguity is disclosed, not silently resolved",
+                       any(f.get("cited_ambiguously_by", 0) > 0 for f in j["shift"])
+                       and not j["content"]))
+
+        # 8. A .md that nothing cites must be SKIPPED and said to be skipped --
+        #    not silently folded into the clean verdict.
+        open(os.path.join(d, "other.md"), "a").write("more\n")
+        _sh_commit(d, "edit an uncited doc")
+        code, j = _sh_audit(d)
+        checks.append(("uncited .md: clean AND declared skipped",
+                       code == 0 and j["md_skipped_non_target"] == ["other.md"]))
+
+        # 9/10. A failed or empty measurement must RAISE, never report clean.
+        for label, spec in (("an invalid range raises", "not-a-ref..HEAD"),
+                            ("an EMPTY range raises rather than reporting clean",
+                             "HEAD..HEAD"),
+                            ("a single rev (no `..`) is refused, not guessed",
+                             "HEAD")):
+            try:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    shift_audit(d, spec, None)
+                ok = False
+            except SystemExit:
+                ok = True
+            checks.append((label, ok))
+
+    for label, ok in checks:
+        bad += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}")
+    return bad, len(TARGET_CASES) + len(RESOLVE_CASES) + len(HUNK_CASES) + len(checks)
 
 
 def self_test():
@@ -443,7 +1144,11 @@ def self_test():
         bad += not ok
         print(f"  {'ok  ' if ok else 'FAIL'} an invalid --range raises rather than reporting clean")
 
-    total = len(FORM_CASES) + 6 + gate_checks
+    print("\n── #336 shift audit ──────────────────────────────────────────────")
+    shift_bad, shift_total = shift_self_test()
+    bad += shift_bad
+
+    total = len(FORM_CASES) + 6 + gate_checks + shift_total
     print(f"\nself-test: {total - bad}/{total} pass")
     if bad:
         print("SELF-TEST FAILED -- the instrument does not behave as documented.")
@@ -460,6 +1165,9 @@ def main():
                    help="gate: fail if the staged diff ADDS a line-number citation")
     g.add_argument("--range", metavar="A..B",
                    help="gate: fail if the rev range ADDS a line-number citation")
+    g.add_argument("--shift-audit", metavar="A..B",
+                   help="audit: fail if the rev range INVALIDATES existing "
+                        "line-number citations (#336)")
     g.add_argument("--self-test", action="store_true",
                    help="prove the detector reports non-zero on known positives")
     ap.add_argument("--json", metavar="OUT", help="write the adjudication table")
@@ -472,6 +1180,8 @@ def main():
     if args.census:
         census(root, args.json)
         return 0
+    if args.shift_audit:
+        return shift_audit(root, args.shift_audit, args.json)
     return gate(root, args)
 
 
