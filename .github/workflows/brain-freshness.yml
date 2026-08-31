@@ -41,6 +41,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The line-citation gate below diffs a COMMIT RANGE; the default depth-1
+          # checkout has neither end of it. Precedent: tier1.yml, tier2.yml,
+          # tier3-libcxx.yml, gate-a/b.yml and no-research.yml all do this.
+          fetch-depth: 0
 
       - name: Prove the instrument can report non-zero
         # A green from a check never seen to fail is not evidence. Its own
@@ -69,3 +74,66 @@ jobs:
         # continue-on-error making a deliberate `exit 1` inert; and an unquoted '#'
         # silently truncating a name:.
         run: python3 tools/check_workflows.py .
+
+      # ── Line-number citation gate (#310, #336) ───────────────────────────────
+      # The job name above predates these two steps and is left alone on purpose:
+      # it is a check-run name, and branch protection matches required checks BY
+      # NAME. Renaming it to describe the new steps would silently un-require it.
+
+      - name: "Prove the line-citation gate can report non-zero (#310, #336)"
+        # Same rule as the two instruments above. tier1.yml also runs this
+        # self-test, but tier1's push trigger carries a paths-ignore DENYLIST
+        # covering **/*.md, specs/**, .specify/** and brain/** -- precisely the
+        # commits that add `.md` line citations. On a docs-only push to main
+        # tier1 is skipped entirely, so this workflow is the only place the
+        # instrument is proven on exactly those commits.
+        run: python3 tools/check_line_citations.py --self-test
+
+      - name: "Line-citation gate — no NEW file:NNN citations in this change (#310, #336)"
+        # WHY THIS EXISTS. The gate shipped in #326 as a LOCAL pre-commit hook
+        # only. Nothing in .github/ invokes pre-commit, and `.git/hooks/` is not
+        # tracked by git -- a hook cannot be committed, so it is absent from any
+        # clone where nobody ran `pre-commit install`. It was absent from the main
+        # checkout. #326 wired the SELF-TEST into CI but not the GATE, so the
+        # instrument was proven able to fire and then never fired. A violation
+        # duly landed unnoticed in 77900be0.
+        #
+        # Measured before wiring, over the last 150 commits: exactly ONE would
+        # fail since the gate landed (c9f962ec, #326) -- 77900be0, already fixed.
+        # The other 26 predate the rule. So this is close to free going forward.
+        #
+        # No continue-on-error, per this file's header: it makes an `exit 1` inert.
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ZERO=0000000000000000000000000000000000000000
+          if [ -n "${PR_BASE:-}" ] && [ -n "${PR_HEAD:-}" ]; then
+            BASE="$PR_BASE"; HEAD="$PR_HEAD"
+          elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != "$ZERO" ]; then
+            BASE="$PUSH_BEFORE"; HEAD="$PUSH_AFTER"
+          else
+            # schedule / workflow_dispatch / first push of a branch: there is no
+            # range to gate. The SELF-TEST above still ran, so this leg is not a
+            # silent pass of an unproven instrument.
+            echo "No commit range for this event -- the addition gate is not applicable."
+            echo "(the self-test above still proved the instrument can report non-zero)"
+            exit 0
+          fi
+          # Fail CLOSED if an end of the range is missing (a force-push whose old
+          # tip was collected). Gating nothing must never read as gating clean.
+          for REV in "$BASE" "$HEAD"; do
+            if ! git cat-file -e "$REV^{commit}" 2>/dev/null; then
+              echo "::error::commit $REV is not present in this checkout; refusing to report a clean gate from a range I cannot read."
+              exit 1
+            fi
+          done
+          # Prefer the merge base: github.event.pull_request.base.sha is the base
+          # BRANCH TIP at event time, so main-only commits would otherwise be
+          # scored against this PR.
+          if MB="$(git merge-base "$BASE" "$HEAD" 2>/dev/null)"; then BASE="$MB"; fi
+          echo "gating $BASE..$HEAD"
+          python3 tools/check_line_citations.py --range "$BASE..$HEAD"
