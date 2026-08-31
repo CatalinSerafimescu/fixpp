@@ -9,6 +9,12 @@ refs:
   - .specify/2d-threading.md
   - .specify/2h-transport.md
   - specs/010-session-cfg-lifetime/spec.md
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/speckit/010-session-cfg-lifetime-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/2d-threading.md
+  - research/G19-fix-fpml-iso20022/decisions/2e-msgstore.md
+  - research/G19-fix-fpml-iso20022/decisions/2g-tls.md
+  - research/G19-fix-fpml-iso20022/decisions/2h-transport.md
 codegraph_entry: [EngineConfig, SessionConfig, MessageStoreFactory, TransportFactory]
 constitution: ["§XIV.2"]
 ---

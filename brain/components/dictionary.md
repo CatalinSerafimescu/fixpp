@@ -9,6 +9,8 @@ refs:
   - src/dictionary/version_registry.cpp
   - .specify/2c-codegen.md
   - .specify/215-dictionary-view.md
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/2c-codegen.md
 codegraph_entry: [Dictionary, xml_loader, orchestra_loader, field_traits, version_registry]
 constitution: ["§I.1"]
 ---

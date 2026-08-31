@@ -8,6 +8,8 @@ refs:
   - include/fixpp/wire/offset_table.hpp
   - include/fixpp/wire/errors.hpp
   - .specify/2b-wire.md
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/2b-wire.md
 codegraph_entry: [Framer, OffsetTable, MessageView, dictionary_driven_validator, wire_error_to_session_reject_reason]
 constitution: ["§VIII.5"]
 ---

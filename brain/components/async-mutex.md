@@ -9,6 +9,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/phases/phase-4/core/048-async-mutex-strand-reap.md
   - research/G19-fix-fpml-iso20022/phases/phase-4/core/058-async-mutex-hardening.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/048-async-mutex-strand-reap-gateb.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/006-async-mutex-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/2f-async-mutex.md
 codegraph_entry: [async_mutex, async_lock_guard, cancel_and_drain]
 constitution: ["§XV.9"]
 ---

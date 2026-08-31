@@ -7,6 +7,8 @@ refs:
   - src/session/engine.cpp
   - include/fixpp/session/session.hpp
   - specs/015-runtime-engine/research.md
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/speckit/015-runtime-engine-gatea.md
 codegraph_entry: [run_read_pump, Framer, on_inbound_frame, Session]
 constitution: ["§VIII.5", "§XI.2"]
 ---

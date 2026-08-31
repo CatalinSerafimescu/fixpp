@@ -7,6 +7,9 @@ refs:
   - .specify/architecture.md
   - .specify/constitution.md
   - spec/feature-catalogue.md
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/architecture.md
+  - research/G19-fix-fpml-iso20022/decisions/constitution.md
 codegraph_entry: []
 ---
 

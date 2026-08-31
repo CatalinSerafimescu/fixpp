@@ -10,6 +10,11 @@ refs:
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/pr331-330-asio-listener-executor-gateb.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/pr326-310-315-gateb.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/012-2h-transport-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/015-runtime-engine-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/023-engine-session-strand-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/2d-threading.md
+  - research/G19-fix-fpml-iso20022/decisions/2j-controlplane.md
 codegraph_entry: [Engine, run_accept_loop, asio_listener, assert_transport_on_session_strand]
 constitution: ["§XI"]
 ---

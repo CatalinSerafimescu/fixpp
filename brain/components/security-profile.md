@@ -6,6 +6,9 @@ status: stable
 refs:
   - include/fixpp/session/security_profile.hpp
   - .specify/constitution.md
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/speckit/043-plaintext-tcp-transport-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/2g-tls.md
 codegraph_entry: [SecurityProfile]
 constitution: ["§XII.5"]
 ---
