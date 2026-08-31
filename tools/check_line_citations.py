@@ -65,8 +65,24 @@ SCAN_DIRS = [
 
 # Form A. The negative lookbehind keeps `a/b/c.cpp:12` from also matching as
 # `b/c.cpp:12` and `c.cpp:12`.
+#
+# `md` and the leading `.` were added 2026-08-31 (#336, user decision). The
+# original rationale for excluding `.md` -- "the tree already holds hundreds of
+# `constitution.md:456` refs" -- does not survive contact with what the gate
+# actually does: --staged/--range read ADDED LINES ONLY, so a pre-existing
+# population is not a reason to permit NEW members of it. A `.md` line citation
+# rots exactly like a `.cpp` one, and #336 exists because that rot was silent.
+#
+# The leading `.` matters as much as the extension: without it
+# `.specify/2d-threading.md:448` matches NOTHING -- not at the dot (wrong class),
+# not one character in (the lookbehind rejects it) -- and `.specify/` is where
+# this repo's line-cited design docs live.
+#
+# `[0-9]`, not `\d`: `\d` also matches Unicode decimal digits, which --shift-audit's
+# ASCII `git grep` prefilter drops. A decider that out-matches its own prefilter
+# is a silent drop; keeping the two in step costs nothing here.
 RE_A = re.compile(
-    r"(?<![\w/.-])([A-Za-z0-9_][A-Za-z0-9_/.-]*\.(?:hpp|cpp|ipp|hh|hxx|cc|h)):(\d+)"
+    r"(?<![\w/.-])([A-Za-z0-9_.][A-Za-z0-9_/.-]*\.(?:hpp|cpp|ipp|hh|hxx|cc|h|md)):([0-9]+)"
 )
 # Form B. {2,} digits: a deliberate recall/precision trade -- one-digit forms
 # are not gated, since they collide with prose about test data (`line 5`) far
@@ -81,18 +97,12 @@ RE_C = re.compile(r"\(:\d+")
 # spec commit that writes a `constitution.md:456`-style ref, of which the tree
 # already holds hundreds. Rot-detection and addition-gating want different
 # populations, so they get different patterns rather than one compromise.
-# The leading `.` is not cosmetic: RE_A's first-character class excludes it, so
-# `.specify/2j-controlplane.md:902` matches NOTHING -- not at the dot (wrong
-# class) and not one character in (the lookbehind rejects it). That silently
-# hides 26 targets, every one of them a `.specify/` design doc, which is exactly
-# the surface this mode exists to protect.
-RE_TARGET = re.compile(
-    # `[0-9]`, NOT `\d`: Python's `\d` matches Unicode decimal digits, the ERE
-    # prefilter's `[0-9]` does not, and `int()` accepts them -- so `doc.md:١٢`
-    # would be decided by a matcher the prefilter had already dropped. A decider
-    # that out-matches its own prefilter is a silent drop.
-    r"(?<![\w/.-])([A-Za-z0-9_.][A-Za-z0-9_/.-]*\.(?:hpp|cpp|ipp|hh|hxx|cc|h|md)):([0-9]+)"
-)
+# --shift-audit's target pattern. It USED to be a widened twin of RE_A, kept
+# separate so the addition gate stayed narrower. RE_A has since been widened to
+# the same thing (#336), so they are one pattern; the alias is kept because the
+# two call sites mean different things and would diverge again under a change to
+# either. A twin that has silently converged is worse than an alias.
+RE_TARGET = RE_A
 
 # `@@ -a[,b] +c[,d] @@`. git OMITS the count when it is 1, which is the common
 # single-line-replacement shape -- defaulting a missing count to 1 is where the
@@ -867,8 +877,16 @@ FORM_CASES = [
     # citation. A line-scoped foreign test got all four of these wrong.
     ("// the branch (session.cpp:225-232) uses gtest's ADD_FAILURE", ["A"]),
     ("#include <asio/co_spawn.hpp>  // spawned at session.cpp:916",  ["A"]),
+    # `.md` targets, gated since #336. A design-doc line number rots exactly like
+    # a source one; the addition gate reads ADDED LINES ONLY, so the size of the
+    # pre-existing population was never a reason to permit new members of it.
+    ("// contract: constitution.md:456 governs this",                ["A"]),
+    ("// see .specify/2d-threading.md:448 for the block",            ["A"]),
+    # Leading dot AND the parent-repo spelling of this submodule.
+    ("(`.specify/constitution.md:335`) is normative",                ["A"]),
     # Genuinely foreign: no such file in this tree.
     ("// mirroring QuickFIX's DataDictionary.cpp:271-273",           []),
+    ("// upstream README.md:12 in another repo",                     []),
     ("// asio/impl/io_context.hpp:88 tests now < abs",               []),
     # Forms B/C name no target, so a foreign token elsewhere on the line must
     # NOT exempt them -- a line-scoped exemption here previously swallowed the
@@ -1314,7 +1332,8 @@ def shift_self_test():
 
 
 def self_test():
-    files = ["src/session/session.cpp", "src/wire/offset_table.cpp"]
+    files = ["src/session/session.cpp", "src/wire/offset_table.cpp",
+             ".specify/constitution.md", ".specify/2d-threading.md"]
     by_base = basename_map(files)
     bad = 0
     print("forms_on() -- the decision the GATE makes:")
