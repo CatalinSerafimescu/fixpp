@@ -57,9 +57,21 @@
 #
 # A SECOND blind spot, different mechanism: a site whose `.get()` was ALWAYS more
 # than six lines below its window was never in the pin at all, so it cannot leave
-# it. `tests/session/conformance/tc_logout_test.cpp` holds two (seven and
-# twenty-one lines). A file's absence from the pin is therefore never evidence
-# that the file has no unguarded `get()` -- only a per-`.get()` sweep answers that.
+# it. A file's absence from the pin is therefore never evidence that the file has
+# no unguarded `get()` -- only a per-`.get()` sweep answers that.
+#
+# This is not hypothetical, and the history does not rot: two such sites escaped
+# the pin in `tests/session/conformance/tc_logout_test.cpp` (`.get()` seven and
+# twenty-one lines below their windows). ONE of them -- `GracefulLogoutTimeout`,
+# which runs first -- wedged the linux-clang-ubsan lane of Tier 1 for 86 minutes
+# on 2026-08-31; the process died there, so the second site was never reached and
+# is not claimed to have wedged that run. It carried the identical unconditional-
+# `get()` hazard and was migrated with it. The pin read 230 before and 230 after
+# -- it never had an opinion either way.
+#
+# To re-derive the size of this blind spot, widen the lookahead below and diff
+# against this census. Prove the widened scan non-vacuous first: run it over a
+# tree that still contains a known far `.get()` and confirm it reports it.
 #
 # ── EXACT SET, NOT A COUNT ────────────────────────────────────────────────────
 # Comparison is by exact set equality against ci/expected-pump-sites.txt, in

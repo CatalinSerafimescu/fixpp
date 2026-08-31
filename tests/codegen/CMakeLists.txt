@@ -455,7 +455,24 @@ target_compile_definitions(codegen_determinism_test PRIVATE
   "FIXPP_CODEGEN_078_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/078-precompiled-builder-libs/contracts/golden\""
 )
 add_test(NAME codegen_determinism_test COMMAND codegen_determinism_test)
-set_tests_properties(codegen_determinism_test PROPERTIES LABELS codegen)
+# TIMEOUT: this test needs an explicit budget because its cost scales with the
+# GENERATED CORPUS -- it regenerates the dictionary codegen and diffs it -- not
+# with a fixture. That is a structural property, so it will keep growing with the
+# corpus, and under a sanitizer it is long enough to exceed ctest's OWN 1500 s
+# default. Without a property here, CI's `--timeout` guard (.github/workflows/
+# tier1.yml, the `linux` job's first Test step) would false-positive on it; an
+# explicit property wins over `--timeout`, which is what this relies on.
+#
+# A WEDGE guard, not a performance assertion. Do not tighten it toward the
+# observed cost.
+#
+# Dated observation, not a standing claim: 1521 s on windows-msvc-asan in the
+# 2026-08-31 runs, the highest of the 14 lanes measured then. It rots -- see the
+# all-lane re-derivation recipe in tier1.yml beside the `--timeout` flag, and run
+# that rather than trusting this number.
+set_tests_properties(codegen_determinism_test PROPERTIES
+  LABELS codegen
+  TIMEOUT 5400)
 
 # 077-builder-args-dedup T019 [US2]: only defined when THIS build was
 # configured with the tier ON -- MainTreeVlatestBuildersUnaffectedByOffPathWitness

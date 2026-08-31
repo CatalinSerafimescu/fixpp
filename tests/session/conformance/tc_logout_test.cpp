@@ -149,11 +149,29 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 //
 // ── #289: the `run_for(W); restart(); fut.get()` migration ───────────────────
 //
-// The sites in this file use `run_window_then_ready`
-// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard
-// #289 names is the UNCONDITIONAL `get()`, not the fixed window. On a
-// manually-driven io_context a `get()` the window did not satisfy blocks with
-// nothing left to pump it -- a deadlock ctest reports as a timeout.
+// The sites in this file use `run_window_then_ready`, and the two graceful-close
+// sites additionally use `pump_until` (both tests/support/pump_until_ready.hpp).
+// Where a window is preserved that is deliberate: the hazard #289 names is the
+// UNCONDITIONAL `get()`, not the fixed window. On a manually-driven io_context a
+// `get()` the window did not satisfy blocks with nothing left to pump it -- a
+// deadlock ctest reports as a timeout, and on a lane with no ctest timeout
+// configured, as a wedged job.
+//
+// A window is NOT preservable where a later step depends on progress the window
+// was only assumed to have made. Both graceful-close tests are that case -- see
+// the arming argument at their `pump_until` -- so they wait on an observed
+// condition instead. The fixture's own sites keep their windows.
+//
+// ⚠️ A CLOSE PUMP HERE MUST BE BOUNDED BELOW `logout_disconnect_timeout_ms`.
+// `Session::close` joins `run_logout_phase1()` with a REAL
+// `asio::steady_timer close_grace` armed for that same duration
+// (src/session/session.cpp, the `||` in the graceful branch). The mock clock
+// does not govern that timer. So a pump whose budget exceeds it will complete
+// `close_fut` off the REAL timer whenever the mock path did not fire -- the
+// test then goes green having never exercised the mock-clock timeout it exists
+// to test. Measured, not reasoned: with the mock advance deleted entirely, a
+// 10 s budget passes in 2202 ms instead of failing. Keeping the budget under
+// the grace period makes that case report a miss instead.
 //
 // Teardown is deliberately NOT a fixture-destructor drain, which is the shape
 // PRs #301 and #307 used for fixtures that OWN their Session. Here every
@@ -336,29 +354,52 @@ TEST(TC009Logout, GracefulLogoutTimeout) {
     auto close_fut =
         asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
 
-    // Let phase 1 start (Logout emitted, LogoutSent).
-    f.ioc.run_for(100ms);
-    f.ioc.restart();
+    // Phase 1 must reach LogoutSent BEFORE the `advance()` below, and a fixed
+    // window cannot promise that. The dependency is not merely "the assertions
+    // read stale state": `run_logout_phase1` computes its deadline as
+    // `steady_now() + logout_disconnect_timeout_ms` at ARM time -- see the
+    // `sleep_until` that follows the LogoutSent transition in
+    // `Session::run_logout_phase1_` (src/session/session.cpp) -- and
+    // `mock_clock::advance` wakes only the waiters that already exist when it
+    // runs. A sleep armed AFTER `advance(3s)` therefore parks 2 s past the NEW
+    // now, nothing remains to reach it, and the `get()` below blocks forever.
+    // That is the wedge, not a slow assertion.
+    //
+    // LogoutSent is used as the arming proxy. It is not claimed to be an exact
+    // one -- that would be a claim about where asio reschedules inside
+    // `co_await sleep_until`, which nothing here re-runs. It does not need to be
+    // exact: if the sleep is somehow NOT yet armed when LogoutSent is observed,
+    // the advance is lost, the close guard below misses, and the test reports a
+    // bounded failure. The proxy stands on that failure mode, not on asio
+    // internals.
+    if (!fixpp::test_support::pump_until(
+            f.ioc, [&sess] { return sess.state() == fixpp::session::fsm_state::LogoutSent; })) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "TC009Logout.GracefulLogoutTimeout/phase1");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                      << "TC009Logout.GracefulLogoutTimeout/phase1";
+        return;
+    }
 
     EXPECT_GE(f.transport.sent_count(), 1u) << "Graceful close must emit Logout";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogoutSent)
         << "After emitting Logout, FSM should be LogoutSent";
 
-    // #289 NOT MIGRATED, and NOT because the census said so -- the census never saw
-    // this site. `close_fut.get()` below sits SEVEN lines under this window and
-    // `ci/pump-census.sh`'s lookahead is SIX, so this row was never in
-    // `ci/expected-pump-sites.txt` and cannot leave it. It is the #289 shape in full:
-    // a fixed window, no `clock->advance()` between it and the `get()`, and an
-    // unconditional `get()` that blocks with nothing left to pump it if the window
-    // does not complete the close. Pre-existing on `main`, untouched by the
-    // conformance-directory migration, deferred to the next batch of the sequence
-    // with its own RED arm. This file's pin being empty is a statement about the
-    // CENSUS, not about the file.
-
     // Peer never confirms: advance clock past 2 s timeout.
     f.clock->advance(std::chrono::seconds{3});
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    // Bounded pump rather than a fixed window -- a fixed window is what wedged
+    // this test on a starved `ctest --parallel` lane. The budget is DERIVED from
+    // the config under test, not chosen: it must stay under the real
+    // `close_grace` timer (see the warning above the fixture), and deriving it
+    // means it cannot drift if that default moves.
+    const auto close_budget = std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms} / 2;
+    if (!fixpp::test_support::pump_until_ready(f.ioc, close_fut, close_budget)) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "TC009Logout.GracefulLogoutTimeout/close");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                      << "TC009Logout.GracefulLogoutTimeout/close";
+        return;
+    }
 
     // Session must be force-disconnected.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
@@ -379,15 +420,17 @@ TEST(TC009Logout, GracefulLogoutBothDirections) {
     auto close_fut =
         asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
 
-    // #289 NOT MIGRATED -- same class as the site above, and invisible to the census
-    // for the same reason (`close_fut.get()` is twenty-one lines below). WEAKER than
-    // that one, deliberately stated as such: the intervening `f.feed(...)` IS
-    // migrated, and on its miss branch `drain_or_report` pumps for up to
-    // `kQuiesceBudget` (5 s), which will usually complete `close_fut` before the
-    // `get()` is reached. The hazard is attenuated, not removed -- nothing checks
-    // `close_fut`'s readiness. Deferred with the site above.
-    f.ioc.run_for(100ms);
-    f.ioc.restart();
+    // Same arming dependency as GracefulLogoutTimeout above, minus the clock
+    // advance: the assertions below read the phase-1 emission, so wait for
+    // LogoutSent rather than for a fixed window.
+    if (!fixpp::test_support::pump_until(
+            f.ioc, [&sess] { return sess.state() == fixpp::session::fsm_state::LogoutSent; })) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "TC009Logout.GracefulLogoutBothDirections/phase1");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                      << "TC009Logout.GracefulLogoutBothDirections/phase1";
+        return;
+    }
 
     ASSERT_GE(f.transport.sent_count(), 1u);
     {
@@ -406,6 +449,21 @@ TEST(TC009Logout, GracefulLogoutBothDirections) {
     f.feed(sess, peer_logout);
 
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
+
+    // The peer's confirming Logout wakes phase 1 via `cancel_sleeps()`, but
+    // whether `close_fut` is READY when `feed`'s window returns is a scheduling
+    // question, not a guarantee. Guard the `get()` so a lost wake FAILS instead
+    // of wedging the binary -- and bound it under the real `close_grace` timer
+    // for the same reason as the site above: past that point the timer, not the
+    // peer's Logout, is what completes the close.
+    const auto close_budget = std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms} / 2;
+    if (!fixpp::test_support::pump_until_ready(f.ioc, close_fut, close_budget)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "TC009Logout.GracefulLogoutBothDirections/close");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                      << "TC009Logout.GracefulLogoutBothDirections/close";
+        return;
+    }
 
     auto r = close_fut.get();
     EXPECT_TRUE(r.has_value());

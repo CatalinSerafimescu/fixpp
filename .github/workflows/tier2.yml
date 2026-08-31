@@ -681,7 +681,9 @@ jobs:
       - name: Test (minimal tier — packaging gated on windows-msvc-release)
         if: matrix.preset != 'windows-msvc-release'
         shell: cmd
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging
+      # `--timeout 1800`: wedge guard, see the `linux` job's first Test step for
+      # why it exists and why it must not be tightened.
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging --timeout 1800
 
       # ⚠️ ASSERT THE COUNT BEFORE RUNNING. `ctest -L` exits 0 when the filter
       # matches NOTHING, so an exit-code-only check would report this lane green
@@ -707,7 +709,9 @@ jobs:
       - name: Test (full tier incl. packaging)
         if: matrix.preset == 'windows-msvc-release'
         shell: cmd
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+      # `--timeout 1800`: wedge guard, see the `linux` job's first Test step for
+      # why it exists and why it must not be tightened.
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure --timeout 1800
 
       # Exit code 0xc0000135 is STATUS_DLL_NOT_FOUND: the process dies in the
       # loader before main(), so ctest captures NO output and the test reports

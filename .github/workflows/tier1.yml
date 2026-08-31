@@ -859,12 +859,40 @@ jobs:
       - name: Test (minimal tier — packaging gated on linux-gcc-release)
         id: minimal_tier_test
         if: matrix.preset != 'linux-gcc-release'
+      # ⚠️ `--timeout 1800` IS A WEDGE GUARD. Without it there is NO per-test
+      # timeout at all: this project calls `enable_testing()` and never
+      # `include(CTest)`, so no DartConfiguration.tcl is written and ctest's
+      # documented 1500 s default never applies. A test that deadlocks then runs
+      # until the JOB budget expires -- `session_tc_logout` wedged this lane for
+      # 86 minutes on 2026-08-31 with no Timeout verdict, and would have burned
+      # all 240 minutes had the run not been cancelled by hand.
+      #
+      # It is NOT a performance assertion and must never be tightened into one.
+      # The CONDITION it must satisfy: stay clear of the slowest test that does
+      # NOT carry its own TIMEOUT property, by enough margin that runner variance
+      # and ordinary growth never reach it. `codegen_determinism_test` is slower
+      # than this and carries its own property (tests/codegen/CMakeLists.txt); an
+      # explicit property wins over `--timeout`, so it is unaffected.
+      #
+      # The measurement behind 1800, as a dated observation and not a standing
+      # claim: across all 14 test lanes of the 2026-08-31 runs (tier1 33398306794
+      # plus the tier2/tier3 runs of the same push), the slowest property-less
+      # test was dictionary_pure_tests at 839 s on windows-msvc-asan.
+      # That is a snapshot; it rots. Re-derive before trusting or changing it:
+      #   # every lane, not one job -- the tier2/tier3 runs are SEPARATE runs
+      #   for wf in tier1.yml tier2.yml tier3-libcxx.yml; do
+      #     rid=$(gh run list --workflow $wf --limit 1 --json databaseId -q '.[0].databaseId')
+      #     for jid in $(gh api /repos/$O/$R/actions/runs/$rid/jobs?per_page=100 -q '.jobs[].id'); do
+      #       gh api /repos/$O/$R/actions/jobs/$jid/logs \
+      #         | grep -oP 'Test\s+#\d+: \S+ .*Passed +[0-9.]+ sec'
+      #     done
+      #   done
         run: |
           python3 ci/measure-peak-rss.py \
             --out "/tmp/peak-rss-${{ matrix.preset }}.env" \
             --log "/tmp/ctest-${{ matrix.preset }}.log" \
             --label "${{ matrix.preset }}" \
-            -- ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging --no-tests=error
+            -- ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging --no-tests=error --timeout 1800
 
       # ── #266 / #229 criterion 4: the peak-memory measurement ────────────────
       #
@@ -983,12 +1011,14 @@ jobs:
       - name: Test (full tier incl. packaging — the SC-011/SC-012 gate)
         id: full_tier_test
         if: matrix.preset == 'linux-gcc-release'
+      # `--timeout 1800`: wedge guard, see the `linux` job's first Test step for
+      # why it exists and why it must not be tightened.
         run: |
           python3 ci/measure-peak-rss.py \
             --out "/tmp/peak-rss-${{ matrix.preset }}.env" \
             --log "/tmp/ctest-${{ matrix.preset }}.log" \
             --label "${{ matrix.preset }}" \
-            -- ctest --preset ${{ matrix.preset }} --output-on-failure --no-tests=error
+            -- ctest --preset ${{ matrix.preset }} --output-on-failure --no-tests=error --timeout 1800
 
       # A second report step rather than widening the one above's `if:`. The two
       # ctest steps are 100 lines apart with the rpmbuild install and the
@@ -1404,7 +1434,7 @@ jobs:
             --out /tmp/peak-rss-linux-clang-coverage.env \
             --log /tmp/ctest-linux-clang-coverage.log \
             --label linux-clang-coverage \
-            -- ctest --preset linux-clang-coverage --output-on-failure
+            -- ctest --preset linux-clang-coverage --output-on-failure --timeout 1800
 
       # Quoted — see the `linux` job's first Peak memory step for why.
       - name: "Peak memory + unexplained-sanitizer gate (#266 / #229 / #267)"

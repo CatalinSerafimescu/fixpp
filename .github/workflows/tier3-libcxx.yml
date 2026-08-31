@@ -576,12 +576,14 @@ jobs:
       - name: Test
         id: libcxx_test
         if: matrix.preset != 'linux-clang-libc++-tsan'
+      # `--timeout 1800`: wedge guard, see tier1.yml's `linux` job first Test step
+      # for why it exists and why it must not be tightened.
         run: |
           python3 ci/measure-peak-rss.py \
             --out "/tmp/peak-rss-${{ matrix.preset }}.env" \
             --log "/tmp/ctest-${{ matrix.preset }}.log" \
             --label "${{ matrix.preset }}" \
-            -- ctest --preset ${{ matrix.preset }} --output-on-failure
+            -- ctest --preset ${{ matrix.preset }} --output-on-failure --timeout 1800
 
       - name: Test (TSan — instrumented libc++)
         id: libcxx_tsan_test
@@ -590,12 +592,14 @@ jobs:
           # Prepend the instrumented libc++ ahead of the apt libc++ in the
           # job-level LD_LIBRARY_PATH so the soname resolves to it at runtime.
           LD_LIBRARY_PATH: ${{ runner.temp }}/libcxx-tsan:${{ env.LD_LIBRARY_PATH }}
+      # `--timeout 1800`: wedge guard, see tier1.yml's `linux` job first Test step
+      # for why it exists and why it must not be tightened.
         run: |
           python3 ci/measure-peak-rss.py \
             --out "/tmp/peak-rss-${{ matrix.preset }}.env" \
             --log "/tmp/ctest-${{ matrix.preset }}.log" \
             --label "${{ matrix.preset }}" \
-            -- ctest --preset ${{ matrix.preset }} --output-on-failure
+            -- ctest --preset ${{ matrix.preset }} --output-on-failure --timeout 1800
 
       # One report step for both, because exactly one of the two Test steps runs
       # per lane. `outcome` of the SKIPPED one is `skipped`, so the two are
