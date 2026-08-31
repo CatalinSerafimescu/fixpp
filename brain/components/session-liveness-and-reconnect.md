@@ -28,17 +28,35 @@ constitution: ["§XI.2"]
 
 ## Participants
 
-`run_heartbeat_cadence`, `run_inbound_liveness_watch`, `run_liveness_loop`, `drive_reconnect`,
-`drive_reconnect_attempt`, `drive_logout`, `run_logout_phase1`. **Nine of the repository's ten
-long-lived coroutines had no page before this one** — derive the current list with
-`python3 tools/brain_inventory.py --census`, never from a list written here.
+`run_liveness_loop`, `drive_reconnect`, `drive_reconnect_attempt`, `run_logout_phase1` — derive the
+current list with `python3 tools/brain_inventory.py --census`, never from a list written here.
+
+> ## ⛔ CORRECTION 2026-08-31 — three names this page used to list are DEAD STUBS
+>
+> `run_heartbeat_cadence`, `run_inbound_liveness_watch` and `drive_logout` in
+> `src/session/reconnect_fsm.cpp` have **one-line bodies** (`co_return expected_t<void>{};`). Their own
+> comments say the logic is *"deferred to Phase 4"* and *"lives in session.cpp run_liveness_loop() for
+> Phase 3."* **The live implementation is `Session::run_liveness_loop()`.**
+>
+> This page previously cited two of those stubs as the enforcement site for its two headline
+> invariants. **It pointed readers at empty functions** — the exact fossil class this bundle exists to
+> prevent, committed by the bundle. Found by a blind agent during the A4 measurement, not by review.
+>
+> ⭐ **Root cause, and it is the transferable part:** `brain_inventory.py` derives "long-lived
+> coroutines" from a **signature**, and a stub has a signature. A declaration-shaped instrument cannot
+> tell a flow from a placeholder. **Re-derive before trusting any name here** — measure the body, do
+> not match the signature:
+>
+> ```bash
+> python3 tools/brain_inventory.py --census    # now flags stubs; see the STUB marker
+> ```
 
 ## Invariants, and where each is enforced
 
 | Invariant | Why | Enforced at |
 |---|---|---|
-| **Liveness escalates in two stages — probe, then terminate** | a silent peer and a dead peer are indistinguishable from one missed interval; the probe disambiguates before the session is torn down | `run_inbound_liveness_watch` (FR-004 / FR-007). ⚠️ **The two thresholds are NOT reproduced here** — read the header. A copied constant is what rots |
-| **The outbound timer is armed on Active entry, rearmed on every outbound, cancelled on Disconnected entry** | the cadence is *"nothing sent for HeartBtInt"*, not *"every HeartBtInt"* — so any outbound resets it and an idle session sends the minimum | `run_heartbeat_cadence` |
+| **Liveness escalates in two stages — probe, then terminate** | a silent peer and a dead peer are indistinguishable from one missed interval; the probe disambiguates before the session is torn down | **`Session::run_liveness_loop()`** in `src/session/session.cpp` — ⚠️ **not** `run_inbound_liveness_watch`, which is a stub (see the correction above). FR-004 / FR-007. **The two thresholds are NOT reproduced here** — read the source. A copied constant is what rots |
+| **The outbound timer is armed on Active entry, rearmed on every outbound, cancelled on Disconnected entry** | the cadence is *"nothing sent for HeartBtInt"*, not *"every HeartBtInt"* — so any outbound resets it and an idle session sends the minimum | **`Session::run_liveness_loop()`** — ⚠️ **not** `run_heartbeat_cadence`, which is a stub |
 | **An inbound Heartbeat's `TestReqID(112)` must match the most recent outbound TestRequest** | an unmatched reply proves liveness of *something*, not of the exchange being probed | FR-006 → `session_testreqid_mismatch` |
 | **Reconnect mints a FRESH `Transport` per attempt; the dead instance is destroyed first** | a `Transport` is never reused across attempts | `drive_reconnect_attempt`; disclosed as **`B-012-2`** |
 | **All elapsed/threshold measurements use `steady_now()`, not `now()`** | `now()` is not promised monotonic, so a wall-clock step would fire or suppress timeouts spuriously | disclosed as **`B-007-3`** |

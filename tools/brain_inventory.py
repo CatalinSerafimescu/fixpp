@@ -25,7 +25,7 @@ import argparse, glob, os, re, subprocess, sys, tempfile
 
 ROW = re.compile(r"^\|\s*([A-Z]+-\d+)\s*\|")
 CITE = re.compile(r"\[(2[a-m]|arch|const)\s*§")
-CORO = re.compile(r"awaitable<(?:[^<>]|<[^<>]*>)*>\s+((?:run|drive)_[a-z0-9_]+)\s*\(")
+CORO = re.compile(r"awaitable<(?:[^<>]|<[^<>]*>)*>\s+(?:[A-Za-z_]\w*::)?((?:run|drive)_[a-z0-9_]+)\s*\(")   # optional Class:: -- a DEFINITION is qualified
 
 
 def cells(line):
@@ -97,12 +97,63 @@ def brain_pages(root):
             for p in glob.glob(os.path.join(root, "brain/**/*.md"), recursive=True)}
 
 
+# signature tail: "( ... )" then optional qualifiers, then the OPENING BRACE itself.
+DEFN = re.compile(r"\((?:[^;()]|\([^;()]*\))*\)\s*(?:noexcept\s*)?(?:->[^{;]*)?\{")
+# NOTE braces are ALLOWED inside the parameter list: a default argument `= {}`
+# is legal there, and excluding braces silently dropped run_read_pump (56 real
+# lines) from the inventory entirely. Losing a real flow is the dangerous
+# direction -- a missing row looks exactly like "there is no such flow".
+
+
+def body_lines(text, brace_pos):
+    """Non-blank, non-comment lines inside the brace-matched body starting at brace_pos."""
+    depth, end = 0, len(text)
+    for j in range(brace_pos, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                end = j
+                break
+    body = text[brace_pos + 1:end]
+    return [l for l in body.split("\n") if l.strip() and not l.strip().startswith("//")]
+
+
 def flows(root):
+    """name -> (file, body_line_count).
+
+    ⚠️ THE SIGNATURE IS NOT THE FLOW. This matcher finds long-lived coroutines by their
+    DECLARATION, and a stub has a declaration. Three of the ten names it reported here
+    turned out to be one-line stubs -- `co_return expected_t<void>{};` with a comment
+    saying the logic "lives in session.cpp run_liveness_loop()" -- while a brain page
+    cited two of them as the enforcement site for its headline invariants. It pointed
+    readers at empty functions.
+
+    A declaration-shaped instrument cannot tell a flow from a placeholder, so it must
+    not present them identically. Body size is measured and stubs are marked. This does
+    not make the tool authoritative about which flows are live; it makes the ones that
+    are obviously NOT live impossible to miss.
+    """
     out = {}
     for pat in ("src/**/*.cpp", "include/**/*.hpp"):
         for f in glob.glob(os.path.join(root, pat), recursive=True):
-            for m in CORO.finditer(open(f, encoding="utf-8", errors="replace").read()):
-                out.setdefault(m.group(1), os.path.relpath(f, root))
+            text = open(f, encoding="utf-8", errors="replace").read()
+            for m in CORO.finditer(text):
+                name = m.group(1)
+                # The brace must FOLLOW THE SIGNATURE DIRECTLY. A header declaration
+                # ends in `;`, and searching for "the next { anywhere" walks past it
+                # into an unrelated function -- which is how the first version of this
+                # fix flagged run_liveness_loop (114 real lines) as a stub. A repair
+                # for a false-clean instrument that produces a false-DIRTY one is the
+                # same defect wearing the other sign.
+                tail = DEFN.match(text, m.end() - 1)
+                if not tail:
+                    continue                      # a declaration, not a definition
+                n = len(body_lines(text, tail.end() - 1))
+                prev = out.get(name)
+                if prev is None or n > prev[1]:   # keep the definition, not a re-decl
+                    out[name] = (os.path.relpath(f, root), n)
     return out
 
 
@@ -154,9 +205,19 @@ def run(root, gaps_only=False):
             "   <<< GAP" if gap else ""))
 
     print("\n== FLOWS  (derived from long-lived coroutines; a new one appears here unedited)")
+    n_stub = 0
     for n in sorted(fl):
         pg = named_by(n, pages)
-        print("  %-30s %-34s %s" % (n, fl[n], ",".join(pg) or "-- no brain page --"))
+        where, blines = fl[n]
+        stub = blines <= 1
+        n_stub += stub
+        print("  %-30s %-34s %5s  %s%s" % (
+            n, where, f"{blines}L", ",".join(pg) or "-- no brain page --",
+            "   <<< STUB -- NOT A LIVE FLOW" if stub else ""))
+    if n_stub:
+        print(f"\n⚠️  {n_stub} of {len(fl)} name(s) above have a one-line body. They are "
+              "DECLARATIONS, not flows.\n    Do not document one as a runtime path -- find "
+              "where the logic actually lives first.")
 
     print("\nA family with no cited design doc AND no page is where a component page must "
           "carry the load alone -- that is the deliverable, not an error.")
@@ -189,7 +250,19 @@ def self_test():
         open(os.path.join(d, "src/a.cpp"), "w").write(
             "asio::awaitable<void> run_x(int a) {}\nawaitable<void> drive_y() {}\n"
             # nested template -- the original [^>]* matcher stopped at the first '>'
-            "asio::awaitable<expected_t<void>> run_nested() {}\n")
+            "asio::awaitable<expected_t<void>> run_nested() {}\n"
+            # a STUB: one-line body. Must be reported AND marked, never dropped.
+            "asio::awaitable<void> Cls::run_stubbed() noexcept {\n"
+            "    co_return;\n}\n"
+            # a real body, QUALIFIED (definitions are; declarations are not)
+            "asio::awaitable<void> Cls::run_real() noexcept {\n"
+            "    int a = 1;\n    int b = 2;\n    co_return;\n}\n"
+            # a DEFAULT ARGUMENT `= {}` in the params -- excluding braces here
+            # silently dropped a 56-line real flow from the whole inventory.
+            "asio::awaitable<void> run_defarg(std::span<int> s = {}) {\n"
+            "    int q = 0;\n    co_return;\n}\n"
+            # a pure DECLARATION -- must NOT be counted as a definition
+            "asio::awaitable<void> run_declared_only(int x);\n")
 
         fam = catalogue(d)
         if set(fam) != {"wire", "orphan"}:
@@ -201,8 +274,20 @@ def self_test():
         if docs_for(d, {"999-nothing"}):
             fails.append("orphan bundle invented a design doc")
         f = flows(d)
-        if set(f) != {"run_x", "drive_y", "run_nested"}:
-            fails.append("flows parsed %s -- nested template dropped?" % sorted(f))
+        want = {"run_x", "drive_y", "run_nested", "run_stubbed", "run_real", "run_defarg"}
+        if set(f) != want:
+            fails.append("flows parsed %s; want %s" % (sorted(f), sorted(want)))
+        # BOTH directions. A stub detector only ever tried against stubs proves it can
+        # fire, not that it can stay quiet -- and its first version flagged a 114-line
+        # coroutine as a stub, which is the same defect with the sign flipped.
+        if f.get("run_stubbed", ("", 9))[1] > 1:
+            fails.append("STUB not detected -- a placeholder would be documented as a flow")
+        if f.get("run_real", ("", 0))[1] <= 1:
+            fails.append("real coroutine MISREPORTED as a stub")
+        if "run_defarg" not in f:
+            fails.append("default-arg `= {}` param list dropped a real flow")
+        if "run_declared_only" in f:
+            fails.append("a pure DECLARATION was counted as a definition")
         pages = brain_pages(d)
         if named_by("wire", pages) != ["wire.md"]:
             fails.append("mention false negative")
@@ -215,7 +300,7 @@ def self_test():
         if columns(os.path.join(d, "spec/feature-catalogue.md"))["/specify"] == 9:
             fails.append("column resolver reproduced the old off-by-one")
 
-    print("self-test: %d/%d passed" % (10 - len(fails), 10))
+    print("self-test: %d/%d passed" % (14 - len(fails), 14))
     for x in fails:
         print("  FAIL", x)
     return 1 if fails else 0
