@@ -15,6 +15,14 @@ on:
     # path-skipped required check never reports → PR blocked forever).
     paths-ignore:
       - "**/*.md"
+      # brain/ (the SecondBrain bundle) is documentation. It is ALL Markdown today,
+      # so "**/*.md" above already covers it -- but only by accident of CONTENT.
+      # The first non-.md file added there (a diagram, a JSON index, a helper)
+      # would silently re-arm the whole matrix on a docs-only change. Listing the
+      # directory records the INTENT, so the skip stops depending on file
+      # extensions. Freshness is still gated -- brain-freshness.yml has no
+      # paths filter and must keep running on exactly these commits.
+      - "brain/**"
       - "docs/**"
       - "specs/**"
       - ".specify/**"
