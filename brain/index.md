@@ -52,6 +52,7 @@ maintained — this page exists because agents did not find them, not because th
 | **Configuration** — TOML loading and name→plugin resolution | [`components/config.md`](./components/config.md) | assuming a new plugin is reachable once the class exists |
 | **QuickFIX compatibility** | [`components/quickfix-compat.md`](./components/quickfix-compat.md) — translation, **not** emulation; the adapter was rejected | planning a runtime shim |
 | **The service wrapper** | [`components/service.md`](./components/service.md) — a stub **by decision**; `src/` has no implementation | treating the empty module as a gap to fill |
+| **Which features TOUCH a given file or contract** | `git log --oneline -- <path>` | ⛔ **the catalogue.** A row names the feature that **DELIVERED** the thing plus its PR — not every feature that has since modified it. `wire/validator.hpp` has ~15 commits against a row citing one feature; several are perf/hardening passes with no row of their own |
 | What is left to do for v1.0 | `../REMAINING-WORK.md` (parent) | this bundle |
 | History — what we used to believe | `history.md` (deliberately off this path) | — |
 

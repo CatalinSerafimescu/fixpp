@@ -92,6 +92,10 @@ The authority is therefore split three ways, and knowing the split is most of th
 
 ## ⚠️ Limitations an integrator must know before trusting this family
 
+⚠️ **This is a SELECTED pair, not the full set** — the family carries roughly a dozen open
+`L-` rows across 005 / 009 / 013. **Derive the full list from the live B&L file**; a blind
+agent correctly treated this as a shortlist and re-derived, which is the intended use.
+
 - **`L-005-1` — the full `[FIX-TC]` conformance corpus is NOT satisfied.** Only a
   capability-partitioned subset ships. Do not read the size of this family as completeness.
 - **`L-005-5` — `OnBehalfOfCompID(115)` / `DeliverToCompID(128)` third-party addressing is not
