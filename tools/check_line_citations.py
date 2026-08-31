@@ -98,6 +98,19 @@ RE_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 # Citations cannot live in these, and they are binary.
 CITE_SCAN_SKIP = ("tests/fuzz/corpus/", "tests/abi/baseline/")
 
+# --shift-audit's `git grep` PREFILTER. It only decides which lines reach
+# RE_TARGET / RE_B / RE_C; those then decide. So its recall MUST be a superset of
+# all three, or citations vanish before anything can judge them and the audit
+# reports clean -- this repo's most repeated defect, one layer up. Deliberately
+# looser than the deciders (no `\b`, no `{2,}`, and `-i` at the call site);
+# over-supply costs nothing because Python re-decides. `--self-test` pins the
+# superset relation, so editing a decider without editing this fails loudly.
+CITE_PREFILTER = [
+    r"\.(hpp|cpp|ipp|hh|hxx|cc|h|md):[0-9]",
+    r"lines?[[:space:]]+[0-9][0-9]",
+    r"\(:[0-9]",
+]
+
 # A `#line` preprocessor directive is not a citation -- form B's {2,}-digit
 # pattern matches its line number.
 RE_LINE_DIRECTIVE = re.compile(r"^\s*#\s*line\s")
@@ -495,14 +508,11 @@ def build_citation_index(root, wanted, rev):
     # One rev-scoped grep instead of 6k blob reads. The patterns are a PREFILTER
     # only -- deliberately looser than RE_TARGET/RE_B/RE_C, which then decide.
     # `-i` widens it further; that costs nothing, since Python re-decides.
-    r = subprocess.run(
-        ["git", "grep", "-nI", "--no-color", "-i", "-E",
-         "-e", r"\.(hpp|cpp|ipp|hh|hxx|cc|h|md):[0-9]",
-         "-e", r"lines?[[:space:]]+[0-9][0-9]",
-         "-e", r"\(:[0-9]",
-         rev, "--", ".",
-         ":(exclude)tests/fuzz/corpus/", ":(exclude)tests/abi/baseline/"],
-        cwd=root, capture_output=True)
+    grep_cmd = ["git", "grep", "-nI", "--no-color", "-i", "-E"]
+    for pat in CITE_PREFILTER:
+        grep_cmd += ["-e", pat]
+    grep_cmd += [rev, "--", "."] + [f":(exclude){x}" for x in CITE_SCAN_SKIP]
+    r = subprocess.run(grep_cmd, cwd=root, capture_output=True)
     if r.returncode > 1:
         raise SystemExit(
             "check-line-citations: git grep failed "
@@ -853,6 +863,78 @@ def _sh_audit(d):
     return code, payload
 
 
+# Citation spellings that must survive the PREFILTER and reach the deciders. Each
+# is an edge of a DECIDER, so if the prefilter is ever narrowed the pin fails
+# rather than the audit quietly going blind. Symlinks are excluded on both sides:
+# `git grep` does not follow them, and following one would double-count every
+# citation in the file it points at (found while validating -- the comparison
+# harness followed `.specify/memory/constitution.md` and reported 19 phantom
+# misses against a tool that was correct).
+PREFILTER_LINES = [
+    "// see session.cpp:1258 for the thunk",
+    "// (`.specify/2j-controlplane.md:902`) per goal 6",
+    "// per `library/.specify/2d-threading.md:22` the lint extends",
+    "// tab before the number: at\tline 448 exactly",
+    "// tilde form (~line 3232) honoured",
+    "// bare self-citation (:532-534) returns status",
+    "// two digits is the floor: line 99 counts",
+    "// doc.md:10 and target.hpp:2 on one line",
+]
+
+
+def prefilter_recall_check(d):
+    """The prefilter must pass through EVERY line the deciders would match.
+
+    It decides what reaches RE_TARGET/RE_B/RE_C, so a prefilter narrower than any
+    of them drops citations before anything can judge them -- and the audit then
+    reports clean because it could not report otherwise.
+    """
+    os.makedirs(os.path.join(d, "pf"), exist_ok=True)
+    open(os.path.join(d, "pf", "spellings.cpp"), "w").write(
+        "\n".join(PREFILTER_LINES) + "\n")
+    _sh_commit(d, "prefilter spellings")
+    rev = git(["rev-parse", "HEAD"], d, "rev-parse").strip()
+
+    cmd = ["git", "grep", "-nI", "--no-color", "-i", "-E"]
+    for pat in CITE_PREFILTER:
+        cmd += ["-e", pat]
+    cmd += [rev, "--", "."]
+    r = subprocess.run(cmd, cwd=d, capture_output=True)
+    passed = set()
+    for h in r.stdout.decode("utf-8", "replace").splitlines():
+        rest = h[len(rev) + 1:]
+        try:
+            cf, cl, _ = rest.split(":", 2)
+        except ValueError:
+            continue
+        passed.add((cf, int(cl)))
+
+    # The deciders, run over every REGULAR tracked file (no symlinks).
+    ls = git(["ls-tree", "-r", "-z", rev], d, "ls-tree").split("\0")
+    decided = set()
+    for e in ls:
+        if not e:
+            continue
+        meta, path = e.split("\t", 1)
+        if meta.split()[0] == "120000":
+            continue
+        try:
+            with open(os.path.join(d, path), encoding="utf-8", errors="replace") as f:
+                src = f.read().splitlines()
+        except OSError:
+            continue
+        for i, ln in enumerate(src):
+            if RE_TARGET.search(ln) or RE_B.search(ln) or RE_C.search(ln):
+                decided.add((path, i + 1))
+
+    missed = decided - passed
+    return [
+        ("prefilter is proven NON-VACUOUS (it passes the spellings through)",
+         len({c for c in passed if c[0] == "pf/spellings.cpp"}) == len(PREFILTER_LINES)),
+        ("every decider-matching line survives the prefilter", not missed),
+    ]
+
+
 def shift_self_test():
     """Both halves of #336's requirement: the audit must fire on a real shift AND
     on a same-line-count mutation of a cited line, and must stay silent on the
@@ -1005,6 +1087,8 @@ def shift_self_test():
         checks.append(("...and the ambiguity is disclosed, not silently resolved",
                        any(f.get("cited_ambiguously_by", 0) > 0 for f in j["shift"])
                        and not j["content"]))
+
+        checks += prefilter_recall_check(d)
 
         # 8. A .md that nothing cites must be SKIPPED and said to be skipped --
         #    not silently folded into the clean verdict.
