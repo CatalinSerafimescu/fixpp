@@ -24,6 +24,14 @@ status: stable
 **Read this first.** It routes; it does not restate. Every surface below already exists and is
 maintained — this page exists because agents did not find them, not because they were missing.
 
+> ### ⚠️ About to trust a zero, write a count, or copy a rule?
+>
+> Read [`failure-classes.md`](failure-classes.md) — six recurring classes with the **trigger** that puts
+> you at risk and the **procedure** that refutes each. It is a taxonomy, not a checklist: the instances
+> live in a private corpus queried at the moment of the trigger, via
+> `research/G19-fix-fpml-iso20022/tools/lessons.py`. ⭐ **A lookup, never a gate** — nothing returned
+> means no recorded lesson matched, not that the code is safe.
+
 > ### 🧭 Asked to explain how the whole project works?
 >
 > **Start at [`render-architecture.md`](render-architecture.md), not here.** It is a prompt: reading
