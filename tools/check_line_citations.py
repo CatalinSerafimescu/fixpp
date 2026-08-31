@@ -643,12 +643,17 @@ def shift_audit(root, spec, json_out=None):
                 f"check-line-citations: {new_path} is status {st} in {spec} but has "
                 f"no blob at {head[:8]}. Refusing to audit from a failed measurement.")
         if old is None:
+            # The target did not exist at `base`, so "did the cited line change"
+            # has no before-value and cannot be violated -- the citation was
+            # dangling before and resolves now, which is an improvement, not rot.
+            # Only OUT OF RANGE stays a finding here: like census's out-of-range
+            # arm, it cannot be anything but a defect.
             for r in cites:
-                content_findings.append(dict(r, why="target ADDED in range (cited "
-                                             "line had no prior content)",
-                                             before=None,
-                                             after=new[r["n"] - 1]
-                                             if 1 <= r["n"] <= len(new) else None))
+                if not 1 <= r["n"] <= len(new):
+                    content_findings.append(dict(
+                        r, why=f"target ADDED in range and line {r['n']} is OUT "
+                               f"OF RANGE ({len(new)} lines)",
+                        before=None, after=None))
             continue
         for r in cites:
             n = r["n"]
@@ -1087,6 +1092,22 @@ def shift_self_test():
         checks.append(("...and the ambiguity is disclosed, not silently resolved",
                        any(f.get("cited_ambiguously_by", 0) > 0 for f in j["shift"])
                        and not j["content"]))
+
+        # 8c. A citation into a file ADDED in the range has no before-value, so it
+        #     is not rot -- but an out-of-range one into it still is.
+        os.makedirs(os.path.join(d, "fresh"), exist_ok=True)
+        open(os.path.join(d, "src", "newcite.cpp"), "w").write(
+            "// in range:  fresh/new.md:2\n"
+            "// past EOF:  fresh/new.md:99\n")
+        _sh_commit(d, "cite a file that does not exist yet")
+        open(os.path.join(d, "fresh", "new.md"), "w").write("A\nB\nC\n")
+        _sh_commit(d, "add the cited file")
+        code, j = _sh_audit(d)
+        checks.append(("added target: an IN-RANGE citation into it is not rot",
+                       not any(c["n"] == 2 for c in j["content"])))
+        checks.append(("added target: an OUT-OF-RANGE citation into it still is",
+                       code == 1 and any(c["n"] == 99 and "OUT OF RANGE" in c["why"]
+                                         for c in j["content"])))
 
         checks += prefilter_recall_check(d)
 
