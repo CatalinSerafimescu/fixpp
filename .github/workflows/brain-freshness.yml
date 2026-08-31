@@ -1,4 +1,4 @@
-name: SecondBrain freshness
+name: Repo hygiene — SecondBrain freshness + workflow traps
 
 # Standalone and deliberately NOT part of tier1.yml: it must inherit neither that
 # matrix's cost nor its label gating. All three tier matrices skip until BOTH gate
@@ -55,3 +55,17 @@ jobs:
         # and the "fix" would be to weaken fail-closed. They have their own local
         # `sweep` subcommand.
         run: python3 tools/check_brain.py gate
+
+      - name: Prove the workflow linter can report non-zero
+        # Same rule as above: its self-test seeds a positive AND a negative for
+        # every trap, including the "declared best-effort" opt-out, so a green
+        # here comes from a check just shown able to go red.
+        run: python3 tools/check_workflows.py --self-test
+
+      - name: Workflow traps
+        # Mechanizes three defects that already bit this repo and were, until now,
+        # only written down as lessons: paths-ignore on a required check's
+        # pull_request trigger (it can never report, so the PR waits forever);
+        # continue-on-error making a deliberate `exit 1` inert; and an unquoted '#'
+        # silently truncating a name:.
+        run: python3 tools/check_workflows.py .
