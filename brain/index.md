@@ -24,6 +24,13 @@ status: stable
 **Read this first.** It routes; it does not restate. Every surface below already exists and is
 maintained — this page exists because agents did not find them, not because they were missing.
 
+> ### 🧭 Asked to explain how the whole project works?
+>
+> **Start at [`render-architecture.md`](render-architecture.md), not here.** It is a prompt: reading
+> order, what to state as uncertain, and how to name the gaps instead of papering over them. The naive
+> route — read `architecture.md`, summarise — produces a confident description of a system that has not
+> existed since May 2026.
+
 ## Route by question
 
 | You want to know | Go to | Not to |
