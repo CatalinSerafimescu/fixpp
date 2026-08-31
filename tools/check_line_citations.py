@@ -835,6 +835,7 @@ HUNK_CASES = [
     ((1515, 0, 41, 1515), False, "append at the original last line"),
     ((12,   0, 47, 1620), True,  "47-line note inserted near the top (9e0b332d)"),
     ((0,    0,  5,   20), True,  "insertion before line 1"),
+    ((0,    0,  5,    0), False, "first content into an EMPTY file: nothing below"),
     ((500,  0,  3, 1515), True,  "insertion mid-document"),
     ((3,    1,  1,  100), False, "NcN, the omitted-count `@@ -3 +3 @@` form"),
     ((121,  3,  3, 1515), False, "NcN over three lines"),
