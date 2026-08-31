@@ -1,0 +1,71 @@
+---
+type: Component Decision Map
+title: Transport — a 5-method interface at its cap, and the two things pushed out to keep it there
+description: The ≤5 pure-virtual rule is not decoration here. It is why TLS handshake is a separate sub-interface and why Listener::cancel does not exist.
+status: stable
+refs:
+  - include/fixpp/transport/transport.hpp
+  - include/fixpp/transport/listener.hpp
+  - include/fixpp/transport/tls_transport.hpp
+  - include/fixpp/transport/reconnect_policy.hpp
+  - .specify/2h-transport.md
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/2h-transport.md
+codegraph_entry: [Transport, Listener, TransportFactory, ReconnectPolicy]
+constitution: ["§XIV.1", "§XIV.2", "§XV.2"]
+---
+
+# Transport
+
+> ## ⚠️ The CODE is authoritative. This page is not.
+>
+> `2h-transport.md` owns this subsystem in depth, so this page is a **supplement**: the shape of the
+> interface and the two decisions that shape follows from. ⚠️ **`2h` carries an Appendix Z** — read it
+> before citing `2h`, and note its §D.1/§D.2 amendments were applied *and then superseded*.
+
+## The interface is exactly at its cap, with zero headroom
+
+`Transport` has **five** pure-virtual methods; `[const §XIV.2]` caps a plugin interface at five. That
+is not a coincidence — it is a budget that has already been spent, and it explains two things that
+otherwise look arbitrary:
+
+| Pushed out | To where | Why |
+|---|---|---|
+| TLS `async_handshake` | a separate `tls_transport` sub-interface | adding it to `Transport` would be a sixth method |
+| `Listener::cancel()` | the concrete `asio_listener` impl only | `Listener` keeps **exactly one** pure-virtual (`async_accept`), preserving the headroom `Transport` has none of |
+
+> ⭐ **So before adding a method here, the question is not "is it useful" but "what comes out".** The
+> two precedents above are the shape of the answer: push it into a sub-interface, or onto the concrete
+> implementation, and keep the abstract surface small.
+>
+> ⚠️ `Listener::cancel()` living on the impl is a **deliberate** Gate A outcome that overrode a review
+> objection. Do not "fix" it by promoting it to the base.
+
+**Re-derive the counts** — they are the whole argument, and a count written here would rot:
+
+```bash
+awk '/^class Transport/,/^};/' include/fixpp/transport/transport.hpp | grep -c '= 0;'
+awk '/^class Listener/,/^};/'  include/fixpp/transport/listener.hpp  | grep -c '= 0;'
+```
+
+## A fresh `Transport` per connection attempt — never reused
+
+Every accept and every reconnect attempt mints a **new** `Transport`; the dead instance is destroyed
+first, so at most one is live per session. Disclosed as **`B-012-2`**. This is why the connect path
+and the reconnect path cannot drift apart — they share `drive_reconnect_attempt`.
+
+## `ReconnectPolicy` is a schedule array, not a formula
+
+It carries a vector of delays with the last entry as a plateau — **not** the
+`{initial, max, multiplier, attempts, jitter}` shape it was first designed with. Two presets exist: a
+default with jitter and a cap (thundering-herd defence), and a QuickFIX-compatible one with neither.
+
+⭐ **The compat preset is the interesting half:** matching an incumbent's *absence* of jitter is a
+deliberate interop choice, not an oversight. Read the header before changing either preset's values —
+they are not reproduced here.
+
+## Related
+
+- [`engine-accept-path.md`](./engine-accept-path.md) · [`initiator-connect-path.md`](./initiator-connect-path.md) — the two flows that drive this interface.
+- [`security-profile.md`](./security-profile.md) — the TLS side, and the two `SecurityProfile` types.
+- [`plugin-factory-ownership.md`](./plugin-factory-ownership.md) — `TransportFactory`'s ownership, where the signed-off docs and the shipped header disagree.
