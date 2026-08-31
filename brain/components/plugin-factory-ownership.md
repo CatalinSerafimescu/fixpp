@@ -6,9 +6,9 @@ status: stable
 refs:
   - include/fixpp/core/engine_config.hpp
   - include/fixpp/session/session_config.hpp
-  - specs/010-session-cfg-lifetime/spec.md
   - .specify/2d-threading.md
   - .specify/2h-transport.md
+  - specs/010-session-cfg-lifetime/spec.md
 codegraph_entry: [EngineConfig, SessionConfig, MessageStoreFactory, TransportFactory]
 constitution: ["§XIV.2"]
 ---

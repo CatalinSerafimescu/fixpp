@@ -107,6 +107,38 @@ def load_pages(root):
     return pages
 
 
+# ── rule 4: refs must be in SOURCE-PRIORITY order ────────────────────────────
+#
+# A concept page routes; the order it routes IN is the routing. `refs` is read
+# top-down by a human in a hurry, so the most authoritative source has to be
+# first. The tiers, per plan step A2:
+#
+#   0  include/ , src/          the code. Authoritative -- everything else is a
+#                               claim ABOUT this.
+#   1  .specify/               design docs + constitution: the WHY, and what was
+#                               rejected. The half that does not rot.
+#   2  specs/<id>/             the per-feature bundle that shipped it.
+#   3  spec/behaviors-*        shipped behaviour a user must know.
+#   4  anything else in-repo.
+#
+# Decision records are `refs_external` and CodeGraph symbols are `codegraph_entry`
+# -- separate keys, so their position is fixed by construction and needs no rule.
+#
+# Enforced rather than documented because an ordering convention that is merely
+# written down is one nobody can tell has been broken.
+
+def ref_tier(path):
+    if path.startswith(("include/", "src/")):
+        return 0
+    if path.startswith(".specify/"):
+        return 1
+    if path.startswith("specs/"):
+        return 2
+    if path.startswith("spec/behaviors"):
+        return 3
+    return 4
+
+
 def check(root, pages):
     """(findings, counts). A finding is (kind, page, detail)."""
     findings = []
@@ -120,6 +152,12 @@ def check(root, pages):
             n_refs += 1
             if not os.path.exists(os.path.join(root, r)):
                 findings.append(("refs", rel, r))
+
+        tiers = [ref_tier(r) for r in list_key(fm, "refs")]
+        if tiers != sorted(tiers):
+            findings.append(("ref-order", rel,
+                             " -> ".join(f"{r}(t{ref_tier(r)})"
+                                         for r in list_key(fm, "refs"))))
 
         for link in RE_MDLINK.findall(body):
             n_links += 1
@@ -177,6 +215,11 @@ def report(findings, counts, quiet=False):
             print(f"  [refs]  {page}: '{d}' does not exist", file=sys.stderr)
         elif kind == "link":
             print(f"  [link]  {page}: '{d}' does not resolve", file=sys.stderr)
+        elif kind == "ref-order":
+            print(f"  [ref-order] {page}: refs are not in source-priority order.\n"
+                  f"              {d}\n"
+                  "              Order: code(0) -> .specify(1) -> specs(2) -> "
+                  "B&L(3) -> other(4).", file=sys.stderr)
         else:
             print(f"  [deprecated-reachable] {page} links '{d}', which is "
                   "status: deprecated", file=sys.stderr)
@@ -254,6 +297,31 @@ def self_test():
     f, _ = check(d, load_pages(d))
     expect("deprecated present but UNLINKED -> 0 findings (the intended state)",
            len(f), 0)
+    shutil.rmtree(d)
+
+    # rule 4 -- refs out of source-priority order.
+    #
+    # Both directions are asserted. A tier check that only ever sees a WRONG
+    # order proves it can fire; it does not prove it can stay quiet, and a rule
+    # that fires on correct input gets disabled within a week.
+    d = tempfile.mkdtemp()
+    _tree(d)
+    page = os.path.join(d, "brain", "components", "c.md")
+    good = ("---\ntype: Component Decision Map\nstatus: stable\nrefs:\n"
+            "  - src/real.cpp\n  - .specify/2d-threading.md\n"
+            "  - specs/010-x/spec.md\n---\n\n# C\n")
+    bad = ("---\ntype: Component Decision Map\nstatus: stable\nrefs:\n"
+           "  - .specify/2d-threading.md\n  - src/real.cpp\n"
+           "  - specs/010-x/spec.md\n---\n\n# C\n")
+    for rel in ("src/real.cpp", ".specify/2d-threading.md", "specs/010-x/spec.md"):
+        _w(os.path.join(d, rel), "x")
+    _w(page, good)
+    f, _ = check(d, load_pages(d))
+    expect("refs in tier order -> 0 findings", len(f), 0)
+    _w(page, bad)
+    f, _ = check(d, load_pages(d))
+    expect("design doc listed BEFORE the code -> exactly 1 [ref-order]",
+           [x[0] for x in f], ["ref-order"])
     shutil.rmtree(d)
 
     print("\nfail-closed paths -- ambiguity is exit 2, never a silent pass:\n")

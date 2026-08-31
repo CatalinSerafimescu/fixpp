@@ -126,7 +126,7 @@ And to prove the citations actually still resolve, compare the **content** of ea
 and after — a line number that still exists is not the same as a line number that still means what it
 meant.
 
-## Two conventions that carry the same load, cheaply
+## Three conventions that carry the same load, cheaply
 
 1. **A header comment naming the governing feature id** — `async_mutex.hpp`'s *"Erratum E-5 (048)"* is
    the working example, and it did the whole job unaided. It is a **pointer, not a result**, so it does
@@ -135,6 +135,24 @@ meant.
 2. **The functional delta at close-out** — what a user must now know that they did not before goes in
    B&L, or an explicit `B&L delta: none — <reason>` disposition. Checked by
    `.claude/scripts/check_bl_delta.py` at `/gate-b` pre-flight; silence is not a disposition.
+
+3. **`refs:` is ordered, and the order IS the routing.** Most authoritative first:
+   **code (`include/`, `src/`) → `.specify/` → `specs/<id>/` → `spec/behaviors-*` → everything else.**
+   Decision records are `refs_external` and CodeGraph symbols are `codegraph_entry` — separate keys, so
+   their position is fixed by construction. `check_brain.py gate` **enforces** the order; a convention
+   only written down is one nobody can tell has been broken.
+
+### What a component page is FOR — and the test that keeps it that way
+
+> ⭐ **A page is pointers plus rejected alternatives. Nothing else.**
+> The test: **delete every sentence that describes what the code does today. Did the page lose any
+> routing value?** If yes, that sentence was doing a job the code should be doing — replace it with the
+> pointer. If no, it was the beginning of the next fossil.
+>
+> This is not stylistic. A behavioural sentence here has no gate, no test and no reviewer; it goes
+> stale silently, and it goes stale in the one place people come to *find out what is stale*. What does
+> **not** rot is **why** a decision was taken and **what was rejected** — that half is historical and
+> is the entire reason this bundle exists.
 
 ## Where evidence lives, and why you may not be able to open it
 

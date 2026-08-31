@@ -45,6 +45,11 @@ target.
 Also true, and easy to assume otherwise: **each acceptor session's loop serves exactly one peer and
 then returns.** There is no re-spin to `async_accept` after a successful handoff.
 
+⚠️ That last one is a **result**, not a structural property — unlike the paragraph above it, a later
+feature could change it without changing anything this page names. **Re-derive before relying on it:**
+read `run_accept_loop` in `src/session/engine.cpp` and check whether the accept call sits inside a
+loop that continues past a successful handoff.
+
 ## ⚠️ Documents that describe this component and are WRONG
 
 Listed because omitting them is the defect this page exists to prevent. **Do not fix code to match

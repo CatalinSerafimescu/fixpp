@@ -4,10 +4,10 @@ title: wire — the largest catalogue family, and what it deliberately does NOT 
 description: 116 catalogue rows, one design doc. The scope boundary is the most useful thing on this page.
 status: stable
 refs:
-  - .specify/2b-wire.md
   - include/fixpp/wire/reject_reason_map.hpp
   - include/fixpp/wire/offset_table.hpp
   - include/fixpp/wire/errors.hpp
+  - .specify/2b-wire.md
 codegraph_entry: [Framer, OffsetTable, MessageView, dictionary_driven_validator, wire_error_to_session_reject_reason]
 constitution: ["§VIII.5"]
 ---

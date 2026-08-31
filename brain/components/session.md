@@ -7,8 +7,8 @@ refs:
   - include/fixpp/session/session.hpp
   - include/fixpp/session/session_fsm.hpp
   - include/fixpp/session/seqnum_manager.hpp
-  - spec/behaviors-and-limitations.md
   - specs/005-session-establishment-fsm/spec.md
+  - spec/behaviors-and-limitations.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---

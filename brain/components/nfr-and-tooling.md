@@ -4,8 +4,8 @@ title: nfr and tooling — why neither gets a subsystem page, and why nfr's stat
 description: Two catalogue families that are not subsystems. Recorded so the next person does not re-open the question, and so nfr's uniform backlog is not mistaken for fact.
 status: stable
 refs:
-  - spec/feature-catalogue.md
   - .specify/constitution.md
+  - spec/feature-catalogue.md
 codegraph_entry: []
 ---
 
