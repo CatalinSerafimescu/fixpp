@@ -37,6 +37,7 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <future>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -263,6 +264,53 @@ bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
     return dead;
 }
 
+// How many of `probes` TCP connects to `port` COMPLETE while nothing ever
+// accepts them? Used by cell 10 to observe the OS accept queue's depth from the
+// client side, which is the only side a unit test has.
+//
+// ⚠️ THE PACING IS LOAD-BEARING — one bounded run per connect, never one run
+// after issuing them all. Fired back to back, the completed count is not
+// reproducible: a client completes its handshake on the peer's SYN-ACK, which
+// the stack can emit before the accept queue accounting that is supposed to
+// reject it has caught up, so the answer depends on scheduling. Awaiting each
+// connect before issuing the next removes that race. The measured spread, and
+// the standalone probe that re-derives it on any machine, are in the decision
+// record — deliberately not repeated here, because a spread is a RESULT and
+// results rot silently in comments.
+//
+// ⚠️ A budget too short for the machine under-counts, which is the SAFE
+// direction only because cell 10 asserts its control arm FIRST: an under-count
+// reds that arm rather than quietly satisfying the bound the cell is testing.
+int count_completed_connects(asio::io_context& ioc, std::uint16_t port, int probes,
+                             std::chrono::milliseconds per_connect) {
+    std::vector<std::unique_ptr<asio::ip::tcp::socket>> sockets;
+    sockets.reserve(static_cast<std::size_t>(probes));
+    const asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), port};
+    int completed = 0;
+
+    for (int i = 0; i < probes; ++i) {
+        sockets.push_back(std::make_unique<asio::ip::tcp::socket>(ioc));
+        sockets.back()->async_connect(ep, [&completed](asio::error_code ec) {
+            if (!ec) ++completed;
+        });
+        ioc.run_for(per_connect);
+        ioc.restart();
+    }
+
+    // Every connect that never completed still holds `completed` by reference
+    // and its socket is about to leave scope. Close, then drain, before either
+    // does — the stack-use-after-scope shape of #313/#316. The drain cannot
+    // disturb the count: those handlers resume with operation_aborted, and only
+    // a clear error_code increments.
+    for (auto& s : sockets) {
+        asio::error_code ignored;
+        s->close(ignored);
+    }
+    ioc.run();
+    ioc.restart();
+    return completed;
+}
+
 }  // namespace
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -454,15 +502,14 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Cell 6 — Endpoint::backlog is forwarded to the OS listen() depth. We can't
-// reliably overflow the backlog on modern Linux (the kernel may silently
-// double the queue via /proc/sys/net/core/somaxconn), so this cell only
-// verifies that the listener constructs successfully with a custom backlog
-// AND that the bound endpoint preserves the requested backlog field.
+// Cell 6 — the requested Endpoint::backlog survives construction and reads
+// back off bound_endpoint().
 //
-// The FR-024 backlog tunability claim is therefore tested via the
-// constructor-survives-config path; deep "65th client RST" coverage moves
-// to a fuzz / stress cell post-MVP.
+// ⚠️ SCOPE: an accessor round-trip, and nothing more. This cell stays GREEN
+// when the constructor never passes the value to listen() at all — it observes
+// the Config field, never the socket. Cell 10 is the one that observes the
+// configured depth at the OS layer; do not read this cell as covering FR-024's
+// tunability claim.
 // ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, BacklogConfigAcceptedAtConstruction) {
     asio::io_context ioc;
@@ -897,4 +944,90 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
         EXPECT_TRUE(client_hs.has_value());
         EXPECT_EQ(server_cs->calls(), 1);
     }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Cell 10 — US3 AC3 / FR-024: the configured Endpoint::backlog bounds how many
+// clients the OS will complete while the application never accepts.
+//
+// This is the cell that observes the socket. Cell 6 reads the Config field back
+// off bound_endpoint() and is green even against a constructor that never calls
+// listen() with it at all, so cell 6 cannot carry FR-024's tunability claim.
+//
+// ⚠️ WHAT THIS CELL ASSERTS IS NOT AC3's LITERAL WORDING, ON PURPOSE.
+// spec.md US3 AC3 says the overflow client "receives a TCP RST or
+// connection-refused per OS behaviour". Measured on both platforms this repo
+// ships to, the client receives NEITHER: its connect simply does not complete
+// (on Linux the SYN is dropped rather than reset, because
+// net.ipv4.tcp_abort_on_overflow defaults to 0). So the MECHANISM half of AC3
+// is not assertable anywhere, and a cell asserting it would be asserting
+// something false. The NORMATIVE half — fixpp does not over-promise
+// availability under saturated accept rates — is exactly what the three
+// assertions below carry. The operator-visible consequence (a saturated
+// acceptor makes clients hang rather than fail fast) is recorded in B&L.
+//
+// ⚠️ Do not "tighten" this into an equality against the configured depth. The
+// queue is off by one BETWEEN PLATFORMS in the direction that would make any
+// single equality wrong on one of them. The relational form below is what holds
+// on both; the two exact figures live in the decision record, dated.
+//
+// ⚠️ No cancel() and no run() on the listener's io_context anywhere in this
+// cell: listen() happens in the constructor, so there is nothing to pump. T034's
+// strand constraint on Listener::cancel() (#333) is therefore satisfied here
+// VACUOUSLY, not violated — this cell issues no cancel to misplace.
+//
+// Anchor: specs/012-2h-transport/spec.md US3 AC3; .specify/2h-transport.md §4.6
+// FR-024. Witness record: .specify/decisions/332-backlog-witness.md.
+// ════════════════════════════════════════════════════════════════════════════
+TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
+    constexpr int kProbes = 12;
+    constexpr std::uint32_t kLowBacklog = 1;
+    constexpr std::uint32_t kHighBacklog = 8;
+    constexpr std::uint32_t kControlBacklog = 64;  // deliberately > kProbes
+    constexpr auto kPerConnect = 250ms;
+
+    // Never run: asio_listener performs bind()/listen() in its constructor, so
+    // there is no listener-side work for this cell to pump.
+    asio::io_context listener_ioc;
+    asio_listener control{listener_ioc.get_executor(), make_listener_cfg(0, kControlBacklog)};
+    asio_listener low{listener_ioc.get_executor(), make_listener_cfg(0, kLowBacklog)};
+    asio_listener high{listener_ioc.get_executor(), make_listener_cfg(0, kHighBacklog)};
+
+    asio::io_context client_ioc;
+    const int n_control =
+        count_completed_connects(client_ioc, control.bound_endpoint().port, kProbes, kPerConnect);
+    const int n_low =
+        count_completed_connects(client_ioc, low.bound_endpoint().port, kProbes, kPerConnect);
+    const int n_high =
+        count_completed_connects(client_ioc, high.bound_endpoint().port, kProbes, kPerConnect);
+
+    // (i) NON-VACUITY, and it has to come first. A sweep broken in any of several
+    //     ordinary ways — wrong port, a per-connect budget too short for a loaded
+    //     machine, ephemeral-port exhaustion — reports a LOW count, which is
+    //     precisely the shape (ii) is looking for. Against a backlog wider than
+    //     the probe count every connect must complete, so this arm proves the
+    //     instrument can report the maximum before any arm below reads a
+    //     shortfall as meaningful. ASSERT, not EXPECT: the rest is noise if it
+    //     fails.
+    ASSERT_EQ(n_control, kProbes)
+        << "the sweep could not complete " << kProbes
+        << " connects even against a listener whose backlog (" << kControlBacklog
+        << ") exceeds that — the assertions below would be measuring the instrument, "
+           "not the listener";
+
+    // (ii) US3 AC3 proper: a listener that never accepts does NOT absorb every
+    //      client that arrives. This is the half of AC3 that is true on every OS.
+    EXPECT_LT(n_low, kProbes)
+        << "a listener configured with backlog=" << kLowBacklog << " completed all " << kProbes
+        << " connects without ever accepting one — the configured depth reached neither "
+           "listen() nor the kernel, so fixpp is over-promising availability";
+
+    // (iii) ...and the bound TRACKS THE CONFIGURED VALUE rather than merely
+    //      existing. This is the assertion that makes the cell a witness for
+    //      Endpoint::backlog FORWARDING: a listen() that ignored the config and
+    //      hardcoded some small depth still satisfies (ii), and dies here.
+    EXPECT_GT(n_high, n_low)
+        << "backlog=" << kHighBacklog << " admitted no more connections than backlog="
+        << kLowBacklog << " (" << n_high << " vs " << n_low
+        << ") — the listener is not forwarding Endpoint::backlog to listen()";
 }
