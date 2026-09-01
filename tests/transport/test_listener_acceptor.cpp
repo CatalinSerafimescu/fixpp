@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/awaitable.hpp>
 #include <asio/buffer.hpp>
@@ -55,6 +56,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <linux/inet_diag.h>
 #include <linux/netlink.h>
 #include <linux/sock_diag.h>
@@ -1301,24 +1303,38 @@ TEST(ListenerAcceptor, KernelRegisteredBacklogTracksConfiguredDepthUpToSomaxconn
     constexpr std::uint32_t kAc3Depth = 64;
     constexpr std::uint32_t kDefaultDepth = 128;
     const std::uint32_t kAboveSomaxconn = static_cast<std::uint32_t>(somaxconn) + 1000;
+    // kAboveSomaxconn round-trips through asio_listener's `int` constructor
+    // parameter; a somaxconn near INT_MAX would make that conversion
+    // implementation-defined. Fail loudly rather than silently truncate.
+    ASSERT_LT(kAboveSomaxconn, static_cast<std::uint32_t>(std::numeric_limits<int>::max()))
+        << "somaxconn=" << somaxconn << " is too large for this arm's overflow margin";
 
     asio::io_context ioc;
     asio_listener at_ac3_depth{ioc.get_executor(), make_listener_cfg(0, kAc3Depth)};
     asio_listener at_default_depth{ioc.get_executor(), make_listener_cfg(0, kDefaultDepth)};
     asio_listener above_somaxconn{ioc.get_executor(), make_listener_cfg(0, kAboveSomaxconn)};
 
+    // Every arm compares against min(requested, somaxconn) — the kernel
+    // silently clamps listen()'s backlog to somaxconn (listen(2)), so a
+    // runner with somaxconn below the requested depth would otherwise false-red
+    // the 64/128 arms. This is the same rule for all three arms, including the
+    // above-somaxconn arm, which resolves to plain `somaxconn`.
     const auto r_ac3 = read_listen_backlog_via_netlink(at_ac3_depth.bound_endpoint().port);
     ASSERT_TRUE(r_ac3.ok) << r_ac3.error;
-    EXPECT_EQ(r_ac3.value, static_cast<int>(kAc3Depth));
+    EXPECT_EQ(r_ac3.value, std::min(static_cast<int>(kAc3Depth), somaxconn))
+        << "backlog=" << kAc3Depth << " (somaxconn=" << somaxconn
+        << ") did not register as min(requested, somaxconn) at the kernel";
 
     const auto r_default = read_listen_backlog_via_netlink(at_default_depth.bound_endpoint().port);
     ASSERT_TRUE(r_default.ok) << r_default.error;
-    EXPECT_EQ(r_default.value, static_cast<int>(kDefaultDepth));
+    EXPECT_EQ(r_default.value, std::min(static_cast<int>(kDefaultDepth), somaxconn))
+        << "backlog=" << kDefaultDepth << " (somaxconn=" << somaxconn
+        << ") did not register as min(requested, somaxconn) at the kernel";
 
     const auto r_above = read_listen_backlog_via_netlink(above_somaxconn.bound_endpoint().port);
     ASSERT_TRUE(r_above.ok) << r_above.error;
-    EXPECT_EQ(r_above.value, somaxconn)
-        << "backlog=" << kAboveSomaxconn << " (above somaxconn=" << somaxconn
-        << ") did not clamp to somaxconn at the kernel";
+    EXPECT_EQ(r_above.value, std::min(static_cast<int>(kAboveSomaxconn), somaxconn))
+        << "backlog=" << kAboveSomaxconn << " (somaxconn=" << somaxconn
+        << ") did not register as min(requested, somaxconn) at the kernel";
 }
 #endif  // __linux__
