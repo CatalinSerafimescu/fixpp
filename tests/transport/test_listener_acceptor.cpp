@@ -268,7 +268,12 @@ bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
 // client side (the only side a unit test has). A scalar completed-count
 // cannot tell "the queue is saturated and this probe is parked" apart from
 // "this probe was refused/reset" — both look like "did not increment" — so
-// every probe's terminal state is recorded individually.
+// every probe's outcome is classified individually, as observed at the end of
+// that probe's bounded pump window. `pending` means only "not yet decided
+// within this window" and is NOT a terminal outcome — a probe classified
+// pending may be refused after the window closes, on a host whose
+// error-report latency exceeds it. Measured latencies and the re-derivation
+// recipe: `.specify/decisions/332-backlog-rst-witness-witnesses.md` §3a.
 enum class connect_outcome { completed, refused_or_reset, other_error, pending };
 
 struct connect_probe_result {
@@ -278,8 +283,9 @@ struct connect_probe_result {
     int pending = 0;
 };
 
-// Fires `probes` connects at `port`, one at a time, and returns each one's
-// classification.
+// Fires `probes` connects at `port`, spacing each initiation by one bounded
+// pump window, and returns each one's snapshot classification. Earlier probes
+// that did not complete remain outstanding while later ones are issued.
 //
 // ⚠️ THE PACING IS LOAD-BEARING FOR EVERY ARM, not only a saturating one —
 // one bounded run per connect, never one run after issuing them all. Fired
@@ -288,7 +294,8 @@ struct connect_probe_result {
 // becomes scheduling-dependent and a saturated listener can report full
 // completion. Measured evidence and re-derivation recipe:
 // `.specify/decisions/332-backlog-rst-witness-witnesses.md` §4/§8a.
-// Awaiting each connect before issuing the next removes that race,
+// Pumping a bounded window after each connect, before issuing the next,
+// removes that race,
 // regardless of whether the target backlog is expected to be saturated.
 // `per_connect` is per-CALLER, not a single shared constant: the control
 // arm decouples from the saturating arms' tight budget by passing a longer
@@ -1005,9 +1012,9 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
 //
 // ⚠️ WHAT THIS CELL ASSERTS IS NOT AC3's LITERAL MECHANISM WORDING, ON PURPOSE.
 // fixpp makes no guarantee about how the OS declines the overflow client —
-// reset, refused, or left pending indefinitely, per OS and configuration
+// reset, refused, or left pending, per OS and configuration
 // (spec.md US3 scenario 3). So the mechanism is not assertable PORTABLY, but
-// it IS observable locally: every probe's terminal state is recorded (see
+// it IS observable locally: every probe's state at its snapshot is recorded (see
 // count_completed_connects above) and a non-pending shortfall is named in the
 // failure message, so a red on a given runner says which outcome that runner
 // produced. The NORMATIVE half — fixpp does not over-promise availability
@@ -1015,9 +1022,11 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
 // The operator-visible consequence is recorded in B&L (`L-012-2`).
 //
 // ⚠️ Do not "tighten" this into an equality against the configured depth. The
-// queue differs between platforms in the direction that would make any
-// single equality wrong on one of them. The relational form below is what holds
-// on both; the two exact figures live in the decision record, dated.
+// arms are a deliberately unsaturated control at backlog 64 plus saturating
+// arms at 1 and 8, 12 probes each — so the cell's discrimination ceiling is its
+// own probe count and no equality against a configured depth is observable
+// here. The measured per-host completion counts live in the decision record,
+// dated.
 //
 // ⚠️ No cancel() and no run() on the listener's io_context anywhere in this
 // cell: listen() happens in the constructor, so there is nothing to pump.
