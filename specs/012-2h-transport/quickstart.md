@@ -342,7 +342,7 @@ for (auto& session : engine.sessions()) {
 |---|---|
 | AC1: 64 concurrent clients → 64 distinct Transports, 64 sessions Active | spec FR-023 + `[2h §9 seam #14]` listener_acceptor |
 | AC2: `cancel()` closes listening socket; subsequent connects refused; in-flight accept → `transport_accept_cancelled` per `[2h §6.6]:1191` | spec FR-025 + `[2h §9 seam #14]` parallel cell |
-| AC3: 65th client at backlog full → TCP RST per OS behaviour (not over-promised) | spec FR-024 + Edge Cases |
+| AC3: 65th client (illustrative — the ordinal is OS-dependent and none is asserted anywhere in the tree) at backlog full → connection NOT established (not over-promised). fixpp makes no guarantee about how the OS declines it — reset, refused, or left pending, per OS and configuration; see spec.md US3 scenario 3 | **Verified by** `test_listener_acceptor.cpp` cell 10 `BacklogBoundsConnectionsCompletedWithoutTheApplication` (saturation bound, at the depths it probes — its own probe count is its discrimination ceiling) **+** cell 11 `RequestedListenDepthTracksConfiguredBacklogAtAc3AndDefaultDepths` (`Endpoint::backlog` forwarded to `listen()`, at this AC's 64 and the shipped default 128) **+** cell 12 `KernelRegisteredBacklogTracksConfiguredDepthUpToSomaxconn` (Linux-only, kernel read-back at the same two depths, clamped above `somaxconn`) — split across those seams because no single cell can carry all three; cell 12 is the only seam that catches a clamp applied AT the `listen()` call site while cell 11's recorded expression stays untouched, so on non-Linux platforms that call-site seam is unwitnessed; whether the OS applies the same saturation mechanism AT 64 as at the depths cell 10 probes is not asserted (#332) |
 
 ---
 

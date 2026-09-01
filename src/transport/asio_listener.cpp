@@ -109,7 +109,18 @@ asio_listener::asio_listener(asio::any_io_executor exec, Config cfg)
     acceptor_.bind(bind_ep);
 
     const int backlog = static_cast<int>(cfg_.bind_endpoint.backlog);
-    acceptor_.listen(backlog > 0 ? backlog : asio::socket_base::max_listen_connections);
+    // requested_listen_depth_ IS the argument EXPRESSION passed to listen()
+    // below, not a separately-computed copy: a clamp written INTO this
+    // expression is therefore recorded, and cannot diverge from what the OS
+    // was asked for.
+    // ⚠️ A clamp applied AT the call site instead — e.g.
+    // listen(min(requested_listen_depth_, N)) — is NOT visible through this
+    // member, by construction; no state-recording witness can see that seam.
+    // On Linux the netlink read-back cell covers it; elsewhere it is an
+    // accepted, recorded gap
+    // (.specify/decisions/332-backlog-rst-witness-witnesses.md, #332 route B).
+    requested_listen_depth_ = backlog > 0 ? backlog : asio::socket_base::max_listen_connections;
+    acceptor_.listen(requested_listen_depth_);
 
     // Update cfg_.bind_endpoint.port with the OS-picked port when caller
     // passed port=0. This lets the engine / test query the resolved port.

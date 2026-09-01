@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/awaitable.hpp>
 #include <asio/buffer.hpp>
@@ -47,6 +48,22 @@
 #include "support/reify_test_frame.hpp"
 #include "transport/asio_listener.hpp"
 #include "transport/loopback_tls_fixture.hpp"
+
+// Cell 12 (#332 route D) reads a listening socket's kernel-registered
+// backlog via NETLINK_SOCK_DIAG — Linux-only, guarded at compile time.
+#if defined(__linux__)
+#include <arpa/inet.h>
+#include <cerrno>
+#include <cstring>
+#include <fstream>
+#include <limits>
+#include <linux/inet_diag.h>
+#include <linux/netlink.h>
+#include <linux/sock_diag.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -263,6 +280,110 @@ bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
     return dead;
 }
 
+// Per-probe classification of one TCP connect to a listener that never
+// accepts, used by cell 10 to observe the OS accept queue's depth from the
+// client side (the only side a unit test has). A scalar completed-count
+// cannot tell "the queue is saturated and this probe is parked" apart from
+// "this probe was refused/reset" — both look like "did not increment" — so
+// every probe's outcome is classified individually, as observed at the end of
+// that probe's bounded pump window. `pending` means only "not yet decided
+// within this window" and is NOT a terminal outcome — a probe classified
+// pending may be refused after the window closes, on a host whose
+// error-report latency exceeds it. Measured latencies and the re-derivation
+// recipe: `.specify/decisions/332-backlog-rst-witness-witnesses.md` §3a.
+enum class connect_outcome { completed, refused_or_reset, other_error, pending };
+
+struct connect_probe_result {
+    int completed = 0;
+    int refused_or_reset = 0;
+    int other_error = 0;
+    int pending = 0;
+};
+
+// Fires `probes` connects at `port`, spacing each initiation by one bounded
+// pump window, and returns each one's snapshot classification. Earlier probes
+// that did not complete remain outstanding while later ones are issued.
+//
+// ⚠️ THE PACING IS LOAD-BEARING FOR EVERY ARM, not only a saturating one —
+// one bounded run per connect, never one run after issuing them all. Fired
+// concurrently, a client can complete on the peer's SYN-ACK before the
+// accept-queue accounting that would reject it has caught up, so the count
+// becomes scheduling-dependent and a saturated listener can report full
+// completion. Measured evidence and re-derivation recipe:
+// `.specify/decisions/332-backlog-rst-witness-witnesses.md` §4/§8a.
+// Pumping a bounded window after each connect, before issuing the next,
+// removes that race,
+// regardless of whether the target backlog is expected to be saturated.
+// `per_connect` is per-CALLER, not a single shared constant: the control
+// arm decouples from the saturating arms' tight budget by passing a longer
+// one (see kControlPerConnect at the call site) — a generous, not latency-
+// coupled, per-probe wait — while keeping the same pacing discipline.
+//
+// ⚠️ A budget too short for the machine under-counts, which is the SAFE
+// direction only because cell 10 asserts its control arm FIRST: an
+// under-count reds that arm rather than quietly satisfying the bound the
+// cell is testing.
+//
+// ⚠️ The per-probe outcome is SNAPSHOTTED before any socket is closed. Once
+// a probe's `close()` runs, its still-pending handler resolves with
+// `operation_aborted`, overwriting the very "pending" signal this function
+// exists to observe — the capture-before-teardown shape of #332. So the
+// counts below are computed first, and the close+drain that follows cannot
+// change them.
+connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16_t port, int probes,
+                                               std::chrono::milliseconds per_connect) {
+    // ⚠️ reserve() is LOAD-BEARING here, not an optimisation. Every socket below
+    // has an outstanding async_connect whose handler holds that socket's address,
+    // and asio leaves the behaviour undefined if a socket is moved while an async
+    // operation is pending. Reserving exactly `probes` up front is the whole
+    // reason no reallocation can move one. Push past `probes` and that guarantee
+    // is silently gone.
+    std::vector<asio::ip::tcp::socket> sockets;
+    sockets.reserve(static_cast<std::size_t>(probes));
+    std::vector<connect_outcome> outcome(static_cast<std::size_t>(probes), connect_outcome::pending);
+    const asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), port};
+
+    for (int i = 0; i < probes; ++i) {
+        sockets.emplace_back(ioc);
+        sockets.back().async_connect(ep, [&outcome, i](asio::error_code ec) {
+            if (!ec) {
+                outcome[static_cast<std::size_t>(i)] = connect_outcome::completed;
+            } else if (ec == asio::error::connection_refused || ec == asio::error::connection_reset) {
+                outcome[static_cast<std::size_t>(i)] = connect_outcome::refused_or_reset;
+            } else if (ec != asio::error::operation_aborted) {
+                outcome[static_cast<std::size_t>(i)] = connect_outcome::other_error;
+            }
+            // operation_aborted cannot fire here: nothing closes a socket until
+            // after the snapshot below.
+        });
+        ioc.run_for(per_connect);
+        ioc.restart();
+    }
+
+    // SNAPSHOT before any teardown — see the function comment.
+    connect_probe_result result;
+    for (auto o : outcome) {
+        switch (o) {
+            case connect_outcome::completed: ++result.completed; break;
+            case connect_outcome::refused_or_reset: ++result.refused_or_reset; break;
+            case connect_outcome::other_error: ++result.other_error; break;
+            case connect_outcome::pending: ++result.pending; break;
+        }
+    }
+
+    // Every connect that never completed still holds `outcome` by reference
+    // and its socket is about to leave scope. Close, then drain, before either
+    // does — the stack-use-after-scope shape of #313/#316. This cannot disturb
+    // `result`: it was already computed above.
+    for (auto& s : sockets) {
+        asio::error_code ignored;
+        s.close(ignored);
+    }
+    ioc.run();
+    ioc.restart();
+    return result;
+}
+
 }  // namespace
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -454,15 +575,14 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Cell 6 — Endpoint::backlog is forwarded to the OS listen() depth. We can't
-// reliably overflow the backlog on modern Linux (the kernel may silently
-// double the queue via /proc/sys/net/core/somaxconn), so this cell only
-// verifies that the listener constructs successfully with a custom backlog
-// AND that the bound endpoint preserves the requested backlog field.
+// Cell 6 — the requested Endpoint::backlog survives construction and reads
+// back off bound_endpoint().
 //
-// The FR-024 backlog tunability claim is therefore tested via the
-// constructor-survives-config path; deep "65th client RST" coverage moves
-// to a fuzz / stress cell post-MVP.
+// ⚠️ SCOPE: an accessor round-trip, and nothing more. This cell stays GREEN
+// when the constructor never passes the value to listen() at all — it observes
+// the Config field, never the socket. Cell 10 is the one that observes the
+// configured depth at the OS layer; do not read this cell as covering FR-024's
+// tunability claim.
 // ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, BacklogConfigAcceptedAtConstruction) {
     asio::io_context ioc;
@@ -898,3 +1018,345 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
         EXPECT_EQ(server_cs->calls(), 1);
     }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// Cell 10 — US3 AC3 / FR-024: the configured Endpoint::backlog bounds how many
+// clients the OS will complete while the application never accepts.
+//
+// This is the cell that observes the socket. Cell 6 reads the Config field back
+// off bound_endpoint() and is green even against a constructor that never calls
+// listen() with it at all, so cell 6 cannot carry FR-024's tunability claim.
+//
+// ⚠️ WHAT THIS CELL ASSERTS IS NOT AC3's LITERAL MECHANISM WORDING, ON PURPOSE.
+// fixpp makes no guarantee about how the OS declines the overflow client —
+// reset, refused, or left pending, per OS and configuration
+// (spec.md US3 scenario 3). So the mechanism is not assertable PORTABLY, but
+// it IS observable locally: every probe's state at its snapshot is recorded (see
+// count_completed_connects above) and a non-pending shortfall is named in the
+// failure message, so a red on a given runner says which outcome that runner
+// produced. The NORMATIVE half — fixpp does not over-promise availability
+// under saturated accept rates — is exactly what the assertions below carry.
+// The operator-visible consequence is recorded in B&L (`L-012-2`).
+//
+// ⚠️ Do not "tighten" this into an equality against the configured depth. The
+// arms are a deliberately unsaturated control at backlog 64 plus saturating
+// arms at 1 and 8, 12 probes each — so the cell's discrimination ceiling is its
+// own probe count and no equality against a configured depth is observable
+// here. The measured per-host completion counts live in the decision record,
+// dated.
+//
+// ⚠️ No cancel() and no run() on the listener's io_context anywhere in this
+// cell: listen() happens in the constructor, so there is nothing to pump.
+// T034's strand constraint on Listener::cancel() (#333) is satisfied here for
+// a structural reason, not merely because this cell issues no cancel():
+// `listener_ioc` is never run by any thread in this cell, so nothing can
+// execute on the listener's executor concurrently with construction or
+// destruction; and `listener_ioc` is declared first, so the listeners (whose
+// destructors DO call close()) are destroyed before their context — the
+// #301/#307 ordering rule.
+//
+// Anchor: specs/012-2h-transport/spec.md US3 AC3; .specify/2h-transport.md §4.6
+// FR-024. Witness record: .specify/decisions/332-backlog-rst-witness-witnesses.md.
+// ════════════════════════════════════════════════════════════════════════════
+TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
+    constexpr int kProbes = 12;
+    constexpr std::uint32_t kLowBacklog = 1;
+    constexpr std::uint32_t kHighBacklog = 8;
+    constexpr std::uint32_t kControlBacklog = 64;  // deliberately > kProbes
+    // Wall clock of a SATURATING arm is ~= kPerConnect x (probes that stay
+    // pending in that arm), because a pending connect keeps the io_context busy
+    // and stops run_for() from returning early — that is the whole cost of a
+    // saturating arm, so the budget is the only lever on it.
+    constexpr auto kPerConnect = 100ms;
+    // The control arm stays PACED (see count_completed_connects' header on why
+    // pacing is not optional) but decouples from the saturating arms' tight
+    // budget: every one of its 12 connects is expected to complete near-
+    // instantly (backlog 64 ≫ probe count), so a generous per-connect wait
+    // costs a healthy run nothing while removing the latency coupling F5
+    // raised against a fixed 100 ms under host load.
+    constexpr auto kControlPerConnect = 2s;
+
+    // Never run: asio_listener performs bind()/listen() in its constructor, so
+    // there is no listener-side work for this cell to pump.
+    asio::io_context listener_ioc;
+    asio_listener control{listener_ioc.get_executor(), make_listener_cfg(0, kControlBacklog)};
+    asio_listener low{listener_ioc.get_executor(), make_listener_cfg(0, kLowBacklog)};
+    asio_listener high{listener_ioc.get_executor(), make_listener_cfg(0, kHighBacklog)};
+
+    asio::io_context client_ioc;
+    const auto r_control = count_completed_connects(client_ioc, control.bound_endpoint().port,
+                                                      kProbes, kControlPerConnect);
+    const auto r_low =
+        count_completed_connects(client_ioc, low.bound_endpoint().port, kProbes, kPerConnect);
+    const auto r_high =
+        count_completed_connects(client_ioc, high.bound_endpoint().port, kProbes, kPerConnect);
+
+    // (i) NON-VACUITY, and it has to come first. A sweep broken in any of several
+    //     ordinary ways — wrong port, a per-connect budget too short for a loaded
+    //     machine, ephemeral-port exhaustion — reports a LOW count, which is
+    //     precisely the shape (ii) is looking for. Against a backlog wider than
+    //     the probe count every connect must complete, so this arm proves the
+    //     instrument can report the maximum before any arm below reads a
+    //     shortfall as meaningful. ASSERT, not EXPECT: the rest is noise if it
+    //     fails.
+    ASSERT_EQ(r_control.completed, kProbes)
+        << "the sweep could not complete " << kProbes
+        << " connects even against a listener whose backlog (" << kControlBacklog
+        << ") exceeds that — the assertions below would be measuring the instrument, not the "
+           "listener (pending="
+        << r_control.pending << ", refused_or_reset=" << r_control.refused_or_reset
+        << ", other_error=" << r_control.other_error << ")";
+
+    // (ii) US3 AC3 proper: a listener that never accepts does NOT absorb every
+    //      client that arrives. This is the half of AC3 that does not depend on
+    //      HOW the OS declines the client — which is the part that varies.
+    EXPECT_LT(r_low.completed, kProbes)
+        << "a listener configured with backlog=" << kLowBacklog << " completed all " << kProbes
+        << " connects without ever accepting one — the configured depth reached neither "
+           "listen() nor the kernel, so fixpp is over-promising availability";
+    // Mechanism (pending vs refused vs reset) is DIAGNOSTIC ONLY and is never
+    // asserted — spec.md US3 scenario 3 permits all three, so asserting any one
+    // of them portably would resurrect the pre-2026-09-01 mechanism claim by
+    // proxy. The counts are carried in the failure messages so a red on a given
+    // runner says which outcome that runner produced.
+    EXPECT_GT(r_low.completed, 0)
+        << "backlog=" << kLowBacklog << " completed no connects at all — the low arm's "
+           "shortfall is a dead listener, not a saturated one (completed=" << r_low.completed
+        << ", pending=" << r_low.pending << ", refused_or_reset=" << r_low.refused_or_reset
+        << ", other_error=" << r_low.other_error << ")";
+    EXPECT_EQ(r_low.other_error, 0)
+        << "backlog=" << kLowBacklog << " produced " << r_low.other_error
+        << " connect error(s) not classified as completed/refused-or-reset/pending";
+
+    // (iii) ...and the bound TRACKS THE CONFIGURED VALUE rather than merely
+    //      existing. This is the assertion that makes the cell a witness for
+    //      Endpoint::backlog FORWARDING: a listen() that ignored the config and
+    //      hardcoded some small depth still satisfies (ii), and dies here.
+    EXPECT_GT(r_high.completed, r_low.completed)
+        << "backlog=" << kHighBacklog << " admitted no more connections than backlog="
+        << kLowBacklog << " (" << r_high.completed << " vs " << r_low.completed
+        << ") — the listener is not forwarding Endpoint::backlog to listen()";
+    EXPECT_EQ(r_high.other_error, 0)
+        << "backlog=" << kHighBacklog << " produced " << r_high.other_error
+        << " connect error(s) not classified as completed/refused-or-reset/pending";
+
+    // ⚠️ NO ARM AT AC3's OWN NAMED DEPTH HERE, and the reason is structural,
+    // not an oversight. A two-point relational bracket — bounded above by the
+    // probe count, below by the next arm's count — cannot discriminate a
+    // clamp that lands strictly between those two bounds; that is a property
+    // of the predicate's shape, not of any particular run. Tightening it
+    // toward an absolute floor trades that gap for a worse one: the OS may
+    // clamp `listen()` silently, so a runner with a smaller `somaxconn` would
+    // then false-negative. An arm was attempted on this basis and dropped;
+    // the attempt, its mutant, and the outcome are dated in
+    // `.specify/decisions/332-backlog-rst-witness-witnesses.md`.
+    //
+    // AC3's own depth (64) and the shipped default (128) are witnessed —
+    // split across two seams this cell structurally cannot reach: cell 11
+    // below (portable) records what fixpp asks the OS for at those depths;
+    // cell 12 (Linux-only) reads back what the OS actually registered. Cell
+    // 12 is the only one of the two that catches a clamp applied AT the
+    // `listen()` call site (e.g. `listen(min(requested_listen_depth_, N))`)
+    // while leaving cell 11's recorded expression untouched — on non-Linux
+    // platforms that call-site seam is not witnessed by any cell in this
+    // file. See both cells' headers and the decision record for why neither
+    // substitutes for the other. (#332)
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Cell 11 — #332 route B: the value asio_listener passes to listen() tracks
+// Endpoint::backlog exactly, at AC3's own named depth (64) and the shipped
+// default (endpoint.hpp's `backlog{128}`) — the two depths cell 10's own
+// probe count (12) cannot discriminate.
+//
+// Portable: requested_listen_depth() is fixpp's own bookkeeping (what it
+// ASKED the OS for), not a kernel read-back — see its doc comment in
+// asio_listener.hpp. Cell 12 (Linux-only) is the seam that reads back what
+// the OS actually registered; the two are independent by construction so
+// that a call-site regression that clamps `listen()` while leaving this
+// record untouched still reds cell 12 — but ONLY on Linux, where cell 12
+// runs. On other platforms a clamp applied at the `listen()` call site with
+// this recorded expression left intact is not witnessed by any cell here
+// (`.specify/decisions/332-backlog-rst-witness-witnesses.md`).
+// ════════════════════════════════════════════════════════════════════════════
+TEST(ListenerAcceptor, RequestedListenDepthTracksConfiguredBacklogAtAc3AndDefaultDepths) {
+    asio::io_context ioc;
+    asio_listener at_ac3_depth{ioc.get_executor(), make_listener_cfg(0, 64)};
+    asio_listener at_default_depth{ioc.get_executor(), make_listener_cfg(0, 128)};
+
+    EXPECT_EQ(at_ac3_depth.requested_listen_depth(), 64);
+    EXPECT_EQ(at_default_depth.requested_listen_depth(), 128);
+}
+
+#if defined(__linux__)
+namespace {
+
+// Netlink INET_DIAG helpers for cell 12 (#332 route D). Reads back a
+// listening socket's kernel-registered backlog independently of fixpp's own
+// bookkeeping (asio_listener::requested_listen_depth(), cell 11 above).
+//
+// `idiag_wqueue` on a TCP_LISTEN-state socket is `sk_max_ack_backlog` — the
+// depth the kernel actually registered, i.e. min(requested, somaxconn) —
+// per the kernel's `inet_diag_msg` fill for listening sockets.
+struct netlink_backlog_result {
+    bool ok{false};
+    int value{0};
+    std::string error;
+};
+
+netlink_backlog_result read_listen_backlog_via_netlink(std::uint16_t port) {
+    const int fd = ::socket(AF_NETLINK, SOCK_RAW, NETLINK_SOCK_DIAG);
+    if (fd < 0) {
+        return {false, 0, std::string{"socket(NETLINK_SOCK_DIAG) failed: "} + std::strerror(errno)};
+    }
+
+    struct nl_req {
+        nlmsghdr nlh;
+        inet_diag_req_v2 idr;
+    };
+    nl_req req{};
+    req.nlh.nlmsg_len = sizeof(req);
+    req.nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
+    req.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    req.idr.sdiag_family = AF_INET;
+    req.idr.sdiag_protocol = IPPROTO_TCP;
+    req.idr.idiag_states = 1U << 10;  // TCP_LISTEN
+
+    if (::send(fd, &req, sizeof(req), 0) < 0) {
+        const std::string err = std::string{"send() failed: "} + std::strerror(errno);
+        ::close(fd);
+        return {false, 0, err};
+    }
+
+    alignas(4) char buf[8192];  // NLMSG_ALIGNTO == 4
+    int found = -1;
+    int matches = 0;
+    const std::uint32_t loopback = htonl(INADDR_LOOPBACK);
+    bool done = false;
+    while (!done) {
+        ssize_t n = ::recv(fd, buf, sizeof(buf), 0);  // NLMSG_NEXT decrements this in-place
+        if (n < 0) {
+            const std::string err = std::string{"recv() failed: "} + std::strerror(errno);
+            ::close(fd);
+            return {false, 0, err};
+        }
+        if (n == 0) break;
+        auto* nlh = reinterpret_cast<nlmsghdr*>(buf);
+        for (; NLMSG_OK(nlh, static_cast<unsigned int>(n)); nlh = NLMSG_NEXT(nlh, n)) {
+            if (nlh->nlmsg_flags & NLM_F_DUMP_INTR) {
+                ::close(fd);
+                return {false, 0, "netlink dump was interrupted (NLM_F_DUMP_INTR)"};
+            }
+            if (nlh->nlmsg_type == NLMSG_DONE) {
+                done = true;
+                break;
+            }
+            if (nlh->nlmsg_type == NLMSG_ERROR) {
+                ::close(fd);
+                return {false, 0, "netlink returned NLMSG_ERROR"};
+            }
+            if (nlh->nlmsg_type != SOCK_DIAG_BY_FAMILY) {
+                ::close(fd);
+                return {false, 0,
+                        "unexpected netlink message type " + std::to_string(nlh->nlmsg_type)};
+            }
+            if (static_cast<std::size_t>(NLMSG_PAYLOAD(nlh, 0)) < sizeof(inet_diag_msg)) {
+                ::close(fd);
+                return {false, 0, "netlink message payload too small for inet_diag_msg"};
+            }
+            auto* msg = reinterpret_cast<inet_diag_msg*>(NLMSG_DATA(nlh));
+            if (ntohs(msg->id.idiag_sport) == port && msg->id.idiag_src[0] == loopback) {
+                found = static_cast<int>(msg->idiag_wqueue);
+                ++matches;
+            }
+        }
+    }
+    ::close(fd);
+
+    if (!done) {
+        return {false, 0, "netlink dump did not terminate with NLMSG_DONE"};
+    }
+    if (matches != 1) {
+        return {false, 0,
+                "expected exactly 1 matching LISTEN socket on 127.0.0.1:" + std::to_string(port) +
+                    ", found " + std::to_string(matches)};
+    }
+    return {true, found, {}};
+}
+
+// Not a runtime skip target — read_somaxconn() FAILS the test (ADD_FAILURE)
+// rather than returning a sentinel a caller could silently tolerate.
+int read_somaxconn() {
+    std::ifstream f{"/proc/sys/net/core/somaxconn"};
+    int value = 0;
+    if (!(f >> value)) {
+        ADD_FAILURE() << "could not read /proc/sys/net/core/somaxconn";
+        return 0;
+    }
+    return value;
+}
+
+}  // namespace
+
+// ════════════════════════════════════════════════════════════════════════════
+// Cell 12 — #332 route D: the kernel's registered backlog for a listening
+// socket — read back independently of fixpp's own bookkeeping (cell 11) via
+// NETLINK_SOCK_DIAG — tracks Endpoint::backlog at AC3's own depth (64) and
+// the shipped default (128), and clamps to /proc/sys/net/core/somaxconn
+// above it.
+//
+// Linux-only by a COMPILE-TIME #if — NOT a runtime skip. If netlink is
+// genuinely unavailable at runtime this cell FAILS with a message saying so;
+// an instrument failing toward silent absence is this repo's most recurring
+// defect class.
+//
+// Every expected value below is the LITERAL depth passed to
+// make_listener_cfg, never `requested_listen_depth()` (cell 11's accessor):
+// route B and route D must be able to disagree with each other, or D adds
+// nothing cell 11 doesn't already cover
+// (`.specify/decisions/332-backlog-rst-witness-witnesses.md`).
+//
+// Anchor: specs/012-2h-transport/spec.md US3 AC3.
+// ════════════════════════════════════════════════════════════════════════════
+TEST(ListenerAcceptor, KernelRegisteredBacklogTracksConfiguredDepthUpToSomaxconn) {
+    const int somaxconn = read_somaxconn();
+    ASSERT_GT(somaxconn, 0) << "could not establish a positive somaxconn baseline";
+
+    constexpr std::uint32_t kAc3Depth = 64;
+    constexpr std::uint32_t kDefaultDepth = 128;
+    const std::uint32_t kAboveSomaxconn = static_cast<std::uint32_t>(somaxconn) + 1000;
+    // kAboveSomaxconn round-trips through asio_listener's `int` constructor
+    // parameter; a somaxconn near INT_MAX would make that conversion
+    // implementation-defined. Fail loudly rather than silently truncate.
+    ASSERT_LT(kAboveSomaxconn, static_cast<std::uint32_t>(std::numeric_limits<int>::max()))
+        << "somaxconn=" << somaxconn << " is too large for this arm's overflow margin";
+
+    asio::io_context ioc;
+    asio_listener at_ac3_depth{ioc.get_executor(), make_listener_cfg(0, kAc3Depth)};
+    asio_listener at_default_depth{ioc.get_executor(), make_listener_cfg(0, kDefaultDepth)};
+    asio_listener above_somaxconn{ioc.get_executor(), make_listener_cfg(0, kAboveSomaxconn)};
+
+    // Every arm compares against min(requested, somaxconn) — the kernel
+    // silently clamps listen()'s backlog to somaxconn (listen(2)), so a
+    // runner with somaxconn below the requested depth would otherwise false-red
+    // the 64/128 arms. This is the same rule for all three arms, including the
+    // above-somaxconn arm, which resolves to plain `somaxconn`.
+    const auto r_ac3 = read_listen_backlog_via_netlink(at_ac3_depth.bound_endpoint().port);
+    ASSERT_TRUE(r_ac3.ok) << r_ac3.error;
+    EXPECT_EQ(r_ac3.value, std::min(static_cast<int>(kAc3Depth), somaxconn))
+        << "backlog=" << kAc3Depth << " (somaxconn=" << somaxconn
+        << ") did not register as min(requested, somaxconn) at the kernel";
+
+    const auto r_default = read_listen_backlog_via_netlink(at_default_depth.bound_endpoint().port);
+    ASSERT_TRUE(r_default.ok) << r_default.error;
+    EXPECT_EQ(r_default.value, std::min(static_cast<int>(kDefaultDepth), somaxconn))
+        << "backlog=" << kDefaultDepth << " (somaxconn=" << somaxconn
+        << ") did not register as min(requested, somaxconn) at the kernel";
+
+    const auto r_above = read_listen_backlog_via_netlink(above_somaxconn.bound_endpoint().port);
+    ASSERT_TRUE(r_above.ok) << r_above.error;
+    EXPECT_EQ(r_above.value, std::min(static_cast<int>(kAboveSomaxconn), somaxconn))
+        << "backlog=" << kAboveSomaxconn << " (somaxconn=" << somaxconn
+        << ") did not register as min(requested, somaxconn) at the kernel";
+}
+#endif  // __linux__
