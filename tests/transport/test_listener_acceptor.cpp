@@ -37,7 +37,6 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <future>
-#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -283,14 +282,20 @@ bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
 // reds that arm rather than quietly satisfying the bound the cell is testing.
 int count_completed_connects(asio::io_context& ioc, std::uint16_t port, int probes,
                              std::chrono::milliseconds per_connect) {
-    std::vector<std::unique_ptr<asio::ip::tcp::socket>> sockets;
+    // ⚠️ reserve() is LOAD-BEARING here, not an optimisation. Every socket below
+    // has an outstanding async_connect whose handler holds that socket's address,
+    // and asio leaves the behaviour undefined if a socket is moved while an async
+    // operation is pending. Reserving exactly `probes` up front is the whole
+    // reason no reallocation can move one. Push past `probes` and that guarantee
+    // is silently gone.
+    std::vector<asio::ip::tcp::socket> sockets;
     sockets.reserve(static_cast<std::size_t>(probes));
     const asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), port};
     int completed = 0;
 
     for (int i = 0; i < probes; ++i) {
-        sockets.push_back(std::make_unique<asio::ip::tcp::socket>(ioc));
-        sockets.back()->async_connect(ep, [&completed](asio::error_code ec) {
+        sockets.emplace_back(ioc);
+        sockets.back().async_connect(ep, [&completed](asio::error_code ec) {
             if (!ec) ++completed;
         });
         ioc.run_for(per_connect);
@@ -304,7 +309,7 @@ int count_completed_connects(asio::io_context& ioc, std::uint16_t port, int prob
     // a clear error_code increments.
     for (auto& s : sockets) {
         asio::error_code ignored;
-        s->close(ignored);
+        s.close(ignored);
     }
     ioc.run();
     ioc.restart();
@@ -984,7 +989,13 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
     constexpr std::uint32_t kLowBacklog = 1;
     constexpr std::uint32_t kHighBacklog = 8;
     constexpr std::uint32_t kControlBacklog = 64;  // deliberately > kProbes
-    constexpr auto kPerConnect = 250ms;
+    // Wall clock is ~= kPerConnect x (probes that never complete), because a
+    // connect left pending keeps the io_context busy and stops run_for()
+    // returning early. That is the whole cost of this cell, so the budget is the
+    // only lever on it. 100 ms keeps ~3 orders of magnitude over a loopback
+    // connect (microseconds; ~1 ms under a sanitizer), and a budget too short
+    // shows up as a RED control arm, never as a quiet pass.
+    constexpr auto kPerConnect = 100ms;
 
     // Never run: asio_listener performs bind()/listen() in its constructor, so
     // there is no listener-side work for this cell to pump.
