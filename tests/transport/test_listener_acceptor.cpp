@@ -1091,7 +1091,8 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
         << ", other_error=" << r_control.other_error << ")";
 
     // (ii) US3 AC3 proper: a listener that never accepts does NOT absorb every
-    //      client that arrives. This is the half of AC3 that is true on every OS.
+    //      client that arrives. This is the half of AC3 that does not depend on
+    //      HOW the OS declines the client — which is the part that varies.
     EXPECT_LT(r_low.completed, kProbes)
         << "a listener configured with backlog=" << kLowBacklog << " completed all " << kProbes
         << " connects without ever accepting one — the configured depth reached neither "
@@ -1122,14 +1123,15 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
         << "backlog=" << kHighBacklog << " produced " << r_high.other_error
         << " connect error(s) not classified as completed/refused-or-reset/pending";
 
-    // ⚠️ A fourth arm at AC3's own named depth (backlog=64, ~70 probes) was
-    // attempted and DROPPED. Run against the mutant it was meant to catch —
-    // `listen(min(backlog, 32))` — the portable relational predicate (bounded
-    // above by the probe count, above the high arm's count) did NOT red: a
-    // clamp landing strictly between the high arm's backlog and the probe
-    // ceiling is invisible to a two-point relational bracket by construction,
-    // and tightening the bracket toward an absolute floor reintroduces the
-    // portability risk this cell's own header warns against (an OS-imposed
-    // clamp on a smaller-somaxconn runner would then false-negative). Measured
-    // result and re-derivation recipe: `.specify/decisions/332-backlog-rst-witness-witnesses.md`.
+    // ⚠️ NO ARM AT AC3's OWN NAMED DEPTH, and the reason is structural, not
+    // an oversight. A two-point relational bracket — bounded above by the probe
+    // count, below by the next arm's count — cannot discriminate a clamp that
+    // lands strictly between those two bounds; that is a property of the
+    // predicate's shape, not of any particular run. Tightening it toward an
+    // absolute floor trades that gap for a worse one: the OS may clamp
+    // `listen()` silently, so a runner with a smaller `somaxconn` would then
+    // false-negative. An arm was attempted on this basis and dropped; the
+    // attempt, its mutant, and the outcome are dated in
+    // `.specify/decisions/332-backlog-rst-witness-witnesses.md`. T034 stays
+    // open on this gap (#332).
 }
