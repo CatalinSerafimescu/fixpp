@@ -745,10 +745,10 @@ TEST(AsioTlsTransportErrorPaths, PostCloseConnectReturnsAlreadyClosed) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    asio::io_context   ioc;
+    asio::io_context ioc;
     LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
 
-    auto       client = fixture.make_client(ioc.get_executor());
+    auto client = fixture.make_client(ioc.get_executor());
     Transport* client_raw = client.get();
 
     std::optional<expected_t<ConnectInfo>> first_connect;
@@ -787,14 +787,14 @@ TEST(AsioTlsTransportErrorPaths, PostCloseHandshakeReturnsAlreadyClosed) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
 
-    asio::io_context   ioc;
+    asio::io_context ioc;
     LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
 
     auto client = fixture.make_client(ioc.get_executor());
     auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
     ASSERT_NE(client_tls, nullptr);
 
-    std::optional<expected_t<ConnectInfo>>      first_connect;
+    std::optional<expected_t<ConnectInfo>> first_connect;
     std::optional<expected_t<handshake_result>> handshake_after_close;
 
     asio::co_spawn(
@@ -818,8 +818,7 @@ TEST(AsioTlsTransportErrorPaths, PostCloseHandshakeReturnsAlreadyClosed) {
         << static_cast<int>(first_connect->error());
 
     ASSERT_TRUE(handshake_after_close.has_value()) << "post-close async_handshake never completed";
-    ASSERT_FALSE(handshake_after_close->has_value())
-        << "post-close async_handshake must fail";
+    ASSERT_FALSE(handshake_after_close->has_value()) << "post-close async_handshake must fail";
     EXPECT_EQ(handshake_after_close->error(), error::transport_already_closed)
         << "post-close handshake must return transport_already_closed (98) per FR-006, got slot="
         << static_cast<int>(handshake_after_close->error());

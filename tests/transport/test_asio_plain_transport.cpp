@@ -374,19 +374,19 @@ TEST(AsioPlainTransport, PostCloseReadReturnsAlreadyClosed) {
 // regression in the connect guard cannot be masked by (or mistaken for) a
 // regression in the read/write guards it shares a file with.
 TEST(AsioPlainTransport, PostCloseConnectReturnsAlreadyClosed) {
-    asio::io_context      ioc;
+    asio::io_context ioc;
     asio::ip::tcp::acceptor acc{ioc};
-    auto                  ep = make_loopback_acceptor(ioc, acc);
+    auto ep = make_loopback_acceptor(ioc, acc);
 
-    bool                        first_connect_ok = false;
+    std::optional<expected_t<fixpp::transport::ConnectInfo>> first_connect;
     std::optional<expected_t<fixpp::transport::ConnectInfo>> connect_after_close;
 
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
             // Accept a socket so the client connect doesn't hang.
-            asio::error_code       ec;
-            asio::ip::tcp::socket  peer{co_await asio::this_coro::executor};
+            asio::error_code ec;
+            asio::ip::tcp::socket peer{co_await asio::this_coro::executor};
             co_await acc.async_accept(peer, asio::redirect_error(asio::use_awaitable, ec));
         },
         asio::detached);
@@ -401,9 +401,8 @@ TEST(AsioPlainTransport, PostCloseConnectReturnsAlreadyClosed) {
             endpoint.host = "127.0.0.1";
             endpoint.port = ep.port();
 
-            auto conn = co_await client.async_connect(endpoint);
-            first_connect_ok = conn.has_value();
-            if (!conn) co_return;
+            first_connect = co_await client.async_connect(endpoint);
+            if (!first_connect->has_value()) co_return;
 
             (void)client.close();
 
@@ -413,7 +412,10 @@ TEST(AsioPlainTransport, PostCloseConnectReturnsAlreadyClosed) {
 
     ioc.run_for(std::chrono::seconds{10});
 
-    ASSERT_TRUE(first_connect_ok) << "precondition: the transport must connect before close()";
+    ASSERT_TRUE(first_connect.has_value()) << "the first async_connect never completed";
+    ASSERT_TRUE(first_connect->has_value())
+        << "precondition: the transport must connect before close(); error="
+        << static_cast<int>(first_connect->error());
     ASSERT_TRUE(connect_after_close.has_value()) << "post-close async_connect never completed";
     ASSERT_FALSE(connect_after_close->has_value())
         << "post-close async_connect must fail (one-shot guard)";
