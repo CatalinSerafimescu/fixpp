@@ -16,7 +16,9 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/awaitable.hpp>
+#include <asio/buffer.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
@@ -36,9 +38,13 @@
 #include <fixpp/transport/transport_factory.hpp>
 #include <future>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <vector>
 
+#include "support/reify_test_frame.hpp"
 #include "transport/asio_listener.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
@@ -83,6 +89,58 @@ asio_listener::Config make_listener_cfg(std::uint16_t port = 0, std::uint32_t ba
     return cfg;
 }
 
+// ── Byte-payload helpers ────────────────────────────────────────────────────
+std::span<const std::byte> as_bytes(std::string_view s) noexcept {
+    return std::span<const std::byte>{reinterpret_cast<std::byte const*>(s.data()), s.size()};
+}
+
+std::string_view as_view(std::span<const std::byte> b) noexcept {
+    return std::string_view{reinterpret_cast<char const*>(b.data()), b.size()};
+}
+
+// Read exactly buf.size() bytes. async_read_some is read_SOME and may return
+// short; a single-shot read would make every payload assertion below depend on
+// TLS record framing rather than on the round trip it claims to witness.
+asio::awaitable<fixpp::core::expected_t<void>> read_exactly(fixpp::transport::Transport& t,
+                                                            std::span<std::byte> buf) {
+    std::size_t got = 0;
+    while (got < buf.size()) {
+        auto r = co_await t.async_read_some(buf.subspan(got));
+        if (!r.has_value()) {
+            co_return std::unexpected{r.error()};
+        }
+        got += *r;
+    }
+    co_return fixpp::core::expected_t<void>{};
+}
+
+// A byte-exact FIX 4.4 Logon (35=A), so the round trip carries a real Logon
+// rather than a Logon-shaped blob.
+//
+// BodyLength (9=) and CheckSum (10=) come from the shared assembler in
+// tests/support/reify_test_frame.hpp, NOT from literals. A hand-computed
+// checksum is a RESULT recorded in source: nothing re-derives it, so it goes
+// stale silently the moment anyone edits the field list. assemble_frame() is
+// header-only with zero fixpp includes, and tests/ is already on this target's
+// include path (tests/transport/CMakeLists.txt).
+//
+// SCOPE: this is a TRANSPORT-level round trip — the assertion is that a
+// handshaken pair carries these bytes intact in both directions. It does NOT
+// exercise FIX session semantics, and does not claim to.
+constexpr char kSoh = '\x01';
+
+std::vector<std::byte> make_logon_frame(std::string const& sender, std::string const& target) {
+    std::string const body = std::string("35=A") + kSoh + "34=1" + kSoh + "49=" + sender + kSoh +
+                             "56=" + target + kSoh + "52=20260901-00:00:00.000" + kSoh + "98=0" +
+                             kSoh + "108=30" + kSoh;
+    return fixpp::test_support::assemble_frame(std::string("8=FIX.4.4") + kSoh, body);
+}
+
+// Cell 8 post-cancel payloads — distinct in each direction so a round trip
+// cannot be satisfied by an echo.
+constexpr std::string_view kServerAfterCancel = "server-after-cancel";
+constexpr std::string_view kClientAfterCancel = "client-after-cancel";
+
 // Open a raw TCP socket to (host, port) on `ioc`. Returns the connected
 // socket on success; surfaces the error_code on failure. Synchronous —
 // the test drives the io_context via run() / run_for().
@@ -117,6 +175,92 @@ ConnectResult sync_tcp_connect(asio::io_context& ioc, std::string const& host, s
     ioc.restart();
 
     return ConnectResult{std::move(sock), ec};
+}
+
+// Has this connection been refused or reset by the peer? FR-025 action (a)
+// admits BOTH outcomes — "TCP RST or connection-refused per OS" — and the two
+// surface at different syscalls: refusal at connect(), reset at the first read.
+// Measured 2026-09-01 on this repo's WSL2 loopback stack: connect() to a
+// just-closed acceptor SUCCEEDS and the connection is reset immediately after
+// (recv → ECONNRESET), 20/20 trials; a stock Linux CI runner returns
+// ECONNREFUSED from connect() instead. A cell asserting only one branch would
+// be asserting an OS detail the contract deliberately leaves open.
+//
+// ⚠️ The read is a LIVENESS bound, NOT a latency expectation (#328). When the
+// acceptor really is closed the RST is already queued, so the read completes in
+// microseconds and the 10 s budget costs a healthy run nothing. The budget
+// expires only when the property under test is VIOLATED — an acceptor left open
+// parks the connection in the backlog with nothing ever to read. That four-order
+// -of-magnitude headroom is what separates this from the 500 ms bound #328
+// closed, where the budget sat at the same order as the normal latency.
+// Issue cancel() ON the listener's executor (T034 strand constraint / #333) and
+// prove it actually ran.
+//
+// ⚠️ LOAD-BEARING, and factored precisely so it cannot be half-copied. A posted
+// cancel that never runs leaves every later assertion describing an UNCANCELLED
+// listener, and the cell goes green having measured nothing — run_for()/restart()
+// is exactly the shape where a handler is silently left unrun. Both call sites
+// need that guard, and writing it out twice is how the second copy loses it.
+// Returning an AssertionResult means one ASSERT_TRUE at the call site carries
+// both failure modes, named distinctly.
+::testing::AssertionResult post_cancel(asio::io_context& ioc, asio_listener& listener) {
+    std::optional<fixpp::core::expected_t<void>> rc;
+    asio::post(ioc, [&] { rc = listener.cancel(); });
+    ioc.run_for(5s);
+    ioc.restart();
+    if (!rc.has_value()) {
+        return ::testing::AssertionFailure()
+               << "the posted cancel() never ran — every assertion after this would be vacuous";
+    }
+    if (!rc->has_value()) {
+        return ::testing::AssertionFailure()
+               << "listener.cancel() failed; error=" << static_cast<int>(rc->error());
+    }
+    return ::testing::AssertionSuccess();
+}
+
+bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
+    if (cr.ec) {
+        // ⚠️ Classify, do not credit any nonzero error_code. sync_tcp_connect's
+        // own deadline (asio::error::timed_out on its `!done` branch) is an
+        // INSTRUMENT failure — a missed handler deadline on THIS connect — not
+        // a contract outcome, and crediting it here would let a hung/slow
+        // instrument masquerade as a passing "refused" branch. Only the two
+        // codes FR-025 action (a) actually names admit true.
+        return cr.ec == asio::error::connection_refused || cr.ec == asio::error::connection_reset;
+    }
+    std::array<std::byte, 1> buf{};
+    bool done = false;
+    asio::error_code read_ec;
+    cr.socket.async_read_some(asio::buffer(buf), [&](asio::error_code ec, std::size_t) {
+        read_ec = ec;
+        done = true;
+    });
+    ioc.run_for(10s);
+
+    // ⚠️ CAPTURE THE VERDICT BEFORE THE DRAIN, and do not re-read done/read_ec
+    // after it. The drain below closes the socket, which completes the pending
+    // read with operation_aborted — setting both flags. Deciding afterwards
+    // therefore reports "dead" for a connection that is very much alive, which
+    // is the whole property this predicate exists to distinguish. Measured: the
+    // flag-only-cancel mutant went GREEN in 10 003 ms when the verdict was read
+    // after the drain.
+    //
+    // done && ec → RST (or EOF) branch. !done → the connection is alive and
+    // parked in a backlog, i.e. the listening socket was never closed.
+    const bool dead = done && static_cast<bool>(read_ec);
+
+    if (!done) {
+        // The read is still pending and its handler holds `done` / `read_ec` by
+        // reference. Close and drain before they leave scope — same shape (and
+        // same remedy) as sync_tcp_connect's timeout branch above; leaving it
+        // outstanding is the stack-use-after-scope of #313/#316.
+        asio::error_code ignored;
+        cr.socket.close(ignored);
+        ioc.run();
+    }
+    ioc.restart();
+    return dead;
 }
 
 }  // namespace
@@ -178,12 +322,15 @@ TEST(ListenerAcceptor, CancelCompletesInflightAcceptWithCancelled) {
 
 // ════════════════════════════════════════════════════════════════════════════
 // Cell 4 — post-cancel async_accept surfaces transport_accept_cancelled
-// without dispatching to the OS. FR-025 Option-A action (1) verified at the
-// LISTENER level rather than at OS level, because some platforms (notably
-// WSL2's Hyper-V loopback stack) do not reliably return ECONNREFUSED to a
-// connect against a closed port. The spec wording "TCP RST or connection-
-// refused per OS" is OS-policy commentary; the binding contract is that the
-// listener no longer accepts new work — which is exactly what we assert.
+// without dispatching to the OS. This is the LISTENER-surface half of FR-025
+// Option-A action (1): the listener no longer accepts new work.
+//
+// It is NOT the whole of action (a). This comment used to argue that the spec's
+// "TCP RST or connection-refused per OS" was mere OS-policy commentary and that
+// the listener-level assertion sufficed — #332 item 3 rejected that, on the
+// ground that a cancel() which flagged the listener without ever closing the
+// acceptor satisfies this cell. The OS-level half is CELL 9, which connects for
+// real and admits both branches the contract names.
 // ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, AcceptAfterCancelReturnsCancelled) {
     asio::io_context ioc;
@@ -211,9 +358,21 @@ TEST(ListenerAcceptor, AcceptAfterCancelReturnsCancelled) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Cell 5 — async_accept reach the connected raw TCP socket. We don't exercise
-// the TLS mint path here (it requires real SSL_CTX fixtures); we verify that
-// the listener observes the connect.
+// Cell 5 — async_accept reaches the connected raw TCP socket. We don't
+// exercise the TLS mint path here (it requires real SSL_CTX fixtures).
+//
+// ⚠️ SCOPE — what this cell proves, and what it does NOT.
+//   PROVES: async_accept is not synchronously ready, and it does resume once a
+//   client has connected.
+//   DOES NOT PROVE CAUSALITY. A mutant that suspends briefly and then returns
+//   unexpected{transport_factory_failed} without ever accepting passes every
+//   assertion here — the initial poll() leaves the future pending, the raw
+//   client still connects into the kernel backlog, and the future still becomes
+//   ready. This cell structurally cannot see that mutant: its mint fails BY
+//   DESIGN under the stub SslCtxConfig, so there is no Transport to inspect.
+//   The causality witness is CELL 7 (FullTlsHandshake), which runs against the
+//   real loopback fixture and does obtain a live Transport — the same mutant
+//   reds there, at ASSERT_TRUE(accept_result.has_value()).
 //
 // This cell covers:
 //   (a) FR-024 "fresh Transport minted per accept" — listener.async_accept
@@ -239,10 +398,12 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
         asio::use_future);
 
     // The accept must still be pending here: poll() drives the coroutine to its
-    // first suspend, and nothing has connected yet. Without this the cell cannot
-    // tell "resumed because a client connected" from "resumed for any reason" --
-    // an async_accept that returned immediately would satisfy every assertion
-    // below, because the listening socket's backlog completes the connect anyway.
+    // first suspend, and nothing has connected yet. This defeats exactly one
+    // mutant -- an async_accept that resumes IMMEDIATELY, which would otherwise
+    // satisfy every assertion below because the listening socket's backlog
+    // completes the connect anyway. What it establishes is "not synchronously
+    // ready", which is strictly weaker than "resumed BECAUSE a client
+    // connected"; see the scope note above the cell for what carries that.
     listener_ioc.poll();
     ASSERT_EQ(fut.wait_for(std::chrono::seconds{0}), std::future_status::timeout)
         << "async_accept resumed before any client connected";
@@ -268,12 +429,18 @@ TEST(ListenerAcceptor, AcceptObservesClientConnect) {
     // std::terminate on unwind).
     const auto status = fut.wait_for(10s);
 
-    // Tear down.
-    (void)listener.cancel();
+    // Tear down. STOP AND JOIN BEFORE CANCELLING. cancel() must never be issued
+    // while io_thread is still inside run(): asio's basic_socket_acceptor
+    // @par Thread Safety block declares "Shared objects: Unsafe", carves out
+    // only the SYNCHRONOUS accept, and names close -- which is exactly what
+    // asio_listener::cancel() calls -- as not thread safe; cancel gets no
+    // carve-out at all. After the join, the test thread is the sole accessor of
+    // acceptor_. (#333 settlement; T034 strand constraint.)
     listener_ioc.stop();
     if (io_thread.joinable()) {
         io_thread.join();
     }
+    (void)listener.cancel();
 
     ASSERT_EQ(status, std::future_status::ready)
         << "async_accept did not resume after client connect";
@@ -315,10 +482,17 @@ TEST(ListenerAcceptor, BacklogConfigAcceptedAtConstruction) {
 //
 // async_accept returns a Transport in state=connected + role=server.
 // Simultaneously the client connects (async_connect) and both sides drive
-// async_handshake. Asserts:
+// async_handshake, then exchange a FIX Logon. Asserts:
 //   (a) accept returns a non-null Transport (FR-024 fresh mint).
 //   (b) server-side async_handshake returns a non-empty handshake_result.
 //   (c) client-side async_handshake returns a non-empty handshake_result.
+//   (d) T034 Logon round trip — client Logon arrives byte-exact at the server
+//       and the server's reply arrives byte-exact at the client.
+//
+// ⚠️ THIS CELL CARRIES THE ACCEPT-CAUSALITY CLAIM for the whole file. Cell 5
+// establishes only "not synchronously ready" (see its scope note). Here the
+// accepted Transport is real and is driven end to end, so an async_accept that
+// resumed without ever accepting cannot reach (a), let alone (d).
 //
 // Guards with FIXPP_TLS_FIXTURE_DIR — skipped when certs not present.
 // Anchor: .specify/2h-transport.md §4.6 FR-023/FR-024.
@@ -344,6 +518,19 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
     expected_t<handshake_result> client_hs_result =
         std::unexpected{error::transport_handshake_cancelled};
 
+    // Logon round trip (d). Distinct in each direction (49=/56= swapped), so a
+    // round trip cannot be satisfied by an echo.
+    const std::vector<std::byte> logon_request = make_logon_frame("CLIENT", "SERVER");
+    const std::vector<std::byte> logon_response = make_logon_frame("SERVER", "CLIENT");
+    std::vector<std::byte> server_rx(logon_request.size());
+    std::vector<std::byte> client_rx(logon_response.size());
+    expected_t<void> server_logon_read = std::unexpected{error::transport_read_eof};
+    expected_t<std::size_t> server_logon_write =
+        std::unexpected{error::transport_write_in_progress};
+    expected_t<std::size_t> client_logon_write =
+        std::unexpected{error::transport_write_in_progress};
+    expected_t<void> client_logon_read = std::unexpected{error::transport_read_eof};
+
     // Server coroutine: accept + handshake.
     asio::co_spawn(
         ioc.get_executor(),
@@ -357,6 +544,17 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
                 co_return;
             }
             server_hs_result = co_await tls->async_handshake(fixture.ssl_cfg());
+            if (!server_hs_result.has_value()) {
+                co_return;
+            }
+            // Logon round trip, server half: read the client's Logon, reply.
+            server_logon_read =
+                co_await read_exactly(**accept_result, std::span<std::byte>{server_rx});
+            if (!server_logon_read.has_value()) {
+                co_return;
+            }
+            server_logon_write =
+                co_await (*accept_result)->async_write(std::span<const std::byte>{logon_response});
         },
         asio::detached);
 
@@ -373,6 +571,16 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
                 co_return;
             }
             client_hs_result = co_await client_tls->async_handshake(fixture.ssl_cfg());
+            if (!client_hs_result.has_value()) {
+                co_return;
+            }
+            // Logon round trip, client half: send the Logon, read the reply.
+            client_logon_write =
+                co_await client->async_write(std::span<const std::byte>{logon_request});
+            if (!client_logon_write.has_value()) {
+                co_return;
+            }
+            client_logon_read = co_await read_exactly(*client, std::span<std::byte>{client_rx});
         },
         asio::detached);
 
@@ -380,10 +588,27 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
 
     ASSERT_TRUE(accept_result.has_value()) << "async_accept must return a Transport; error="
                                            << static_cast<int>(accept_result.error());
-    EXPECT_TRUE(server_hs_result.has_value()) << "server async_handshake must succeed; error="
+    ASSERT_NE(accept_result->get(), nullptr) << "async_accept must mint a non-null Transport";
+    ASSERT_TRUE(server_hs_result.has_value()) << "server async_handshake must succeed; error="
                                               << static_cast<int>(server_hs_result.error());
-    EXPECT_TRUE(client_hs_result.has_value()) << "client async_handshake must succeed; error="
+    ASSERT_TRUE(client_hs_result.has_value()) << "client async_handshake must succeed; error="
                                               << static_cast<int>(client_hs_result.error());
+
+    // (d) Logon round trip. Assert each leg, so a failure names the direction
+    // that broke rather than only the byte comparison at the end.
+    ASSERT_TRUE(client_logon_write.has_value())
+        << "client must write the Logon; error=" << static_cast<int>(client_logon_write.error());
+    EXPECT_EQ(*client_logon_write, logon_request.size());
+    ASSERT_TRUE(server_logon_read.has_value()) << "server must read the client Logon; error="
+                                               << static_cast<int>(server_logon_read.error());
+    EXPECT_EQ(as_view(server_rx), as_view(logon_request));
+
+    ASSERT_TRUE(server_logon_write.has_value()) << "server must write the Logon reply; error="
+                                                << static_cast<int>(server_logon_write.error());
+    EXPECT_EQ(*server_logon_write, logon_response.size());
+    ASSERT_TRUE(client_logon_read.has_value()) << "client must read the Logon reply; error="
+                                               << static_cast<int>(client_logon_read.error());
+    EXPECT_EQ(as_view(client_rx), as_view(logon_response));
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -392,10 +617,28 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
 // Option-A contract action (3): listener.cancel() does NOT close or modify
 // Transports it already returned — ownership has transferred.
 //
-// Sequence:
-//   1. Accept one client → TLS handshake → server Transport in handshaken state.
-//   2. Call listener.cancel().
-//   3. Verify the server-side Transport can still async_write (not closed).
+// FR-025 clause (3) names the protected state as an already-resumed-but-
+// NOT-YET-CONSUMED unique_ptr<Transport> — [2h §4.6]'s async_accept doc
+// comment: "initially in the 'connected' state ... the FSM issues
+// async_handshake (TLS) immediately." That is the pre-handshake state, so
+// cancel() must be proven to land BEFORE the handshake, not after it (#332
+// Gate B r1 F1). Three phases, in order:
+//   1. Accept + raw TCP connect only — server_transport ends up in the
+//      pre-handshake "connected" state FR-025(3) protects. No handshake yet.
+//   2. Post listener.cancel() ONTO the listener's executor (T034 strand
+//      constraint / #333 — cancel() calls acceptor_.close(), which asio names
+//      explicitly as not thread safe) while server_transport is still in
+//      that pre-handshake state.
+//   3. Verify the server-side Transport still supports the full post-cancel
+//      surface T034 names: async_handshake, async_write, async_read_some and
+//      close — all issued AFTER cancel().
+//
+// ⚠️ THE ASSERTIONS MUST DEMAND SUCCESS, not merely a non-cancelled error.
+// This cell previously asserted EXPECT_NE(write_result.error_or(...),
+// transport_accept_cancelled). A Transport closed by the cancel returns
+// transport_already_closed — which is != transport_accept_cancelled — so the
+// exact defect the cell exists to catch passed it. Only success witnesses
+// "UNAFFECTED".
 //
 // Anchor: .specify/2h-transport.md §4.6 FR-025 Option-A.
 // ════════════════════════════════════════════════════════════════════════════
@@ -413,67 +656,182 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
     LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
 
     std::unique_ptr<Transport> server_transport;
-    expected_t<handshake_result> server_hs = std::unexpected{error::transport_handshake_cancelled};
-    expected_t<handshake_result> client_hs = std::unexpected{error::transport_handshake_cancelled};
 
-    // Server: accept + handshake, store transport.
+    // Phase 1 — accept + raw TCP connect only, no handshake. The accept only
+    // terminates if the client connect succeeds (a failed/discarded connect
+    // leaves the accept pending forever), so the phase is bounded with
+    // run_for() — a liveness bound, not a #328 latency barrier — and the
+    // connect result is captured and asserted so a failure is diagnosed by
+    // cause rather than by the ASSERT_NE(server_transport, nullptr) symptom.
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
             auto ar = co_await fixture.listener().async_accept();
             if (!ar.has_value()) co_return;
             server_transport = std::move(*ar);
-            auto* tls = dynamic_cast<TlsTransport*>(server_transport.get());
-            if (!tls) co_return;
-            server_hs = co_await tls->async_handshake(fixture.ssl_cfg());
         },
         asio::detached);
 
-    // Client: connect + handshake.
     auto client = fixture.make_client(ioc.get_executor());
     auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
     ASSERT_NE(client_tls, nullptr);
 
+    expected_t<ConnectInfo> connect_result = std::unexpected{error::transport_connect_cancelled};
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
-            auto conn = co_await client->async_connect(fixture.server_endpoint());
-            if (!conn.has_value()) co_return;
-            client_hs = co_await client_tls->async_handshake(fixture.ssl_cfg());
+            connect_result = co_await client->async_connect(fixture.server_endpoint());
         },
         asio::detached);
 
     ioc.run_for(std::chrono::seconds{10});
     ioc.restart();
 
-    ASSERT_TRUE(server_hs.has_value())
-        << "server handshake must succeed before testing cancel isolation";
+    ASSERT_TRUE(connect_result.has_value())
+        << "client async_connect in phase 1 must SUCCEED, or the accept coroutine never "
+           "terminates and the run_for() bound above is masking a hang; error="
+        << static_cast<int>(connect_result.error());
+    ASSERT_NE(server_transport, nullptr);
+    auto* server_tls = dynamic_cast<TlsTransport*>(server_transport.get());
+    ASSERT_NE(server_tls, nullptr);
 
-    // Cancel the listener AFTER we already hold server_transport.
-    fixture.cancel_listener();
+    // Phase 2 — cancel the listener while server_transport is held in the
+    // pre-handshake state. post_cancel() issues it on the listener's
+    // executor and proves it ran — see its ⚠️ note.
+    ASSERT_TRUE(post_cancel(ioc, fixture.listener()));
 
-    // The server Transport must still be usable (write a small payload).
-    // We expect the write to succeed or at minimum not crash / assert closed.
-    // The client peer is still alive (client Transport not closed yet).
+    // Phase 3 — the post-cancel surface: handshake, write, read, close —
+    // each must SUCCEED, issued strictly after cancel().
+    expected_t<handshake_result> server_hs = std::unexpected{error::transport_handshake_cancelled};
+    expected_t<handshake_result> client_hs = std::unexpected{error::transport_handshake_cancelled};
+    std::array<std::byte, kClientAfterCancel.size()> server_rx{};
     expected_t<std::size_t> write_result = std::unexpected{error::transport_write_in_progress};
+    expected_t<void> read_result = std::unexpected{error::transport_read_eof};
+    std::array<std::byte, kServerAfterCancel.size()> client_rx{};
+    expected_t<void> client_read_result = std::unexpected{error::transport_read_eof};
 
-    const std::array<std::byte, 4> payload{};
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
-            write_result =
-                co_await server_transport->async_write(std::span<const std::byte>{payload});
+            server_hs = co_await server_tls->async_handshake(fixture.ssl_cfg());
+            if (!server_hs.has_value()) {
+                co_return;
+            }
+            write_result = co_await server_transport->async_write(as_bytes(kServerAfterCancel));
+            if (!write_result.has_value()) {
+                co_return;
+            }
+            read_result = co_await read_exactly(*server_transport, std::span<std::byte>{server_rx});
         },
         asio::detached);
 
-    ioc.run_for(std::chrono::seconds{5});
+    // ⚠️ LOAD-BEARING peer half. Without it the server's read has nothing to
+    // observe: the cell would stall out the run_for() below and then fail on a
+    // starved read rather than witnessing the post-cancel surface.
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            client_hs = co_await client_tls->async_handshake(fixture.ssl_cfg());
+            if (!client_hs.has_value()) {
+                co_return;
+            }
+            client_read_result = co_await read_exactly(*client, std::span<std::byte>{client_rx});
+            if (!client_read_result.has_value()) {
+                co_return;
+            }
+            (void)co_await client->async_write(as_bytes(kClientAfterCancel));
+        },
+        asio::detached);
 
-    // The write must not return transport_factory_failed or any "closed" sentinel.
-    // Acceptable outcomes: success (bytes written) or connection-related error
-    // (peer may have reset) — but NOT transport_accept_cancelled (which would
-    // indicate the listener incorrectly forwarded its cancel to the Transport).
-    EXPECT_NE(write_result.error_or(error::transport_read_eof), error::transport_accept_cancelled)
-        << "listener cancel() must NOT affect already-resumed Transport";
+    ioc.run_for(std::chrono::seconds{10});
+
+    ASSERT_TRUE(server_hs.has_value())
+        << "server async_handshake on an already-resumed (pre-handshake) Transport must "
+           "SUCCEED after listener cancel(); error="
+        << static_cast<int>(server_hs.error());
+    ASSERT_TRUE(client_hs.has_value())
+        << "client handshake must succeed after listener cancel(); error="
+        << static_cast<int>(client_hs.error());
+
+    ASSERT_TRUE(write_result.has_value())
+        << "async_write on an already-resumed Transport must SUCCEED after listener cancel(); "
+           "error="
+        << static_cast<int>(write_result.error());
+    EXPECT_EQ(*write_result, kServerAfterCancel.size());
+
+    ASSERT_TRUE(read_result.has_value())
+        << "async_read_some on an already-resumed Transport must SUCCEED after listener "
+           "cancel(); error="
+        << static_cast<int>(read_result.error());
+    EXPECT_EQ(as_view(server_rx), kClientAfterCancel);
+
+    ASSERT_TRUE(client_read_result.has_value())
+        << "client read of the server's post-cancel write must SUCCEED; error="
+        << static_cast<int>(client_read_result.error());
+    EXPECT_EQ(as_view(client_rx), kServerAfterCancel);
+
+    EXPECT_TRUE(server_transport->close().has_value())
+        << "close() on an already-resumed Transport must succeed after listener cancel()";
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// connection_refused_or_reset() classifier — must NOT credit a synthetic
+// sync_tcp_connect() deadline miss (asio::error::timed_out) as a
+// connection-refused verdict. #332 Gate B r1 F3: the pre-fix classifier
+// returned `true` on ANY nonzero error_code, so a missed handler deadline on
+// the SECOND connect in cell 9 would pass as "refused" without the socket
+// ever having been examined.
+//
+// ⚠️ No FIXPP_TLS_FIXTURE_DIR guard — this cell opens no socket and needs no
+// TLS fixture, so it runs on every leg. On this WSL2 host it is the ONLY arm
+// that executes the changed branch: cell 9's own two connects both observe
+// cr.ec == 0 here (verdict comes from the read branch instead), so without
+// this cell the classifier fix would ship with zero coverage of the branch it
+// changes.
+// ════════════════════════════════════════════════════════════════════════════
+TEST(ListenerAcceptor, ConnectionRefusedOrResetRejectsSyntheticTimeout) {
+    asio::io_context ioc;
+    ConnectResult cr{asio::ip::tcp::socket{ioc}, asio::error::timed_out};
+    EXPECT_FALSE(connection_refused_or_reset(ioc, cr));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Cell 9 — FR-025 Option-A action (a): cancel() CLOSES the listening socket,
+// so a subsequent client connect is refused at the TCP layer.
+//
+// The pre-existing coverage for action (a) was cell 4's post-cancel
+// async_accept returning transport_accept_cancelled. That witnesses the accept
+// SURFACE, not the socket: a cancel() that flagged the listener without ever
+// closing the acceptor satisfies it. This cell connects for real.
+//
+// ⚠️ POSITIVE CONTROL, IN THIS SAME RUN — REMOVING IT MAKES THE CELL VACUOUS.
+// The first connect must SUCCEED before the cancel. A dead connection proves
+// nothing on its own — a wrong port, an unbound port, or bad arithmetic is dead
+// too. Only the before/after pair attributes the death to cancel().
+//
+// The failure assertion is deliberately LOOSE, and covers BOTH branches FR-025
+// names; see connection_refused_or_reset() above for the measurement that
+// showed a single-branch assertion is platform-dependent.
+//
+// Anchor: .specify/2h-transport.md §4.6 FR-025 Option-A action (a).
+// ════════════════════════════════════════════════════════════════════════════
+TEST(ListenerAcceptor, CancelClosesListeningSocketSoLaterConnectsAreRefused) {
+    asio::io_context listener_ioc;
+    asio_listener listener{listener_ioc.get_executor(), make_listener_cfg()};
+    const std::uint16_t port = listener.bound_endpoint().port;
+
+    asio::io_context client_ioc;
+    auto before = sync_tcp_connect(client_ioc, "127.0.0.1", port, 10s);
+    ASSERT_FALSE(static_cast<bool>(before.ec))
+        << "positive control: the port must ACCEPT a connect before cancel(); "
+        << before.ec.message();
+
+    ASSERT_TRUE(post_cancel(listener_ioc, listener));
+
+    auto after = sync_tcp_connect(client_ioc, "127.0.0.1", port, 10s);
+    EXPECT_TRUE(connection_refused_or_reset(client_ioc, after))
+        << "after cancel() the listening socket must be closed, so a fresh connect must be "
+           "refused or reset — it connected and stayed alive instead";
 }
 
 TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
