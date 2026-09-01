@@ -221,7 +221,13 @@ ConnectResult sync_tcp_connect(asio::io_context& ioc, std::string const& host, s
 
 bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
     if (cr.ec) {
-        return true;  // connection-refused branch
+        // ⚠️ Classify, do not credit any nonzero error_code. sync_tcp_connect's
+        // own deadline (asio::error::timed_out on its `!done` branch) is an
+        // INSTRUMENT failure — a missed handler deadline on THIS connect — not
+        // a contract outcome, and crediting it here would let a hung/slow
+        // instrument masquerade as a passing "refused" branch. Only the two
+        // codes FR-025 action (a) actually names admit true.
+        return cr.ec == asio::error::connection_refused || cr.ec == asio::error::connection_reset;
     }
     std::array<std::byte, 1> buf{};
     bool done = false;
@@ -753,6 +759,27 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
 
     EXPECT_TRUE(server_transport->close().has_value())
         << "close() on an already-resumed Transport must succeed after listener cancel()";
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// connection_refused_or_reset() classifier — must NOT credit a synthetic
+// sync_tcp_connect() deadline miss (asio::error::timed_out) as a
+// connection-refused verdict. #332 Gate B r1 F3: the pre-fix classifier
+// returned `true` on ANY nonzero error_code, so a missed handler deadline on
+// the SECOND connect in cell 9 would pass as "refused" without the socket
+// ever having been examined.
+//
+// ⚠️ No FIXPP_TLS_FIXTURE_DIR guard — this cell opens no socket and needs no
+// TLS fixture, so it runs on every leg. On this WSL2 host it is the ONLY arm
+// that executes the changed branch: cell 9's own two connects both observe
+// cr.ec == 0 here (verdict comes from the read branch instead), so without
+// this cell the classifier fix would ship with zero coverage of the branch it
+// changes.
+// ════════════════════════════════════════════════════════════════════════════
+TEST(ListenerAcceptor, ConnectionRefusedOrResetRejectsSyntheticTimeout) {
+    asio::io_context ioc;
+    ConnectResult cr{asio::ip::tcp::socket{ioc}, asio::error::timed_out};
+    EXPECT_FALSE(connection_refused_or_reset(ioc, cr));
 }
 
 // ════════════════════════════════════════════════════════════════════════════
