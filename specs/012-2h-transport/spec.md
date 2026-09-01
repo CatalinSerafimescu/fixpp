@@ -86,7 +86,7 @@ A fixpp developer writes a session-FSM test that needs to drive the FSM through 
 
 ### Edge Cases
 
-- **`async_connect` called twice on the same Transport before the first completes or `close()`/`cancel()` returns**: the second call returns `transport_already_connected` immediately; the first is not disturbed.
+- **`async_connect` called twice on the same Transport before the first completes or `close()`/`cancel()` returns**: ⚠️ **Amended 2026-09-01 (#339)** — this Edge Case was written as if the guard were a call counter. It is not: it tests the ENTRY STATE, and `async_connect` leaves the Transport in `fresh` for the whole duration of an in-flight attempt. So an OVERLAPPING second call also attempts — it does not get `transport_already_connected`. That variant is returned once the first attempt has SUCCEEDED (state `connected`/`handshaken`), and `transport_already_closed` once the Transport is closed. The first call is not disturbed either way. FR-007 carries the full state table.
 - **`async_read_some` issued while a previous `async_read_some` is in flight on the same Transport**: returns `transport_read_in_progress` immediately. (API-level exclusivity contract — strand serialisation is defence-in-depth only per design-doc §4.1.)
 - **`async_write` issued while a previous `async_write` is in flight on the same Transport**: returns `transport_write_in_progress` immediately.
 - **Short write under cancellation** (some bytes sent, some not): the awaitable completes with `transport_write_cancelled`; the FSM treats this as a torn write and disconnects + recovers via `[FIX-SL §4.5.2]` `ResendRequest`. The persisted frame is NOT rolled back per `[2e §6.1.4]`.

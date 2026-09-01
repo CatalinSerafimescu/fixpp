@@ -48,8 +48,8 @@ struct ConnectInfo;
 // Transport instance. Concurrent second call returns IMMEDIATELY with
 // transport_read_in_progress / transport_write_in_progress per [2h §6.6].
 // Strand serialisation is defence-in-depth, NOT binding. async_connect and
-// async_handshake are one-shot per Transport lifetime; second call raises
-// transport_already_connected.
+// async_handshake are one-shot per Transport lifetime; the ENTRY STATE decides the
+// answer, not the call index — see async_connect/async_handshake below (#339).
 // ─────────────────────────────────────────────────────────────────────────────
 class Transport {
 public:
@@ -137,7 +137,7 @@ public:
     // (4) Cancel any in-flight async_connect / async_read_some / async_write /
     //     async_handshake. Synchronous; idempotent on already-cancelled /
     //     never-issued ops. Returns expected_t<void> for symmetry (only
-    //     documented failure: transport_already_closed after close() — ⚠️ NOT IMPLEMENTED (#339)).
+    //     documented failure: transport_already_closed after close ⚠️ NOT IMPLEMENTED — #340).
     //
     //     ⚠️ CALL IT ON THE SESSION STRAND. This read "thread-safe (ASIO
     //     cancellation_signal is thread-safe)" until 2026-08-31 (#333). Both

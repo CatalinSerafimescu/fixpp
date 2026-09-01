@@ -51,8 +51,8 @@ public:
     ~asio_plain_transport() override = default;
 
     // (1) TCP connect (resolve → connect → socket options); NO handshake follows.
-    //     cancellation_type::total → transport_connect_cancelled. Second call →
-    //     transport_already_connected.
+    //     cancellation_type::total → transport_connect_cancelled. By ENTRY STATE (#339):
+    //     connected → 97; closed → 98; fresh → attempts (a failed attempt stays fresh).
     [[nodiscard]] asio::awaitable<core::expected_t<ConnectInfo>> async_connect(
         Endpoint const& ep) override;
 

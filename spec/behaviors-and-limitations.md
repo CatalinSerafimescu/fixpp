@@ -2130,11 +2130,30 @@ requirement. Evidence: issue #339.
 
 - **B-339-1 — the answer to `async_connect` / `async_handshake` is decided by the ENTRY STATE, not by the call index, and every `closed` state now answers `transport_already_closed` (98) where two of them answered `transport_already_connected` (97).** The state table, which is the whole row — everything else here is why:
 
+  ⚠️ **One table per transport, because they do not share a state set** — the TLS transport has
+  `handshaken` and the plaintext one does not, and their read/write guards therefore key on
+  different states. A single merged table has to claim something false about one of them.
+
+  **TLS** — `{fresh, connected, handshaken, closed}`:
+
   | call | `fresh` | `connected` | `handshaken` | `closed` |
   |---|---|---|---|---|
   | `async_connect` | attempts (a failed attempt stays `fresh`, retryable) | 97 | 97 | **98** ← moved |
-  | `async_handshake` (TLS) | 97 | attempts | 97 | **98** ← moved |
-  | `async_read_some` / `async_write` | 98 | 98 (TLS: pre-`handshaken`) | proceeds | 98 |
+  | `async_handshake` | 97 | attempts | 97 | **98** ← moved |
+  | `async_read_some` / `async_write` | 98 | 98 | proceeds | 98 |
+
+  **Plaintext** — `{fresh, connected, closed}`, no handshake surface:
+
+  | call | `fresh` | `connected` | `closed` |
+  |---|---|---|---|
+  | `async_connect` | attempts (a failed attempt stays `fresh`, retryable) | 97 | **98** ← moved |
+  | `async_read_some` / `async_write` | 98 | proceeds | 98 |
+
+  ⚠️ **`fresh → attempts` covers the IN-FLIGHT case too**, which is where the call-count reading
+  does its most concrete damage: `async_connect` leaves the Transport `fresh` for the whole
+  duration of an attempt, so a second call issued while the first is still running also attempts
+  — it does NOT get `transport_already_connected`. The 012 spec's Edge Case said otherwise and is
+  amended alongside this row.
 
   FR-006 states the post-close rule without exception — *"After `close()` returns, every subsequent `async_*` returns `transport_already_closed`"* — and `async_read_some` / `async_write` already honoured it on both transports. `async_connect` and `async_handshake` did not: their one-shot guards tested `state_ != fresh` / `state_ != connected`, which `closed` also satisfies, so the closed case fell through to the one-shot answer.
 
@@ -2148,4 +2167,4 @@ requirement. Evidence: issue #339.
 
   **Three hostile-review rounds shaped this row, all on one recurring error: describing the contract by CALL COUNT when it is decided by STATE.** Cut 1 said the one-shot contract was unchanged — false for the failure state. Cut 2 said "handshake failure" without excluding the preflight returns — false for those. Cut 3 said a second call after a preflight rejection "answers 97" — false again, since `connected` is exactly the state that admits the call. The table above replaces the sentence that kept rotting, because a state table is checkable against the code and a call-count sentence is not.
 
-  Witnesses, each seen RED before its green was believed: `AsioPlainTransport.PostCloseConnectReturnsAlreadyClosed`, `AsioTlsTransportErrorPaths.PostClose{Connect,Handshake}ReturnsAlreadyClosed` (one per site, each red under a mutant removing only its own guard), `PostFailedHandshakeEntryPointsReturnAlreadyClosed` (red under both TLS mutants — it probes both guards, so deliberately not part of that diagonal), and `PreflightHandshakeRejectionLeavesTransportOpen` (the forced-spurious-HIT arm: it asserts 97 on purpose, and is the only cell that reds when a guard fires where it must not).
+  Witnesses, each seen RED before its green was believed: `AsioPlainTransport.PostCloseConnectReturnsAlreadyClosed`, `AsioTlsTransportErrorPaths.PostClose{Connect,Handshake}ReturnsAlreadyClosed` (one per site, each red under a mutant removing only its own guard), `PostFailedHandshakeEntryPointsReturnAlreadyClosed` (red under both TLS mutants — it probes both guards, so deliberately not part of that diagonal), and `PreflightHandshakeRejectionLeavesTransportOpen` (the forced-spurious-HIT arm: it pins the EXACT answers a still-open Transport gives — the repeated preflight rejection, and 97 from `async_connect` — and is the only cell that reds when a guard fires where it must not).

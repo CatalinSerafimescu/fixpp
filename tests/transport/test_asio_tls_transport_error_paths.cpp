@@ -953,8 +953,8 @@ TEST(AsioTlsTransportErrorPaths, PostFailedHandshakeEntryPointsReturnAlreadyClos
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Case 9: a PREFLIGHT async_handshake rejection leaves the Transport OPEN, so
-//         the one-shot answer (97) still stands there (#339, Codex F-339-R2-1)
+// Case 9: a PREFLIGHT async_handshake rejection leaves the Transport OPEN — so the
+//         retry ATTEMPTS again, and async_connect still answers 97 (#339, F-339-R2-1)
 //
 // This is the FORCED-SPURIOUS-HIT arm for #339's new `state_ == closed` guards.
 // Case 7 and Case 8 both force the guard to FIRE and check it answers 98. Neither
@@ -967,9 +967,10 @@ TEST(AsioTlsTransportErrorPaths, PostFailedHandshakeEntryPointsReturnAlreadyClos
 // B-339-1 draws between the PREFLIGHT rejections and the IN-PROTOCOL failures
 // of Case 8, and this cell is what keeps it honest.
 //
-// ⚠️ The `EXPECT_EQ(..., transport_already_connected)` below is therefore
-// asserting 97 ON PURPOSE. It is not a leftover from before #339: it is the
-// property that #339 must NOT have moved. Do not "fix" it to 98.
+// ⚠️ Both EXPECT_EQs below assert a NON-98 answer ON PURPOSE — the repeated
+// handshake's own preflight rejection, and 97 from async_connect. They are not
+// leftovers from before #339: they are the properties #339 must NOT have moved.
+// Do not "fix" either to transport_already_closed.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(AsioTlsTransportErrorPaths, PreflightHandshakeRejectionLeavesTransportOpen) {
     if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
