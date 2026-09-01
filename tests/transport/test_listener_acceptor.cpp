@@ -657,10 +657,12 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
 
     std::unique_ptr<Transport> server_transport;
 
-    // Phase 1 — accept + raw TCP connect only, no handshake. Both coroutines
-    // terminate on their own (co_return right after), so a plain ioc.run()
-    // drains the phase with no timing barrier — #328 does not attach to a
-    // pair of coroutines that both terminate.
+    // Phase 1 — accept + raw TCP connect only, no handshake. The accept only
+    // terminates if the client connect succeeds (a failed/discarded connect
+    // leaves the accept pending forever), so the phase is bounded with
+    // run_for() — a liveness bound, not a #328 latency barrier — and the
+    // connect result is captured and asserted so a failure is diagnosed by
+    // cause rather than by the ASSERT_NE(server_transport, nullptr) symptom.
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
@@ -674,16 +676,21 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
     auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
     ASSERT_NE(client_tls, nullptr);
 
+    expected_t<ConnectInfo> connect_result = std::unexpected{error::transport_connect_cancelled};
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
-            (void)co_await client->async_connect(fixture.server_endpoint());
+            connect_result = co_await client->async_connect(fixture.server_endpoint());
         },
         asio::detached);
 
-    ioc.run();
+    ioc.run_for(std::chrono::seconds{10});
     ioc.restart();
 
+    ASSERT_TRUE(connect_result.has_value())
+        << "client async_connect in phase 1 must SUCCEED, or the accept coroutine never "
+           "terminates and the run_for() bound above is masking a hang; error="
+        << static_cast<int>(connect_result.error());
     ASSERT_NE(server_transport, nullptr);
     auto* server_tls = dynamic_cast<TlsTransport*>(server_transport.get());
     ASSERT_NE(server_tls, nullptr);
@@ -700,6 +707,8 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
     std::array<std::byte, kClientAfterCancel.size()> server_rx{};
     expected_t<std::size_t> write_result = std::unexpected{error::transport_write_in_progress};
     expected_t<void> read_result = std::unexpected{error::transport_read_eof};
+    std::array<std::byte, kServerAfterCancel.size()> client_rx{};
+    expected_t<void> client_read_result = std::unexpected{error::transport_read_eof};
 
     asio::co_spawn(
         ioc.get_executor(),
@@ -726,9 +735,8 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
             if (!client_hs.has_value()) {
                 co_return;
             }
-            std::array<std::byte, kServerAfterCancel.size()> client_rx{};
-            auto rr = co_await read_exactly(*client, std::span<std::byte>{client_rx});
-            if (!rr.has_value()) {
+            client_read_result = co_await read_exactly(*client, std::span<std::byte>{client_rx});
+            if (!client_read_result.has_value()) {
                 co_return;
             }
             (void)co_await client->async_write(as_bytes(kClientAfterCancel));
@@ -756,6 +764,11 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
            "cancel(); error="
         << static_cast<int>(read_result.error());
     EXPECT_EQ(as_view(server_rx), kClientAfterCancel);
+
+    ASSERT_TRUE(client_read_result.has_value())
+        << "client read of the server's post-cancel write must SUCCEED; error="
+        << static_cast<int>(client_read_result.error());
+    EXPECT_EQ(as_view(client_rx), kServerAfterCancel);
 
     EXPECT_TRUE(server_transport->close().has_value())
         << "close() on an already-resumed Transport must succeed after listener cancel()";
