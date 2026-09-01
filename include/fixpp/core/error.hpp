@@ -493,13 +493,13 @@ enum class error : std::uint8_t {
                                                //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
     transport_already_connected = 97,          // [2h §6.6]:1173 — async_connect or
                                                //   async_handshake called a second time on
-                                               //   the same Transport instance (one-shot
-                                               //   per lifetime per [2h §4.1]).
+                                               //   a still-OPEN Transport (one-shot per
+                                               //   [2h §4.1]). If it is closed → 98 (#339).
                                                //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
     transport_already_closed = 98,             // [2h §6.6]:1174 — cancel() or any async_*
-                                               //   called after close(); idempotent
-                                               //   second close() does NOT return this —
-                                               //   returns expected_t<void>{} per [2h §4.1].
+                                               //   once state == closed. close() is not the
+                                               //   only door: a failed TLS handshake also
+                                               //   lands there (#339). 2nd close() → {}.
                                                //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
     transport_read_in_progress = 99,           // [2h §6.6]:1175 — concurrent second
                                                //   async_read_some while a first is

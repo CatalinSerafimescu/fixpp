@@ -28,6 +28,7 @@
 #include <fixpp/transport/transport_factory.hpp>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <variant>
 
@@ -822,6 +823,130 @@ TEST(AsioTlsTransportErrorPaths, PostCloseHandshakeReturnsAlreadyClosed) {
     EXPECT_EQ(handshake_after_close->error(), error::transport_already_closed)
         << "post-close handshake must return transport_already_closed (98) per FR-006, got slot="
         << static_cast<int>(handshake_after_close->error());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Case 8: `state_t::closed` is ALSO reached by handshake failure, and all four
+//         entry points answer transport_already_closed there (#339, Codex
+//         F-339-1)
+//
+// The three Case-7 cells above only ever reach `closed` via close(). But the TLS
+// state machine has three OTHER writes of `state_ = state_t::closed`, all on
+// handshake-failure paths in async_handshake — so `closed` means "this Transport
+// is finished", not "close() was called". Re-derive the set rather than trusting
+// a count here: `grep -n 'state_ = state_t::closed' src/transport/asio_tls_transport.cpp`.
+//
+// That matters because #339 moved async_connect / async_handshake in this state
+// too, from transport_already_connected (97) to transport_already_closed (98).
+// It is a real delta beyond the post-close() one, and B-339-1 discloses it.
+//
+// ⚠️ LOAD-BEARING — the read and write legs are NOT filler. async_read_some and
+// async_write already answered 98 in this state BEFORE #339 (their guards test
+// `state_ != handshaken`, which `closed` satisfies). Asserting them here is what
+// makes "all four are now uniform" a measured property rather than a claim, and
+// it pins the pre-existing half so a future change cannot move it silently.
+//
+// ⚠️ This cell is deliberately NOT part of the per-site mutant diagonal. It
+// probes BOTH changed TLS guards, so it reds under the async_connect arm AND the
+// async_handshake arm. A reader expecting one-red-per-arm should expect two here.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(AsioTlsTransportErrorPaths, PostFailedHandshakeEntryPointsReturnAlreadyClosed) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    // ⚠️ ROLE DIRECTION IS THE WHOLE CELL: the SERVER presents the ed25519 leaf,
+    // so the CLIENT is the side whose handshake fails and whose state_ goes to
+    // closed. With the certs the other way round the client handshake SUCCEEDS,
+    // the client lands in `handshaken`, and every assertion below then measures
+    // the one-shot guard instead of the closed guard — a green cell testing
+    // nothing. The ASSERT_FALSE on the handshake result below is what stops that
+    // degradation from being silent.
+    auto server_cs =
+        make_cert_source(fixture_path("leaf_ed25519.pem"), fixture_path("leaf_ed25519.key"));
+    auto client_cs =
+        make_cert_source(fixture_path("leaf_rsa2048.pem"), fixture_path("leaf_rsa2048.key"));
+    if (server_cs == nullptr) {
+        GTEST_SKIP() << "leaf_ed25519 fixtures not available";
+    }
+    ASSERT_NE(client_cs, nullptr);
+
+    auto server_cfg = make_ssl_cfg(server_cs);
+    auto client_cfg = make_ssl_cfg(client_cs);
+
+    asio::io_context ioc;
+    auto server = make_server_listener(ioc.get_executor(), server_cfg);
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            auto ar = co_await server.listener->async_accept();
+            if (!ar.has_value()) co_return;
+            auto* tls = dynamic_cast<TlsTransport*>(ar->get());
+            if (tls == nullptr) co_return;
+            (void)co_await tls->async_handshake(server_cfg);
+        },
+        asio::detached);
+
+    auto client = make_client_transport(ioc.get_executor(), client_cfg);
+    auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
+    ASSERT_NE(client_tls, nullptr);
+
+    std::optional<expected_t<ConnectInfo>> first_connect;
+    std::optional<expected_t<handshake_result>> failed_handshake;
+    std::optional<expected_t<std::size_t>> read_after;
+    std::optional<expected_t<std::size_t>> write_after;
+    std::optional<expected_t<ConnectInfo>> connect_after;
+    std::optional<expected_t<handshake_result>> handshake_after;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            const auto ep = Endpoint{"127.0.0.1", server.port, 0};
+            first_connect = co_await client_tls->async_connect(ep);
+            if (!first_connect->has_value()) co_return;
+
+            failed_handshake = co_await client_tls->async_handshake(client_cfg);
+            if (failed_handshake->has_value()) co_return;  // asserted below
+
+            // Deliberately NO close() call — `closed` was reached by the failure.
+            std::array<std::byte, 4> buf{};
+            read_after = co_await client_tls->async_read_some(std::span<std::byte>{buf});
+            const std::byte b{0x01};
+            write_after = co_await client_tls->async_write(std::span<const std::byte>{&b, 1});
+            connect_after = co_await client_tls->async_connect(ep);
+            handshake_after = co_await client_tls->async_handshake(client_cfg);
+        },
+        asio::detached);
+
+    ioc.run_for(20s);
+
+    ASSERT_TRUE(first_connect.has_value()) << "the first async_connect never completed";
+    ASSERT_TRUE(first_connect->has_value()) << "precondition: TCP connect must succeed; error="
+                                            << static_cast<int>(first_connect->error());
+
+    ASSERT_TRUE(failed_handshake.has_value()) << "the client async_handshake never completed";
+    ASSERT_FALSE(failed_handshake->has_value())
+        << "precondition: the CLIENT handshake must FAIL — that is what drives state_ to "
+           "closed without close(). It succeeded, so the certs are the wrong way round and "
+           "every assertion below is measuring the one-shot guard, not the closed guard.";
+
+    const auto expect_closed = [](char const* what, auto const& slot) {
+        ASSERT_TRUE(slot.has_value()) << what << " never completed";
+        ASSERT_FALSE(slot->has_value()) << what << " must fail in the closed state";
+        EXPECT_EQ(slot->error(), error::transport_already_closed)
+            << what
+            << " must return transport_already_closed (98) in the failed-handshake "
+               "closed state; got slot="
+            << static_cast<int>(slot->error());
+    };
+
+    // Pre-existing before #339 — pinned so "uniform" stays measured.
+    expect_closed("post-failed-handshake async_read_some", read_after);
+    expect_closed("post-failed-handshake async_write", write_after);
+    // Moved by #339, from 97.
+    expect_closed("post-failed-handshake async_connect", connect_after);
+    expect_closed("post-failed-handshake async_handshake", handshake_after);
 }
 
 }  // namespace
