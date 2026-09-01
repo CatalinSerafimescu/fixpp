@@ -140,6 +140,12 @@ public:
     // listener without out-of-band coordination.
     [[nodiscard]] Endpoint bound_endpoint() const noexcept { return cfg_.bind_endpoint; }
 
+    // The value actually passed to listen() by the constructor — i.e. what
+    // fixpp ASKED the OS for, not what the OS registered (the kernel may
+    // clamp it further; that is not observable through this accessor).
+    // #332 route B.
+    [[nodiscard]] int requested_listen_depth() const noexcept { return requested_listen_depth_; }
+
     // 013 T040 — operator-observation surface for pre-Session TLS validation
     // events (FR-028 / FR-035). Returns a membership-witness view over the
     // last ≤16 emitted SessionEvents (physical ring order; NOT chronological).
@@ -152,6 +158,9 @@ private:
     Config cfg_;
     asio::any_io_executor exec_;
     asio::ip::tcp::acceptor acceptor_;
+    // Set once, in the constructor, to the exact argument passed to
+    // listen() — see requested_listen_depth() above. #332 route B.
+    int requested_listen_depth_{0};
     // Concretely-typed accept factories (make_accepted() is non-virtual —
     // E-4/E-7). Exactly one is used, selected by cfg_.transport_kind.
     // Lazily initialised on first async_accept() call (mirrors TLS pattern).
