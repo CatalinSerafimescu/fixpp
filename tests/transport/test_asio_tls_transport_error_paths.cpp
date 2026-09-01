@@ -7,6 +7,7 @@
 #include <asio/awaitable.hpp>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
+#include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -1023,12 +1024,17 @@ TEST(AsioTlsTransportErrorPaths, PreflightHandshakeRejectionLeavesTransportOpen)
         << static_cast<int>(preflight_reject->error())
         << ", so it took a different path and the assertions below prove nothing.";
 
-    // The point of the cell: the guard must NOT have fired.
+    // The point of the cell: the guard must NOT have fired. Assert the EXACT answer, not
+    // merely "not 98" — `EXPECT_NE(..., already_closed)` is satisfied by a mutant that
+    // writes `handshaken` here, which is equally false about the state (F-339-R3-2).
+    // `connected` is the state async_handshake ADMITS, so a repeat with the same bad
+    // config re-runs the preflight and returns the same rejection — NOT a one-shot 97.
     ASSERT_TRUE(handshake_after.has_value()) << "the second async_handshake never completed";
     ASSERT_FALSE(handshake_after->has_value());
-    EXPECT_NE(handshake_after->error(), error::transport_already_closed)
-        << "a PREFLIGHT rejection must not leave the Transport closed — #339's guard fired "
-           "where it must not; got slot="
+    EXPECT_EQ(handshake_after->error(), error::transport_psk_unsupported)
+        << "a PREFLIGHT rejection leaves the Transport `connected`, so the retry reaches the "
+           "same FR-017 check. 98 means #339's guard fired where it must not; 97 means the "
+           "state moved to fresh/handshaken. Got slot="
         << static_cast<int>(handshake_after->error());
 
     ASSERT_TRUE(connect_after.has_value()) << "the second async_connect never completed";

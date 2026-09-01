@@ -94,7 +94,7 @@ public:
     //     SEPARATE step the FSM issues after this completes successfully.
     //
     //     Cancellation: cancellation_type::total → transport_connect_cancelled.
-    //     Idempotency: 2nd call while OPEN → already_connected; once closed → already_closed.
+    //     By STATE not call count (#339): closed → 98; connected/handshaken → 97; fresh → attempts.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>> async_connect(
         Endpoint const& ep) = 0;
 
@@ -137,7 +137,7 @@ public:
     // (4) Cancel any in-flight async_connect / async_read_some / async_write /
     //     async_handshake. Synchronous; idempotent on already-cancelled /
     //     never-issued ops. Returns expected_t<void> for symmetry (only
-    //     documented failure: transport_already_closed after close()).
+    //     documented failure: transport_already_closed after close() — ⚠️ NOT IMPLEMENTED (#339)).
     //
     //     ⚠️ CALL IT ON THE SESSION STRAND. This read "thread-safe (ASIO
     //     cancellation_signal is thread-safe)" until 2026-08-31 (#333). Both
