@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/awaitable.hpp>
 #include <asio/buffer.hpp>
 #include <asio/co_spawn.hpp>
@@ -26,7 +27,6 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <fixpp/core/error.hpp>
@@ -575,7 +575,8 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
                 co_return;
             }
             // Logon round trip, client half: send the Logon, read the reply.
-            client_logon_write = co_await client->async_write(std::span<const std::byte>{logon_request});
+            client_logon_write =
+                co_await client->async_write(std::span<const std::byte>{logon_request});
             if (!client_logon_write.has_value()) {
                 co_return;
             }
@@ -598,18 +599,15 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
     ASSERT_TRUE(client_logon_write.has_value())
         << "client must write the Logon; error=" << static_cast<int>(client_logon_write.error());
     EXPECT_EQ(*client_logon_write, logon_request.size());
-    ASSERT_TRUE(server_logon_read.has_value())
-        << "server must read the client Logon; error="
-        << static_cast<int>(server_logon_read.error());
+    ASSERT_TRUE(server_logon_read.has_value()) << "server must read the client Logon; error="
+                                               << static_cast<int>(server_logon_read.error());
     EXPECT_EQ(as_view(server_rx), as_view(logon_request));
 
-    ASSERT_TRUE(server_logon_write.has_value())
-        << "server must write the Logon reply; error="
-        << static_cast<int>(server_logon_write.error());
+    ASSERT_TRUE(server_logon_write.has_value()) << "server must write the Logon reply; error="
+                                                << static_cast<int>(server_logon_write.error());
     EXPECT_EQ(*server_logon_write, logon_response.size());
-    ASSERT_TRUE(client_logon_read.has_value())
-        << "client must read the Logon reply; error="
-        << static_cast<int>(client_logon_read.error());
+    ASSERT_TRUE(client_logon_read.has_value()) << "client must read the Logon reply; error="
+                                               << static_cast<int>(client_logon_read.error());
     EXPECT_EQ(as_view(client_rx), as_view(logon_response));
 }
 
@@ -678,7 +676,9 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
 
     asio::co_spawn(
         ioc.get_executor(),
-        [&]() -> asio::awaitable<void> { (void)co_await client->async_connect(fixture.server_endpoint()); },
+        [&]() -> asio::awaitable<void> {
+            (void)co_await client->async_connect(fixture.server_endpoint());
+        },
         asio::detached);
 
     ioc.run();
