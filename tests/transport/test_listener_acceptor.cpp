@@ -231,6 +231,19 @@ bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
         done = true;
     });
     ioc.run_for(10s);
+
+    // ⚠️ CAPTURE THE VERDICT BEFORE THE DRAIN, and do not re-read done/read_ec
+    // after it. The drain below closes the socket, which completes the pending
+    // read with operation_aborted — setting both flags. Deciding afterwards
+    // therefore reports "dead" for a connection that is very much alive, which
+    // is the whole property this predicate exists to distinguish. Measured: the
+    // flag-only-cancel mutant went GREEN in 10 003 ms when the verdict was read
+    // after the drain.
+    //
+    // done && ec → RST (or EOF) branch. !done → the connection is alive and
+    // parked in a backlog, i.e. the listening socket was never closed.
+    const bool dead = done && static_cast<bool>(read_ec);
+
     if (!done) {
         // The read is still pending and its handler holds `done` / `read_ec` by
         // reference. Close and drain before they leave scope — same shape (and
@@ -241,9 +254,7 @@ bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
         ioc.run();
     }
     ioc.restart();
-    // done && ec → RST (or EOF) branch. !done → the connection is alive and
-    // parked in a backlog, i.e. the listening socket was never closed.
-    return done && static_cast<bool>(read_ec);
+    return dead;
 }
 
 }  // namespace
