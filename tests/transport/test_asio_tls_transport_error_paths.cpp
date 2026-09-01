@@ -7,6 +7,7 @@
 #include <asio/awaitable.hpp>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
+#include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -28,6 +29,7 @@
 #include <fixpp/transport/transport_factory.hpp>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <variant>
 
@@ -716,6 +718,332 @@ TEST(AsioTlsTransportErrorPaths, Ed25519HandshakeFailureDoesNotEmitValidationEve
             << "Ed25519 sigalg mismatch path must not emit tls_validation_failed: "
                "verify_peer_trampoline does not set verify_error on this OpenSSL-level failure";
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Case 7: post-close entry guards → transport_already_closed (#339)
+//
+// FR-006 in specs/012-2h-transport/spec.md, and close()'s own doc comment
+// in include/fixpp/transport/transport.hpp, both state it unconditionally:
+// "After close() returns, every subsequent async_* returns
+// transport_already_closed." async_read_some and async_write honoured that;
+// async_connect and async_handshake collapsed `closed` into the one-shot
+// answer transport_already_connected (97).
+//
+// Both cells drive the transport to `connected` through a real loopback
+// connect before closing it, so `closed` is reached from the state a caller
+// actually observes — not from `fresh`, where the same guard would fire for a
+// different reason.
+//
+// ⚠️ LOAD-BEARING: `transport_already_connected` remains correct for
+// async_connect from `connected`/`handshaken` and for async_handshake from
+// `handshaken` — the one-shot contract these guards exist to enforce, and
+// witnessed by test_inflight_exclusivity.cpp cells 3 and 4. Only the `closed`
+// case moved. A cell here that asserted 98 for those states would be asserting
+// the opposite of the sibling file.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(AsioTlsTransportErrorPaths, PostCloseConnectReturnsAlreadyClosed) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+
+    auto client = fixture.make_client(ioc.get_executor());
+    Transport* client_raw = client.get();
+
+    std::optional<expected_t<ConnectInfo>> first_connect;
+    std::optional<expected_t<ConnectInfo>> connect_after_close;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            first_connect = co_await client_raw->async_connect(fixture.server_endpoint());
+            if (!first_connect->has_value()) {
+                co_return;
+            }
+            (void)client_raw->close();
+            connect_after_close = co_await client_raw->async_connect(fixture.server_endpoint());
+        },
+        asio::detached);
+
+    ioc.run_for(10s);
+
+    ASSERT_TRUE(first_connect.has_value()) << "the first async_connect never completed";
+    ASSERT_TRUE(first_connect->has_value())
+        << "precondition: the transport must connect before close(); error="
+        << static_cast<int>(first_connect->error());
+
+    ASSERT_TRUE(connect_after_close.has_value()) << "post-close async_connect never completed";
+    ASSERT_FALSE(connect_after_close->has_value())
+        << "post-close async_connect must fail (one-shot guard)";
+    EXPECT_EQ(connect_after_close->error(), error::transport_already_closed)
+        << "post-close connect must return transport_already_closed (98) per FR-006, got slot="
+        << static_cast<int>(connect_after_close->error());
+}
+
+TEST(AsioTlsTransportErrorPaths, PostCloseHandshakeReturnsAlreadyClosed) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+
+    auto client = fixture.make_client(ioc.get_executor());
+    auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
+    ASSERT_NE(client_tls, nullptr);
+
+    std::optional<expected_t<ConnectInfo>> first_connect;
+    std::optional<expected_t<handshake_result>> handshake_after_close;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            first_connect = co_await client_tls->async_connect(fixture.server_endpoint());
+            if (!first_connect->has_value()) {
+                co_return;
+            }
+            (void)client_tls->close();
+            handshake_after_close = co_await client_tls->async_handshake(fixture.ssl_cfg());
+        },
+        asio::detached);
+
+    ioc.run_for(10s);
+
+    ASSERT_TRUE(first_connect.has_value()) << "the first async_connect never completed";
+    ASSERT_TRUE(first_connect->has_value())
+        << "precondition: the transport must connect before close(); error="
+        << static_cast<int>(first_connect->error());
+
+    ASSERT_TRUE(handshake_after_close.has_value()) << "post-close async_handshake never completed";
+    ASSERT_FALSE(handshake_after_close->has_value()) << "post-close async_handshake must fail";
+    EXPECT_EQ(handshake_after_close->error(), error::transport_already_closed)
+        << "post-close handshake must return transport_already_closed (98) per FR-006, got slot="
+        << static_cast<int>(handshake_after_close->error());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Case 8: `state_t::closed` is ALSO reached by handshake failure, and all four
+//         entry points answer transport_already_closed there (#339, Codex
+//         F-339-1)
+//
+// The three Case-7 cells above only ever reach `closed` via close(). But the TLS
+// state machine has three OTHER writes of `state_ = state_t::closed`, all on
+// handshake-failure paths in async_handshake — so `closed` means "this Transport
+// is finished", not "close() was called". Re-derive the set rather than trusting
+// a count here: `grep -n 'state_ = state_t::closed' src/transport/asio_tls_transport.cpp`.
+//
+// That matters because #339 moved async_connect / async_handshake in this state
+// too, from transport_already_connected (97) to transport_already_closed (98).
+// It is a real delta beyond the post-close() one, and B-339-1 discloses it.
+//
+// ⚠️ LOAD-BEARING — the read and write legs are NOT filler. async_read_some and
+// async_write already answered 98 in this state BEFORE #339 (their guards test
+// `state_ != handshaken`, which `closed` satisfies). Asserting them here is what
+// makes "all four are now uniform" a measured property rather than a claim, and
+// it pins the pre-existing half so a future change cannot move it silently.
+//
+// ⚠️ This cell is deliberately NOT part of the per-site mutant diagonal. It
+// probes BOTH changed TLS guards, so it reds under the async_connect arm AND the
+// async_handshake arm. A reader expecting one-red-per-arm should expect two here.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(AsioTlsTransportErrorPaths, PostFailedHandshakeEntryPointsReturnAlreadyClosed) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    // ⚠️ ROLE DIRECTION IS THE WHOLE CELL: the SERVER presents the ed25519 leaf,
+    // so the CLIENT is the side whose handshake fails and whose state_ goes to
+    // closed. With the certs the other way round the client handshake SUCCEEDS,
+    // the client lands in `handshaken`, and every assertion below then measures
+    // the one-shot guard instead of the closed guard — a green cell testing
+    // nothing. The ASSERT_FALSE on the handshake result below is what stops that
+    // degradation from being silent.
+    auto server_cs =
+        make_cert_source(fixture_path("leaf_ed25519.pem"), fixture_path("leaf_ed25519.key"));
+    auto client_cs =
+        make_cert_source(fixture_path("leaf_rsa2048.pem"), fixture_path("leaf_rsa2048.key"));
+    // NOT a GTEST_SKIP (#339 F-339-R2-4). leaf_ed25519.{pem,key} are committed and
+    // FIXPP_TLS_FIXTURE_DIR is set unconditionally for this target, so a load failure is a
+    // broken test environment — and this is the ONLY witness for the failed-handshake
+    // closed state. Skipping it would let ctest stay green with the property unexercised.
+    ASSERT_NE(server_cs, nullptr) << "leaf_ed25519 fixture must load; it is committed";
+    ASSERT_NE(client_cs, nullptr);
+
+    auto server_cfg = make_ssl_cfg(server_cs);
+    auto client_cfg = make_ssl_cfg(client_cs);
+
+    asio::io_context ioc;
+    auto server = make_server_listener(ioc.get_executor(), server_cfg);
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            auto ar = co_await server.listener->async_accept();
+            if (!ar.has_value()) co_return;
+            auto* tls = dynamic_cast<TlsTransport*>(ar->get());
+            if (tls == nullptr) co_return;
+            (void)co_await tls->async_handshake(server_cfg);
+        },
+        asio::detached);
+
+    auto client = make_client_transport(ioc.get_executor(), client_cfg);
+    auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
+    ASSERT_NE(client_tls, nullptr);
+
+    std::optional<expected_t<ConnectInfo>> first_connect;
+    std::optional<expected_t<handshake_result>> failed_handshake;
+    std::optional<expected_t<std::size_t>> read_after;
+    std::optional<expected_t<std::size_t>> write_after;
+    std::optional<expected_t<ConnectInfo>> connect_after;
+    std::optional<expected_t<handshake_result>> handshake_after;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            const auto ep = Endpoint{"127.0.0.1", server.port, 0};
+            first_connect = co_await client_tls->async_connect(ep);
+            if (!first_connect->has_value()) co_return;
+
+            failed_handshake = co_await client_tls->async_handshake(client_cfg);
+            if (failed_handshake->has_value()) co_return;  // asserted below
+
+            // Deliberately NO close() call — `closed` was reached by the failure.
+            std::array<std::byte, 4> buf{};
+            read_after = co_await client_tls->async_read_some(std::span<std::byte>{buf});
+            const std::byte b{0x01};
+            write_after = co_await client_tls->async_write(std::span<const std::byte>{&b, 1});
+            connect_after = co_await client_tls->async_connect(ep);
+            handshake_after = co_await client_tls->async_handshake(client_cfg);
+        },
+        asio::detached);
+
+    ioc.run_for(20s);
+
+    ASSERT_TRUE(first_connect.has_value()) << "the first async_connect never completed";
+    ASSERT_TRUE(first_connect->has_value()) << "precondition: TCP connect must succeed; error="
+                                            << static_cast<int>(first_connect->error());
+
+    ASSERT_TRUE(failed_handshake.has_value()) << "the client async_handshake never completed";
+    ASSERT_FALSE(failed_handshake->has_value())
+        << "precondition: the CLIENT handshake must FAIL — that is what drives state_ to "
+           "closed without close(). It succeeded, so the certs are the wrong way round and "
+           "every assertion below is measuring the one-shot guard, not the closed guard.";
+
+    const auto expect_closed = [](char const* what, auto const& slot) {
+        ASSERT_TRUE(slot.has_value()) << what << " never completed";
+        ASSERT_FALSE(slot->has_value()) << what << " must fail in the closed state";
+        EXPECT_EQ(slot->error(), error::transport_already_closed)
+            << what
+            << " must return transport_already_closed (98) in the failed-handshake "
+               "closed state; got slot="
+            << static_cast<int>(slot->error());
+    };
+
+    // Pre-existing before #339 — pinned so "uniform" stays measured.
+    expect_closed("post-failed-handshake async_read_some", read_after);
+    expect_closed("post-failed-handshake async_write", write_after);
+    // Moved by #339, from 97.
+    expect_closed("post-failed-handshake async_connect", connect_after);
+    expect_closed("post-failed-handshake async_handshake", handshake_after);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Case 9: a PREFLIGHT async_handshake rejection leaves the Transport OPEN — so the
+//         retry ATTEMPTS again, and async_connect still answers 97 (#339, F-339-R2-1)
+//
+// This is the FORCED-SPURIOUS-HIT arm for #339's new `state_ == closed` guards.
+// Case 7 and Case 8 both force the guard to FIRE and check it answers 98. Neither
+// can catch the opposite error — a guard that fires where it must not. A guard
+// that answered 98 for every failed handshake would pass all of them.
+//
+// async_handshake rejects an unset/PSK profile (FR-017) BEFORE any state write,
+// so `state_` stays `connected`: the transport is not dead and a subsequent
+// handshake with a good config may still proceed. That is the distinction
+// B-339-1 draws between the PREFLIGHT rejections and the IN-PROTOCOL failures
+// of Case 8, and this cell is what keeps it honest.
+//
+// ⚠️ Both EXPECT_EQs below assert a NON-98 answer ON PURPOSE — the repeated
+// handshake's own preflight rejection, and 97 from async_connect. They are not
+// leftovers from before #339: they are the properties #339 must NOT have moved.
+// Do not "fix" either to transport_already_closed.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(AsioTlsTransportErrorPaths, PreflightHandshakeRejectionLeavesTransportOpen) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+
+    auto client = fixture.make_client(ioc.get_executor());
+    auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
+    ASSERT_NE(client_tls, nullptr);
+
+    // A config whose profile is `unset` — rejected by the FR-017 preflight check,
+    // which runs before async_handshake writes state_ anywhere.
+    fixpp::tls::SslCtxConfig unset_cfg = fixture.ssl_cfg();
+    unset_cfg.profile = fixpp::tls::SecurityProfile::unset;
+
+    std::optional<expected_t<ConnectInfo>> first_connect;
+    std::optional<expected_t<handshake_result>> preflight_reject;
+    std::optional<expected_t<handshake_result>> handshake_after;
+    std::optional<expected_t<ConnectInfo>> connect_after;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            first_connect = co_await client_tls->async_connect(fixture.server_endpoint());
+            if (!first_connect->has_value()) co_return;
+
+            preflight_reject = co_await client_tls->async_handshake(unset_cfg);
+            if (preflight_reject->has_value()) co_return;  // asserted below
+
+            // state_ must still be `connected` here — NOT closed.
+            handshake_after = co_await client_tls->async_handshake(unset_cfg);
+            connect_after = co_await client_tls->async_connect(fixture.server_endpoint());
+        },
+        asio::detached);
+
+    ioc.run_for(10s);
+
+    ASSERT_TRUE(first_connect.has_value()) << "the first async_connect never completed";
+    ASSERT_TRUE(first_connect->has_value()) << "precondition: the transport must connect; error="
+                                            << static_cast<int>(first_connect->error());
+
+    ASSERT_TRUE(preflight_reject.has_value()) << "the preflight async_handshake never completed";
+    ASSERT_FALSE(preflight_reject->has_value())
+        << "precondition: an unset profile must be rejected";
+    ASSERT_EQ(preflight_reject->error(), error::transport_psk_unsupported)
+        << "precondition: this cell needs the FR-017 PREFLIGHT rejection specifically — the one "
+           "that returns before any state write. Got slot="
+        << static_cast<int>(preflight_reject->error())
+        << ", so it took a different path and the assertions below prove nothing.";
+
+    // The point of the cell: the guard must NOT have fired. Assert the EXACT answer, not
+    // merely "not 98" — `EXPECT_NE(..., already_closed)` is satisfied by a mutant that
+    // writes `handshaken` here, which is equally false about the state (F-339-R3-2).
+    // `connected` is the state async_handshake ADMITS, so a repeat with the same bad
+    // config re-runs the preflight and returns the same rejection — NOT a one-shot 97.
+    ASSERT_TRUE(handshake_after.has_value()) << "the second async_handshake never completed";
+    ASSERT_FALSE(handshake_after->has_value());
+    EXPECT_EQ(handshake_after->error(), error::transport_psk_unsupported)
+        << "a PREFLIGHT rejection leaves the Transport `connected`, so the retry reaches the "
+           "same FR-017 check. 98 means #339's guard fired where it must not; 97 means the "
+           "state moved to fresh/handshaken. Got slot="
+        << static_cast<int>(handshake_after->error());
+
+    ASSERT_TRUE(connect_after.has_value()) << "the second async_connect never completed";
+    ASSERT_FALSE(connect_after->has_value());
+    EXPECT_EQ(connect_after->error(), error::transport_already_connected)
+        << "after a preflight rejection the Transport is still OPEN, so the one-shot answer "
+           "(97) stands; got slot="
+        << static_cast<int>(connect_after->error());
 }
 
 }  // namespace

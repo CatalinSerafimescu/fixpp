@@ -242,7 +242,7 @@ Scope and conventions:
 
 - **B-012-5 — A truncated TLS close (peer omits close-notify) surfaces as the DISTINCT `transport_read_truncated`, not `transport_read_eof`, and is NOT a hard error.** `close()` waits up to `tls_close_timeout` (1 s default) for the peer's close-notify; on timeout it completes with `transport_read_truncated` (mapped to a `warn`-level log by the 2k layer), preserving SC-006's distinct-named-variant rule rather than collapsing to EOF. *(FR-006; spec Edge Cases "TLS bidirectional close-notify hangs".)*
 
-- **B-012-6 — In-flight exclusivity is an explicit API-level contract, not just strand defence.** A second concurrent `async_read_some` / `async_write` on the same Transport returns `transport_read_in_progress` / `transport_write_in_progress` immediately; a second `async_connect`/`async_handshake` returns `transport_already_connected`. Strand serialisation is defence-in-depth only. *(FR-007; spec Edge Cases.)*
+- **B-012-6 — In-flight exclusivity is an explicit API-level contract, not just strand defence.** A second concurrent `async_read_some` / `async_write` on the same Transport returns `transport_read_in_progress` / `transport_write_in_progress` immediately; for `async_connect`/`async_handshake` the answer is by ENTRY STATE, not call count — see B-339-1's per-transport tables below; "second call → `transport_already_connected`" is false for the states that ATTEMPT and for every closed state. Strand serialisation is defence-in-depth only. *(FR-007; spec Edge Cases.)*
 
 ### Limitations
 
@@ -2116,3 +2116,65 @@ is a consumer-contract row, not a Spec-Kit feature. Evidence: issue #284, PR #28
   single window: the process parks — `State: S`, one thread, CPU frozen at one jiffy — and was still
   wedged at 449 s, 15x the deadline it was first killed at. Fixed test-side by
   `tests/support/pump_until_ready.hpp`, which is shape (b) above.)*
+
+---
+
+## fixpp#339 — post-close `async_connect` / `async_handshake` error mapping (2026-09-01)
+
+Three entry guards answered a **closed** Transport with the one-shot code instead of the post-close
+one, contradicting FR-006, `close()`'s own doc comment, and the two sibling guards in the same
+files. Spec: none — this is a defect fix against 012-2h-transport's existing FR-006, not a new
+requirement. Evidence: issue #339.
+
+### Behaviors
+
+- **B-339-1 — the answer to `async_connect` / `async_handshake` is decided by the ENTRY STATE, not by the call index, and every `closed` state now answers `transport_already_closed` (98) where two of them answered `transport_already_connected` (97).** The state table, which is the whole row — everything else here is why:
+
+  ⚠️ **One table per transport, because they do not share a state set** — the TLS transport has
+  `handshaken` and the plaintext one does not, and their read/write guards therefore key on
+  different states. A single merged table has to claim something false about one of them.
+
+  **TLS** — `{fresh, connected, handshaken, closed}`:
+
+  | call | `fresh` | `connected` | `handshaken` | `closed` |
+  |---|---|---|---|---|
+  | `async_connect` | attempts (a failed attempt stays `fresh`, retryable) | 97 | 97 | **98** ← moved |
+  | `async_handshake` | 97 | attempts | 97 | **98** ← moved |
+  | `async_read_some` / `async_write` | 98 | 98 | proceeds | 98 |
+
+  **Plaintext** — `{fresh, connected, closed}`, no handshake surface:
+
+  | call | `fresh` | `connected` | `closed` |
+  |---|---|---|---|
+  | `async_connect` | attempts (a failed attempt stays `fresh`, retryable) | 97 | **98** ← moved |
+  | `async_read_some` / `async_write` | 98 | proceeds | 98 |
+
+  ⚠️ **`fresh → attempts` covers the IN-FLIGHT case too**, which is where the call-count reading
+  does its most concrete damage: `async_connect` leaves the Transport `fresh` for the whole
+  duration of an attempt, so a second call issued while the first is still running also attempts
+  — it does NOT get `transport_already_connected`. The 012 spec's Edge Case said otherwise and is
+  amended alongside this row.
+
+  FR-006 states the post-close rule without exception — *"After `close()` returns, every subsequent `async_*` returns `transport_already_closed`"* — and `async_read_some` / `async_write` already honoured it on both transports. `async_connect` and `async_handshake` did not: their one-shot guards tested `state_ != fresh` / `state_ != connected`, which `closed` also satisfies, so the closed case fell through to the one-shot answer.
+
+  **`close()` is not the only door into `closed`, so the delta is wider than "post-`close()`".** The TLS transport also enters `closed` from inside `async_handshake` — re-derive the set with `grep -n 'state_ = state_t::closed' src/transport/asio_tls_transport.cpp` rather than trusting a count here. In that state **`async_read_some` and `async_write` already answered 98 before this change**, so the change did not invent a meaning for the failure state: it made the two remaining entry points agree with the two that were already there. The plaintext transport has no second door — `close()` is the only writer of its `closed` state.
+
+  ⚠️ **Which handshake failures get there is a matter of WHEN, not of failing.** The returns that precede any state write leave the Transport `connected` and are genuinely retryable — the FR-017 unset/PSK rejection and the pre-handshake cancellation reap. Everything from the OpenSSL exchange onward closes it, *including the post-exchange result-construction failure*, which is why "in-protocol" is the wrong predicate and "has the exchange been entered" is the right one. The consequence people trip on: a retry after a config rejection is a **real attempt**, not a one-shot refusal, because `connected` is the state `async_handshake` admits.
+
+  ⚠️ **Witness gap, stated rather than papered over.** The FR-017 rejection is witnessed (`PreflightHandshakeRejectionLeavesTransportOpen`, red under a mutant that closes on that path). The **cancellation reap is not**, and the attempt to witness it is the useful part: `async_handshake` calls `reset_cancellation_state()` on entry, which installs a *fresh* cancellation state, so a signal emitted by the caller before the call is invisible to the reap — it can only fire on a signal landing in the window between that reset and the check. Every attempt to drive it from the public surface either unwound the coroutine (`total`) or ran the real handshake to the bound (`partial`). So its "stays `connected`" claim rests on STRUCTURE — it returns above every `state_` write, which reading settles and which cannot rot — not on a measurement. Whether that guard is reachable at all is a separate production question, not one #339 answers.
+
+  **The one-shot contract did not move for the OPEN states** — `async_connect` from `connected`/`handshaken`, `async_handshake` from `fresh`/`handshaken` — witnessed by `test_inflight_exclusivity.cpp` cells 3 and 4. *(FR-006; FR-007 as amended; issue #339.)*
+
+  **Three hostile-review rounds shaped this row, all on one recurring error: describing the contract by CALL COUNT when it is decided by STATE.** Cut 1 said the one-shot contract was unchanged — false for the failure state. Cut 2 said "handshake failure" without excluding the preflight returns — false for those. Cut 3 said a second call after a preflight rejection "answers 97" — false again, since `connected` is exactly the state that admits the call. The table above replaces the sentence that kept rotting, because a state table is checkable against the code and a call-count sentence is not.
+
+  ⚠️ **What the #339 witnesses do and do not establish.** They cover the cells this change
+  MOVED — the `closed` column, plus the forced-spurious-HIT arm that keeps the guard out of the
+  `connected` column. They do **not** establish the whole of either table: a hostile review
+  produced a one-character mutant (invert the plaintext `async_write` state guard, making
+  `connected` answer 98) that leaves all five of them green. It is killed by the broader suite —
+  `transport_asio_plain_transport`'s connect/read/write cell writes from `connected`, and that
+  target FAILS under the mutant, measured, not assumed. So the rows above are defended, but by
+  the transport suite as a whole rather than by this change's own cells; do not read the #339
+  matrix as a proof of the tables.
+
+  Witnesses, each seen RED before its green was believed: `AsioPlainTransport.PostCloseConnectReturnsAlreadyClosed`, `AsioTlsTransportErrorPaths.PostClose{Connect,Handshake}ReturnsAlreadyClosed` (one per site, each red under a mutant removing only its own guard), `PostFailedHandshakeEntryPointsReturnAlreadyClosed` (red under both TLS mutants — it probes both guards, so deliberately not part of that diagonal), and `PreflightHandshakeRejectionLeavesTransportOpen` (the forced-spurious-HIT arm: it pins the EXACT answers a still-open Transport gives — the repeated preflight rejection, and 97 from `async_connect` — and is the only cell that reds when a guard fires where it must not).

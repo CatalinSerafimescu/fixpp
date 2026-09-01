@@ -491,15 +491,15 @@ enum class error : std::uint8_t {
                                                //   (Config::connect_timeout, default 30 s)
                                                //   elapsed before TCP SYN-ACK received.
                                                //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_already_connected = 97,          // [2h §6.6]:1173 — async_connect or
-                                               //   async_handshake called a second time on
-                                               //   the same Transport instance (one-shot
-                                               //   per lifetime per [2h §4.1]).
+    transport_already_connected = 97,          // [2h §6.6]:1173 — the ENTRY STATE forbids
+                                               //   it, not the call count (#339):
+                                               //   async_connect from connected/handshaken,
+                                               //   async_handshake from fresh/handshaken.
                                                //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_already_closed = 98,             // [2h §6.6]:1174 — cancel() or any async_*
-                                               //   called after close(); idempotent
-                                               //   second close() does NOT return this —
-                                               //   returns expected_t<void>{} per [2h §4.1].
+    transport_already_closed = 98,             // [2h §6.6]:1174 — any async_* once state
+                                               //   == closed. close() is not the only door:
+                                               //   a TLS handshake that ENTERED the OpenSSL
+                                               //   exchange also lands there (#339).
                                                //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
     transport_read_in_progress = 99,           // [2h §6.6]:1175 — concurrent second
                                                //   async_read_some while a first is

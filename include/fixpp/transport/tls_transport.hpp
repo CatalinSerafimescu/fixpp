@@ -110,9 +110,9 @@ public:
     //
     //     In-flight exclusivity: handshake is one-shot per Transport lifetime
     //     (like async_connect — see Transport in-flight exclusivity contract);
-    //     second async_handshake → transport_already_connected. Reconnect path
-    //     destroys the dead Transport, mints a fresh one via TransportFactory
-    //     ::make(...), then handshakes on the new instance (Clarifications
+    //     By STATE, not call count (#339): closed → already_closed;
+    //     fresh/handshaken → already_connected; connected → ATTEMPTS (a
+    //     preflight rejection stays connected). Reconnect mints a fresh one via
     //     2026-05-27 Q1=B).
     //
     //     [[clang::lifetimebound]] on cfg — caller MUST keep SslCtxConfig

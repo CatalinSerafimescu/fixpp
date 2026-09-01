@@ -106,7 +106,7 @@ public:
     //
     //     In-flight exclusivity: handshake is one-shot per Transport lifetime
     //     (like async_connect — see Transport in-flight exclusivity contract);
-    //     second async_handshake → transport_already_connected. Reconnect path
+    //     By STATE not call count (#339): closed → 98; fresh/handshaken → 97. Reconnect
     //     destroys the dead Transport, mints a fresh one via TransportFactory
     //     ::make(...), then handshakes on the new instance (Clarifications
     //     2026-05-27 Q1=B).

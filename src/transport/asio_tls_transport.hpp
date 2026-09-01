@@ -21,8 +21,8 @@
 //     At most one in-flight async_read_some AND one in-flight async_write
 //     per instance. A concurrent second call returns IMMEDIATELY with
 //     transport_read_in_progress / transport_write_in_progress.
-//     async_connect and async_handshake are one-shot; a second call returns
-//     transport_already_connected.
+//     async_connect / async_handshake answer by ENTRY STATE, not call count:
+//     closed → 98; a state that forbids the call → 97; otherwise it ATTEMPTS (#339).
 //     Implementation note: `read_in_flight_` / `write_in_flight_` are
 //     strand-confined booleans (NOT atomics) — all Transport coroutines run
 //     on `exec_`'s strand per [2d §4.8], so unlocked reads are safe.

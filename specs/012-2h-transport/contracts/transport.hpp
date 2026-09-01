@@ -49,8 +49,8 @@ struct ConnectInfo;
 // Transport instance. Concurrent second call returns IMMEDIATELY with
 // transport_read_in_progress / transport_write_in_progress per [2h §6.6].
 // Strand serialisation is defence-in-depth, NOT binding. async_connect and
-// async_handshake are one-shot per Transport lifetime; second call raises
-// transport_already_connected.
+// async_handshake are one-shot per Transport lifetime; the ENTRY STATE decides the
+// answer, not the call index — see async_connect/async_handshake below (#339).
 // ─────────────────────────────────────────────────────────────────────────────
 class Transport {
 public:
@@ -92,7 +92,7 @@ public:
     //     SEPARATE step the FSM issues after this completes successfully.
     //
     //     Cancellation: cancellation_type::total → transport_connect_cancelled.
-    //     Idempotency: second call before close()/cancel() → transport_already_connected.
+    //     By STATE not call count (#339): closed → 98; connected/handshaken → 97; fresh → attempts.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>>
         async_connect(Endpoint const& ep) = 0;
 
@@ -136,7 +136,7 @@ public:
     //     async_handshake. Synchronous; thread-safe (ASIO cancellation_signal
     //     is thread-safe); idempotent on already-cancelled / never-issued ops.
     //     Returns expected_t<void> for symmetry (only documented failure:
-    //     transport_already_closed when called after close()).
+    //     transport_already_closed after close ⚠️ NOT IMPLEMENTED — see #340).
     //
     //     cancel() does NOT close the socket — the FSM may retry a cancelled
     //     connect/read/write. cancel() is the synchronous half of the

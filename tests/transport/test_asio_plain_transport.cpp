@@ -10,7 +10,9 @@
 //      0x16 (TLS record header). Asserts SC-001 (no TLS layer).
 //   3. Cancellation → transport_read_cancelled / transport_write_cancelled.
 //   4. Post-close: async_read_some → transport_already_closed,
-//                  async_write → transport_already_closed.
+//                  async_write → transport_already_closed,
+//                  async_connect → transport_already_closed (#339 — FR-006 is
+//                  unconditional; the one-shot guard used to answer 97 here).
 //   5. Idempotent close(): second call returns {}.
 //   6. Factory smoke: make() mints transport; kind()==plaintext;
 //      reload_credentials() → session_invalid_argument;
@@ -355,6 +357,71 @@ TEST(AsioPlainTransport, PostCloseReadReturnsAlreadyClosed) {
         << "post-close write must return transport_already_closed";
 
     EXPECT_TRUE(second_close.has_value()) << "second close() must be idempotent (return {})";
+}
+
+// ── Test 4b: Post-close: async_connect → transport_already_closed (#339) ──────
+//
+// FR-006 is unconditional: "After close() returns, every subsequent async_*
+// returns transport_already_closed." Test 4 above witnesses the read and write
+// halves. The connect half was NOT covered, and the one-shot `state_ != fresh`
+// guard collapsed `closed` into transport_already_connected (97).
+//
+// The transport is driven through a real connect first, so `closed` is reached
+// from `connected` — the state a caller actually observes — rather than from
+// `fresh`.
+//
+// This cell is a separate TEST, not an extra leg of Test 4, so that a
+// regression in the connect guard cannot be masked by (or mistaken for) a
+// regression in the read/write guards it shares a file with.
+TEST(AsioPlainTransport, PostCloseConnectReturnsAlreadyClosed) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor acc{ioc};
+    auto ep = make_loopback_acceptor(ioc, acc);
+
+    std::optional<expected_t<fixpp::transport::ConnectInfo>> first_connect;
+    std::optional<expected_t<fixpp::transport::ConnectInfo>> connect_after_close;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            // Accept a socket so the client connect doesn't hang.
+            asio::error_code ec;
+            asio::ip::tcp::socket peer{co_await asio::this_coro::executor};
+            co_await acc.async_accept(peer, asio::redirect_error(asio::use_awaitable, ec));
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            Transport::Config cfg{};
+            asio_plain_transport client{co_await asio::this_coro::executor, cfg};
+
+            fixpp::transport::Endpoint endpoint;
+            endpoint.host = "127.0.0.1";
+            endpoint.port = ep.port();
+
+            first_connect = co_await client.async_connect(endpoint);
+            if (!first_connect->has_value()) co_return;
+
+            (void)client.close();
+
+            connect_after_close = co_await client.async_connect(endpoint);
+        },
+        asio::detached);
+
+    ioc.run_for(std::chrono::seconds{10});
+
+    ASSERT_TRUE(first_connect.has_value()) << "the first async_connect never completed";
+    ASSERT_TRUE(first_connect->has_value())
+        << "precondition: the transport must connect before close(); error="
+        << static_cast<int>(first_connect->error());
+    ASSERT_TRUE(connect_after_close.has_value()) << "post-close async_connect never completed";
+    ASSERT_FALSE(connect_after_close->has_value())
+        << "post-close async_connect must fail (one-shot guard)";
+    EXPECT_EQ(connect_after_close->error(), error::transport_already_closed)
+        << "post-close connect must return transport_already_closed (98) per FR-006, got slot="
+        << static_cast<int>(connect_after_close->error());
 }
 
 // ── Test 5: Factory smoke — kind, reload_credentials, cert_source_snapshot ────
