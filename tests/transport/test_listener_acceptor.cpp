@@ -263,25 +263,53 @@ bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
     return dead;
 }
 
-// How many of `probes` TCP connects to `port` COMPLETE while nothing ever
-// accepts them? Used by cell 10 to observe the OS accept queue's depth from the
-// client side, which is the only side a unit test has.
+// Per-probe classification of one TCP connect to a listener that never
+// accepts, used by cell 10 to observe the OS accept queue's depth from the
+// client side (the only side a unit test has). A scalar completed-count
+// cannot tell "the queue is saturated and this probe is parked" apart from
+// "this probe was refused/reset" — both look like "did not increment" — so
+// every probe's terminal state is recorded individually.
+enum class connect_outcome { completed, refused_or_reset, other_error, pending };
+
+struct connect_probe_result {
+    int completed = 0;
+    int refused_or_reset = 0;
+    int other_error = 0;
+    int pending = 0;
+};
+
+// Fires `probes` connects at `port`, one at a time, and returns each one's
+// classification.
 //
-// ⚠️ THE PACING IS LOAD-BEARING — one bounded run per connect, never one run
-// after issuing them all. Fired back to back, the completed count is not
-// reproducible: a client completes its handshake on the peer's SYN-ACK, which
-// the stack can emit before the accept queue accounting that is supposed to
-// reject it has caught up, so the answer depends on scheduling. Awaiting each
-// connect before issuing the next removes that race. The measured spread, and
-// the standalone probe that re-derives it on any machine, are in the decision
-// record — deliberately not repeated here, because a spread is a RESULT and
-// results rot silently in comments.
+// ⚠️ THE PACING IS LOAD-BEARING FOR EVERY ARM, not only a saturating one —
+// one bounded run per connect, never one run after issuing them all. Fired
+// back to back, the completed count is not reproducible: a client completes
+// its handshake on the peer's SYN-ACK, which the stack can emit before the
+// accept queue accounting that is supposed to reject it has caught up, so
+// the answer depends on scheduling — measured directly: firing the CONTROL
+// arm's 12 connects unpaced against a listener whose real backlog had been
+// mutated down to 1 still reported 12/12 completions, the exact false pass
+// pacing exists to prevent (`.specify/decisions/332-backlog-rst-witness-witnesses.md`).
+// Awaiting each connect before issuing the next removes that race,
+// regardless of whether the target backlog is expected to be saturated.
+// `per_connect` is per-CALLER, not a single shared constant: the control
+// arm decouples from the saturating arms' tight budget by passing a longer
+// one (see kControlPerConnect at the call site) — a generous, not latency-
+// coupled, per-probe wait — while keeping the same pacing discipline.
 //
 // ⚠️ A budget too short for the machine under-counts, which is the SAFE
-// direction only because cell 10 asserts its control arm FIRST: an under-count
-// reds that arm rather than quietly satisfying the bound the cell is testing.
-int count_completed_connects(asio::io_context& ioc, std::uint16_t port, int probes,
-                             std::chrono::milliseconds per_connect) {
+// direction only because cell 10 asserts its control arm FIRST: an
+// under-count reds that arm rather than quietly satisfying the bound the
+// cell is testing.
+//
+// ⚠️ The per-probe outcome is SNAPSHOTTED before any socket is closed. Once
+// a probe's `close()` runs, its still-pending handler resolves with
+// `operation_aborted`, overwriting the very "pending" signal this function
+// exists to observe — the capture-before-teardown shape of #332. So the
+// counts below are computed first, and the close+drain that follows cannot
+// change them.
+connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16_t port, int probes,
+                                               std::chrono::milliseconds per_connect) {
     // ⚠️ reserve() is LOAD-BEARING here, not an optimisation. Every socket below
     // has an outstanding async_connect whose handler holds that socket's address,
     // and asio leaves the behaviour undefined if a socket is moved while an async
@@ -290,30 +318,48 @@ int count_completed_connects(asio::io_context& ioc, std::uint16_t port, int prob
     // is silently gone.
     std::vector<asio::ip::tcp::socket> sockets;
     sockets.reserve(static_cast<std::size_t>(probes));
+    std::vector<connect_outcome> outcome(static_cast<std::size_t>(probes), connect_outcome::pending);
     const asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), port};
-    int completed = 0;
 
     for (int i = 0; i < probes; ++i) {
         sockets.emplace_back(ioc);
-        sockets.back().async_connect(ep, [&completed](asio::error_code ec) {
-            if (!ec) ++completed;
+        sockets.back().async_connect(ep, [&outcome, i](asio::error_code ec) {
+            if (!ec) {
+                outcome[static_cast<std::size_t>(i)] = connect_outcome::completed;
+            } else if (ec == asio::error::connection_refused || ec == asio::error::connection_reset) {
+                outcome[static_cast<std::size_t>(i)] = connect_outcome::refused_or_reset;
+            } else if (ec != asio::error::operation_aborted) {
+                outcome[static_cast<std::size_t>(i)] = connect_outcome::other_error;
+            }
+            // operation_aborted cannot fire here: nothing closes a socket until
+            // after the snapshot below.
         });
         ioc.run_for(per_connect);
         ioc.restart();
     }
 
-    // Every connect that never completed still holds `completed` by reference
+    // SNAPSHOT before any teardown — see the function comment.
+    connect_probe_result result;
+    for (auto o : outcome) {
+        switch (o) {
+            case connect_outcome::completed: ++result.completed; break;
+            case connect_outcome::refused_or_reset: ++result.refused_or_reset; break;
+            case connect_outcome::other_error: ++result.other_error; break;
+            case connect_outcome::pending: ++result.pending; break;
+        }
+    }
+
+    // Every connect that never completed still holds `outcome` by reference
     // and its socket is about to leave scope. Close, then drain, before either
-    // does — the stack-use-after-scope shape of #313/#316. The drain cannot
-    // disturb the count: those handlers resume with operation_aborted, and only
-    // a clear error_code increments.
+    // does — the stack-use-after-scope shape of #313/#316. This cannot disturb
+    // `result`: it was already computed above.
     for (auto& s : sockets) {
         asio::error_code ignored;
         s.close(ignored);
     }
     ioc.run();
     ioc.restart();
-    return completed;
+    return result;
 }
 
 }  // namespace
@@ -959,17 +1005,16 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
 // off bound_endpoint() and is green even against a constructor that never calls
 // listen() with it at all, so cell 6 cannot carry FR-024's tunability claim.
 //
-// ⚠️ WHAT THIS CELL ASSERTS IS NOT AC3's LITERAL WORDING, ON PURPOSE.
-// spec.md US3 AC3 says the overflow client "receives a TCP RST or
-// connection-refused per OS behaviour". Measured on both platforms this repo
-// ships to, the client receives NEITHER: its connect simply does not complete
-// (on Linux the SYN is dropped rather than reset, because
-// net.ipv4.tcp_abort_on_overflow defaults to 0). So the MECHANISM half of AC3
-// is not assertable anywhere, and a cell asserting it would be asserting
-// something false. The NORMATIVE half — fixpp does not over-promise
-// availability under saturated accept rates — is exactly what the three
-// assertions below carry. The operator-visible consequence (a saturated
-// acceptor makes clients hang rather than fail fast) is recorded in B&L.
+// ⚠️ WHAT THIS CELL ASSERTS IS NOT AC3's LITERAL MECHANISM WORDING, ON PURPOSE.
+// fixpp makes no guarantee about how the OS declines the overflow client —
+// reset, refused, or left pending indefinitely, per OS and configuration
+// (spec.md US3 scenario 3). So the mechanism is not assertable PORTABLY, but
+// it IS observable locally: every probe's terminal state is recorded (see
+// count_completed_connects above) and a non-pending shortfall is named in the
+// failure message, so a red on a given runner says which outcome that runner
+// produced. The NORMATIVE half — fixpp does not over-promise availability
+// under saturated accept rates — is exactly what the assertions below carry.
+// The operator-visible consequence is recorded in B&L (`L-012-2`).
 //
 // ⚠️ Do not "tighten" this into an equality against the configured depth. The
 // queue is off by one BETWEEN PLATFORMS in the direction that would make any
@@ -977,9 +1022,14 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
 // on both; the two exact figures live in the decision record, dated.
 //
 // ⚠️ No cancel() and no run() on the listener's io_context anywhere in this
-// cell: listen() happens in the constructor, so there is nothing to pump. T034's
-// strand constraint on Listener::cancel() (#333) is therefore satisfied here
-// VACUOUSLY, not violated — this cell issues no cancel to misplace.
+// cell: listen() happens in the constructor, so there is nothing to pump.
+// T034's strand constraint on Listener::cancel() (#333) is satisfied here for
+// a structural reason, not merely because this cell issues no cancel():
+// `listener_ioc` is never run by any thread in this cell, so nothing can
+// execute on the listener's executor concurrently with construction or
+// destruction; and `listener_ioc` is declared first, so the listeners (whose
+// destructors DO call close()) are destroyed before their context — the
+// #301/#307 ordering rule.
 //
 // Anchor: specs/012-2h-transport/spec.md US3 AC3; .specify/2h-transport.md §4.6
 // FR-024. Witness record: .specify/decisions/332-backlog-rst-witness-witnesses.md.
@@ -989,13 +1039,18 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
     constexpr std::uint32_t kLowBacklog = 1;
     constexpr std::uint32_t kHighBacklog = 8;
     constexpr std::uint32_t kControlBacklog = 64;  // deliberately > kProbes
-    // Wall clock is ~= kPerConnect x (probes that never complete), because a
-    // connect left pending keeps the io_context busy and stops run_for()
-    // returning early. That is the whole cost of this cell, so the budget is the
-    // only lever on it. 100 ms keeps ~3 orders of magnitude over a loopback
-    // connect (microseconds; ~1 ms under a sanitizer), and a budget too short
-    // shows up as a RED control arm, never as a quiet pass.
+    // Wall clock of a SATURATING arm is ~= kPerConnect x (probes that stay
+    // pending in that arm), because a pending connect keeps the io_context busy
+    // and stops run_for() from returning early — that is the whole cost of a
+    // saturating arm, so the budget is the only lever on it.
     constexpr auto kPerConnect = 100ms;
+    // The control arm stays PACED (see count_completed_connects' header on why
+    // pacing is not optional) but decouples from the saturating arms' tight
+    // budget: every one of its 12 connects is expected to complete near-
+    // instantly (backlog 64 ≫ probe count), so a generous per-connect wait
+    // costs a healthy run nothing while removing the latency coupling F5
+    // raised against a fixed 100 ms under host load.
+    constexpr auto kControlPerConnect = 2s;
 
     // Never run: asio_listener performs bind()/listen() in its constructor, so
     // there is no listener-side work for this cell to pump.
@@ -1005,11 +1060,11 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
     asio_listener high{listener_ioc.get_executor(), make_listener_cfg(0, kHighBacklog)};
 
     asio::io_context client_ioc;
-    const int n_control =
-        count_completed_connects(client_ioc, control.bound_endpoint().port, kProbes, kPerConnect);
-    const int n_low =
+    const auto r_control = count_completed_connects(client_ioc, control.bound_endpoint().port,
+                                                      kProbes, kControlPerConnect);
+    const auto r_low =
         count_completed_connects(client_ioc, low.bound_endpoint().port, kProbes, kPerConnect);
-    const int n_high =
+    const auto r_high =
         count_completed_connects(client_ioc, high.bound_endpoint().port, kProbes, kPerConnect);
 
     // (i) NON-VACUITY, and it has to come first. A sweep broken in any of several
@@ -1020,25 +1075,50 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
     //     instrument can report the maximum before any arm below reads a
     //     shortfall as meaningful. ASSERT, not EXPECT: the rest is noise if it
     //     fails.
-    ASSERT_EQ(n_control, kProbes)
+    ASSERT_EQ(r_control.completed, kProbes)
         << "the sweep could not complete " << kProbes
         << " connects even against a listener whose backlog (" << kControlBacklog
-        << ") exceeds that — the assertions below would be measuring the instrument, "
-           "not the listener";
+        << ") exceeds that — the assertions below would be measuring the instrument, not the "
+           "listener (pending="
+        << r_control.pending << ", refused_or_reset=" << r_control.refused_or_reset << ")";
 
     // (ii) US3 AC3 proper: a listener that never accepts does NOT absorb every
     //      client that arrives. This is the half of AC3 that is true on every OS.
-    EXPECT_LT(n_low, kProbes)
+    EXPECT_LT(r_low.completed, kProbes)
         << "a listener configured with backlog=" << kLowBacklog << " completed all " << kProbes
         << " connects without ever accepting one — the configured depth reached neither "
            "listen() nor the kernel, so fixpp is over-promising availability";
+    // FQ-7 mechanism check, local only (see the cell header on why not portable):
+    // the shortfall above must be genuinely PENDING, not refused/reset — asserting
+    // that portably would resurrect the pre-2026-09-01 mechanism claim by proxy.
+    EXPECT_EQ(r_low.refused_or_reset, 0)
+        << "backlog=" << kLowBacklog << " bounced " << r_low.refused_or_reset
+        << " probe(s) with refused/reset instead of leaving them pending on this runner — "
+           "fixpp does not guarantee a mechanism either way (spec.md US3 scenario 3)";
+    EXPECT_EQ(r_low.other_error, 0)
+        << "backlog=" << kLowBacklog << " produced " << r_low.other_error
+        << " connect error(s) not classified as completed/refused-or-reset/pending";
 
     // (iii) ...and the bound TRACKS THE CONFIGURED VALUE rather than merely
     //      existing. This is the assertion that makes the cell a witness for
     //      Endpoint::backlog FORWARDING: a listen() that ignored the config and
     //      hardcoded some small depth still satisfies (ii), and dies here.
-    EXPECT_GT(n_high, n_low)
+    EXPECT_GT(r_high.completed, r_low.completed)
         << "backlog=" << kHighBacklog << " admitted no more connections than backlog="
-        << kLowBacklog << " (" << n_high << " vs " << n_low
+        << kLowBacklog << " (" << r_high.completed << " vs " << r_low.completed
         << ") — the listener is not forwarding Endpoint::backlog to listen()";
+    EXPECT_EQ(r_high.refused_or_reset, 0)
+        << "backlog=" << kHighBacklog << " bounced " << r_high.refused_or_reset
+        << " probe(s) with refused/reset instead of leaving them pending on this runner";
+
+    // ⚠️ A fourth arm at AC3's own named depth (backlog=64, ~70 probes) was
+    // attempted and DROPPED. Run against the mutant it was meant to catch —
+    // `listen(min(backlog, 32))` — the portable relational predicate (bounded
+    // above by the probe count, above the high arm's count) did NOT red: a
+    // clamp landing strictly between the high arm's backlog and the probe
+    // ceiling is invisible to a two-point relational bracket by construction,
+    // and tightening the bracket toward an absolute floor reintroduces the
+    // portability risk this cell's own header warns against (an OS-imposed
+    // clamp on a smaller-somaxconn runner would then false-negative). Measured
+    // result and re-derivation recipe: `.specify/decisions/332-backlog-rst-witness-witnesses.md`.
 }
