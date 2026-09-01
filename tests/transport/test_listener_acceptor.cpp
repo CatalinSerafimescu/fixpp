@@ -42,7 +42,9 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
+#include "support/reify_test_frame.hpp"
 #include "transport/asio_listener.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
@@ -105,28 +107,34 @@ asio::awaitable<fixpp::core::expected_t<void>> read_exactly(fixpp::transport::Tr
     while (got < buf.size()) {
         auto r = co_await t.async_read_some(buf.subspan(got));
         if (!r.has_value()) {
-            co_return fixpp::core::expected_t<void>{std::unexpected{r.error()}};
+            co_return std::unexpected{r.error()};
         }
         got += *r;
     }
     co_return fixpp::core::expected_t<void>{};
 }
 
-// A byte-exact FIX 4.4 Logon (35=A) and its reply, SOH = 0x01. BodyLength (9=)
-// and CheckSum (10=) are correct for these bytes, so the payload is a real
-// Logon rather than a Logon-shaped blob.
+// A byte-exact FIX 4.4 Logon (35=A), so the round trip carries a real Logon
+// rather than a Logon-shaped blob.
+//
+// BodyLength (9=) and CheckSum (10=) come from the shared assembler in
+// tests/support/reify_test_frame.hpp, NOT from literals. A hand-computed
+// checksum is a RESULT recorded in source: nothing re-derives it, so it goes
+// stale silently the moment anyone edits the field list. assemble_frame() is
+// header-only with zero fixpp includes, and tests/ is already on this target's
+// include path (tests/transport/CMakeLists.txt).
 //
 // SCOPE: this is a TRANSPORT-level round trip — the assertion is that a
 // handshaken pair carries these bytes intact in both directions. It does NOT
-// exercise FIX session semantics: this target links fixpp_transport +
-// fixpp_tls only, and pulling in a codec/session library to encode the same
-// bytes would be new dependency surface, not a stronger witness.
-constexpr std::string_view kLogonRequest =
-    "8=FIX.4.4\0019=67\00135=A\00134=1\00149=CLIENT\00156=SERVER\001"
-    "52=20260901-00:00:00.000\00198=0\001108=30\00110=125\001";
-constexpr std::string_view kLogonResponse =
-    "8=FIX.4.4\0019=67\00135=A\00134=1\00149=SERVER\00156=CLIENT\001"
-    "52=20260901-00:00:00.000\00198=0\001108=30\00110=125\001";
+// exercise FIX session semantics, and does not claim to.
+constexpr char kSoh = '\x01';
+
+std::vector<std::byte> make_logon_frame(std::string const& sender, std::string const& target) {
+    std::string const body = std::string("35=A") + kSoh + "34=1" + kSoh + "49=" + sender + kSoh +
+                             "56=" + target + kSoh + "52=20260901-00:00:00.000" + kSoh + "98=0" +
+                             kSoh + "108=30" + kSoh;
+    return fixpp::test_support::assemble_frame(std::string("8=FIX.4.4") + kSoh, body);
+}
 
 // Cell 8 post-cancel payloads — distinct in each direction so a round trip
 // cannot be satisfied by an echo.
@@ -185,8 +193,33 @@ ConnectResult sync_tcp_connect(asio::io_context& ioc, std::string const& host, s
 // parks the connection in the backlog with nothing ever to read. That four-order
 // -of-magnitude headroom is what separates this from the 500 ms bound #328
 // closed, where the budget sat at the same order as the normal latency.
-bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr,
-                                 std::chrono::milliseconds bound = 10s) {
+// Issue cancel() ON the listener's executor (T034 strand constraint / #333) and
+// prove it actually ran.
+//
+// ⚠️ LOAD-BEARING, and factored precisely so it cannot be half-copied. A posted
+// cancel that never runs leaves every later assertion describing an UNCANCELLED
+// listener, and the cell goes green having measured nothing — run_for()/restart()
+// is exactly the shape where a handler is silently left unrun. Both call sites
+// need that guard, and writing it out twice is how the second copy loses it.
+// Returning an AssertionResult means one ASSERT_TRUE at the call site carries
+// both failure modes, named distinctly.
+::testing::AssertionResult post_cancel(asio::io_context& ioc, asio_listener& listener) {
+    std::optional<fixpp::core::expected_t<void>> rc;
+    asio::post(ioc, [&] { rc = listener.cancel(); });
+    ioc.run_for(5s);
+    ioc.restart();
+    if (!rc.has_value()) {
+        return ::testing::AssertionFailure()
+               << "the posted cancel() never ran — every assertion after this would be vacuous";
+    }
+    if (!rc->has_value()) {
+        return ::testing::AssertionFailure()
+               << "listener.cancel() failed; error=" << static_cast<int>(rc->error());
+    }
+    return ::testing::AssertionSuccess();
+}
+
+bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
     if (cr.ec) {
         return true;  // connection-refused branch
     }
@@ -197,7 +230,16 @@ bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr,
         read_ec = ec;
         done = true;
     });
-    ioc.run_for(bound);
+    ioc.run_for(10s);
+    if (!done) {
+        // The read is still pending and its handler holds `done` / `read_ec` by
+        // reference. Close and drain before they leave scope — same shape (and
+        // same remedy) as sync_tcp_connect's timeout branch above; leaving it
+        // outstanding is the stack-use-after-scope of #313/#316.
+        asio::error_code ignored;
+        cr.socket.close(ignored);
+        ioc.run();
+    }
     ioc.restart();
     // done && ec → RST (or EOF) branch. !done → the connection is alive and
     // parked in a backlog, i.e. the listening socket was never closed.
@@ -263,12 +305,15 @@ TEST(ListenerAcceptor, CancelCompletesInflightAcceptWithCancelled) {
 
 // ════════════════════════════════════════════════════════════════════════════
 // Cell 4 — post-cancel async_accept surfaces transport_accept_cancelled
-// without dispatching to the OS. FR-025 Option-A action (1) verified at the
-// LISTENER level rather than at OS level, because some platforms (notably
-// WSL2's Hyper-V loopback stack) do not reliably return ECONNREFUSED to a
-// connect against a closed port. The spec wording "TCP RST or connection-
-// refused per OS" is OS-policy commentary; the binding contract is that the
-// listener no longer accepts new work — which is exactly what we assert.
+// without dispatching to the OS. This is the LISTENER-surface half of FR-025
+// Option-A action (1): the listener no longer accepts new work.
+//
+// It is NOT the whole of action (a). This comment used to argue that the spec's
+// "TCP RST or connection-refused per OS" was mere OS-policy commentary and that
+// the listener-level assertion sufficed — #332 item 3 rejected that, on the
+// ground that a cancel() which flagged the listener without ever closing the
+// acceptor satisfies this cell. The OS-level half is CELL 9, which connects for
+// real and admits both branches the contract names.
 // ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, AcceptAfterCancelReturnsCancelled) {
     asio::io_context ioc;
@@ -456,9 +501,12 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
     expected_t<handshake_result> client_hs_result =
         std::unexpected{error::transport_handshake_cancelled};
 
-    // Logon round trip (d).
-    std::array<std::byte, kLogonRequest.size()> server_rx{};
-    std::array<std::byte, kLogonResponse.size()> client_rx{};
+    // Logon round trip (d). Distinct in each direction (49=/56= swapped), so a
+    // round trip cannot be satisfied by an echo.
+    const std::vector<std::byte> logon_request = make_logon_frame("CLIENT", "SERVER");
+    const std::vector<std::byte> logon_response = make_logon_frame("SERVER", "CLIENT");
+    std::vector<std::byte> server_rx(logon_request.size());
+    std::vector<std::byte> client_rx(logon_response.size());
     expected_t<void> server_logon_read = std::unexpected{error::transport_read_eof};
     expected_t<std::size_t> server_logon_write =
         std::unexpected{error::transport_write_in_progress};
@@ -488,7 +536,8 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
             if (!server_logon_read.has_value()) {
                 co_return;
             }
-            server_logon_write = co_await (*accept_result)->async_write(as_bytes(kLogonResponse));
+            server_logon_write =
+                co_await (*accept_result)->async_write(std::span<const std::byte>{logon_response});
         },
         asio::detached);
 
@@ -509,7 +558,7 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
                 co_return;
             }
             // Logon round trip, client half: send the Logon, read the reply.
-            client_logon_write = co_await client->async_write(as_bytes(kLogonRequest));
+            client_logon_write = co_await client->async_write(std::span<const std::byte>{logon_request});
             if (!client_logon_write.has_value()) {
                 co_return;
             }
@@ -531,20 +580,20 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
     // that broke rather than only the byte comparison at the end.
     ASSERT_TRUE(client_logon_write.has_value())
         << "client must write the Logon; error=" << static_cast<int>(client_logon_write.error());
-    EXPECT_EQ(*client_logon_write, kLogonRequest.size());
+    EXPECT_EQ(*client_logon_write, logon_request.size());
     ASSERT_TRUE(server_logon_read.has_value())
         << "server must read the client Logon; error="
         << static_cast<int>(server_logon_read.error());
-    EXPECT_EQ(as_view(server_rx), kLogonRequest);
+    EXPECT_EQ(as_view(server_rx), as_view(logon_request));
 
     ASSERT_TRUE(server_logon_write.has_value())
         << "server must write the Logon reply; error="
         << static_cast<int>(server_logon_write.error());
-    EXPECT_EQ(*server_logon_write, kLogonResponse.size());
+    EXPECT_EQ(*server_logon_write, logon_response.size());
     ASSERT_TRUE(client_logon_read.has_value())
         << "client must read the Logon reply; error="
         << static_cast<int>(client_logon_read.error());
-    EXPECT_EQ(as_view(client_rx), kLogonResponse);
+    EXPECT_EQ(as_view(client_rx), as_view(logon_response));
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -623,22 +672,9 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
         << "client handshake must succeed before testing cancel isolation";
     ASSERT_NE(server_transport, nullptr);
 
-    // Cancel the listener AFTER we already hold server_transport, ON the
-    // listener's executor.
-    //
-    // ⚠️ LOAD-BEARING — removing the capture or either ASSERT makes this cell
-    // vacuous. A posted cancel that never runs leaves everything below asserting
-    // about an UNCANCELLED listener, and the cell goes green having measured
-    // nothing; run_for()/restart() is exactly the shape where a handler is
-    // silently left unrun.
-    std::optional<expected_t<void>> cancel_rc;
-    asio::post(ioc, [&] { cancel_rc = fixture.listener().cancel(); });
-    ioc.run_for(std::chrono::seconds{5});
-    ioc.restart();
-    ASSERT_TRUE(cancel_rc.has_value())
-        << "the posted cancel() never ran — every assertion below would be vacuous";
-    ASSERT_TRUE(cancel_rc->has_value())
-        << "listener.cancel() failed; error=" << static_cast<int>(cancel_rc->error());
+    // Cancel the listener AFTER we already hold server_transport. post_cancel()
+    // issues it on the listener's executor and proves it ran — see its ⚠️ note.
+    ASSERT_TRUE(post_cancel(ioc, fixture.listener()));
 
     // Post-cancel surface: write, read, close — each must SUCCEED.
     std::array<std::byte, kClientAfterCancel.size()> server_rx{};
@@ -720,16 +756,7 @@ TEST(ListenerAcceptor, CancelClosesListeningSocketSoLaterConnectsAreRefused) {
         << "positive control: the port must ACCEPT a connect before cancel(); "
         << before.ec.message();
 
-    // On the listener's executor (T034 strand constraint / #333), and captured.
-    // ⚠️ LOAD-BEARING — a posted cancel that never ran would leave the assertion
-    // below measuring an open listener that happened to die for another reason.
-    std::optional<fixpp::core::expected_t<void>> cancel_rc;
-    asio::post(listener_ioc, [&] { cancel_rc = listener.cancel(); });
-    listener_ioc.run();
-    ASSERT_TRUE(cancel_rc.has_value())
-        << "the posted cancel() never ran — the assertion below would be vacuous";
-    ASSERT_TRUE(cancel_rc->has_value())
-        << "cancel() failed; error=" << static_cast<int>(cancel_rc->error());
+    ASSERT_TRUE(post_cancel(listener_ioc, listener));
 
     auto after = sync_tcp_connect(client_ioc, "127.0.0.1", port, 10s);
     EXPECT_TRUE(connection_refused_or_reset(client_ioc, after))
