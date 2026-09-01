@@ -723,8 +723,8 @@ TEST(AsioTlsTransportErrorPaths, Ed25519HandshakeFailureDoesNotEmitValidationEve
 // ─────────────────────────────────────────────────────────────────────────────
 // Case 7: post-close entry guards → transport_already_closed (#339)
 //
-// FR-006 (spec.md:117) and close()'s own doc comment
-// (include/fixpp/transport/transport.hpp) both state it unconditionally:
+// FR-006 in specs/012-2h-transport/spec.md, and close()'s own doc comment
+// in include/fixpp/transport/transport.hpp, both state it unconditionally:
 // "After close() returns, every subsequent async_* returns
 // transport_already_closed." async_read_some and async_write honoured that;
 // async_connect and async_handshake collapsed `closed` into the one-shot
