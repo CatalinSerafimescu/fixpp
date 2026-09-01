@@ -613,13 +613,21 @@ TEST(ListenerAcceptor, FullTlsHandshake) {
 // Option-A contract action (3): listener.cancel() does NOT close or modify
 // Transports it already returned — ownership has transferred.
 //
-// Sequence:
-//   1. Accept one client → TLS handshake → server Transport in handshaken state.
+// FR-025 clause (3) names the protected state as an already-resumed-but-
+// NOT-YET-CONSUMED unique_ptr<Transport> — [2h §4.6]'s async_accept doc
+// comment: "initially in the 'connected' state ... the FSM issues
+// async_handshake (TLS) immediately." That is the pre-handshake state, so
+// cancel() must be proven to land BEFORE the handshake, not after it (#332
+// Gate B r1 F1). Three phases, in order:
+//   1. Accept + raw TCP connect only — server_transport ends up in the
+//      pre-handshake "connected" state FR-025(3) protects. No handshake yet.
 //   2. Post listener.cancel() ONTO the listener's executor (T034 strand
 //      constraint / #333 — cancel() calls acceptor_.close(), which asio names
-//      explicitly as not thread safe).
+//      explicitly as not thread safe) while server_transport is still in
+//      that pre-handshake state.
 //   3. Verify the server-side Transport still supports the full post-cancel
-//      surface T034 names: async_write, async_read_some and close.
+//      surface T034 names: async_handshake, async_write, async_read_some and
+//      close — all issued AFTER cancel().
 //
 // ⚠️ THE ASSERTIONS MUST DEMAND SUCCESS, not merely a non-cancelled error.
 // This cell previously asserted EXPECT_NE(write_result.error_or(...),
@@ -644,50 +652,45 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
     LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
 
     std::unique_ptr<Transport> server_transport;
-    expected_t<handshake_result> server_hs = std::unexpected{error::transport_handshake_cancelled};
-    expected_t<handshake_result> client_hs = std::unexpected{error::transport_handshake_cancelled};
 
-    // Server: accept + handshake, store transport.
+    // Phase 1 — accept + raw TCP connect only, no handshake. Both coroutines
+    // terminate on their own (co_return right after), so a plain ioc.run()
+    // drains the phase with no timing barrier — #328 does not attach to a
+    // pair of coroutines that both terminate.
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
             auto ar = co_await fixture.listener().async_accept();
             if (!ar.has_value()) co_return;
             server_transport = std::move(*ar);
-            auto* tls = dynamic_cast<TlsTransport*>(server_transport.get());
-            if (!tls) co_return;
-            server_hs = co_await tls->async_handshake(fixture.ssl_cfg());
         },
         asio::detached);
 
-    // Client: connect + handshake.
     auto client = fixture.make_client(ioc.get_executor());
     auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
     ASSERT_NE(client_tls, nullptr);
 
     asio::co_spawn(
         ioc.get_executor(),
-        [&]() -> asio::awaitable<void> {
-            auto conn = co_await client->async_connect(fixture.server_endpoint());
-            if (!conn.has_value()) co_return;
-            client_hs = co_await client_tls->async_handshake(fixture.ssl_cfg());
-        },
+        [&]() -> asio::awaitable<void> { (void)co_await client->async_connect(fixture.server_endpoint()); },
         asio::detached);
 
-    ioc.run_for(std::chrono::seconds{10});
+    ioc.run();
     ioc.restart();
 
-    ASSERT_TRUE(server_hs.has_value())
-        << "server handshake must succeed before testing cancel isolation";
-    ASSERT_TRUE(client_hs.has_value())
-        << "client handshake must succeed before testing cancel isolation";
     ASSERT_NE(server_transport, nullptr);
+    auto* server_tls = dynamic_cast<TlsTransport*>(server_transport.get());
+    ASSERT_NE(server_tls, nullptr);
 
-    // Cancel the listener AFTER we already hold server_transport. post_cancel()
-    // issues it on the listener's executor and proves it ran — see its ⚠️ note.
+    // Phase 2 — cancel the listener while server_transport is held in the
+    // pre-handshake state. post_cancel() issues it on the listener's
+    // executor and proves it ran — see its ⚠️ note.
     ASSERT_TRUE(post_cancel(ioc, fixture.listener()));
 
-    // Post-cancel surface: write, read, close — each must SUCCEED.
+    // Phase 3 — the post-cancel surface: handshake, write, read, close —
+    // each must SUCCEED, issued strictly after cancel().
+    expected_t<handshake_result> server_hs = std::unexpected{error::transport_handshake_cancelled};
+    expected_t<handshake_result> client_hs = std::unexpected{error::transport_handshake_cancelled};
     std::array<std::byte, kClientAfterCancel.size()> server_rx{};
     expected_t<std::size_t> write_result = std::unexpected{error::transport_write_in_progress};
     expected_t<void> read_result = std::unexpected{error::transport_read_eof};
@@ -695,6 +698,10 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
+            server_hs = co_await server_tls->async_handshake(fixture.ssl_cfg());
+            if (!server_hs.has_value()) {
+                co_return;
+            }
             write_result = co_await server_transport->async_write(as_bytes(kServerAfterCancel));
             if (!write_result.has_value()) {
                 co_return;
@@ -709,6 +716,10 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
+            client_hs = co_await client_tls->async_handshake(fixture.ssl_cfg());
+            if (!client_hs.has_value()) {
+                co_return;
+            }
             std::array<std::byte, kServerAfterCancel.size()> client_rx{};
             auto rr = co_await read_exactly(*client, std::span<std::byte>{client_rx});
             if (!rr.has_value()) {
@@ -718,7 +729,15 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
         },
         asio::detached);
 
-    ioc.run_for(std::chrono::seconds{5});
+    ioc.run_for(std::chrono::seconds{10});
+
+    ASSERT_TRUE(server_hs.has_value())
+        << "server async_handshake on an already-resumed (pre-handshake) Transport must "
+           "SUCCEED after listener cancel(); error="
+        << static_cast<int>(server_hs.error());
+    ASSERT_TRUE(client_hs.has_value())
+        << "client handshake must succeed after listener cancel(); error="
+        << static_cast<int>(client_hs.error());
 
     ASSERT_TRUE(write_result.has_value())
         << "async_write on an already-resumed Transport must SUCCEED after listener cancel(); "
