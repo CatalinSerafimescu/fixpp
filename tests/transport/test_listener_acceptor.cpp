@@ -1151,12 +1151,16 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
     // the attempt, its mutant, and the outcome are dated in
     // `.specify/decisions/332-backlog-rst-witness-witnesses.md`.
     //
-    // AC3's own depth (64) and the shipped default (128) ARE witnessed —
+    // AC3's own depth (64) and the shipped default (128) are witnessed —
     // split across two seams this cell structurally cannot reach: cell 11
-    // below records what fixpp asks the OS for at those depths; cell 12
-    // (Linux-only) reads back what the OS actually registered. See both
-    // cells' headers and the decision record for why neither substitutes
-    // for the other. (#332)
+    // below (portable) records what fixpp asks the OS for at those depths;
+    // cell 12 (Linux-only) reads back what the OS actually registered. Cell
+    // 12 is the only one of the two that catches a clamp applied AT the
+    // `listen()` call site (e.g. `listen(min(requested_listen_depth_, N))`)
+    // while leaving cell 11's recorded expression untouched — on non-Linux
+    // platforms that call-site seam is not witnessed by any cell in this
+    // file. See both cells' headers and the decision record for why neither
+    // substitutes for the other. (#332)
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1170,7 +1174,9 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
 // asio_listener.hpp. Cell 12 (Linux-only) is the seam that reads back what
 // the OS actually registered; the two are independent by construction so
 // that a call-site regression that clamps `listen()` while leaving this
-// record untouched still reds cell 12
+// record untouched still reds cell 12 — but ONLY on Linux, where cell 12
+// runs. On other platforms a clamp applied at the `listen()` call site with
+// this recorded expression left intact is not witnessed by any cell here
 // (`.specify/decisions/332-backlog-rst-witness-witnesses.md`).
 // ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, RequestedListenDepthTracksConfiguredBacklogAtAc3AndDefaultDepths) {
