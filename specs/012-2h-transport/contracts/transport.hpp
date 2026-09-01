@@ -92,7 +92,7 @@ public:
     //     SEPARATE step the FSM issues after this completes successfully.
     //
     //     Cancellation: cancellation_type::total → transport_connect_cancelled.
-    //     Idempotency: second call before close()/cancel() → transport_already_connected.
+    //     Idempotency: 2nd call while OPEN → already_connected; once closed → already_closed.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>>
         async_connect(Endpoint const& ep) = 0;
 

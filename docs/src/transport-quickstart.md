@@ -73,7 +73,7 @@ At most **one** in-flight `async_read_some` and **one** in-flight `async_write` 
 
 - `transport_read_in_progress` — second `async_read_some` while the first is in flight.
 - `transport_write_in_progress` — second `async_write` while the first is in flight.
-- `transport_already_connected` — second `async_connect` or `async_handshake` (one-shot per lifetime).
+- `transport_already_connected` — second `async_connect` or `async_handshake` (one-shot per lifetime) on a still-OPEN Transport. Once the Transport is closed these return `transport_already_closed` instead — see B-339-1, which also notes that an in-protocol TLS handshake failure reaches the closed state without `close()`.
 
 The strand serialisation is defence-in-depth; the API-level exclusivity contract is the binding rule (the strand only serialises completion-handler dispatch, not initiation).
 

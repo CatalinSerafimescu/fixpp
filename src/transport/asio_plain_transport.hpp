@@ -100,7 +100,7 @@ public:
     // (1) TCP connect (resolve → timer-armed connect → apply_socket_options_).
     //     NO TLS handshake. state fresh→connected.
     //     cancellation_type::total → transport_connect_cancelled.
-    //     Second call → transport_already_connected.
+    //     2nd call → already_connected; after close() → already_closed (#339).
     [[nodiscard]] asio::awaitable<core::expected_t<ConnectInfo>> async_connect(
         Endpoint const& ep) override;
 

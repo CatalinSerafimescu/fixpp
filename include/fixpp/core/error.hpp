@@ -496,9 +496,9 @@ enum class error : std::uint8_t {
                                                //   a still-OPEN Transport (one-shot per
                                                //   [2h §4.1]). If it is closed → 98 (#339).
                                                //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_already_closed = 98,             // [2h §6.6]:1174 — cancel() or any async_*
-                                               //   once state == closed. close() is not the
-                                               //   only door: a failed TLS handshake also
+    transport_already_closed = 98,             // [2h §6.6]:1174 — any async_* once state
+                                               //   == closed. close() is not the only door:
+                                               //   an in-protocol TLS handshake failure also
                                                //   lands there (#339). 2nd close() → {}.
                                                //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
     transport_read_in_progress = 99,           // [2h §6.6]:1175 — concurrent second
