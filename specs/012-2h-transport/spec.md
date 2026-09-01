@@ -64,7 +64,11 @@ A FIX engine operator deploys an acceptor (server-side) gateway that accepts inb
 
 1. **Given** an `asio_listener` bound to a port with backlog ≥ 64, **When** 64 clients connect concurrently, **Then** 64 distinct `Transport` instances are produced and 64 sessions transition to Active without any accept being dropped.
 2. **Given** an `asio_listener` with the `cancel()` API invoked, **When** a client attempts a new connect after the cancel, **Then** the connect is refused at the kernel level (the acceptor stops listening) and the listener's awaitable completes with `transport_accept_cancelled` per `[2h §6.6]:1191`.
-3. **Given** the acceptor port's backlog is full and a 65th client connects, **When** the acceptor cannot dequeue fast enough, **Then** the 65th client receives a TCP RST or connection-refused per OS behaviour — fixpp does not over-promise availability under saturated accept rates (per `[2h §10 Q7]` deferral).
+3. **Given** the acceptor port's backlog is full and a 65th client connects, **When** the acceptor cannot dequeue fast enough, **Then** the 65th client's connection is **not established** — fixpp does not over-promise availability under saturated accept rates (per `[2h §10 Q7]` deferral). Witness: `tests/transport/test_listener_acceptor.cpp` cell 10 (`BacklogBoundsConnectionsCompletedWithoutTheApplication`).
+
+   ⚠️ **The OS does not reset or refuse that client, on either platform this repo ships to.** Until 2026-09-01 this AC promised "a TCP RST or connection-refused per OS behaviour". That is **false** and has been deleted rather than re-scoped: measured on the Linux and Windows development hosts, the overflow client's `connect()` simply never completes — no RST, no `ECONNREFUSED` — so how long it waits is governed by the *client's own* connect timeout, not by a prompt failure from the server. On Linux this follows from `net.ipv4.tcp_abort_on_overflow`, whose default of `0` drops the SYN instead of resetting. Operator-visible consequence recorded in `spec/behaviors-and-limitations.md`.
+
+   The identical "TCP RST or connection-refused per OS" phrasing in scenario 2 above is **not** affected — there the listening socket is closed, which really does produce one of those two outcomes (both branches witnessed by cell 9). Same boilerplate, two different situations, two different truth values.
 
 ---
 

@@ -977,7 +977,7 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
 // VACUOUSLY, not violated — this cell issues no cancel to misplace.
 //
 // Anchor: specs/012-2h-transport/spec.md US3 AC3; .specify/2h-transport.md §4.6
-// FR-024. Witness record: .specify/decisions/332-backlog-witness.md.
+// FR-024. Witness record: .specify/decisions/332-backlog-rst-witness-witnesses.md.
 // ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
     constexpr int kProbes = 12;
