@@ -283,13 +283,11 @@ struct connect_probe_result {
 //
 // ⚠️ THE PACING IS LOAD-BEARING FOR EVERY ARM, not only a saturating one —
 // one bounded run per connect, never one run after issuing them all. Fired
-// back to back, the completed count is not reproducible: a client completes
-// its handshake on the peer's SYN-ACK, which the stack can emit before the
-// accept queue accounting that is supposed to reject it has caught up, so
-// the answer depends on scheduling — measured directly: firing the CONTROL
-// arm's 12 connects unpaced against a listener whose real backlog had been
-// mutated down to 1 still reported 12/12 completions, the exact false pass
-// pacing exists to prevent (`.specify/decisions/332-backlog-rst-witness-witnesses.md`).
+// concurrently, a client can complete on the peer's SYN-ACK before the
+// accept-queue accounting that would reject it has caught up, so the count
+// becomes scheduling-dependent and a saturated listener can report full
+// completion. Measured evidence and re-derivation recipe:
+// `.specify/decisions/332-backlog-rst-witness-witnesses.md` §4/§8a.
 // Awaiting each connect before issuing the next removes that race,
 // regardless of whether the target backlog is expected to be saturated.
 // `per_connect` is per-CALLER, not a single shared constant: the control
@@ -1017,7 +1015,7 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
 // The operator-visible consequence is recorded in B&L (`L-012-2`).
 //
 // ⚠️ Do not "tighten" this into an equality against the configured depth. The
-// queue is off by one BETWEEN PLATFORMS in the direction that would make any
+// queue differs between platforms in the direction that would make any
 // single equality wrong on one of them. The relational form below is what holds
 // on both; the two exact figures live in the decision record, dated.
 //
@@ -1080,7 +1078,8 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
         << " connects even against a listener whose backlog (" << kControlBacklog
         << ") exceeds that — the assertions below would be measuring the instrument, not the "
            "listener (pending="
-        << r_control.pending << ", refused_or_reset=" << r_control.refused_or_reset << ")";
+        << r_control.pending << ", refused_or_reset=" << r_control.refused_or_reset
+        << ", other_error=" << r_control.other_error << ")";
 
     // (ii) US3 AC3 proper: a listener that never accepts does NOT absorb every
     //      client that arrives. This is the half of AC3 that is true on every OS.
@@ -1088,13 +1087,16 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
         << "a listener configured with backlog=" << kLowBacklog << " completed all " << kProbes
         << " connects without ever accepting one — the configured depth reached neither "
            "listen() nor the kernel, so fixpp is over-promising availability";
-    // FQ-7 mechanism check, local only (see the cell header on why not portable):
-    // the shortfall above must be genuinely PENDING, not refused/reset — asserting
-    // that portably would resurrect the pre-2026-09-01 mechanism claim by proxy.
-    EXPECT_EQ(r_low.refused_or_reset, 0)
-        << "backlog=" << kLowBacklog << " bounced " << r_low.refused_or_reset
-        << " probe(s) with refused/reset instead of leaving them pending on this runner — "
-           "fixpp does not guarantee a mechanism either way (spec.md US3 scenario 3)";
+    // Mechanism (pending vs refused vs reset) is DIAGNOSTIC ONLY and is never
+    // asserted — spec.md US3 scenario 3 permits all three, so asserting any one
+    // of them portably would resurrect the pre-2026-09-01 mechanism claim by
+    // proxy. The counts are carried in the failure messages so a red on a given
+    // runner says which outcome that runner produced.
+    EXPECT_GT(r_low.completed, 0)
+        << "backlog=" << kLowBacklog << " completed no connects at all — the low arm's "
+           "shortfall is a dead listener, not a saturated one (completed=" << r_low.completed
+        << ", pending=" << r_low.pending << ", refused_or_reset=" << r_low.refused_or_reset
+        << ", other_error=" << r_low.other_error << ")";
     EXPECT_EQ(r_low.other_error, 0)
         << "backlog=" << kLowBacklog << " produced " << r_low.other_error
         << " connect error(s) not classified as completed/refused-or-reset/pending";
@@ -1107,9 +1109,9 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
         << "backlog=" << kHighBacklog << " admitted no more connections than backlog="
         << kLowBacklog << " (" << r_high.completed << " vs " << r_low.completed
         << ") — the listener is not forwarding Endpoint::backlog to listen()";
-    EXPECT_EQ(r_high.refused_or_reset, 0)
-        << "backlog=" << kHighBacklog << " bounced " << r_high.refused_or_reset
-        << " probe(s) with refused/reset instead of leaving them pending on this runner";
+    EXPECT_EQ(r_high.other_error, 0)
+        << "backlog=" << kHighBacklog << " produced " << r_high.other_error
+        << " connect error(s) not classified as completed/refused-or-reset/pending";
 
     // ⚠️ A fourth arm at AC3's own named depth (backlog=64, ~70 probes) was
     // attempted and DROPPED. Run against the mutant it was meant to catch —
