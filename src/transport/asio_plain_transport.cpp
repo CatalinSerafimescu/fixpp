@@ -111,6 +111,13 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // Enable total cancellation (co_spawn defaults to terminal-only per D-17).
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
+    // FR-006 is unconditional: after close() returns, EVERY async_* answers
+    // transport_already_closed. This precedes the one-shot guard below, which
+    // would otherwise collapse `closed` into transport_already_connected (#339).
+    if (state_ == state_t::closed) {
+        co_return std::unexpected{E::transport_already_closed};
+    }
+
     // One-shot guard: only fresh transports can connect.
     if (state_ != state_t::fresh) {
         co_return std::unexpected{E::transport_already_connected};

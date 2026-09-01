@@ -242,7 +242,7 @@ Scope and conventions:
 
 - **B-012-5 — A truncated TLS close (peer omits close-notify) surfaces as the DISTINCT `transport_read_truncated`, not `transport_read_eof`, and is NOT a hard error.** `close()` waits up to `tls_close_timeout` (1 s default) for the peer's close-notify; on timeout it completes with `transport_read_truncated` (mapped to a `warn`-level log by the 2k layer), preserving SC-006's distinct-named-variant rule rather than collapsing to EOF. *(FR-006; spec Edge Cases "TLS bidirectional close-notify hangs".)*
 
-- **B-012-6 — In-flight exclusivity is an explicit API-level contract, not just strand defence.** A second concurrent `async_read_some` / `async_write` on the same Transport returns `transport_read_in_progress` / `transport_write_in_progress` immediately; a second `async_connect`/`async_handshake` returns `transport_already_connected`. Strand serialisation is defence-in-depth only. *(FR-007; spec Edge Cases.)*
+- **B-012-6 — In-flight exclusivity is an explicit API-level contract, not just strand defence.** A second concurrent `async_read_some` / `async_write` on the same Transport returns `transport_read_in_progress` / `transport_write_in_progress` immediately; a second `async_connect`/`async_handshake` on a still-OPEN Transport returns `transport_already_connected` — but on a CLOSED one it returns `transport_already_closed`, per FR-006 and B-339-1 below. Strand serialisation is defence-in-depth only. *(FR-007; spec Edge Cases.)*
 
 ### Limitations
 
@@ -2116,3 +2116,16 @@ is a consumer-contract row, not a Spec-Kit feature. Evidence: issue #284, PR #28
   single window: the process parks — `State: S`, one thread, CPU frozen at one jiffy — and was still
   wedged at 449 s, 15x the deadline it was first killed at. Fixed test-side by
   `tests/support/pump_until_ready.hpp`, which is shape (b) above.)*
+
+---
+
+## fixpp#339 — post-close `async_connect` / `async_handshake` error mapping (2026-09-01)
+
+Three entry guards answered a **closed** Transport with the one-shot code instead of the post-close
+one, contradicting FR-006, `close()`'s own doc comment, and the two sibling guards in the same
+files. Spec: none — this is a defect fix against 012-2h-transport's existing FR-006, not a new
+requirement. Evidence: issue #339.
+
+### Behaviors
+
+- **B-339-1 — `async_connect` and `async_handshake` on a CLOSED Transport now return `transport_already_closed` (98); they previously returned `transport_already_connected` (97).** FR-006 states the post-close rule without exception — *"After `close()` returns, every subsequent `async_*` returns `transport_already_closed`"* — and `async_read_some` / `async_write` already honoured it on both transports. `async_connect` (TLS and plaintext) and `async_handshake` (TLS) did not: their one-shot guards tested `state_ != fresh` / `state_ != connected`, which `closed` also satisfies, so the closed case fell through to the one-shot answer. A consumer that branched on `97` to mean *"this Transport is live, you already connected it"* will now see `98` for a Transport it closed, which is the distinction FR-006 exists to draw. **The one-shot contract is unchanged**: `async_connect` from `connected`/`handshaken`, and `async_handshake` from `handshaken`, still return `transport_already_connected` — only the `closed` case moved. *(FR-006; issue #339; witnessed by `AsioPlainTransport.PostCloseConnectReturnsAlreadyClosed` and `AsioTlsTransportErrorPaths.PostClose{Connect,Handshake}ReturnsAlreadyClosed`, each seen RED at 97 on the unfixed tree and RED again under a per-site mutant that removes only its own guard.)*

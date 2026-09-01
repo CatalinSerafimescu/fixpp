@@ -718,4 +718,111 @@ TEST(AsioTlsTransportErrorPaths, Ed25519HandshakeFailureDoesNotEmitValidationEve
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Case 7: post-close entry guards → transport_already_closed (#339)
+//
+// FR-006 (spec.md:117) and close()'s own doc comment
+// (include/fixpp/transport/transport.hpp) both state it unconditionally:
+// "After close() returns, every subsequent async_* returns
+// transport_already_closed." async_read_some and async_write honoured that;
+// async_connect and async_handshake collapsed `closed` into the one-shot
+// answer transport_already_connected (97).
+//
+// Both cells drive the transport to `connected` through a real loopback
+// connect before closing it, so `closed` is reached from the state a caller
+// actually observes — not from `fresh`, where the same guard would fire for a
+// different reason.
+//
+// ⚠️ LOAD-BEARING: `transport_already_connected` remains correct for
+// async_connect from `connected`/`handshaken` and for async_handshake from
+// `handshaken` — the one-shot contract these guards exist to enforce, and
+// witnessed by test_inflight_exclusivity.cpp cells 3 and 4. Only the `closed`
+// case moved. A cell here that asserted 98 for those states would be asserting
+// the opposite of the sibling file.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(AsioTlsTransportErrorPaths, PostCloseConnectReturnsAlreadyClosed) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context   ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+
+    auto       client = fixture.make_client(ioc.get_executor());
+    Transport* client_raw = client.get();
+
+    std::optional<expected_t<ConnectInfo>> first_connect;
+    std::optional<expected_t<ConnectInfo>> connect_after_close;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            first_connect = co_await client_raw->async_connect(fixture.server_endpoint());
+            if (!first_connect->has_value()) {
+                co_return;
+            }
+            (void)client_raw->close();
+            connect_after_close = co_await client_raw->async_connect(fixture.server_endpoint());
+        },
+        asio::detached);
+
+    ioc.run_for(10s);
+
+    ASSERT_TRUE(first_connect.has_value()) << "the first async_connect never completed";
+    ASSERT_TRUE(first_connect->has_value())
+        << "precondition: the transport must connect before close(); error="
+        << static_cast<int>(first_connect->error());
+
+    ASSERT_TRUE(connect_after_close.has_value()) << "post-close async_connect never completed";
+    ASSERT_FALSE(connect_after_close->has_value())
+        << "post-close async_connect must fail (one-shot guard)";
+    EXPECT_EQ(connect_after_close->error(), error::transport_already_closed)
+        << "post-close connect must return transport_already_closed (98) per FR-006, got slot="
+        << static_cast<int>(connect_after_close->error());
+}
+
+TEST(AsioTlsTransportErrorPaths, PostCloseHandshakeReturnsAlreadyClosed) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context   ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+
+    auto client = fixture.make_client(ioc.get_executor());
+    auto* client_tls = dynamic_cast<TlsTransport*>(client.get());
+    ASSERT_NE(client_tls, nullptr);
+
+    std::optional<expected_t<ConnectInfo>>      first_connect;
+    std::optional<expected_t<handshake_result>> handshake_after_close;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            first_connect = co_await client_tls->async_connect(fixture.server_endpoint());
+            if (!first_connect->has_value()) {
+                co_return;
+            }
+            (void)client_tls->close();
+            handshake_after_close = co_await client_tls->async_handshake(fixture.ssl_cfg());
+        },
+        asio::detached);
+
+    ioc.run_for(10s);
+
+    ASSERT_TRUE(first_connect.has_value()) << "the first async_connect never completed";
+    ASSERT_TRUE(first_connect->has_value())
+        << "precondition: the transport must connect before close(); error="
+        << static_cast<int>(first_connect->error());
+
+    ASSERT_TRUE(handshake_after_close.has_value()) << "post-close async_handshake never completed";
+    ASSERT_FALSE(handshake_after_close->has_value())
+        << "post-close async_handshake must fail";
+    EXPECT_EQ(handshake_after_close->error(), error::transport_already_closed)
+        << "post-close handshake must return transport_already_closed (98) per FR-006, got slot="
+        << static_cast<int>(handshake_after_close->error());
+}
+
 }  // namespace

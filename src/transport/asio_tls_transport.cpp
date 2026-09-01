@@ -895,6 +895,13 @@ void asio_tls_transport::setup_ssl_ctx_() {
     // Enable total cancellation (co_spawn defaults to terminal-only per D-17).
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
+    // FR-006 is unconditional: after close() returns, EVERY async_* answers
+    // transport_already_closed. This precedes the one-shot guard below, which
+    // would otherwise collapse `closed` into transport_already_connected (#339).
+    if (state_ == state_t::closed) {
+        co_return std::unexpected{E::transport_already_closed};
+    }
+
     // One-shot guard.
     if (state_ != state_t::fresh) {
         co_return std::unexpected{E::transport_already_connected};
@@ -1018,6 +1025,13 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
 
     // Enable total cancellation (D-17).
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+
+    // FR-006 is unconditional: after close() returns, EVERY async_* answers
+    // transport_already_closed. This precedes the one-shot guard below, which
+    // would otherwise collapse `closed` into transport_already_connected (#339).
+    if (state_ == state_t::closed) {
+        co_return std::unexpected{E::transport_already_closed};
+    }
 
     // One-shot guard: only valid from the connected state.
     if (state_ != state_t::connected) {
