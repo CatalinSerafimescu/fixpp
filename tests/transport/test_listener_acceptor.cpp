@@ -1243,6 +1243,10 @@ netlink_backlog_result read_listen_backlog_via_netlink(std::uint16_t port) {
         if (n == 0) break;
         auto* nlh = reinterpret_cast<nlmsghdr*>(buf);
         for (; NLMSG_OK(nlh, static_cast<unsigned int>(n)); nlh = NLMSG_NEXT(nlh, n)) {
+            if (nlh->nlmsg_flags & NLM_F_DUMP_INTR) {
+                ::close(fd);
+                return {false, 0, "netlink dump was interrupted (NLM_F_DUMP_INTR)"};
+            }
             if (nlh->nlmsg_type == NLMSG_DONE) {
                 done = true;
                 break;
@@ -1250,6 +1254,15 @@ netlink_backlog_result read_listen_backlog_via_netlink(std::uint16_t port) {
             if (nlh->nlmsg_type == NLMSG_ERROR) {
                 ::close(fd);
                 return {false, 0, "netlink returned NLMSG_ERROR"};
+            }
+            if (nlh->nlmsg_type != SOCK_DIAG_BY_FAMILY) {
+                ::close(fd);
+                return {false, 0,
+                        "unexpected netlink message type " + std::to_string(nlh->nlmsg_type)};
+            }
+            if (static_cast<std::size_t>(NLMSG_PAYLOAD(nlh, 0)) < sizeof(inet_diag_msg)) {
+                ::close(fd);
+                return {false, 0, "netlink message payload too small for inet_diag_msg"};
             }
             auto* msg = reinterpret_cast<inet_diag_msg*>(NLMSG_DATA(nlh));
             if (ntohs(msg->id.idiag_sport) == port && msg->id.idiag_src[0] == loopback) {
@@ -1260,6 +1273,9 @@ netlink_backlog_result read_listen_backlog_via_netlink(std::uint16_t port) {
     }
     ::close(fd);
 
+    if (!done) {
+        return {false, 0, "netlink dump did not terminate with NLMSG_DONE"};
+    }
     if (matches != 1) {
         return {false, 0,
                 "expected exactly 1 matching LISTEN socket on 127.0.0.1:" + std::to_string(port) +
