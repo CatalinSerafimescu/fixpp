@@ -342,7 +342,7 @@ for (auto& session : engine.sessions()) {
 |---|---|
 | AC1: 64 concurrent clients → 64 distinct Transports, 64 sessions Active | spec FR-023 + `[2h §9 seam #14]` listener_acceptor |
 | AC2: `cancel()` closes listening socket; subsequent connects refused; in-flight accept → `transport_accept_cancelled` per `[2h §6.6]:1191` | spec FR-025 + `[2h §9 seam #14]` parallel cell |
-| AC3: 65th client at backlog full → connection NOT established (not over-promised). ⚠️ NOT by RST/refusal — the client's connect never completes; see spec.md US3 scenario 3 | `test_listener_acceptor.cpp` cell 10 `BacklogBoundsConnectionsCompletedWithoutTheApplication` |
+| AC3: 65th client at backlog full → connection NOT established (not over-promised). fixpp makes no guarantee about how the OS declines it — reset, refused, or left pending, per OS and configuration; see spec.md US3 scenario 3 | `test_listener_acceptor.cpp` cell 10 `BacklogBoundsConnectionsCompletedWithoutTheApplication` |
 
 ---
 
