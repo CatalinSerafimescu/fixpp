@@ -48,6 +48,21 @@
 #include "transport/asio_listener.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
+// Cell 12 (#332 route D) reads a listening socket's kernel-registered
+// backlog via NETLINK_SOCK_DIAG — Linux-only, guarded at compile time.
+#if defined(__linux__)
+#include <arpa/inet.h>
+#include <cerrno>
+#include <cstring>
+#include <fstream>
+#include <linux/inet_diag.h>
+#include <linux/netlink.h>
+#include <linux/sock_diag.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
 namespace {
 
 using namespace std::chrono_literals;
@@ -1123,15 +1138,187 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
         << "backlog=" << kHighBacklog << " produced " << r_high.other_error
         << " connect error(s) not classified as completed/refused-or-reset/pending";
 
-    // ⚠️ NO ARM AT AC3's OWN NAMED DEPTH, and the reason is structural, not
-    // an oversight. A two-point relational bracket — bounded above by the probe
-    // count, below by the next arm's count — cannot discriminate a clamp that
-    // lands strictly between those two bounds; that is a property of the
-    // predicate's shape, not of any particular run. Tightening it toward an
-    // absolute floor trades that gap for a worse one: the OS may clamp
-    // `listen()` silently, so a runner with a smaller `somaxconn` would then
-    // false-negative. An arm was attempted on this basis and dropped; the
-    // attempt, its mutant, and the outcome are dated in
-    // `.specify/decisions/332-backlog-rst-witness-witnesses.md`. T034 stays
-    // open on this gap (#332).
+    // ⚠️ NO ARM AT AC3's OWN NAMED DEPTH HERE, and the reason is structural,
+    // not an oversight. A two-point relational bracket — bounded above by the
+    // probe count, below by the next arm's count — cannot discriminate a
+    // clamp that lands strictly between those two bounds; that is a property
+    // of the predicate's shape, not of any particular run. Tightening it
+    // toward an absolute floor trades that gap for a worse one: the OS may
+    // clamp `listen()` silently, so a runner with a smaller `somaxconn` would
+    // then false-negative. An arm was attempted on this basis and dropped;
+    // the attempt, its mutant, and the outcome are dated in
+    // `.specify/decisions/332-backlog-rst-witness-witnesses.md`.
+    //
+    // AC3's own depth (64) and the shipped default (128) ARE witnessed —
+    // split across two seams this cell structurally cannot reach: cell 11
+    // below records what fixpp asks the OS for at those depths; cell 12
+    // (Linux-only) reads back what the OS actually registered. See both
+    // cells' headers and the decision record for why neither substitutes
+    // for the other. (#332)
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// Cell 11 — #332 route B: the value asio_listener passes to listen() tracks
+// Endpoint::backlog exactly, at AC3's own named depth (64) and the shipped
+// default (endpoint.hpp's `backlog{128}`) — the two depths cell 10's own
+// probe count (12) cannot discriminate.
+//
+// Portable: requested_listen_depth() is fixpp's own bookkeeping (what it
+// ASKED the OS for), not a kernel read-back — see its doc comment in
+// asio_listener.hpp. Cell 12 (Linux-only) is the seam that reads back what
+// the OS actually registered; the two are independent by construction so
+// that a call-site regression that clamps `listen()` while leaving this
+// record untouched still reds cell 12
+// (`.specify/decisions/332-backlog-rst-witness-witnesses.md`).
+// ════════════════════════════════════════════════════════════════════════════
+TEST(ListenerAcceptor, RequestedListenDepthTracksConfiguredBacklogAtAc3AndDefaultDepths) {
+    asio::io_context ioc;
+    asio_listener at_ac3_depth{ioc.get_executor(), make_listener_cfg(0, 64)};
+    asio_listener at_default_depth{ioc.get_executor(), make_listener_cfg(0, 128)};
+
+    EXPECT_EQ(at_ac3_depth.requested_listen_depth(), 64);
+    EXPECT_EQ(at_default_depth.requested_listen_depth(), 128);
+}
+
+#if defined(__linux__)
+namespace {
+
+// Netlink INET_DIAG helpers for cell 12 (#332 route D). Reads back a
+// listening socket's kernel-registered backlog independently of fixpp's own
+// bookkeeping (asio_listener::requested_listen_depth(), cell 11 above).
+//
+// `idiag_wqueue` on a TCP_LISTEN-state socket is `sk_max_ack_backlog` — the
+// depth the kernel actually registered, i.e. min(requested, somaxconn) —
+// per the kernel's `inet_diag_msg` fill for listening sockets.
+struct netlink_backlog_result {
+    bool ok{false};
+    int value{0};
+    std::string error;
+};
+
+netlink_backlog_result read_listen_backlog_via_netlink(std::uint16_t port) {
+    const int fd = ::socket(AF_NETLINK, SOCK_RAW, NETLINK_SOCK_DIAG);
+    if (fd < 0) {
+        return {false, 0, std::string{"socket(NETLINK_SOCK_DIAG) failed: "} + std::strerror(errno)};
+    }
+
+    struct nl_req {
+        nlmsghdr nlh;
+        inet_diag_req_v2 idr;
+    };
+    nl_req req{};
+    req.nlh.nlmsg_len = sizeof(req);
+    req.nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
+    req.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    req.idr.sdiag_family = AF_INET;
+    req.idr.sdiag_protocol = IPPROTO_TCP;
+    req.idr.idiag_states = 1U << 10;  // TCP_LISTEN
+
+    if (::send(fd, &req, sizeof(req), 0) < 0) {
+        const std::string err = std::string{"send() failed: "} + std::strerror(errno);
+        ::close(fd);
+        return {false, 0, err};
+    }
+
+    alignas(4) char buf[8192];  // NLMSG_ALIGNTO == 4
+    int found = -1;
+    int matches = 0;
+    const std::uint32_t loopback = htonl(INADDR_LOOPBACK);
+    bool done = false;
+    while (!done) {
+        ssize_t n = ::recv(fd, buf, sizeof(buf), 0);  // NLMSG_NEXT decrements this in-place
+        if (n < 0) {
+            const std::string err = std::string{"recv() failed: "} + std::strerror(errno);
+            ::close(fd);
+            return {false, 0, err};
+        }
+        if (n == 0) break;
+        auto* nlh = reinterpret_cast<nlmsghdr*>(buf);
+        for (; NLMSG_OK(nlh, static_cast<unsigned int>(n)); nlh = NLMSG_NEXT(nlh, n)) {
+            if (nlh->nlmsg_type == NLMSG_DONE) {
+                done = true;
+                break;
+            }
+            if (nlh->nlmsg_type == NLMSG_ERROR) {
+                ::close(fd);
+                return {false, 0, "netlink returned NLMSG_ERROR"};
+            }
+            auto* msg = reinterpret_cast<inet_diag_msg*>(NLMSG_DATA(nlh));
+            if (ntohs(msg->id.idiag_sport) == port && msg->id.idiag_src[0] == loopback) {
+                found = static_cast<int>(msg->idiag_wqueue);
+                ++matches;
+            }
+        }
+    }
+    ::close(fd);
+
+    if (matches != 1) {
+        return {false, 0,
+                "expected exactly 1 matching LISTEN socket on 127.0.0.1:" + std::to_string(port) +
+                    ", found " + std::to_string(matches)};
+    }
+    return {true, found, {}};
+}
+
+// Not a runtime skip target — read_somaxconn() FAILS the test (ADD_FAILURE)
+// rather than returning a sentinel a caller could silently tolerate.
+int read_somaxconn() {
+    std::ifstream f{"/proc/sys/net/core/somaxconn"};
+    int value = 0;
+    if (!(f >> value)) {
+        ADD_FAILURE() << "could not read /proc/sys/net/core/somaxconn";
+        return 0;
+    }
+    return value;
+}
+
+}  // namespace
+
+// ════════════════════════════════════════════════════════════════════════════
+// Cell 12 — #332 route D: the kernel's registered backlog for a listening
+// socket — read back independently of fixpp's own bookkeeping (cell 11) via
+// NETLINK_SOCK_DIAG — tracks Endpoint::backlog at AC3's own depth (64) and
+// the shipped default (128), and clamps to /proc/sys/net/core/somaxconn
+// above it.
+//
+// Linux-only by a COMPILE-TIME #if — NOT a runtime skip. If netlink is
+// genuinely unavailable at runtime this cell FAILS with a message saying so;
+// an instrument failing toward silent absence is this repo's most recurring
+// defect class.
+//
+// Every expected value below is the LITERAL depth passed to
+// make_listener_cfg, never `requested_listen_depth()` (cell 11's accessor):
+// route B and route D must be able to disagree with each other, or D adds
+// nothing cell 11 doesn't already cover
+// (`.specify/decisions/332-backlog-rst-witness-witnesses.md`).
+//
+// Anchor: specs/012-2h-transport/spec.md US3 AC3.
+// ════════════════════════════════════════════════════════════════════════════
+TEST(ListenerAcceptor, KernelRegisteredBacklogTracksConfiguredDepthUpToSomaxconn) {
+    const int somaxconn = read_somaxconn();
+    ASSERT_GT(somaxconn, 0) << "could not establish a positive somaxconn baseline";
+
+    constexpr std::uint32_t kAc3Depth = 64;
+    constexpr std::uint32_t kDefaultDepth = 128;
+    const std::uint32_t kAboveSomaxconn = static_cast<std::uint32_t>(somaxconn) + 1000;
+
+    asio::io_context ioc;
+    asio_listener at_ac3_depth{ioc.get_executor(), make_listener_cfg(0, kAc3Depth)};
+    asio_listener at_default_depth{ioc.get_executor(), make_listener_cfg(0, kDefaultDepth)};
+    asio_listener above_somaxconn{ioc.get_executor(), make_listener_cfg(0, kAboveSomaxconn)};
+
+    const auto r_ac3 = read_listen_backlog_via_netlink(at_ac3_depth.bound_endpoint().port);
+    ASSERT_TRUE(r_ac3.ok) << r_ac3.error;
+    EXPECT_EQ(r_ac3.value, static_cast<int>(kAc3Depth));
+
+    const auto r_default = read_listen_backlog_via_netlink(at_default_depth.bound_endpoint().port);
+    ASSERT_TRUE(r_default.ok) << r_default.error;
+    EXPECT_EQ(r_default.value, static_cast<int>(kDefaultDepth));
+
+    const auto r_above = read_listen_backlog_via_netlink(above_somaxconn.bound_endpoint().port);
+    ASSERT_TRUE(r_above.ok) << r_above.error;
+    EXPECT_EQ(r_above.value, somaxconn)
+        << "backlog=" << kAboveSomaxconn << " (above somaxconn=" << somaxconn
+        << ") did not clamp to somaxconn at the kernel";
+}
+#endif  // __linux__
