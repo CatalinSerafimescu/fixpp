@@ -31,6 +31,10 @@ prints `0` for a whole syntax.
 - **Trigger:** you are about to believe a zero, an empty result, or a green.
 - **Procedure:** **prove it can report non-zero first.** Run it against a case you know is positive —
   the unfixed tree, a seeded match, a deliberate mutant. Distrust a *uniform* result especially.
+- ⚠️ **A proven PATTERN is not a proven TRAVERSAL.** A matcher demonstrated non-zero on a seeded case
+  says nothing about whether the walk reached the corpus — a recursive grep does not descend a
+  symlinked root, and a directory never entered is indistinguishable in the output from one that held
+  no match. Assert how many files the sweep actually examined, and check whether any root is a link.
 - ⚠️ **A self-test written from the implementation certifies the implementation**, bug included. Build
   fixtures from the real artefact, verbatim.
 
