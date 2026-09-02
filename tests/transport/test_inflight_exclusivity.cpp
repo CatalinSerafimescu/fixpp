@@ -1031,7 +1031,6 @@ TEST(InflightExclusivity, CloseAsyncDeliversCloseNotify_Fixes348) {
     ioc.run_for(200ms);
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // #348 — close_async QUIESCES its own suspended read and still delivers the
 // alert. THIS is the shape every real adopter has.
@@ -1077,7 +1076,8 @@ TEST(InflightExclusivity, CloseAsyncQuiescesOwnPendingReadAndStillDeliversAlert_
         ioc.get_executor(),
         [&server_read, server_raw, &server_buf]() -> asio::awaitable<void> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
-            server_read = co_await server_raw->async_read_some(std::span<std::byte>{&server_buf, 1});
+            server_read =
+                co_await server_raw->async_read_some(std::span<std::byte>{&server_buf, 1});
         },
         asio::detached);
 
@@ -1085,7 +1085,8 @@ TEST(InflightExclusivity, CloseAsyncQuiescesOwnPendingReadAndStillDeliversAlert_
         ioc.get_executor(),
         [&client_read, client_raw, &client_buf]() -> asio::awaitable<void> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
-            client_read = co_await client_raw->async_read_some(std::span<std::byte>{&client_buf, 1});
+            client_read =
+                co_await client_raw->async_read_some(std::span<std::byte>{&client_buf, 1});
         },
         asio::detached);
 
@@ -1271,14 +1272,16 @@ TEST(InflightExclusivity, CloseAsyncCancelledMidCloseStillClosesTheSocket) {
         ioc.get_executor(),
         [&server_read, server_raw, &server_buf]() -> asio::awaitable<void> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
-            server_read = co_await server_raw->async_read_some(std::span<std::byte>{&server_buf, 1});
+            server_read =
+                co_await server_raw->async_read_some(std::span<std::byte>{&server_buf, 1});
         },
         asio::detached);
     asio::co_spawn(
         ioc.get_executor(),
         [&client_read, client_raw, &client_buf]() -> asio::awaitable<void> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
-            client_read = co_await client_raw->async_read_some(std::span<std::byte>{&client_buf, 1});
+            client_read =
+                co_await client_raw->async_read_some(std::span<std::byte>{&client_buf, 1});
         },
         asio::detached);
 
@@ -1412,7 +1415,8 @@ TEST(InflightExclusivity, PlaintextCloseAsyncUsesBaseDefaultAndCloses) {
         asio::detached);
     ioc.run_for(5s);
 
-    ASSERT_TRUE(connected.has_value() && connected->has_value()) << "plaintext connect must succeed";
+    ASSERT_TRUE(connected.has_value() && connected->has_value())
+        << "plaintext connect must succeed";
     ASSERT_TRUE(closed.has_value()) << "the default close_async must complete";
     EXPECT_TRUE(closed->has_value());
 
@@ -1430,13 +1434,12 @@ TEST(InflightExclusivity, PlaintextCloseAsyncUsesBaseDefaultAndCloses) {
     std::size_t peer_n = 0;
     bool peer_handler_ran = false;
     ioc.restart();
-    accepted.async_read_some(
-        asio::buffer(&peer_buf, 1),
-        [&peer_ec, &peer_n, &peer_handler_ran](asio::error_code ec, std::size_t n) {
-            peer_ec = ec;
-            peer_n = n;
-            peer_handler_ran = true;
-        });
+    accepted.async_read_some(asio::buffer(&peer_buf, 1), [&peer_ec, &peer_n, &peer_handler_ran](
+                                                             asio::error_code ec, std::size_t n) {
+        peer_ec = ec;
+        peer_n = n;
+        peer_handler_ran = true;
+    });
     ioc.run_for(2s);
     ASSERT_TRUE(peer_handler_ran)
         << "the peer read never completed — it is still pending, so the assertions below would "

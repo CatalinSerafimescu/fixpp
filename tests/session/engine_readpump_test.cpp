@@ -39,6 +39,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -65,7 +66,6 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
-#include <array>
 #include <future>
 #include <memory>
 #include <optional>
@@ -575,7 +575,8 @@ struct HoldingClient {
 };
 
 static asio::awaitable<void> run_client_holding_read(
-    fixpp::transport::test::LoopbackTlsFixture& fixture, uint16_t acceptor_port, HoldingClient& hc) {
+    fixpp::transport::test::LoopbackTlsFixture& fixture, uint16_t acceptor_port,
+    HoldingClient& hc) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(hc.transport.get());
@@ -688,8 +689,8 @@ TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348)
 
     // THE DIFFERENCE FROM CASE 4: the session closes itself, so the close runs
     // at session.cpp's post-root-cancel site rather than Engine::stop()'s.
-    auto close_fut = asio::co_spawn(
-        ioc, acc->close(fixpp::session::close_mode::terminal), asio::use_future);
+    auto close_fut =
+        asio::co_spawn(ioc, acc->close(fixpp::session::close_mode::terminal), asio::use_future);
     ioc.run_for(4s);
     ioc.restart();
     ASSERT_EQ(close_fut.wait_for(0s), std::future_status::ready)

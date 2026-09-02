@@ -35,16 +35,16 @@
 
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-#include <asio/bind_cancellation_slot.hpp>
-#include <asio/redirect_error.hpp>
-#include <asio/steady_timer.hpp>
-#include <asio/cancellation_signal.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -506,7 +506,6 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
         << "SC-001: live TLS reconnect must resume the session to Active.";
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // #351 — WHERE a pending cancellation is actually answered in the reconnect
 // chain. MEASURED; the answer is neither reap named in the issue.
@@ -597,7 +596,6 @@ TEST_F(ReconnectLiveHappyPathTest, PendingCancellationAnswersWithErrorValueNotAT
     EXPECT_EQ(factory->connect_count.load(), 0)
         << "the attempt proceeded to connect despite a pending cancellation";
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // #351 — the counterfactual, so the disposition is chosen against evidence and

@@ -1539,16 +1539,16 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
             // asio::post does not -- the completion being waited for is delivered
             // by the reactor, and a post-only spin can starve it.
             asio::steady_timer quiesce{exec_};
-        bool first_poll = true;
+            bool first_poll = true;
             while (ssl_op_suspended_() && std::chrono::steady_clock::now() < close_deadline) {
                 // One IMMEDIATE re-check — the cancelled completion is normally already
-            // queued behind us — then a real backoff. Polling at zero length for the
-            // whole budget would turn the fallback for a WEDGED operation into a
-            // spin that saturates the strand it is waiting on, i.e. it would amplify
-            // exactly the condition it exists to contain.
-            quiesce.expires_after(first_poll ? std::chrono::milliseconds{0}
-                                             : std::chrono::milliseconds{1});
-            first_poll = false;
+                // queued behind us — then a real backoff. Polling at zero length for the
+                // whole budget would turn the fallback for a WEDGED operation into a
+                // spin that saturates the strand it is waiting on, i.e. it would amplify
+                // exactly the condition it exists to contain.
+                quiesce.expires_after(first_poll ? std::chrono::milliseconds{0}
+                                                 : std::chrono::milliseconds{1});
+                first_poll = false;
                 asio::error_code wait_ec;
                 co_await quiesce.async_wait(asio::redirect_error(asio::use_awaitable, wait_ec));
                 if (wait_ec) {
@@ -1623,7 +1623,8 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         });
 
         asio::error_code shutdown_ec;
-        co_await ssl_stream_->async_shutdown(asio::redirect_error(asio::use_awaitable, shutdown_ec));
+        co_await ssl_stream_->async_shutdown(
+            asio::redirect_error(asio::use_awaitable, shutdown_ec));
 
         // Retire BEFORE cancel (D-4.1) — see the connect/handshake sites.
         ++timer_epochs_->close;
