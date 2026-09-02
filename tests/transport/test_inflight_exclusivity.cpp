@@ -357,7 +357,6 @@ TEST(InflightExclusivity, HandshakeOneShotFromSucceededState) {
     ioc.run_for(200ms);
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Connected-but-NOT-handshaken pair — cell 6 needs a Transport in `connected`,
 // which make_handshaken_pair above has already moved past.
@@ -514,8 +513,7 @@ TEST(InflightExclusivity, HandshakeOverlapRefusedWhileFirstInFlight) {
 
     asio::co_spawn(
         strand,
-        [&hs_b, &hs_a, &a_inflight_when_b_issued, client_tls,
-         &ssl_cfg]() -> asio::awaitable<void> {
+        [&hs_b, &hs_a, &a_inflight_when_b_issued, client_tls, &ssl_cfg]() -> asio::awaitable<void> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
             a_inflight_when_b_issued = !hs_a.has_value();
             hs_b = co_await client_tls->async_handshake(ssl_cfg);

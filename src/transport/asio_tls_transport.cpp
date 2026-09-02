@@ -19,8 +19,6 @@
 
 #include "asio_tls_transport.hpp"
 
-#include "inflight_flag_guard.hpp"
-
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
@@ -65,6 +63,8 @@
 #include <string>
 #include <system_error>
 #include <vector>
+
+#include "inflight_flag_guard.hpp"
 
 // asio::async_connect is a free function in <asio/connect.hpp>.
 // Use it via namespace alias to avoid conflict with our member function name.

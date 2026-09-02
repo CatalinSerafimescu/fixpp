@@ -14,8 +14,6 @@
 
 #include "asio_plain_transport.hpp"
 
-#include "inflight_flag_guard.hpp"
-
 #include <asio/any_io_executor.hpp>
 #include <asio/async_result.hpp>
 #include <asio/connect.hpp>
@@ -27,6 +25,8 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
 #include <fixpp/core/error.hpp>
+
+#include "inflight_flag_guard.hpp"
 
 // Disambiguate between the member and the free function asio::async_connect.
 namespace asio_free = asio;

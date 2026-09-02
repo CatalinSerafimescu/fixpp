@@ -30,7 +30,7 @@
 
 **Validation rules**:
 - **In-flight exclusivity (API-level contract)**: at most one in-flight `async_read_some` AND one in-flight `async_write` per instance; concurrent second call returns IMMEDIATELY with `transport_read_in_progress` / `transport_write_in_progress`. Strand serialisation is defence-in-depth, NOT binding.
-- **One-shot connect / handshake** per `Transport` lifetime, answered by ENTRY STATE not call index (#339). `async_connect`: closed → `transport_already_closed`, connected/handshaken → `transport_already_connected`, fresh → attempts. `async_handshake`: closed → `transport_already_closed`, fresh/handshaken → `transport_already_connected`, connected → attempts.
+- **One-shot connect / handshake** per `Transport` lifetime, answered by ENTRY STATE not call index (#339). `async_connect`: closed → `transport_already_closed`, connected/handshaken → `transport_already_connected`, fresh with an attempt IN FLIGHT → `transport_already_connected` (#342), fresh and idle → attempts. `async_handshake`: closed → `transport_already_closed`, fresh/handshaken → `transport_already_connected`, connected with a handshake IN FLIGHT → `transport_already_connected` (#342), connected and idle → attempts.
 - **Post-`close()`** every `async_*` returns `transport_already_closed`.
 
 **State transitions** (held in impl state; see E-9 `asio_tls_transport`):

@@ -2142,32 +2142,39 @@ requirement. Evidence: issue #339.
 
   | call | `fresh` | `connected` | `handshaken` | `closed` |
   |---|---|---|---|---|
-  | `async_connect` | attempts (a failed attempt stays `fresh`, retryable) | 97 | 97 | **98** ← moved |
-  | `async_handshake` | 97 | attempts | 97 | **98** ← moved |
+  | `async_connect` | attempts if idle; **97 if an attempt is IN FLIGHT** (#342). A failed attempt stays `fresh`, retryable | 97 | 97 | **98** ← moved |
+  | `async_handshake` | 97 | attempts if idle; **97 if a handshake is IN FLIGHT** (#342) | 97 | **98** ← moved |
   | `async_read_some` / `async_write` | 98 | 98 | proceeds | 98 |
 
   **Plaintext** — `{fresh, connected, closed}`, no handshake surface:
 
   | call | `fresh` | `connected` | `closed` |
   |---|---|---|---|
-  | `async_connect` | attempts (a failed attempt stays `fresh`, retryable) | 97 | **98** ← moved |
+  | `async_connect` | attempts if idle; **97 if an attempt is IN FLIGHT** (#342). A failed attempt stays `fresh`, retryable | 97 | **98** ← moved |
   | `async_read_some` / `async_write` | 98 | proceeds | 98 |
 
-  ⚠️ **`fresh → attempts` covers the IN-FLIGHT case too**, which is where the call-count reading
-  does its most concrete damage: `async_connect` leaves the Transport `fresh` for the whole
-  duration of an attempt, so a second call issued while the first is still running also attempts
-  — it does NOT get `transport_already_connected`. The 012 spec's Edge Case said otherwise and is
-  amended alongside this row.
+  ⚠️ **THE IN-FLIGHT CASE MOVED ON 2026-09-02 — this row's original claim is now FALSE.** It read
+  *"`fresh → attempts` covers the IN-FLIGHT case too … a second call issued while the first is
+  still running also attempts"*. True when written; #342 then added a real in-flight guard, so an
+  overlapping second call is now REFUSED with 97. The tables above carry the current answer and
+  B-342-1 carries the delta. Nothing else is restated here: this row is about the `closed` column.
 
   FR-006 states the post-close rule without exception — *"After `close()` returns, every subsequent `async_*` returns `transport_already_closed`"* — and `async_read_some` / `async_write` already honoured it on both transports. `async_connect` and `async_handshake` did not: their one-shot guards tested `state_ != fresh` / `state_ != connected`, which `closed` also satisfies, so the closed case fell through to the one-shot answer.
 
   **`close()` is not the only door into `closed`, so the delta is wider than "post-`close()`".** The TLS transport also enters `closed` from inside `async_handshake` — re-derive the set with `grep -n 'state_ = state_t::closed' src/transport/asio_tls_transport.cpp` rather than trusting a count here. In that state **`async_read_some` and `async_write` already answered 98 before this change**, so the change did not invent a meaning for the failure state: it made the two remaining entry points agree with the two that were already there. The plaintext transport has no second door — `close()` is the only writer of its `closed` state.
 
-  ⚠️ **Which handshake failures get there is a matter of WHEN, not of failing.** The returns that precede any state write leave the Transport `connected` and are genuinely retryable — the FR-017 unset/PSK rejection and the pre-handshake cancellation reap. Everything from the OpenSSL exchange onward closes it, *including the post-exchange result-construction failure*, which is why "in-protocol" is the wrong predicate and "has the exchange been entered" is the right one. The consequence people trip on: a retry after a config rejection is a **real attempt**, not a one-shot refusal, because `connected` is the state `async_handshake` admits.
+  ⚠️ **Which handshake failures get there is a matter of WHEN, not of failing.** The returns that precede any state write leave the Transport `connected` and are genuinely retryable — the FR-017 unset/PSK rejection (the pre-handshake cancellation reap that also sat here was deleted as unreachable on 2026-09-02, #341). Everything from the OpenSSL exchange onward closes it, *including the post-exchange result-construction failure*, which is why "in-protocol" is the wrong predicate and "has the exchange been entered" is the right one. The consequence people trip on: a retry after a config rejection is a **real attempt**, not a one-shot refusal, because `connected` is the state `async_handshake` admits.
 
-  ⚠️ **Witness gap, stated rather than papered over.** The FR-017 rejection is witnessed (`PreflightHandshakeRejectionLeavesTransportOpen`, red under a mutant that closes on that path). The **cancellation reap is not**, and the attempt to witness it is the useful part: `async_handshake` calls `reset_cancellation_state()` on entry, which installs a *fresh* cancellation state, so a signal emitted by the caller before the call is invisible to the reap — it can only fire on a signal landing in the window between that reset and the check. Every attempt to drive it from the public surface either unwound the coroutine (`total`) or ran the real handshake to the bound (`partial`). So its "stays `connected`" claim rests on STRUCTURE — it returns above every `state_` write, which reading settles and which cannot rot — not on a measurement. Whether that guard is reachable at all is a separate production question, not one #339 answers.
+  ⚠️ **The witness gap recorded here is CLOSED BY REMOVAL, not by a measurement (#341).** This
+  paragraph described a pre-handshake cancellation reap that #339 could not witness from the
+  public surface. It is now deleted: `reset_cancellation_state()` re-constructs the cancellation
+  state from the parent slot with `cancelled_` value-initialised, and both `this_coro` awaiters
+  are `await_ready()==true`, so no suspension point separates the reset from the read and the reap
+  could only ever observe `none`. It was unreachable, not merely unwitnessed — so there is no
+  longer a claim here needing a witness. The FR-017 rejection remains witnessed by
+  `PreflightHandshakeRejectionLeavesTransportOpen`.
 
-  **The one-shot contract did not move for the OPEN states** — `async_connect` from `connected`/`handshaken`, `async_handshake` from `fresh`/`handshaken` — witnessed by `test_inflight_exclusivity.cpp` cells 3 and 4. *(FR-006; FR-007 as amended; issue #339.)*
+  **The one-shot contract did not move for the OPEN states** — `async_connect` from `connected`/`handshaken`, `async_handshake` from `fresh`/`handshaken` — witnessed by `test_inflight_exclusivity.cpp` cells 3 and 4 (renamed 2026-09-02 to `ConnectOneShotFromSucceededState` / `HandshakeOneShotFromSucceededState`, because they are SEQUENTIAL and were mis-billed as overlap witnesses — #342). *(FR-006; FR-007 as amended; issue #339.)*
 
   **Three hostile-review rounds shaped this row, all on one recurring error: describing the contract by CALL COUNT when it is decided by STATE.** Cut 1 said the one-shot contract was unchanged — false for the failure state. Cut 2 said "handshake failure" without excluding the preflight returns — false for those. Cut 3 said a second call after a preflight rejection "answers 97" — false again, since `connected` is exactly the state that admits the call. The table above replaces the sentence that kept rotting, because a state table is checkable against the code and a call-count sentence is not.
 
@@ -2182,3 +2189,99 @@ requirement. Evidence: issue #339.
   matrix as a proof of the tables.
 
   Witnesses, each seen RED before its green was believed: `AsioPlainTransport.PostCloseConnectReturnsAlreadyClosed`, `AsioTlsTransportErrorPaths.PostClose{Connect,Handshake}ReturnsAlreadyClosed` (one per site, each red under a mutant removing only its own guard), `PostFailedHandshakeEntryPointsReturnAlreadyClosed` (red under both TLS mutants — it probes both guards, so deliberately not part of that diagonal), and `PreflightHandshakeRejectionLeavesTransportOpen` (the forced-spurious-HIT arm: it pins the EXACT answers a still-open Transport gives — the repeated preflight rejection, and 97 from `async_connect` — and is the only cell that reds when a guard fires where it must not).
+
+
+---
+
+## fixpp#340 / #341 / #342 — transport contract truth + real overlap guard (2026-09-02)
+
+Three contract-vs-code divergences found by the Codex hostile review of #339's branch and
+deliberately not folded into it. Two resolve on the DOCUMENT side, one is a functional delta.
+Spec: none new — these are defect fixes against 012-2h-transport's existing FR-005 / FR-007.
+Evidence: issues #340, #341, #342.
+
+### Behaviors
+
+- **B-342-1 — an OVERLAPPING `async_connect` / `async_handshake` is now REFUSED with
+  `transport_already_connected` (97); before this it really attempted, and the two attempts
+  corrupted each other.** This is the functional delta of the three.
+
+  The one-shot guard is a STATE test, and `state_` advances only on SUCCESS — so for the whole
+  duration of an attempt the Transport was still `fresh` (or `connected`, for handshake) and a
+  second call passed straight through. That was not merely redundant: asio's composed
+  `async_connect` calls `socket_.close(ec)` immediately before each endpoint attempt (vendored
+  asio, `asio/impl/connect.hpp`), so the second attempt closed the socket out from under the
+  first, the first could surface as `operation_aborted` — which this transport maps to
+  `transport_connect_timeout` when no cancellation state is set — and the shared connect-epoch
+  counter was advanced by whichever completed first.
+
+  `connect_in_flight_` (both transports) and `handshake_in_flight_` (TLS) now carry that
+  dimension. **No new error variant was minted**: 97 is what every contract site already
+  published for this case, so the guard makes the published contract TRUE rather than requiring
+  it to be rewritten. That was also forced — the `transport_*` family is pinned contiguous at
+  94..115 (FR-034 / T006) and `error.hpp` already runs past it, so a new variant could not have
+  sat in the block.
+
+  ⚠️ **A FAILED attempt is still retryable.** The flags are cleared by an RAII guard on every
+  exit path including frame destruction under cancellation, so a failed connect leaves the
+  Transport `fresh` AND idle. The B-339-1 tables above carry the full state answer.
+
+  Witnesses in `tests/transport/test_inflight_exclusivity.cpp`, each seen RED under a mutation
+  that removes ONLY the mechanism it tests — the three form a diagonal, so no cell is standing in
+  for another:
+
+  | mutation | cell 5 overlap connect | cell 6 overlap handshake | cell 7 retry-after-failure |
+  |---|---|---|---|
+  | delete the connect overlap guard | **RED** | pass | pass |
+  | delete the handshake overlap guard | pass | **RED** | pass |
+  | guard never clears the flag | pass | pass | **RED** |
+
+  The third row is why cell 7 exists: a guard that sets the flag and never clears it passes both
+  overlap cells while wedging the Transport into permanent 97.
+
+  ⚠️ **Cells 5 and 6 carry a forced-spurious-HIT arm, without which they would be vacuous.** 97 is
+  ALSO what the one-shot state test answers once the first call has succeeded, so "the second call
+  got 97" passes with no overlap guard at all — just by letting the first finish first. Each cell
+  additionally asserts the first call was still IN FLIGHT at the instant the second issued, read
+  with no suspension point between it and the guard, so it cannot go stale.
+
+- **B-342-2 — `close()` no longer sends `SSL_shutdown` underneath a suspended handshake.** A
+  latent pre-existing defect, closed as a consequence of B-342-1 rather than as its own change.
+  `close()` gated close-notify on `ssl_stream_ && !read_in_flight_ && !write_in_flight_`; a
+  suspended `async_handshake` has `ssl_stream_` ENGAGED and neither read/write flag set, so
+  `close()` reached `SSL_shutdown` with an SSL operation suspended on the stream — exactly the
+  mutation that condition's own comment forbids. `handshake_in_flight_` joins the condition.
+
+- **B-341-1 — cancellation takes effect from the FIRST REAL SUSPENSION POINT; the eight pre-op
+  cancellation reaps that claimed otherwise were unreachable and are deleted.** No behaviour
+  changes: every deleted branch was dead.
+
+  Verified at the asio source rather than inferred. `awaitable_thread::reset_cancellation_state`
+  re-constructs `cancellation_state` from the parent slot, and that ctor `emplace`s a fresh impl
+  whose `cancelled_` is value-initialised, so emissions that already happened are NOT replayed.
+  Both `this_coro` awaiters involved are `await_ready()==true` with an empty `await_suspend`, so
+  no suspension point separates the reset from the read — the reap could only ever observe
+  `none`.
+
+  ⚠️ **The issue named ONE site; the mechanism gives EIGHT.** `async_connect`,
+  `async_read_some` and `async_write` on both transports, `async_handshake` on TLS, and
+  `async_accept` on the listener. Stopping at the named site would have left seven live. Every
+  reap that FOLLOWS a `co_await` — post-resolve, post-connect, post-handshake — is reachable and
+  is kept.
+
+  Consequence a caller must know: a cancellation delivered BEFORE one of these calls is picked up
+  is not observed at entry; it takes effect when the first real async operation completes with
+  `operation_aborted`. The listener already had the reachable form of this — its `is_open()`
+  short-circuit (RC#H) — which is why deleting its reap costs nothing.
+
+- **B-340-1 — `Transport::cancel()` has NO documented failure; it returns `expected_t<void>` for
+  symmetry only.** Contract-side resolution: the published contract named
+  `transport_already_closed` after `close()` as its ONLY documented failure, and no implementation
+  ever returned it — both return `{}` unconditionally. No production caller branches on the
+  result, so there was no caller evidence forcing the code side; the never-implemented failure is
+  deleted from the contract instead of being added to the code. `cancel()` after `close()`
+  therefore still succeeds, as it always did in fact.
+
+  Also struck at the same site: `specs/012-2h-transport/contracts/transport.hpp` still carried the
+  *"thread-safe (ASIO cancellation_signal is thread-safe)"* claim that #333 removed from the
+  implementing header on 2026-08-31. The contract copy had diverged and kept publishing it.

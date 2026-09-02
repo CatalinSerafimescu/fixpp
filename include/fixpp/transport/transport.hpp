@@ -48,8 +48,11 @@ struct ConnectInfo;
 // Transport instance. Concurrent second call returns IMMEDIATELY with
 // transport_read_in_progress / transport_write_in_progress per [2h §6.6].
 // Strand serialisation is defence-in-depth, NOT binding. async_connect and
-// async_handshake are one-shot per Transport lifetime; the ENTRY STATE decides the
-// answer, not the call index — see async_connect/async_handshake below (#339).
+// async_handshake are one-shot per Transport lifetime; the ENTRY STATE decides
+// the answer, not the call index (#339) — and that state includes whether an
+// attempt is IN FLIGHT, so an OVERLAPPING second call is REFUSED with
+// transport_already_connected rather than racing the first (#342). See
+// async_connect / async_handshake below for the per-state table.
 // ─────────────────────────────────────────────────────────────────────────────
 class Transport {
 public:
@@ -93,8 +96,15 @@ public:
     //     (kernel SYN → SYN-ACK → ACK); for TlsTransport, async_handshake is a
     //     SEPARATE step the FSM issues after this completes successfully.
     //
-    //     Cancellation: cancellation_type::total → transport_connect_cancelled.
-    //     By STATE not call count (#339): closed → 98; connected/handshaken → 97; fresh → attempts.
+    //     Cancellation: cancellation_type::total → transport_connect_cancelled,
+    //     effective from the FIRST REAL SUSPENSION POINT — a signal emitted
+    //     before the call is not observed at entry (#341).
+    //     By STATE, not call index (#339, #342):
+    //       closed                       → 98 transport_already_closed
+    //       connected / handshaken       → 97 transport_already_connected
+    //       fresh, an attempt IN FLIGHT  → 97 (overlap refused, #342)
+    //       fresh and idle               → ATTEMPTS; a FAILED attempt stays
+    //                                      fresh and is retryable.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>> async_connect(
         Endpoint const& ep) = 0;
 

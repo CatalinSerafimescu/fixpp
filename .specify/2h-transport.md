@@ -256,9 +256,9 @@ public:
     //     the resolver / connect chain causes the awaitable to complete with
     //     transport_connect_cancelled.
     //
-    //     Idempotency: calling async_connect twice on the same Transport
-    //     before close()/cancel() returns is a programmer error — the second
-    //     call returns transport_already_connected.
+    //     Idempotency: a second async_connect from a SUCCEEDED state, or while
+    //     one is IN FLIGHT (#342), returns transport_already_connected; after a
+    //     FAILED attempt the Transport is still fresh and really retries.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>>
         async_connect(Endpoint const& ep) = 0;
 

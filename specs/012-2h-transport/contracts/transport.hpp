@@ -91,8 +91,15 @@ public:
     //     (kernel SYN → SYN-ACK → ACK); for TlsTransport, async_handshake is a
     //     SEPARATE step the FSM issues after this completes successfully.
     //
-    //     Cancellation: cancellation_type::total → transport_connect_cancelled.
-    //     By STATE not call count (#339): closed → 98; connected/handshaken → 97; fresh → attempts.
+    //     Cancellation: cancellation_type::total → transport_connect_cancelled,
+    //     effective from the FIRST REAL SUSPENSION POINT — a signal emitted
+    //     before the call is not observed at entry (#341).
+    //     By STATE, not call index (#339, #342):
+    //       closed                       → 98 transport_already_closed
+    //       connected / handshaken       → 97 transport_already_connected
+    //       fresh, an attempt IN FLIGHT  → 97 (overlap refused, #342)
+    //       fresh and idle               → ATTEMPTS; a FAILED attempt stays
+    //                                      fresh and is retryable.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>>
         async_connect(Endpoint const& ep) = 0;
 
