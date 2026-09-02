@@ -77,7 +77,8 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
 //       [US3 wiring deferred to T017 — for now just capture snap for ssl_cfg build]
 //   (3) Build per-attempt SslCtxConfig ssl_cfg from the snapshot.
 //       HOLD ssl_cfg in attempt scope: async_handshake takes it by const&
-//       [[clang::lifetimebound]] (tls_transport.hpp:116-118) — never a temporary.
+//       [[clang::lifetimebound]] on TlsTransport::async_handshake's cfg
+//       parameter (tls_transport.hpp) — never a temporary.
 //   (4) t = factory_->make(exec, ssl_cfg, nullptr); on failure count + continue.
 //   (5) t->async_connect(endpoint_); on failure release t, count + continue.
 //   (6) dynamic_cast<TlsTransport*>(t.get()) null-check.
@@ -229,7 +230,7 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
         // ── Step 3: build per-attempt SslCtxConfig (held in attempt scope) ──
         // ssl_cfg is held across both make() and async_handshake() — the arg
         // to async_handshake is const& [[clang::lifetimebound]]; MUST NOT pass
-        // a temporary (tls_transport.hpp:116-118).
+        // a temporary (TlsTransport::async_handshake's cfg parameter, tls_transport.hpp).
         // tls_profile_ is set by Session::open() via set_tls_profile(); without
         // it async_handshake rejects the attempt with transport_psk_unsupported.
         fixpp::tls::SslCtxConfig ssl_cfg{};
@@ -280,7 +281,7 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
         }
 
         // ssl_cfg is still in scope — required by [[clang::lifetimebound]]
-        // on async_handshake's cfg parameter (tls_transport.hpp:116-118).
+        // on TlsTransport::async_handshake's cfg parameter (tls_transport.hpp).
         auto handshake_result_r = co_await tls->async_handshake(ssl_cfg);
         if (!handshake_result_r) {
             // Handshake failure: release t, count, continue.

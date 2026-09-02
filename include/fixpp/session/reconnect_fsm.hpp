@@ -188,7 +188,8 @@ public:
     //   (2) read cert_source snapshot for rotation detection (E-3, US3);
     //   (3) build per-attempt SslCtxConfig ssl_cfg from the snapshot — held in
     //       attempt scope across both make() and async_handshake() (the arg is
-    //       const& [[clang::lifetimebound]] at tls_transport.hpp:116-118);
+    //       const& [[clang::lifetimebound]] on TlsTransport::async_handshake's
+    //       cfg parameter, tls_transport.hpp);
     //   (4) factory_->make(exec, ssl_cfg, mr) → on failure count attempt, continue;
     //   (5) t->async_connect(endpoint_) → on failure release t, count, continue;
     //   (6) dynamic_cast<TlsTransport*>(t.get()) null-check → on null count, continue;

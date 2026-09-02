@@ -53,6 +53,22 @@ struct ConnectInfo;
 // attempt is IN FLIGHT, so an OVERLAPPING second call is REFUSED with
 // transport_already_connected rather than racing the first (#342). See
 // async_connect / async_handshake below for the per-state table.
+//
+// CANCELLATION TIMING (#341) — the canonical statement; the implementations
+// point here rather than repeating it. Cancellation takes effect from the
+// FIRST REAL SUSPENSION POINT of each method, never at entry. Every async_*
+// opens with `reset_cancellation_state(enable_total_cancellation())` (D-17),
+// and that call re-constructs the coroutine's cancellation_state from the
+// parent slot; the ctor emplaces a fresh impl whose `cancelled_` is
+// value-initialised, so an emission that already happened is NOT replayed
+// into the new state. Both awaiters involved are `await_ready()==true` with
+// an empty `await_suspend`, so nothing between the reset and a following read
+// suspends. A pre-operation reap could therefore only ever observe `none` --
+// which is why none of the implementations has one, and why a signal emitted
+// BEFORE a call is first observed when the underlying async op completes with
+// operation_aborted. Reaps that FOLLOW a co_await are reachable and are kept.
+// Re-derive: asio cancellation_state.hpp's (slot, filter) ctor + impl_base(),
+// and awaitable_thread::reset_cancellation_state in asio impl/awaitable.hpp.
 // ─────────────────────────────────────────────────────────────────────────────
 class Transport {
 public:

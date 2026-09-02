@@ -148,12 +148,11 @@ asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::asy
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     // #341: no pre-accept cancellation reap here, deliberately -- it would be
-    // dead. reset_cancellation_state() above re-constructs the cancellation
-    // state from the parent slot with `cancelled_` value-initialised, prior
-    // emissions are not replayed, and nothing between it and here suspends
-    // (both are await_ready()==true awaiters -- asio impl/awaitable.hpp
-    // await_transform). The RC#H is_open() short-circuit below is the
-    // REACHABLE handler for "cancel() ran before this coroutine resumed".
+    // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
+    // for the mechanism and the re-derivation recipe.
+    // The RC#H is_open() short-circuit below is the REACHABLE handler for the
+    // case the dead reap looked like it covered: cancel() ran before this
+    // coroutine resumed.
 
     // RC#H (P3-1): if the acceptor handle is already closed (e.g., cancel()
     // was called before this coroutine resumed) short-circuit immediately with

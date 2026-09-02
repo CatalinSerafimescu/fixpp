@@ -34,13 +34,10 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
-#include <asio/ip/address.hpp>
-#include <asio/ip/tcp.hpp>
 #include <asio/strand.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <chrono>
-#include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>

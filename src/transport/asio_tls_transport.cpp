@@ -932,18 +932,9 @@ void asio_tls_transport::setup_ssl_ctx_() {
     // so the Transport stays retryable per FR-007.
     detail::inflight_flag_guard connect_guard{connect_in_flight_};
 
-    // #341: there is NO pre-connect cancellation reap here, deliberately.
-    // reset_cancellation_state() above re-constructs the coroutine's
-    // cancellation_state from the parent slot, and that ctor emplaces a fresh
-    // impl whose `cancelled_` is value-initialised (asio cancellation_state.hpp
-    // ctor; awaitable_thread::reset_cancellation_state, asio impl/awaitable.hpp).
-    // Emissions that already happened are NOT replayed into the new state, and
-    // no suspension point separates the reset from this line, so a reap here
-    // could only ever read `none`. Cancellation therefore takes effect from the
-    // FIRST REAL SUSPENSION POINT onward -- the reaps below, which follow a
-    // co_await, are reachable and are kept.
-    // Re-derive: read the cancellation_state(slot, filter) ctor and confirm
-    // impl_base::impl_base() zero-initialises cancelled_.
+    // #341: no pre-connect cancellation reap here, deliberately -- it would be
+    // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
+    // for the mechanism and the re-derivation recipe.
 
     // ── Resolve ───────────────────────────────────────────────────────────────
     asio::ip::tcp::resolver resolver{exec_};
@@ -1081,18 +1072,9 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // cancellation, so a failed handshake stays retryable from `connected`.
     detail::inflight_flag_guard handshake_guard{handshake_in_flight_};
 
-    // #341: there is NO pre-handshake cancellation reap here, deliberately.
-    // reset_cancellation_state() above re-constructs the coroutine's
-    // cancellation_state from the parent slot, and that ctor emplaces a fresh
-    // impl whose `cancelled_` is value-initialised (asio cancellation_state.hpp
-    // ctor; awaitable_thread::reset_cancellation_state, asio impl/awaitable.hpp).
-    // Emissions that already happened are NOT replayed into the new state, and
-    // no suspension point separates the reset from this line, so a reap here
-    // could only ever read `none`. Cancellation therefore takes effect from the
-    // FIRST REAL SUSPENSION POINT onward -- the reap below, which follows a
-    // co_await, is reachable and is kept.
-    // Re-derive: read the cancellation_state(slot, filter) ctor and confirm
-    // impl_base::impl_base() zero-initialises cancelled_.
+    // #341: no pre-handshake cancellation reap here, deliberately -- it would be
+    // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
+    // for the mechanism and the re-derivation recipe.
 
     // Reject PSK config (FR-017).
     if (cfg.profile == fixpp::tls::SecurityProfile::unset) {
@@ -1270,13 +1252,8 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     }
 
     // #341: no pre-read cancellation reap here, deliberately -- it would be
-    // dead. reset_cancellation_state() above re-constructs the cancellation
-    // state from the parent slot with `cancelled_` value-initialised, prior
-    // emissions are not replayed, and nothing between it and here suspends
-    // (the reset and the state read are both await_ready()==true awaiters --
-    // asio impl/awaitable.hpp await_transform). A reap here could only read
-    // `none`. Cancellation takes effect from the first real suspension point,
-    // i.e. the ssl_stream_->async_read_some below, which completes with operation_aborted.
+    // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
+    // for the mechanism and the re-derivation recipe.
 
     read_in_flight_ = true;
 
@@ -1331,13 +1308,8 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     }
 
     // #341: no pre-write cancellation reap here, deliberately -- it would be
-    // dead. reset_cancellation_state() above re-constructs the cancellation
-    // state from the parent slot with `cancelled_` value-initialised, prior
-    // emissions are not replayed, and nothing between it and here suspends
-    // (the reset and the state read are both await_ready()==true awaiters --
-    // asio impl/awaitable.hpp await_transform). A reap here could only read
-    // `none`. Cancellation takes effect from the first real suspension point,
-    // i.e. the asio::async_write below, which completes with operation_aborted.
+    // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
+    // for the mechanism and the re-derivation recipe.
 
     write_in_flight_ = true;
 
@@ -1416,11 +1388,13 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // in ~asio_tls_transport, which (for engine-managed sessions) runs after the
     // role loop exits — i.e., after run_read_pump co_returns and all pending SSL
     // completions have executed. [2g §7.8]
-    // handshake_in_flight_ joins the condition (#342). A suspended
-    // async_handshake has ssl_stream_ ENGAGED and state_ == connected, so
-    // before this term close() reached SSL_shutdown with an SSL operation
-    // suspended on it -- exactly the mutation the paragraph above forbids.
-    if (ssl_stream_ && !read_in_flight_ && !write_in_flight_ && !handshake_in_flight_) {
+    // ssl_op_suspended_() also covers handshake_in_flight_ (#342). Before that
+    // term existed, a suspended async_handshake -- ssl_stream_ ENGAGED, state_
+    // == connected, neither read nor write flag set -- let close() reach
+    // SSL_shutdown with an SSL operation suspended on the stream, exactly the
+    // mutation the paragraph above forbids. The predicate's declaration carries
+    // the invariant that keeps the set complete.
+    if (ssl_stream_ && !ssl_op_suspended_()) {
         SSL* ssl = ssl_stream_->native_handle();
         if (ssl) {
             // First SSL_shutdown sends close_notify; bounded by tls_close_timeout

@@ -22,6 +22,19 @@
 // co_return AND on frame destruction (asio destroys a suspended awaitable
 // frame under total cancellation, which runs in-scope locals' destructors).
 //
+// ⚠️ SCOPE, stated because the argument above proves more than this header
+// fixes. Reason (2) -- a frame destroyed while suspended runs in-scope
+// destructors but never resumes the body -- applies WORD FOR WORD to
+// read_in_flight_ / write_in_flight_, which remain plain-assignment. A frame
+// torn down while suspended in async_read_some / async_write therefore leaves
+// its flag stuck true and wedges the Transport into permanent
+// transport_read_in_progress / transport_write_in_progress, the exact symmetry
+// of the 97 wedge this guard exists to prevent. Those two are NOT converted
+// here: each has a single call site whose only cross-coroutine reader is
+// close(), and converting them would ship with the same witness gap #339 hit
+// trying to drive "frame destroyed while suspended" from the public surface.
+// Known and deferred, not overlooked -- see the follow-up issue.
+//
 // The guard writes through the enclosing Transport's `this`. That is not a new
 // lifetime hazard: the surrounding coroutine body already dereferences `this`
 // (socket_, state_) at every step, so a frame resumed or destroyed after the
