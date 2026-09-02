@@ -2374,9 +2374,9 @@ Evidence: issues #340, #341, #342.
   `test_inflight_exclusivity.cpp`'s `CloseDoesNotDeliverCloseNotify_PinsDefect348`, so a future fix
   has to come through that assertion deliberately instead of changing the wire silently.
 
-  ⚠️ Consequence for an operator TODAY: a peer of a fixpp session that closes cleanly logs a
-  transport read ERROR, not a benign truncation. Alerting tuned on the documented behaviour will
-  mis-classify every normal disconnect.
+  ⚠️ Consequence for a caller of `close()` ITSELF: the peer logs a transport read ERROR, not a
+  benign truncation. ⚠️ **This is no longer the whole story for the SHIPPED teardown paths** —
+  see the second amendment to this row below, which is where the current answer lives.
 
 - **B-340-1 — `Transport::cancel()` has NO documented failure; it returns `expected_t<void>` for
   symmetry only.** Contract-side resolution: the published contract named
@@ -2430,11 +2430,10 @@ Evidence: issues #346, #348, #349; new issue #351.
   chain.
 
 - **B-348-1 (AMENDED) — `close_async()` exists and delivers the close-notify that `close()` throws
-  away. `close()` itself is UNCHANGED, and no production caller uses `close_async()`.**
-
-  The B-348-1 row above records the defect and still stands as the shipped behaviour: a peer of a
-  fixpp session that closes cleanly observes `transport_read_error`, not a benign truncation, and
-  alerting tuned on the documented behaviour still mis-classifies every normal disconnect.
+  away. `close()` itself is UNCHANGED.** ⚠️ This row's *"no production caller uses
+  `close_async()`"* and its peer-observation paragraph were true when written and are
+  **SUPERSEDED** by the second amendment below; read that one for what ships. Nothing else in this
+  row has changed.
 
   What is new is an opt-in entry point. `Transport::close_async()` is a virtual WITH A DEFAULT
   (`co_return close();`), so the `[const §XIV.2]` five-**pure**-virtual cap is untouched and no
@@ -2448,6 +2447,49 @@ Evidence: issues #346, #348, #349; new issue #351.
   ⚠️ **#348 IS NOT CLOSED BY THIS.** Shipping the capability and adopting it are separate decisions.
   The obstacle is named at the declaration: `Session`'s terminal close emits
   `cancellation_type::total` immediately before closing, which would cancel an awaited shutdown.
+
+- **B-348-1 (AMENDED 2) — the shipped teardown paths now use `close_async()`, so a peer of a fixpp
+  session that closes cleanly observes `transport_read_eof`. `close()` is still unchanged and a
+  direct caller of it still gets the abortive close.**
+
+  Two adoptions, both measured at the PEER:
+
+  | teardown path | peer read outcome |
+  |---|---|
+  | `Engine::stop()` — the per-session transport close on each session strand | `transport_read_eof` |
+  | `Session::close(terminal \| graceful)` — the close that follows the root total-cancel | `transport_read_eof` |
+  | a direct `Transport::close()` call | `transport_read_error` — unchanged, and still pinned |
+
+  ⚠️ **THE STATED OBSTACLE WAS REAL AND IS RESOLVED IN THE TRANSPORT, NOT AT THE CALL SITE.** The
+  first amendment named it correctly: at both sites an SSL operation is suspended — the read pump
+  is blocked in `async_read_some`, and the root total-cancel that precedes the close has not yet
+  been delivered to it — and `close_async()` inherited `close()`'s rule of skipping the alert
+  whenever that is so. Adopting it unchanged would have compiled, passed, and delivered nothing.
+
+  `close_async()` now QUIESCES instead of skipping: `socket_.cancel()` completes the pending
+  operation with `operation_aborted` without touching SSL state, the coroutine unwinds, the
+  `inflight_flag_guard` clears the flag, and only then is the alert written. `state_` is closed
+  before the cancel, so a woken pump cannot start a new read and the join terminates. The whole
+  call — quiesce plus shutdown — is bounded by ONE `Config::tls_close_timeout` budget, and an
+  operation that does not quiesce inside it falls back to the abortive close. **The worst case is
+  therefore the old behaviour plus a bounded wait, never a hang.**
+
+  ⚠️ **Sites deliberately NOT adopted**, so the next reader does not read the two above as "all of
+  them": the accept-loop reject paths in `engine.cpp` (bad dynamic_cast, handshake failure,
+  first-frame failure, malformed CompIDs, registry mismatch, `open()` failure) and `session.cpp`'s
+  FQ-G force-close of a wedged logout phase 1. The reject paths are serial in the accept loop, so a
+  graceful close there lets one unresponsive peer per connection spend the close budget ahead of
+  every other pending accept; the FQ-G close exists to unwedge a blocked writer, where abortive is
+  the intent. Derive the current adopters with `git grep close_async -- src`, never from this list.
+
+  Witnesses: `tests/session/engine_readpump_test.cpp`'s
+  `EngineStopDeliversCloseNotifyToPeer_Fixes348` and
+  `SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348` assert the PEER's read outcome, and each
+  was proven RED against a tree with ONLY its own adoption reverted. The transport-level quiesce is
+  witnessed by `CloseAsyncQuiescesOwnPendingReadAndStillDeliversAlert_Fixes348`, proven RED by
+  restoring the `|| ssl_op_suspended_()` bail — a mutation under which the pre-existing
+  `CloseAsyncDeliversCloseNotify_Fixes348` stays GREEN, which is why that cell alone was not
+  evidence for any of this.
 
 ### Limitations
 

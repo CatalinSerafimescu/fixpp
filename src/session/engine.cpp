@@ -1260,11 +1260,28 @@ asio::awaitable<void> Engine::stop() {
                     co_await asio::co_spawn(
                         *entry.session_strand,
                         [tp]() -> asio::awaitable<void> {
-                            // close() is synchronous + idempotent. Running on the session
+                            // #348 — close_async(), not close(). Running on the session
                             // strand serializes it with the in-flight async_read_some
-                            // completion (the BIO_ctrl touch in map_error_code). [INV-4a]
-                            tp->close();
-                            co_return;
+                            // completion (the BIO_ctrl touch in map_error_code) exactly as
+                            // close() did. [INV-4a]
+                            //
+                            // WHY THE ASYNC ONE HERE. This is the site whose own comment
+                            // above says the read pump "is blocked in async_read_some with
+                            // no peer EOF" and closes the socket to wake it — i.e. the
+                            // abortive close is deliberate here, and its cost is that every
+                            // peer of an engine shutting down reads an OS-level error
+                            // instead of a TLS close-notify (#348, measured). close_async()
+                            // wakes the pump the same way (socket_.cancel() rather than
+                            // socket_.close()), waits for the frame to unwind, and only then
+                            // writes the alert. Falls back to the abortive close if the op
+                            // does not quiesce inside tls_close_timeout, so the worst case
+                            // is today's behaviour plus a bounded wait.
+                            //
+                            // No deadlock: we are SUSPENDED on this strand while waiting, so
+                            // the pump's cancelled completion runs. The plaintext transport
+                            // inherits Transport::close_async()'s `co_return close()`, so
+                            // this is a no-op change for a non-TLS session.
+                            (void)co_await tp->close_async();
                         },
                         asio::use_awaitable);
                 }

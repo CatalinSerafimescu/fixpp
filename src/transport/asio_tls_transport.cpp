@@ -1444,11 +1444,9 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         co_return core::expected_t<void>{};
     }
 
-    // No stream, or an SSL operation is suspended on it -- there is nothing to
-    // shut down gracefully, and mutating SSL state underneath a suspended op is
-    // the hazard close() documents at length. Fall back to the abortive path,
-    // which is the honest outcome rather than a pretended graceful one.
-    if (!ssl_stream_ || ssl_op_suspended_()) {
+    // No stream at all -- nothing to shut down gracefully. Delegate to close(),
+    // which is reached with state_ still open and so does the socket teardown.
+    if (!ssl_stream_) {
         co_return close();
     }
 
@@ -1458,7 +1456,66 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // no-op that returns {} without closing the socket. That is subsumption, not
     // a leak, while close_async runs to completion; an adopter that can race the
     // two must treat close_async as the owner of the close.
+    //
+    // ⚠️ FROM HERE ON, DO NOT DELEGATE TO close(): it reads state_ for its
+    // idempotency check and would return {} having closed nothing. Every bail-out
+    // below performs the socket teardown itself.
     state_ = state_t::closed;
+
+    // ONE budget for the whole call, not one per phase. The quiesce below and
+    // the shutdown deadline further down both run against this deadline, so the
+    // documented tls_close_timeout knob bounds close_async as a whole rather
+    // than being spent twice over.
+    const auto close_deadline = std::chrono::steady_clock::now() + cfg_.tls_close_timeout;
+
+    // ── Quiesce a suspended SSL operation rather than giving up on it (#348) ──
+    // close() bails to an abortive close whenever an op is suspended, because
+    // SSL_shutdown underneath a suspended op mutates state that op's completion
+    // is about to touch (map_error_code -> BIO_ctrl on the SSL BIO). Inheriting
+    // that bail here would have made close_async useless at exactly the call
+    // sites that need it: on an established session the read pump is ALWAYS
+    // blocked in async_read_some (engine.cpp's stop() says so at its own
+    // transport-close step, and closes the socket precisely to wake it).
+    //
+    // The hazard is the SUSPENSION, not the operation. socket_.cancel()
+    // completes the pending op with operation_aborted WITHOUT touching SSL
+    // state; once its frame has resumed and inflight_flag_guard has cleared the
+    // flag, nothing is suspended on ssl_stream_ and the shutdown is safe.
+    //
+    // ⚠️ state_ is already closed above, which is what makes this terminate: a
+    // woken read pump that immediately re-reads is refused, so the flag stays
+    // clear once it drops.
+    if (ssl_op_suspended_()) {
+        asio::error_code cancel_ec;
+        socket_.cancel(cancel_ec);
+
+        // Bounded join. Same shape as the stop() join in engine.cpp: a
+        // zero-length timer wait yields THROUGH THE SCHEDULER, which a bare
+        // asio::post does not -- the completion being waited for is delivered
+        // by the reactor, and a post-only spin can starve it.
+        asio::steady_timer quiesce{exec_};
+        while (ssl_op_suspended_() && std::chrono::steady_clock::now() < close_deadline) {
+            quiesce.expires_after(std::chrono::milliseconds{0});
+            asio::error_code wait_ec;
+            co_await quiesce.async_wait(asio::redirect_error(asio::use_awaitable, wait_ec));
+            if (wait_ec) {
+                // Our own cancellation. Break rather than spin to the deadline
+                // -- every subsequent wait would complete instantly with the
+                // same error, turning a bounded join into a hot loop.
+                break;
+            }
+        }
+
+        if (ssl_op_suspended_()) {
+            // Could not quiesce. Abortive close -- and deliberately NO
+            // SSL_shutdown, because that is the exact mutation the suspended
+            // completion forbids. The peer sees the #348 symptom; that is the
+            // honest outcome, not a pretended graceful one.
+            asio::error_code ec;
+            socket_.close(ec);
+            co_return core::expected_t<void>{};
+        }
+    }
 
     // THE DIFFERENCE FROM close(). close() calls SSL_shutdown() on the native
     // handle, which only deposits the alert into asio's BIO; nothing drains it
@@ -1466,9 +1523,11 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // through ssl::detail::io, which drains engine::get_output() to the next
     // layer -- i.e. it actually writes the alert.
     //
-    // Bounded by tls_close_timeout so a peer that never answers cannot hold the
-    // close open; the budget comes from Config rather than a literal so the
-    // documented knob is the one in force. We do NOT wait for the peer's
+    // Bounded by the shared close_deadline above, so a peer that never answers
+    // cannot hold the close open; the budget comes from Config rather than a
+    // literal so the documented knob is the one in force, and it is the budget
+    // for the whole call -- a quiesce that consumed part of it leaves the
+    // shutdown that much less. We do NOT wait for the peer's
     // answering close_notify beyond that budget -- sending ours is what makes
     // the peer's read a clean EOF, which is the observable #348 is about.
     // QUICK SHUTDOWN. Without this, async_shutdown waits for the peer's
@@ -1489,7 +1548,7 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // `this`. The epoch is retired below BEFORE cancel(), and again in the
     // destructor body.
     asio::steady_timer deadline{exec_};
-    deadline.expires_after(cfg_.tls_close_timeout);
+    deadline.expires_at(close_deadline);
     const std::uint64_t close_epoch = ++timer_epochs_->close;
     deadline.async_wait([this, epochs = timer_epochs_, close_epoch](asio::error_code ec) {
         if (ec || close_epoch != epochs->close) {

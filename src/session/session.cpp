@@ -1551,7 +1551,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     }
     root_cancel_.emit(asio::cancellation_type::total);
     if (auto live = live_transport_shared_()) {
-        (void)live->close();
+        // #348 — close_async(), not close(). The emit above cancels the read
+        // pump but its completion has not run yet, so the transport still has a
+        // read in flight at this instant; the synchronous close() therefore took
+        // its suspended-op path, skipped the close-notify entirely, and the peer
+        // of a cleanly closing fixpp session read an OS-level error. close_async
+        // cancels and JOINS the in-flight op first, then writes the alert,
+        // bounded by Config::tls_close_timeout and falling back to the abortive
+        // close if it cannot quiesce — so the worst case is the old behaviour.
+        //
+        // Not moved above the emit: the pump would still be reading there, and
+        // the join would have nothing to make it stop.
+        (void)co_await live->close_async();
     }
 
     // T045: clear the session_local<trace_context> slot at close completion
