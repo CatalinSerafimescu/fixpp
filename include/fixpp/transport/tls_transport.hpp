@@ -113,8 +113,10 @@ public:
     //     By STATE, not call count (#339, #342): closed → already_closed;
     //     fresh/handshaken → already_connected; connected with a handshake IN
     //     FLIGHT → already_connected (overlap refused, #342); connected and idle
-    //     → ATTEMPTS (a preflight rejection stays connected, and so does a failed
-    //     handshake attempt). Reconnect mints a fresh one via
+    //     → ATTEMPTS. ⚠️ Only a PREFLIGHT rejection (returned before the OpenSSL
+    //     exchange is entered) leaves the Transport `connected` and retryable;
+    //     every failure from the exchange onward sets `closed`, so a retry after
+    //     one answers already_closed. Reconnect mints a fresh one via
     //     2026-05-27 Q1=B).
     //
     //     [[clang::lifetimebound]] on cfg — caller MUST keep SslCtxConfig

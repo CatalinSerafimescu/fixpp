@@ -161,10 +161,10 @@ public:
         if (closed_) {
             co_return std::unexpected{E::transport_already_closed};
         }
-        if (auto cs = co_await asio::this_coro::cancellation_state;
-            cs.cancelled() != asio::cancellation_type::none) {
-            co_return std::unexpected{E::transport_connect_cancelled};
-        }
+
+        // #341: no pre-op cancellation reap here (see the CANCELLATION TIMING
+        // note on Transport in transport.hpp) -- it would be dead. The reap
+        // after the post() below IS reachable and is kept.
 
         // Deferred resume — checkpoint so the awaiter's cancellation slot
         // gets a fair chance to fire before we return.
@@ -185,11 +185,6 @@ public:
         if (closed_) {
             co_return std::unexpected{E::transport_already_closed};
         }
-        if (auto cs = co_await asio::this_coro::cancellation_state;
-            cs.cancelled() != asio::cancellation_type::none) {
-            co_return std::unexpected{E::transport_read_cancelled};
-        }
-
         // reads_observed_ / read_sizes_ are recorded here, before latency
         // injection, unlike writes_observed_ (which counts at actual data
         // movement, after latency). This is deliberate, not a mirroring
@@ -280,11 +275,6 @@ public:
         if (closed_) {
             co_return std::unexpected{E::transport_already_closed};
         }
-        if (auto cs = co_await asio::this_coro::cancellation_state;
-            cs.cancelled() != asio::cancellation_type::none) {
-            co_return std::unexpected{E::transport_write_cancelled};
-        }
-
         // Latency injection.
         if (script_.write_latency > std::chrono::milliseconds{0}) {
             asio::steady_timer timer{exec_};
@@ -345,11 +335,6 @@ public:
         if (handshaken_) {
             co_return std::unexpected{E::transport_already_connected};
         }
-        if (auto cs = co_await asio::this_coro::cancellation_state;
-            cs.cancelled() != asio::cancellation_type::none) {
-            co_return std::unexpected{E::transport_handshake_cancelled};
-        }
-
         // Latency injection.
         if (script_.handshake_latency > std::chrono::milliseconds{0}) {
             asio::steady_timer timer{exec_};

@@ -34,6 +34,7 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
+#include <asio/ip/tcp.hpp>
 #include <asio/strand.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
@@ -42,6 +43,7 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_errors.hpp>
+#include <fixpp/transport/transport_factory.hpp>
 #include <memory>
 #include <optional>
 #include <span>
@@ -55,6 +57,7 @@ using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::transport::ConnectInfo;
 using fixpp::transport::handshake_result;
+using fixpp::transport::make_asio_plain_transport_factory;
 using fixpp::transport::TlsTransport;
 using fixpp::transport::Transport;
 using fixpp::transport::test::LoopbackTlsFixture;
@@ -552,9 +555,11 @@ TEST(InflightExclusivity, HandshakeOverlapRefusedWhileFirstInFlight) {
 // silently wedges the Transport into permanent transport_already_connected,
 // breaking FR-007's "a failed attempt stays `fresh` and is retryable".
 //
-// First attempt targets a port that was bound and then closed, so the connect is
-// refused; the Transport must stay `fresh` AND clear the flag, so the retry to
-// the live fixture endpoint must really connect.
+// The first attempt fails in RESOLUTION (an RFC 6761 `.invalid` host), which
+// returns before any state write, so the Transport must stay `fresh` AND clear
+// the flag -- and the retry to the live fixture endpoint must really connect.
+// (A refused CONNECT would have been the obvious choice and is not usable here;
+// the body explains why.)
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(InflightExclusivity, ConnectRetryableAfterFailedAttempt) {
     if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
@@ -621,6 +626,136 @@ TEST(InflightExclusivity, ConnectRetryableAfterFailedAttempt) {
         << (second->has_value() ? 0 : static_cast<int>(second->error()));
 
     (void)client->close();
+    ioc.run_for(200ms);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cells 8-9: the PLAINTEXT transport's overlap guard.
+//
+// ⚠️ Cells 5 and 7 above exercise only the TLS transport -- LoopbackTlsFixture's
+// make_client mints an asio_tls_transport. #342 added an INDEPENDENT guard to
+// asio_plain_transport, and without these two cells deleting it would leave
+// every other cell green while plaintext overlapping connects went back to
+// closing the socket out from under each other. A per-implementation guard
+// needs a per-implementation witness; a mutation row that says "delete the
+// connect overlap guard" is otherwise true of only one of the two.
+// ─────────────────────────────────────────────────────────────────────────────
+std::unique_ptr<Transport> make_plain_client(asio::io_context& ioc) {
+    auto factory = make_asio_plain_transport_factory(Transport::Config{});
+    if (!factory) throw std::runtime_error("plain factory failed");
+    fixpp::tls::SslCtxConfig unused{};
+    auto t = (*factory)->make(ioc.get_executor(), unused, nullptr);
+    if (!t) throw std::runtime_error("plain make() failed");
+    return std::move(*t);
+}
+
+asio::ip::tcp::endpoint make_loopback_acceptor(asio::ip::tcp::acceptor& acc) {
+    asio::ip::tcp::endpoint ep{asio::ip::address_v4::loopback(), 0};
+    acc.open(ep.protocol());
+    acc.set_option(asio::ip::tcp::acceptor::reuse_address{true});
+    acc.bind(ep);
+    acc.listen();
+    return acc.local_endpoint();
+}
+
+// Cell 8: plaintext async_connect OVERLAP → transport_already_connected (#342).
+// Same shape and same spurious-hit arm as cell 5.
+TEST(InflightExclusivity, PlaintextConnectOverlapRefusedWhileFirstInFlight) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor acc{ioc};
+    const auto bound = make_loopback_acceptor(acc);
+    const fixpp::transport::Endpoint ep{"127.0.0.1", bound.port()};
+
+    auto client = make_plain_client(ioc);
+    Transport* client_raw = client.get();
+
+    std::optional<expected_t<ConnectInfo>> result_a;
+    std::optional<expected_t<ConnectInfo>> result_b;
+    std::optional<bool> a_inflight_when_b_issued;
+
+    asio::ip::tcp::socket accepted{ioc};
+    acc.async_accept(accepted, [](asio::error_code) {});
+
+    auto strand = asio::make_strand(ioc.get_executor());
+
+    asio::co_spawn(
+        strand,
+        [&result_a, client_raw, ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            result_a = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        strand,
+        [&result_b, &result_a, &a_inflight_when_b_issued, client_raw,
+         ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            a_inflight_when_b_issued = !result_a.has_value();
+            result_b = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    ioc.run_for(5s);
+
+    ASSERT_TRUE(a_inflight_when_b_issued.has_value()) << "Coroutine B never ran";
+    EXPECT_TRUE(*a_inflight_when_b_issued)
+        << "SPURIOUS-HIT: A had already completed when B issued, so a 97 below would "
+           "come from the one-shot state test, not from the overlap guard";
+
+    ASSERT_TRUE(result_b.has_value()) << "B must complete (guard answers immediately)";
+    ASSERT_FALSE(result_b->has_value()) << "B must be refused, not attempt";
+    EXPECT_EQ(result_b->error(), error::transport_already_connected);
+
+    ASSERT_TRUE(result_a.has_value()) << "A must still complete";
+    EXPECT_TRUE(result_a->has_value()) << "A must still succeed";
+
+    (void)client->close();
+    asio::error_code ignored;
+    acc.close(ignored);
+    ioc.run_for(200ms);
+}
+
+// Cell 9: plaintext flag CLEARS — retry after a failed attempt really attempts.
+TEST(InflightExclusivity, PlaintextConnectRetryableAfterFailedAttempt) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor acc{ioc};
+    const auto bound = make_loopback_acceptor(acc);
+    const fixpp::transport::Endpoint good{"127.0.0.1", bound.port()};
+    const fixpp::transport::Endpoint unresolvable{"no.such.host.invalid", 12345};
+
+    auto client = make_plain_client(ioc);
+    Transport* client_raw = client.get();
+
+    std::optional<expected_t<ConnectInfo>> first;
+    std::optional<expected_t<ConnectInfo>> second;
+
+    asio::ip::tcp::socket accepted{ioc};
+    acc.async_accept(accepted, [](asio::error_code) {});
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&first, &second, client_raw, unresolvable, good]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            first = co_await client_raw->async_connect(unresolvable);
+            second = co_await client_raw->async_connect(good);
+        },
+        asio::detached);
+
+    ioc.run_for(10s);
+
+    ASSERT_TRUE(first.has_value());
+    ASSERT_FALSE(first->has_value()) << "unresolvable host must fail";
+    EXPECT_EQ(first->error(), error::transport_resolve_failed);
+
+    ASSERT_TRUE(second.has_value());
+    EXPECT_TRUE(second->has_value())
+        << "retry after a FAILED attempt must really attempt — a guard that never clears "
+           "connect_in_flight_ answers transport_already_connected here";
+
+    (void)client->close();
+    asio::error_code ignored;
+    acc.close(ignored);
     ioc.run_for(200ms);
 }
 

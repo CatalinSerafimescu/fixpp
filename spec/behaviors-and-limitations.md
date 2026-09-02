@@ -2230,14 +2230,22 @@ Evidence: issues #340, #341, #342.
   that removes ONLY the mechanism it tests — the three form a diagonal, so no cell is standing in
   for another:
 
-  | mutation | cell 5 overlap connect | cell 6 overlap handshake | cell 7 retry-after-failure |
-  |---|---|---|---|
-  | delete the connect overlap guard | **RED** | pass | pass |
-  | delete the handshake overlap guard | pass | **RED** | pass |
-  | guard never clears the flag | pass | pass | **RED** |
+  | mutation | c5 TLS overlap | c6 TLS handshake overlap | c7 TLS retry | c8 plain overlap | c9 plain retry |
+  |---|---|---|---|---|---|
+  | delete the **TLS** connect overlap guard | **RED** | pass | pass | pass | pass |
+  | delete the TLS handshake overlap guard | pass | **RED** | pass | pass | pass |
+  | delete the **plaintext** connect overlap guard | pass | pass | pass | **RED** | pass |
+  | guard never clears the flag (shared header) | pass | pass | **RED** | pass | **RED** |
 
-  The third row is why cell 7 exists: a guard that sets the flag and never clears it passes both
-  overlap cells while wedging the Transport into permanent 97.
+  The last row is why the retry cells exist: a guard that sets the flag and never clears it passes
+  every overlap cell while wedging the Transport into permanent 97.
+
+  ⚠️ **The plaintext rows exist because the first version of this matrix did not have them, and
+  said "delete the connect overlap guard → RED" without qualifying which one.** Cells 5 and 7 use
+  `LoopbackTlsFixture`, so they mint a TLS transport and say nothing about
+  `asio_plain_transport`'s independent guard — deleting THAT one left every cell green. A
+  per-implementation guard needs a per-implementation witness; caught in review, closed by cells
+  8-9.
 
   ⚠️ **Cells 5 and 6 carry a forced-spurious-HIT arm, without which they would be vacuous.** 97 is
   ALSO what the one-shot state test answers once the first call has succeeded, so "the second call
@@ -2252,9 +2260,8 @@ Evidence: issues #340, #341, #342.
   `close()` reached `SSL_shutdown` with an SSL operation suspended on the stream — exactly the
   mutation that condition's own comment forbids. `handshake_in_flight_` joins the condition.
 
-- **B-341-1 — cancellation takes effect from the FIRST REAL SUSPENSION POINT; the eight pre-op
-  cancellation reaps that claimed otherwise were unreachable and are deleted.** No behaviour
-  changes: every deleted branch was dead.
+- **B-341-1 — every pre-operation cancellation reap was unreachable and is deleted.** No behaviour
+  changes: each deleted branch was dead.
 
   Verified at the asio source rather than inferred. `awaitable_thread::reset_cancellation_state`
   re-constructs `cancellation_state` from the parent slot, and that ctor `emplace`s a fresh impl
@@ -2263,16 +2270,25 @@ Evidence: issues #340, #341, #342.
   no suspension point separates the reset from the read — the reap could only ever observe
   `none`.
 
-  ⚠️ **The issue named ONE site; the mechanism gives EIGHT.** `async_connect`,
-  `async_read_some` and `async_write` on both transports, `async_handshake` on TLS, and
-  `async_accept` on the listener. Stopping at the named site would have left seven live. Every
-  reap that FOLLOWS a `co_await` — post-resolve, post-connect, post-handshake — is reachable and
-  is kept.
+  ⚠️ **The issue named ONE site. Do NOT trust a count here — this row first said EIGHT and was
+  wrong**, because the sweep behind it covered `src/` and never `include/`, missing the shipped
+  `mock_transport.hpp`. The CONDITION identifies a site, so use it instead of any number: *a reap
+  is dead iff the nearest preceding `co_await` is the `reset_cancellation_state` call itself* —
+  nothing between the reset and the read suspends. Re-derive with that rule over
+  `src/transport/` **and** `include/fixpp/transport/`. Every reap that FOLLOWS a real `co_await`
+  — post-resolve, post-connect, post-handshake, and the mock's post-`post()` reap — is reachable
+  and is kept.
 
-  Consequence a caller must know: a cancellation delivered BEFORE one of these calls is picked up
-  is not observed at entry; it takes effect when the first real async operation completes with
-  `operation_aborted`. The listener already had the reachable form of this — its `is_open()`
-  short-circuit (RC#H) — which is why deleting its reap costs nothing.
+  ⚠️ **Consequence a caller must know, and it is the opposite of the intuitive reading.** A
+  cancellation emitted BEFORE one of these calls is **DISCARDED**, not deferred: the reset
+  replaces the parent slot's handler and a `cancellation_signal` retains nothing to replay into
+  the new one — and co_spawn's default entry state is terminal-only, so a `total` emitted before
+  entry is filtered away even before the reset drops it. Only a signal emitted while the
+  operation is genuinely in flight takes effect; a caller that must not proceed must test its own
+  precondition before calling, or use `close()`. (This row first claimed such a signal "takes
+  effect when the first real async operation completes with `operation_aborted`" — false, and
+  caught in review.) The listener already had the reachable form of the entry case — its
+  `is_open()` short-circuit (RC#H) — which is why deleting its reap costs nothing.
 
 - **B-340-1 — `Transport::cancel()` has NO documented failure; it returns `expected_t<void>` for
   symmetry only.** Contract-side resolution: the published contract named
@@ -2282,6 +2298,18 @@ Evidence: issues #340, #341, #342.
   deleted from the contract instead of being added to the code. `cancel()` after `close()`
   therefore still succeeds, as it always did in fact.
 
-  Also struck at the same site: `specs/012-2h-transport/contracts/transport.hpp` still carried the
-  *"thread-safe (ASIO cancellation_signal is thread-safe)"* claim that #333 removed from the
-  implementing header on 2026-08-31. The contract copy had diverged and kept publishing it.
+  ⚠️ **The first cut of this fix changed the two HEADERS and stopped, which was not the site
+  set.** The normative sources still carried both false claims and were found in review: spec
+  FR-005 (`cancel()` MUST be ... thread-safe (the underlying ASIO `cancellation_signal` is
+  thread-safe)`), `.specify/2h-transport.md`'s §4.1 contract comment, its `[const §X.5]`
+  reentrancy row, and its §6.6 error-table row listing `cancel` among the calls answering 98 —
+  plus five checklist items (CHK010/011/012/026/035) that had dispositioned those very statements
+  **PASS**. All are corrected, and the checklist items are re-dispositioned SPEC-FIXED rather
+  than left as passes over false text.
+
+  The `cancellation_signal` half is #333's residue, not #340's: #333 struck it from the
+  implementing header on 2026-08-31 and the contract copy plus every normative source kept
+  publishing it. Both halves are wrong for the same reason — no shipped `cancel()` emits a
+  `cancellation_signal` at all; each calls `socket_.cancel()`, and asio's `basic_stream_socket`
+  @par Thread Safety says "Shared objects: Unsafe" without carving out `cancel`. No off-strand
+  caller is claimed to exist; this corrects the contract, it does not report a live race.

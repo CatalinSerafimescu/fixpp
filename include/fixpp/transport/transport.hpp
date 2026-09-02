@@ -64,9 +64,19 @@ struct ConnectInfo;
 // into the new state. Both awaiters involved are `await_ready()==true` with
 // an empty `await_suspend`, so nothing between the reset and a following read
 // suspends. A pre-operation reap could therefore only ever observe `none` --
-// which is why none of the implementations has one, and why a signal emitted
-// BEFORE a call is first observed when the underlying async op completes with
-// operation_aborted. Reaps that FOLLOW a co_await are reachable and are kept.
+// which is why none of the implementations has one. Reaps that FOLLOW a
+// co_await are reachable and are kept.
+//
+// ⚠️ WHAT THIS MEANS FOR A CALLER, stated because the obvious reading is wrong.
+// A cancellation emitted BEFORE the call is DISCARDED -- it is not deferred to
+// the first suspension point and it will NOT abort the operation. The reset
+// replaces the parent slot's handler, and a cancellation_signal keeps no
+// record to replay into the new one; worse, co_spawn's default entry state is
+// terminal-only, so a `total` emitted before entry is filtered to nothing even
+// before the reset discards it. Only a signal emitted AFTER the reset -- i.e.
+// while the operation is genuinely in flight -- takes effect, surfacing as
+// operation_aborted on the awaited op. A caller that must not proceed has to
+// check its own precondition before calling, or call close().
 // Re-derive: asio cancellation_state.hpp's (slot, filter) ctor + impl_base(),
 // and awaitable_thread::reset_cancellation_state in asio impl/awaitable.hpp.
 // ─────────────────────────────────────────────────────────────────────────────
