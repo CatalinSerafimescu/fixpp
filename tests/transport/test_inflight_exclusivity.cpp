@@ -932,4 +932,53 @@ TEST(InflightExclusivity, CloseDoesNotDeliverCloseNotify_PinsDefect348) {
     ioc.run_for(200ms);
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell 13: D-4.0 destroy-with-no-drain must not fault in the in-flight guard.
+//
+// Destroys the Transport while async_connect is suspended in resolution, then
+// destroys the io_context WITHOUT running it, so the suspended frame is
+// DESTROYED rather than resumed — the one path on which a coroutine's in-scope
+// destructors run against a Transport that is already gone.
+//
+// ⚠️ This cell reproduced a REAL heap-use-after-free (ASan: WRITE of size 1 in
+// ~inflight_flag_guard) when the in-flight flags were plain Transport members.
+// It is green only because the flags now live in the separately-owned
+// timer_epoch_state block, which outlives the Transport. Bind the guard to a
+// Transport member again and this cell reds under ASan.
+//
+// ⚠️ ONLY MEANINGFUL UNDER A SANITIZER. Without ASan the stray one-byte write
+// lands in freed-but-mapped memory and the cell passes regardless — so a green
+// run in the plain debug preset is not evidence. The linux-clang-asan preset is
+// where this one earns its keep.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, DestroyWithNoDrainDoesNotFaultInFlightGuard) {
+    std::optional<expected_t<ConnectInfo>> result;
+    {
+        asio::io_context ioc;
+        asio::ip::tcp::acceptor acc{ioc};
+        const auto bound = make_loopback_acceptor(acc);
+        const fixpp::transport::Endpoint ep{"127.0.0.1", bound.port()};
+
+        auto client = make_plain_client(ioc);
+        Transport* raw = client.get();
+
+        asio::co_spawn(
+            ioc.get_executor(),
+            [&result, raw, ep]() -> asio::awaitable<void> {
+                co_await asio::this_coro::reset_cancellation_state(
+                    asio::enable_total_cancellation());
+                result = co_await raw->async_connect(ep);
+            },
+            asio::detached);
+
+        ioc.poll();          // start the coroutine; it suspends in async_resolve
+        client.reset();      // D-4.0: destroy the Transport with the op in flight
+        asio::error_code ig;
+        acc.close(ig);
+        // ioc destructor here destroys the suspended frame -> ~inflight_flag_guard
+    }
+    SUCCEED() << "no fault under the sanitizer";
+}
+
 }  // namespace

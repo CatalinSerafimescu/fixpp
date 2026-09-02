@@ -35,27 +35,56 @@
 // trying to drive "frame destroyed while suspended" from the public surface.
 // Known and deferred, not overlooked -- see the follow-up issue.
 //
-// The guard writes through the enclosing Transport's `this`. That is not a new
-// lifetime hazard: the surrounding coroutine body already dereferences `this`
-// (socket_, state_) at every step, so a frame resumed or destroyed after the
-// Transport died is UB with or without this guard. The separately-owned
-// timer_epoch_state block exists for the DIFFERENT case of a queued timer
-// HANDLER outliving `this` (D-4.1); a coroutine frame is not that case.
+// ⚠️ THE FLAG LIVES IN timer_epoch_state, NOT IN THE TRANSPORT — and that is
+// load-bearing, not tidiness. The first version of this guard bound a
+// `bool&` to a Transport member and this comment argued the point away:
+// "that is not a new lifetime hazard: the surrounding coroutine body already
+// dereferences `this` at every step, so a frame resumed or destroyed after the
+// Transport died is UB with or without this guard."
+//
+// That argument is FALSE, and ASan says so. It conflates RESUME with DESTROY.
+// A resumed frame does dereference `this`. A frame merely DESTROYED at a
+// suspension point runs only its in-scope destructors — and before this guard
+// existed there were none that touched `this`: `resolver` and `steady_timer`
+// hold executor copies, not the Transport. This destructor was the first, and
+// under D-4.0 destroy-with-no-drain (the Transport destroyed synchronously on
+// the failure arm, its frame destroyed later) it produced a measured
+// heap-use-after-free — WRITE of size 1, reported at this destructor.
+//
+// That is the SAME hazard timer_epoch_state was built for, one step over: the
+// timer handlers there capture a COPY of the shared_ptr precisely so a stranded
+// handler never reads through a dangling `this`. Holding a copy of that block
+// here makes the clear safe whether or not the Transport is still alive.
 
 #pragma once
+
+#include <memory>
+#include <utility>
+
+#include "timer_epoch_state.hpp"
 
 namespace fixpp::transport::detail {
 
 class inflight_flag_guard {
 public:
-    explicit inflight_flag_guard(bool& flag) noexcept : flag_(flag) { flag_ = true; }
-    ~inflight_flag_guard() { flag_ = false; }
+    // Takes a COPY of the shared block, so the block outlives the Transport and
+    // the clear in ~inflight_flag_guard is safe even when the frame is
+    // destroyed after the Transport (D-4.0). Never bind this to a Transport
+    // member -- that is the bug this shape exists to prevent, and it was a
+    // measured heap-use-after-free, not a theoretical one.
+    inflight_flag_guard(std::shared_ptr<timer_epoch_state> block,
+                        bool timer_epoch_state::* field) noexcept
+        : block_(std::move(block)), field_(field) {
+        (*block_).*field_ = true;
+    }
+    ~inflight_flag_guard() { (*block_).*field_ = false; }
 
     inflight_flag_guard(inflight_flag_guard const&) = delete;
     inflight_flag_guard& operator=(inflight_flag_guard const&) = delete;
 
 private:
-    bool& flag_;
+    std::shared_ptr<timer_epoch_state> block_;
+    bool timer_epoch_state::* field_;
 };
 
 }  // namespace fixpp::transport::detail

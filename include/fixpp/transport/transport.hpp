@@ -54,6 +54,16 @@ struct ConnectInfo;
 // transport_already_connected rather than racing the first (#342). See
 // async_connect / async_handshake below for the per-state table.
 //
+// ⚠️ SCOPE OF THE STATE ANSWERS ABOVE AND BELOW: they bind the PRODUCTION
+// transports (asio_plain_transport, asio_tls_transport). The shipped test
+// double `mock_transport` (include/fixpp/transport/test/mock_transport.hpp)
+// implements a deliberately reduced surface — it carries `closed_` and
+// `handshaken_` only, so it answers the post-close rows and NOT the one-shot or
+// in-flight rows: a second async_connect after a successful one succeeds again
+// there rather than returning transport_already_connected, and it has no
+// read/write in-flight guards. A session-FSM test that needs those answers must
+// drive a real transport, not the mock.
+//
 // CANCELLATION TIMING (#341) — the canonical statement; the implementations
 // point here rather than repeating it. Cancellation takes effect from the
 // FIRST REAL SUSPENSION POINT of each method, never at entry. Every async_*

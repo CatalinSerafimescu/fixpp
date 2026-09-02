@@ -924,13 +924,14 @@ void asio_tls_transport::setup_ssl_ctx_() {
     // of rewriting it — and a new variant could not sit in the family anyway,
     // which is pinned contiguous at 94..115 (FR-034 / T006) while error.hpp
     // already runs past 115.
-    if (connect_in_flight_) {
+    if (timer_epochs_->connect_in_flight) {
         co_return std::unexpected{E::transport_already_connected};
     }
     // Cleared on EVERY exit path, including frame destruction under
     // cancellation. A failed attempt leaves state_ == fresh AND clears this,
     // so the Transport stays retryable per FR-007.
-    detail::inflight_flag_guard connect_guard{connect_in_flight_};
+    detail::inflight_flag_guard connect_guard{timer_epochs_,
+                                             &timer_epoch_state::connect_in_flight};
 
     // #341: no pre-connect cancellation reap here, deliberately -- it would be
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
@@ -1084,7 +1085,7 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // whole duration of an in-flight handshake, so the one-shot test above
     // cannot refuse an OVERLAPPING second async_handshake; this does.
     // 97 rather than a new *_in_progress variant — see async_connect above.
-    if (handshake_in_flight_) {
+    if (timer_epochs_->handshake_in_flight) {
         co_return std::unexpected{E::transport_already_connected};
     }
     // Cleared on every exit path, including frame destruction under
@@ -1092,7 +1093,8 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // retryable. Only the preflight returns above leave state_ == connected --
     // every handshake that enters the OpenSSL exchange sets state_ = closed, so
     // a retry after one answers transport_already_closed, not a real attempt.
-    detail::inflight_flag_guard handshake_guard{handshake_in_flight_};
+    detail::inflight_flag_guard handshake_guard{timer_epochs_,
+                                               &timer_epoch_state::handshake_in_flight};
 
     // #341: no pre-handshake cancellation reap here, deliberately -- it would be
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp

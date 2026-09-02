@@ -191,9 +191,6 @@ private:
     // ── In-flight exclusivity flags (strand-confined — NOT atomics) ───────────
     bool read_in_flight_{false};
     bool write_in_flight_{false};
-    // #342 — async_connect overlap. Distinct from state_: state_ leaves
-    // `fresh` only on SUCCESS, so it cannot express "attempt in flight".
-    bool connect_in_flight_{false};
 
     // ── Acceptor event sink (null on initiator side) ───────────────────────────
     ListenerEvents* listener_events_{nullptr};

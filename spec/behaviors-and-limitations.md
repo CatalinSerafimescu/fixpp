@@ -2260,8 +2260,13 @@ Evidence: issues #340, #341, #342.
   `close()` reached `SSL_shutdown` with an SSL operation suspended on the stream — exactly the
   mutation that condition's own comment forbids. `handshake_in_flight_` joins the condition.
 
-- **B-341-1 — every pre-operation cancellation reap was unreachable and is deleted.** No behaviour
-  changes: each deleted branch was dead.
+- **B-341-1 — every pre-operation cancellation reap IN THE TRANSPORT MODULE was unreachable and is
+  deleted.** No behaviour changes: each deleted branch was dead. ⚠️ **The scope qualifier is load-
+  bearing — the first draft of this headline said "every" with no qualifier, which is false.** The
+  MECHANISM is repo-wide, but the sweep was `src/transport/` + `include/fixpp/transport/`. Reaps of
+  the identical shape survive elsewhere, at least in `src/tls/file_cert_source.cpp` — whose own
+  comment calls it *"load-bearing for the §6.4 binding contract"* — and `src/session/reconnect_fsm.cpp`.
+  Those are other modules' contracts and are filed, not silently swept.
 
   Verified at the asio source rather than inferred. `awaitable_thread::reset_cancellation_state`
   re-constructs `cancellation_state` from the parent slot, and that ctor `emplace`s a fresh impl
@@ -2289,6 +2294,34 @@ Evidence: issues #340, #341, #342.
   effect when the first real async operation completes with `operation_aborted`" — false, and
   caught in review.) The listener already had the reachable form of the entry case — its
   `is_open()` short-circuit (RC#H) — which is why deleting its reap costs nothing.
+
+- **B-342-3 — the in-flight flags live in `timer_epoch_state`, not on the Transport, because the
+  obvious placement was a measured heap-use-after-free.** Recorded because the reasoning that
+  produced the bug was written down and was persuasive.
+
+  The flags were first plain Transport members cleared by an RAII guard holding a `bool&`, and the
+  guard's header argued the hazard away: *"the surrounding coroutine body already dereferences
+  `this` at every step, so a frame resumed or destroyed after the Transport died is UB with or
+  without this guard."* That conflates two different things. A **resumed** frame does dereference
+  `this`. A frame merely **destroyed** at a suspension point runs only its in-scope destructors —
+  and `async_connect` had none that touched `this`: `resolver` and `steady_timer` hold executor
+  copies. The guard's destructor was the first, so it did not inherit an existing hazard, it
+  created one.
+
+  ASan, under D-4.0 destroy-with-no-drain (Transport destroyed synchronously on the failure arm,
+  its suspended frame destroyed afterwards): **heap-use-after-free, WRITE of size 1, in
+  `~inflight_flag_guard`**. Not theoretical, and not found by reading — the argument above was
+  written by someone who had read the code.
+
+  The fix is the mechanism the same function already used one step over: `timer_epoch_state` is a
+  separately-owned block whose whole purpose is to outlive the Transport, which is why the timer
+  handlers there capture a COPY of its `shared_ptr` rather than `this`. The flags moved into it and
+  the guard holds a copy, so the clear is safe whether or not the Transport still exists.
+
+  Witnessed by `DestroyWithNoDrainDoesNotFaultInFlightGuard`, which reproduced the fault before the
+  fix. ⚠️ That cell is **only meaningful under a sanitizer** — without ASan the stray one-byte write
+  lands in freed-but-mapped memory and it passes regardless, so a green plain-debug run is not
+  evidence for it.
 
 - **B-347-1 — `close()` during DNS resolution no longer resurrects a closed Transport.** Both
   `async_connect` implementations tested `state_ == closed` exactly once, on entry, before

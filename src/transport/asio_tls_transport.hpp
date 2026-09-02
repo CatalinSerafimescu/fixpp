@@ -326,12 +326,6 @@ private:
     // way — that part of the note was never load-bearing on cancel().
     bool read_in_flight_{false};
     bool write_in_flight_{false};
-    // #342 — async_connect / async_handshake overlap. Distinct from
-    // state_: state_ advances only on SUCCESS, so it cannot express
-    // "attempt in flight". handshake_in_flight_ is ALSO read by close()
-    // to keep SSL_shutdown off a suspended handshake.
-    bool connect_in_flight_{false};
-    bool handshake_in_flight_{false};
 
     // INVARIANT: every flag guarding an operation on ssl_stream_ MUST appear
     // here. close() uses this to decide whether sending close_notify would
@@ -341,7 +335,7 @@ private:
     // ssl_stream_ belongs in this predicate; that is the rule close() relies on
     // and could not state at its own call site.
     [[nodiscard]] bool ssl_op_suspended_() const noexcept {
-        return read_in_flight_ || write_in_flight_ || handshake_in_flight_;
+        return read_in_flight_ || write_in_flight_ || timer_epochs_->handshake_in_flight;
     }
 
     // ── 013 T039 — ListenerEvents sink (null on initiator side) ─────────────
