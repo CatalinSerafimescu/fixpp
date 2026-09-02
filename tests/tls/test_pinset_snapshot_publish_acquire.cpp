@@ -192,12 +192,10 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
         // Bounding the RATE instead bounds total allocation over the deadline
         // while leaving the deadline the operative bound.
         //
-        // ⚠️ No iteration count is stated for that rate, and none should be: a
-        // sleep shorter than the system timer granularity sleeps for the
-        // GRANULARITY, so the delivered period is a property of the platform,
-        // not of the argument below (issue #327). The bound survives that — a
-        // coarser period allocates less, not more — but any count derived from
-        // `deadline / 200 us` does not.
+        // ⚠️ Do not restate that rate as an iteration count: a sub-granularity
+        // sleep sleeps for the GRANULARITY, so the delivered period is a
+        // platform property, not the argument below. The allocation bound
+        // survives that — a coarser period allocates less (issue #327).
         std::this_thread::sleep_for(std::chrono::microseconds{200});
     }
 
