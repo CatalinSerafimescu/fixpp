@@ -35,6 +35,32 @@ Scope and conventions:
 - **B-001-4 — Trailing fractional zeros are preserved in the encoding, but compare ignores them.** `5.500` parses to `{5500, -3}` (the exponent retains scale), yet value-equality treats it as equal to `5.5`. Storage is representation-faithful; comparison is value-faithful. *(AC-P5 / AC-C1.)*
 - **B-001-5 — Swapping the decimal width is a build-time choice enforced at LINK time.** Setting `-DFIXPP_DECIMAL_T=...` widens the whole engine; two translation units built with conflicting `FIXPP_DECIMAL_T` fail with an unresolved-symbol *link* error (`decimal_alias_sentinel`), not a runtime mismatch. The alias never changes the `fixpp_decimal_t` C-ABI shape (always 16 bytes). *(AC-B3 / AC-B4.)*
 
+- **B-351-1 — `ReconnectFsm::drive_reconnect_attempt()` discarded a cancellation emitted before it
+  was entered, and connected anyway. Only asio's throw was stopping it.**
+
+  The coroutine's first statement was `reset_cancellation_state(enable_total_cancellation())`, which
+  re-constructs the state from the parent slot with `cancelled_` value-initialised — so an emission
+  that already happened is not replayed, and BOTH reaps below it (the post-backoff one #349 fixed and
+  the loop-head one #349 kept) observed `none`. The attempt then ran to a successful connect and
+  handshake with the caller's cancellation gone.
+
+  ⚠️ **This was invisible because asio masked it.** `await_transform` for a child awaitable throws
+  `operation_aborted` at the CALLER's `co_await drive_reconnect_attempt()` when `throw_if_cancelled_`
+  — default TRUE — sees the state already cancelled, so the body never ran and the reset never got
+  the chance to discard anything. The masking is a POLICY the caller can switch off, not a property
+  of the FSM: #351 proposed switching it off, which would have unmasked this.
+
+  Fixed by #349's own rule applied at the coroutine head — reap BEFORE the reset, not instead of it.
+  Both states are measured in `tests/session/test_reconnect_live_happy_path.cpp`: with the default
+  policy the caller gets the throw and the body never runs; with `throw_if_cancelled(false)` the body
+  runs and now answers `transport_connect_cancelled`. Deleting the head reap turns the second cell
+  RED by letting the attempt connect — that is its mutation kill.
+
+  ⚠️ This does NOT make `[2g §6.4]`'s `tls_load_cancelled` reachable from this caller, and L-349-1
+  below still stands: `load_credentials()` is not entered on either path, and nothing suspends
+  between the loop-head reap and the load at which a cancellation could arrive. An opt-out placed
+  around the LOAD, as #351 proposed, would guard a window that cannot open.
+
 ### Limitations
 
 - **L-001-1 — No arithmetic and no locale-aware formatting on `decimal<T>`.** No `+ - * /`, no thousands-separators / exponent-notation / per-locale decimal marks; it is a representation primitive only. **Status: wontfix.** *(spec §5 "Out of scope".)*
@@ -2457,7 +2483,7 @@ Evidence: issues #346, #348, #349; new issue #351.
   | teardown path | peer read outcome |
   |---|---|
   | `Engine::stop()` — the per-session transport close on each session strand | `transport_read_eof` |
-  | `Session::close(terminal \| graceful)` — the close that follows the root total-cancel | `transport_read_eof` |
+  | `Session::close(terminal)` — the close that follows the root total-cancel | `transport_read_eof` |
   | a direct `Transport::close()` call | `transport_read_error` — unchanged, and still pinned |
 
   ⚠️ **THE STATED OBSTACLE WAS REAL AND IS RESOLVED IN THE TRANSPORT, NOT AT THE CALL SITE.** The
@@ -2473,6 +2499,12 @@ Evidence: issues #346, #348, #349; new issue #351.
   call — quiesce plus shutdown — is bounded by ONE `Config::tls_close_timeout` budget, and an
   operation that does not quiesce inside it falls back to the abortive close. **The worst case is
   therefore the old behaviour plus a bounded wait, never a hang.**
+
+  ⚠️ **`close(graceful)` is NOT in that table, deliberately.** It reaches the same adopted site, but
+  only after phase 1; on the phase-1 TIMEOUT arm `session.cpp`'s FQ-G force-close has already closed
+  the transport abortively, and the `close_async` below it is then the idempotent no-op — so the
+  peer's outcome on that arm is `transport_read_error`, unchanged. The row claims only what the
+  witnesses drive.
 
   ⚠️ **Sites deliberately NOT adopted**, so the next reader does not read the two above as "all of
   them": the accept-loop reject paths in `engine.cpp` (bad dynamic_cast, handshake failure,
