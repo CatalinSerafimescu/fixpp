@@ -25,6 +25,7 @@ tests/session/durable_before_transmit_test.cpp:307
 tests/session/durable_before_transmit_test.cpp:310
 tests/session/durable_before_transmit_test.cpp:75
 tests/session/engine_acceptor_test.cpp:813
+tests/session/engine_readpump_test.cpp:694
 tests/session/engine_seam_removal_test.cpp:170
 tests/session/engine_seam_removal_test.cpp:186
 tests/session/fsm_matrix_witness_test.cpp:1041
@@ -162,9 +163,9 @@ tests/session/test_reconnect_backoff_cap.cpp:367
 tests/session/test_reconnect_happy_path.cpp:173
 tests/session/test_reconnect_happy_path.cpp:181
 tests/session/test_reconnect_happy_path.cpp:367
-tests/session/test_reconnect_live_happy_path.cpp:236
-tests/session/test_reconnect_live_happy_path.cpp:358
-tests/session/test_reconnect_live_happy_path.cpp:441
+tests/session/test_reconnect_live_happy_path.cpp:290
+tests/session/test_reconnect_live_happy_path.cpp:412
+tests/session/test_reconnect_live_happy_path.cpp:495
 tests/session/test_recovery_admin_span_gapfill.cpp:163
 tests/session/test_recovery_admin_span_gapfill.cpp:171
 tests/session/test_recovery_admin_span_gapfill.cpp:250
