@@ -1069,7 +1069,10 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         co_return std::unexpected{E::transport_already_connected};
     }
     // Cleared on every exit path, including frame destruction under
-    // cancellation, so a failed handshake stays retryable from `connected`.
+    // cancellation. ⚠️ That makes the Transport IDLE again; it does NOT make it
+    // retryable. Only the preflight returns above leave state_ == connected --
+    // every handshake that enters the OpenSSL exchange sets state_ = closed, so
+    // a retry after one answers transport_already_closed, not a real attempt.
     detail::inflight_flag_guard handshake_guard{handshake_in_flight_};
 
     // #341: no pre-handshake cancellation reap here, deliberately -- it would be
