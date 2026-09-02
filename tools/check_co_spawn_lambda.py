@@ -45,6 +45,24 @@ them, reports the same "0 findings" a clean tree does. Every `co_spawn` TOKEN mu
 reconcile against a parsed call site, so a spelling the pattern does not anticipate is a
 loud error rather than a silent skip.
 
+⚠️ WHAT THESE FLOORS DO NOT COVER, because it is easy to read them as covering it: they
+witness the scan's REACH, not its DETECTOR. Break the invocation test itself and every
+floor still passes on a tree that has the defect. `--self-test` is what guards the
+detector, which is why both it and the scan run in CI, unconditionally, as a pair. Run
+one without the other and you have a gate that cannot fail for the reason it exists.
+
+⚠️ OUT OF REACH BY CONSTRUCTION — a named closure invoked at the call site:
+
+    auto lam = [&]() -> asio::awaitable<void> { ... };
+    asio::co_spawn(ioc, lam(), asio::detached);   // NOT flagged
+
+This carries the same closure-lifetime requirement, and the tree uses the shape widely.
+Whether it is sound depends on whether `lam` outlives the coroutine — a lifetime question,
+not a lexical one, so no rule this scanner can express decides it. Deciding it needs an
+AST/CFG tool and a compilation database, which is also why this check is lexical: it must
+run buildless in an ungated job. Treat a clean result as "no immediately-invoked temporary
+closure", never as "no closure-lifetime defect".
+
     tools/check_co_spawn_lambda.py              scan the tree, exit 1 on any finding
     tools/check_co_spawn_lambda.py --self-test  run the fixture suite (forms, not sites)
 """
@@ -522,14 +540,14 @@ SELF_TEST_CASES = [
      "  constexpr std::size_t kCapacity = 10'000;\n"
      "  co_return;\n"
      "}(), asio::detached);", 1, 1, 1),
-    # Kept alongside the decimal case though both reach the same branch TODAY: an
-    # implementation testing `text[i-1].isdigit()` instead of walking back to the token
-    # start passes decimal and fails hex. The fixture kills that mutant.
-    ("hex digit separator is not a char literal",
-     f"asio::co_spawn(ioc, [&]() -> {A} {{\n"
-     "  constexpr auto kMask = 0x1F'FF;\n"
-     "  co_return;\n"
-     "}(), asio::detached);", 1, 1, 1),
+    # Not redundant with the decimal case, and the difference is the LAYOUT as much as
+    # the radix. An implementation testing `text[i-1].isdigit()` instead of walking back
+    # to the token start reads the `'` in `0x1F'FF` as a char literal and blanks to
+    # end-of-line — which only reaches the `}()` if it shares that line. Written on its
+    # own line this fixture let that mutant survive the whole suite; keep it on one line.
+    ("hex digit separator is not a char literal (ONE LINE — see above)",
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ auto k = 0x1F'FF; co_return; }}(), tok);",
+     1, 1, 1),
     ("encoding-prefixed char literal is still a literal",
      f"asio::co_spawn(ioc, [&]() -> {A} {{\n"
      "  char c = L'}';  // co_spawn(x, [&]{ }(), t)\n"
