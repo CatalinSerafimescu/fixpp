@@ -2135,10 +2135,12 @@ jobs:
       #
       # A lambda coroutine reaches its captures THROUGH the closure object, so
       # passing it to co_spawn as an immediately-invoked temporary (`}(),`)
-      # destroys the closure while the coroutine is still suspended at its first
-      # co_await. Both instances this guard was written for were latent only
-      # because nothing after the suspension point touched a capture; one added
-      # statement makes either a use-after-free with no compiler diagnostic.
+      # destroys the closure at the end of the full-expression. asio's
+      # `awaitable` promise returns `suspend_always` from `initial_suspend`, so
+      # the body does not begin until AFTER co_spawn returns — the first body
+      # statement naming a capture therefore already reads a destroyed closure.
+      # This is a use-after-free on the first execution, not a hazard some later
+      # edit would arm, and no compiler diagnostic fires on it.
       #
       # ⚠️ BOTH STEPS LIVE IN THIS UNGATED JOB DELIBERATELY, and the scan did NOT
       # go beside the other source gates in `check-layers`. `check-layers` is

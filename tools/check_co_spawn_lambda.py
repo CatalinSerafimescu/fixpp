@@ -1,42 +1,49 @@
 #!/usr/bin/env python3
-"""Recurrence guard for the dangling immediately-invoked lambda coroutine (issue #291).
+r"""Recurrence guard for the dangling immediately-invoked lambda coroutine (issue #291).
 
 A lambda coroutine reaches its captures THROUGH THE CLOSURE OBJECT — the coroutine
-frame does not copy them. So the closure must outlive the coroutine. Passing the
-lambda to `co_spawn` as an immediately-invoked temporary destroys the closure at the
-end of the full-expression, i.e. the moment `co_spawn` returns, while the coroutine
-is still suspended at its first `co_await`:
+frame stores the implicit object parameter as a reference, not a copy. So the closure
+must outlive the coroutine. Passing the lambda to `co_spawn` as an immediately-invoked
+temporary destroys the closure at the end of the full-expression:
 
     Forbidden : asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { ... }(), tok);
     Required  : asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { ... },   tok);
                                                                   ^ no trailing ()
 
-With the trailing `()` removed, asio stores the callable and invokes it itself, so
-the closure lives as long as the coroutine does.
+With the trailing `()` removed, asio stores the callable and invokes it itself, so the
+closure lives as long as the coroutine does.
 
-Any statement AFTER a suspension point that touches a capture is then an immediate
-use-after-free, with no diagnostic and no compiler warning. The two known instances
-(PR #290's, and issue #291's) were both latent-not-firing for exactly one reason:
-nothing after the suspension point happened to touch a capture. That is one edit
-away from a real UAF, which is why this is a lexical guard rather than a review note.
+⚠️ THIS IS NOT A LATENT HAZARD THAT ONE FUTURE EDIT WOULD ARM. asio's
+`awaitable::promise_type::initial_suspend()` returns `suspend_always`, so the coroutine
+body does not begin until AFTER `co_spawn` returns — by which time the temporary closure
+is already destroyed. The FIRST body statement that names a capture therefore already
+reads through a dead closure. #291's own analysis called this latent; it is not.
 
 WHAT IS FLAGGED — and why it is not a `grep '}(),'`
 ---------------------------------------------------
-A bare regex over the file cannot tell the argument-level invocation (the defect)
-from an inner immediately-invoked lambda nested inside a correctly-passed outer
-lambda (perfectly fine), and cannot tell either from the same bytes inside a comment
-or a string. This scanner therefore:
+A bare regex cannot tell the argument-level invocation from an inner immediately-invoked
+lambda nested inside a correctly-passed outer one, cannot tell either from the same bytes
+in a comment or a literal, and cannot see the same defect wearing a wrapper. This scanner:
 
-  * strips comments, string / char / raw-string literals first (line structure kept);
-  * matches each `co_spawn(` to its closing paren, and ERRORS OUT if it cannot —
-    an unmatched call site is a parse failure, never a silent skip;
-  * flags `}` followed by `(` ONLY at the top level of the argument list, i.e. at
-    paren-depth 1 relative to the `co_spawn(` and brace-depth 0. An inner
-    `[&]{ ... }()` inside a lambda body sits at brace-depth >= 1 and is not flagged.
+  * splices backslash-newline continuations first (C++ phase 2), keeping a map back to
+    original line numbers, so a spliced `*\<newline>/` really does close a comment;
+  * strips comments, string / char / raw-string literals, and `#include <...>` paths;
+  * matches each `co_spawn(` to its closing paren, and ERRORS OUT if it cannot;
+  * tracks real LAMBDA INTRODUCERS (`[...]` followed by a parameter list / trailing
+    return / qualifiers and then a body), not bare `{` — `Handler{a, b}` is not a lambda;
+  * flags a lambda that is immediately invoked and is NOT nested inside another lambda's
+    body, seeing through transparent wrappers: `([&]{...})()` and `std::move([&]{...}())`
+    are the same defect as `[&]{...}()`;
+  * requires the lambda body to actually be a coroutine (`co_await` / `co_return` /
+    `co_yield`). `[&]{ return s.close(); }()` invokes its closure synchronously and is
+    safe. The test is over-inclusive on purpose — a nested `co_await` still counts — so
+    the error is toward flagging, never toward missing.
 
-It reports a DENOMINATOR (`sites parsed`, `sites with a lambda argument`), not just
-a hit count: a scanner that silently parsed zero call sites would otherwise report
-exactly the same "PASS" as a clean tree.
+It reports DENOMINATORS (`sites parsed`, `sites with a lambda argument`) and fails closed
+on each: a scan that parses no call site, or recognises a lambda argument at none of
+them, reports the same "0 findings" a clean tree does. Every `co_spawn` TOKEN must also
+reconcile against a parsed call site, so a spelling the pattern does not anticipate is a
+loud error rather than a silent skip.
 
     tools/check_co_spawn_lambda.py              scan the tree, exit 1 on any finding
     tools/check_co_spawn_lambda.py --self-test  run the fixture suite (forms, not sites)
@@ -47,30 +54,60 @@ import sys
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-EXTS = {".cpp", ".cc", ".cxx", ".hpp", ".hh", ".h"}
+
+# Every extension the repository uses for C++ TEXT, not just the ones that happen to
+# hold a co_spawn today. An extension list is a claim about what C++ is; leaving one out
+# makes the scan silently blind to a whole file class (the tree carries 903 `.inl`).
+EXTS = {".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h", ".inl", ".ipp",
+        ".tpp", ".ixx", ".cppm"}
 
 CO_SPAWN = re.compile(r"\bco_spawn\s*\(")
-# Every `co_spawn` token, call or not. The DIFFERENCE between this and CO_SPAWN
-# is the scan's traversal witness: a spelling the call-site regex does not
-# anticipate (`co_spawn<T>(`, a macro, a stray mention) would otherwise be a
-# SILENT skip that costs a site and changes nothing visible in the output.
+# Every `co_spawn` token, call or not. The DIFFERENCE between this and CO_SPAWN is the
+# scan's traversal witness: a spelling the call-site regex does not anticipate would
+# otherwise be a SILENT skip that costs a site and changes nothing visible.
 CO_SPAWN_TOKEN = re.compile(r"\bco_spawn\b")
 INCLUDE_ANGLE = re.compile(r"#\s*include\s*<[^>\n]*>")
+CORO_KEYWORD = re.compile(r"\bco_(?:await|return|yield)\b")
+IDENT_CHAR = re.compile(r"[A-Za-z0-9_]")
 
 
 class ParseError(Exception):
-    """A `co_spawn(` whose argument list does not close. Never swallowed."""
+    """A `co_spawn(` the scanner could not account for. Never swallowed."""
+
+
+def splice(text: str):
+    """C++ phase 2: delete each backslash-newline. Returns (spliced, line_of).
+
+    `line_of[i]` is the 1-based ORIGINAL line of spliced character `i`, so a finding
+    still points at a line a human can open. Without this, `/* ... *\\<newline>/` — which
+    really does close the comment — leaves the stripper thinking the comment never ends,
+    and it blanks the rest of the file into a clean result.
+    """
+    out = []
+    line_of = []
+    i, n, line = 0, len(text), 1
+    while i < n:
+        if text[i] == "\\":
+            if i + 1 < n and text[i + 1] == "\n":
+                i += 2
+                line += 1
+                continue
+            if i + 2 < n and text[i + 1] == "\r" and text[i + 2] == "\n":
+                i += 3
+                line += 1
+                continue
+        out.append(text[i])
+        line_of.append(line)
+        if text[i] == "\n":
+            line += 1
+        i += 1
+    return "".join(out), line_of
 
 
 def strip_noncode(text: str) -> str:
-    """Blank out comments and literals, preserving length and line breaks.
-
-    Every removed byte becomes a space (newlines kept), so byte offsets and line
-    numbers in the result still address the original file.
-    """
-    # `#include <asio/co_spawn.hpp>` is a header PATH, not code. Blanked first
-    # (precisely, not by dropping every preprocessor line — a macro body can hold
-    # a real call). The quoted form is already covered by literal blanking below.
+    """Blank out comments, literals and include paths, preserving length and newlines."""
+    # `#include <asio/co_spawn.hpp>` is a header PATH, not code. Blanked precisely rather
+    # than by dropping every preprocessor line — a macro body can hold a real call.
     text = INCLUDE_ANGLE.sub(lambda m: " " * len(m.group(0)), text)
 
     out = list(text)
@@ -84,11 +121,10 @@ def strip_noncode(text: str) -> str:
 
     while i < n:
         c = text[i]
-        # raw string: R"delim( ... )delim"
         if c == "R" and i + 1 < n and text[i + 1] == '"':
             m = re.compile(r'R"([^()\\ ]{0,16})\(').match(text, i)
             if m:
-                close = ')' + m.group(1) + '"'
+                close = ")" + m.group(1) + '"'
                 end = text.find(close, m.end())
                 end = n if end < 0 else end + len(close)
                 blank(i, end)
@@ -108,9 +144,8 @@ def strip_noncode(text: str) -> str:
             continue
         if c == "'":
             # C++14 digit separator (`10'000`, `0x1F'FF`) is NOT a char literal.
-            # Distinguish by the token to its left: a separator's token starts with
-            # a digit, whereas an encoding prefix (`L'a'`, `u8'a'`) starts with a
-            # letter. Getting this wrong blanks out real code to end of line.
+            # Distinguish by the token to its left: a separator's token starts with a
+            # digit, an encoding prefix (`L'a'`, `u8'a'`) starts with a letter.
             k = i - 1
             while k >= 0 and (text[k].isalnum() or text[k] == "'"):
                 k -= 1
@@ -135,39 +170,118 @@ def strip_noncode(text: str) -> str:
     return "".join(out)
 
 
+def _skip_ws(code: str, i: int) -> int:
+    n = len(code)
+    while i < n and code[i] in " \t\r\n":
+        i += 1
+    return i
+
+
+def _match_pair(code: str, i: int, open_c: str, close_c: str) -> int:
+    """`code[i]` is `open_c`; return the index just past its match, or -1."""
+    depth = 0
+    n = len(code)
+    while i < n:
+        if code[i] == open_c:
+            depth += 1
+        elif code[i] == close_c:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return -1
+
+
+def _lambda_body_start(code: str, i: int) -> int:
+    """`code[i]` is `[`. If it introduces a lambda, return its body's `{` index, else -1.
+
+    Walks the optional template parameter list, the parameter list, and the qualifier /
+    trailing-return run, stopping at the body. `funcs[i](x)` fails here — nothing after
+    its parameter list leads to a `{` — and `[[nodiscard]]` is rejected up front.
+    """
+    n = len(code)
+    if i + 1 < n and code[i + 1] == "[":
+        return -1  # attribute, not a capture list
+    j = _match_pair(code, i, "[", "]")
+    if j < 0:
+        return -1
+    j = _skip_ws(code, j)
+    if j < n and code[j] == "<":  # generic lambda template parameter list
+        j = _match_pair(code, j, "<", ">")
+        if j < 0:
+            return -1
+        j = _skip_ws(code, j)
+    if j < n and code[j] == "(":
+        j = _match_pair(code, j, "(", ")")
+        if j < 0:
+            return -1
+        j = _skip_ws(code, j)
+    # Qualifiers and a trailing return type may sit between here and the body. Anything
+    # that could not appear there means this `[` was not a lambda introducer.
+    while j < n and code[j] != "{":
+        c = code[j]
+        if c == "(":  # noexcept(...) / a parenthesised trailing return type
+            j = _match_pair(code, j, "(", ")")
+            if j < 0:
+                return -1
+            continue
+        if IDENT_CHAR.match(c) or c in " \t\r\n<>:*&-.,":
+            j += 1
+            continue
+        return -1
+    return j if j < n else -1
+
+
 def scan_text(text: str, relpath: str = "<text>"):
     """Return (findings, sites_parsed, sites_with_lambda_arg).
 
-    A finding is (relpath, line, snippet) for one immediately-invoked lambda passed
-    as a `co_spawn` argument.
+    A finding is (relpath, original_line, snippet) for one immediately-invoked lambda
+    coroutine passed as a `co_spawn` argument.
     """
-    code = strip_noncode(text)
-    findings = []
-    sites = 0
-    sites_with_lambda = 0
+    spliced, line_of = splice(text)
+    code = strip_noncode(spliced)
 
-    # Reconcile the two enumerations BEFORE parsing: every `co_spawn` token in
-    # code must be a call site the parser will visit. This is a CONDITION, not a
-    # count — it holds at any tree size and cannot go stale.
+    def lineno(off: int) -> int:
+        return line_of[off] if off < len(line_of) else (line_of[-1] if line_of else 1)
+
+    # Reconcile the two enumerations BEFORE parsing: every `co_spawn` token in code must
+    # be a call site the parser will visit. A CONDITION, not a count — it cannot rot.
     call_starts = {m.start() for m in CO_SPAWN.finditer(code)}
     unparsed = [m for m in CO_SPAWN_TOKEN.finditer(code) if m.start() not in call_starts]
     if unparsed:
-        lines = ", ".join(str(code.count("\n", 0, m.start()) + 1) for m in unparsed[:10])
+        where = ", ".join(str(lineno(m.start())) for m in unparsed[:10])
         raise ParseError(
             f"{relpath}: {len(unparsed)} `co_spawn` token(s) in code that the call-site "
-            f"pattern does not match (line(s) {lines}). Each is a site the scan would "
+            f"pattern does not match (line(s) {where}). Each is a site the scan would "
             f"skip in silence — widen the pattern or explain the spelling."
         )
+
+    findings = []
+    sites = 0
+    sites_with_lambda = 0
+    n = len(code)
 
     for m in CO_SPAWN.finditer(code):
         sites += 1
         i = m.end()  # just past the '('
         paren = 1  # depth relative to the co_spawn '('
-        brace = 0
         saw_lambda = False
-        n = len(code)
+        stack = []  # open lambda bodies: (body_open_index, paren_depth_at_introducer)
+
         while i < n:
             c = code[i]
+            if c == "[" and not stack:
+                body = _lambda_body_start(code, i)
+                if body >= 0:
+                    stack.append((body, paren))
+                    i = body + 1
+                    continue
+            elif c == "[":
+                body = _lambda_body_start(code, i)
+                if body >= 0:
+                    stack.append((body, paren))
+                    i = body + 1
+                    continue
             if c == "(":
                 paren += 1
             elif c == ")":
@@ -175,35 +289,61 @@ def scan_text(text: str, relpath: str = "<text>"):
                 if paren == 0:
                     break
             elif c == "{":
-                if paren == 1 and brace == 0:
-                    saw_lambda = True
-                brace += 1
+                # A brace that is not a lambda body — a braced init-list, a nested
+                # block. Tracked so its `}` cannot pop a lambda frame.
+                stack.append((-1, paren))
             elif c == "}":
-                brace -= 1
-                if brace < 0:
+                if not stack:
                     raise ParseError(
-                        f"{relpath}: unbalanced '}}' inside co_spawn( at offset {m.start()}"
+                        f"{relpath}: unbalanced '}}' inside co_spawn( at line "
+                        f"{lineno(m.start())}"
                     )
-                if paren == 1 and brace == 0:
-                    # Argument-level lambda body just closed. An invocation here is
-                    # the defect; anything else (`,` or `)`) is the correct form.
-                    j = i + 1
-                    while j < n and code[j] in " \t\r\n":
-                        j += 1
-                    if j < n and code[j] == "(":
-                        line = code.count("\n", 0, i) + 1
-                        snippet = text[i : j + 2].replace("\n", "\\n")
-                        findings.append((relpath, line, snippet))
+                body_open, intro_paren = stack.pop()
+                if body_open >= 0:
+                    nested = any(fr[0] >= 0 for fr in stack)
+                    if not nested:
+                        saw_lambda = True
+                        body_text = code[body_open : i + 1]
+                        if CORO_KEYWORD.search(body_text) and _is_invoked(
+                            code, i + 1, paren
+                        ):
+                            findings.append(
+                                (relpath, lineno(i), code[i : i + 2].replace("\n", "\\n"))
+                            )
             i += 1
+
         if paren != 0:
             raise ParseError(
-                f"{relpath}: unterminated co_spawn( starting at line "
-                f"{code.count(chr(10), 0, m.start()) + 1}"
+                f"{relpath}: unterminated co_spawn( starting at line {lineno(m.start())}"
             )
         if saw_lambda:
             sites_with_lambda += 1
 
     return findings, sites, sites_with_lambda
+
+
+def _is_invoked(code: str, i: int, paren: int) -> bool:
+    """Is the lambda whose body just closed at `i-1` immediately invoked?
+
+    Sees through transparent wrappers by consuming closing parens of groups opened INSIDE
+    the co_spawn argument list: `([&]{...})()` reaches its `(` past one `)`,
+    `std::move([&]{...}())` reaches it directly. The floor is the co_spawn's own depth,
+    so `wrap([&]{...})` — uninvoked, merely passed along — stops at the `,` and is not
+    flagged, and `co_spawn(ioc, [&]{...})` stops at the call's own closing paren.
+    """
+    n = len(code)
+    depth = paren
+    while True:
+        i = _skip_ws(code, i)
+        if i >= n:
+            return False
+        if code[i] == "(":
+            return True
+        if code[i] == ")" and depth > 1:
+            depth -= 1
+            i += 1
+            continue
+        return False
 
 
 def tracked_sources():
@@ -220,10 +360,9 @@ def main_scan() -> int:
     findings, sites, with_lambda = [], 0, 0
     files = 0
     for name in tracked_sources():
-        try:
-            text = (ROOT / name).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+        # A read failure is FATAL. Swallowing it would let the one file holding a new
+        # defect drop out of the universe with no change to the printed result.
+        text = (ROOT / name).read_text(encoding="utf-8", errors="replace")
         if "co_spawn" not in text:
             continue
         files += 1
@@ -232,17 +371,16 @@ def main_scan() -> int:
         sites += s
         with_lambda += wl
 
-    # Two floors, both CONDITIONS rather than counts, so neither bakes in today's
-    # tree. A scan that visited no call site, or that visited call sites but
-    # recognised a lambda argument at none of them (the brace tracking broken),
-    # reports the same "0 immediately-invoked" a genuinely clean tree does.
+    # Both floors are CONDITIONS rather than counts, so neither bakes in today's tree.
+    # A scan that visited no call site, or that visited call sites but recognised a
+    # lambda argument at none of them, reports the same "0 findings" a clean tree does.
     if sites == 0:
         print("[co-spawn-lambda] ERROR: parsed 0 co_spawn call sites — the scan found "
               "nothing to check. Treat this as a broken instrument, not a clean tree.")
         return 2
     if with_lambda == 0:
         print(f"[co-spawn-lambda] ERROR: parsed {sites} co_spawn call site(s) but "
-              "recognised a lambda argument at none of them. The brace tracking is "
+              "recognised a lambda argument at none of them. The lambda tracking is "
               "broken; a zero finding count here means nothing.")
         return 2
 
@@ -251,8 +389,9 @@ def main_scan() -> int:
 
     if findings:
         print("[co-spawn-lambda] FAIL: lambda coroutine passed as an immediately-invoked")
-        print("  temporary. The closure dies when co_spawn returns, while the coroutine is")
-        print("  still suspended. Drop the trailing '()' and let asio own the closure.")
+        print("  temporary. asio's initial_suspend is suspend_always, so the body does not")
+        print("  start until co_spawn has returned and the closure is already destroyed.")
+        print("  Drop the trailing '()' and let asio own the closure.")
         for f, ln, snip in findings:
             print(f"    {f}:{ln}: {snip}")
         return 1
@@ -262,124 +401,145 @@ def main_scan() -> int:
 
 
 # ── self-test ────────────────────────────────────────────────────────────────
-# Fixtures are written from the C++ FORMS this check must separate, not copied
-# from the sites it was written to catch: a fixture derived from the code under
-# repair certifies whatever that code does.
+# Fixtures are written from the C++ FORMS this check must separate, not copied from the
+# sites it was written to catch: a fixture derived from the code under repair certifies
+# whatever that code does. Each pins ALL THREE outputs — findings, sites parsed, and
+# sites with a lambda argument — because the last two are floors the scan fails closed
+# on, and a fixture that ignores them cannot notice when they stop meaning anything.
+
+A = "asio::awaitable<void>"
 
 SELF_TEST_CASES = [
-    # (name, source, expected number of findings)
+    # (name, source, expected findings, expected sites, expected lambda-sites)
     ("classic trailing }(),",
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }(), asio::detached);", 1),
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}(), asio::detached);", 1, 1, 1),
     ("space before invocation",
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; } (), asio::detached);", 1),
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }} (), asio::detached);", 1, 1, 1),
     ("newline before invocation",
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }\n(), asio::detached);", 1),
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}\n(), asio::detached);", 1, 1, 1),
+    ("PARENTHESISED lambda, then invoked",
+     f"asio::co_spawn(ioc, ([&]() -> {A} {{ co_return; }})(), asio::detached);", 1, 1, 1),
+    ("std::move wrapping an invoked lambda",
+     f"asio::co_spawn(ioc, std::move([&]() -> {A} {{ co_return; }}()), asio::detached);",
+     1, 1, 1),
     ("correct form, uninvoked",
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }, asio::detached);", 0),
-    ("correct form, capture list with initializer",
-     "asio::co_spawn(ioc, [p = s]() -> asio::awaitable<void> { co_return; }, asio::detached);", 0),
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}, asio::detached);", 0, 1, 1),
+    ("correct form, capture with initializer",
+     f"asio::co_spawn(ioc, [p = s]() -> {A} {{ co_return; }}, asio::detached);", 0, 1, 1),
+    ("correct form, generic lambda",
+     f"asio::co_spawn(ioc, [&]<class T>() -> {A} {{ co_return; }}, asio::detached);",
+     0, 1, 1),
+    ("correct form, mutable + noexcept qualifiers",
+     f"asio::co_spawn(ioc, [&]() mutable noexcept(true) -> {A} {{ co_return; }}, tok);",
+     0, 1, 1),
     ("invoked lambda NESTED inside a correctly-passed lambda",
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{\n"
      "  auto v = [&] { return 1; }();\n"
      "  co_return;\n"
-     "}, asio::detached);", 0),
-    ("invoked lambda as the LAST argument",
-     "asio::co_spawn(ioc, member(), [&](std::exception_ptr) { }());", 1),
+     "}, asio::detached);", 0, 1, 1),
+    ("NON-coroutine invoked lambda returning an awaitable is SAFE",
+     "asio::co_spawn(ioc, [&] { return s.close(); }(), asio::detached);", 0, 1, 1),
     ("awaitable expression, no lambda at all",
-     "asio::co_spawn(ioc, session->close(mode::terminal), asio::use_future);", 0),
-    ("braced init-list argument is not an invocation",
-     "asio::co_spawn(ioc, Handler{a, b}, asio::detached);", 0),
+     "asio::co_spawn(ioc, session->close(mode::terminal), asio::use_future);", 0, 1, 0),
+    ("braced init-list argument is NOT a lambda",
+     "asio::co_spawn(ioc, Handler{a, b}, asio::detached);", 0, 1, 0),
+    ("array subscript followed by a call is NOT a lambda",
+     "asio::co_spawn(ioc, handlers[i](x), asio::detached);", 0, 1, 0),
+    ("attribute is NOT a capture list",
+     f"asio::co_spawn(ioc, [[maybe_unused]] f(), asio::detached);", 0, 1, 0),
     ("offending bytes inside a // comment",
-     "// asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { }(), asio::detached);\n"
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }, asio::detached);", 0),
+     f"// asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}(), tok);\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}, asio::detached);", 0, 1, 1),
     ("offending bytes inside a /* */ comment",
-     "/* co_spawn(ioc, [&]{ }(), tok); */\n"
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }, asio::detached);", 0),
+     f"/* co_spawn(ioc, [&]() -> {A} {{ co_return; }}(), tok); */\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}, asio::detached);", 0, 1, 1),
+    ("SPLICED block-comment terminator really closes the comment",
+     "/* comment *\\\n/\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_await f(); }}(), asio::detached);", 1, 1, 1),
+    ("SPLICED line comment swallows the next physical line",
+     "// comment \\\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_await f(); }}(), tok);\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}, asio::detached);", 0, 1, 1),
     ("offending bytes inside a string literal",
-     'EXPECT_EQ(msg, "co_spawn(ioc, [&]{ }(), tok)");', 0),
+     'EXPECT_EQ(msg, "co_spawn(ioc, [&]{ co_return; }(), tok)");', 0, 0, 0),
     ("offending bytes inside a raw string literal",
-     'const char* s = R"cpp(co_spawn(ioc, [&]{ }(), tok);)cpp";', 0),
+     'const char* s = R"cpp(co_spawn(ioc, [&]{ co_return; }(), tok);)cpp";', 0, 0, 0),
     ("immediately-invoked lambda in a NON-co_spawn call",
-     "register_handler(ioc, [&]() { return 1; }(), tok);", 0),
+     f"register_handler(ioc, [&]() -> {A} {{ co_return; }}(), tok);", 0, 0, 0),
     ("nested co_spawn: inner is the offender",
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {\n"
-     "  asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }(), asio::detached);\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{\n"
+     f"  asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}(), asio::detached);\n"
      "  co_return;\n"
-     "}, asio::detached);", 1),
+     "}, asio::detached);", 1, 2, 2),
     ("two offenders in one file are both reported",
-     "asio::co_spawn(a, [&]() -> asio::awaitable<void> { co_return; }(), asio::detached);\n"
-     "asio::co_spawn(b, [&]() -> asio::awaitable<void> { co_return; }(), asio::detached);", 2),
+     f"asio::co_spawn(a, [&]() -> {A} {{ co_return; }}(), asio::detached);\n"
+     f"asio::co_spawn(b, [&]() -> {A} {{ co_return; }}(), asio::detached);", 2, 2, 2),
     ("template argument commas do not confuse the scan",
      "asio::co_spawn(ioc, [&]() -> asio::awaitable<std::pair<int, int>> {\n"
      "  co_return std::pair<int, int>{1, 2};\n"
-     "}(), asio::detached);", 1),
+     "}(), asio::detached);", 1, 1, 1),
     ("digit separator is not a char literal",
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{\n"
      "  constexpr std::size_t kCapacity = 10'000;\n"
      "  co_return;\n"
-     "}(), asio::detached);", 1),
+     "}(), asio::detached);", 1, 1, 1),
     # Kept alongside the decimal case though both reach the same branch TODAY: an
-    # implementation testing `text[i-1].isdigit()` instead of walking back to the
-    # token start passes decimal and fails hex. The fixture kills that mutant.
+    # implementation testing `text[i-1].isdigit()` instead of walking back to the token
+    # start passes decimal and fails hex. The fixture kills that mutant.
     ("hex digit separator is not a char literal",
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{\n"
      "  constexpr auto kMask = 0x1F'FF;\n"
      "  co_return;\n"
-     "}(), asio::detached);", 1),
+     "}(), asio::detached);", 1, 1, 1),
     ("encoding-prefixed char literal is still a literal",
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{\n"
      "  char c = L'}';  // co_spawn(x, [&]{ }(), t)\n"
      "  co_return;\n"
-     "}, asio::detached);", 0),
-    ("co_spawn in an #include path is not a call site",
-     "#include <asio/co_spawn.hpp>\n"
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }(), tok);", 1),
-    ("a macro body IS still scanned",
-     "#define SPAWN(x) asio::co_spawn(x, [&]() -> asio::awaitable<void> { co_return; }(), tok)",
-     1),
+     "}, asio::detached);", 0, 1, 1),
     ("apostrophe in a comment does not swallow the call site",
      "// asio's closure lifetime\n"
-     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }(), asio::detached);", 1),
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}(), asio::detached);", 1, 1, 1),
+    ("co_spawn in an #include path is not a call site",
+     "#include <asio/co_spawn.hpp>\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}(), tok);", 1, 1, 1),
+    ("identifier split by a line splice is REJOINED, then scanned",
+     f"asio::co_spa\\\nwn(ioc, [&]() -> {A} {{ co_return; }}(), tok);", 1, 1, 1),
+    ("a macro body IS still scanned",
+     f"#define SPAWN(x) asio::co_spawn(x, [&]() -> {A} {{ co_return; }}(), tok)",
+     1, 1, 1),
+]
+
+# Inputs that must RAISE rather than contribute zero findings. Each is written as its
+# own arm so the failure mode it forces — a silent skip — is forced individually.
+SELF_TEST_RAISES = [
+    ("unterminated co_spawn(",
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}(),\n"),
+    ("bare co_spawn mention with no call",
+     "int co_spawn;\n"
+     f"asio::co_spawn(ioc, [&]() -> {A} {{ co_return; }}, tok);"),
+    ("explicitly-templated co_spawn spelling",
+     f"asio::co_spawn<void>(ioc, [&]() -> {A} {{ co_return; }}, tok);"),
 ]
 
 
 def main_self_test() -> int:
     failures = 0
-    for name, src, expected in SELF_TEST_CASES:
+    for name, src, want_f, want_s, want_l in SELF_TEST_CASES:
         try:
-            findings, sites, _ = scan_text(src, "<fixture>")
+            findings, sites, lam = scan_text(src, "<fixture>")
         except ParseError as e:
             print(f"  FAIL  {name}: unexpected ParseError: {e}")
             failures += 1
             continue
-        got = len(findings)
-        if got != expected:
-            print(f"  FAIL  {name}: expected {expected} finding(s), got {got} "
-                  f"(sites parsed: {sites})")
+        got = (len(findings), sites, lam)
+        want = (want_f, want_s, want_l)
+        if got != want:
+            print(f"  FAIL  {name}: expected (findings, sites, lambda-sites) {want}, got {got}")
             failures += 1
         else:
-            print(f"  ok    {name}  ({got} finding(s), {sites} site(s))")
+            print(f"  ok    {name}  {got}")
 
-    # The universe side is an instrument too: an unclosed call site must ERROR,
-    # not silently contribute zero findings.
-    try:
-        scan_text("asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }(),\n",
-                  "<fixture>")
-        print("  FAIL  unterminated co_spawn( must raise ParseError, not parse clean")
-        failures += 1
-    except ParseError:
-        print("  ok    unterminated co_spawn( raises ParseError")
-
-    # A `co_spawn` token the call-site pattern misses must RAISE, not contribute
-    # zero findings — the traversal witness. Written as two arms so the failure
-    # mode (silent skip) is forced individually.
-    for name, src in (
-        ("bare co_spawn mention with no call",
-         "// see co_spawn\nint co_spawn;\n"
-         "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }, tok);"),
-        ("explicitly-templated co_spawn spelling",
-         "asio::co_spawn<void>(ioc, [&]() -> asio::awaitable<void> { co_return; }, tok);"),
-    ):
+    for name, src in SELF_TEST_RAISES:
         try:
             scan_text(src, "<fixture>")
             print(f"  FAIL  {name}: must raise ParseError, not parse clean")
@@ -387,7 +547,7 @@ def main_self_test() -> int:
         except ParseError:
             print(f"  ok    {name} raises ParseError")
 
-    total = len(SELF_TEST_CASES) + 3
+    total = len(SELF_TEST_CASES) + len(SELF_TEST_RAISES)
     if failures:
         print(f"[co-spawn-lambda] SELF-TEST FAIL: {failures} of {total} case(s) failed.")
         return 1
