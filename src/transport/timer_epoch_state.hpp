@@ -19,9 +19,9 @@
 // so it outlives the transport — a plain member would be read through the
 // dangling `this` that is the defect being fixed.
 //
-// ONE type, not one per transport. The plain transport uses `connect` only and
-// carries 8 unused bytes; that is what data-model.md §4 and research.md D-4.1
-// specify ("handshake — TLS only; unused on the plain transport"). Two
+// ONE type, not one per transport. The plain transport does not use every
+// field; that is what data-model.md §4 and research.md D-4.1 specify
+// ("handshake — TLS only; unused on the plain transport"). Two
 // same-named-but-differently-shaped nested types were delivered first, then
 // unified here at /simplify: the namespace-scope collision that justified
 // nesting existed ONLY because the type had been split, and both headers are
@@ -50,6 +50,17 @@
 
 namespace fixpp::transport {
 
+// THE ADMISSION RULE FOR THIS STRUCT, so the next field is decided by the
+// invariant rather than by whether it resembles an epoch: a member belongs here
+// iff its mutation must SURVIVE THE TRANSPORT'S DESTRUCTION. A suspended
+// coroutine frame is destroyed after the Transport on the D-4.0
+// destroy-with-no-drain path, and a stranded timer handler can be queued and
+// ready when the Transport dies -- so anything such a handler or destructor
+// touches must live in a block they can hold by shared_ptr COPY rather than
+// through `this`. Both tenants qualify for that one reason: the timer epochs
+// (handlers capture a copy and compare) and the in-flight flags (the guard
+// holds a copy and clears). The name says the first tenant, not the rule.
+
 // Strand-confined plain integers, no atomics: every arm and retire runs on the
 // transport's own executor, and the accessor is read only after the context has
 // been driven to completion. Should a future consumer arm or retire from a
@@ -57,19 +68,17 @@ namespace fixpp::transport {
 struct timer_epoch_state {
     std::uint64_t connect{0};
     std::uint64_t handshake{0};  // TLS only; unused on the plain transport.
+    std::uint64_t close{0};      // TLS only; close_async's shutdown deadline (#348).
 
-    // ── In-flight flags (#342), here for the SAME lifetime reason as the
-    // epochs, established by MEASUREMENT not by argument. They were first
-    // written as plain Transport members cleared by an RAII guard in
-    // async_connect / async_handshake; ASan then reported a
-    // heap-use-after-free, WRITE of size 1, in that guard's destructor under
-    // D-4.0 destroy-with-no-drain. A suspended coroutine frame is destroyed
-    // AFTER the Transport on that path, and a destructor that writes through
-    // `this` is exactly what the rest of this file exists to avoid — the timer
-    // handlers capture a COPY of the shared_ptr for the same reason. Living
-    // here, the clear is safe whether or not the Transport is still alive.
+    // Managed by detail::inflight_flag_guard (#342 / #346); the guard's header
+    // carries the argument and the measured fault that forced this placement.
     bool connect_in_flight{false};
     bool handshake_in_flight{false};  // TLS only.
+
+    // read/write (#346). Cross-coroutine reader is the TLS close() predicate
+    // ssl_op_suspended_(), which is strand-confined.
+    bool read_in_flight{false};
+    bool write_in_flight{false};
 };
 
 }  // namespace fixpp::transport

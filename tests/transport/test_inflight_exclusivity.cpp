@@ -932,6 +932,97 @@ TEST(InflightExclusivity, CloseDoesNotDeliverCloseNotify_PinsDefect348) {
     ioc.run_for(200ms);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// #348: close_async() DOES deliver close_notify — asserted at the PEER.
+//
+// The paired positive of cell 12 above, and deliberately the same shape so the
+// two can be read against each other: identical fixture, identical pending
+// server read, the ONLY difference is client->close_async() instead of
+// client->close(). Cell 12 measures transport_read_error; this one must measure
+// a clean transport_read_eof.
+//
+// That difference is the wire-level assertion #348 asks for. It is not "the
+// call returned {}" — close() returns {} too, and returns it having thrown the
+// alert away. The peer's read outcome is the only thing that can tell a drained
+// BIO from an undrained one from outside the process.
+//
+// ⚠️ RED-ARM CONTRACT: swap close_async() for close() below and this cell must
+// fail with transport_read_error — i.e. it must turn into cell 12.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, CloseAsyncDeliversCloseNotify_Fixes348) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto pair = make_handshaken_pair(fixture, ioc);
+
+    std::optional<expected_t<std::size_t>> server_read;
+    std::byte buf{0};
+    Transport* server_raw = pair.server.get();
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&server_read, server_raw, &buf]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            server_read = co_await server_raw->async_read_some(std::span<std::byte>{&buf, 1});
+        },
+        asio::detached);
+    // client_raw is hoisted ABOVE the pump deliberately. Left below it, the
+    // `pair.client.get()` lands inside ci/pump-census.sh's lookahead window,
+    // whose `get_re` matches ANY `ident.get(` and so cannot tell a
+    // unique_ptr::get() from the future::get() the census is actually hunting
+    // (#289). That made this cell a census FALSE POSITIVE. Hoisting removes it
+    // without pinning a site that is not one -- cell 12 above already declares
+    // its raw pointer this way.
+    Transport* client_raw = pair.client.get();
+
+    ioc.run_for(300ms);
+    ASSERT_FALSE(server_read.has_value()) << "server read must still be pending before close";
+
+    std::optional<expected_t<void>> closed;
+    const auto t0 = std::chrono::steady_clock::now();
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&closed, client_raw]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            closed = co_await client_raw->close_async();
+        },
+        asio::detached);
+    ioc.run_for(3s);
+    const auto elapsed = std::chrono::steady_clock::now() - t0;
+
+    ASSERT_TRUE(closed.has_value()) << "close_async must complete";
+    EXPECT_TRUE(closed->has_value());
+
+    // ⚠️ WITHOUT THIS THE CELL CANNOT SEE THE QUICK-SHUTDOWN FIX. The alert is
+    // written either way, so the peer's clean EOF below is satisfied even when
+    // async_shutdown blocks for the peer's ANSWERING alert and is released only
+    // by the deadline. This cell passed at 1.32 s before SSL_set_shutdown existed
+    // — inside the same 3 s pump — so the pump alone witnesses nothing.
+    //
+    // The budget is DERIVED from the competing timeout rather than written as a
+    // literal: a reversion parks on tls_close_timeout exactly, so anything
+    // comfortably below it discriminates, and the assertion tracks the Config
+    // default if it ever moves.
+    const auto budget = Transport::Config{}.tls_close_timeout;
+    EXPECT_LT(elapsed, budget / 2)
+        << "close_async took " << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed)
+        << ", i.e. it waited on the peer's answering close_notify and was released by the "
+           "tls_close_timeout deadline. The SSL_set_shutdown(SSL_RECEIVED_SHUTDOWN) quick "
+           "shutdown is missing or ineffective (#348).";
+
+    ASSERT_TRUE(server_read.has_value()) << "server read must complete after the peer's close";
+    ASSERT_FALSE(server_read->has_value());
+    EXPECT_EQ(server_read->error(), error::transport_read_eof)
+        << "#348: close_async() must drain the close_notify alert to the wire, so the peer sees a "
+           "CLEAN EOF. transport_read_error here means the alert was generated into the BIO and "
+           "discarded — the exact defect cell 12 pins for close().";
+
+    (void)pair.server->close();
+    ioc.run_for(200ms);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell 13: D-4.0 destroy-with-no-drain must not fault in the in-flight guard.
@@ -980,5 +1071,27 @@ TEST(InflightExclusivity, DestroyWithNoDrainDoesNotFaultInFlightGuard) {
     }
     SUCCEED() << "no fault under the sanitizer";
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #346 — read/write in-flight flags are RAII-guarded; the wedge they prevent has
+// NO behavioural witness here, deliberately.
+//
+// The CONDITION: a wedge requires a read/write frame DESTROYED while suspended
+// AND a Transport that survives to exhibit the stuck flag. asio destroys a
+// suspended frame only when the handler chain is destroyed unrun -- via
+// ~awaitable_thread, i.e. io_context destruction -- and the Transport's executor
+// does not outlive that. (~awaitable also destroys a frame, but only one stopped
+// at initial_suspend, where the guard was never constructed.) Cancellation, by
+// contrast, RESUMES the frame with operation_aborted, which is why a plain
+// assignment below the co_await survives that path and the cell built on it was
+// vacuous — which is why cell 13 above
+// can only assert "no fault" and not "not wedged".
+//
+// Two public-surface shapes were built to break that and BOTH were measured
+// unsound — see #346 and the gate record before rebuilding either. ⚠️ Do not
+// discharge this by adding a cell that goes green: show it RED first on a tree
+// with the guards reverted to plain assignment, which is the step that killed
+// both attempts. The claim rests on STRUCTURE, the way B-339-1 does.
+// ─────────────────────────────────────────────────────────────────────────────
 
 }  // namespace

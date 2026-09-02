@@ -4,36 +4,38 @@
 //
 // Sets a strand-confined in-flight boolean for the lifetime of the guard.
 //
-// WHY THIS EXISTS RATHER THAN THE LOCAL IDIOM (#342). async_read_some and
-// async_write set and clear their flags by plain assignment:
+// WHY RAII RATHER THAN PLAIN ASSIGNMENT (#342, extended to read/write in #346).
 //
-//     read_in_flight_ = true;
-//     ... single co_await ...
-//     read_in_flight_ = false;
+// A set/clear pair written as two statements around a co_await:
 //
-// That is safe THERE because those coroutines have exactly ONE suspension
-// point and every exit after the set is a plain co_return below the clear.
-// async_connect / async_handshake do not have that shape: between the set and
-// the natural clear there are many co_return paths (resolve failure, connect
-// refused, timeout, cancelled, handshake failure, pinset rejection, ...). A
-// missed clear does not fail loudly — it wedges the Transport into permanent
-// transport_already_connected, so every later connect/handshake is refused and
-// the socket is never retried. Hence RAII: the destructor runs on every
-// co_return AND on frame destruction (asio destroys a suspended awaitable
-// frame under total cancellation, which runs in-scope locals' destructors).
+//     flag = true;
+//     ... co_await ...
+//     flag = false;
 //
-// ⚠️ SCOPE, stated because the argument above proves more than this header
-// fixes. Reason (2) -- a frame destroyed while suspended runs in-scope
-// destructors but never resumes the body -- applies WORD FOR WORD to
-// read_in_flight_ / write_in_flight_, which remain plain-assignment. A frame
-// torn down while suspended in async_read_some / async_write therefore leaves
-// its flag stuck true and wedges the Transport into permanent
-// transport_read_in_progress / transport_write_in_progress, the exact symmetry
-// of the 97 wedge this guard exists to prevent. Those two are NOT converted
-// here: each has a single call site whose only cross-coroutine reader is
-// close(), and converting them would ship with the same witness gap #339 hit
-// trying to drive "frame destroyed while suspended" from the public surface.
-// Known and deferred, not overlooked -- see the follow-up issue.
+// has TWO ways to leave the flag stuck true. (1) Any co_return between the set
+// and the clear skips it -- async_connect / async_handshake have many (resolve
+// failure, connect refused, timeout, cancelled, handshake failure, pinset
+// rejection, ...). (2) A frame DESTROYED while suspended runs its in-scope
+// destructors but never resumes the body, so no statement below the co_await
+// ever executes; asio destroys a suspended awaitable frame under total
+// cancellation. Reason (2) does not care how many suspension points or exit
+// paths a coroutine has, which is why async_read_some / async_write are guarded
+// here too even though each has exactly one of each.
+//
+// ⚠️ BE PRECISE ABOUT WHEN (2) HAPPENS -- an earlier draft of this header said
+// "asio destroys a suspended awaitable frame under total cancellation", and that
+// is FALSE. Cancellation RESUMES the frame with operation_aborted, on which a
+// plain assignment below the co_await runs perfectly well. A frame is destroyed
+// mid-body only when its handler chain is destroyed unrun (~awaitable_thread,
+// i.e. io_context teardown). No caller-reachable path is known that destroys a
+// read/write frame while the Transport SURVIVES to exhibit the stuck flag, so
+// reason (2) is why this shape is correct, not evidence of a live wedge --
+// see the #346 note in tests/transport/test_inflight_exclusivity.cpp.
+//
+// A stuck flag does not fail loudly. It wedges the Transport permanently:
+// transport_already_connected (97) for connect/handshake,
+// transport_read_in_progress / transport_write_in_progress (99/100) for
+// read/write. Every later operation is refused and the socket is never retried.
 //
 // ⚠️ THE FLAG LIVES IN timer_epoch_state, NOT IN THE TRANSPORT — and that is
 // load-bearing, not tidiness. The first version of this guard bound a

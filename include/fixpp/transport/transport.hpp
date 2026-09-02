@@ -73,9 +73,33 @@ struct ConnectInfo;
 // value-initialised, so an emission that already happened is NOT replayed
 // into the new state. Both awaiters involved are `await_ready()==true` with
 // an empty `await_suspend`, so nothing between the reset and a following read
-// suspends. A pre-operation reap could therefore only ever observe `none` --
-// which is why none of the implementations has one. Reaps that FOLLOW a
-// co_await are reachable and are kept.
+// suspends. A reap placed BELOW that reset could therefore only ever observe
+// `none`, and none of the transport implementations has one. Reaps that FOLLOW
+// a co_await are reachable and are kept.
+//
+// ⚠️ THE RULE IS AN ORDERING, NOT A PROHIBITION (#349). What kills a reap is a
+// reset standing between it and the emission it is meant to see -- not the reap
+// itself. Read `cancellation_state` BEFORE any reset and the inherited emission
+// is still there to be observed. `src/tls/file_cert_source.cpp` does that,
+// because [2g §6.4] binds that window. The transport implementations
+// deliberately reset first and accept the consequence stated below.
+//
+// ⚠️ BUT ORDERING ALONE IS NOT SUFFICIENT, AND A CALLEE CANNOT MAKE IT SO.
+// Reaping before the reset only fires when the caller has turned
+// `throw_if_cancelled` OFF. It defaults to TRUE and is per-awaitable_thread, and
+// `await_transform` for a child awaitable throws operation_aborted when the
+// inherited state is already cancelled -- on exactly the condition the reap
+// tests, before the child body runs. So the reap and the throw are guarded by
+// the same predicate and the throw wins. A caller that wants the error VALUE
+// rather than the exception must `co_await this_coro::throw_if_cancelled(false)`
+// around the call; no caller in this repo does, so those reaps do not currently
+// fire in production -- tracked as #351. Re-derive:
+// `awaitable_frame_base::await_transform(awaitable<T, Executor>)` in asio's
+// impl/awaitable.hpp, and the `throw_if_cancelled_` member on its entry point.
+//
+// `src/session/reconnect_fsm.cpp`'s corrected reap is a DIFFERENT shape and is
+// not subject to any of this: it reaps an emission the backoff sleep left
+// behind, i.e. post-suspension, which is the reachable kind.
 //
 // ⚠️ WHAT THIS MEANS FOR A CALLER, stated because the obvious reading is wrong.
 // A cancellation emitted BEFORE the call is DISCARDED -- it is not deferred to
@@ -86,7 +110,9 @@ struct ConnectInfo;
 // before the reset discards it. Only a signal emitted AFTER the reset -- i.e.
 // while the operation is genuinely in flight -- takes effect, surfacing as
 // operation_aborted on the awaited op. A caller that must not proceed has to
-// check its own precondition before calling, or call close().
+// check its own precondition before calling, or call close(). ⚠️ This paragraph
+// describes THE TRANSPORTS, which reset first; it is not a property of asio.
+// A callee that reaps before resetting does honour a pre-call cancellation.
 // Re-derive: asio cancellation_state.hpp's (slot, filter) ctor + impl_base(),
 // and awaitable_thread::reset_cancellation_state in asio impl/awaitable.hpp.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -249,6 +275,31 @@ public:
     //     Idempotency: second close() returns expected_t<void>{} without side
     //     effects.
     [[nodiscard]] virtual core::expected_t<void> close() noexcept = 0;
+
+    // (6) Graceful asynchronous close (#348). NOT pure — the default IS close(),
+    //     so every existing implementor keeps compiling and behaving as before,
+    //     and a caller opts in per call site.
+    //
+    //     WHY ADDITIVE rather than making close() itself async: close() is a
+    //     synchronous pure-virtual with implementors across the library and the
+    //     test suite, for a benefit only the TLS transport can deliver — and it
+    //     would not be usable at the call site that most wants it, since
+    //     Session's terminal close emits cancellation_type::total immediately
+    //     before closing, which would cancel an awaited shutdown.
+    //
+    //     WHAT THE TLS OVERRIDE ADDS over close(): it drives shutdown through
+    //     asio's ssl::stream, which actually writes the close-notify alert to
+    //     the next layer — the step whose absence is the #348 defect — bounded
+    //     by Config::tls_close_timeout.
+    //
+    //     Adopting this at a production call site is a separate decision;
+    //     derive the current adopters with `git grep close_async`. Witnessed by
+    //     test_inflight_exclusivity.cpp's CloseAsyncDeliversCloseNotify, which
+    //     asserts the PEER observes a clean EOF — a wire-level outcome, not
+    //     merely that the call returned.
+    [[nodiscard]] virtual asio::awaitable<core::expected_t<void>> close_async() {
+        co_return close();
+    }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

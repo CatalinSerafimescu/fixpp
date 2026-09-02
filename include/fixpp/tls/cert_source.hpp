@@ -23,6 +23,28 @@
 //
 //       // 3. REAP PRE-I/O CANCELLATION — the "between-call-and-first-suspension"
 //       //    reap. Load-bearing for the §6.4 binding contract.
+//       //
+//       //    ⚠️ DO NOT PUT A reset_cancellation_state ABOVE THIS. The recipe has
+//       //    none on purpose. The repo's opposing convention -- "every co_spawned
+//       //    loop MUST reset_cancellation_state(total) as its first step" -- is
+//       //    about co_spawn ROOTS, and applying it here VOIDS this step: the
+//       //    reset re-constructs cancellation_state from the parent slot with
+//       //    `cancelled_` value-initialised, so an emission that already happened
+//       //    is not replayed and the reap can only ever see `none`. That is
+//       //    exactly how the in-tree file_cert_source acquired the defect fixed in
+//       //    #349. If the implementation needs total cancellation for step 4, put
+//       //    the reset AFTER this reap.
+//       //
+//       //    ⚠️ AND THE ORDERING IS STILL NOT ENOUGH ON ITS OWN — this step fires
+//       //    only if YOUR CALLER opted out of asio's `throw_if_cancelled`, which
+//       //    DEFAULTS TO TRUE. With the default, `co_await src->load_credentials()`
+//       //    throws operation_aborted before your body runs, on exactly the
+//       //    condition this step tests. So a correctly-ordered step 3 can still
+//       //    never fire, and §6.4's `tls_load_cancelled` is not what such a caller
+//       //    observes. No caller in this repo opts out today. Write the step
+//       //    anyway — it is correct and cheap — but do not rely on it as the
+//       //    mechanism that reports pre-call cancellation unless you also control
+//       //    the caller. Tracked as fixpp#351.
 //       if (cs.cancelled() != asio::cancellation_type::none)
 //           co_return core::expected_t<local_credentials>{
 //               unexpect, error::tls_load_cancelled };

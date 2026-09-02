@@ -33,11 +33,16 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <chrono>
+#include <functional>
 #include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_errors.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <memory>
+#include <optional>
+#include <span>
+#include <vector>
 
 #include "transport/asio_plain_transport.hpp"
 
@@ -147,6 +152,281 @@ TEST(AsioPlainTransportConfig, TcpKeepaliveApplied) {
     EXPECT_TRUE(keepalive_observed)
         << "tcp_keepalive=true must be observable via SO_KEEPALIVE after connect; "
            "apply_socket_options_() must have run and honored the config";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Socket-option knobs that apply_socket_options_() honours but nothing read
+// back: SO_LINGER (enabled arm), SO_RCVBUF and SO_SNDBUF.
+//
+// These three `if` arms were the only untaken branches left in
+// apply_socket_options_(): the defaults are so_linger_enabled=false and
+// {recv,send}_buf_bytes=0, so every existing cell drove the OTHER side of each
+// branch. A knob that is written but never read back is indistinguishable from
+// a knob that is silently ignored -- which is the whole reason the keepalive
+// cell above reads its option back rather than trusting the assignment.
+//
+// ⚠️ The kernel is allowed to ROUND buffer sizes (Linux doubles SO_RCVBUF/
+// SO_SNDBUF and enforces its own floor), so these assert "changed from the
+// default in the direction we asked", NOT equality with the requested value.
+// An equality assertion here would be a cell that fails on the platform rather
+// than on the defect.
+// ─────────────────────────────────────────────────────────────────────────────
+// Socket-option knobs that apply_socket_options_() honours but nothing read
+// back: SO_LINGER (enabled arm), SO_RCVBUF and SO_SNDBUF.
+//
+// These three `if` arms were the only untaken branches in apply_socket_options_():
+// the defaults are so_linger_enabled=false and {recv,send}_buf_bytes=0, so every
+// existing cell drove the OTHER side of each branch.
+//
+// ⚠️ THE KERNEL IS ITS OWN ORACLE HERE, and that is the third shape of this
+// assertion. The two before it both asserted a property of KERNEL POLICY, and
+// each was falsified by a host that did not share the dev box's policy:
+//
+//   (a) `configured > unconnected-probe`  -> VACUOUS. Linux raises SO_SNDBUF at
+//       connect unaided (16384 -> 87040 with no option set), so it held with the
+//       tcp_send_buf_bytes block DELETED.
+//   (b) `configured >= requested`         -> FAILED ON CI. sk_sndbuf is clamped to
+//       net.core.wmem_max: 4 MiB here (256 KiB request doubles to 512 KiB),
+//       212992 on the runner (the request is clamped BELOW what was asked). There
+//       is a CEILING, not only a floor.
+//   (c) `configured > default-Config`     -> FAILED ON CI, opposite direction.
+//       An untouched socket AUTOTUNES upward (runner baseline: 1313280), and an
+//       explicit setsockopt DISABLES autotuning and pins the clamped 212992. So
+//       setting the knob makes the buffer SMALLER on that host. The direction is
+//       host-dependent and cannot be asserted at all.
+//
+// So this cell predicts nothing about the kernel. It performs the SAME
+// setsockopt on a plain asio socket and compares the transport against THAT.
+// Whatever the host's default, ceiling, doubling or autotuning does, both sides
+// experience it identically -- and with the block deleted the transport reads the
+// untouched default instead, which is what makes the mutant die. The
+// discriminating power is CHECKED IN THE CELL (oracle != default) rather than
+// assumed, so a host where the two coincide skips instead of passing vacuously.
+// ─────────────────────────────────────────────────────────────────────────────
+static constexpr int kRequestedBufBytes = 256 * 1024;
+
+TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor acc{ioc};
+    auto ep = make_loopback_acceptor(ioc, acc);
+
+    // Exactly three connections are made below; accepting a bounded number (and
+    // closing the acceptor after) lets run_for drain instead of sitting out its
+    // whole budget on a permanently-armed accept.
+    constexpr int kConnections = 3;
+    std::vector<std::unique_ptr<asio::ip::tcp::socket>> peers;
+    std::function<void(int)> accept_next = [&](int remaining) {
+        if (remaining == 0) {
+            asio::error_code ignored;
+            acc.close(ignored);
+            return;
+        }
+        peers.push_back(std::make_unique<asio::ip::tcp::socket>(ioc));
+        acc.async_accept(*peers.back(), [&, remaining](asio::error_code e) {
+            if (!e) accept_next(remaining - 1);
+        });
+    };
+    accept_next(kConnections);
+
+    bool done{false};
+    bool linger_on{false};
+    int linger_secs{-1};
+    int def_rcv{0}, def_snd{0};      // plain socket, no option
+    int orc_rcv{0}, orc_snd{0};      // plain socket, the SAME setsockopt
+    int recv_buf{0}, send_buf{0};    // the transport
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            const asio::ip::tcp::endpoint dst{asio::ip::address_v4::loopback(), ep.port()};
+            asio::error_code e;
+
+            auto read_bufs = [&](const asio::ip::tcp::socket& s, int& r_out, int& w_out) {
+                asio::socket_base::receive_buffer_size r;
+                asio::socket_base::send_buffer_size w;
+                s.get_option(r, e);
+                if (e) return false;
+                r_out = r.value();
+                s.get_option(w, e);
+                if (e) return false;
+                w_out = w.value();
+                return true;
+            };
+
+            // (1) plain socket, untouched.
+            asio::ip::tcp::socket plain{co_await asio::this_coro::executor};
+            co_await plain.async_connect(dst, asio::redirect_error(asio::use_awaitable, e));
+            if (e || !read_bufs(plain, def_rcv, def_snd)) co_return;
+
+            // (2) plain socket, the SAME setsockopt the transport is meant to do.
+            asio::ip::tcp::socket oracle{co_await asio::this_coro::executor};
+            co_await oracle.async_connect(dst, asio::redirect_error(asio::use_awaitable, e));
+            if (e) co_return;
+            oracle.set_option(asio::socket_base::receive_buffer_size{kRequestedBufBytes}, e);
+            if (e) co_return;
+            oracle.set_option(asio::socket_base::send_buffer_size{kRequestedBufBytes}, e);
+            if (e) co_return;
+            if (!read_bufs(oracle, orc_rcv, orc_snd)) co_return;
+
+            // (3) the transport, configured with the same knobs.
+            Transport::Config cfg{};
+            cfg.so_linger_enabled = true;  // default false -> takes the other arm
+            cfg.so_linger_seconds = 3;
+            cfg.tcp_recv_buf_bytes = kRequestedBufBytes;  // default 0 -> block not entered
+            cfg.tcp_send_buf_bytes = kRequestedBufBytes;
+            asio_plain_transport client{co_await asio::this_coro::executor, cfg};
+
+            fixpp::transport::Endpoint endpoint;
+            endpoint.host = "127.0.0.1";
+            endpoint.port = ep.port();
+            auto conn = co_await client.async_connect(endpoint);
+            if (!conn) co_return;
+
+            const auto& sock = asio_plain_transport_test_access::socket_of(client);
+            asio::socket_base::linger linger_opt;
+            sock.get_option(linger_opt, e);
+            if (e) co_return;
+            linger_on = linger_opt.enabled();
+            linger_secs = linger_opt.timeout();
+            if (!read_bufs(sock, recv_buf, send_buf)) co_return;
+
+            done = true;
+        },
+        asio::detached);
+
+    ioc.run_for(std::chrono::seconds{12});
+
+    // Liveness: every read above bails via co_return on error, so without this a
+    // failed get_option would leave zeros and the comparisons would be vacuous.
+    ASSERT_TRUE(done) << "config coroutine did not complete — a connect or option read failed";
+
+    EXPECT_TRUE(linger_on) << "so_linger_enabled=true must reach SO_LINGER";
+    EXPECT_EQ(linger_secs, 3) << "so_linger_seconds must be the value configured";
+
+    // The instrument's own discrimination check, on THIS host: if an explicit
+    // setsockopt is indistinguishable from leaving the socket alone, the
+    // comparison below cannot detect a missing setsockopt either, and passing
+    // would mean nothing.
+    if (orc_rcv == def_rcv && orc_snd == def_snd) {
+        GTEST_SKIP() << "this host reports identical buffers with and without an explicit "
+                        "setsockopt (rcv=" << def_rcv << " snd=" << def_snd
+                     << "), so the cell cannot discriminate here";
+    }
+
+    if (orc_rcv != def_rcv) {
+        EXPECT_EQ(recv_buf, orc_rcv)
+            << "tcp_recv_buf_bytes must reach SO_RCVBUF: the transport should read what a plain "
+               "socket given the same setsockopt reads (" << orc_rcv << "), not the untouched "
+               "default (" << def_rcv << ")";
+    }
+    if (orc_snd != def_snd) {
+        EXPECT_EQ(send_buf, orc_snd)
+            << "tcp_send_buf_bytes must reach SO_SNDBUF: the transport should read what a plain "
+               "socket given the same setsockopt reads (" << orc_snd << "), not the untouched "
+               "default (" << def_snd << ")";
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The PLAINTEXT read/write overlap guards (FR-007) -- 99 and 100.
+//
+// test_inflight_exclusivity.cpp witnesses the overlap guards on the TLS
+// transport and the CONNECT guard on both, but the plaintext read and write
+// guards had no cell at all: both `if (..._in_flight)` branches were untaken in
+// coverage. That is the same per-implementation gap the #342 cells call out --
+// a mutation deleting the plaintext read guard would leave every existing cell
+// green.
+//
+// Shape: connect to a peer that accepts and stays SILENT, so the first read
+// suspends and is genuinely still in flight when the second is issued.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(AsioPlainTransportConfig, PlaintextReadAndWriteOverlapRefused) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor acc{ioc};
+    auto ep = make_loopback_acceptor(ioc, acc);
+
+    asio::ip::tcp::socket peer{ioc};
+    acc.async_accept(peer, [](asio::error_code) {});
+
+    std::optional<fixpp::core::expected_t<std::size_t>> second_read;
+    std::optional<fixpp::core::expected_t<std::size_t>> second_write;
+    bool connected{false};
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            Transport::Config cfg{};
+            auto client =
+                std::make_unique<asio_plain_transport>(co_await asio::this_coro::executor, cfg);
+
+            fixpp::transport::Endpoint endpoint;
+            endpoint.host = "127.0.0.1";
+            endpoint.port = ep.port();
+            auto conn = co_await client->async_connect(endpoint);
+            if (!conn) co_return;
+            connected = true;
+
+            auto* raw = client.get();
+            std::array<std::byte, 32> buf1{};
+            std::array<std::byte, 32> buf2{};
+
+            // First read: suspends (peer is silent) and stays in flight.
+            asio::co_spawn(
+                co_await asio::this_coro::executor,
+                [raw, &buf1]() -> asio::awaitable<void> {
+                    co_await asio::this_coro::reset_cancellation_state(
+                        asio::enable_total_cancellation());
+                    (void)co_await raw->async_read_some(std::span<std::byte>{buf1});
+                },
+                asio::detached);
+
+            // Yield so the first read reaches its suspension point.
+            asio::steady_timer t{co_await asio::this_coro::executor};
+            t.expires_after(std::chrono::milliseconds{100});
+            co_await t.async_wait(asio::use_awaitable);
+
+            second_read = co_await raw->async_read_some(std::span<std::byte>{buf2});
+
+            // Same for write: a 4 MiB payload against a peer that never reads
+            // cannot drain, so the first write stays in flight.
+            // shared_ptr, not static: the detached write coroutine outlives this
+            // frame, so a frame-local buffer would dangle — but a static would
+            // retain 4 MiB for the process lifetime (measured: +4 MiB maxrss)
+            // and add a guard on every pass. Size is chosen to defeat
+            // sndbuf+peer-rcvbuf autotuning; do not shrink it.
+            auto big = std::make_shared<std::vector<std::byte>>(1 << 22, std::byte{0xCD});
+            std::array<std::byte, 8> small{};
+            asio::co_spawn(
+                co_await asio::this_coro::executor,
+                [raw, big]() -> asio::awaitable<void> {
+                    co_await asio::this_coro::reset_cancellation_state(
+                        asio::enable_total_cancellation());
+                    (void)co_await raw->async_write(std::span<const std::byte>{*big});
+                },
+                asio::detached);
+            t.expires_after(std::chrono::milliseconds{100});
+            co_await t.async_wait(asio::use_awaitable);
+
+            second_write = co_await raw->async_write(std::span<const std::byte>{small});
+
+            (void)client->close();
+        },
+        asio::detached);
+
+    ioc.run_for(std::chrono::seconds{15});
+
+    ASSERT_TRUE(connected) << "client failed to connect";
+    ASSERT_TRUE(second_read.has_value()) << "overlapping read must answer IMMEDIATELY, not suspend";
+    ASSERT_FALSE(second_read->has_value());
+    EXPECT_EQ(second_read->error(), fixpp::core::error::transport_read_in_progress)
+        << "plaintext read overlap must be refused with 99 (FR-007)";
+
+    ASSERT_TRUE(second_write.has_value())
+        << "overlapping write must answer IMMEDIATELY, not suspend";
+    ASSERT_FALSE(second_write->has_value());
+    EXPECT_EQ(second_write->error(), fixpp::core::error::transport_write_in_progress)
+        << "plaintext write overlap must be refused with 100 (FR-007)";
 }
 
 // ── Test (b): close() is prompt — no tls_close_timeout delay ──────────────────

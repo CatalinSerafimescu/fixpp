@@ -638,6 +638,7 @@ asio_tls_transport::asio_tls_transport(asio::any_io_executor exec, Transport::Co
 asio_tls_transport::~asio_tls_transport() {
     ++timer_epochs_->connect;
     ++timer_epochs_->handshake;
+    ++timer_epochs_->close;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1271,7 +1272,7 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     }
 
     // In-flight exclusivity guard (FR-007 — strand-confined boolean).
-    if (read_in_flight_) {
+    if (timer_epochs_->read_in_flight) {
         co_return std::unexpected{E::transport_read_in_progress};
     }
 
@@ -1279,15 +1280,14 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
     // for the mechanism and the re-derivation recipe.
 
-    read_in_flight_ = true;
+    // #346: RAII — see inflight_flag_guard.hpp for why not assignment.
+    detail::inflight_flag_guard read_guard{timer_epochs_, &timer_epoch_state::read_in_flight};
 
     // NEVER allocate in the read-path completion-handler dispatch per [const §VIII.5].
     // asio::ssl::stream::async_read_some writes directly into the caller-owned buf.
     asio::error_code ec;
     std::size_t bytes_read = co_await ssl_stream_->async_read_some(
         asio::buffer(buf.data(), buf.size()), asio::redirect_error(asio::use_awaitable, ec));
-
-    read_in_flight_ = false;
 
     if (ec) {
         if (ec == asio::error::operation_aborted) {
@@ -1327,7 +1327,7 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     }
 
     // In-flight exclusivity guard (FR-007).
-    if (write_in_flight_) {
+    if (timer_epochs_->write_in_flight) {
         co_return std::unexpected{E::transport_write_in_progress};
     }
 
@@ -1335,15 +1335,14 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
     // for the mechanism and the re-derivation recipe.
 
-    write_in_flight_ = true;
+    // #346: RAII — see inflight_flag_guard.hpp for why not assignment.
+    detail::inflight_flag_guard write_guard{timer_epochs_, &timer_epoch_state::write_in_flight};
 
     // Composed write (async_write — NOT async_write_some per FR-004).
     asio::error_code ec;
     std::size_t bytes_written =
         co_await asio::async_write(*ssl_stream_, asio::buffer(bytes.data(), bytes.size()),
                                    asio::redirect_error(asio::use_awaitable, ec));
-
-    write_in_flight_ = false;
 
     if (ec) {
         if (ec == asio::error::operation_aborted) {
@@ -1397,7 +1396,7 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // ── Best-effort TLS close-notify (graceful shutdown) ──────────────────────
     // Send the close_notify alert ONLY when no SSL operation is suspended on this
     // strand. close() is strand-confined (FR-006 — see header §"State machine"),
-    // so read_in_flight_ / write_in_flight_ are authoritative reads here. If a
+    // so the in-flight flags in *timer_epochs_ are authoritative reads here. If a
     // read/write is in flight, its completion handler will later run
     // map_error_code → BIO_ctrl on ssl_stream_; mutating the SSL state via
     // SSL_shutdown underneath that suspended op is unsafe, and socket_.close()
@@ -1434,6 +1433,92 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // Best-effort; ignore ec.
 
     return {};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// close_async — graceful TLS shutdown that actually reaches the wire (#348)
+// ─────────────────────────────────────────────────────────────────────────────
+[[nodiscard]] asio::awaitable<core::expected_t<void>> asio_tls_transport::close_async() {
+    // Idempotent, exactly like close().
+    if (state_ == state_t::closed) {
+        co_return core::expected_t<void>{};
+    }
+
+    // No stream, or an SSL operation is suspended on it -- there is nothing to
+    // shut down gracefully, and mutating SSL state underneath a suspended op is
+    // the hazard close() documents at length. Fall back to the abortive path,
+    // which is the honest outcome rather than a pretended graceful one.
+    if (!ssl_stream_ || ssl_op_suspended_()) {
+        co_return close();
+    }
+
+    // Set BEFORE the suspension so no new async_* can start against ssl_stream_
+    // while the shutdown is in flight -- read/write/handshake all reject on
+    // state_. ⚠️ It also makes a close() arriving DURING the suspension a silent
+    // no-op that returns {} without closing the socket. That is subsumption, not
+    // a leak, while close_async runs to completion; an adopter that can race the
+    // two must treat close_async as the owner of the close.
+    state_ = state_t::closed;
+
+    // THE DIFFERENCE FROM close(). close() calls SSL_shutdown() on the native
+    // handle, which only deposits the alert into asio's BIO; nothing drains it
+    // and the socket_.close() that follows discards it. async_shutdown goes
+    // through ssl::detail::io, which drains engine::get_output() to the next
+    // layer -- i.e. it actually writes the alert.
+    //
+    // Bounded by tls_close_timeout so a peer that never answers cannot hold the
+    // close open; the budget comes from Config rather than a literal so the
+    // documented knob is the one in force. We do NOT wait for the peer's
+    // answering close_notify beyond that budget -- sending ours is what makes
+    // the peer's read a clean EOF, which is the observable #348 is about.
+    // QUICK SHUTDOWN. Without this, async_shutdown waits for the peer's
+    // ANSWERING close_notify and only the deadline below releases it -- so
+    // every close against a peer that does not itself close gracefully burned
+    // the WHOLE tls_close_timeout budget.
+    // Marking the inbound direction already-shut makes SSL_shutdown report
+    // complete as soon as OUR alert is written, which is the only half #348 is
+    // about; the deadline goes back to being a backstop rather than the normal
+    // exit path.
+    SSL_set_shutdown(ssl_stream_->native_handle(), SSL_RECEIVED_SHUTDOWN);
+
+    // Deadline, armed with the SAME epoch discipline as the connect and
+    // handshake sites above -- the handler captures a shared_ptr COPY of the
+    // block and compares, never `this` alone. timer.cancel() cannot un-queue an
+    // already-completed handler (D-4.1), so a deadline that fired just before
+    // teardown would otherwise reach socket_.cancel() through a dangling
+    // `this`. The epoch is retired below BEFORE cancel(), and again in the
+    // destructor body.
+    asio::steady_timer deadline{exec_};
+    deadline.expires_after(cfg_.tls_close_timeout);
+    const std::uint64_t close_epoch = ++timer_epochs_->close;
+    deadline.async_wait([this, epochs = timer_epochs_, close_epoch](asio::error_code ec) {
+        if (ec || close_epoch != epochs->close) {
+            return;  // cancelled, or this attempt's epoch was retired — no-op.
+        }
+        asio::error_code ignored;
+        socket_.cancel(ignored);
+    });
+
+    asio::error_code shutdown_ec;
+    co_await ssl_stream_->async_shutdown(asio::redirect_error(asio::use_awaitable, shutdown_ec));
+
+    // Retire BEFORE cancel (D-4.1) — see the connect/handshake sites.
+    ++timer_epochs_->close;
+    deadline.cancel();
+
+    // shutdown_ec is deliberately not surfaced. A peer that closes the TCP
+    // connection without answering yields eof/stream_truncated here, and that
+    // is a NORMAL graceful close from our side: our alert was still written,
+    // which is the whole point. close() is best-effort and so is this.
+    (void)shutdown_ec;
+
+    // ssl_stream_ is NEVER reset here, for the same reason close() documents:
+    // a pending completion passes through map_error_code -> BIO_ctrl on the SSL
+    // BIO, and freeing it underneath that is a UAF.
+    asio::error_code ec;
+    socket_.close(ec);
+
+    co_return core::expected_t<void>{};
 }
 
 }  // namespace fixpp::transport

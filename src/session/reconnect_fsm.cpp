@@ -130,9 +130,21 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
                 asio::error_code wait_ec;
                 co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, wait_ec));
 
-                // Re-check cancellation state after the sleep.
-                co_await asio::this_coro::reset_cancellation_state(
-                    asio::enable_total_cancellation());
+                // #349: reap the state THE SLEEP LEFT BEHIND, before any reset.
+                //
+                // The reset used to stand above this read, and that ordering
+                // discarded a real emission. `wait_ec` only covers the case
+                // where the cancellation aborted the wait itself. It does NOT
+                // cover a `total` emitted after the timer fired NATURALLY but
+                // before this coroutine resumed — a live possibility, since the
+                // emitting handler and this resumption are two handlers on the
+                // same strand. On that path wait_ec is clear, the reset wiped
+                // the emission (it re-constructs cancellation_state from the
+                // parent slot with `cancelled_` value-initialised, so an
+                // emission that already happened is not replayed — #341), and
+                // BOTH this reap and the one below the loop head then observed
+                // `none`. The attempt proceeded to connect with the caller's
+                // cancellation silently discarded.
                 if (auto cs = co_await asio::this_coro::cancellation_state;
                     cs.cancelled() != asio::cancellation_type::none) {
                     co_return std::unexpected{error::transport_connect_cancelled};
@@ -140,10 +152,21 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
                 if (wait_ec == asio::error::operation_aborted) {
                     co_return std::unexpected{error::transport_connect_cancelled};
                 }
+
+                // Re-enable total cancellation for the attempt below. AFTER the
+                // reap, never before it (#349).
+                co_await asio::this_coro::reset_cancellation_state(
+                    asio::enable_total_cancellation());
             }
         }
 
-        // Re-check cancellation after the backoff sleep (or at attempt 0).
+        // #349: KEPT. LIVE only when no reset intervenes between the nearest
+        // preceding SUSPENSION and this read -- a zero-length backoff skips the
+        // block above, which is where the reset lives, and reaches it.
+        // Re-derive before touching it by walking back to that suspension;
+        // `this_coro` awaiters are await_ready()==true and never break the
+        // chain. An empty schedule yields a zero delay. ⚠️ Do not delete this by
+        // analogy with #341's transport sweep.
         if (auto cs = co_await asio::this_coro::cancellation_state;
             cs.cancelled() != asio::cancellation_type::none) {
             co_return std::unexpected{error::transport_connect_cancelled};

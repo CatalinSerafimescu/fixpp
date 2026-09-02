@@ -46,9 +46,9 @@ namespace fixpp::transport {
 //   *          → (close())                         → closed
 //   connected  + cancel mid-IO                    → state unchanged (cancel ≠ close)
 //
-// Thread-safety: all async methods and the strand-confined flags
-// (read_in_flight_, write_in_flight_) are confined to the session strand
-// provided at construction. ⚠️ cancel() was documented off-strand-safe here;
+// Thread-safety: all async methods and the strand-confined in-flight flags
+// (timer_epochs_->read_in_flight / write_in_flight, #346) are confined to the
+// session strand provided at construction. ⚠️ cancel() was documented off-strand-safe here;
 // struck 2026-08-31 (#333) — see Transport::cancel(). Treat as strand-confined.
 // ─────────────────────────────────────────────────────────────────────────────
 class asio_plain_transport final : public Transport {
@@ -188,9 +188,8 @@ private:
     // destroy synchronously on the failure arm).
     std::shared_ptr<timer_epoch_state> timer_epochs_{std::make_shared<timer_epoch_state>()};
 
-    // ── In-flight exclusivity flags (strand-confined — NOT atomics) ───────────
-    bool read_in_flight_{false};
-    bool write_in_flight_{false};
+    // #346: read/write in-flight flags live in *timer_epochs_, managed by
+    // detail::inflight_flag_guard — rationale in that header.
 
     // ── Acceptor event sink (null on initiator side) ───────────────────────────
     ListenerEvents* listener_events_{nullptr};

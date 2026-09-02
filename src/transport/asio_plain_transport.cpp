@@ -280,7 +280,7 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     }
 
     // In-flight exclusivity guard (FR-007 — strand-confined boolean).
-    if (read_in_flight_) {
+    if (timer_epochs_->read_in_flight) {
         co_return std::unexpected{E::transport_read_in_progress};
     }
 
@@ -288,15 +288,14 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
     // for the mechanism and the re-derivation recipe.
 
-    read_in_flight_ = true;
+    // #346: RAII — see inflight_flag_guard.hpp for why not assignment.
+    detail::inflight_flag_guard read_guard{timer_epochs_, &timer_epoch_state::read_in_flight};
 
     // NEVER allocate in the read-path completion handler per [const §VIII.5].
     // socket_.async_read_some writes directly into the caller-owned buf.
     asio::error_code ec;
     std::size_t bytes_read = co_await socket_.async_read_some(
         asio::buffer(buf.data(), buf.size()), asio::redirect_error(asio::use_awaitable, ec));
-
-    read_in_flight_ = false;
 
     if (ec) {
         if (ec == asio::error::operation_aborted) {
@@ -327,7 +326,7 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     }
 
     // In-flight exclusivity guard (FR-007).
-    if (write_in_flight_) {
+    if (timer_epochs_->write_in_flight) {
         co_return std::unexpected{E::transport_write_in_progress};
     }
 
@@ -335,15 +334,14 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
     // for the mechanism and the re-derivation recipe.
 
-    write_in_flight_ = true;
+    // #346: RAII — see inflight_flag_guard.hpp for why not assignment.
+    detail::inflight_flag_guard write_guard{timer_epochs_, &timer_epoch_state::write_in_flight};
 
     // Composed write (async_write — NOT async_write_some per FR-004).
     asio::error_code ec;
     std::size_t bytes_written =
         co_await asio::async_write(socket_, asio::buffer(bytes.data(), bytes.size()),
                                    asio::redirect_error(asio::use_awaitable, ec));
-
-    write_in_flight_ = false;
 
     if (ec) {
         if (ec == asio::error::operation_aborted) {

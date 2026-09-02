@@ -505,12 +505,12 @@ file_cert_source::make_file_cert_source(Config cfg, std::pmr::memory_resource* m
 // parses every file ONCE at construction time, no blocking I/O is needed here.
 //
 // Steps executed per [2g §6.4] contracts/cert_source.hpp lines 206-243:
-//   0. Enable total cancellation ([feedback_asio_cospawn_total_cancellation_default]).
-//   2. Read cancellation_state.
-//   3. REAP PRE-I/O CANCELLATION (load-bearing).
-//   4. Build credentials inline from cached state (no cancellable_dispatch hop —
-//      the §6.4 footnote explicitly authorises this for already-cached state).
-//      Post-build cancellation check is retained for symmetry.
+// Executed in this order (recipe step numbers in parentheses):
+//   read the INHERITED cancellation_state   (step 2) — before any reset, #349
+//   reap pre-I/O cancellation               (step 3) — load-bearing for §6.4
+//   enable total cancellation               (step 0) — after the reap, #349
+//   build credentials from cached state     (step 4) — no cancellable_dispatch
+//      hop; the §6.4 footnote authorises this for already-cached state.
 //
 // The step-4 cancellable_dispatch hop and the full §6.4 production-path witness
 // (deterministic probe under per_session_strand / direct_executor per [2d §4.8])
@@ -518,21 +518,25 @@ file_cert_source::make_file_cert_source(Config cfg, std::pmr::memory_resource* m
 // seam #13 pin). [2g §6.4:926-929] is the spec authorisation for this path.
 [[nodiscard]] asio::awaitable<core::expected_t<local_credentials>>
 file_cert_source::load_credentials() {
-    // Enable total cancellation so callers using cancellation_type::total are
-    // honoured (asio::co_spawn defaults to terminal-only cancellation per
-    // [[feedback_asio_cospawn_total_cancellation_default]]).
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
-
-    // Step 2: read cancellation_state.
+    // Step 2: read the INHERITED cancellation_state — BEFORE any reset (#349).
+    // ORDER IS THE CONTRACT HERE, not style: §6.4 binds the window between the
+    // call being issued and the first suspension, and that window is only
+    // observable in the state inherited from the awaiting parent. A reset above
+    // this line voids it. Mechanism and rule: the CANCELLATION TIMING note on
+    // Transport in transport.hpp.
     auto cs = co_await asio::this_coro::cancellation_state;
 
-    // Step 3: REAP PRE-I/O CANCELLATION.
-    // This is the "between-call-and-first-suspension" reap — load-bearing
-    // for the §6.4 binding contract.
+    // Step 3: REAP PRE-I/O CANCELLATION — load-bearing for the §6.4 binding
+    // contract, and now actually able to fire.
     if (cs.cancelled() != asio::cancellation_type::none) {
         co_return core::expected_t<local_credentials>{std::unexpect,
                                                       core::error::tls_load_cancelled};
     }
+
+    // Enable total cancellation for the work BELOW the reap (co_spawn defaults
+    // to terminal-only per [[feedback_asio_cospawn_total_cancellation_default]]).
+    // MUST stay after the step-3 read — see above.
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     // Step 4: build credentials from cached state.
     // For file_cert_source all data is cached at construction; no blocking I/O.
@@ -548,13 +552,8 @@ file_cert_source::load_credentials() {
         result = std::unexpected{core::error::tls_cert_load_failed};
     }
 
-    // Check cancellation again after the build step.
-    cs = co_await asio::this_coro::cancellation_state;
-    if (cs.cancelled() != asio::cancellation_type::none) {
-        co_return core::expected_t<local_credentials>{std::unexpect,
-                                                      core::error::tls_load_cancelled};
-    }
-
+    // #349: no post-build reap -- build_credentials() is synchronous and
+    // nothing since the step-3 read suspends, so one could only observe `none`.
     co_return result;
 }
 
