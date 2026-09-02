@@ -50,6 +50,12 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 EXTS = {".cpp", ".cc", ".cxx", ".hpp", ".hh", ".h"}
 
 CO_SPAWN = re.compile(r"\bco_spawn\s*\(")
+# Every `co_spawn` token, call or not. The DIFFERENCE between this and CO_SPAWN
+# is the scan's traversal witness: a spelling the call-site regex does not
+# anticipate (`co_spawn<T>(`, a macro, a stray mention) would otherwise be a
+# SILENT skip that costs a site and changes nothing visible in the output.
+CO_SPAWN_TOKEN = re.compile(r"\bco_spawn\b")
+INCLUDE_ANGLE = re.compile(r"#\s*include\s*<[^>\n]*>")
 
 
 class ParseError(Exception):
@@ -62,6 +68,11 @@ def strip_noncode(text: str) -> str:
     Every removed byte becomes a space (newlines kept), so byte offsets and line
     numbers in the result still address the original file.
     """
+    # `#include <asio/co_spawn.hpp>` is a header PATH, not code. Blanked first
+    # (precisely, not by dropping every preprocessor line — a macro body can hold
+    # a real call). The quoted form is already covered by literal blanking below.
+    text = INCLUDE_ANGLE.sub(lambda m: " " * len(m.group(0)), text)
+
     out = list(text)
     n = len(text)
     i = 0
@@ -134,6 +145,19 @@ def scan_text(text: str, relpath: str = "<text>"):
     findings = []
     sites = 0
     sites_with_lambda = 0
+
+    # Reconcile the two enumerations BEFORE parsing: every `co_spawn` token in
+    # code must be a call site the parser will visit. This is a CONDITION, not a
+    # count — it holds at any tree size and cannot go stale.
+    call_starts = {m.start() for m in CO_SPAWN.finditer(code)}
+    unparsed = [m for m in CO_SPAWN_TOKEN.finditer(code) if m.start() not in call_starts]
+    if unparsed:
+        lines = ", ".join(str(code.count("\n", 0, m.start()) + 1) for m in unparsed[:10])
+        raise ParseError(
+            f"{relpath}: {len(unparsed)} `co_spawn` token(s) in code that the call-site "
+            f"pattern does not match (line(s) {lines}). Each is a site the scan would "
+            f"skip in silence — widen the pattern or explain the spelling."
+        )
 
     for m in CO_SPAWN.finditer(code):
         sites += 1
@@ -208,9 +232,18 @@ def main_scan() -> int:
         sites += s
         with_lambda += wl
 
+    # Two floors, both CONDITIONS rather than counts, so neither bakes in today's
+    # tree. A scan that visited no call site, or that visited call sites but
+    # recognised a lambda argument at none of them (the brace tracking broken),
+    # reports the same "0 immediately-invoked" a genuinely clean tree does.
     if sites == 0:
         print("[co-spawn-lambda] ERROR: parsed 0 co_spawn call sites — the scan found "
               "nothing to check. Treat this as a broken instrument, not a clean tree.")
+        return 2
+    if with_lambda == 0:
+        print(f"[co-spawn-lambda] ERROR: parsed {sites} co_spawn call site(s) but "
+              "recognised a lambda argument at none of them. The brace tracking is "
+              "broken; a zero finding count here means nothing.")
         return 2
 
     print(f"[co-spawn-lambda] {files} file(s), {sites} co_spawn call site(s) parsed, "
@@ -285,6 +318,9 @@ SELF_TEST_CASES = [
      "  constexpr std::size_t kCapacity = 10'000;\n"
      "  co_return;\n"
      "}(), asio::detached);", 1),
+    # Kept alongside the decimal case though both reach the same branch TODAY: an
+    # implementation testing `text[i-1].isdigit()` instead of walking back to the
+    # token start passes decimal and fails hex. The fixture kills that mutant.
     ("hex digit separator is not a char literal",
      "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {\n"
      "  constexpr auto kMask = 0x1F'FF;\n"
@@ -295,6 +331,12 @@ SELF_TEST_CASES = [
      "  char c = L'}';  // co_spawn(x, [&]{ }(), t)\n"
      "  co_return;\n"
      "}, asio::detached);", 0),
+    ("co_spawn in an #include path is not a call site",
+     "#include <asio/co_spawn.hpp>\n"
+     "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }(), tok);", 1),
+    ("a macro body IS still scanned",
+     "#define SPAWN(x) asio::co_spawn(x, [&]() -> asio::awaitable<void> { co_return; }(), tok)",
+     1),
     ("apostrophe in a comment does not swallow the call site",
      "// asio's closure lifetime\n"
      "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }(), asio::detached);", 1),
@@ -328,7 +370,24 @@ def main_self_test() -> int:
     except ParseError:
         print("  ok    unterminated co_spawn( raises ParseError")
 
-    total = len(SELF_TEST_CASES) + 1
+    # A `co_spawn` token the call-site pattern misses must RAISE, not contribute
+    # zero findings — the traversal witness. Written as two arms so the failure
+    # mode (silent skip) is forced individually.
+    for name, src in (
+        ("bare co_spawn mention with no call",
+         "// see co_spawn\nint co_spawn;\n"
+         "asio::co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }, tok);"),
+        ("explicitly-templated co_spawn spelling",
+         "asio::co_spawn<void>(ioc, [&]() -> asio::awaitable<void> { co_return; }, tok);"),
+    ):
+        try:
+            scan_text(src, "<fixture>")
+            print(f"  FAIL  {name}: must raise ParseError, not parse clean")
+            failures += 1
+        except ParseError:
+            print(f"  ok    {name} raises ParseError")
+
+    total = len(SELF_TEST_CASES) + 3
     if failures:
         print(f"[co-spawn-lambda] SELF-TEST FAIL: {failures} of {total} case(s) failed.")
         return 1
