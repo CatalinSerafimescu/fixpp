@@ -918,6 +918,12 @@ void asio_tls_transport::setup_ssl_ctx_() {
     // -> transport_connect_timeout, and the shared connect epoch is advanced
     // by whichever finishes first). Overlap is now REFUSED with the variant
     // every contract site already published for it.
+    // WHY 97 and not a new transport_connect_in_progress sibling of the 99/100
+    // pair the read/write guards use: 97 is what every published contract site
+    // ALREADY named for this case, so the guard makes the contract true instead
+    // of rewriting it — and a new variant could not sit in the family anyway,
+    // which is pinned contiguous at 94..115 (FR-034 / T006) while error.hpp
+    // already runs past 115.
     if (connect_in_flight_) {
         co_return std::unexpected{E::transport_already_connected};
     }
@@ -1067,6 +1073,7 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // #342 overlap guard: see async_connect. state_ stays `connected` for the
     // whole duration of an in-flight handshake, so the one-shot test above
     // cannot refuse an OVERLAPPING second async_handshake; this does.
+    // 97 rather than a new *_in_progress variant — see async_connect above.
     if (handshake_in_flight_) {
         co_return std::unexpected{E::transport_already_connected};
     }
