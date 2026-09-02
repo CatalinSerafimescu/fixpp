@@ -147,11 +147,12 @@ asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::asy
     // Enable total cancellation (co_spawn defaults to terminal-only per D-17).
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
-    // Pre-accept cancellation reap.
-    auto cs = co_await asio::this_coro::cancellation_state;
-    if (cs.cancelled() != asio::cancellation_type::none) {
-        co_return std::unexpected{E::transport_accept_cancelled};
-    }
+    // #341: no pre-accept cancellation reap here, deliberately -- it would be
+    // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
+    // for the mechanism and the re-derivation recipe.
+    // The RC#H is_open() short-circuit below is the REACHABLE handler for the
+    // case the dead reap looked like it covered: cancel() ran before this
+    // coroutine resumed.
 
     // RC#H (P3-1): if the acceptor handle is already closed (e.g., cancel()
     // was called before this coroutine resumed) short-circuit immediately with

@@ -6,12 +6,27 @@
 //
 // Cells 1-4 wired against LoopbackTlsFixture (gate-b/r2 RC#E close).
 //
-//   Cell 1: async_write overlap → second call returns transport_write_in_progress.
-//   Cell 2: async_read_some overlap → second call returns transport_read_in_progress.
-//   Cell 3: async_connect overlap → second call returns transport_already_connected.
-//   Cell 4: async_handshake overlap → second call returns transport_already_connected.
+//   Cell 1: async_write OVERLAP → second call returns transport_write_in_progress.
+//   Cell 2: async_read_some OVERLAP → second call returns transport_read_in_progress.
+//   Cell 3: async_connect SEQUENTIAL one-shot → transport_already_connected.
+//   Cell 4: async_handshake SEQUENTIAL one-shot → transport_already_connected.
+//   Cell 5: async_connect OVERLAP → refused with transport_already_connected (#342).
+//   Cell 6: async_handshake OVERLAP → refused with transport_already_connected (#342).
+//   Cell 7: async_connect retry after a FAILED attempt → really attempts (#342).
 //
-// All four cells verify per [2h §4.1] normative API-level exclusivity contract.
+// ⚠️ Cells 3 and 4 were billed as OVERLAP witnesses until 2026-09-02 and are
+// NOT: cell 3 co_awaits the first connect to completion before issuing the
+// second, and cell 4 runs on an already fully handshaken pair. They are correct
+// SEQUENTIAL one-shot tests — they are the evidence that the answer from a
+// SUCCEEDED state is 97 — and are kept as such under honest names (#342).
+//
+// Cells 5-7 are the overlap witnesses. They could not have passed before #342:
+// the one-shot test is a STATE test and state_ leaves `fresh` only on SUCCESS,
+// so an overlapping second async_connect used to pass through and really
+// attempt. Cell 7 is the arm that catches the opposite failure — a guard that
+// sets the flag and never clears it passes cells 5 and 6 and fails cell 7.
+//
+// All cells verify per [2h §4.1] normative API-level exclusivity contract.
 
 #include <gtest/gtest.h>
 
@@ -19,6 +34,7 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
+#include <asio/ip/tcp.hpp>
 #include <asio/strand.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
@@ -27,6 +43,7 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_errors.hpp>
+#include <fixpp/transport/transport_factory.hpp>
 #include <memory>
 #include <optional>
 #include <span>
@@ -40,6 +57,7 @@ using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::transport::ConnectInfo;
 using fixpp::transport::handshake_result;
+using fixpp::transport::make_asio_plain_transport_factory;
 using fixpp::transport::TlsTransport;
 using fixpp::transport::Transport;
 using fixpp::transport::test::LoopbackTlsFixture;
@@ -256,9 +274,11 @@ TEST(InflightExclusivity, ReadOverlapReturnImmediately) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cell 3: connect one-shot guard → transport_already_connected.
+// Cell 3: connect one-shot from a SUCCEEDED state → transport_already_connected.
+// SEQUENTIAL, not an overlap witness — the first connect is co_awaited to
+// completion before the second is issued (#342). Cell 5 is the overlap one.
 // ─────────────────────────────────────────────────────────────────────────────
-TEST(InflightExclusivity, ConnectOneShot) {
+TEST(InflightExclusivity, ConnectOneShotFromSucceededState) {
     if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
@@ -297,9 +317,11 @@ TEST(InflightExclusivity, ConnectOneShot) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cell 4: handshake one-shot guard → transport_already_connected.
+// Cell 4: handshake one-shot from a SUCCEEDED state → transport_already_connected.
+// SEQUENTIAL, not an overlap witness — it runs on an already fully handshaken
+// pair (#342). Cell 6 is the overlap one.
 // ─────────────────────────────────────────────────────────────────────────────
-TEST(InflightExclusivity, HandshakeOneShot) {
+TEST(InflightExclusivity, HandshakeOneShotFromSucceededState) {
     if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
     }
@@ -333,6 +355,630 @@ TEST(InflightExclusivity, HandshakeOneShot) {
     (void)pair.client->close();
     (void)pair.server->close();
     ioc.run_for(200ms);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Connected-but-NOT-handshaken pair — cell 6 needs a Transport in `connected`,
+// which make_handshaken_pair above has already moved past.
+// ─────────────────────────────────────────────────────────────────────────────
+struct ConnectedPair {
+    std::unique_ptr<Transport> client;
+    std::unique_ptr<Transport> server;
+};
+
+ConnectedPair make_connected_pair(LoopbackTlsFixture& fixture, asio::io_context& ioc) {
+    auto client = fixture.make_client(ioc.get_executor());
+    Transport* client_raw = client.get();
+    const auto ep = fixture.server_endpoint();
+
+    std::optional<expected_t<ConnectInfo>> connect_result;
+    std::optional<expected_t<std::unique_ptr<Transport>>> accept_result;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&connect_result, client_raw, ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            connect_result = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&accept_result, listener = &fixture.listener()]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            accept_result = co_await listener->async_accept();
+        },
+        asio::detached);
+
+    ioc.run_for(10s);
+    ioc.restart();
+
+    if (!connect_result || !connect_result->has_value())
+        throw std::runtime_error("make_connected_pair: client connect failed");
+    if (!accept_result || !accept_result->has_value())
+        throw std::runtime_error("make_connected_pair: server accept failed");
+
+    return ConnectedPair{
+        .client = std::move(client),
+        .server = std::move(accept_result->value()),
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell 5: async_connect OVERLAP → transport_already_connected (#342).
+//
+// A and B are bound to the SAME strand. A issues async_connect and suspends at
+// async_resolve (every this_coro awaiter before it is await_ready()==true, so
+// the resolve is the first real suspension point). B then runs on that strand
+// and must be REFUSED while A is still in flight.
+//
+// ⚠️ SPURIOUS-HIT ARM. 97 is also what the one-shot STATE test answers once A
+// has SUCCEEDED — so a cell that only asserts "B got 97" would pass even if the
+// overlap guard did not exist, simply by letting A finish first. The
+// a_inflight_when_b_issued capture is what distinguishes the two: it is read
+// inside B with NO suspension point between it and the guard read inside
+// async_connect, so it cannot go stale.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, ConnectOverlapRefusedWhileFirstInFlight) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto client = fixture.make_client(ioc.get_executor());
+    Transport* client_raw = client.get();
+    const auto ep = fixture.server_endpoint();
+
+    std::optional<expected_t<ConnectInfo>> result_a;
+    std::optional<expected_t<ConnectInfo>> result_b;
+    std::optional<bool> a_inflight_when_b_issued;
+
+    auto strand = asio::make_strand(ioc.get_executor());
+
+    asio::co_spawn(
+        strand,
+        [&result_a, client_raw, ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            result_a = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        strand,
+        [&result_b, &result_a, &a_inflight_when_b_issued, client_raw,
+         ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            a_inflight_when_b_issued = !result_a.has_value();
+            result_b = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    ioc.run_for(5s);
+
+    ASSERT_TRUE(a_inflight_when_b_issued.has_value()) << "Coroutine B never ran";
+    EXPECT_TRUE(*a_inflight_when_b_issued)
+        << "SPURIOUS-HIT: A had already completed when B issued, so a 97 below would "
+           "come from the one-shot state test, not from the overlap guard";
+
+    ASSERT_TRUE(result_b.has_value()) << "B must complete (guard answers immediately)";
+    ASSERT_FALSE(result_b->has_value()) << "B must be refused, not attempt";
+    EXPECT_EQ(result_b->error(), error::transport_already_connected);
+
+    ASSERT_TRUE(result_a.has_value()) << "A must still complete";
+    EXPECT_TRUE(result_a->has_value())
+        << "A must still SUCCEED — before #342 the overlapping attempt called "
+           "socket_.close() underneath it";
+
+    (void)client->close();
+    ioc.run_for(200ms);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell 6: async_handshake OVERLAP → transport_already_connected (#342).
+//
+// Same shape and same spurious-hit arm as cell 5. A cannot complete before B
+// runs by construction: A suspends inside the OpenSSL exchange waiting on the
+// peer, and the server's handshake is spawned AFTER B on the same io_context.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, HandshakeOverlapRefusedWhileFirstInFlight) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto pair = make_connected_pair(fixture, ioc);
+
+    auto* client_tls = dynamic_cast<TlsTransport*>(pair.client.get());
+    auto* server_tls = dynamic_cast<TlsTransport*>(pair.server.get());
+    ASSERT_NE(client_tls, nullptr) << "Client transport must be TlsTransport";
+    ASSERT_NE(server_tls, nullptr) << "Server transport must be TlsTransport";
+    const auto& ssl_cfg = fixture.ssl_cfg();
+
+    std::optional<expected_t<handshake_result>> hs_a;
+    std::optional<expected_t<handshake_result>> hs_b;
+    std::optional<expected_t<handshake_result>> hs_server;
+    std::optional<bool> a_inflight_when_b_issued;
+
+    auto strand = asio::make_strand(ioc.get_executor());
+
+    asio::co_spawn(
+        strand,
+        [&hs_a, client_tls, &ssl_cfg]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            hs_a = co_await client_tls->async_handshake(ssl_cfg);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        strand,
+        [&hs_b, &hs_a, &a_inflight_when_b_issued, client_tls, &ssl_cfg]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            a_inflight_when_b_issued = !hs_a.has_value();
+            hs_b = co_await client_tls->async_handshake(ssl_cfg);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&hs_server, server_tls, &ssl_cfg]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            hs_server = co_await server_tls->async_handshake(ssl_cfg);
+        },
+        asio::detached);
+
+    ioc.run_for(10s);
+
+    ASSERT_TRUE(a_inflight_when_b_issued.has_value()) << "Coroutine B never ran";
+    EXPECT_TRUE(*a_inflight_when_b_issued)
+        << "SPURIOUS-HIT: A had already completed when B issued, so a 97 below would "
+           "come from the one-shot state test, not from the overlap guard";
+
+    ASSERT_TRUE(hs_b.has_value()) << "B must complete (guard answers immediately)";
+    ASSERT_FALSE(hs_b->has_value()) << "B must be refused, not attempt";
+    EXPECT_EQ(hs_b->error(), error::transport_already_connected);
+
+    ASSERT_TRUE(hs_a.has_value()) << "A must still complete";
+    EXPECT_TRUE(hs_a->has_value()) << "A's handshake must still succeed";
+
+    (void)pair.client->close();
+    (void)pair.server->close();
+    ioc.run_for(200ms);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell 7: the flag CLEARS — a retry after a FAILED attempt really attempts.
+//
+// Cells 5 and 6 prove the guard FIRES. They cannot catch the opposite defect: a
+// guard that sets connect_in_flight_ and never clears it passes both of them and
+// silently wedges the Transport into permanent transport_already_connected,
+// breaking FR-007's "a failed attempt stays `fresh` and is retryable".
+//
+// The first attempt fails in RESOLUTION (an RFC 6761 `.invalid` host), which
+// returns before any state write, so the Transport must stay `fresh` AND clear
+// the flag -- and the retry to the live fixture endpoint must really connect.
+// (A refused CONNECT would have been the obvious choice and is not usable here;
+// the body explains why.)
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, ConnectRetryableAfterFailedAttempt) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+
+    // The failing first attempt is a RESOLVE failure: ".invalid" is reserved by
+    // RFC 6761 as guaranteed-NXDOMAIN, so this fails fast and deterministically,
+    // and async_connect returns transport_resolve_failed WITHOUT ever leaving
+    // state_ == fresh -- exactly the "failed attempt is retryable" case FR-007
+    // names.
+    //
+    // ⚠️ NOT a refused connect, which is the obvious choice and is not
+    // constructible here: this sandbox DROPS connects to unbound loopback ports
+    // rather than refusing them (measured: 127.0.0.1 ports 1/2/9/65000 all time
+    // out, none gives ECONNREFUSED), so a "connect must fail" arm built that way
+    // hangs to its bound instead of failing. A bound-then-closed EPHEMERAL port
+    // is worse still: the first version of this cell used one and the connect
+    // SUCCEEDED, leaving the fixture listener's accept pending for the full 10 s
+    // -- the client's outbound socket draws from the same ephemeral range, and a
+    // loopback connect whose source and destination ports coincide can
+    // self-connect.
+    const fixpp::transport::Endpoint unresolvable{"no.such.host.invalid", 12345};
+
+    auto client = fixture.make_client(ioc.get_executor());
+    Transport* client_raw = client.get();
+    const auto good_ep = fixture.server_endpoint();
+
+    std::optional<expected_t<ConnectInfo>> first;
+    std::optional<expected_t<ConnectInfo>> second;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&first, &second, client_raw, unresolvable, good_ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            first = co_await client_raw->async_connect(unresolvable);
+            second = co_await client_raw->async_connect(good_ep);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [listener = &fixture.listener()]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            (void)co_await listener->async_accept();
+        },
+        asio::detached);
+
+    ioc.run_for(10s);
+
+    ASSERT_TRUE(first.has_value()) << "First attempt must complete";
+    ASSERT_FALSE(first->has_value()) << "Connect to an unresolvable host must fail";
+    EXPECT_EQ(first->error(), error::transport_resolve_failed)
+        << "Pinned so this cell cannot start passing via some other failure mode";
+
+    ASSERT_TRUE(second.has_value()) << "Retry must complete";
+    EXPECT_TRUE(second->has_value())
+        << "Retry after a FAILED attempt must really attempt. A guard that never "
+           "clears connect_in_flight_ answers transport_already_connected here "
+           "while still passing cells 5 and 6. Got error: "
+        << (second->has_value() ? 0 : static_cast<int>(second->error()));
+
+    (void)client->close();
+    ioc.run_for(200ms);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cells 8-9: the PLAINTEXT transport's overlap guard.
+//
+// ⚠️ Cells 5 and 7 above exercise only the TLS transport -- LoopbackTlsFixture's
+// make_client mints an asio_tls_transport. #342 added an INDEPENDENT guard to
+// asio_plain_transport, and without these two cells deleting it would leave
+// every other cell green while plaintext overlapping connects went back to
+// closing the socket out from under each other. A per-implementation guard
+// needs a per-implementation witness; a mutation row that says "delete the
+// connect overlap guard" is otherwise true of only one of the two.
+// ─────────────────────────────────────────────────────────────────────────────
+std::unique_ptr<Transport> make_plain_client(asio::io_context& ioc) {
+    auto factory = make_asio_plain_transport_factory(Transport::Config{});
+    if (!factory) throw std::runtime_error("plain factory failed");
+    fixpp::tls::SslCtxConfig unused{};
+    auto t = (*factory)->make(ioc.get_executor(), unused, nullptr);
+    if (!t) throw std::runtime_error("plain make() failed");
+    return std::move(*t);
+}
+
+asio::ip::tcp::endpoint make_loopback_acceptor(asio::ip::tcp::acceptor& acc) {
+    asio::ip::tcp::endpoint ep{asio::ip::address_v4::loopback(), 0};
+    acc.open(ep.protocol());
+    acc.set_option(asio::ip::tcp::acceptor::reuse_address{true});
+    acc.bind(ep);
+    acc.listen();
+    return acc.local_endpoint();
+}
+
+// Cell 8: plaintext async_connect OVERLAP → transport_already_connected (#342).
+// Same shape and same spurious-hit arm as cell 5.
+TEST(InflightExclusivity, PlaintextConnectOverlapRefusedWhileFirstInFlight) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor acc{ioc};
+    const auto bound = make_loopback_acceptor(acc);
+    const fixpp::transport::Endpoint ep{"127.0.0.1", bound.port()};
+
+    auto client = make_plain_client(ioc);
+    Transport* client_raw = client.get();
+
+    std::optional<expected_t<ConnectInfo>> result_a;
+    std::optional<expected_t<ConnectInfo>> result_b;
+    std::optional<bool> a_inflight_when_b_issued;
+
+    asio::ip::tcp::socket accepted{ioc};
+    acc.async_accept(accepted, [](asio::error_code) {});
+
+    auto strand = asio::make_strand(ioc.get_executor());
+
+    asio::co_spawn(
+        strand,
+        [&result_a, client_raw, ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            result_a = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        strand,
+        [&result_b, &result_a, &a_inflight_when_b_issued, client_raw,
+         ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            a_inflight_when_b_issued = !result_a.has_value();
+            result_b = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    ioc.run_for(5s);
+
+    ASSERT_TRUE(a_inflight_when_b_issued.has_value()) << "Coroutine B never ran";
+    EXPECT_TRUE(*a_inflight_when_b_issued)
+        << "SPURIOUS-HIT: A had already completed when B issued, so a 97 below would "
+           "come from the one-shot state test, not from the overlap guard";
+
+    ASSERT_TRUE(result_b.has_value()) << "B must complete (guard answers immediately)";
+    ASSERT_FALSE(result_b->has_value()) << "B must be refused, not attempt";
+    EXPECT_EQ(result_b->error(), error::transport_already_connected);
+
+    ASSERT_TRUE(result_a.has_value()) << "A must still complete";
+    EXPECT_TRUE(result_a->has_value()) << "A must still succeed";
+
+    (void)client->close();
+    asio::error_code ignored;
+    acc.close(ignored);
+    ioc.run_for(200ms);
+}
+
+// Cell 9: plaintext flag CLEARS — retry after a failed attempt really attempts.
+TEST(InflightExclusivity, PlaintextConnectRetryableAfterFailedAttempt) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor acc{ioc};
+    const auto bound = make_loopback_acceptor(acc);
+    const fixpp::transport::Endpoint good{"127.0.0.1", bound.port()};
+    const fixpp::transport::Endpoint unresolvable{"no.such.host.invalid", 12345};
+
+    auto client = make_plain_client(ioc);
+    Transport* client_raw = client.get();
+
+    std::optional<expected_t<ConnectInfo>> first;
+    std::optional<expected_t<ConnectInfo>> second;
+
+    asio::ip::tcp::socket accepted{ioc};
+    acc.async_accept(accepted, [](asio::error_code) {});
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&first, &second, client_raw, unresolvable, good]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            first = co_await client_raw->async_connect(unresolvable);
+            second = co_await client_raw->async_connect(good);
+        },
+        asio::detached);
+
+    ioc.run_for(10s);
+
+    ASSERT_TRUE(first.has_value());
+    ASSERT_FALSE(first->has_value()) << "unresolvable host must fail";
+    EXPECT_EQ(first->error(), error::transport_resolve_failed);
+
+    ASSERT_TRUE(second.has_value());
+    EXPECT_TRUE(second->has_value())
+        << "retry after a FAILED attempt must really attempt — a guard that never clears "
+           "connect_in_flight_ answers transport_already_connected here";
+
+    (void)client->close();
+    asio::error_code ignored;
+    acc.close(ignored);
+    ioc.run_for(200ms);
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cells 10-11: close() DURING DNS RESOLUTION must not resurrect the Transport
+// (#347).
+//
+// close() is strand-confined and so is async_connect, but async_resolve is not
+// the socket: `close()` calls socket_.close(), which the RESOLVER never
+// observes. So a close() landing while the connect is suspended in resolution
+// used to be overwritten -- the coroutine resumed, asio's composed
+// async_connect OPENED the socket it needed, and `state_ = connected` published
+// a live socket behind a close() that had already returned, violating FR-006.
+//
+// Ordering is structural, not timed: A and B share a strand, A suspends in
+// async_resolve (the first real suspension point), so B's close() runs while A
+// is parked there.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, TlsCloseDuringResolveDoesNotResurrect) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto client = fixture.make_client(ioc.get_executor());
+    Transport* client_raw = client.get();
+    const auto ep = fixture.server_endpoint();
+
+    std::optional<expected_t<ConnectInfo>> connect_result;
+    std::optional<bool> closed_while_connect_inflight;
+
+    auto strand = asio::make_strand(ioc.get_executor());
+
+    asio::co_spawn(
+        strand,
+        [&connect_result, client_raw, ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            connect_result = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        strand,
+        [&connect_result, &closed_while_connect_inflight, client_raw]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            closed_while_connect_inflight = !connect_result.has_value();
+            (void)client_raw->close();
+            co_return;
+        },
+        asio::detached);
+
+    ioc.run_for(5s);
+
+    ASSERT_TRUE(closed_while_connect_inflight.has_value()) << "closer coroutine never ran";
+    EXPECT_TRUE(*closed_while_connect_inflight)
+        << "VACUOUS: the connect had already finished when close() ran, so this cell would "
+           "prove nothing about the resolve window";
+
+    ASSERT_TRUE(connect_result.has_value()) << "connect must complete";
+    ASSERT_FALSE(connect_result->has_value())
+        << "connect must NOT succeed after close() returned (FR-006)";
+    EXPECT_EQ(connect_result->error(), error::transport_already_closed);
+
+    ioc.run_for(200ms);
+}
+
+TEST(InflightExclusivity, PlaintextCloseDuringResolveDoesNotResurrect) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor acc{ioc};
+    const auto bound = make_loopback_acceptor(acc);
+    const fixpp::transport::Endpoint ep{"127.0.0.1", bound.port()};
+
+    auto client = make_plain_client(ioc);
+    Transport* client_raw = client.get();
+
+    // No accept is armed: the connect is refused by close() and never lands, so
+    // a pending accept would only hold the io_context open for the full window.
+    std::optional<expected_t<ConnectInfo>> connect_result;
+    std::optional<bool> closed_while_connect_inflight;
+
+    auto strand = asio::make_strand(ioc.get_executor());
+
+    asio::co_spawn(
+        strand,
+        [&connect_result, client_raw, ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            connect_result = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        strand,
+        [&connect_result, &closed_while_connect_inflight, client_raw]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            closed_while_connect_inflight = !connect_result.has_value();
+            (void)client_raw->close();
+            co_return;
+        },
+        asio::detached);
+
+    ioc.run_for(5s);
+
+    ASSERT_TRUE(closed_while_connect_inflight.has_value()) << "closer coroutine never ran";
+    EXPECT_TRUE(*closed_while_connect_inflight) << "VACUOUS: connect already finished";
+
+    ASSERT_TRUE(connect_result.has_value());
+    ASSERT_FALSE(connect_result->has_value())
+        << "connect must NOT succeed after close() returned (FR-006)";
+    EXPECT_EQ(connect_result->error(), error::transport_already_closed);
+
+    asio::error_code ignored;
+    acc.close(ignored);
+    ioc.run_for(200ms);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell 12: what a peer ACTUALLY observes when close() ends a handshaken TLS
+// session (#348).
+//
+// ⚠️ THIS CELL PINS A DEFECT, NOT DESIRED BEHAVIOUR. close()'s published
+// contract says it "initiates best-effort bidi TLS shutdown (SSL_shutdown
+// close-notify)" bounded by tls_close_timeout, and that a truncated close
+// "surfaces as transport_read_truncated and is NOT treated as a hard error".
+// MEASURED, deterministically over repeated runs: the peer's in-flight read
+// completes with transport_read_error (104) -- an OS-level error, neither the
+// clean transport_read_eof of a real close_notify nor the documented
+// transport_read_truncated.
+//
+// Cause (#348): close() calls SSL_shutdown() on the NATIVE handle. asio's
+// ssl::stream writes through a BIO pair -- ssl::detail::engine::shutdown()
+// generates the alert into the BIO and ssl::detail::io drains it to the socket.
+// Nothing drains it here, and socket_.close() immediately after discards it.
+//
+// It is pinned rather than left unwitnessed so that fixing #348 has to come
+// through this assertion deliberately instead of changing behaviour silently.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, CloseDoesNotDeliverCloseNotify_PinsDefect348) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto pair = make_handshaken_pair(fixture, ioc);
+
+    std::optional<expected_t<std::size_t>> server_read;
+    std::byte buf{0};
+    Transport* server_raw = pair.server.get();
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&server_read, server_raw, &buf]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            server_read = co_await server_raw->async_read_some(std::span<std::byte>{&buf, 1});
+        },
+        asio::detached);
+    ioc.run_for(300ms);
+    ASSERT_FALSE(server_read.has_value()) << "server read must still be pending before close()";
+
+    (void)pair.client->close();
+    ioc.run_for(2s);
+
+    ASSERT_TRUE(server_read.has_value()) << "server read must complete after peer close()";
+    ASSERT_FALSE(server_read->has_value());
+    EXPECT_EQ(server_read->error(), error::transport_read_error)
+        << "#348: measured behaviour. If this now reports transport_read_eof, close() has "
+           "started delivering close_notify and #348 is FIXED — update the contract in "
+           "transport.hpp and this cell together. If it reports transport_read_truncated, the "
+           "alert is being dropped differently than measured; re-derive before editing docs.";
+
+    (void)pair.server->close();
+    ioc.run_for(200ms);
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell 13: D-4.0 destroy-with-no-drain must not fault in the in-flight guard.
+//
+// Destroys the Transport while async_connect is suspended in resolution, then
+// destroys the io_context WITHOUT running it, so the suspended frame is
+// DESTROYED rather than resumed — the one path on which a coroutine's in-scope
+// destructors run against a Transport that is already gone.
+//
+// ⚠️ This cell reproduced a REAL heap-use-after-free (ASan: WRITE of size 1 in
+// ~inflight_flag_guard) when the in-flight flags were plain Transport members.
+// It is green only because the flags now live in the separately-owned
+// timer_epoch_state block, which outlives the Transport. Bind the guard to a
+// Transport member again and this cell reds under ASan.
+//
+// ⚠️ ONLY MEANINGFUL UNDER A SANITIZER. Without ASan the stray one-byte write
+// lands in freed-but-mapped memory and the cell passes regardless — so a green
+// run in the plain debug preset is not evidence. The linux-clang-asan preset is
+// where this one earns its keep.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, DestroyWithNoDrainDoesNotFaultInFlightGuard) {
+    std::optional<expected_t<ConnectInfo>> result;
+    {
+        asio::io_context ioc;
+        asio::ip::tcp::acceptor acc{ioc};
+        const auto bound = make_loopback_acceptor(acc);
+        const fixpp::transport::Endpoint ep{"127.0.0.1", bound.port()};
+
+        auto client = make_plain_client(ioc);
+        Transport* raw = client.get();
+
+        asio::co_spawn(
+            ioc.get_executor(),
+            [&result, raw, ep]() -> asio::awaitable<void> {
+                co_await asio::this_coro::reset_cancellation_state(
+                    asio::enable_total_cancellation());
+                result = co_await raw->async_connect(ep);
+            },
+            asio::detached);
+
+        ioc.poll();          // start the coroutine; it suspends in async_resolve
+        client.reset();      // D-4.0: destroy the Transport with the op in flight
+        asio::error_code ig;
+        acc.close(ig);
+        // ioc destructor here destroys the suspended frame -> ~inflight_flag_guard
+    }
+    SUCCEED() << "no fault under the sanitizer";
 }
 
 }  // namespace

@@ -26,6 +26,8 @@
 #include <asio/write.hpp>
 #include <fixpp/core/error.hpp>
 
+#include "inflight_flag_guard.hpp"
+
 // Disambiguate between the member and the free function asio::async_connect.
 namespace asio_free = asio;
 
@@ -123,11 +125,33 @@ void asio_plain_transport::apply_socket_options_() noexcept {
         co_return std::unexpected{E::transport_already_connected};
     }
 
-    // Pre-connect cancellation reap.
-    auto cs = co_await asio::this_coro::cancellation_state;
-    if (cs.cancelled() != asio::cancellation_type::none) {
-        co_return std::unexpected{E::transport_connect_cancelled};
+    // #342 overlap guard: the one-shot test above is a STATE test, and state_
+    // does not leave `fresh` until an attempt SUCCEEDS -- so without this a
+    // second async_connect issued while the first is still in flight passed
+    // straight through and really attempted. asio's composed async_connect
+    // calls socket_.close(ec) before each endpoint attempt, so the two
+    // attempts corrupt each other (the first can surface as operation_aborted
+    // -> transport_connect_timeout, and the shared connect epoch is advanced
+    // by whichever finishes first). Overlap is now REFUSED with the variant
+    // every contract site already published for it.
+    // WHY 97 and not a new transport_connect_in_progress sibling of the 99/100
+    // pair the read/write guards use: 97 is what every published contract site
+    // ALREADY named for this case, so the guard makes the contract true instead
+    // of rewriting it — and a new variant could not sit in the family anyway,
+    // which is pinned contiguous at 94..115 (FR-034 / T006) while error.hpp
+    // already runs past 115.
+    if (timer_epochs_->connect_in_flight) {
+        co_return std::unexpected{E::transport_already_connected};
     }
+    // Cleared on EVERY exit path, including frame destruction under
+    // cancellation. A failed attempt leaves state_ == fresh AND clears this,
+    // so the Transport stays retryable per FR-007.
+    detail::inflight_flag_guard connect_guard{timer_epochs_,
+                                             &timer_epoch_state::connect_in_flight};
+
+    // #341: no pre-connect cancellation reap here, deliberately -- it would be
+    // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
+    // for the mechanism and the re-derivation recipe.
 
     // ── Resolve ───────────────────────────────────────────────────────────────
     asio::ip::tcp::resolver resolver{exec_};
@@ -143,9 +167,17 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     }
 
     // Post-resolve cancellation reap.
-    cs = co_await asio::this_coro::cancellation_state;
+    auto cs = co_await asio::this_coro::cancellation_state;
     if (cs.cancelled() != asio::cancellation_type::none) {
         co_return std::unexpected{E::transport_connect_cancelled};
+    }
+
+    // #347: close() runs on this strand and can have executed while we were
+    // suspended in async_resolve -- which the RESOLVER never observes, because
+    // socket_.close() does not cancel it. FR-006 is unconditional, so re-test
+    // it here instead of proceeding to open a socket the owner already closed.
+    if (state_ == state_t::closed) {
+        co_return std::unexpected{E::transport_already_closed};
     }
 
     // ── Connect with timeout ──────────────────────────────────────────────────
@@ -216,6 +248,17 @@ void asio_plain_transport::apply_socket_options_() noexcept {
         }
     }
 
+    // #347: last re-test before committing the state. asio's composed
+    // async_connect OPENS the socket it connects, so a close() that landed
+    // during the attempt has already been undone by the time we get here --
+    // close the socket again rather than publishing `connected` and leaving a
+    // live socket behind a close() that already returned.
+    if (state_ == state_t::closed) {
+        asio::error_code close_ec;
+        socket_.close(close_ec);
+        co_return std::unexpected{E::transport_already_closed};
+    }
+
     state_ = state_t::connected;
     co_return info;
 }
@@ -241,11 +284,9 @@ void asio_plain_transport::apply_socket_options_() noexcept {
         co_return std::unexpected{E::transport_read_in_progress};
     }
 
-    // Pre-read cancellation reap.
-    auto cs = co_await asio::this_coro::cancellation_state;
-    if (cs.cancelled() != asio::cancellation_type::none) {
-        co_return std::unexpected{E::transport_read_cancelled};
-    }
+    // #341: no pre-read cancellation reap here, deliberately -- it would be
+    // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
+    // for the mechanism and the re-derivation recipe.
 
     read_in_flight_ = true;
 
@@ -290,11 +331,9 @@ void asio_plain_transport::apply_socket_options_() noexcept {
         co_return std::unexpected{E::transport_write_in_progress};
     }
 
-    // Pre-write cancellation reap.
-    auto cs = co_await asio::this_coro::cancellation_state;
-    if (cs.cancelled() != asio::cancellation_type::none) {
-        co_return std::unexpected{E::transport_write_cancelled};
-    }
+    // #341: no pre-write cancellation reap here, deliberately -- it would be
+    // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
+    // for the mechanism and the re-derivation recipe.
 
     write_in_flight_ = true;
 

@@ -91,8 +91,15 @@ public:
     //     (kernel SYN → SYN-ACK → ACK); for TlsTransport, async_handshake is a
     //     SEPARATE step the FSM issues after this completes successfully.
     //
-    //     Cancellation: cancellation_type::total → transport_connect_cancelled.
-    //     By STATE not call count (#339): closed → 98; connected/handshaken → 97; fresh → attempts.
+    //     Cancellation: cancellation_type::total → transport_connect_cancelled,
+    //     effective from the FIRST REAL SUSPENSION POINT — a signal emitted
+    //     before the call is not observed at entry (#341).
+    //     By STATE, not call index (#339, #342):
+    //       closed                       → 98 transport_already_closed
+    //       connected / handshaken       → 97 transport_already_connected
+    //       fresh, an attempt IN FLIGHT  → 97 (overlap refused, #342)
+    //       fresh and idle               → ATTEMPTS; a FAILED attempt stays
+    //                                      fresh and is retryable.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>>
         async_connect(Endpoint const& ep) = 0;
 
@@ -133,10 +140,13 @@ public:
         async_write(std::span<const std::byte> bytes [[clang::lifetimebound]]) = 0;
 
     // (4) Cancel any in-flight async_connect / async_read_some / async_write /
-    //     async_handshake. Synchronous; thread-safe (ASIO cancellation_signal
-    //     is thread-safe); idempotent on already-cancelled / never-issued ops.
-    //     Returns expected_t<void> for symmetry (only documented failure:
-    //     transport_already_closed after close ⚠️ NOT IMPLEMENTED — see #340).
+    //     async_handshake. Synchronous; idempotent on already-cancelled /
+    //     never-issued ops. CALL IT ON THE SESSION STRAND — the "thread-safe
+    //     (ASIO cancellation_signal is thread-safe)" claim that stood here was
+    //     struck 2026-08-31 (#333): every impl cancels via socket_.cancel(),
+    //     and asio's basic_stream_socket @par Thread Safety says "Shared
+    //     objects: Unsafe". Returns expected_t<void> for SYMMETRY ONLY — NO
+    //     failure is defined and none can occur (#340).
     //
     //     cancel() does NOT close the socket — the FSM may retry a cancelled
     //     connect/read/write. cancel() is the synchronous half of the
@@ -151,6 +161,10 @@ public:
     //     (1 s default); a truncated close (peer-side missing close-notify)
     //     surfaces as transport_read_truncated and is NOT treated as a hard
     //     error (logged at `warn` level by 2k per [2g §7.8]).
+    //     ⚠️ MEASURED FALSE ON ALL THREE COUNTS 2026-09-02 (#348) — no
+    //     close-notify reaches the wire, tls_close_timeout is never read on
+    //     this path, and the peer observes transport_read_error. See the
+    //     implementing header for the mechanism.
     //
     //     Idempotency: second close() returns expected_t<void>{} without side
     //     effects.

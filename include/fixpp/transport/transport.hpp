@@ -48,8 +48,47 @@ struct ConnectInfo;
 // Transport instance. Concurrent second call returns IMMEDIATELY with
 // transport_read_in_progress / transport_write_in_progress per [2h §6.6].
 // Strand serialisation is defence-in-depth, NOT binding. async_connect and
-// async_handshake are one-shot per Transport lifetime; the ENTRY STATE decides the
-// answer, not the call index — see async_connect/async_handshake below (#339).
+// async_handshake are one-shot per Transport lifetime; the ENTRY STATE decides
+// the answer, not the call index (#339) — and that state includes whether an
+// attempt is IN FLIGHT, so an OVERLAPPING second call is REFUSED with
+// transport_already_connected rather than racing the first (#342). See
+// async_connect / async_handshake below for the per-state table.
+//
+// ⚠️ SCOPE OF THE STATE ANSWERS ABOVE AND BELOW: they bind the PRODUCTION
+// transports (asio_plain_transport, asio_tls_transport). The shipped test
+// double `mock_transport` (include/fixpp/transport/test/mock_transport.hpp)
+// implements a deliberately reduced surface — it carries `closed_` and
+// `handshaken_` only, so it answers the post-close rows and NOT the one-shot or
+// in-flight rows: a second async_connect after a successful one succeeds again
+// there rather than returning transport_already_connected, and it has no
+// read/write in-flight guards. A session-FSM test that needs those answers must
+// drive a real transport, not the mock.
+//
+// CANCELLATION TIMING (#341) — the canonical statement; the implementations
+// point here rather than repeating it. Cancellation takes effect from the
+// FIRST REAL SUSPENSION POINT of each method, never at entry. Every async_*
+// opens with `reset_cancellation_state(enable_total_cancellation())` (D-17),
+// and that call re-constructs the coroutine's cancellation_state from the
+// parent slot; the ctor emplaces a fresh impl whose `cancelled_` is
+// value-initialised, so an emission that already happened is NOT replayed
+// into the new state. Both awaiters involved are `await_ready()==true` with
+// an empty `await_suspend`, so nothing between the reset and a following read
+// suspends. A pre-operation reap could therefore only ever observe `none` --
+// which is why none of the implementations has one. Reaps that FOLLOW a
+// co_await are reachable and are kept.
+//
+// ⚠️ WHAT THIS MEANS FOR A CALLER, stated because the obvious reading is wrong.
+// A cancellation emitted BEFORE the call is DISCARDED -- it is not deferred to
+// the first suspension point and it will NOT abort the operation. The reset
+// replaces the parent slot's handler, and a cancellation_signal keeps no
+// record to replay into the new one; worse, co_spawn's default entry state is
+// terminal-only, so a `total` emitted before entry is filtered to nothing even
+// before the reset discards it. Only a signal emitted AFTER the reset -- i.e.
+// while the operation is genuinely in flight -- takes effect, surfacing as
+// operation_aborted on the awaited op. A caller that must not proceed has to
+// check its own precondition before calling, or call close().
+// Re-derive: asio cancellation_state.hpp's (slot, filter) ctor + impl_base(),
+// and awaitable_thread::reset_cancellation_state in asio impl/awaitable.hpp.
 // ─────────────────────────────────────────────────────────────────────────────
 class Transport {
 public:
@@ -93,8 +132,15 @@ public:
     //     (kernel SYN → SYN-ACK → ACK); for TlsTransport, async_handshake is a
     //     SEPARATE step the FSM issues after this completes successfully.
     //
-    //     Cancellation: cancellation_type::total → transport_connect_cancelled.
-    //     By STATE not call count (#339): closed → 98; connected/handshaken → 97; fresh → attempts.
+    //     Cancellation: cancellation_type::total → transport_connect_cancelled,
+    //     effective from the FIRST REAL SUSPENSION POINT — a signal emitted
+    //     before the call is not observed at entry (#341).
+    //     By STATE, not call index (#339, #342):
+    //       closed                       → 98 transport_already_closed
+    //       connected / handshaken       → 97 transport_already_connected
+    //       fresh, an attempt IN FLIGHT  → 97 (overlap refused, #342)
+    //       fresh and idle               → ATTEMPTS; a FAILED attempt stays
+    //                                      fresh and is retryable.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>> async_connect(
         Endpoint const& ep) = 0;
 
@@ -136,8 +182,11 @@ public:
 
     // (4) Cancel any in-flight async_connect / async_read_some / async_write /
     //     async_handshake. Synchronous; idempotent on already-cancelled /
-    //     never-issued ops. Returns expected_t<void> for symmetry (only
-    //     documented failure: transport_already_closed after close ⚠️ NOT IMPLEMENTED — #340).
+    //     never-issued ops. Returns expected_t<void> for SYMMETRY ONLY — NO
+    //     failure is defined and none can occur; every shipped impl returns {}
+    //     unconditionally. (#340 resolved on the contract side: the
+    //     never-implemented transport_already_closed failure was deleted here
+    //     rather than added to the code, because no caller branches on it.)
     //
     //     ⚠️ CALL IT ON THE SESSION STRAND. This read "thread-safe (ASIO
     //     cancellation_signal is thread-safe)" until 2026-08-31 (#333). Both
@@ -171,11 +220,31 @@ public:
 
     // (5) Close the transport. Synchronous on the session strand. After close()
     //     returns, every async_* returns transport_already_closed.
-    //     For TLS transports: initiates best-effort bidi TLS shutdown
-    //     (SSL_shutdown close-notify) bounded by Config::tls_close_timeout
-    //     (1 s default); a truncated close (peer-side missing close-notify)
-    //     surfaces as transport_read_truncated and is NOT treated as a hard
-    //     error (logged at `warn` level by 2k per [2g §7.8]).
+    //     ⚠️ FOR TLS TRANSPORTS, WHAT THIS ACTUALLY DOES IS NOT A GRACEFUL
+    //     SHUTDOWN — corrected 2026-09-02 against a measurement (#348). This
+    //     read "initiates best-effort bidi TLS shutdown (SSL_shutdown
+    //     close-notify) bounded by Config::tls_close_timeout (1 s default); a
+    //     truncated close surfaces as transport_read_truncated and is NOT
+    //     treated as a hard error". Three claims, none of them true as shipped:
+    //
+    //       - NO close-notify reaches the peer. close() calls SSL_shutdown() on
+    //         the NATIVE handle; asio's ssl::stream writes through a BIO pair
+    //         (ssl::detail::engine::shutdown generates the alert, and
+    //         ssl::detail::io drains it to the socket). Nothing drains it here,
+    //         and socket_.close() immediately after discards it.
+    //       - close() does NOT wait, and never reads tls_close_timeout on this
+    //         path. It is synchronous and returns at once; there is nothing
+    //         asynchronous for that budget to bound.
+    //       - The peer does NOT observe transport_read_truncated. MEASURED,
+    //         deterministic over repeated runs: a peer with an in-flight read
+    //         gets transport_read_error — an OS-level error, not the non-fatal
+    //         truncation the sentence promised.
+    //
+    //     Whether to make this a real graceful shutdown (which needs an ASYNC
+    //     close(), i.e. an API change) or to keep the synchronous abortive close
+    //     is an open decision — #348. Pinned by
+    //     test_inflight_exclusivity.cpp's CloseDoesNotDeliverCloseNotify cell so
+    //     the behaviour cannot change without that assertion changing too.
     //
     //     Idempotency: second close() returns expected_t<void>{} without side
     //     effects.

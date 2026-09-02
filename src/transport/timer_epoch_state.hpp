@@ -57,6 +57,19 @@ namespace fixpp::transport {
 struct timer_epoch_state {
     std::uint64_t connect{0};
     std::uint64_t handshake{0};  // TLS only; unused on the plain transport.
+
+    // ── In-flight flags (#342), here for the SAME lifetime reason as the
+    // epochs, established by MEASUREMENT not by argument. They were first
+    // written as plain Transport members cleared by an RAII guard in
+    // async_connect / async_handshake; ASan then reported a
+    // heap-use-after-free, WRITE of size 1, in that guard's destructor under
+    // D-4.0 destroy-with-no-drain. A suspended coroutine frame is destroyed
+    // AFTER the Transport on that path, and a destructor that writes through
+    // `this` is exactly what the rest of this file exists to avoid — the timer
+    // handlers capture a COPY of the shared_ptr for the same reason. Living
+    // here, the clear is safe whether or not the Transport is still alive.
+    bool connect_in_flight{false};
+    bool handshake_in_flight{false};  // TLS only.
 };
 
 }  // namespace fixpp::transport

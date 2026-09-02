@@ -256,9 +256,9 @@ public:
     //     the resolver / connect chain causes the awaitable to complete with
     //     transport_connect_cancelled.
     //
-    //     Idempotency: calling async_connect twice on the same Transport
-    //     before close()/cancel() returns is a programmer error — the second
-    //     call returns transport_already_connected.
+    //     Idempotency: a second async_connect from a SUCCEEDED state, or while
+    //     one is IN FLIGHT (#342), returns transport_already_connected; after a
+    //     FAILED attempt the Transport is still fresh and really retries.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<ConnectInfo>>
         async_connect(Endpoint const& ep) = 0;
 
@@ -307,10 +307,10 @@ public:
         async_write(std::span<const std::byte> bytes [[clang::lifetimebound]]) = 0;
 
     // (4) Cancel any in-flight async_connect / async_read_some / async_write
-    //     / async_handshake. Synchronous; safe to call from any thread (the
-    //     underlying ASIO socket/cancellation_signal is thread-safe per ASIO's
-    //     contract). Idempotent; calling cancel() on an already-cancelled or
-    //     never-issued op is a no-op. Returns expected_t<void> for symmetry
+    //     / async_handshake. Synchronous; CALL IT ON THE SESSION STRAND (the
+    //     "safe from any thread" claim here was struck 2026-09-02, #333/#340:
+    //     no impl emits a cancellation_signal, and asio calls a shared socket
+    //     Unsafe). Idempotent. Returns expected_t<void> for symmetry ONLY
     //     with the other failable ops (the only documented failure is
     //     transport_already_closed when called after close()).
     //
@@ -323,12 +323,12 @@ public:
     // (5) Close the transport. Synchronous on the session strand. After close()
     //     returns, no further async_connect / async_read_some / async_write /
     //     async_handshake is permitted (each returns transport_already_closed).
-    //     For TLS transports, close() initiates a graceful TLS shutdown
-    //     (SSL_shutdown bidirectional close-notify) on a best-effort basis —
-    //     a 1-second timeout bounds the wait per Transport::Config::tls_close_timeout
-    //     to avoid blocking the strand on an unresponsive peer; a non-graceful
-    //     close (counterparty unresponsive, network partition) is reported as
-    //     transport_tls_close_truncated but not treated as a hard error.
+    //     For TLS transports, close() was specified to initiate a graceful TLS
+    //     shutdown (SSL_shutdown bidirectional close-notify) bounded by
+    //     Transport::Config::tls_close_timeout. ⚠️ MEASURED FALSE 2026-09-02
+    //     (#348): the alert never leaves asio's BIO, close() never waits, and
+    //     the peer observes an OS-level read error rather than a truncated
+    //     close. The decision to implement or to re-specify is open in #348.
     //
     //     Idempotency: calling close() twice on the same Transport returns
     //     expected_t<void>{} on the second call without side effects.
@@ -1108,7 +1108,7 @@ Every `expected_t<T>`-returning method declared in §4.1–§4.8 carries `[[nodi
 - `fixpp_transport_async_connect(...)`, `fixpp_transport_async_read_some(...)`, `fixpp_transport_async_write(...)`, `fixpp_transport_cancel(...)`, `fixpp_transport_close(...)` — async ops mapped through 2i's awaitable-to-C-callback bridge (the same shape 2i uses for `[2g §5]` `fixpp_cert_source_load_credentials`).
 - `fixpp_tls_transport_async_handshake(...)` returning a `fixpp_handshake_result_t` PoD struct mirroring the C++ `handshake_result` value type (§4.2): the C-ABI shape carries the `peer_identity` (raw subject_dn + SAN list crossing as `(const char*, size_t)`), `negotiated_cipher` (string), and a `fixpp_pinset_snapshot_t` opaque handle wrapping `shared_ptr<const pin_snapshot>` per `[2g §5]`. The C-ABI consumer reads from the returned PoD; no separate accessor symbols are needed because the underlying C++ shape is value-typed.
 - `FIXPP_ERR_TRANSPORT_*` C-ABI coalescing groups per §6.6.
-- Reentrancy classifications per `[const §X.5]`: `cancel()` / `close()` are documented `thread-safe`; the async methods are `single-thread` (must be invoked from the session's `session_executor` per `[2d §4.8]`).
+- Reentrancy classifications per `[const §X.5]`: `cancel()` / `close()` are **strand-confined** (⚠️ read `thread-safe` until 2026-09-02 — #333/#340); the async methods are `single-thread` (invoked from the session's `session_executor` per `[2d §4.8]`).
 
 **No 2h shape is fundamentally incompatible with the C ABI delegation.** The `Transport` virtual surface, the `Endpoint` / `ReconnectPolicy` PoD types, and the `peer_identity` accessor all map cleanly to opaque-handle / PoD / callback shapes 2i already uses.
 
@@ -1228,7 +1228,7 @@ Numeric range allocation. Per the per-doc-prefix convention each doc owns a non-
 | `transport_connect_refused` | §4.1 — TCP connect returned `ECONNREFUSED` (peer not listening on port). | Operator / counterparty error — peer down or port misconfigured. |
 | `transport_connect_timeout` | §4.1 — TCP connect did not complete within `Config::connect_timeout` (default 30 s). | Network / counterparty error — peer unreachable or behind an unresponsive firewall. |
 | `transport_connect_cancelled` | §4.1 — `async_connect` cancelled before completion (cancellation_type::total observed). | Cancellation; not an error in most contexts — caller decides. |
-| `transport_already_connected` | §4.1 — `async_connect` called twice on the same Transport instance before close()/cancel(). Also covers in-flight `async_handshake` overlap (handshake is one-shot per Transport lifetime, like connect — a second `async_handshake` while one is in flight surfaces this variant). | Programmer error — fix the FSM. |
+| `transport_already_connected` | §4.1 — `async_connect`/`async_handshake` refused by ENTRY STATE (#339, #342): from an already-SUCCEEDED state, or while an attempt is IN FLIGHT. A failed `async_connect` stays `fresh` and really retries; a handshake retries only after a PREFLIGHT rejection, since entering the OpenSSL exchange sets `closed` → `transport_already_closed`. | Programmer error — fix the FSM. |
 | `transport_read_in_progress` | §4.1 — `async_read_some` called while a previous `async_read_some`'s awaitable has not yet completed (in-flight exclusivity violation per §4.1 normative contract). | Programmer error — fix the FSM (one in-flight read per Transport). |
 | `transport_write_in_progress` | §4.1 — `async_write` called while a previous `async_write`'s awaitable has not yet completed (in-flight exclusivity violation per §4.1 normative contract). | Programmer error — fix the FSM (one in-flight write per Transport). |
 | `transport_reconnect_limit_exceeded` | §4.4.1 — the FSM's reconnect loop exhausted `ReconnectPolicy::max_attempts` (default 10 per `ReconnectPolicy::defaults()`). The session terminates; operators that need a longer envelope override `max_attempts` explicitly. | Operational event — peer unreachable for the configured envelope; session terminates per `[const §XV]` thunder-herd-pattern intent. |
@@ -1243,7 +1243,7 @@ Numeric range allocation. Per the per-doc-prefix convention each doc owns a non-
 | `transport_handshake_cancelled` | §4.2 — `async_handshake` cancelled. The SSL* state is broken; caller MUST close(). | Cancellation. |
 | `transport_handshake_timeout` | §4.2 — `async_handshake` exceeded `Config::tls_handshake_timeout` (default 30 s). | Network / counterparty error. |
 | `transport_accept_cancelled` | §4.6 — `Listener::async_accept` cancelled. | Cancellation. |
-| `transport_already_closed` | §4.1 — `async_connect` / `async_read_some` / `async_write` / `async_handshake` / `cancel` called after `close()` returned. | Programmer error — fix the FSM. |
+| `transport_already_closed` | §4.1 — `async_connect` / `async_read_some` / `async_write` / `async_handshake` called after `close()` returned. ⚠️ NOT `cancel` — it defines no failure and returns {} unconditionally (#340). | Programmer error — fix the FSM. |
 | `transport_factory_failed` | §4.7 — `TransportFactory::make(...)` reported failure (e.g., OS resource exhaustion at socket creation; OpenSSL `SSL_CTX_new` failure). | Configuration / runtime error. |
 | `transport_psk_unsupported` | §4.5 — caller's `SslCtxConfig` requested PSK (T-012); v1.0 default impl rejects until T-012 P2 hook ships. | Configuration error — fall back to `mtls_*` profile or wait for v1.x. |
 
