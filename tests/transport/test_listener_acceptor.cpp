@@ -286,18 +286,17 @@ bool connection_refused_or_reset(asio::io_context& ioc, ConnectResult& cr) {
 // cannot tell "the queue is saturated and this probe is parked" apart from
 // "this probe was refused/reset" — both look like "did not increment" — so
 // every probe's outcome is classified individually, as observed at the end of
-// that probe's bounded pump window. `pending` means only "not yet decided
-// within this window" and is NOT a terminal outcome — a probe classified
-// pending may be refused after the window closes, on a host whose
-// error-report latency exceeds it. Measured latencies and the re-derivation
-// recipe: `.specify/decisions/332-backlog-rst-witness-witnesses.md` §3a.
-enum class connect_outcome { completed, refused_or_reset, other_error, pending };
+// that probe's bounded pump window. A probe classified `undecided_in_window`
+// may be refused after the window closes, on a host whose error-report
+// latency exceeds it. Measured latencies and the re-derivation recipe:
+// `.specify/decisions/332-backlog-rst-witness-witnesses.md` §3a.
+enum class connect_outcome { completed, refused_or_reset, other_error, undecided_in_window };
 
 struct connect_probe_result {
     int completed = 0;
     int refused_or_reset = 0;
     int other_error = 0;
-    int pending = 0;
+    int undecided_in_window = 0;
 };
 
 // Fires `probes` connects at `port`, spacing each initiation by one bounded
@@ -326,9 +325,9 @@ struct connect_probe_result {
 //
 // ⚠️ The per-probe outcome is SNAPSHOTTED before any socket is closed. Once
 // a probe's `close()` runs, its still-pending handler resolves with
-// `operation_aborted`, overwriting the very "pending" signal this function
-// exists to observe — the capture-before-teardown shape of #332. So the
-// counts below are computed first, and the close+drain that follows cannot
+// `operation_aborted`, overwriting the very `undecided_in_window` signal this
+// function exists to observe — the capture-before-teardown shape of #332. So
+// the counts below are computed first, and the close+drain that follows cannot
 // change them.
 connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16_t port, int probes,
                                                std::chrono::milliseconds per_connect) {
@@ -340,7 +339,8 @@ connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16
     // is silently gone.
     std::vector<asio::ip::tcp::socket> sockets;
     sockets.reserve(static_cast<std::size_t>(probes));
-    std::vector<connect_outcome> outcome(static_cast<std::size_t>(probes), connect_outcome::pending);
+    std::vector<connect_outcome> outcome(static_cast<std::size_t>(probes),
+                                         connect_outcome::undecided_in_window);
     const asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), port};
 
     for (int i = 0; i < probes; ++i) {
@@ -367,7 +367,9 @@ connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16
             case connect_outcome::completed: ++result.completed; break;
             case connect_outcome::refused_or_reset: ++result.refused_or_reset; break;
             case connect_outcome::other_error: ++result.other_error; break;
-            case connect_outcome::pending: ++result.pending; break;
+            case connect_outcome::undecided_in_window:
+                ++result.undecided_in_window;
+                break;
         }
     }
 
@@ -1032,7 +1034,7 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
 // reset, refused, or left pending, per OS and configuration
 // (spec.md US3 scenario 3). So the mechanism is not assertable PORTABLY, but
 // it IS observable locally: every probe's state at its snapshot is recorded (see
-// count_completed_connects above) and a non-pending shortfall is named in the
+// count_completed_connects above) and the per-outcome counts are named in the
 // failure message, so a red on a given runner says which outcome that runner
 // produced. The NORMATIVE half — fixpp does not over-promise availability
 // under saturated accept rates — is exactly what the assertions below carry.
@@ -1103,8 +1105,8 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
         << "the sweep could not complete " << kProbes
         << " connects even against a listener whose backlog (" << kControlBacklog
         << ") exceeds that — the assertions below would be measuring the instrument, not the "
-           "listener (pending="
-        << r_control.pending << ", refused_or_reset=" << r_control.refused_or_reset
+           "listener (undecided_in_window="
+        << r_control.undecided_in_window << ", refused_or_reset=" << r_control.refused_or_reset
         << ", other_error=" << r_control.other_error << ")";
 
     // (ii) US3 AC3 proper: a listener that never accepts does NOT absorb every
@@ -1119,14 +1121,16 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
     // of them portably would resurrect the pre-2026-09-01 mechanism claim by
     // proxy. The counts are carried in the failure messages so a red on a given
     // runner says which outcome that runner produced.
-    EXPECT_GT(r_low.completed, 0)
-        << "backlog=" << kLowBacklog << " completed no connects at all — the low arm's "
-           "shortfall is a dead listener, not a saturated one (completed=" << r_low.completed
-        << ", pending=" << r_low.pending << ", refused_or_reset=" << r_low.refused_or_reset
-        << ", other_error=" << r_low.other_error << ")";
+    EXPECT_GT(r_low.completed, 0) << "backlog=" << kLowBacklog
+                                  << " completed no connects at all — the low arm's "
+                                     "shortfall is a dead listener, not a saturated one (completed="
+                                  << r_low.completed
+                                  << ", undecided_in_window=" << r_low.undecided_in_window
+                                  << ", refused_or_reset=" << r_low.refused_or_reset
+                                  << ", other_error=" << r_low.other_error << ")";
     EXPECT_EQ(r_low.other_error, 0)
         << "backlog=" << kLowBacklog << " produced " << r_low.other_error
-        << " connect error(s) not classified as completed/refused-or-reset/pending";
+        << " connect error(s) not classified as completed/refused-or-reset/undecided-in-window";
 
     // (iii) ...and the bound TRACKS THE CONFIGURED VALUE rather than merely
     //      existing. This is the assertion that makes the cell a witness for
@@ -1138,7 +1142,7 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
         << ") — the listener is not forwarding Endpoint::backlog to listen()";
     EXPECT_EQ(r_high.other_error, 0)
         << "backlog=" << kHighBacklog << " produced " << r_high.other_error
-        << " connect error(s) not classified as completed/refused-or-reset/pending";
+        << " connect error(s) not classified as completed/refused-or-reset/undecided-in-window";
 
     // ⚠️ NO ARM AT AC3's OWN NAMED DEPTH HERE, and the reason is structural,
     // not an oversight. A two-point relational bracket — bounded above by the
