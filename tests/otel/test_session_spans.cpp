@@ -15,11 +15,15 @@
 // [const §XIII.3]: no Scope anywhere.
 //
 // The three `sleep_for(10us)` calls below are sub-granularity and DELIBERATELY
-// left as sleeps. Each has to make one span's measured latency non-zero, which
-// any timer granularity satisfies; there is no rate and no interleaving here for
-// a coarser sleep to destroy, so the spin fix issue #327 applies elsewhere would
-// buy nothing. Listed there as needing no change — do not sweep them for
-// symmetry with the sites that do.
+// left as sleeps. Note what they are NOT for: `latency_ns > 0` is guaranteed
+// without them, by the `std::max(INT64_C(1), ...)` clamp at each site and, for
+// the RAII path, in `record_latency` (src/otel/session_spans.cpp). What a sleep
+// buys is that the recorded latency is a MEASURED interval rather than that
+// clamp floor — so deleting them would leave the assertions passing on the
+// clamp alone. Any timer granularity delivers a measured interval, and there is
+// no rate and no interleaving here for a coarser sleep to destroy, so the spin
+// fix issue #327 applies elsewhere would buy nothing but runtime. Listed there
+// as needing no change — do not sweep them for symmetry with the sites that do.
 
 #include <gtest/gtest.h>
 

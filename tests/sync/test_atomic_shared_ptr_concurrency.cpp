@@ -427,13 +427,13 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
   //
   // `spin_for`, not `sleep_for` — support/spin_window.hpp carries the general
   // reason. What is local to this site: the six windows differ from each other
-  // on purpose, and sub-granularity sleeps would wake all six at the same tick
-  // boundary, so the separation this stagger exists to create would be gone.
-  // The delivered durations would still differ between calls — each sleep
-  // starts at a different offset within the tick — so it is the wake-ups that
-  // coincide, and the assertion below therefore reads the shortest delivered
-  // window rather than looking for equality. Six spins of at most 60 us, once
-  // per test.
+  // on purpose, and a sub-granularity sleep delivers the tick instead of the
+  // window, so the intended separation is not what a thread actually waits.
+  // Note the shape that survives regardless: each thread's second op cannot
+  // begin its wait until its first op has finished, so program order keeps the
+  // ops in at least two groups however coarse the wait becomes — what a coarse
+  // wait costs is the separation WITHIN a group, not all of it. Six spins of at
+  // most 60 us, once per test.
   auto short_stagger = [](std::uint32_t seed) -> long long {
     std::mt19937 rng(seed);
     std::uniform_int_distribution<int> dist(5, 60);
@@ -564,12 +564,11 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
   // builds the matrix, so the count and the constraint cannot drift apart.
   //
   // DIAGNOSTIC ONLY — deliberately not asserted, not even as a floor. Each
-  // thread runs its two ops back to back, so one thread's second op begins after
-  // another thread's first op has ended for reasons that have nothing to do with
-  // the stagger; the count therefore stays well clear of zero even with the
-  // stagger deleted outright (verified by deleting it). A floor on it would be a
-  // check that cannot report a problem — so it is carried into the failure
-  // message below instead, where it says which shape a red took.
+  // thread runs its two ops back to back, so cross-thread edges arise from
+  // program order alone, for reasons that have nothing to do with the stagger.
+  // The count is therefore not a witness for the stagger working, and a floor on
+  // it would be a check whose subject it does not measure. It is carried into
+  // the failure message below instead, where it says which shape a red took.
   int cross_thread_realtime_edges = 0;
   std::array<std::array<bool, 6>, 6> must_before{};
   for (auto& row : must_before) row.fill(false);
@@ -588,10 +587,12 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
     }
   }
 
-  // The stagger delivers the window it asks for — the one assertion here that
-  // the granularity defect fails. The SHORTEST delivered stagger is the
-  // statistic, not the longest: granularity lengthens all six, whereas an
-  // unlucky preemption lengthens one, so a max would trade discrimination for
+  // The stagger delivers the window it asks for. Read this for exactly what it
+  // is: a detector for UNIFORM oversleep — the granularity defect lengthens
+  // every wait, so the shortest of the six is enough to catch it. It is not a
+  // proof that the six windows ended up distinct; nothing here asserts that.
+  // The SHORTEST is the statistic rather than the longest because an unlucky
+  // preemption lengthens one wait, so a max would trade discrimination for
   // flakiness under load. The bound sits far from both sides — well above the
   // largest window this site requests, well below the granularity it would
   // otherwise be rounded up to — which is what keeps it from being a timing
@@ -603,8 +604,8 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
   EXPECT_LT(shortest_stagger_ns, 1'000'000)
       << "the shortest per-op stagger took " << (shortest_stagger_ns / 1000)
       << " us for a window of at most 60 us — the requested window is being rounded up to "
-         "the system timer granularity, so the six ops no longer occupy distinct real-time "
-         "windows (cross_thread_realtime_edges=" << cross_thread_realtime_edges << ")";
+         "the system timer granularity, so what separates these ops is no longer what this "
+         "test asked for (cross_thread_realtime_edges=" << cross_thread_realtime_edges << ")";
 
   auto consistent_with_constraints = [&](const std::array<int, 6>& perm) {
     std::array<int, 6> pos{};

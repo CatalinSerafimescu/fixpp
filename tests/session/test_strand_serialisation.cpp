@@ -57,13 +57,12 @@ void open_session(Session& s, asio::thread_pool& pool) {
 }
 
 // A precise sub-millisecond window, for widening the race an unserialised
-// implementation would lose. `spin_for` rather than `sleep_for`: the callbacks
-// below are serialized on one strand, so a loop of sub-granularity sleeps pays
-// N x the timer granularity end to end, which is what made the bounded drain
-// below miss its budget on the MSVC lane while the code under test was behaving
-// correctly (PR #326). The header states the general reason; what is local to
-// this test is that only one strand runs at a time here, so exactly one thread
-// spins.
+// implementation would lose. `spin_for` rather than `sleep_for`, and the local
+// reason is the strand: these callbacks are serialized, so any per-callback
+// oversleep accumulates end to end and can exhaust the bounded drain below
+// while the code under test is behaving correctly. (That is not hypothetical —
+// it is what PR #326 was; the measured lane history lives there, not here.)
+// Only one strand runs at a time, so exactly one thread spins.
 
 TEST(SeamStrandSerialisation, NoOverlapWithinSessionUnderMultiThreadPool) {
     asio::thread_pool pool{8};

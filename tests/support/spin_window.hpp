@@ -14,17 +14,22 @@
 //     boundary, so windows that exist to separate events stop separating them
 //     (issue #327).
 //
-// Both are silent: the sleep returns success, and the test still passes — just
-// weaker, or slower, than it reads.
+// Neither announces itself: nothing in the API reports that the wait was
+// rounded up. The oversleep surfaces later and elsewhere — as a weakened
+// interleaving, or as an enclosing budget exhausted by work that is behaving
+// correctly — with the timer never named as the cause.
 //
-// A spin costs the requested duration on every platform. It also BURNS A CORE
-// for that duration, so this is for SHORT windows only. A site that needs to
-// yield the CPU across a long deadline must keep sleeping and accept the
-// granularity; spinning one of those would starve the very thread it waits for.
+// A spin waits on the requested clock rather than on the timer, so it is not
+// rounded up to a tick. It bounds the wait from BELOW, not above: preemption
+// or a coarse clock can still make the delivered window longer than asked. It
+// also BURNS A CORE for the duration, so this is for SHORT windows only. A site
+// that needs to yield the CPU across a long deadline must keep sleeping and
+// accept the granularity; spinning one of those would starve the very thread it
+// is waiting for.
 //
 // The delivered duration is returned so a caller that must PROVE its window was
 // honoured can assert on it rather than assume it. Callers that only need the
-// delay may ignore it.
+// delay may ignore it. A non-positive `d` returns zero without sampling.
 //
 // Re-derive rather than trust a number: compile a loop of
 // `sleep_for(microseconds{5})` and divide the elapsed time by the iteration
@@ -36,6 +41,9 @@
 namespace fixpp::test_support {
 
 inline std::chrono::steady_clock::duration spin_for(std::chrono::steady_clock::duration d) {
+    if (d <= std::chrono::steady_clock::duration::zero()) {
+        return std::chrono::steady_clock::duration::zero();
+    }
     const auto started = std::chrono::steady_clock::now();
     const auto until = started + d;
     // The sample that ends the spin IS the measurement: reading the clock again
