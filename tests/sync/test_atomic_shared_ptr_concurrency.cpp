@@ -35,6 +35,8 @@
 #include <thread>
 #include <vector>
 
+#include "support/spin_window.hpp"
+
 namespace {
 
 using AtomicIntPtr = fixpp::sync::atomic_shared_ptr<int>;
@@ -213,9 +215,14 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
       // waiting for a descheduled reader, so it must be able to span the whole
       // deadline, and a spun ceiling exhausts in milliseconds — proven not to
       // rescue a 400 ms-delayed reader. Bounding the RATE bounds total allocation
-      // over the deadline (10 s / 200 us) — each publish make_shared's a Payload
-      // that a reader's snapshot may briefly extend — while leaving the deadline
-      // the operative bound.
+      // over the deadline — each publish make_shared's a Payload that a reader's
+      // snapshot may briefly extend — while leaving the deadline the operative
+      // bound.
+      //
+      // ⚠️ Do not restate that rate as an iteration count: a sub-granularity
+      // sleep sleeps for the GRANULARITY, so the delivered period is a platform
+      // property, not the argument below. The allocation bound survives that —
+      // a coarser period allocates less (issue #327).
       std::this_thread::sleep_for(std::chrono::microseconds{200});
     }
 
@@ -402,6 +409,9 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
     int observed_value{-1};
     bool cas_success{false};
     int expected_after{-1};
+    // What the stagger before this op actually cost. Recorded, not assumed:
+    // see the assertion after the joins.
+    long long stagger_ns{0};
   };
 
   auto null_ptr = std::shared_ptr<int>{};
@@ -409,11 +419,27 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
   auto p2 = std::make_shared<int>(2);
   auto p3 = std::make_shared<int>(3);
 
-  // Short random micro-sleep to increase interleaving.
-  auto short_sleep = [](std::uint32_t seed) {
+  // Short per-op stagger, so the six operations occupy DISTINCT real-time
+  // windows. `must_before` below is built from `ops[i].end_ns <
+  // ops[j].start_ns`; an operation that overlaps every other one contributes no
+  // such edge, and the permutation search is then constrained by per-thread
+  // program order alone.
+  //
+  // `spin_for`, not `sleep_for` — support/spin_window.hpp carries the general
+  // reason. What is local to this site: the six windows differ from each other
+  // on purpose, and a sub-granularity sleep delivers the tick instead of the
+  // window, so the intended separation is not what a thread actually waits.
+  // Note the shape that survives regardless: each thread's second op cannot
+  // begin its wait until its first op has finished, so program order keeps the
+  // ops in at least two groups however coarse the wait becomes — what a coarse
+  // wait costs is the separation WITHIN a group, not all of it. Six spins of at
+  // most 60 us, once per test.
+  auto short_stagger = [](std::uint32_t seed) -> long long {
     std::mt19937 rng(seed);
     std::uniform_int_distribution<int> dist(5, 60);
-    std::this_thread::sleep_for(std::chrono::microseconds(dist(rng)));
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               fixpp::test_support::spin_for(std::chrono::microseconds(dist(rng))))
+        .count();
   };
 
   // Unmasked int64 ns. The previous `int` with `& 0x7fffffff` wrapped every
@@ -450,7 +476,7 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
         op.kind = Op::Kind::Store;
         op.thread_id = thread_id;
         op.arg_desired = 1;
-        short_sleep(11U);
+        op.stagger_ns = short_stagger(11U);
         op.start_ns = now_ns();
         ptr.store(p1);
         op.end_ns = now_ns();
@@ -461,7 +487,7 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
         op.kind = Op::Kind::Exchange;
         op.thread_id = thread_id;
         op.arg_desired = 2;
-        short_sleep(23U);
+        op.stagger_ns = short_stagger(23U);
         op.start_ns = now_ns();
         op.observed_value = id_of(ptr.exchange(p2));
         op.end_ns = now_ns();
@@ -472,7 +498,7 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
         Op op;
         op.kind = Op::Kind::Load;
         op.thread_id = thread_id;
-        short_sleep(37U);
+        op.stagger_ns = short_stagger(37U);
         op.start_ns = now_ns();
         op.observed_value = id_of(ptr.load());
         op.end_ns = now_ns();
@@ -484,7 +510,7 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
         op.thread_id = thread_id;
         op.arg_expected = 2;
         op.arg_desired = 3;
-        short_sleep(41U);
+        op.stagger_ns = short_stagger(41U);
         op.start_ns = now_ns();
         auto expected = p2;
         op.cas_success = ptr.compare_exchange_strong(expected, p3);
@@ -499,7 +525,7 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
         op.thread_id = thread_id;
         op.arg_expected = 0;
         op.arg_desired = 3;
-        short_sleep(53U);
+        op.stagger_ns = short_stagger(53U);
         op.start_ns = now_ns();
         auto expected = null_ptr;
         op.cas_success = ptr.compare_exchange_strong(expected, p3);
@@ -511,7 +537,7 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
         Op op;
         op.kind = Op::Kind::Load;
         op.thread_id = thread_id;
-        short_sleep(67U);
+        op.stagger_ns = short_stagger(67U);
         op.start_ns = now_ns();
         op.observed_value = id_of(ptr.load());
         op.end_ns = now_ns();
@@ -531,6 +557,19 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
   ASSERT_EQ(cursor.load(std::memory_order_relaxed), 6) << "All 6 ops must complete";
 
   // Build must_before[i][j]: i must appear before j in the linearization.
+  //
+  // Cross-thread real-time edges are what make this a LINEARIZABILITY check
+  // rather than a per-thread program-order check: without one, any interleaving
+  // of the three threads' sequences is admissible. Counted in the SAME pass that
+  // builds the matrix, so the count and the constraint cannot drift apart.
+  //
+  // DIAGNOSTIC ONLY — deliberately not asserted, not even as a floor. Each
+  // thread runs its two ops back to back, so cross-thread edges arise from
+  // program order alone, for reasons that have nothing to do with the stagger.
+  // The count is therefore not a witness for the stagger working, and a floor on
+  // it would be a check whose subject it does not measure. It is carried into
+  // the failure message below instead, where it says which shape a red took.
+  int cross_thread_realtime_edges = 0;
   std::array<std::array<bool, 6>, 6> must_before{};
   for (auto& row : must_before) row.fill(false);
   for (int i = 0; i < 6; ++i) {
@@ -541,9 +580,32 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
       }
       if (ops[i].end_ns < ops[j].start_ns) {
         must_before[i][j] = true;
+        if (ops[i].thread_id != ops[j].thread_id) {
+          ++cross_thread_realtime_edges;
+        }
       }
     }
   }
+
+  // The stagger delivers the window it asks for. Read this for exactly what it
+  // is: a detector for UNIFORM oversleep — the granularity defect lengthens
+  // every wait, so the shortest of the six is enough to catch it. It is not a
+  // proof that the six windows ended up distinct; nothing here asserts that.
+  // The SHORTEST is the statistic rather than the longest because an unlucky
+  // preemption lengthens one wait, so a max would trade discrimination for
+  // flakiness under load. The bound sits far from both sides — well above the
+  // largest window this site requests, well below the granularity it would
+  // otherwise be rounded up to — which is what keeps it from being a timing
+  // assertion in disguise (issue #327).
+  const long long shortest_stagger_ns =
+      std::min_element(ops.begin(), ops.end(), [](const Op& a, const Op& b) {
+        return a.stagger_ns < b.stagger_ns;
+      })->stagger_ns;
+  EXPECT_LT(shortest_stagger_ns, 1'000'000)
+      << "the shortest per-op stagger took " << (shortest_stagger_ns / 1000)
+      << " us for a window of at most 60 us — the requested window is being rounded up to "
+         "the system timer granularity, so what separates these ops is no longer what this "
+         "test asked for (cross_thread_realtime_edges=" << cross_thread_realtime_edges << ")";
 
   auto consistent_with_constraints = [&](const std::array<int, 6>& perm) {
     std::array<int, 6> pos{};

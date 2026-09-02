@@ -13,6 +13,17 @@
 //
 // Anchor: specs/017-log-otel/contracts/otel-surface.md §SessionSpans.
 // [const §XIII.3]: no Scope anywhere.
+//
+// The three `sleep_for(10us)` calls below are sub-granularity and DELIBERATELY
+// left as sleeps. Note what they are NOT for: `latency_ns > 0` is guaranteed
+// without them, by the `std::max(INT64_C(1), ...)` clamp at each site and, for
+// the RAII path, in `record_latency` (src/otel/session_spans.cpp). What a sleep
+// buys is that the recorded latency is a MEASURED interval rather than that
+// clamp floor — so deleting them would leave the assertions passing on the
+// clamp alone. Any timer granularity delivers a measured interval, and there is
+// no rate and no interleaving here for a coarser sleep to destroy, so the spin
+// fix issue #327 applies elsewhere would buy nothing but runtime. Listed there
+// as needing no change — do not sweep them for symmetry with the sites that do.
 
 #include <gtest/gtest.h>
 
@@ -115,6 +126,7 @@ TEST_F(SessionSpansTest, SessionSpanAndParseChildBothOK) {
     const auto t0 = std::chrono::steady_clock::now();
     auto parse_span = tracer->StartSpan("fixpp.session.parse", parse_opts);
 
+    // Deliberate sub-granularity sleep — see the file header (issue #327).
     std::this_thread::sleep_for(std::chrono::microseconds(10));
 
     const auto latency_ns = std::max(
@@ -179,6 +191,7 @@ TEST_F(SessionSpansTest, ParseChildOnDifferentThreadParentsCorrectly) {
             const auto t0 = std::chrono::steady_clock::now();
             auto ps = tracer->StartSpan("fixpp.session.parse", child_opts);
 
+            // Deliberate sub-granularity sleep — see the file header (issue #327).
             std::this_thread::sleep_for(std::chrono::microseconds(10));
 
             const auto ns = std::max(
@@ -238,6 +251,7 @@ TEST_F(SessionSpansTest, ParseSpanRaiiSetsLatencyAndStatus) {
     {
         fixpp::otel::ParseSpan parse{tracer, session_sc};
         parse.set_msg_type("D");
+        // Deliberate sub-granularity sleep — see the file header (issue #327).
         std::this_thread::sleep_for(std::chrono::microseconds(10));
         // dtor: records latency_ns + sets kOk + calls End()
     }
