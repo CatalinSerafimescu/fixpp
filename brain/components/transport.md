@@ -60,7 +60,10 @@ still the right check, and it is why this paragraph does not name the current ad
 
 **Why adoption was not the one-liner it looked like, which is the part worth carrying forward.** The
 stated obstacle — `Session`'s terminal close emits `cancellation_type::total` immediately before
-closing — was real but misdiagnosed. The awaited shutdown was never the problem; the problem was
+closing, which would cancel an awaited shutdown — was **not real at all**: `Session::close()` opens
+by disabling cancellation on its own frame, so that emission never reached the close it was said to
+break. Verify at the head of `Session::close` before repeating either version. The awaited shutdown
+was never the problem; the problem was
 that at BOTH teardown sites an SSL operation is still suspended (the read pump is blocked in
 `async_read_some`, and the total-cancel that precedes the close has not been delivered to it yet),
 and `close_async()` had inherited `close()`'s rule of skipping the alert whenever that is so.

@@ -286,10 +286,18 @@ public:
     //
     //     WHY ADDITIVE rather than making close() itself async: close() is a
     //     synchronous pure-virtual with implementors across the library and the
-    //     test suite, for a benefit only the TLS transport can deliver — and it
-    //     would not be usable at the call site that most wants it, since
-    //     Session's terminal close emits cancellation_type::total immediately
-    //     before closing, which would cancel an awaited shutdown.
+    //     test suite, for a benefit only the TLS transport can deliver.
+    //
+    //     ⚠️ THIS PARAGRAPH USED TO ADD "and it would not be usable at the call
+    //     site that most wants it, since Session's terminal close emits
+    //     cancellation_type::total immediately before closing, which would
+    //     cancel an awaited shutdown". THAT WAS FALSE and is struck. Session's
+    //     close() opens by disabling cancellation on its own frame precisely so
+    //     that teardown runs to completion; the root emission cancels the
+    //     session work it is tearing down, not close()'s own awaits. Re-derive:
+    //     the reset_cancellation_state(disable_cancellation{}) at the head of
+    //     Session::close in src/session/session.cpp. The real obstacle was
+    //     elsewhere and is described under the TLS override below.
     //
     //     WHAT THE TLS OVERRIDE ADDS over close(): it drives shutdown through
     //     asio's ssl::stream, which actually writes the close-notify alert to

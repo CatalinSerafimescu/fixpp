@@ -31,14 +31,18 @@
 #include <gtest/gtest.h>
 
 #include <asio/awaitable.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
+#include <asio/post.hpp>
 #include <asio/strand.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <chrono>
+#include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
@@ -49,6 +53,9 @@
 #include <span>
 #include <vector>
 
+// Internal transport header — needed for asio_tls_transport::timer_epochs(), the
+// observable that makes the close_async idempotency guard mutation-killable.
+#include "transport/asio_tls_transport.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
 namespace {
@@ -1110,6 +1117,15 @@ TEST(InflightExclusivity, CloseAsyncQuiescesOwnPendingReadAndStillDeliversAlert_
 
     // Budget derived from the competing timeout, not a literal: a close_async
     // whose quiesce loop times out instead of joining parks on tls_close_timeout.
+    //
+    // ⚠️ THIS IS A WALL-CLOCK ASSERTION AND SO IS SCHEDULER-SENSITIVE — a heavily
+    // descheduled sanitizer runner could in principle miss the 500 ms ceiling
+    // even though the close completed promptly once scheduled. Kept, with the
+    // separation stated rather than hidden: pass is ~0.3 s, the mutant parks at
+    // 1 s, and the identical assertion in CloseAsyncDeliversCloseNotify_Fixes348
+    // has shipped green across the full tier-1 matrix including three MSVC lanes.
+    // If this ever flakes, widen the CONFIGURED timeout to widen the gap — do not
+    // raise the fraction, which narrows it.
     const auto budget = Transport::Config{}.tls_close_timeout;
     EXPECT_LT(elapsed, budget / 2)
         << "close_async took " << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed)
@@ -1135,14 +1151,18 @@ TEST(InflightExclusivity, CloseAsyncQuiescesOwnPendingReadAndStillDeliversAlert_
 // FQ-G force-close, engine.cpp's accept-loop rejects), so a second close arriving
 // on an already-closed transport is the NORMAL case, not a corner one.
 //
-// ⚠️ THIS CELL IS A CONTRACT WITNESS, NOT A MUTATION-KILLED ONE, and the
-// difference was MEASURED rather than assumed: deleting the `state_ == closed`
-// early return leaves all five close_async cells GREEN. The branch has no
-// observable through the public API — without it the second call runs
-// SSL_set_shutdown + async_shutdown against an already-closed socket, which
-// errors internally and still returns {}. Do not add an assertion that pretends
-// otherwise; the honest claim is that the documented idempotency holds on both
-// orderings, and that the branch is exercised rather than dead.
+// ⚠️ THE FIRST VERSION OF THIS CELL ASSERTED ONLY THE RETURN VALUE AND WAS
+// LABELLED "no observable, cannot be mutation-killed" — measured, and true of
+// what it asserted: deleting the `state_ == closed` early return left all five
+// close_async cells green. That label was WRONG about the tree, not just about
+// the cell. Without the guard the second call falls through to the shutdown
+// deadline, which BUMPS timer_epochs_->close twice, and that counter is already
+// exposed for exactly this purpose by asio_tls_transport::timer_epochs(). The
+// lesson worth keeping: "no observable exists" is a claim about the whole
+// surface, and it was made after looking only at the return value.
+//
+// So the cell now reads the epoch. A completed close performs no further close
+// ATTEMPT, and that is what the idempotency guard buys.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(InflightExclusivity, CloseAsyncIsIdempotentAfterCloseAndAfterItself) {
     if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
@@ -1153,19 +1173,25 @@ TEST(InflightExclusivity, CloseAsyncIsIdempotentAfterCloseAndAfterItself) {
     LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
     auto pair = make_handshaken_pair(fixture, ioc);
 
+    auto* client_tls = dynamic_cast<fixpp::transport::asio_tls_transport*>(pair.client.get());
+    ASSERT_NE(client_tls, nullptr) << "the fixture must mint a TLS transport for this cell";
     Transport* client_raw = pair.client.get();
     Transport* server_raw = pair.server.get();
 
     std::optional<expected_t<void>> first;
     std::optional<expected_t<void>> second;
     std::optional<expected_t<void>> after_sync_close;
+    std::uint64_t epoch_after_first = 0;
+    std::uint64_t epoch_after_second = 0;
 
     asio::co_spawn(
         ioc.get_executor(),
-        [&first, &second, &after_sync_close, client_raw, server_raw]() -> asio::awaitable<void> {
+        [&, client_raw, server_raw]() -> asio::awaitable<void> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
             first = co_await client_raw->close_async();
+            epoch_after_first = client_tls->timer_epochs()->close;
             second = co_await client_raw->close_async();
+            epoch_after_second = client_tls->timer_epochs()->close;
             // The other ordering: a synchronous close() first, close_async after.
             (void)server_raw->close();
             after_sync_close = co_await server_raw->close_async();
@@ -1179,6 +1205,129 @@ TEST(InflightExclusivity, CloseAsyncIsIdempotentAfterCloseAndAfterItself) {
     EXPECT_TRUE(second->has_value());
     ASSERT_TRUE(after_sync_close.has_value());
     EXPECT_TRUE(after_sync_close->has_value());
+
+    // THE MUTATION KILL. The first close arms and retires the shutdown deadline,
+    // so a nonzero epoch here is the proof the counter moves at all — without it
+    // the equality below would hold vacuously on a transport that never closed.
+    EXPECT_GT(epoch_after_first, 0U)
+        << "the first close_async never armed its shutdown deadline; the equality below would be "
+           "vacuous";
+    EXPECT_EQ(epoch_after_second, epoch_after_first)
+        << "the second close_async armed a NEW shutdown deadline against an already-closed "
+           "transport, i.e. the `state_ == closed` idempotency guard is gone. A second close must "
+           "perform no further close attempt.";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #348 — a close_async CANCELLED MID-QUIESCE still closes the socket.
+//
+// THE INVARIANT UNDER TEST, stated first because it is bigger than this cell:
+// close_async publishes `state_ = closed` BEFORE it suspends, which makes both
+// close() and a second close_async() no-ops. Every path out of it from that
+// point therefore has to close the socket, or it strands a LIVE connection
+// behind a permanently closed logical state that neither entry point can
+// recover. There are three such paths — the normal one, the quiesce's
+// give-up-and-close, and the catch(...).
+//
+// ⚠️ THIS CELL DRIVES THE catch(...), AND THAT WAS MEASURED, NOT PREDICTED. The
+// first version of this comment claimed the give-up branch; the mutation that
+// removes THAT branch's socket_.close() left this cell green, and the mutation
+// that removes the CATCH's kills it. The emission lands during the quiesce, the
+// wait_ec break falls through with the state still cancelled, and the throw
+// comes from the async_shutdown `co_await`'s precheck. The give-up branch has
+// no cell — its own comment says so.
+//
+// HOW THE CANCELLATION IS LANDED, since the ordering is the whole cell. The
+// emit is POSTED onto the same executor immediately after the close is spawned,
+// so it runs at close_async's first suspension: the coroutine has already called
+// socket_.cancel() and is waiting on the quiesce timer, whose wait the emission
+// aborts. An emit issued before ioc.run() would witness nothing at all — the
+// slot has no handler until co_spawn initiates.
+//
+// ⚠️ The peer's read is the assertion, NOT close_async's return value. It
+// returns {} on the defect too — having left the socket open. Only the peer can
+// tell the difference from outside the process.
+//
+// ⚠️ RED-ARM CONTRACT: delete the `socket_.close(ec)` from close_async's
+// catch(...) and the server's read below must stay PENDING for the full 3 s pump.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, CloseAsyncCancelledMidCloseStillClosesTheSocket) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto pair = make_handshaken_pair(fixture, ioc);
+
+    std::optional<expected_t<std::size_t>> server_read;
+    std::optional<expected_t<std::size_t>> client_read;
+    std::byte server_buf{0};
+    std::byte client_buf{0};
+    Transport* server_raw = pair.server.get();
+    Transport* client_raw = pair.client.get();
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&server_read, server_raw, &server_buf]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            server_read = co_await server_raw->async_read_some(std::span<std::byte>{&server_buf, 1});
+        },
+        asio::detached);
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&client_read, client_raw, &client_buf]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            client_read = co_await client_raw->async_read_some(std::span<std::byte>{&client_buf, 1});
+        },
+        asio::detached);
+
+    ioc.run_for(300ms);
+    ASSERT_FALSE(server_read.has_value());
+    ASSERT_FALSE(client_read.has_value())
+        << "the closing side must have a read in flight, or close_async never enters the quiesce "
+           "and this cell drives nothing";
+
+    asio::cancellation_signal sig;
+    std::optional<expected_t<void>> closed;
+    bool escaped = false;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&closed, &escaped, client_raw]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            try {
+                closed = co_await client_raw->close_async();
+            } catch (...) {
+                // Recorded, not swallowed: an escape is a finding either way —
+                // close_async's own catch(...) exists so teardown never throws at
+                // a caller that documents a clean return.
+                escaped = true;
+            }
+        },
+        asio::bind_cancellation_slot(sig.slot(), asio::detached));
+
+    asio::post(ioc.get_executor(), [&sig] { sig.emit(asio::cancellation_type::total); });
+
+    ioc.run_for(3s);
+
+    EXPECT_FALSE(escaped) << "close_async let an exception escape to its caller";
+
+    ASSERT_TRUE(server_read.has_value())
+        << "THE DEFECT: close_async was cancelled mid-quiesce and returned without closing the "
+           "socket, so the peer's read is still pending and the connection is live behind a "
+           "transport whose state_ says closed — close() and a second close_async() are both "
+           "no-ops from here, so nothing can recover it.";
+    ASSERT_FALSE(server_read->has_value());
+
+    // Deliberately NOT asserting WHICH error the peer sees. A cancelled close is
+    // abortive by construction — the alert is not sent, because sending it under
+    // a suspended SSL op is the hazard close() documents — so the outcome is the
+    // #348 symptom and that is correct here. What must hold is that the peer's
+    // read TERMINATED.
+
+    (void)pair.server->close();
+    ioc.run_for(200ms);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

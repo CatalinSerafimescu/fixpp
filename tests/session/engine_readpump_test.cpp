@@ -639,7 +639,6 @@ TEST(EngineReadPumpTest, EngineStopDeliversCloseNotifyToPeer_Fixes348) {
     ioc.run_for(2s);
     ioc.restart();
 
-    auto acc = h->engine->lookup(h->acc_id);
     ASSERT_TRUE(hc.logged_on) << "client did not reach Logon within 2s";
     ASSERT_FALSE(hc.terminal_read.has_value())
         << "the peer's read already terminated BEFORE stop() — this case would then witness "
@@ -673,13 +672,16 @@ TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348)
     ioc.run_for(2s);
     ioc.restart();
 
+    // ⚠️ ASSERT, not GTEST_SKIP. The sibling cells in this file skip here because
+    // they predate the acceptance path being wired; it is live now, and this cell
+    // is the ONLY witness that session.cpp's teardown calls close_async(). A skip
+    // would let a regression that stops publishing the session delete the witness
+    // silently and still report green. The fixture-dir skip above is the only
+    // legitimate skip in this cell.
     auto acc = h->engine->lookup(h->acc_id);
-    if (!acc) {
-        auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run();
-        stop_fut.get();
-        GTEST_SKIP() << "acceptor session not found — acceptance path not live";
-    }
+    ASSERT_TRUE(acc) << "acceptor session was never published — this cell cannot witness "
+                        "Session::close(terminal) without it, and skipping here would hide the "
+                        "loss of the only witness for that adoption";
     ASSERT_TRUE(hc.logged_on) << "client did not reach Logon within 2s";
     ASSERT_FALSE(hc.terminal_read.has_value())
         << "the peer's read already terminated BEFORE close(terminal)";

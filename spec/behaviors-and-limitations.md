@@ -2486,8 +2486,11 @@ Evidence: issues #346, #348, #349; new issue #351.
   | `Session::close(terminal)` — the close that follows the root total-cancel | `transport_read_eof` |
   | a direct `Transport::close()` call | `transport_read_error` — unchanged, and still pinned |
 
-  ⚠️ **THE STATED OBSTACLE WAS REAL AND IS RESOLVED IN THE TRANSPORT, NOT AT THE CALL SITE.** The
-  first amendment named it correctly: at both sites an SSL operation is suspended — the read pump
+  ⚠️ **THE STATED OBSTACLE WAS NOT THE REAL ONE.** The first amendment named the blocker as
+  `Session`'s terminal close emitting `cancellation_type::total` before closing, which "would cancel
+  an awaited shutdown". It would not: `Session::close()` disables cancellation on its own frame as
+  its first statement, so that emission never reached the awaited close. The real blocker was in the
+  transport, not at the call site: at both sites an SSL operation is suspended — the read pump
   is blocked in `async_read_some`, and the root total-cancel that precedes the close has not yet
   been delivered to it — and `close_async()` inherited `close()`'s rule of skipping the alert
   whenever that is so. Adopting it unchanged would have compiled, passed, and delivered nothing.
@@ -2505,6 +2508,16 @@ Evidence: issues #346, #348, #349; new issue #351.
   the transport abortively, and the `close_async` below it is then the idempotent no-op — so the
   peer's outcome on that arm is `transport_read_error`, unchanged. The row claims only what the
   witnesses drive.
+
+  ⚠️ **KNOWN, BOUNDED, AND NOT FIXED: a close arriving DURING an in-flight `close_async()` is told
+  `{}` before the socket is actually closed.** `close_async()` publishes `state_ = closed` before it
+  suspends, so both `close()` and a second `close_async()` become no-ops for up to
+  `tls_close_timeout` while the first call finishes. That is subsumption rather than a leak *only*
+  because every exit from `close_async()` past that transition closes the socket, including the
+  exceptional one — the `catch(...)` is what makes the second caller's `{}` honest. Making `close()`
+  fall through instead was considered and rejected: it buys a difference observable only against a
+  WEDGED operation, which nothing in the suite can produce, so it would ship an unwitnessable branch.
+  Revisit if an adopter appears that races the two entry points and acts on the early `{}`.
 
   ⚠️ **Sites deliberately NOT adopted**, so the next reader does not read the two above as "all of
   them": the accept-loop reject paths in `engine.cpp` (bad dynamic_cast, handshake failure,
@@ -2539,7 +2552,13 @@ Evidence: issues #346, #348, #349; new issue #351.
   wins and the child body never runs. A caller gets a thrown error, not the `tls_load_cancelled`
   §6.4 names.
 
-  `git grep throw_if_cancelled -- src include` is empty. All three production callers of
+  ⚠️ This row previously offered `git grep throw_if_cancelled -- src include` as the re-derivation
+  and asserted it was empty. That command matches the explanatory comments in `transport.hpp`,
+  `cert_source.hpp` and `reconnect_fsm.cpp` and so returns hits regardless — a recipe that reports
+  the opposite of the claim. The claim it was standing in for is a CONDITION, not a count: no caller
+  in this repo turns asio's `throw_if_cancelled` OFF around a `load_credentials()` call, and each of
+  the three production callers is non-firing for its own reason. Re-derive by reading those three
+  sites, not by grepping for the identifier. All three production callers of
   `load_credentials()` are non-firing: `reconnect_fsm` awaits it with the default, and the two
   ctor-time sites use `co_spawn(..., asio::detached)`, which binds no cancellation slot at all so
   `cancelled()` is permanently `none`. The `file_cert_source` reap is therefore CORRECT AND INERT.
