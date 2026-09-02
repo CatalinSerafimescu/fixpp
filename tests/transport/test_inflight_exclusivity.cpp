@@ -974,6 +974,7 @@ TEST(InflightExclusivity, CloseAsyncDeliversCloseNotify_Fixes348) {
 
     std::optional<expected_t<void>> closed;
     Transport* client_raw = pair.client.get();
+    const auto t0 = std::chrono::steady_clock::now();
     asio::co_spawn(
         ioc.get_executor(),
         [&closed, client_raw]() -> asio::awaitable<void> {
@@ -982,9 +983,27 @@ TEST(InflightExclusivity, CloseAsyncDeliversCloseNotify_Fixes348) {
         },
         asio::detached);
     ioc.run_for(3s);
+    const auto elapsed = std::chrono::steady_clock::now() - t0;
 
-    ASSERT_TRUE(closed.has_value()) << "close_async must complete within tls_close_timeout";
+    ASSERT_TRUE(closed.has_value()) << "close_async must complete";
     EXPECT_TRUE(closed->has_value());
+
+    // ⚠️ WITHOUT THIS THE CELL CANNOT SEE THE QUICK-SHUTDOWN FIX. The alert is
+    // written either way, so the peer's clean EOF below is satisfied even when
+    // async_shutdown blocks for the peer's ANSWERING alert and is released only
+    // by the deadline. This cell passed at 1.32 s before SSL_set_shutdown existed
+    // — inside the same 3 s pump — so the pump alone witnesses nothing.
+    //
+    // The budget is DERIVED from the competing timeout rather than written as a
+    // literal: a reversion parks on tls_close_timeout exactly, so anything
+    // comfortably below it discriminates, and the assertion tracks the Config
+    // default if it ever moves.
+    const auto budget = Transport::Config{}.tls_close_timeout;
+    EXPECT_LT(elapsed, budget / 2)
+        << "close_async took " << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed)
+        << ", i.e. it waited on the peer's answering close_notify and was released by the "
+           "tls_close_timeout deadline. The SSL_set_shutdown(SSL_RECEIVED_SHUTDOWN) quick "
+           "shutdown is missing or ineffective (#348).";
 
     ASSERT_TRUE(server_read.has_value()) << "server read must complete after the peer's close";
     ASSERT_FALSE(server_read->has_value());
@@ -1051,8 +1070,13 @@ TEST(InflightExclusivity, DestroyWithNoDrainDoesNotFaultInFlightGuard) {
 //
 // The CONDITION: a wedge requires a read/write frame DESTROYED while suspended
 // AND a Transport that survives to exhibit the stuck flag. asio destroys a
-// suspended frame at awaitable_thread teardown, i.e. io_context destruction, and
-// the Transport's executor does not outlive that — which is why cell 13 above
+// suspended frame only when the handler chain is destroyed unrun -- via
+// ~awaitable_thread, i.e. io_context destruction -- and the Transport's executor
+// does not outlive that. (~awaitable also destroys a frame, but only one stopped
+// at initial_suspend, where the guard was never constructed.) Cancellation, by
+// contrast, RESUMES the frame with operation_aborted, which is why a plain
+// assignment below the co_await survives that path and the cell built on it was
+// vacuous — which is why cell 13 above
 // can only assert "no fault" and not "not wedged".
 //
 // Two public-surface shapes were built to break that and BOTH were measured

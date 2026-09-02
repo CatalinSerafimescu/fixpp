@@ -22,6 +22,16 @@
 // paths a coroutine has, which is why async_read_some / async_write are guarded
 // here too even though each has exactly one of each.
 //
+// ⚠️ BE PRECISE ABOUT WHEN (2) HAPPENS -- an earlier draft of this header said
+// "asio destroys a suspended awaitable frame under total cancellation", and that
+// is FALSE. Cancellation RESUMES the frame with operation_aborted, on which a
+// plain assignment below the co_await runs perfectly well. A frame is destroyed
+// mid-body only when its handler chain is destroyed unrun (~awaitable_thread,
+// i.e. io_context teardown). No caller-reachable path is known that destroys a
+// read/write frame while the Transport SURVIVES to exhibit the stuck flag, so
+// reason (2) is why this shape is correct, not evidence of a live wedge --
+// see the #346 note in tests/transport/test_inflight_exclusivity.cpp.
+//
 // A stuck flag does not fail loudly. It wedges the Transport permanently:
 // transport_already_connected (97) for connect/handshake,
 // transport_read_in_progress / transport_write_in_progress (99/100) for

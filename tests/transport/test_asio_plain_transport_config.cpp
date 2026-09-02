@@ -170,6 +170,10 @@ TEST(AsioPlainTransportConfig, TcpKeepaliveApplied) {
 // An equality assertion here would be a cell that fails on the platform rather
 // than on the defect.
 // ─────────────────────────────────────────────────────────────────────────────
+// Well above any platform's SO_{RCV,SND}BUF floor, so a kernel round is always
+// upward and >= cannot be satisfied by the floor alone.
+static constexpr int kRequestedBufBytes = 256 * 1024;
+
 TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     asio::io_context ioc;
     asio::ip::tcp::acceptor acc{ioc};
@@ -180,8 +184,6 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     int linger_secs{-1};
     int recv_buf{0};
     int send_buf{0};
-    int recv_buf_default{0};
-    int send_buf_default{0};
 
     asio::co_spawn(
         ioc.get_executor(),
@@ -195,26 +197,11 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
-            // Baseline: what the OS gives an untouched socket, so the assertions
-            // below compare against THIS box rather than a hard-coded number.
-            {
-                asio::ip::tcp::socket probe{co_await asio::this_coro::executor};
-                asio::error_code oec;
-                probe.open(asio::ip::tcp::v4(), oec);
-                asio::socket_base::receive_buffer_size r;
-                asio::socket_base::send_buffer_size w;
-                probe.get_option(r, oec);
-                recv_buf_default = r.value();
-                probe.get_option(w, oec);
-                send_buf_default = w.value();
-                probe.close(oec);
-            }
-
             Transport::Config cfg{};
             cfg.so_linger_enabled = true;  // default false -> takes the else arm
             cfg.so_linger_seconds = 3;
-            cfg.tcp_recv_buf_bytes = 256 * 1024;  // default 0 -> skips the block
-            cfg.tcp_send_buf_bytes = 256 * 1024;
+            cfg.tcp_recv_buf_bytes = kRequestedBufBytes;  // default 0 -> block not entered
+            cfg.tcp_send_buf_bytes = kRequestedBufBytes;
             asio_plain_transport client{co_await asio::this_coro::executor, cfg};
 
             fixpp::transport::Endpoint endpoint;
@@ -248,10 +235,24 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     ASSERT_TRUE(done) << "client coroutine did not complete";
     EXPECT_TRUE(linger_on) << "so_linger_enabled=true must reach SO_LINGER";
     EXPECT_EQ(linger_secs, 3) << "so_linger_seconds must be the value configured";
-    EXPECT_GT(recv_buf, recv_buf_default)
-        << "tcp_recv_buf_bytes must enlarge SO_RCVBUF beyond this host's default";
-    EXPECT_GT(send_buf, send_buf_default)
-        << "tcp_send_buf_bytes must enlarge SO_SNDBUF beyond this host's default";
+    // ⚠️ NOT a comparison against an unconnected probe socket. That was the first
+    // shape here and its SEND arm was VACUOUS: Linux raises SO_SNDBUF at connect
+    // time on its own (measured on this host: 16384 unconnected -> 87040
+    // connected with NO option set), so `connected > unconnected` was satisfied
+    // by the kernel and stayed green with the tcp_send_buf_bytes block DELETED —
+    // the exact mutation the cell exists to catch. The recv arm happened to be
+    // sound (131072 both ways), which is why one rationale covering both arms hid
+    // the asymmetry. The two knobs are separate `if` blocks, so the live arm
+    // could not cover the dead one.
+    //
+    // Assert against the REQUESTED value instead: the kernel may round UP (Linux
+    // returns 2x the request, Windows returns it exactly) but never silently
+    // down for a request this far above any floor, so >= discriminates in both
+    // directions without encoding a platform's doubling.
+    EXPECT_GE(recv_buf, kRequestedBufBytes)
+        << "tcp_recv_buf_bytes must reach SO_RCVBUF";
+    EXPECT_GE(send_buf, kRequestedBufBytes)
+        << "tcp_send_buf_bytes must reach SO_SNDBUF";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

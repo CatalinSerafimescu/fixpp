@@ -80,12 +80,26 @@ struct ConnectInfo;
 // ⚠️ THE RULE IS AN ORDERING, NOT A PROHIBITION (#349). What kills a reap is a
 // reset standing between it and the emission it is meant to see -- not the reap
 // itself. Read `cancellation_state` BEFORE any reset and the inherited emission
-// is still there to be observed. So: if a pre-call cancellation must be
-// honoured, reap first and reset after. `src/tls/file_cert_source.cpp` and
-// `src/session/reconnect_fsm.cpp` do exactly that, because [2g §6.4] binds that
-// window; the transport implementations deliberately reset first and accept the
-// consequence stated below. Do not read "the transports have no pre-op reap" as
-// "a pre-op reap cannot work".
+// is still there to be observed. `src/tls/file_cert_source.cpp` does that,
+// because [2g §6.4] binds that window. The transport implementations
+// deliberately reset first and accept the consequence stated below.
+//
+// ⚠️ BUT ORDERING ALONE IS NOT SUFFICIENT, AND A CALLEE CANNOT MAKE IT SO.
+// Reaping before the reset only fires when the caller has turned
+// `throw_if_cancelled` OFF. It defaults to TRUE and is per-awaitable_thread, and
+// `await_transform` for a child awaitable throws operation_aborted when the
+// inherited state is already cancelled -- on exactly the condition the reap
+// tests, before the child body runs. So the reap and the throw are guarded by
+// the same predicate and the throw wins. A caller that wants the error VALUE
+// rather than the exception must `co_await this_coro::throw_if_cancelled(false)`
+// around the call; no caller in this repo does, so those reaps do not currently
+// fire in production -- tracked as #351. Re-derive:
+// `awaitable_frame_base::await_transform(awaitable<T, Executor>)` in asio's
+// impl/awaitable.hpp, and the `throw_if_cancelled_` member on its entry point.
+//
+// `src/session/reconnect_fsm.cpp`'s corrected reap is a DIFFERENT shape and is
+// not subject to any of this: it reaps an emission the backoff sleep left
+// behind, i.e. post-suspension, which is the reachable kind.
 //
 // ⚠️ WHAT THIS MEANS FOR A CALLER, stated because the obvious reading is wrong.
 // A cancellation emitted BEFORE the call is DISCARDED -- it is not deferred to

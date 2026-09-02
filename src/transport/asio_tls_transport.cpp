@@ -1452,6 +1452,12 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         co_return close();
     }
 
+    // Set BEFORE the suspension so no new async_* can start against ssl_stream_
+    // while the shutdown is in flight -- read/write/handshake all reject on
+    // state_. ⚠️ It also makes a close() arriving DURING the suspension a silent
+    // no-op that returns {} without closing the socket. That is subsumption, not
+    // a leak, while close_async runs to completion; an adopter that can race the
+    // two must treat close_async as the owner of the close.
     state_ = state_t::closed;
 
     // THE DIFFERENCE FROM close(). close() calls SSL_shutdown() on the native
@@ -1468,8 +1474,7 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // QUICK SHUTDOWN. Without this, async_shutdown waits for the peer's
     // ANSWERING close_notify and only the deadline below releases it -- so
     // every close against a peer that does not itself close gracefully burned
-    // the WHOLE tls_close_timeout. Measured on the paired cells: 0.31 s for
-    // close() against 1.32 s here, a delta equal to the 1 s default budget.
+    // the WHOLE tls_close_timeout budget.
     // Marking the inbound direction already-shut makes SSL_shutdown report
     // complete as soon as OUR alert is written, which is the only half #348 is
     // about; the deadline goes back to being a backstop rather than the normal

@@ -157,9 +157,10 @@ static expected_t<local_credentials> await_as_child_with_pending_cancel(
             // Re-derive by deleting this line: the cells below then fail with a
             // thrown "co_await: Operation aborted" instead of an error value.
             //
-            // §6.4's reap therefore has an UNSTATED PRECONDITION on the caller.
-            // That gap is filed separately; this helper pins the condition under
-            // which the reap is the mechanism that answers.
+            // §6.4's reap therefore has an UNSTATED PRECONDITION on the caller,
+            // and NO production caller meets it (#351). These cells pin the
+            // mechanism under the condition where the reap is what answers; they
+            // are NOT a witness that any shipped caller gets tls_load_cancelled.
             co_await asio::this_coro::throw_if_cancelled(false);
             // Emit on the parent's OWN slot while the parent is running: the
             // handler is installed, nothing is suspended, so this records the

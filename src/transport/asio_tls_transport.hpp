@@ -333,6 +333,14 @@ private:
     // connect cannot conflict with SSL_shutdown. A future async op that touches
     // ssl_stream_ belongs in this predicate; that is the rule close() relies on
     // and could not state at its own call site.
+    //
+    // ⚠️ SECOND ADMISSIBLE GUARD, added with close_async (#348): a state_
+    // TRANSITION taken BEFORE the suspension. close_async sets state_ = closed
+    // and only then awaits async_shutdown on ssl_stream_, and every other async
+    // entry point rejects on state_ != handshaken -- so no SSL op can start
+    // underneath it and it needs no flag here. An operation that suspends on
+    // ssl_stream_ WITHOUT first closing state_ must add a flag to this
+    // predicate.
     [[nodiscard]] bool ssl_op_suspended_() const noexcept {
         return timer_epochs_->read_in_flight || timer_epochs_->write_in_flight ||
                timer_epochs_->handshake_in_flight;
