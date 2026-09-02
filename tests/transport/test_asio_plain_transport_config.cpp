@@ -249,10 +249,8 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     // returns 2x the request, Windows returns it exactly) but never silently
     // down for a request this far above any floor, so >= discriminates in both
     // directions without encoding a platform's doubling.
-    EXPECT_GE(recv_buf, kRequestedBufBytes)
-        << "tcp_recv_buf_bytes must reach SO_RCVBUF";
-    EXPECT_GE(send_buf, kRequestedBufBytes)
-        << "tcp_send_buf_bytes must reach SO_SNDBUF";
+    EXPECT_GE(recv_buf, kRequestedBufBytes) << "tcp_recv_buf_bytes must reach SO_RCVBUF";
+    EXPECT_GE(send_buf, kRequestedBufBytes) << "tcp_send_buf_bytes must reach SO_SNDBUF";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

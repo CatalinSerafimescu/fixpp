@@ -969,11 +969,19 @@ TEST(InflightExclusivity, CloseAsyncDeliversCloseNotify_Fixes348) {
             server_read = co_await server_raw->async_read_some(std::span<std::byte>{&buf, 1});
         },
         asio::detached);
+    // client_raw is hoisted ABOVE the pump deliberately. Left below it, the
+    // `pair.client.get()` lands inside ci/pump-census.sh's lookahead window,
+    // whose `get_re` matches ANY `ident.get(` and so cannot tell a
+    // unique_ptr::get() from the future::get() the census is actually hunting
+    // (#289). That made this cell a census FALSE POSITIVE. Hoisting removes it
+    // without pinning a site that is not one -- cell 12 above already declares
+    // its raw pointer this way.
+    Transport* client_raw = pair.client.get();
+
     ioc.run_for(300ms);
     ASSERT_FALSE(server_read.has_value()) << "server read must still be pending before close";
 
     std::optional<expected_t<void>> closed;
-    Transport* client_raw = pair.client.get();
     const auto t0 = std::chrono::steady_clock::now();
     asio::co_spawn(
         ioc.get_executor(),
