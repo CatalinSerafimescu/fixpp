@@ -240,7 +240,7 @@ TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
                     auto ex = co_await asio::this_coro::executor;
                     co_await asio::post(ex, asio::use_awaitable);
                     // guard_r destructs here on resume — but we never resume.
-                }(),
+                },
                 asio::detached);
 
             // Run exactly ONE handler: H acquires the lock and parks.
@@ -281,7 +281,7 @@ TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
             auto ex = co_await asio::this_coro::executor;
             co_await asio::post(ex, asio::use_awaitable);
             // guard_r destructs on resume → unlock() → active_holders_count_--.
-        }(),
+        },
         asio::detached);
 
     // Spawn close(terminal): drain() waits for H.

@@ -2131,6 +2131,18 @@ jobs:
       - name: "Regression pin — line-citation checker self-test (#310, #326)"
         run: python3 tools/check_line_citations.py --self-test
 
+      # Same reasoning as the pin above, applied to #291's co_spawn guard. The
+      # guard itself runs in `check-layers`, which is behind `gate-precheck` and
+      # skipped on release; its self-test is pinned HERE, ungated, so a commit
+      # that broke the scanner's comment/literal stripping or its paren matcher
+      # cannot reach a green gate by reporting zero findings. 22 fixtures written
+      # from the C++ FORMS the scan must separate (nested invoked lambda, digit
+      # separators, raw strings, encoding-prefixed char literals), plus one that
+      # asserts an unterminated `co_spawn(` ERRORS instead of parsing clean.
+      # Buildless — python3 only.
+      - name: "Regression pin — co_spawn lambda guard self-test (#291)"
+        run: python3 tools/check_co_spawn_lambda.py --self-test
+
   check-layers:
     name: check-layers
     runs-on: ubuntu-24.04
@@ -2150,6 +2162,17 @@ jobs:
 
       - name: Run layer enforcement script
         run: python3 tools/check_layers.py
+
+      # #291: a lambda coroutine passed to co_spawn as an immediately-invoked
+      # temporary (`}(),`). The closure — which the coroutine reaches its captures
+      # THROUGH — dies when co_spawn returns, while the coroutine is still
+      # suspended at its first co_await. Both known instances were latent only
+      # because nothing after the suspension point touched a capture; one added
+      # statement makes either a use-after-free with no compiler diagnostic.
+      # Reports a denominator (sites parsed / with a lambda argument), and exits 2
+      # rather than 0 if it parses no call sites at all.
+      - name: Run co_spawn closure-lifetime gate (#291)
+        run: python3 tools/check_co_spawn_lambda.py
 
       # 049-c-abi-handles-errors (T024): C-ABI occupancy + reentrancy gates.
       # Pure-text checks (no build) — run alongside the layer gate.
