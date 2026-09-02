@@ -2131,6 +2131,39 @@ jobs:
       - name: "Regression pin — line-citation checker self-test (#310, #326)"
         run: python3 tools/check_line_citations.py --self-test
 
+      # ── #291: co_spawn closure lifetime ────────────────────────────────────
+      #
+      # A lambda coroutine reaches its captures THROUGH the closure object, so
+      # passing it to co_spawn as an immediately-invoked temporary (`}(),`)
+      # destroys the closure at the end of the full-expression. asio's
+      # `awaitable` promise returns `suspend_always` from `initial_suspend`, so
+      # the body does not begin until AFTER co_spawn returns — the first body
+      # statement naming a capture therefore already reads a destroyed closure.
+      # This is a use-after-free on the first execution, not a hazard some later
+      # edit would arm, and no compiler diagnostic fires on it.
+      #
+      # ⚠️ BOTH STEPS LIVE IN THIS UNGATED JOB DELIBERATELY, and the scan did NOT
+      # go beside the other source gates in `check-layers`. `check-layers` is
+      # behind `gate-precheck`, so it emits nothing until BOTH gate labels land —
+      # i.e. nothing during the review rounds that are the only thing standing
+      # between a fresh `}(),` and merge. brain-freshness.yml's header records
+      # the same reasoning for check_line_citations.py's real run.
+      #
+      # The self-test is what stops the scan reporting a false clean: fixtures
+      # written from the C++ FORMS the scan must separate — a nested invoked
+      # lambda inside a correctly-passed one, digit separators, raw strings,
+      # encoding-prefixed char literals — plus arms asserting that an
+      # unterminated `co_spawn(` and a `co_spawn` token the call-site pattern
+      # does not match both ERROR rather than parsing clean. Run
+      # `--self-test` for the current tally; it prints N/N.
+      #
+      # Buildless — python3 + git only.
+      - name: "Regression pin — co_spawn lambda guard self-test (#291)"
+        run: python3 tools/check_co_spawn_lambda.py --self-test
+
+      - name: "co_spawn closure-lifetime gate (#291)"
+        run: python3 tools/check_co_spawn_lambda.py
+
   check-layers:
     name: check-layers
     runs-on: ubuntu-24.04
