@@ -326,6 +326,12 @@ private:
     // way — that part of the note was never load-bearing on cancel().
     bool read_in_flight_{false};
     bool write_in_flight_{false};
+    // #342 — async_connect / async_handshake overlap. Distinct from
+    // state_: state_ advances only on SUCCESS, so it cannot express
+    // "attempt in flight". handshake_in_flight_ is ALSO read by close()
+    // to keep SSL_shutdown off a suspended handshake.
+    bool connect_in_flight_{false};
+    bool handshake_in_flight_{false};
 
     // ── 013 T039 — ListenerEvents sink (null on initiator side) ─────────────
     // Non-owning pointer to the listener's event ring. Non-null only when this

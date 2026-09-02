@@ -136,8 +136,11 @@ public:
 
     // (4) Cancel any in-flight async_connect / async_read_some / async_write /
     //     async_handshake. Synchronous; idempotent on already-cancelled /
-    //     never-issued ops. Returns expected_t<void> for symmetry (only
-    //     documented failure: transport_already_closed after close ⚠️ NOT IMPLEMENTED — #340).
+    //     never-issued ops. Returns expected_t<void> for SYMMETRY ONLY — NO
+    //     failure is defined and none can occur; every shipped impl returns {}
+    //     unconditionally. (#340 resolved on the contract side: the
+    //     never-implemented transport_already_closed failure was deleted here
+    //     rather than added to the code, because no caller branches on it.)
     //
     //     ⚠️ CALL IT ON THE SESSION STRAND. This read "thread-safe (ASIO
     //     cancellation_signal is thread-safe)" until 2026-08-31 (#333). Both

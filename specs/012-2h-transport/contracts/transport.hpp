@@ -133,10 +133,13 @@ public:
         async_write(std::span<const std::byte> bytes [[clang::lifetimebound]]) = 0;
 
     // (4) Cancel any in-flight async_connect / async_read_some / async_write /
-    //     async_handshake. Synchronous; thread-safe (ASIO cancellation_signal
-    //     is thread-safe); idempotent on already-cancelled / never-issued ops.
-    //     Returns expected_t<void> for symmetry (only documented failure:
-    //     transport_already_closed after close ⚠️ NOT IMPLEMENTED — see #340).
+    //     async_handshake. Synchronous; idempotent on already-cancelled /
+    //     never-issued ops. CALL IT ON THE SESSION STRAND — the "thread-safe
+    //     (ASIO cancellation_signal is thread-safe)" claim that stood here was
+    //     struck 2026-08-31 (#333): every impl cancels via socket_.cancel(),
+    //     and asio's basic_stream_socket @par Thread Safety says "Shared
+    //     objects: Unsafe". Returns expected_t<void> for SYMMETRY ONLY — NO
+    //     failure is defined and none can occur (#340).
     //
     //     cancel() does NOT close the socket — the FSM may retry a cancelled
     //     connect/read/write. cancel() is the synchronous half of the

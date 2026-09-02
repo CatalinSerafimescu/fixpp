@@ -14,6 +14,8 @@
 
 #include "asio_plain_transport.hpp"
 
+#include "inflight_flag_guard.hpp"
+
 #include <asio/any_io_executor.hpp>
 #include <asio/async_result.hpp>
 #include <asio/connect.hpp>
@@ -123,11 +125,35 @@ void asio_plain_transport::apply_socket_options_() noexcept {
         co_return std::unexpected{E::transport_already_connected};
     }
 
-    // Pre-connect cancellation reap.
-    auto cs = co_await asio::this_coro::cancellation_state;
-    if (cs.cancelled() != asio::cancellation_type::none) {
-        co_return std::unexpected{E::transport_connect_cancelled};
+    // #342 overlap guard: the one-shot test above is a STATE test, and state_
+    // does not leave `fresh` until an attempt SUCCEEDS -- so without this a
+    // second async_connect issued while the first is still in flight passed
+    // straight through and really attempted. asio's composed async_connect
+    // calls socket_.close(ec) before each endpoint attempt, so the two
+    // attempts corrupt each other (the first can surface as operation_aborted
+    // -> transport_connect_timeout, and the shared connect epoch is advanced
+    // by whichever finishes first). Overlap is now REFUSED with the variant
+    // every contract site already published for it.
+    if (connect_in_flight_) {
+        co_return std::unexpected{E::transport_already_connected};
     }
+    // Cleared on EVERY exit path, including frame destruction under
+    // cancellation. A failed attempt leaves state_ == fresh AND clears this,
+    // so the Transport stays retryable per FR-007.
+    detail::inflight_flag_guard connect_guard{connect_in_flight_};
+
+    // #341: there is NO pre-connect cancellation reap here, deliberately.
+    // reset_cancellation_state() above re-constructs the coroutine's
+    // cancellation_state from the parent slot, and that ctor emplaces a fresh
+    // impl whose `cancelled_` is value-initialised (asio cancellation_state.hpp
+    // ctor; awaitable_thread::reset_cancellation_state, asio impl/awaitable.hpp).
+    // Emissions that already happened are NOT replayed into the new state, and
+    // no suspension point separates the reset from this line, so a reap here
+    // could only ever read `none`. Cancellation therefore takes effect from the
+    // FIRST REAL SUSPENSION POINT onward -- the reaps below, which follow a
+    // co_await, are reachable and are kept.
+    // Re-derive: read the cancellation_state(slot, filter) ctor and confirm
+    // impl_base::impl_base() zero-initialises cancelled_.
 
     // ── Resolve ───────────────────────────────────────────────────────────────
     asio::ip::tcp::resolver resolver{exec_};
@@ -143,7 +169,7 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     }
 
     // Post-resolve cancellation reap.
-    cs = co_await asio::this_coro::cancellation_state;
+    auto cs = co_await asio::this_coro::cancellation_state;
     if (cs.cancelled() != asio::cancellation_type::none) {
         co_return std::unexpected{E::transport_connect_cancelled};
     }
@@ -241,11 +267,14 @@ void asio_plain_transport::apply_socket_options_() noexcept {
         co_return std::unexpected{E::transport_read_in_progress};
     }
 
-    // Pre-read cancellation reap.
-    auto cs = co_await asio::this_coro::cancellation_state;
-    if (cs.cancelled() != asio::cancellation_type::none) {
-        co_return std::unexpected{E::transport_read_cancelled};
-    }
+    // #341: no pre-read cancellation reap here, deliberately -- it would be
+    // dead. reset_cancellation_state() above re-constructs the cancellation
+    // state from the parent slot with `cancelled_` value-initialised, prior
+    // emissions are not replayed, and nothing between it and here suspends
+    // (the reset and the state read are both await_ready()==true awaiters --
+    // asio impl/awaitable.hpp await_transform). A reap here could only read
+    // `none`. Cancellation takes effect from the first real suspension point,
+    // i.e. the socket_.async_read_some below, which completes with operation_aborted.
 
     read_in_flight_ = true;
 
@@ -290,11 +319,14 @@ void asio_plain_transport::apply_socket_options_() noexcept {
         co_return std::unexpected{E::transport_write_in_progress};
     }
 
-    // Pre-write cancellation reap.
-    auto cs = co_await asio::this_coro::cancellation_state;
-    if (cs.cancelled() != asio::cancellation_type::none) {
-        co_return std::unexpected{E::transport_write_cancelled};
-    }
+    // #341: no pre-write cancellation reap here, deliberately -- it would be
+    // dead. reset_cancellation_state() above re-constructs the cancellation
+    // state from the parent slot with `cancelled_` value-initialised, prior
+    // emissions are not replayed, and nothing between it and here suspends
+    // (the reset and the state read are both await_ready()==true awaiters --
+    // asio impl/awaitable.hpp await_transform). A reap here could only read
+    // `none`. Cancellation takes effect from the first real suspension point,
+    // i.e. the asio::async_write below, which completes with operation_aborted.
 
     write_in_flight_ = true;
 
