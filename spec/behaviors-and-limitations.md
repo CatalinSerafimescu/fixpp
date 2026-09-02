@@ -2401,3 +2401,92 @@ Evidence: issues #340, #341, #342.
   `cancellation_signal` at all; each calls `socket_.cancel()`, and asio's `basic_stream_socket`
   @par Thread Safety says "Shared objects: Unsafe" without carving out `cancel`. No off-strand
   caller is claimed to exist; this corrects the contract, it does not report a live race.
+
+## fixpp#346 / #348 / #349 — reap ordering, in-flight RAII, graceful close_async (2026-09-02)
+
+Three follow-ons from #350. Each turned out to be a different defect than the issue that filed it
+predicted, and two of the three ship with their reachability NARROWER than the issue implied — that
+is the part to read. Spec: none new (defect fixes against 012-2h-transport and `[2g §6.4]`).
+Evidence: issues #346, #348, #349; new issue #351.
+
+### Behaviors
+
+- **B-349-1 — `ReconnectFsm` no longer discards a cancellation emitted during a backoff sleep.**
+  This is the branch's one live production fix.
+
+  `wait_ec` covers only a cancellation that ABORTED the wait. A `total` emitted after the timer
+  fired NATURALLY was wiped by a `reset_cancellation_state` standing above the reap — the reset
+  re-constructs `cancellation_state` from the parent slot with `cancelled_` value-initialised, so an
+  emission that already happened is not replayed (#341's mechanism) — and both downstream reaps then
+  observed `none`. The attempt proceeded to connect with the caller's cancellation silently
+  discarded. Fixed by reading the state the sleep left behind BEFORE resetting.
+
+  ⚠️ **The loop-head reap is KEPT and must not be swept.** It is dead at attempt 0 and dead after a
+  NON-ZERO backoff — exactly the two cases its old comment claimed it covered — and live only when a
+  retry has a zero-length backoff, where the backoff block (which contains the reset) is skipped
+  entirely. `ReconnectPolicy::delay_for_attempt` returns 0 for an empty schedule, and
+  `session_config.hpp` records a shipped configuration that had one. Re-derive by walking to the
+  nearest preceding SUSPENSION; `this_coro` awaiters are `await_ready()==true` and never break the
+  chain.
+
+- **B-348-1 (AMENDED) — `close_async()` exists and delivers the close-notify that `close()` throws
+  away. `close()` itself is UNCHANGED, and no production caller uses `close_async()`.**
+
+  The B-348-1 row above records the defect and still stands as the shipped behaviour: a peer of a
+  fixpp session that closes cleanly observes `transport_read_error`, not a benign truncation, and
+  alerting tuned on the documented behaviour still mis-classifies every normal disconnect.
+
+  What is new is an opt-in entry point. `Transport::close_async()` is a virtual WITH A DEFAULT
+  (`co_return close();`), so the `[const §XIV.2]` five-**pure**-virtual cap is untouched and no
+  implementor changes. The TLS override drives `ssl_stream_->async_shutdown`, which is what actually
+  writes the alert to the next layer, bounded by `Config::tls_close_timeout` — the first path on
+  which that documented budget has any role.
+
+  Measured at the PEER: a peer whose read is pending sees `transport_read_eof` after
+  `close_async()` where `close()` gives `transport_read_error`.
+
+  ⚠️ **#348 IS NOT CLOSED BY THIS.** Shipping the capability and adopting it are separate decisions.
+  The obstacle is named at the declaration: `Session`'s terminal close emits
+  `cancellation_type::total` immediately before closing, which would cancel an awaited shutdown.
+
+### Limitations
+
+- **L-349-1 — `[2g §6.4]`'s pre-I/O reap does not fire for any caller in this repo, and correcting
+  its ORDER (which this change did) was necessary but not sufficient.** Tracked as **#351**.
+
+  asio's `await_transform` for a child awaitable throws `operation_aborted` when
+  `throw_if_cancelled_` — which DEFAULTS TO TRUE and is per-`awaitable_thread` — sees the inherited
+  state already cancelled. That is the same predicate the reap tests, checked first, so the throw
+  wins and the child body never runs. A caller gets a thrown error, not the `tls_load_cancelled`
+  §6.4 names.
+
+  `git grep throw_if_cancelled -- src include` is empty. All three production callers of
+  `load_credentials()` are non-firing: `reconnect_fsm` awaits it with the default, and the two
+  ctor-time sites use `co_spawn(..., asio::detached)`, which binds no cancellation slot at all so
+  `cancelled()` is permanently `none`. The `file_cert_source` reap is therefore CORRECT AND INERT.
+
+  Operator impact: none today — no shipped path depends on that error value. Implementor impact:
+  `include/fixpp/tls/cert_source.hpp` publishes the §6.4 recipe for third-party `cert_source`
+  authors, and a correctly-ordered step 3 copied from it can still never fire unless that author
+  also controls the caller. Both that header and `transport.hpp`'s CANCELLATION TIMING note now
+  state the precondition.
+
+- **L-346-1 — read/write in-flight flags are RAII-guarded, and the wedge they prevent has NO
+  behavioural witness. The claim rests on STRUCTURE, the way B-339-1 does.**
+
+  `read_in_flight` / `write_in_flight` moved into `timer_epoch_state` and are set and cleared by
+  `inflight_flag_guard`, so the clear runs on frame destruction as well as on every `co_return`.
+  Binding such a guard to a Transport MEMBER is a measured heap-use-after-free, which is why the
+  flags live in the block that outlives the Transport.
+
+  ⚠️ **A wedge requires a frame destroyed mid-body AND a Transport that survives to exhibit the
+  stuck flag, and no caller-reachable path produces both.** Cancellation — total or terminal —
+  RESUMES the frame with `operation_aborted`, on which a plain assignment below the `co_await` runs
+  perfectly well; a frame is destroyed mid-body only when its handler chain is destroyed unrun
+  (`~awaitable_thread`, i.e. io_context teardown), which takes the Transport's executor with it.
+
+  Two witness shapes were built and both MEASURED unsound — one passed on the unconverted tree
+  (vacuous), the other failed on the converted one because the frame was neither destroyed nor
+  resumed, i.e. it measured "still in flight" rather than "wedged". ⚠️ Do not discharge this row
+  with a cell that goes green; show it RED first against a tree with the guards reverted to plain
+  assignment, which is the step that killed both attempts.

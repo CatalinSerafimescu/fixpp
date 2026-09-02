@@ -38,6 +38,28 @@ otherwise look arbitrary:
 > two precedents above are the shape of the answer: push it into a sub-interface, or onto the concrete
 > implementation, and keep the abstract surface small.
 >
+
+### A THIRD way out, taken by `close_async()` (#348): a virtual WITH A DEFAULT
+
+The cap counts **pure-virtual** methods — `[const §XIV.2]` says "≤5 **pure-virtual** methods", not
+five methods. `close_async()` is a sixth method and the cap still holds at five, because it ships a
+default body (`co_return close();`) rather than `= 0`. Re-derive rather than trusting this sentence:
+count `= 0;` inside `class Transport` in `include/fixpp/transport/transport.hpp`.
+
+That is not a loophole, it is the property that made the shape affordable. A defaulted virtual costs
+existing implementors **nothing** — the library's two transports, `mock_transport` and the test
+doubles all keep compiling untouched — whereas a sixth pure-virtual would have required a design-doc
+justification reviewed at Gate A, and changing `close()`'s own signature would have broken every
+implementor for a benefit only the TLS transport can deliver.
+
+⚠️ **The cost is paid elsewhere, and it is real:** a defaulted virtual can ship with NO adopters, and
+`close_async()` did. Every production teardown still calls the synchronous `close()`, so the
+user-visible #348 defect (no TLS close-notify reaches the peer; the peer observes
+`transport_read_error`) is **unchanged**. When you read that a branch "fixed #348", check
+`git grep close_async` for a production call site before believing it. The obstacle to adoption is
+named at the declaration: `Session`'s terminal close emits `cancellation_type::total` immediately
+before closing, which would cancel an awaited shutdown.
+
 > ⚠️ `Listener::cancel()` living on the impl is a **deliberate** Gate A outcome that overrode a review
 > objection. Do not "fix" it by promoting it to the base.
 
