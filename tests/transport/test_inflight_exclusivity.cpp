@@ -759,4 +759,177 @@ TEST(InflightExclusivity, PlaintextConnectRetryableAfterFailedAttempt) {
     ioc.run_for(200ms);
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cells 10-11: close() DURING DNS RESOLUTION must not resurrect the Transport
+// (#347).
+//
+// close() is strand-confined and so is async_connect, but async_resolve is not
+// the socket: `close()` calls socket_.close(), which the RESOLVER never
+// observes. So a close() landing while the connect is suspended in resolution
+// used to be overwritten -- the coroutine resumed, asio's composed
+// async_connect OPENED the socket it needed, and `state_ = connected` published
+// a live socket behind a close() that had already returned, violating FR-006.
+//
+// Ordering is structural, not timed: A and B share a strand, A suspends in
+// async_resolve (the first real suspension point), so B's close() runs while A
+// is parked there.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, TlsCloseDuringResolveDoesNotResurrect) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto client = fixture.make_client(ioc.get_executor());
+    Transport* client_raw = client.get();
+    const auto ep = fixture.server_endpoint();
+
+    std::optional<expected_t<ConnectInfo>> connect_result;
+    std::optional<bool> closed_while_connect_inflight;
+
+    auto strand = asio::make_strand(ioc.get_executor());
+
+    asio::co_spawn(
+        strand,
+        [&connect_result, client_raw, ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            connect_result = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        strand,
+        [&connect_result, &closed_while_connect_inflight, client_raw]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            closed_while_connect_inflight = !connect_result.has_value();
+            (void)client_raw->close();
+            co_return;
+        },
+        asio::detached);
+
+    ioc.run_for(5s);
+
+    ASSERT_TRUE(closed_while_connect_inflight.has_value()) << "closer coroutine never ran";
+    EXPECT_TRUE(*closed_while_connect_inflight)
+        << "VACUOUS: the connect had already finished when close() ran, so this cell would "
+           "prove nothing about the resolve window";
+
+    ASSERT_TRUE(connect_result.has_value()) << "connect must complete";
+    ASSERT_FALSE(connect_result->has_value())
+        << "connect must NOT succeed after close() returned (FR-006)";
+    EXPECT_EQ(connect_result->error(), error::transport_already_closed);
+
+    ioc.run_for(200ms);
+}
+
+TEST(InflightExclusivity, PlaintextCloseDuringResolveDoesNotResurrect) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor acc{ioc};
+    const auto bound = make_loopback_acceptor(acc);
+    const fixpp::transport::Endpoint ep{"127.0.0.1", bound.port()};
+
+    auto client = make_plain_client(ioc);
+    Transport* client_raw = client.get();
+
+    // No accept is armed: the connect is refused by close() and never lands, so
+    // a pending accept would only hold the io_context open for the full window.
+    std::optional<expected_t<ConnectInfo>> connect_result;
+    std::optional<bool> closed_while_connect_inflight;
+
+    auto strand = asio::make_strand(ioc.get_executor());
+
+    asio::co_spawn(
+        strand,
+        [&connect_result, client_raw, ep]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            connect_result = co_await client_raw->async_connect(ep);
+        },
+        asio::detached);
+
+    asio::co_spawn(
+        strand,
+        [&connect_result, &closed_while_connect_inflight, client_raw]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            closed_while_connect_inflight = !connect_result.has_value();
+            (void)client_raw->close();
+            co_return;
+        },
+        asio::detached);
+
+    ioc.run_for(5s);
+
+    ASSERT_TRUE(closed_while_connect_inflight.has_value()) << "closer coroutine never ran";
+    EXPECT_TRUE(*closed_while_connect_inflight) << "VACUOUS: connect already finished";
+
+    ASSERT_TRUE(connect_result.has_value());
+    ASSERT_FALSE(connect_result->has_value())
+        << "connect must NOT succeed after close() returned (FR-006)";
+    EXPECT_EQ(connect_result->error(), error::transport_already_closed);
+
+    asio::error_code ignored;
+    acc.close(ignored);
+    ioc.run_for(200ms);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell 12: what a peer ACTUALLY observes when close() ends a handshaken TLS
+// session (#348).
+//
+// ⚠️ THIS CELL PINS A DEFECT, NOT DESIRED BEHAVIOUR. close()'s published
+// contract says it "initiates best-effort bidi TLS shutdown (SSL_shutdown
+// close-notify)" bounded by tls_close_timeout, and that a truncated close
+// "surfaces as transport_read_truncated and is NOT treated as a hard error".
+// MEASURED, deterministically over repeated runs: the peer's in-flight read
+// completes with transport_read_error (104) -- an OS-level error, neither the
+// clean transport_read_eof of a real close_notify nor the documented
+// transport_read_truncated.
+//
+// Cause (#348): close() calls SSL_shutdown() on the NATIVE handle. asio's
+// ssl::stream writes through a BIO pair -- ssl::detail::engine::shutdown()
+// generates the alert into the BIO and ssl::detail::io drains it to the socket.
+// Nothing drains it here, and socket_.close() immediately after discards it.
+//
+// It is pinned rather than left unwitnessed so that fixing #348 has to come
+// through this assertion deliberately instead of changing behaviour silently.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, CloseDoesNotDeliverCloseNotify_PinsDefect348) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto pair = make_handshaken_pair(fixture, ioc);
+
+    std::optional<expected_t<std::size_t>> server_read;
+    std::byte buf{0};
+    Transport* server_raw = pair.server.get();
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&server_read, server_raw, &buf]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            server_read = co_await server_raw->async_read_some(std::span<std::byte>{&buf, 1});
+        },
+        asio::detached);
+    ioc.run_for(300ms);
+    ASSERT_FALSE(server_read.has_value()) << "server read must still be pending before close()";
+
+    (void)pair.client->close();
+    ioc.run_for(2s);
+
+    ASSERT_TRUE(server_read.has_value()) << "server read must complete after peer close()";
+    ASSERT_FALSE(server_read->has_value());
+    EXPECT_EQ(server_read->error(), error::transport_read_error)
+        << "#348: measured behaviour. If this now reports transport_read_eof, close() has "
+           "started delivering close_notify and #348 is FIXED — update the contract in "
+           "transport.hpp and this cell together. If it reports transport_read_truncated, the "
+           "alert is being dropped differently than measured; re-derive before editing docs.";
+
+    (void)pair.server->close();
+    ioc.run_for(200ms);
+}
+
 }  // namespace

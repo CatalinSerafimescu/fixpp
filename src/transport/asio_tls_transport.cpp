@@ -955,6 +955,14 @@ void asio_tls_transport::setup_ssl_ctx_() {
         co_return std::unexpected{E::transport_connect_cancelled};
     }
 
+    // #347: close() runs on this strand and can have executed while we were
+    // suspended in async_resolve -- which the RESOLVER never observes, because
+    // socket_.close() does not cancel it. FR-006 is unconditional, so re-test
+    // it here instead of proceeding to open a socket the owner already closed.
+    if (state_ == state_t::closed) {
+        co_return std::unexpected{E::transport_already_closed};
+    }
+
     // ── Connect with timeout ──────────────────────────────────────────────────
     // Arm a timer that cancels the socket on expiry.
     asio::steady_timer timer{exec_};
@@ -1033,6 +1041,17 @@ void asio_tls_transport::setup_ssl_ctx_() {
             info.local.host = local_ep.address().to_string();
             info.local.port = local_ep.port();
         }
+    }
+
+    // #347: last re-test before committing the state. asio's composed
+    // async_connect OPENS the socket it connects, so a close() that landed
+    // during the attempt has already been undone by the time we get here --
+    // close the socket again rather than publishing `connected` and leaving a
+    // live socket behind a close() that already returned.
+    if (state_ == state_t::closed) {
+        asio::error_code close_ec;
+        socket_.close(close_ec);
+        co_return std::unexpected{E::transport_already_closed};
     }
 
     state_ = state_t::connected;
