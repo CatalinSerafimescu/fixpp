@@ -53,12 +53,22 @@ detector, which is why both it and the scan run in CI, unconditionally, as a pai
 one without the other and you have a gate that cannot fail for the reason it exists.
 
 ⚠️ THIS IS A LEXER, AND THESE FORMS DEFEAT IT. Each was MEASURED against this scanner,
-compiles under clang, and yields a clean exit-0 scan while carrying the defect. They are
-recorded rather than fixed: each needs the preprocessor or the AST, which needs a
-compilation database, which this check deliberately does not have — it must run buildless
-in an UNGATED job, so it sees the defect during review rather than only at merge. That
-trade is the design, not an oversight, and it is the reason the claim here is "catches the
-direct immediately-invoked form", NOT "cannot report a false clean":
+compiles under clang, and yields a clean exit-0 scan while carrying the defect. They fall
+into TWO groups, and conflating them would overstate the case for leaving them open:
+
+  NEEDS SEMANTICS — no lexer closes these. Form 3 needs the preprocessor; form 1 needs
+  real expression parsing to be closed in general. Both imply the AST, hence a compilation
+  database, which this check deliberately does not have: it must run buildless in an
+  UNGATED job so it fires during review rather than only at merge.
+
+  MERELY UNIMPLEMENTED HERE — forms 2 and 4 are reachable lexically. Form 2 is a missing
+  `[[...]]` case in the qualifier walk; form 4 is an ordering gap (splice() runs before
+  strip_noncode() with no raw-string awareness). Neither needs semantics. They are open
+  because this parser has now produced a NEW defect at each of its last three extensions,
+  not because they are out of reach — see the note at the end of this block.
+
+The claim here is therefore "catches the direct immediately-invoked form", NOT "cannot
+report a false clean":
 
     // 1. coroutine IILE inside an init-capture — the introducer is skipped whole
     co_spawn(ioc, [a = [&]() -> awaitable<void> { use(cap); co_return; }()]()
@@ -75,9 +85,18 @@ direct immediately-invoked form", NOT "cannot report a false clean":
     // 4. a raw string whose contents phase-2 splicing must NOT have joined
     //    (C++ reverts phase 1/2 inside raw contents; this scanner splices globally)
 
-Forms 1, 2 and 4 would be reached by an AST pass; 3 needs preprocessing. None occurs in
-this tree today — verified by two independent reviewers' AST and token-stream censuses —
-so what ships is a gate with known holes rather than a gate believed to be complete.
+None occurs in this tree today — verified by two independent reviewers' AST and
+token-stream censuses — so what ships is a gate with known holes rather than a gate
+believed to be complete.
+
+⚠️ BEFORE EXTENDING THIS PARSER TO CLOSE FORMS 2 OR 4, READ THIS. Each of its last three
+extensions introduced a fresh defect in the SAME place: the lambda denominator counted
+`Handler{a, b}` (bare braces), then `m[k], Handler{a, b}` (a comma escaping the introducer
+at angle depth 0), then `new int[n]{}` (a bracket that is not a capture list). Three
+disguises of one defect, each found by review AFTER the previous fix shipped. A fourth
+extension is not obviously cheaper than moving this check to an AST pass in a job that
+already has a compilation database — which would also close forms 1 and 3 and the named
+closure below. Weigh that before adding a punctuation rule.
 
 ⚠️ OUT OF REACH BY CONSTRUCTION — a named closure invoked at the call site:
 
