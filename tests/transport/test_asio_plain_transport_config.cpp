@@ -170,8 +170,35 @@ TEST(AsioPlainTransportConfig, TcpKeepaliveApplied) {
 // An equality assertion here would be a cell that fails on the platform rather
 // than on the defect.
 // ─────────────────────────────────────────────────────────────────────────────
-// Well above any platform's SO_{RCV,SND}BUF floor, so a kernel round is always
-// upward and >= cannot be satisfied by the floor alone.
+// Socket-option knobs that apply_socket_options_() honours but nothing read
+// back: SO_LINGER (enabled arm), SO_RCVBUF and SO_SNDBUF.
+//
+// These three `if` arms were the only untaken branches left in
+// apply_socket_options_(): the defaults are so_linger_enabled=false and
+// {recv,send}_buf_bytes=0, so every existing cell drove the OTHER side of each
+// branch. A knob written but never read back is indistinguishable from a knob
+// silently ignored -- the reason the keepalive cell above reads its option back.
+//
+// ⚠️ THE BASELINE IS A SECOND *CONNECTED* TRANSPORT WITH A DEFAULT Config, and
+// both earlier shapes of this assertion were WRONG in ways that only one
+// platform revealed:
+//
+//   (a) baseline from an UNCONNECTED probe socket -> the SEND arm was VACUOUS.
+//       Linux raises SO_SNDBUF at connect on its own (16384 -> 87040 with no
+//       option set), so `connected > unconnected` held with the
+//       tcp_send_buf_bytes block DELETED -- the exact mutation this cell exists
+//       to catch.
+//   (b) absolute `>= requested` -> FAILED ON CI, passed locally. The kernel has
+//       a CEILING as well as a floor: sk_sndbuf is clamped to
+//       net.core.wmem_max, which is 4 MiB on the dev box (256 KiB request
+//       doubles to 512 KiB) and 212992 on the CI runner (the request is clamped
+//       BELOW it). "Rounds up, never down" was simply false.
+//
+// Comparing two connected sockets that differ ONLY in the Config is immune to
+// both: whatever the platform's default and ceiling are, setting the knob must
+// move the value, and deleting the block makes the two equal. Do not "simplify"
+// this back to an absolute bound or to an unconnected baseline.
+// ─────────────────────────────────────────────────────────────────────────────
 static constexpr int kRequestedBufBytes = 256 * 1024;
 
 TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
@@ -182,32 +209,47 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     bool done{false};
     bool linger_on{false};
     int linger_secs{-1};
-    int recv_buf{0};
-    int send_buf{0};
+    int recv_buf{0}, send_buf{0};
+    int recv_base{0}, send_base{0};
+
+    // Accept BOTH connections and hold the peers open for the duration.
+    asio::ip::tcp::socket peer_a{ioc};
+    asio::ip::tcp::socket peer_b{ioc};
+    acc.async_accept(peer_a, [](asio::error_code) {});
 
     asio::co_spawn(
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
-            asio::error_code ec;
-            asio::ip::tcp::socket peer{co_await asio::this_coro::executor};
-            co_await acc.async_accept(peer, asio::redirect_error(asio::use_awaitable, ec));
-        },
-        asio::detached);
-
-    asio::co_spawn(
-        ioc.get_executor(),
-        [&]() -> asio::awaitable<void> {
-            Transport::Config cfg{};
-            cfg.so_linger_enabled = true;  // default false -> takes the else arm
-            cfg.so_linger_seconds = 3;
-            cfg.tcp_recv_buf_bytes = kRequestedBufBytes;  // default 0 -> block not entered
-            cfg.tcp_send_buf_bytes = kRequestedBufBytes;
-            asio_plain_transport client{co_await asio::this_coro::executor, cfg};
-
             fixpp::transport::Endpoint endpoint;
             endpoint.host = "127.0.0.1";
             endpoint.port = ep.port();
 
+            // Baseline: same transport, same connect, DEFAULT Config.
+            Transport::Config base_cfg{};
+            asio_plain_transport base{co_await asio::this_coro::executor, base_cfg};
+            auto base_conn = co_await base.async_connect(endpoint);
+            if (!base_conn) co_return;
+            {
+                const auto& s = asio_plain_transport_test_access::socket_of(base);
+                asio::error_code e;
+                asio::socket_base::receive_buffer_size r;
+                asio::socket_base::send_buffer_size w;
+                s.get_option(r, e);
+                if (e) co_return;
+                recv_base = r.value();
+                s.get_option(w, e);
+                if (e) co_return;
+                send_base = w.value();
+            }
+
+            acc.async_accept(peer_b, [](asio::error_code) {});
+
+            Transport::Config cfg{};
+            cfg.so_linger_enabled = true;  // default false -> takes the other arm
+            cfg.so_linger_seconds = 3;
+            cfg.tcp_recv_buf_bytes = kRequestedBufBytes;  // default 0 -> block not entered
+            cfg.tcp_send_buf_bytes = kRequestedBufBytes;
+            asio_plain_transport client{co_await asio::this_coro::executor, cfg};
             auto conn = co_await client.async_connect(endpoint);
             if (!conn) co_return;
 
@@ -215,15 +257,17 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
             asio::error_code get_ec;
             asio::socket_base::linger linger_opt;
             sock.get_option(linger_opt, get_ec);
-            if (!get_ec) {
-                linger_on = linger_opt.enabled();
-                linger_secs = linger_opt.timeout();
-            }
+            if (get_ec) co_return;
+            linger_on = linger_opt.enabled();
+            linger_secs = linger_opt.timeout();
+
             asio::socket_base::receive_buffer_size r;
             asio::socket_base::send_buffer_size w;
             sock.get_option(r, get_ec);
+            if (get_ec) co_return;
             recv_buf = r.value();
             sock.get_option(w, get_ec);
+            if (get_ec) co_return;
             send_buf = w.value();
 
             done = true;
@@ -232,25 +276,19 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
 
     ioc.run_for(std::chrono::seconds{12});
 
-    ASSERT_TRUE(done) << "client coroutine did not complete";
+    // Every read above bails out via `co_return` on error, so `done` is the
+    // instrument's own liveness check: without it a failed get_option would
+    // leave the baselines at 0 and the comparisons would be meaningless.
+    ASSERT_TRUE(done) << "config coroutine did not complete — option reads failed or connect did";
+    ASSERT_GT(recv_base, 0) << "baseline SO_RCVBUF must be observed non-zero";
+    ASSERT_GT(send_base, 0) << "baseline SO_SNDBUF must be observed non-zero";
+
     EXPECT_TRUE(linger_on) << "so_linger_enabled=true must reach SO_LINGER";
     EXPECT_EQ(linger_secs, 3) << "so_linger_seconds must be the value configured";
-    // ⚠️ NOT a comparison against an unconnected probe socket. That was the first
-    // shape here and its SEND arm was VACUOUS: Linux raises SO_SNDBUF at connect
-    // time on its own (measured on this host: 16384 unconnected -> 87040
-    // connected with NO option set), so `connected > unconnected` was satisfied
-    // by the kernel and stayed green with the tcp_send_buf_bytes block DELETED —
-    // the exact mutation the cell exists to catch. The recv arm happened to be
-    // sound (131072 both ways), which is why one rationale covering both arms hid
-    // the asymmetry. The two knobs are separate `if` blocks, so the live arm
-    // could not cover the dead one.
-    //
-    // Assert against the REQUESTED value instead: the kernel may round UP (Linux
-    // returns 2x the request, Windows returns it exactly) but never silently
-    // down for a request this far above any floor, so >= discriminates in both
-    // directions without encoding a platform's doubling.
-    EXPECT_GE(recv_buf, kRequestedBufBytes) << "tcp_recv_buf_bytes must reach SO_RCVBUF";
-    EXPECT_GE(send_buf, kRequestedBufBytes) << "tcp_send_buf_bytes must reach SO_SNDBUF";
+    EXPECT_GT(recv_buf, recv_base)
+        << "tcp_recv_buf_bytes must move SO_RCVBUF off the default-Config value";
+    EXPECT_GT(send_buf, send_base)
+        << "tcp_send_buf_bytes must move SO_SNDBUF off the default-Config value";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
