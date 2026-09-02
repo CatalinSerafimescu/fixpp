@@ -323,12 +323,12 @@ public:
     // (5) Close the transport. Synchronous on the session strand. After close()
     //     returns, no further async_connect / async_read_some / async_write /
     //     async_handshake is permitted (each returns transport_already_closed).
-    //     For TLS transports, close() initiates a graceful TLS shutdown
-    //     (SSL_shutdown bidirectional close-notify) on a best-effort basis —
-    //     a 1-second timeout bounds the wait per Transport::Config::tls_close_timeout
-    //     to avoid blocking the strand on an unresponsive peer; a non-graceful
-    //     close (counterparty unresponsive, network partition) is reported as
-    //     transport_tls_close_truncated but not treated as a hard error.
+    //     For TLS transports, close() was specified to initiate a graceful TLS
+    //     shutdown (SSL_shutdown bidirectional close-notify) bounded by
+    //     Transport::Config::tls_close_timeout. ⚠️ MEASURED FALSE 2026-09-02
+    //     (#348): the alert never leaves asio's BIO, close() never waits, and
+    //     the peer observes an OS-level read error rather than a truncated
+    //     close. The decision to implement or to re-specify is open in #348.
     //
     //     Idempotency: calling close() twice on the same Transport returns
     //     expected_t<void>{} on the second call without side effects.

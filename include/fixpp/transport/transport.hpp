@@ -210,11 +210,31 @@ public:
 
     // (5) Close the transport. Synchronous on the session strand. After close()
     //     returns, every async_* returns transport_already_closed.
-    //     For TLS transports: initiates best-effort bidi TLS shutdown
-    //     (SSL_shutdown close-notify) bounded by Config::tls_close_timeout
-    //     (1 s default); a truncated close (peer-side missing close-notify)
-    //     surfaces as transport_read_truncated and is NOT treated as a hard
-    //     error (logged at `warn` level by 2k per [2g §7.8]).
+    //     ⚠️ FOR TLS TRANSPORTS, WHAT THIS ACTUALLY DOES IS NOT A GRACEFUL
+    //     SHUTDOWN — corrected 2026-09-02 against a measurement (#348). This
+    //     read "initiates best-effort bidi TLS shutdown (SSL_shutdown
+    //     close-notify) bounded by Config::tls_close_timeout (1 s default); a
+    //     truncated close surfaces as transport_read_truncated and is NOT
+    //     treated as a hard error". Three claims, none of them true as shipped:
+    //
+    //       - NO close-notify reaches the peer. close() calls SSL_shutdown() on
+    //         the NATIVE handle; asio's ssl::stream writes through a BIO pair
+    //         (ssl::detail::engine::shutdown generates the alert, and
+    //         ssl::detail::io drains it to the socket). Nothing drains it here,
+    //         and socket_.close() immediately after discards it.
+    //       - close() does NOT wait, and never reads tls_close_timeout on this
+    //         path. It is synchronous and returns at once; there is nothing
+    //         asynchronous for that budget to bound.
+    //       - The peer does NOT observe transport_read_truncated. MEASURED,
+    //         deterministic over repeated runs: a peer with an in-flight read
+    //         gets transport_read_error — an OS-level error, not the non-fatal
+    //         truncation the sentence promised.
+    //
+    //     Whether to make this a real graceful shutdown (which needs an ASYNC
+    //     close(), i.e. an API change) or to keep the synchronous abortive close
+    //     is an open decision — #348. Pinned by
+    //     test_inflight_exclusivity.cpp's CloseDoesNotDeliverCloseNotify cell so
+    //     the behaviour cannot change without that assertion changing too.
     //
     //     Idempotency: second close() returns expected_t<void>{} without side
     //     effects.

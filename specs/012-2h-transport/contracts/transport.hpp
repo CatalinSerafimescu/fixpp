@@ -161,6 +161,10 @@ public:
     //     (1 s default); a truncated close (peer-side missing close-notify)
     //     surfaces as transport_read_truncated and is NOT treated as a hard
     //     error (logged at `warn` level by 2k per [2g §7.8]).
+    //     ⚠️ MEASURED FALSE ON ALL THREE COUNTS 2026-09-02 (#348) — no
+    //     close-notify reaches the wire, tls_close_timeout is never read on
+    //     this path, and the peer observes transport_read_error. See the
+    //     implementing header for the mechanism.
     //
     //     Idempotency: second close() returns expected_t<void>{} without side
     //     effects.

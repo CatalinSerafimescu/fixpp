@@ -2193,7 +2193,7 @@ requirement. Evidence: issue #339.
 
 ---
 
-## fixpp#340 / #341 / #342 — transport contract truth + real overlap guard (2026-09-02)
+## fixpp#340 / #341 / #342 / #347 / #348 — transport contract truth, overlap guard, close() lifecycle (2026-09-02)
 
 Three contract-vs-code divergences found by the Codex hostile review of #339's branch and
 deliberately not folded into it. Two resolve on the DOCUMENT side, one is a functional delta.
@@ -2289,6 +2289,61 @@ Evidence: issues #340, #341, #342.
   effect when the first real async operation completes with `operation_aborted`" — false, and
   caught in review.) The listener already had the reachable form of the entry case — its
   `is_open()` short-circuit (RC#H) — which is why deleting its reap costs nothing.
+
+- **B-347-1 — `close()` during DNS resolution no longer resurrects a closed Transport.** Both
+  `async_connect` implementations tested `state_ == closed` exactly once, on entry, before
+  `async_resolve`. `close()` is strand-confined and so is `async_connect`, but the RESOLVER is
+  neither the socket nor reachable from `close()` — `socket_.close()` does not cancel it. A
+  `close()` landing while the connect was suspended in resolution was therefore overwritten: the
+  coroutine resumed, asio's composed `async_connect` OPENED the socket it needed, and
+  `state_ = connected` published a live socket behind a `close()` that had already returned.
+  FR-006 is unconditional and this violated it. Pre-existing on `main`; found by the Codex
+  hostile review of this branch.
+
+  Two re-tests per transport: after the resolver suspension, and again immediately before
+  committing `connected` (that one also closes the socket, because asio has already opened it by
+  then).
+
+  ⚠️ **Witness accounting, stated because the obvious reading overclaims.** Cells 10 and 11 (one
+  per implementation) were seen RED on the UNFIXED tree — both fail on
+  `ASSERT_FALSE(connect_result->has_value())`, i.e. the connect SUCCEEDING after `close()`
+  returned, which is the defect itself. But the two re-tests are **jointly** witnessed, not
+  individually: deleting either one alone leaves both cells GREEN, because the other catches it.
+  Measured, not assumed — each was deleted on its own and the suite re-run. The pre-commit
+  re-test guards a genuinely different window (a `close()` landing after resolution, during the
+  TCP connect) that is not drivable from the public surface on loopback, where that window is
+  effectively instantaneous. It is defence resting on STRUCTURE, and is recorded as such rather
+  than implied to be covered.
+
+- **B-348-1 — `close()` does not perform a graceful TLS shutdown, and never did; the contract
+  said otherwise in four places.** Pre-existing on `main`. The published contract read *"initiates
+  best-effort bidi TLS shutdown (SSL_shutdown close-notify) bounded by `Config::tls_close_timeout`
+  (1 s default); a truncated close ... surfaces as `transport_read_truncated` and is NOT treated
+  as a hard error"*. Three claims, none true as shipped:
+
+  | claim | reality |
+  |---|---|
+  | a close-notify is sent | the alert is generated into asio's BIO pair and never drained; `socket_.close()` immediately after discards it |
+  | bounded by `tls_close_timeout` | `close()` is synchronous, returns at once, and never reads that budget on this path |
+  | peer sees `transport_read_truncated` (non-fatal) | peer sees **`transport_read_error`** — an OS-level error |
+
+  The third line is MEASURED, deterministically over repeated runs, through the public API on both
+  ends — not derived from reading asio. `asio::ssl::stream` writes through a BIO pair:
+  `ssl::detail::engine::shutdown()` generates the alert and `ssl::detail::io` drains it to the
+  socket. Calling `SSL_shutdown()` on the native handle performs only the first half.
+
+  ⚠️ **This row records a DEFECT, and the fix is NOT in this change.** Making it a real graceful
+  shutdown requires an ASYNC `close()` — it is one of the five `noexcept` synchronous
+  pure-virtuals — so "implement it" and "re-specify the abortive close as the contract" are
+  different features with different blast radius. That decision is open in **#348**. What this
+  change does is stop the contract asserting behaviour no implementation has (the same disposition
+  #340 took) and PIN the measured behaviour with
+  `test_inflight_exclusivity.cpp`'s `CloseDoesNotDeliverCloseNotify_PinsDefect348`, so a future fix
+  has to come through that assertion deliberately instead of changing the wire silently.
+
+  ⚠️ Consequence for an operator TODAY: a peer of a fixpp session that closes cleanly logs a
+  transport read ERROR, not a benign truncation. Alerting tuned on the documented behaviour will
+  mis-classify every normal disconnect.
 
 - **B-340-1 — `Transport::cancel()` has NO documented failure; it returns `expected_t<void>` for
   symmetry only.** Contract-side resolution: the published contract named
