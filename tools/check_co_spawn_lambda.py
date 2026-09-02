@@ -218,18 +218,43 @@ def _lambda_body_start(code: str, i: int) -> int:
         j = _skip_ws(code, j)
     # Qualifiers and a trailing return type may sit between here and the body. Anything
     # that could not appear there means this `[` was not a lambda introducer.
-    while j < n and code[j] != "{":
+    #
+    # ⚠️ A COMMA IS ONLY LEGAL INSIDE ANGLE BRACKETS here (`-> std::pair<int, int>`). At
+    # angle depth 0 a comma ends the argument, so accepting one lets a subscript walk
+    # into the NEXT argument and adopt its brace: `co_spawn(ioc, m[k], Handler{a, b})`
+    # would count `Handler{a, b}` as a lambda. That is the brace-counting denominator
+    # defect in a narrower disguise.
+    angle = 0
+    while j < n and (code[j] != "{" or angle > 0):
         c = code[j]
         if c == "(":  # noexcept(...) / a parenthesised trailing return type
             j = _match_pair(code, j, "(", ")")
             if j < 0:
                 return -1
             continue
-        if IDENT_CHAR.match(c) or c in " \t\r\n<>:*&-.,":
+        if c == "-" and j + 1 < n and code[j + 1] == ">":  # trailing-return arrow
+            j += 2
+            continue
+        if c == "<":
+            angle += 1
+            j += 1
+            continue
+        if c == ">":
+            if angle == 0:
+                return -1
+            angle -= 1
+            j += 1
+            continue
+        if c == ",":
+            if angle == 0:
+                return -1
+            j += 1
+            continue
+        if IDENT_CHAR.match(c) or c in " \t\r\n:*&.":
             j += 1
             continue
         return -1
-    return j if j < n else -1
+    return j if j < n and angle == 0 else -1
 
 
 def scan_text(text: str, relpath: str = "<text>"):
@@ -270,13 +295,7 @@ def scan_text(text: str, relpath: str = "<text>"):
 
         while i < n:
             c = code[i]
-            if c == "[" and not stack:
-                body = _lambda_body_start(code, i)
-                if body >= 0:
-                    stack.append((body, paren))
-                    i = body + 1
-                    continue
-            elif c == "[":
+            if c == "[":
                 body = _lambda_body_start(code, i)
                 if body >= 0:
                     stack.append((body, paren))
@@ -346,6 +365,26 @@ def _is_invoked(code: str, i: int, paren: int) -> bool:
         return False
 
 
+def floor_verdict(sites: int, with_lambda: int):
+    """Return an error string if the scan's own coverage is unbelievable, else None.
+
+    Both floors are CONDITIONS rather than counts, so neither bakes in today's tree. A
+    scan that visited no call site, or that visited call sites but recognised a lambda
+    argument at none of them, prints the same "0 immediately-invoked" a clean tree does.
+
+    Lifted out of `main_scan` so the self-test can fire it: a floor whose firing is
+    never exercised is a floor nobody has seen work.
+    """
+    if sites == 0:
+        return ("[co-spawn-lambda] ERROR: parsed 0 co_spawn call sites — the scan found "
+                "nothing to check. Treat this as a broken instrument, not a clean tree.")
+    if with_lambda == 0:
+        return (f"[co-spawn-lambda] ERROR: parsed {sites} co_spawn call site(s) but "
+                "recognised a lambda argument at none of them. The lambda tracking is "
+                "broken; a zero finding count here means nothing.")
+    return None
+
+
 def tracked_sources():
     out = subprocess.run(
         ["git", "-C", str(ROOT), "ls-files", "-z"],
@@ -371,17 +410,9 @@ def main_scan() -> int:
         sites += s
         with_lambda += wl
 
-    # Both floors are CONDITIONS rather than counts, so neither bakes in today's tree.
-    # A scan that visited no call site, or that visited call sites but recognised a
-    # lambda argument at none of them, reports the same "0 findings" a clean tree does.
-    if sites == 0:
-        print("[co-spawn-lambda] ERROR: parsed 0 co_spawn call sites — the scan found "
-              "nothing to check. Treat this as a broken instrument, not a clean tree.")
-        return 2
-    if with_lambda == 0:
-        print(f"[co-spawn-lambda] ERROR: parsed {sites} co_spawn call site(s) but "
-              "recognised a lambda argument at none of them. The lambda tracking is "
-              "broken; a zero finding count here means nothing.")
+    verdict = floor_verdict(sites, with_lambda)
+    if verdict is not None:
+        print(verdict)
         return 2
 
     print(f"[co-spawn-lambda] {files} file(s), {sites} co_spawn call site(s) parsed, "
@@ -443,6 +474,14 @@ SELF_TEST_CASES = [
      "asio::co_spawn(ioc, session->close(mode::terminal), asio::use_future);", 0, 1, 0),
     ("braced init-list argument is NOT a lambda",
      "asio::co_spawn(ioc, Handler{a, b}, asio::detached);", 0, 1, 0),
+    ("subscript then a braced-init arg does NOT become a lambda",
+     "asio::co_spawn(ioc, m[k], Handler{a, b});", 0, 1, 0),
+    ("subscript, then a REAL invoked lambda, is still caught",
+     f"asio::co_spawn(ioc, m[k], [&]() -> {A} {{ co_return; }}());", 1, 1, 1),
+    ("trailing return type with a template comma is still a lambda",
+     "asio::co_spawn(ioc, [&]() -> asio::awaitable<std::pair<int, int>> {\n"
+     "  co_return std::pair<int, int>{1, 2};\n"
+     "}, asio::detached);", 0, 1, 1),
     ("array subscript followed by a call is NOT a lambda",
      "asio::co_spawn(ioc, handlers[i](x), asio::detached);", 0, 1, 0),
     ("attribute is NOT a capture list",
@@ -547,7 +586,21 @@ def main_self_test() -> int:
         except ParseError:
             print(f"  ok    {name} raises ParseError")
 
-    total = len(SELF_TEST_CASES) + len(SELF_TEST_RAISES)
+    # The floors: each must FIRE on the shape it names, and stay silent otherwise. A
+    # floor that has never been seen to fire is a floor nobody has proven works.
+    for name, sites, lam, want_fire in (
+        ("no call site parsed at all", 0, 0, True),
+        ("call sites parsed but no lambda recognised", 1318, 0, True),
+        ("a healthy scan trips neither floor", 1318, 347, False),
+    ):
+        fired = floor_verdict(sites, lam) is not None
+        if fired != want_fire:
+            print(f"  FAIL  floor: {name}: expected fire={want_fire}, got {fired}")
+            failures += 1
+        else:
+            print(f"  ok    floor: {name} (fires={fired})")
+
+    total = len(SELF_TEST_CASES) + len(SELF_TEST_RAISES) + 3
     if failures:
         print(f"[co-spawn-lambda] SELF-TEST FAIL: {failures} of {total} case(s) failed.")
         return 1
