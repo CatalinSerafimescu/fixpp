@@ -288,12 +288,8 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
     // for the mechanism and the re-derivation recipe.
 
-    // #346: RAII, not assignment. The clear below used to be a plain
-    // statement after the co_await, which cannot run when asio destroys a
-    // suspended frame -- leaving the flag stuck true and wedging every later
-    // read into permanent transport_read_in_progress.
-    detail::inflight_flag_guard read_guard{timer_epochs_,
-                                          &timer_epoch_state::read_in_flight};
+    // #346: RAII — see inflight_flag_guard.hpp for why not assignment.
+    detail::inflight_flag_guard read_guard{timer_epochs_, &timer_epoch_state::read_in_flight};
 
     // NEVER allocate in the read-path completion handler per [const §VIII.5].
     // socket_.async_read_some writes directly into the caller-owned buf.
@@ -338,12 +334,8 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
     // for the mechanism and the re-derivation recipe.
 
-    // #346: RAII, not assignment. The clear below used to be a plain
-    // statement after the co_await, which cannot run when asio destroys a
-    // suspended frame -- leaving the flag stuck true and wedging every later
-    // write into permanent transport_write_in_progress.
-    detail::inflight_flag_guard write_guard{timer_epochs_,
-                                          &timer_epoch_state::write_in_flight};
+    // #346: RAII — see inflight_flag_guard.hpp for why not assignment.
+    detail::inflight_flag_guard write_guard{timer_epochs_, &timer_epoch_state::write_in_flight};
 
     // Composed write (async_write — NOT async_write_some per FR-004).
     asio::error_code ec;

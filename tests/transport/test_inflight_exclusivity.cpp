@@ -997,7 +997,6 @@ TEST(InflightExclusivity, CloseAsyncDeliversCloseNotify_Fixes348) {
     ioc.run_for(200ms);
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell 13: D-4.0 destroy-with-no-drain must not fault in the in-flight guard.
 //
@@ -1047,59 +1046,20 @@ TEST(InflightExclusivity, DestroyWithNoDrainDoesNotFaultInFlightGuard) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// #346 — read/write in-flight flags: the conversion SHIPS, the behavioural
-// witness DOES NOT EXIST, and this block records the measurement that says so
-// rather than a green cell that would prove something else.
+// #346 — read/write in-flight flags are RAII-guarded; the wedge they prevent has
+// NO behavioural witness here, deliberately.
 //
-// The conversion: read_in_flight / write_in_flight moved into
-// *timer_epochs_ and are now managed by detail::inflight_flag_guard, the same
-// mechanism async_connect / async_handshake use. That is strictly safer and
-// removes the "this coroutine has only one exit path, so assignment is fine"
-// reasoning burden from two more sites.
+// The CONDITION: a wedge requires a read/write frame DESTROYED while suspended
+// AND a Transport that survives to exhibit the stuck flag. asio destroys a
+// suspended frame at awaitable_thread teardown, i.e. io_context destruction, and
+// the Transport's executor does not outlive that — which is why cell 13 above
+// can only assert "no fault" and not "not wedged".
 //
-// ⚠️ WHAT #346 ASKED FOR AND WHY IT IS NOT HERE. #346 required a cell that
-// destroys a frame suspended in async_read_some / async_write and then asserts a
-// later read/write is NOT refused with 99/100 — proven RED against the
-// unconverted tree. Two shapes were built and BOTH were measured unsound; they
-// are described here so the next attempt does not rebuild them:
-//
-//   (a) READ, cancelled via cancellation_type::total on the spawned coroutine's
-//       own slot, then a second read issued on the surviving Transport.
-//       MEASURED: passes on the UNCONVERTED tree too, i.e. vacuous. Total
-//       cancellation RESUMES the read with operation_aborted rather than
-//       destroying its frame, and on the resume path the plain
-//       `read_in_flight_ = false` statement below the co_await executes
-//       normally. The two trees are indistinguishable from outside.
-//
-//   (b) WRITE, same shape, with a 4 MiB payload against a peer that never
-//       reads, so the write cannot complete.
-//       MEASURED: FAILS on the CONVERTED tree — a false positive. Instrumented
-//       with a scope-marker on the coroutine frame, the reading was
-//       `frame_gone=0 first_recorded=0`: the frame was neither destroyed nor
-//       resumed, so the write really was still in flight and the second write's
-//       transport_write_in_progress was CORRECT, not a wedge. The cell could
-//       not tell "wedged" from "legitimately busy".
-//
-// The structural claim this rests on instead, stated as a CONDITION so it can
-// be re-derived rather than trusted: a plain assignment below a co_await cannot
-// run when a frame is DESTROYED at that suspension point, whereas a
-// destructor can. What no public-surface shape could produce is a
-// read/write frame destroyed while its Transport SURVIVES — asio destroys a
-// suspended awaitable frame at awaitable_thread teardown, which is
-// io_context destruction, and the Transport's executor does not outlive that.
-// Cell 13 above drives exactly that teardown and consequently destroys the
-// Transport along with the frame, which is why it can only assert "no fault"
-// and not "not wedged".
-//
-// So the wedge #346 describes is REAL AS A CODE PROPERTY and, on the evidence
-// above, not reachable by a caller while the Transport is still usable. The
-// conversion is kept because it is correct and uniform, not because a test
-// forced it. Do not close this note by adding a cell that goes green without
-// first showing it RED on a tree with the guards removed — both shapes above
-// went green or red for the wrong reason, and that is the failure mode here.
-//
-// Related: B-339-1 records the same harness limitation for the cancellation
-// path; inflight_flag_guard.hpp carries the lifetime half of the argument.
+// Two public-surface shapes were built to break that and BOTH were measured
+// unsound — see #346 and the gate record before rebuilding either. ⚠️ Do not
+// discharge this by adding a cell that goes green: show it RED first on a tree
+// with the guards reverted to plain assignment, which is the step that killed
+// both attempts. The claim rests on STRUCTURE, the way B-339-1 does.
 // ─────────────────────────────────────────────────────────────────────────────
 
 }  // namespace

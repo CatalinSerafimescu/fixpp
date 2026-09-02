@@ -160,25 +160,13 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
             }
         }
 
-        // #349: KEPT, and the condition under which it can fire is narrower
-        // than the old comment ("re-check after the backoff sleep, or at
-        // attempt 0") claimed — both of those are precisely the cases in which
-        // it CANNOT fire. Walk the paths to the nearest preceding SUSPENSION
-        // (this_coro awaiters are await_ready()==true and never break the
-        // chain):
-        //   n == 0                : nothing has suspended since the reset at
-        //                           the top of the coroutine  -> dead.
-        //   n > 0, delay >  0     : the backoff block above ends in a reset
-        //                           -> dead.
-        //   n > 0, delay == 0     : the backoff block is SKIPPED entirely, so
-        //                           the nearest suspension is the PREVIOUS
-        //                           iteration's async_connect/async_handshake
-        //                           and no reset intervenes -> LIVE.
-        // A zero-length backoff is reachable, not hypothetical:
-        // ReconnectPolicy::delay_for_attempt returns 0 for an empty schedule,
-        // and session_config.hpp records a shipped configuration that had one.
-        // That single live path is why this reap is not deleted alongside the
-        // dead ones -- do not "tidy" it away by analogy with #341.
+        // #349: KEPT. LIVE only when no reset intervenes between the nearest
+        // preceding SUSPENSION and this read -- a zero-length backoff skips the
+        // block above, which is where the reset lives, and reaches it.
+        // Re-derive before touching it by walking back to that suspension;
+        // `this_coro` awaiters are await_ready()==true and never break the
+        // chain. An empty schedule yields a zero delay. ⚠️ Do not delete this by
+        // analogy with #341's transport sweep.
         if (auto cs = co_await asio::this_coro::cancellation_state;
             cs.cancelled() != asio::cancellation_type::none) {
             co_return std::unexpected{error::transport_connect_cancelled};

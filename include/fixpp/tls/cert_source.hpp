@@ -23,6 +23,17 @@
 //
 //       // 3. REAP PRE-I/O CANCELLATION — the "between-call-and-first-suspension"
 //       //    reap. Load-bearing for the §6.4 binding contract.
+//       //
+//       //    ⚠️ DO NOT PUT A reset_cancellation_state ABOVE THIS. The recipe has
+//       //    none on purpose. The repo's opposing convention -- "every co_spawned
+//       //    loop MUST reset_cancellation_state(total) as its first step" -- is
+//       //    about co_spawn ROOTS, and applying it here VOIDS this step: the
+//       //    reset re-constructs cancellation_state from the parent slot with
+//       //    `cancelled_` value-initialised, so an emission that already happened
+//       //    is not replayed and the reap can only ever see `none`. That is
+//       //    exactly how the in-tree file_cert_source acquired the defect fixed in
+//       //    #349. If the implementation needs total cancellation for step 4, put
+//       //    the reset AFTER this reap.
 //       if (cs.cancelled() != asio::cancellation_type::none)
 //           co_return core::expected_t<local_credentials>{
 //               unexpect, error::tls_load_cancelled };

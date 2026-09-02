@@ -33,15 +33,15 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <chrono>
-#include <memory>
-#include <optional>
-#include <span>
-#include <vector>
 #include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_errors.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <memory>
+#include <optional>
+#include <span>
+#include <vector>
 
 #include "transport/asio_plain_transport.hpp"
 
@@ -211,7 +211,7 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
             }
 
             Transport::Config cfg{};
-            cfg.so_linger_enabled = true;   // default false -> takes the else arm
+            cfg.so_linger_enabled = true;  // default false -> takes the else arm
             cfg.so_linger_seconds = 3;
             cfg.tcp_recv_buf_bytes = 256 * 1024;  // default 0 -> skips the block
             cfg.tcp_send_buf_bytes = 256 * 1024;
@@ -284,8 +284,8 @@ TEST(AsioPlainTransportConfig, PlaintextReadAndWriteOverlapRefused) {
         [&]() -> asio::awaitable<void> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
             Transport::Config cfg{};
-            auto client = std::make_unique<asio_plain_transport>(
-                co_await asio::this_coro::executor, cfg);
+            auto client =
+                std::make_unique<asio_plain_transport>(co_await asio::this_coro::executor, cfg);
 
             fixpp::transport::Endpoint endpoint;
             endpoint.host = "127.0.0.1";
@@ -317,14 +317,19 @@ TEST(AsioPlainTransportConfig, PlaintextReadAndWriteOverlapRefused) {
 
             // Same for write: a 4 MiB payload against a peer that never reads
             // cannot drain, so the first write stays in flight.
-            static std::vector<std::byte> big(1 << 22, std::byte{0xCD});
+            // shared_ptr, not static: the detached write coroutine outlives this
+            // frame, so a frame-local buffer would dangle — but a static would
+            // retain 4 MiB for the process lifetime (measured: +4 MiB maxrss)
+            // and add a guard on every pass. Size is chosen to defeat
+            // sndbuf+peer-rcvbuf autotuning; do not shrink it.
+            auto big = std::make_shared<std::vector<std::byte>>(1 << 22, std::byte{0xCD});
             std::array<std::byte, 8> small{};
             asio::co_spawn(
                 co_await asio::this_coro::executor,
-                [raw]() -> asio::awaitable<void> {
+                [raw, big]() -> asio::awaitable<void> {
                     co_await asio::this_coro::reset_cancellation_state(
                         asio::enable_total_cancellation());
-                    (void)co_await raw->async_write(std::span<const std::byte>{big});
+                    (void)co_await raw->async_write(std::span<const std::byte>{*big});
                 },
                 asio::detached);
             t.expires_after(std::chrono::milliseconds{100});

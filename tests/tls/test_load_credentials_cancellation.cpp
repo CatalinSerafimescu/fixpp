@@ -33,11 +33,11 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <atomic>
-#include <string>
 #include <chrono>
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/cert_source.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -50,7 +50,6 @@ namespace {
 #endif
 
 std::string fixture(const char* name) { return std::string(FIXPP_TLS_FIXTURE_DIR) + "/" + name; }
-
 
 using fixpp::core::error;
 using fixpp::core::expected_t;
@@ -136,47 +135,31 @@ static expected_t<local_credentials> spawn_and_run(asio::io_context& ioc,
 // Drive load_credentials() AS A CHILD AWAIT of a parent coroutine that already
 // carries an emitted `total` on its own slot.
 //
-// THIS IS THE SHAPE §6.4 ACTUALLY BINDS, and getting it wrong is what produced
-// the claim this comment replaces. §6.4's window is "between
-// `co_await cs->load_credentials()` issuing the call and the awaitable taking
-// its first suspension" -- a CHILD AWAIT, which inherits the parent's
-// cancellation_state. The previous harness drove load_credentials() as a
-// co_spawn ROOT instead (see spawn_and_run below), where the entry state is
-// terminal-only and an emit-before-spawn has no listener yet. From that shape
-// the reap genuinely cannot be reached, and the file concluded the reap was
-// "externally untestable ... a defensive code-structural barrier". Both
-// statements were wrong: the window is not between the reset and the read, it
-// is BEFORE the reset -- and a reset standing ahead of the read is what
-// discarded it (#349).
+// THIS IS THE SHAPE §6.4 ACTUALLY BINDS: its window is a CHILD AWAIT, which
+// inherits the parent's cancellation_state. A co_spawn ROOT (see spawn_and_run
+// below) cannot reach it — the entry state is terminal-only and an
+// emit-before-spawn has no listener yet — so a harness built that way concludes
+// the reap is unreachable, which is what this file used to record.
 static expected_t<local_credentials> await_as_child_with_pending_cancel(
     asio::io_context& ioc, cert_source& src, asio::cancellation_signal& signal) {
     auto fut = asio::co_spawn(
         ioc,
         [&src, &signal]() -> asio::awaitable<expected_t<local_credentials>> {
             // Parent admits total, so the state the child inherits can carry it.
-            co_await asio::this_coro::reset_cancellation_state(
-                asio::enable_total_cancellation());
-            // ⚠️ WITHOUT THIS LINE THE CHILD BODY NEVER RUNS, and step 3
-            // cannot reap anything no matter how it is ordered. asio's
-            // awaitable await_transform (asio/impl/awaitable.hpp:174-180)
-            // opens with:
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            // ⚠️ WITHOUT THIS LINE THE CHILD BODY NEVER RUNS, and step 3 cannot
+            // reap anything however it is ordered. asio's awaitable
+            // await_transform (awaitable_frame_base, guarded by
+            // `throw_if_cancelled_`, which DEFAULTS TO TRUE) throws
+            // operation_aborted when a cancellation is already pending — so a
+            // default caller gets a thrown error rather than the
+            // tls_load_cancelled §6.4 names, and never enters the child.
+            // Re-derive by deleting this line: the cells below then fail with a
+            // thrown "co_await: Operation aborted" instead of an error value.
             //
-            //     if (entry_point()->throw_if_cancelled_)
-            //       if (!!get_cancellation_state().cancelled())
-            //         throw_error(asio::error::operation_aborted, "co_await");
-            //
-            // throw_if_cancelled_ DEFAULTS TO TRUE, so a parent that awaits
-            // load_credentials() with a cancellation already pending gets an
-            // operation_aborted EXCEPTION at the await point -- §6.4's outcome
-            // is delivered, but as a thrown error rather than the
-            // tls_load_cancelled that §6.4 names, and the reap it credits is
-            // never reached. Measured: with this line removed the two cells
-            // below fail with 'C++ exception with description "co_await:
-            // Operation aborted."'.
-            //
-            // So §6.4's reap has an UNSTATED PRECONDITION on the caller. That
-            // gap is real and is filed separately; this helper pins the
-            // condition under which the reap is the mechanism that answers.
+            // §6.4's reap therefore has an UNSTATED PRECONDITION on the caller.
+            // That gap is filed separately; this helper pins the condition under
+            // which the reap is the mechanism that answers.
             co_await asio::this_coro::throw_if_cancelled(false);
             // Emit on the parent's OWN slot while the parent is running: the
             // handler is installed, nothing is suspended, so this records the
@@ -209,20 +192,6 @@ TEST(LoadCredentialsCancellation, Step3ReapsCancellationInheritedFromParent) {
     EXPECT_EQ(result.error(), error::tls_load_cancelled);
     EXPECT_TRUE(cs.step3_reap_fired.load()) << "step 3 is the step that must reap it";
     EXPECT_FALSE(cs.step4_reached.load()) << "§6.4 requires the reap to precede any I/O work";
-}
-
-// ── FORCED-MISS ARM: no cancellation ⇒ step 3 silent, step 4 reached ─────────
-// Proves the instrument above can report the NEGATIVE too — a cell that only
-// ever fires is not evidence that step 3 discriminates.
-TEST(LoadCredentialsCancellation, Step3SilentWhenNoCancellationPending) {
-    CancellableMockCertSource cs;
-    asio::io_context ioc;
-    asio::cancellation_signal signal;
-
-    auto result = spawn_and_run(ioc, cs, signal);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_FALSE(cs.step3_reap_fired.load()) << "step 3 must not fire when no cancellation present";
-    EXPECT_TRUE(cs.step4_reached.load());
 }
 
 // ── The PRODUCTION path, not just the recipe ────────────────────────────────

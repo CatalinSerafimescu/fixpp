@@ -323,18 +323,8 @@ private:
     // make_shared (ssl_ctx_ above) inside the same trap_throw boundary.
     std::shared_ptr<timer_epoch_state> timer_epochs_{std::make_shared<timer_epoch_state>()};
 
-    // ── In-flight exclusivity flags (strand-confined — NOT atomics) ─────────
-    //
-    // These booleans are read and written exclusively from coroutines running
-    // on exec_'s strand. cancel() does NOT touch these flags. ⚠️ This read
-    // "cancel() is the only off-strand writer … it only fires cancel_signal_"
-    // until 2026-08-31 (#333): there is no cancel_signal_ member, and cancel()
-    // is not documented off-strand-safe. The flags stay strand-confined either
-    // way — that part of the note was never load-bearing on cancel().
-    // #346: these two now live in *timer_epochs_ alongside connect/handshake,
-    // set and cleared by detail::inflight_flag_guard. The guard's destructor is
-    // what makes frame-destruction safe, and a guard bound to a member of
-    // `this` was a measured heap-use-after-free (inflight_flag_guard.hpp).
+    // #346: read/write in-flight flags live in *timer_epochs_, managed by
+    // detail::inflight_flag_guard — rationale in that header.
 
     // INVARIANT: every flag guarding an operation on ssl_stream_ MUST appear
     // here. close() uses this to decide whether sending close_notify would

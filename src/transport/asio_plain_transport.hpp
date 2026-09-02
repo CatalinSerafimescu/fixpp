@@ -188,13 +188,8 @@ private:
     // destroy synchronously on the failure arm).
     std::shared_ptr<timer_epoch_state> timer_epochs_{std::make_shared<timer_epoch_state>()};
 
-    // ── In-flight exclusivity flags ──────────────────────────────────────────
-    // #346: read/write live in *timer_epochs_, not here. They are set and
-    // cleared by detail::inflight_flag_guard, whose destructor must be able to
-    // run after the Transport is gone (a frame destroyed while suspended runs
-    // in-scope destructors but never resumes the body). A guard bound to a
-    // member of `this` was a MEASURED heap-use-after-free -- see
-    // inflight_flag_guard.hpp. Still strand-confined, still not atomics.
+    // #346: read/write in-flight flags live in *timer_epochs_, managed by
+    // detail::inflight_flag_guard — rationale in that header.
 
     // ── Acceptor event sink (null on initiator side) ───────────────────────────
     ListenerEvents* listener_events_{nullptr};

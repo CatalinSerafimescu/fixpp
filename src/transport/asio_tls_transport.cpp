@@ -638,6 +638,7 @@ asio_tls_transport::asio_tls_transport(asio::any_io_executor exec, Transport::Co
 asio_tls_transport::~asio_tls_transport() {
     ++timer_epochs_->connect;
     ++timer_epochs_->handshake;
+    ++timer_epochs_->close;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1279,9 +1280,8 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
     // for the mechanism and the re-derivation recipe.
 
-    // #346: RAII, not assignment -- see the plain transport's twin site.
-    detail::inflight_flag_guard read_guard{timer_epochs_,
-                                          &timer_epoch_state::read_in_flight};
+    // #346: RAII — see inflight_flag_guard.hpp for why not assignment.
+    detail::inflight_flag_guard read_guard{timer_epochs_, &timer_epoch_state::read_in_flight};
 
     // NEVER allocate in the read-path completion-handler dispatch per [const §VIII.5].
     // asio::ssl::stream::async_read_some writes directly into the caller-owned buf.
@@ -1335,9 +1335,8 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
     // for the mechanism and the re-derivation recipe.
 
-    // #346: RAII, not assignment -- see the plain transport's twin site.
-    detail::inflight_flag_guard write_guard{timer_epochs_,
-                                          &timer_epoch_state::write_in_flight};
+    // #346: RAII — see inflight_flag_guard.hpp for why not assignment.
+    detail::inflight_flag_guard write_guard{timer_epochs_, &timer_epoch_state::write_in_flight};
 
     // Composed write (async_write — NOT async_write_some per FR-004).
     asio::error_code ec;
@@ -1466,16 +1465,40 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // documented knob is the one in force. We do NOT wait for the peer's
     // answering close_notify beyond that budget -- sending ours is what makes
     // the peer's read a clean EOF, which is the observable #348 is about.
+    // QUICK SHUTDOWN. Without this, async_shutdown waits for the peer's
+    // ANSWERING close_notify and only the deadline below releases it -- so
+    // every close against a peer that does not itself close gracefully burned
+    // the WHOLE tls_close_timeout. Measured on the paired cells: 0.31 s for
+    // close() against 1.32 s here, a delta equal to the 1 s default budget.
+    // Marking the inbound direction already-shut makes SSL_shutdown report
+    // complete as soon as OUR alert is written, which is the only half #348 is
+    // about; the deadline goes back to being a backstop rather than the normal
+    // exit path.
+    SSL_set_shutdown(ssl_stream_->native_handle(), SSL_RECEIVED_SHUTDOWN);
+
+    // Deadline, armed with the SAME epoch discipline as the connect and
+    // handshake sites above -- the handler captures a shared_ptr COPY of the
+    // block and compares, never `this` alone. timer.cancel() cannot un-queue an
+    // already-completed handler (D-4.1), so a deadline that fired just before
+    // teardown would otherwise reach socket_.cancel() through a dangling
+    // `this`. The epoch is retired below BEFORE cancel(), and again in the
+    // destructor body.
     asio::steady_timer deadline{exec_};
     deadline.expires_after(cfg_.tls_close_timeout);
-    deadline.async_wait([this](asio::error_code ec) {
-        if (ec) return;  // cancelled -- shutdown finished first.
+    const std::uint64_t close_epoch = ++timer_epochs_->close;
+    deadline.async_wait([this, epochs = timer_epochs_, close_epoch](asio::error_code ec) {
+        if (ec || close_epoch != epochs->close) {
+            return;  // cancelled, or this attempt's epoch was retired — no-op.
+        }
         asio::error_code ignored;
         socket_.cancel(ignored);
     });
 
     asio::error_code shutdown_ec;
     co_await ssl_stream_->async_shutdown(asio::redirect_error(asio::use_awaitable, shutdown_ec));
+
+    // Retire BEFORE cancel (D-4.1) — see the connect/handshake sites.
+    ++timer_epochs_->close;
     deadline.cancel();
 
     // shutdown_ec is deliberately not surfaced. A peer that closes the TCP
