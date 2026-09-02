@@ -19,9 +19,11 @@
 // so it outlives the transport — a plain member would be read through the
 // dangling `this` that is the defect being fixed.
 //
-// ONE type, not one per transport. The plain transport uses `connect` only and
-// carries 8 unused bytes; that is what data-model.md §4 and research.md D-4.1
-// specify ("handshake — TLS only; unused on the plain transport"). Two
+// ONE type, not one per transport. The plain transport does not use every
+// field; that is what data-model.md §4 and research.md D-4.1 specify
+// ("handshake — TLS only; unused on the plain transport"). The byte count that
+// used to stand here was a RESULT, and #346 falsified it by adding fields --
+// re-derive it from the struct if you need it rather than reading it here. Two
 // same-named-but-differently-shaped nested types were delivered first, then
 // unified here at /simplify: the namespace-scope collision that justified
 // nesting existed ONLY because the type had been split, and both headers are
@@ -70,6 +72,17 @@ struct timer_epoch_state {
     // here, the clear is safe whether or not the Transport is still alive.
     bool connect_in_flight{false};
     bool handshake_in_flight{false};  // TLS only.
+
+    // read/write joined the block in #346 for the SAME reason, and the
+    // reasoning was already written down one paragraph above before it was
+    // acted on: a frame destroyed while suspended runs its in-scope
+    // destructors but never resumes the body, so a guard is the only thing
+    // that can clear these -- and a guard bound to a Transport member is the
+    // measured heap-use-after-free described above. They are read across
+    // coroutines by the TLS close() predicate (ssl_op_suspended_()), which is
+    // strand-confined, so the move is unobservable to it.
+    bool read_in_flight{false};
+    bool write_in_flight{false};
 };
 
 }  // namespace fixpp::transport

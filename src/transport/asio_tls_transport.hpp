@@ -23,9 +23,10 @@
 //     transport_read_in_progress / transport_write_in_progress.
 //     async_connect / async_handshake answer by ENTRY STATE, not call count:
 //     closed → 98; a state that forbids the call → 97; otherwise it ATTEMPTS (#339).
-//     Implementation note: `read_in_flight_` / `write_in_flight_` are
-//     strand-confined booleans (NOT atomics) — all Transport coroutines run
-//     on `exec_`'s strand per [2d §4.8], so unlocked reads are safe.
+//     Implementation note: the in-flight flags are strand-confined booleans
+//     (NOT atomics) — all Transport coroutines run on `exec_`'s strand per
+//     [2d §4.8], so unlocked reads are safe. They live in *timer_epochs_ and
+//     are managed by detail::inflight_flag_guard (#342 / #346).
 //     `cancel()` is synchronous and does NOT touch the flags or state.
 //     ⚠️ Its "only modifies `cancel_signal_`" claim was struck 2026-08-31
 //     (#333) — no such member exists. See the Thread-safety model note below.
@@ -94,8 +95,9 @@ namespace fixpp::transport {
 //   connected / handshaken + cancel mid-IO     → state unchanged (cancel ≠ close)
 //
 // Thread-safety model:
-//   All async methods and the strand-confined flags (read_in_flight_,
-//   write_in_flight_) are confined to the session strand provided at
+//   All async methods and the strand-confined in-flight flags
+//   (timer_epochs_->read_in_flight / write_in_flight, #346) are confined to
+//   the session strand provided at
 //   construction. ⚠️ cancel() was documented off-strand-safe via a
 //   `cancel_signal_` that does not exist; struck 2026-08-31 (#333).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,6 +207,11 @@ public:
     [[nodiscard]] core::expected_t<void> cancel() noexcept override;
 
     [[nodiscard]] core::expected_t<void> close() noexcept override;
+
+    // #348: the graceful counterpart. Drives SSL shutdown through asio's
+    // ssl::stream so the close-notify alert is actually drained to the socket,
+    // bounded by Config::tls_close_timeout. See Transport::close_async().
+    [[nodiscard]] asio::awaitable<core::expected_t<void>> close_async() override;
 
     // ── TlsTransport override ───────────────────────────────────────────────
 
@@ -324,8 +331,10 @@ private:
     // until 2026-08-31 (#333): there is no cancel_signal_ member, and cancel()
     // is not documented off-strand-safe. The flags stay strand-confined either
     // way — that part of the note was never load-bearing on cancel().
-    bool read_in_flight_{false};
-    bool write_in_flight_{false};
+    // #346: these two now live in *timer_epochs_ alongside connect/handshake,
+    // set and cleared by detail::inflight_flag_guard. The guard's destructor is
+    // what makes frame-destruction safe, and a guard bound to a member of
+    // `this` was a measured heap-use-after-free (inflight_flag_guard.hpp).
 
     // INVARIANT: every flag guarding an operation on ssl_stream_ MUST appear
     // here. close() uses this to decide whether sending close_notify would
@@ -335,7 +344,8 @@ private:
     // ssl_stream_ belongs in this predicate; that is the rule close() relies on
     // and could not state at its own call site.
     [[nodiscard]] bool ssl_op_suspended_() const noexcept {
-        return read_in_flight_ || write_in_flight_ || timer_epochs_->handshake_in_flight;
+        return timer_epochs_->read_in_flight || timer_epochs_->write_in_flight ||
+               timer_epochs_->handshake_in_flight;
     }
 
     // ── 013 T039 — ListenerEvents sink (null on initiator side) ─────────────

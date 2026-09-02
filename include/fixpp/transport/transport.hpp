@@ -249,6 +249,36 @@ public:
     //     Idempotency: second close() returns expected_t<void>{} without side
     //     effects.
     [[nodiscard]] virtual core::expected_t<void> close() noexcept = 0;
+
+    // (6) Graceful asynchronous close (#348). NOT pure — the default IS close(),
+    //     so every existing implementor keeps compiling and behaving exactly as
+    //     before, and a caller opts in per call site.
+    //
+    //     WHY AN ADDITIVE VIRTUAL RATHER THAN MAKING close() ASYNC. close() is
+    //     one of five synchronous pure-virtuals with implementors across the
+    //     library and the test suite; changing its signature breaks all of them
+    //     for a benefit only the TLS transport can deliver. It would also not
+    //     be usable at the call site that most wants it: Session's terminal
+    //     close path calls close() immediately after
+    //     root_cancel_.emit(cancellation_type::total), so an awaited shutdown
+    //     there would be cancelled by the emission on the line above it.
+    //
+    //     WHAT THE TLS OVERRIDE ADDS over close(): it drives the shutdown
+    //     through asio's ssl::stream (async_shutdown), which is what actually
+    //     DRAINS the close-notify alert out of the BIO pair and onto the wire —
+    //     the step whose absence is the #348 defect — and it bounds the wait
+    //     with Config::tls_close_timeout, giving that budget the role its
+    //     documentation always claimed it had.
+    //
+    //     ⚠️ NO PRODUCTION CALL SITE ADOPTS THIS YET. Shipping the capability
+    //     and migrating the call sites are separate decisions; close()'s
+    //     behaviour above is unchanged and still what the engine and Session
+    //     invoke. Witnessed by test_inflight_exclusivity.cpp's
+    //     CloseAsyncDeliversCloseNotify cell, which asserts the PEER observes a
+    //     clean EOF — a wire-level outcome, not merely that the call returned.
+    [[nodiscard]] virtual asio::awaitable<core::expected_t<void>> close_async() {
+        co_return close();
+    }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

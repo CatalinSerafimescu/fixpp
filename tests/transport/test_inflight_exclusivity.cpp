@@ -932,6 +932,71 @@ TEST(InflightExclusivity, CloseDoesNotDeliverCloseNotify_PinsDefect348) {
     ioc.run_for(200ms);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// #348: close_async() DOES deliver close_notify — asserted at the PEER.
+//
+// The paired positive of cell 12 above, and deliberately the same shape so the
+// two can be read against each other: identical fixture, identical pending
+// server read, the ONLY difference is client->close_async() instead of
+// client->close(). Cell 12 measures transport_read_error; this one must measure
+// a clean transport_read_eof.
+//
+// That difference is the wire-level assertion #348 asks for. It is not "the
+// call returned {}" — close() returns {} too, and returns it having thrown the
+// alert away. The peer's read outcome is the only thing that can tell a drained
+// BIO from an undrained one from outside the process.
+//
+// ⚠️ RED-ARM CONTRACT: swap close_async() for close() below and this cell must
+// fail with transport_read_error — i.e. it must turn into cell 12.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, CloseAsyncDeliversCloseNotify_Fixes348) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto pair = make_handshaken_pair(fixture, ioc);
+
+    std::optional<expected_t<std::size_t>> server_read;
+    std::byte buf{0};
+    Transport* server_raw = pair.server.get();
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&server_read, server_raw, &buf]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            server_read = co_await server_raw->async_read_some(std::span<std::byte>{&buf, 1});
+        },
+        asio::detached);
+    ioc.run_for(300ms);
+    ASSERT_FALSE(server_read.has_value()) << "server read must still be pending before close";
+
+    std::optional<expected_t<void>> closed;
+    Transport* client_raw = pair.client.get();
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&closed, client_raw]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            closed = co_await client_raw->close_async();
+        },
+        asio::detached);
+    ioc.run_for(3s);
+
+    ASSERT_TRUE(closed.has_value()) << "close_async must complete within tls_close_timeout";
+    EXPECT_TRUE(closed->has_value());
+
+    ASSERT_TRUE(server_read.has_value()) << "server read must complete after the peer's close";
+    ASSERT_FALSE(server_read->has_value());
+    EXPECT_EQ(server_read->error(), error::transport_read_eof)
+        << "#348: close_async() must drain the close_notify alert to the wire, so the peer sees a "
+           "CLEAN EOF. transport_read_error here means the alert was generated into the BIO and "
+           "discarded — the exact defect cell 12 pins for close().";
+
+    (void)pair.server->close();
+    ioc.run_for(200ms);
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell 13: D-4.0 destroy-with-no-drain must not fault in the in-flight guard.
@@ -980,5 +1045,61 @@ TEST(InflightExclusivity, DestroyWithNoDrainDoesNotFaultInFlightGuard) {
     }
     SUCCEED() << "no fault under the sanitizer";
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #346 — read/write in-flight flags: the conversion SHIPS, the behavioural
+// witness DOES NOT EXIST, and this block records the measurement that says so
+// rather than a green cell that would prove something else.
+//
+// The conversion: read_in_flight / write_in_flight moved into
+// *timer_epochs_ and are now managed by detail::inflight_flag_guard, the same
+// mechanism async_connect / async_handshake use. That is strictly safer and
+// removes the "this coroutine has only one exit path, so assignment is fine"
+// reasoning burden from two more sites.
+//
+// ⚠️ WHAT #346 ASKED FOR AND WHY IT IS NOT HERE. #346 required a cell that
+// destroys a frame suspended in async_read_some / async_write and then asserts a
+// later read/write is NOT refused with 99/100 — proven RED against the
+// unconverted tree. Two shapes were built and BOTH were measured unsound; they
+// are described here so the next attempt does not rebuild them:
+//
+//   (a) READ, cancelled via cancellation_type::total on the spawned coroutine's
+//       own slot, then a second read issued on the surviving Transport.
+//       MEASURED: passes on the UNCONVERTED tree too, i.e. vacuous. Total
+//       cancellation RESUMES the read with operation_aborted rather than
+//       destroying its frame, and on the resume path the plain
+//       `read_in_flight_ = false` statement below the co_await executes
+//       normally. The two trees are indistinguishable from outside.
+//
+//   (b) WRITE, same shape, with a 4 MiB payload against a peer that never
+//       reads, so the write cannot complete.
+//       MEASURED: FAILS on the CONVERTED tree — a false positive. Instrumented
+//       with a scope-marker on the coroutine frame, the reading was
+//       `frame_gone=0 first_recorded=0`: the frame was neither destroyed nor
+//       resumed, so the write really was still in flight and the second write's
+//       transport_write_in_progress was CORRECT, not a wedge. The cell could
+//       not tell "wedged" from "legitimately busy".
+//
+// The structural claim this rests on instead, stated as a CONDITION so it can
+// be re-derived rather than trusted: a plain assignment below a co_await cannot
+// run when a frame is DESTROYED at that suspension point, whereas a
+// destructor can. What no public-surface shape could produce is a
+// read/write frame destroyed while its Transport SURVIVES — asio destroys a
+// suspended awaitable frame at awaitable_thread teardown, which is
+// io_context destruction, and the Transport's executor does not outlive that.
+// Cell 13 above drives exactly that teardown and consequently destroys the
+// Transport along with the frame, which is why it can only assert "no fault"
+// and not "not wedged".
+//
+// So the wedge #346 describes is REAL AS A CODE PROPERTY and, on the evidence
+// above, not reachable by a caller while the Transport is still usable. The
+// conversion is kept because it is correct and uniform, not because a test
+// forced it. Do not close this note by adding a cell that goes green without
+// first showing it RED on a tree with the guards removed — both shapes above
+// went green or red for the wrong reason, and that is the failure mode here.
+//
+// Related: B-339-1 records the same harness limitation for the cancellation
+// path; inflight_flag_guard.hpp carries the lifetime half of the argument.
+// ─────────────────────────────────────────────────────────────────────────────
 
 }  // namespace
