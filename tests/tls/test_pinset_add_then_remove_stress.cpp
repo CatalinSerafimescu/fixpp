@@ -140,7 +140,14 @@ TEST(PinsetStress, ConcurrentAddRemoveAndFind) {
         // whole deadline, and 2000 spun iterations exhaust in milliseconds — a
         // count-bounded net was proven not to rescue a 400 ms-delayed reader.
         // Bounding the RATE instead bounds total allocation over the deadline
-        // (10 s / 200 us) while leaving the deadline the operative bound.
+        // while leaving the deadline the operative bound.
+        //
+        // ⚠️ No iteration count is stated for that rate, and none should be: a
+        // sleep shorter than the system timer granularity sleeps for the
+        // GRANULARITY, so the delivered period is a property of the platform,
+        // not of the argument below (issue #327). The bound survives that — a
+        // coarser period allocates less, not more — but any count derived from
+        // `deadline / 200 us` does not.
         std::this_thread::sleep_for(std::chrono::microseconds{200});
     }
 
