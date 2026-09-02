@@ -2526,7 +2526,12 @@ Evidence: issues #346, #348, #349; new issue #351.
 ### Limitations
 
 - **L-349-1 — `[2g §6.4]`'s pre-I/O reap does not fire for any caller in this repo, and correcting
-  its ORDER (which this change did) was necessary but not sufficient.** Tracked as **#351**.
+  its ORDER was necessary but not sufficient.** **Status: wontfix — #351 closed on the measurement
+  in B-351-1 above, and this row is now the standing record.** Opting the caller out of
+  `throw_if_cancelled` is ALSO not sufficient: the in-tree caller's own pre-load reap answers first
+  and `load_credentials()` is never entered, so the §6.4 window is empty from this repo in both
+  directions. Delivering §6.4 needs a caller with a genuinely non-empty window; the recipe in
+  `include/fixpp/tls/cert_source.hpp` states that precondition for third-party implementors.
 
   asio's `await_transform` for a child awaitable throws `operation_aborted` when
   `throw_if_cancelled_` — which DEFAULTS TO TRUE and is per-`awaitable_thread` — sees the inherited

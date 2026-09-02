@@ -53,12 +53,26 @@ justification reviewed at Gate A, and changing `close()`'s own signature would h
 implementor for a benefit only the TLS transport can deliver.
 
 ⚠️ **The cost is paid elsewhere, and it is real:** a defaulted virtual can ship with NO adopters, and
-`close_async()` did. Every production teardown still calls the synchronous `close()`, so the
-user-visible #348 defect (no TLS close-notify reaches the peer; the peer observes
-`transport_read_error`) is **unchanged**. When you read that a branch "fixed #348", check
-`git grep close_async` for a production call site before believing it. The obstacle to adoption is
-named at the declaration: `Session`'s terminal close emits `cancellation_type::total` immediately
-before closing, which would cancel an awaited shutdown.
+`close_async()` shipped with none. For one release the user-visible #348 defect (no TLS close-notify
+reaches the peer) was **unchanged** while the capability existed. When you read that a branch "fixed
+#348", check `git grep close_async -- src` for a production call site before believing it — that is
+still the right check, and it is why this paragraph does not name the current adopters.
+
+**Why adoption was not the one-liner it looked like, which is the part worth carrying forward.** The
+stated obstacle — `Session`'s terminal close emits `cancellation_type::total` immediately before
+closing — was real but misdiagnosed. The awaited shutdown was never the problem; the problem was
+that at BOTH teardown sites an SSL operation is still suspended (the read pump is blocked in
+`async_read_some`, and the total-cancel that precedes the close has not been delivered to it yet),
+and `close_async()` had inherited `close()`'s rule of skipping the alert whenever that is so.
+Adopting it unchanged would have compiled, passed every transport-level cell, and delivered nothing —
+a capability that is *exactly* inert at the call sites it was written for.
+
+The fix belonged in the transport, not at the call site: `close_async()` now CANCELS the suspended
+op (`socket_.cancel()`, which does not touch SSL state), joins it, and only then writes the alert,
+with an abortive fallback if it will not quiesce inside the budget. The generalisable shape is that
+**an opt-in written against the easy state is not evidence about the state its adopters are in** —
+the pre-existing cell that closed a transport with nothing in flight stayed GREEN under the mutation
+that made the whole feature inert.
 
 > ⚠️ `Listener::cancel()` living on the impl is a **deliberate** Gate A outcome that overrode a review
 > objection. Do not "fix" it by promoting it to the base.

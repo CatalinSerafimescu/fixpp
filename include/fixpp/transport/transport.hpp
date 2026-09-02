@@ -93,7 +93,11 @@ struct ConnectInfo;
 // the same predicate and the throw wins. A caller that wants the error VALUE
 // rather than the exception must `co_await this_coro::throw_if_cancelled(false)`
 // around the call; no caller in this repo does, so those reaps do not currently
-// fire in production -- tracked as #351. Re-derive:
+// fire in production. ⚠️ Opting out is necessary and NOT sufficient: measured
+// against ReconnectFsm, the caller's own pre-load reap answers first and the
+// callee body is never entered, so the window stays empty either way. #351
+// closed on that measurement; the standing record is
+// `spec/behaviors-and-limitations.md` L-349-1 / B-351-1. Re-derive:
 // `awaitable_frame_base::await_transform(awaitable<T, Executor>)` in asio's
 // impl/awaitable.hpp, and the `throw_if_cancelled_` member on its entry point.
 //
