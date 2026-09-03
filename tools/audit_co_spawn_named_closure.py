@@ -174,6 +174,7 @@ import concurrent.futures as cf
 import json
 import os
 import shlex
+import shutil
 import sys
 
 import clang.cindex as ci
@@ -1090,10 +1091,16 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--build-dir", default="build/linux-clang-debug")
-    ap.add_argument("--libclang", default="/opt/llvm22/lib/libclang.so")
+    # ⚠️ NO HARDCODED LOCAL PATH. An absolute author-machine default is what broke
+    # the cross-check tool in CI on its first run. Empty means "let cindex find
+    # one"; the CI job passes both explicitly, derived from the LLVM it installed.
+    ap.add_argument(
+        "--libclang", default=os.environ.get("FIXPP_LIBCLANG", ""),
+        help="path to libclang.so (default: $FIXPP_LIBCLANG, else cindex's own search)",
+    )
     ap.add_argument(
         "--resource-dir",
-        default="/opt/llvm22/lib/clang/22",
+        default=os.environ.get("FIXPP_CLANG_RESOURCE_DIR", ""),
         help="clang resource dir (`clang++ -print-resource-dir`). libclang does not "
              "infer it from the compilation database, and without it every TU dies on "
              "'stddef.h file not found' — which this tool reports as a FAILED PARSE "

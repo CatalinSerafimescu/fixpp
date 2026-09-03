@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
+import shutil
 import json
 import os
 import re
@@ -102,11 +103,29 @@ def run_clang_query(cq: str, build_dir: str, files: list[str], timeout: int,
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--build-dir", default="build/linux-clang-debug")
-    ap.add_argument("--clang-query", default="/opt/llvm22/bin/clang-query")
+    # ⚠️ RESOLVED FROM PATH, never hardcoded. This defaulted to an absolute path
+    # on the author's machine (`/opt/llvm22/bin/clang-query`) and CI died on
+    # FileNotFoundError the first time it ran — a local environment leaked into a
+    # shipped default. Fails loud below rather than silently skipping the
+    # cross-check, which would leave the audit's zero resting on one instrument.
+    ap.add_argument(
+        "--clang-query",
+        default=(shutil.which("clang-query") or shutil.which("clang-query-22") or ""),
+        help="clang-query binary (default: first found on PATH)",
+    )
     ap.add_argument("--audit-json", required=True, help="--json-out from the libclang walker")
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--jobs", type=int, default=4)
     args = ap.parse_args()
+
+    if not args.clang_query or not shutil.which(args.clang_query):
+        print(
+            f"ERROR: clang-query not found (--clang-query={args.clang_query!r}).\n"
+            "  The cross-check cannot run, and skipping it would leave the audit's\n"
+            "  result resting on a single instrument. Install clang-tools or pass\n"
+            "  --clang-query explicitly."
+        )
+        return 1
 
     with open(args.audit_json, encoding="utf-8") as fh:
         audit = json.load(fh)

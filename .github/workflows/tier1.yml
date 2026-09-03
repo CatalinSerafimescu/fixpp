@@ -2316,6 +2316,22 @@ jobs:
           echo "RESOURCE_DIR=$(clang++ -print-resource-dir)" >> "$GITHUB_ENV"
           echo "using libclang: $LIBCLANG"
 
+          # clang-query drives the SECOND instrument. Resolve it from the LLVM we
+          # just installed, and fail loud if the toolchain did not ship it: the
+          # cross-check is what keeps the audit's zero from resting on one tool,
+          # so silently skipping it is the failure this pair exists to prevent.
+          BINDIR=$(llvm-config-${CLANG_VER} --bindir)
+          CQ=""
+          for cand in "$BINDIR/clang-query" "$(command -v clang-query-${CLANG_VER} || true)" "$(command -v clang-query || true)"; do
+            [ -n "$cand" ] && [ -x "$cand" ] && { CQ="$cand"; break; }
+          done
+          test -n "$CQ" || {
+            echo "::error::clang-query not found for clang $CLANG_VER (looked in $BINDIR and on PATH)."
+            echo "::error::llvm.sh installs it via clang-tools-$CLANG_VER; add it if the package set changed."
+            ls -la "$BINDIR" | grep -i clang | head -20; exit 1; }
+          echo "CLANG_QUERY=$CQ" >> "$GITHUB_ENV"
+          echo "using clang-query: $CQ"
+
       # ⚠️ THE PAIR, and the order matters. The sweep's own counters witness the
       # scan's REACH; only the fixtures witness DETECTION. A sweep alone is a gate
       # that cannot fail for the reason it exists — and that is not hypothetical
@@ -2359,6 +2375,7 @@ jobs:
           python3 tools/reconcile_co_spawn_census.py \
             --build-dir build/${{ env.PRESET }} \
             --audit-json /tmp/co-spawn-audit.json \
+            --clang-query "$CLANG_QUERY" \
             --jobs 4
           echo "::notice::co_spawn cross-check wall-clock: $(( $(date +%s) - START ))s"
 
