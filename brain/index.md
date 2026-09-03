@@ -61,6 +61,7 @@ maintained — this page exists because agents did not find them, not because th
 | **QuickFIX compatibility** | [`components/quickfix-compat.md`](./components/quickfix-compat.md) — translation, **not** emulation; the adapter was rejected | planning a runtime shim |
 | **The service wrapper** | [`components/service.md`](./components/service.md) — a stub **by decision**; `src/` has no implementation | treating the empty module as a gap to fill |
 | **Which features TOUCH a given file or contract** | `git log --oneline -- <path>` | ⛔ **the catalogue.** A row names the feature that **DELIVERED** the thing plus its PR — not every feature that has since modified it. `wire/validator.hpp` has ~15 commits against a row citing one feature; several are perf/hardening passes with no row of their own |
+| **Whether a `co_spawn` site's closure outlives its coroutine** — the #291/#354 lifetime rule, and which of the two instruments answers it | the pair below: `tools/check_co_spawn_lambda.py` (lexer, in CI) and `tools/audit_co_spawn_named_closure.py` (AST, on demand) | grepping for `}(),` — see the pair's own docstrings for why a regex cannot decide the named-closure form |
 | What is left to do for v1.0 | `../REMAINING-WORK.md` (parent) | this bundle |
 | History — what we used to believe | `history.md` (deliberately off this path) | — |
 
@@ -176,6 +177,50 @@ meant.
 > stale silently, and it goes stale in the one place people come to *find out what is stale*. What does
 > **not** rot is **why** a decision was taken and **what was rejected** — that half is historical and
 > is the entire reason this bundle exists.
+
+### Two instruments for one rule, and why only one is in CI
+
+A lambda coroutine reaches its captures **through the closure object**, so the closure must outlive
+the coroutine. asio's `awaitable` promise returns `suspend_always` from `initial_suspend`, so the body
+does not begin until after `co_spawn` returns — meaning a violation is a use-after-free **on the first
+execution**, not a hazard some later edit arms, and no compiler diagnostic fires on it.
+
+Two forms, two instruments, and the split is deliberate:
+
+| form | instrument | where it runs |
+|---|---|---|
+| `co_spawn(ioc, [&]{…}(), tok)` — immediately-invoked temporary | `tools/check_co_spawn_lambda.py` | **CI, ungated tier1**, buildless |
+| `auto lam = […]; co_spawn(ioc, lam(), tok)` — named closure | `tools/audit_co_spawn_named_closure.py` | **locally, on demand** |
+
+**Why the second is NOT in CI, which is the part that will get re-litigated.** Deciding the named
+form needs the closure's scope compared against the call that DRIVES the coroutine, which needs an
+AST and a compilation database. A full sweep is ~242 TUs at ~31 s each — ~35 min on four cores, hours
+on a 2-vCPU runner. A diff-scoped variant would be affordable and **strictly weaker**: it cannot see a
+site whose safety changed because a driving call moved in a file the diff did not touch. Either way it
+needs a build, so it could only live in a **gated** job — emitting nothing during the review rounds
+that are the only thing between a fresh unsafe site and merge, which is the window the buildless lexer
+was placed to cover.
+
+Weighed against that: the immediately-invoked form is already caught in the ungated job, and the named
+form requires a closure declared in a *narrower* scope than its driving call. ⚠️ **Whether the
+population is currently clean is a measurement with a date on it — look it up in #354, do not assume
+it from this page.**
+
+**Run the audit when there is a reason to:** before a release or after a wave of new `co_spawn` sites;
+when touching the pump/drain helpers, since its `DRIVING_FREE_FUNCTIONS` set decides what counts as
+*driven* and a rename there silently turns callers into findings; or as the AST-level follow-up when
+the lexer fires.
+
+⚠️ **Both tools carry their own blind-spot lists, and those lists are the point.** The lexer's
+docstring enumerates four forms that defeat it, each measured against it. The AST tool's enumerates
+the false-SAFE paths it cannot close — reachability, cross-file driving calls, fixture destructors.
+A tool trusted past its documented reach is class 1 on [`failure-classes.md`](./failure-classes.md).
+
+⚠️ **The AST tool is cross-checked by a second instrument sharing no code** —
+`tools/reconcile_co_spawn_census.py` runs the same population through `clang-query` and diffs the
+site **sets**, not the counts. Two instruments agreeing on a total while disagreeing about which
+sites those are is a finding, not a pass. Keep them as a pair; a clean sweep from a single tool with
+this one's defect history is not evidence.
 
 ### ⭐ The local idiom: pin a decision with a `static_assert`, not a comment
 
