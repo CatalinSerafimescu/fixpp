@@ -2164,6 +2164,233 @@ jobs:
       - name: "co_spawn closure-lifetime gate (#291)"
         run: python3 tools/check_co_spawn_lambda.py
 
+      # ── #353: a test compiled OUT of a sanitizer leg by its own guard ──────
+      #
+      # test_seqnum_drain_on_close.cpp guarded a whole TEST on
+      # `!defined(__SANITIZE_ADDRESS__)`. That test held BOTH use-after-frees
+      # fixed in #291, so the ASan leg — the primary detector for that class —
+      # could not have reported either one, and nothing said so: a skipped test
+      # and a passing test are indistinguishable in a leg's summary. The only
+      # signal is a per-preset test COUNT, and nobody compares those.
+      #
+      # ⚠️ WHY A SOURCE SCAN AND NOT A TEST-COUNT DIFF. Comparing
+      # `--gtest_list_tests` across presets is the more direct instrument, but it
+      # needs two BUILT binaries, so it could only live in a gated job — i.e.
+      # emit nothing until both gate labels land, which is after the review
+      # rounds that are the only thing between a fresh carve-out and merge. This
+      # runs buildless in the ungated job for the same reason the #291 guard
+      # above does. The cost is stated rather than hidden: this checks that every
+      # preset-conditional case carries a written disposition, NOT that the
+      # counts actually match at runtime.
+      #
+      # Self-test first, for the reason the #291 pair records: the denominators
+      # witness the scan's REACH, not its DETECTOR. Break the "is this test
+      # inside a sanitizer-conditional region" test and every denominator still
+      # passes on a tree that has the defect.
+      #
+      # Buildless — python3 only.
+      - name: "Regression pin — preset-conditional test census self-test (#353)"
+        run: python3 tools/check_sanitizer_test_carveouts.py --self-test
+
+      - name: "Preset-conditional test carve-out gate (#353)"
+        run: python3 tools/check_sanitizer_test_carveouts.py
+
+  # ── #354: AST audit of the named-closure co_spawn form ────────────────────
+  #
+  # THE RULE. A lambda coroutine reaches its captures THROUGH the closure object,
+  # so the closure must outlive the coroutine. #291's buildless lexer
+  # (`ci-script-pins`, ungated) catches the immediately-invoked TEMPORARY form.
+  # It cannot reach the NAMED form — `auto lam = ...; co_spawn(ioc, lam(), tok)` —
+  # because deciding that one means comparing the closure's SCOPE against the call
+  # that DRIVES the coroutine, which needs an AST and a compilation database.
+  #
+  # WHY THIS JOB IS CHEAP, which is the whole reason it can exist at all: the tool
+  # needs `compile_commands.json` (emitted at CONFIGURE time) plus the GENERATED
+  # headers — 28 TUs under tests/ include them. It does NOT need the project
+  # compiled. So this configures, builds ONLY `fixpp_codegen_generate`, and parses
+  # the TUs itself with libclang. `linux-clang-release` is used because it is the
+  # cheapest preset to configure; the audit is about SCOPES, and no verdict here
+  # depends on optimisation level or NDEBUG.
+  #
+  # ⚠️ GATED, and that is a real limitation rather than an oversight. It needs a
+  # configured build, so it sits behind `gate-precheck` and emits NOTHING during
+  # the review rounds that are the only thing between a fresh unsafe site and
+  # merge. That window belongs to the buildless lexer. Do not delete the lexer on
+  # the grounds that this job subsumes it — it does not.
+  #
+  # Measured locally at `--jobs 4`: 242 TUs, 539 s. ⚠️ An earlier figure of "~35
+  # min, dominated by clang parses" was WRONG in both halves — the parse was 8 %
+  # of it and a per-AST-node `realpath` was the rest. Re-measure from this job's
+  # own timing rather than trusting either number; it emits a `::notice::` with
+  # its own wall-clock for exactly that.
+  #
+  # ⚠️ NOT IN `tier1-required` YET, DELIBERATELY, and this must not be forgotten.
+  # The job ASSERTS (a FLAG exits non-zero) but nothing blocks merge on it until
+  # it is added to that job's `needs:`. It is held out for ONE run because the
+  # runner-side pieces — the pip-bindings / apt-library pairing, the codegen-only
+  # build, the wall-clock — have never executed in CI. Promote it once a real run
+  # has shown its timing and that it is not flaky. A job that asserts but cannot
+  # block is exactly the shape this repo has been bitten by; leaving it here
+  # permanently would be that defect.
+  co-spawn-closure-audit:
+    name: co-spawn-closure-audit
+    runs-on: ubuntu-24.04
+    needs: gate-precheck
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
+    concurrency:
+      group: tier1-${{ github.event.pull_request.number || github.ref }}-cospawn-audit
+      cancel-in-progress: true
+    env:
+      PRESET: linux-clang-release
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Clang 22 (apt.llvm.org) + Ninja
+        run: |
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22 all
+          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
+          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
+          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
+          sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
+          sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
+          sudo apt-get install -y ninja-build swig python3-dev
+          clang++ --version
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Conan
+        run: pipx install conan
+
+      - name: Initialize Conan default profile
+        run: conan profile detect --force
+
+      - uses: oras-project/setup-oras@v2
+
+      - name: Restore Conan cache from GHCR
+        run: ci/restore-conan-cache.sh ${{ env.PRESET }}
+
+      - name: Conan install
+        run: |
+          conan export conan/recipes/civetweb --version 1.16
+          conan install . -pr conan/profiles/${{ env.PRESET }} --build=missing -of build/${{ env.PRESET }}
+
+      - name: Configure (emits compile_commands.json)
+        run: cmake --preset ${{ env.PRESET }} -DFIXPP_BUILD_PYTHON=OFF
+
+      # 28 TUs under tests/ include generated headers. Without them libclang
+      # cannot parse those TUs — and this tool reports a failed parse as UNSEEN,
+      # never as clean, so the job would fail loudly rather than under-report.
+      - name: Generate codegen headers only (NOT a full build)
+        run: cmake --build build/${{ env.PRESET }} --target fixpp_codegen_generate
+
+      # ⚠️ THE BINDINGS AND THE LIBRARY ARE DELIBERATELY MISMATCHED, and the
+      # mismatch is the correct configuration rather than an accident.
+      # PyPI's `libclang` wheel tops out at 18.1.1 and BUNDLES an 18 shared
+      # library. This tree is C++23 built by clang 22, so an 18 libclang cannot
+      # parse it — every TU would die and the tool would report 242 UNSEEN files.
+      # So: take the PYTHON BINDINGS from pip and the SHARED LIBRARY from the
+      # apt-installed LLVM 22. The tool tolerates the resulting cursor-kind skew
+      # by construction (it depends only on kinds stable since early LLVM, and
+      # recurses through nodes the bindings cannot name) and REPORTS the unnamed
+      # count so the skew is visible rather than silent.
+      - name: Install libclang python bindings + locate the LLVM 22 library
+        run: |
+          set -euo pipefail
+          pip install libclang
+          CLANG_VER=$(clang++ --version | grep -oE 'clang version [0-9]+' | grep -oE '[0-9]+$')
+          LIBDIR=$(llvm-config-${CLANG_VER} --libdir)
+          LIBCLANG=""
+          for cand in "$LIBDIR/libclang.so" "$LIBDIR/libclang.so.1" "$LIBDIR/libclang-${CLANG_VER}.so.1"; do
+            [ -f "$cand" ] && { LIBCLANG="$cand"; break; }
+          done
+          # Fail LOUD. Falling back to pip's bundled 18 would parse nothing and
+          # the tool would report every TU as UNSEEN — recoverable, but only after
+          # someone reads the log. An unresolvable library is a broken job.
+          test -n "$LIBCLANG" || {
+            echo "::error::no libclang.so under $LIBDIR for clang $CLANG_VER"; ls -la "$LIBDIR" | head -40; exit 1; }
+          echo "LIBCLANG=$LIBCLANG" >> "$GITHUB_ENV"
+          echo "RESOURCE_DIR=$(clang++ -print-resource-dir)" >> "$GITHUB_ENV"
+          echo "using libclang: $LIBCLANG"
+
+          # clang-query drives the SECOND instrument. Resolve it from the LLVM we
+          # just installed, and fail loud if the toolchain did not ship it: the
+          # cross-check is what keeps the audit's zero from resting on one tool,
+          # so silently skipping it is the failure this pair exists to prevent.
+          BINDIR=$(llvm-config-${CLANG_VER} --bindir)
+          CQ=""
+          for cand in "$BINDIR/clang-query" "$(command -v clang-query-${CLANG_VER} || true)" "$(command -v clang-query || true)"; do
+            [ -n "$cand" ] && [ -x "$cand" ] && { CQ="$cand"; break; }
+          done
+          test -n "$CQ" || {
+            echo "::error::clang-query not found for clang $CLANG_VER (looked in $BINDIR and on PATH)."
+            echo "::error::llvm.sh installs it via clang-tools-$CLANG_VER; add it if the package set changed."
+            ls -la "$BINDIR" | grep -i clang | head -20; exit 1; }
+          echo "CLANG_QUERY=$CQ" >> "$GITHUB_ENV"
+          echo "using clang-query: $CQ"
+
+      # ⚠️ THE PAIR, and the order matters. The sweep's own counters witness the
+      # scan's REACH; only the fixtures witness DETECTION. A sweep alone is a gate
+      # that cannot fail for the reason it exists — and that is not hypothetical
+      # here: the argument-level lambda prune was BROKEN while every in-tree check
+      # passed, because implicit AST nodes happen to wrap the argument in real
+      # code. `--self-test` is what caught it.
+      - name: "Detector self-test — co_spawn named-closure audit (#354)"
+        run: |
+          python3 tools/audit_co_spawn_named_closure.py --self-test \
+            --libclang "$LIBCLANG" --resource-dir "$RESOURCE_DIR"
+
+      - name: "co_spawn named-closure audit (#354)"
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          FIXPP_REPO_ROOT="$PWD" python3 tools/audit_co_spawn_named_closure.py \
+            --build-dir build/${{ env.PRESET }} \
+            --libclang "$LIBCLANG" \
+            --resource-dir "$RESOURCE_DIR" \
+            --jobs 4 \
+            --json-out /tmp/co-spawn-audit.json
+          echo "::notice::co_spawn audit wall-clock: $(( $(date +%s) - START ))s"
+
+      # ⚠️ THE CROSS-CHECK IS PART OF THE GATE, not an optional extra. Both the
+      # tool docstring ("Usage — RUN THE PAIR, always") and brain/index.md ("Keep
+      # them as a pair; a clean sweep from a single tool with this one's defect
+      # history is not evidence") say so, and an earlier version of this job ran
+      # the audit alone and discarded its --json-out — which made both statements
+      # false and left the audit's zero resting on one instrument.
+      #
+      # It re-derives the SAME population through clang-query, a matcher sharing
+      # no code with the libclang walker, and diffs the site SETS rather than the
+      # counts: two instruments agreeing on a total while disagreeing about WHICH
+      # sites those are is a finding, not a pass. It fails on any non-empty
+      # difference, on any file it could not see, and on a population it cannot
+      # reconcile against.
+      - name: "co_spawn census cross-check (#354)"
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          python3 tools/reconcile_co_spawn_census.py \
+            --build-dir build/${{ env.PRESET }} \
+            --audit-json /tmp/co-spawn-audit.json \
+            --clang-query "$CLANG_QUERY" \
+            --extra-arg="-resource-dir=$RESOURCE_DIR" \
+            --jobs 4
+          echo "::notice::co_spawn cross-check wall-clock: $(( $(date +%s) - START ))s"
+
+      # The site table is what a reviewer needs to disposition a FLAG or a MANUAL
+      # without re-running a 9-minute sweep locally. It was being written to /tmp
+      # and discarded.
+      - name: Upload the audit site table
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: co-spawn-audit
+          path: /tmp/co-spawn-audit.json
+          if-no-files-found: warn
+
   check-layers:
     name: check-layers
     runs-on: ubuntu-24.04

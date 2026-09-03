@@ -1047,3 +1047,98 @@ TEST(AsioTlsTransportErrorPaths, PreflightHandshakeRejectionLeavesTransportOpen)
 }
 
 }  // namespace
+
+// ── #358: close_async() must not weaken its CALLER's cancellation shield ──────
+//
+// THE DEFECT. `reset_cancellation_state` replaces the single bottom-frame
+// cancellation state of the WHOLE co_spawn chain, not the resetting frame's own.
+// `close_async()` opened with `reset_cancellation_state(enable_total_cancellation())`,
+// which therefore DELETED the `disable_cancellation` that `Session::close()`
+// installs one frame up precisely so teardown survives the caller's signal.
+//
+// The consequence is a hang, not a wrong value: with the shield gone, a
+// cancellation arriving during close is recorded, `Session::close()`'s next
+// `co_await` throws operation_aborted before its child body runs, close() unwinds
+// WITHOUT publishing `close_result_`, and a concurrent close() spins forever in
+// the `closing` branch awaiting a result nobody will ever set. `Session::close()`'s
+// own comment describes that outcome verbatim — it is what the shield was added
+// for. Measured on windows-msvc-debug: 11 wedges / 40 on EngineSessionStrand.V12b,
+// full suite wedged on iteration 1, and 0 / 40 with the reset neutralised.
+//
+// WHAT THIS CELL ASSERTS is the PROPERTY rather than the hang: after
+// `co_await close_async()` returns, a caller that installed `disable_cancellation`
+// must still be shielded. That is one implication with a deterministic observable,
+// where the hang itself needs a race between two closes and a live session.
+//
+// ⚠️ THE TRANSPORT IS DELIBERATELY NOT CONNECTED, and that is not a shortcut. The
+// reset is the FIRST statement of close_async(), before the `state_ == closed`
+// and `!ssl_stream_` early returns, so the clobber does not depend on connection
+// state at all. Not connecting removes a loopback socket and a real handshake from
+// a cell that needs neither, making it deterministic. If a future edit moves the
+// reset below those early returns, this cell must be revisited — it would then be
+// asserting the property on a path that no longer reaches the reset.
+//
+// RED before the fix: close_async leaves the frame at `enable_total_cancellation`,
+// so the emit below IS recorded, `cancelled()` reads terminal, and the following
+// `co_await` throws.
+TEST(AsioTlsTransportErrorPaths, CloseAsyncPreservesCallerDisableCancellation) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto client = fixture.make_client(ioc.get_executor());
+    Transport* client_raw = client.get();
+
+    asio::cancellation_signal sig;
+    bool probe_completed = false;
+    bool await_after_close_threw = false;
+    asio::cancellation_type_t cancelled_after_close = asio::cancellation_type::none;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            // Exactly what Session::close() installs, and for the same reason.
+            co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+
+            (void)co_await client_raw->close_async();
+
+            // Emitted AFTER close_async returned. Under the shield this must be
+            // ignored; it is recorded only if close_async re-enabled cancellation
+            // on the shared bottom frame.
+            sig.emit(asio::cancellation_type::terminal);
+
+            auto cs = co_await asio::this_coro::cancellation_state;
+            cancelled_after_close = cs.cancelled();
+
+            // The operative consequence: the caller's NEXT co_await must not throw.
+            // This is the shape that unwound Session::close() before publishing
+            // close_result_.
+            try {
+                co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+            } catch (...) {
+                await_after_close_threw = true;
+            }
+            probe_completed = true;
+        },
+        asio::bind_cancellation_slot(sig.slot(), asio::detached));
+
+    ioc.run_for(10s);
+
+    ASSERT_TRUE(probe_completed)
+        << "#358: the probe coroutine never completed — a broken cell, not a RED proof.";
+
+    EXPECT_EQ(cancelled_after_close, asio::cancellation_type::none)
+        << "#358: after `co_await close_async()` the caller's disable_cancellation shield was "
+        << "GONE — a terminal emitted afterwards was recorded (cancelled="
+        << static_cast<unsigned>(cancelled_after_close) << "). close_async()'s entry "
+        << "reset_cancellation_state replaces the WHOLE chain's bottom-frame state, so it must "
+        << "install disable_cancellation{} and not enable_total_cancellation(). See the #358 "
+        << "note at that reset.";
+
+    EXPECT_FALSE(await_after_close_threw)
+        << "#358: the caller's next co_await after close_async() threw operation_aborted. That "
+        << "is the exact unwind that leaves Session::close() without publishing close_result_, "
+        << "after which a concurrent close() spins forever in the `closing` branch.";
+}

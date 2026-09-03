@@ -1067,8 +1067,40 @@ void asio_tls_transport::setup_ssl_ctx_() {
 asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     using E = core::error;
 
-    // Enable total cancellation (D-17).
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    // #357 — the SAME two-argument OUT filter async_connect and async_read_some
+    // install, for the same reason, on the third op that goes through asio's SSL
+    // composed operation. `ssl::detail::io_op` derives from
+    // base_from_cancellation_state's NO-FILTER constructor, which builds a
+    // `cancellation_state(slot)` — documented and implemented as TERMINAL-ONLY. A
+    // one-argument reset installs the filter as BOTH in and out
+    // (cancellation_state.hpp: `impl<Filter, Filter>(filter, filter)`), so
+    // Engine::stop()'s `total` was forwarded as `total` and then silently dropped
+    // by that inner terminal-only state: an in-flight handshake did not abort, and
+    // stop()'s step-3 join on outstanding_counter_ could not retire until the
+    // accepted transport's tls_handshake_timeout (1500 ms at engine.cpp's accept
+    // path) ran out. The OUT filter maps any accepted cancellation to `terminal`
+    // for the forwarded child op.
+    //
+    // The timeout-vs-cancel classification below survives this: the state records
+    // `cancelled_ = in_filter_(in)` and only THEN computes `out_filter_(cancelled_)`
+    // (cancellation_state.hpp `impl::operator()`), so `cs.cancelled()` still reads
+    // `total` and the operation_aborted branch still separates
+    // transport_handshake_cancelled from transport_handshake_timeout.
+    //
+    // ⚠️ ONE reset, not a second one before the await — unlike async_connect, which
+    // resets twice. A reset RECONSTRUCTS the state and does not replay an earlier
+    // emission, so a late second reset silently discards a cancellation that
+    // arrived between the two.
+    //
+    // ⚠️ This also makes a pure `partial` abort the handshake, where the child's
+    // terminal-only state used to drop it. That matches what the two sibling ops
+    // already do; no in-tree caller emits `partial` at a transport.
+    // [[feedback_asio_cospawn_total_cancellation_default]];
+    // [[feedback_engine_stop_must_close_transports_total_cancel_insufficient]].
+    co_await asio::this_coro::reset_cancellation_state(
+        asio::enable_total_cancellation(), [](asio::cancellation_type ct) {
+            return ct == asio::cancellation_type::none ? ct : asio::cancellation_type::terminal;
+        });
 
     // FR-006 is unconditional: after close() returns, EVERY async_* answers
     // transport_already_closed. This precedes the one-shot guard below, which
@@ -1316,8 +1348,32 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     std::span<const std::byte> bytes) {
     using E = core::error;
 
-    // Enable total cancellation (D-17).
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    // #357 — the fourth site needing the OUT filter, and the one with TWO layers
+    // to get through rather than one. See async_handshake above for the mechanism;
+    // here asio's own composed `async_write` installs `enable_partial_cancellation`
+    // (impl/write.hpp) BEFORE the SSL io_op's terminal-only state, so a pure
+    // `total` was dropped one layer higher still. Mapping to `terminal` clears
+    // both, because terminal is in enable_partial_cancellation's mask and is the
+    // only type the SSL op accepts.
+    //
+    // ⚠️ THIS IS A UNIFORMITY FIX, NOT A WITNESSED ONE, and the distinction is
+    // deliberate rather than an omission. The DEFECT is structural: two layers
+    // drop `total`, which is true by construction and does not depend on any
+    // caller. Whether an in-tree caller can currently REACH it is a survey, and a
+    // survey re-arms itself on every new call site, so no count or window is
+    // recorded here. What is recorded is why it was fixed rather than deferred:
+    // it is the same one-line defect as the three siblings, and leaving one of
+    // four wrong is how the next reader concludes the asymmetry is deliberate.
+    //
+    // To re-derive reachability if you need it: a write must be SUSPENDED when
+    // stop() fires, on a transport stop() cannot otherwise reach — i.e. before
+    // publication, since after it stop()'s step-2 close_async() calls
+    // socket_.cancel() and wakes the write. Both reviewers of #357 judged that
+    // window narrow in this tree; neither claimed it empty, and no cell drives it.
+    co_await asio::this_coro::reset_cancellation_state(
+        asio::enable_total_cancellation(), [](asio::cancellation_type ct) {
+            return ct == asio::cancellation_type::none ? ct : asio::cancellation_type::terminal;
+        });
 
     // state_ != handshaken covers both `closed` and pre-handshake states.
     // ssl_stream_ is engaged iff state_ == handshaken (see async_read_some
@@ -1439,17 +1495,57 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
 // close_async — graceful TLS shutdown that actually reaches the wire (#348)
 // ─────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] asio::awaitable<core::expected_t<void>> asio_tls_transport::close_async() {
-    // Same cancellation policy as the five sibling async methods on this class,
-    // which all reset here — close_async was the one that did not, and its
-    // quiesce loop below is the reason that mattered: without the reset, a
-    // cancellation arriving mid-close makes the NEXT `co_await` in the loop
-    // throw operation_aborted out of a teardown path whose callers document a
-    // clean `expected_t<void>{}` return. `this_coro` awaiters are exempt from
-    // asio's throw-on-cancelled check, so this line is reachable even when the
-    // inherited state is already cancelled. ⚠️ It does NOT protect the CALLER's
-    // own `co_await t->close_async()` — that throw happens one frame up, before
-    // this body runs; see the CANCELLATION TIMING note in transport.hpp.
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    // ⚠️ `disable_cancellation`, NOT the siblings' `enable_total_cancellation` —
+    // and this line was a HANG on main until #358. Read the whole note before
+    // "restoring consistency" with the five sibling methods.
+    //
+    // WHAT WENT WRONG. `reset_cancellation_state` REPLACES the single
+    // bottom-frame cancellation state of the WHOLE co_spawn chain, not this
+    // frame's own. `Session::close()` installs `disable_cancellation` one frame
+    // up (session.cpp) precisely so teardown survives the caller's signal, and
+    // its comment there spells out the consequence of losing it: a later
+    // `co_await` aborts, close() unwinds BEFORE publishing `close_result_`, and
+    // a concurrent close() then spins forever in the `closing` branch awaiting a
+    // result nobody will ever set. Resetting to `enable_total_cancellation()`
+    // here deleted that shield from underneath its owner, and produced exactly
+    // the hang that comment was written to prevent.
+    //
+    // Measured on windows-msvc-debug at 6a1b1bb2, EngineSessionStrand.V12b:
+    // 11 wedges / 40 with this line as `enable_total_cancellation()`; 0 / 40 with
+    // the reset neutralised, and 0 / 40 with the shield re-installed after the
+    // await. Full suite wedged on iteration 1. The `Session::close()` milestone
+    // trace read `cancelled=0` before this call and `cancelled=4` after it, with
+    // 20/20 correlation between that transition and the wedge.
+    //
+    // WHY THE OLD VALUE NEVER SERVED ITS OWN STATED INTENT. The note it carried
+    // said the reset stops a cancellation arriving mid-close from throwing out of
+    // a teardown path whose callers document a clean `expected_t<void>{}` return.
+    // `enable_total_cancellation` cannot do that — it ACCEPTS cancellation, so one
+    // arriving is recorded and the next `co_await` throws regardless. All it ever
+    // achieved was discarding a cancellation recorded EARLIER. `disable_cancellation`
+    // achieves the stated intent unconditionally.
+    //
+    // ⚠️ THIS FUNCTION LEAVES THE FRAME WITH CANCELLATION DISABLED after it
+    // returns, because a reset cannot be scoped. That is a deliberate choice, not
+    // an oversight: `reset_cancellation_state` clobbers the caller whatever value
+    // is passed, so the only question is which clobber is least harmful, and for a
+    // teardown-only method it is the one `Session::close()` installs for itself.
+    //
+    // ⚠️ THE OTHER ADOPTER INSTALLS NOTHING, and an earlier version of this
+    // comment claimed both did. The detached co_spawn at engine.cpp's stop step 2
+    // has no reset at all — harmlessly, because `asio::detached` leaves the slot
+    // unconnected so any reset there would be a no-op, but the claim was false and
+    // this comment tells you to re-derive the adopter set. Someone doing exactly
+    // that finds it wrong and has to work out whether it matters. It does not; the
+    // reasoning above still holds, because a frame with no connected slot cannot
+    // have a shield to lose. Re-derive with `git grep close_async -- src`.
+    //
+    // `this_coro` awaiters are exempt from asio's throw-on-cancelled check, so
+    // this line is reachable even when the inherited state is already cancelled.
+    // ⚠️ It still does NOT protect the CALLER's own `co_await t->close_async()` —
+    // that throw happens one frame up, before this body runs; see the CANCELLATION
+    // TIMING note in transport.hpp.
+    co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
 
     // Idempotent, exactly like close().
     if (state_ == state_t::closed) {
@@ -1552,9 +1648,42 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
                 asio::error_code wait_ec;
                 co_await quiesce.async_wait(asio::redirect_error(asio::use_awaitable, wait_ec));
                 if (wait_ec) {
-                    // Our own cancellation. Break rather than spin to the deadline
-                    // -- every subsequent wait would complete instantly with the
-                    // same error, turning a bounded join into a hot loop.
+                    // Break rather than spin to the deadline -- every subsequent
+                    // wait would complete instantly with the same error, turning a
+                    // bounded join into a hot loop.
+                    //
+                    // ⚠️ UNREACHABLE AS OF #358, and kept deliberately. This branch
+                    // existed for "our own cancellation", which the entry-level
+                    // `disable_cancellation` now makes impossible: nothing else
+                    // cancels `quiesce` (it is a local, cancelled only at scope
+                    // exit).
+                    //
+                    // MEASURED, not predicted. A poll counter and an exit-reason
+                    // probe were run on both arms against
+                    // CloseAsyncCancelledMidCloseStillClosesTheSocket:
+                    //     pre-#358 : "BREAK on wait_ec after 1 polls", exit polls=1
+                    //     post-#358: no BREAK line,                    exit polls=1
+                    // So the branch really did fire before and really does not now
+                    // -- and it costs nothing here, because the loop exits after ONE
+                    // poll either way: the op genuinely quiesces (still_suspended=0).
+                    // The probe is proven able to fire (it did, pre-fix), so its
+                    // silence post-fix is meaningful rather than a dead instrument.
+                    //
+                    // ⚠️ THAT IS A BOUND, NOT AN ALL-CLEAR. The 1 s worst case needs
+                    // an SSL op that SURVIVES socket_.cancel(), which this file's own
+                    // give-up branch says nothing in the suite can produce, and which
+                    // nobody has tried to construct. Against such an op the loop now
+                    // backs off at 1 ms to `close_deadline` instead of breaking out
+                    // early -- bounded by `tls_close_timeout`, and the designed
+                    // fallback, but slower. A per-cell A/B over 36 cells put the
+                    // largest median delta at +2 ms, which measures the suites we
+                    // have, not the case they cannot reach.
+                    //
+                    // Kept because the guard is correct for any state where
+                    // cancellation IS enabled, and the entry reset is one edit away
+                    // from changing. Do NOT write a cell claiming to drive it
+                    // without first re-enabling cancellation at the entry reset --
+                    // and if you do that, re-read the #358 note there first.
                     break;
                 }
             }
@@ -1640,20 +1769,40 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         // nothing else can close it, so close it here and report the same
         // best-effort success close() reports — the connection IS down.
         //
-        // WITNESSED by CloseAsyncCancelledMidCloseStillClosesTheSocket in
-        // test_inflight_exclusivity.cpp, which kills the mutation that removes
-        // this socket_.close(): the peer's read then stays pending forever.
+        // ⚠️ NO CELL DRIVES THIS HANDLER AS OF #358, and this is the SECOND time
+        // this comment has been wrong about that. Read both rounds before editing.
         //
-        // ⚠️ AN EARLIER DRAFT OF THIS COMMENT SAID "NO CELL DRIVES THIS HANDLER"
-        // and explained at length why one could not — reasoning that landing a
-        // cancellation inside the microsecond-wide async_shutdown suspension
-        // would be racing. That reasoning described a path this handler is NOT
-        // usually reached by. What the cell actually does is emit during the
-        // QUIESCE; the wait_ec break then falls through with the state still
-        // cancelled, and the throw happens at the async_shutdown `co_await`'s
-        // precheck rather than inside the shutdown. The claim was refuted by
-        // running the mutation, which is the only reason it is not still here.
-        // The give-up branch above is the exit with no cell — see its comment.
+        // ROUND 1 (#348). The comment said "no cell drives this handler" and
+        // explained why one could not — landing a cancellation inside the
+        // microsecond-wide async_shutdown suspension would be racing. That was
+        // refuted by running the mutation: CloseAsyncCancelledMidCloseStillCloses
+        // TheSocket does drive it, by emitting during the QUIESCE, after which the
+        // wait_ec break falls through with the state still cancelled and the throw
+        // lands at the async_shutdown co_await's PRECHECK rather than inside it.
+        //
+        // ROUND 2 (#358). That whole route required close_async's entry reset to
+        // leave cancellation ENABLED. It no longer does — see the #358 note at the
+        // reset. With `disable_cancellation` there is no recorded cancellation, no
+        // precheck throw, and the cell reaches this handler on no path at all.
+        //
+        // MEASURED 2x2, using the cell's own documented RED-ARM contract (delete
+        // the socket_.close(ec) below):
+        //     enable_total_cancellation + close present -> PASS
+        //     enable_total_cancellation + close REMOVED -> FAIL   (cell drove it)
+        //     disable_cancellation      + close present -> PASS
+        //     disable_cancellation      + close REMOVED -> PASS   (cell does NOT)
+        // The FAIL row is what proves the mutation harness can report non-zero, so
+        // the bottom-right PASS is a real loss of power and not a dead instrument.
+        //
+        // THE HANDLER STAYS. It still guards the invariant that no exit past the
+        // state transition leaves the socket open, and the body can still throw —
+        // timer construction and asio's own allocations are the remaining sources.
+        // What is gone is the WITNESS, and that is disclosed rather than papered
+        // over: the cell above now exercises the normal path, not this one.
+        //
+        // ⚠️ DO NOT "restore" the witness by reverting the entry reset. That reset
+        // is a hang fix (#358, measured 11 wedges / 40). A witness for this handler
+        // needs a fault-injection seam, not a cancellation.
         asio::error_code ec;
         socket_.close(ec);
         co_return core::expected_t<void>{};

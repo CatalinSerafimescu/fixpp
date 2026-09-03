@@ -370,10 +370,15 @@ private:
     // handshake bound to socket_. ⚠️ "which is thread-safe" was struck
     // 2026-08-31 (#333): asio's basic_stream_socket @par Thread Safety block
     // says "Shared objects: Unsafe" and carves out only specific SYNCHRONOUS
-    // operations (send/receive/connect/shutdown) — cancel is not among them. Each public coroutine
-    // also calls reset_cancellation_state(enable_total_cancellation()) at
-    // entry (D-17), allowing FSM-emitted cancellation_type::total to fire
-    // through the awaiter's native slot. No per-transport cancellation_signal
+// ⚠️ THE ENTRY RESET IS NOT UNIFORM — see the CANCELLATION
+    // TIMING block in transport.hpp, which is the canonical statement.
+    // This comment used to say every public coroutine opens with
+    // reset_cancellation_state(enable_total_cancellation()) (D-17). That
+    // is now false for FIVE of six methods on this class: close_async
+    // installs disable_cancellation{}, and connect/handshake/read/write
+    // install the TWO-argument form whose OUT filter maps any accepted
+    // cancellation to `terminal` for the composed child op. Derive the
+    // shape from what each method AWAITS; do not assume it from here. No per-transport cancellation_signal
     // is held — the socket itself is the cancel sink.
 };
 
