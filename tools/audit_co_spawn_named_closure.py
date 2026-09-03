@@ -537,10 +537,12 @@ class SiteWalker:
             # ⚠️ PRUNE AT LAMBDA BODIES. An unpruned descent walks INTO the spawned
             # lambda's own body and mistakes a closure invoked in there for the
             # spawned argument itself. Measured: it reported
-            # `co_spawn(..., read_bufs(), ...)` at
-            # tests/transport/test_asio_plain_transport_config.cpp:238, where the
+            # `co_spawn(..., read_bufs(), ...)` in
+            # tests/transport/test_asio_plain_transport_config.cpp's
+            # `AsioPlainTransportConfig.LingerAndBufferSizeKnobsApplied`, where the
             # argument is a correctly-passed uninvoked `[&]() -> awaitable<void>`
-            # and `read_bufs` is a plain non-coroutine helper called inside it.
+            # and the `auto read_bufs = [&](const asio::ip::tcp::socket& s, ...)`
+            # declared inside it is a plain non-coroutine helper.
             # This is the same confusion tools/check_co_spawn_lambda.py's docstring
             # calls out — telling the argument-level invocation from an inner
             # invoked lambda nested inside a correctly-passed outer one.
