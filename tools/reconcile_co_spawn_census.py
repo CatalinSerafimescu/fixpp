@@ -106,31 +106,39 @@ def main() -> int:
     ap.add_argument("--audit-json", required=True, help="--json-out from the libclang walker")
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--jobs", type=int, default=4)
-    ap.add_argument("--limit", type=int, default=0, help="only the first N files (subset run)")
     args = ap.parse_args()
 
     with open(args.audit_json, encoding="utf-8") as fh:
         audit = json.load(fh)
     lib_sites = {(os.path.realpath(s["file"]), s["line"]) for s in audit["sites"]}
 
-    with open(os.path.join(args.build_dir, "compile_commands.json"), encoding="utf-8") as fh:
-        db = json.load(fh)
-    files = []
-    seen = set()
-    for e in db:
-        f = os.path.realpath(os.path.join(e.get("directory", "."), e["file"]))
-        if f in seen:
-            continue
-        seen.add(f)
-        try:
-            with open(f, encoding="utf-8", errors="replace") as src:
-                if "co_spawn" not in src.read():
-                    continue
-        except OSError:
-            continue
-        files.append(f)
-    if args.limit:
-        files = files[: args.limit]
+    # ⚠️ THE POPULATION COMES FROM THE AUDIT RUN, NEVER RE-DERIVED HERE.
+    # A set-diff is only sound if both instruments saw the same files. This script
+    # used to rebuild the list from compile_commands.json with a hand-copied
+    # equivalent of the audit's own filter -- which silently diverged the moment
+    # the audit was run with `--filter`, putting every site outside the filter into
+    # the "only clang-query" bucket whose entire purpose is that each entry gets
+    # hand-inspected. `--limit` here did the mirror-image damage, manufacturing
+    # "only libclang (ALARMING)" hits, which is the signal reserved for "the
+    # matcher is missing a shape". Both readings look like findings and are
+    # artefacts of the population, not the detectors.
+    #
+    # The independence this script claims is between the two DETECTORS -- a
+    # clang-query matcher and a libclang walker, sharing no code. It was never
+    # about the population, and sharing the population is what makes the diff mean
+    # anything.
+    if "files" not in audit:
+        print(
+            "ERROR: the audit JSON has no `files` key, so the population it scanned is\n"
+            "  unknown and a set-diff against it would be meaningless. Re-run\n"
+            "  tools/audit_co_spawn_named_closure.py --json-out <file> to produce one."
+        )
+        return 1
+    files = [f for f in audit["files"] if os.path.exists(f)]
+    missing = len(audit["files"]) - len(files)
+    if missing:
+        print(f"⚠️ {missing} file(s) from the audit population no longer exist — the audit "
+              f"JSON is stale relative to the tree.")
 
     cq_sites, failures = run_clang_query(
         args.clang_query, args.build_dir, files, args.timeout, args.jobs

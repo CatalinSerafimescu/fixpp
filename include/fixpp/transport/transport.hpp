@@ -66,9 +66,36 @@ struct ConnectInfo;
 //
 // CANCELLATION TIMING (#341) — the canonical statement; the implementations
 // point here rather than repeating it. Cancellation takes effect from the
-// FIRST REAL SUSPENSION POINT of each method, never at entry. Every async_*
-// opens with `reset_cancellation_state(enable_total_cancellation())` (D-17),
-// and that call re-constructs the coroutine's cancellation_state from the
+// FIRST REAL SUSPENSION POINT of each method, never at entry.
+//
+// ⚠️ THE POLICY IS NOT UNIFORM, and this note said it was until #357/#358. There
+// are THREE shapes, and which one a method needs is decided by WHAT IT AWAITS,
+// not by its name. Re-derive from the awaited call; do not copy from a sibling.
+//
+//   (a) one-argument `reset_cancellation_state(enable_total_cancellation())`
+//       — enough when the awaited op is RAW (a reactive socket op accepts
+//       terminal|partial|total directly, per asio/detail/
+//       reactive_socket_service_base.hpp). Example: plain async_read_some.
+//
+//   (b) TWO-argument, with an OUT filter mapping any accepted cancellation to
+//       `terminal` — REQUIRED when the awaited op is COMPOSED and installs its
+//       own narrower state, which silently drops `total`. asio's SSL io_op is
+//       TERMINAL-ONLY; asio's composed async_write/async_read install
+//       `enable_partial_cancellation` (terminal|partial). Both discard a pure
+//       `total`. Sites: TLS connect/handshake/read/write, plain write.
+//
+//   (c) `reset_cancellation_state(disable_cancellation{})` — for a teardown path
+//       that must COMPLETE. Site: TLS close_async. Cancellation takes effect at
+//       NO suspension point there, which is the whole intent.
+//
+// ⚠️ AND THE RESET IS NOT LOCAL. It replaces the bottom-frame cancellation state
+// of the WHOLE co_spawn chain, so a callee's reset silently rewrites its
+// CALLER's policy. That is not a footnote: it was a measured hang (#358), where
+// close_async's reset deleted the `disable_cancellation` Session::close() had
+// installed to survive teardown. Before changing any reset, ask what the callers
+// installed and why.
+//
+// A reset call re-constructs the coroutine's cancellation_state from the
 // parent slot; the ctor emplaces a fresh impl whose `cancelled_` is
 // value-initialised, so an emission that already happened is NOT replayed
 // into the new state. Both awaiters involved are `await_ready()==true` with

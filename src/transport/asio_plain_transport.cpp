@@ -317,8 +317,28 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     std::span<const std::byte> bytes) {
     using E = core::error;
 
-    // Enable total cancellation (D-17).
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    // #357 — the OUT filter, for the same reason the TLS write has it, on the
+    // SAME asio layer. This method awaits the COMPOSED `asio::async_write`, whose
+    // write_op installs `enable_partial_cancellation()` (asio/impl/write.hpp) —
+    // a mask of terminal|partial that does NOT contain `total`. So Engine::stop()'s
+    // `total` was accepted by this frame, forwarded unchanged by the one-argument
+    // reset that used to be here, and then dropped one layer down.
+    //
+    // ⚠️ THIS IS THE PLAIN TRANSPORT, and it was missed when the four TLS sites
+    // were fixed — found by a reviewer applying that commit's own argument
+    // ("leaving one of four wrong is how the next reader concludes the asymmetry
+    // is deliberate") across the file boundary the asio mechanism does not respect.
+    //
+    // ⚠️ `async_read_some` above does NOT need this and must not get it "for
+    // symmetry": it awaits the RAW `socket_.async_read_some`, and a reactive
+    // socket op's cancellation handler accepts terminal|partial|total directly
+    // (asio/detail/reactive_socket_service_base.hpp). The distinction is COMPOSED
+    // vs RAW, not read vs write — re-derive it from the awaited call, never from
+    // this list.
+    co_await asio::this_coro::reset_cancellation_state(
+        asio::enable_total_cancellation(), [](asio::cancellation_type ct) {
+            return ct == asio::cancellation_type::none ? ct : asio::cancellation_type::terminal;
+        });
 
     // state_ != connected covers both `fresh` and `closed`.
     if (state_ != state_t::connected) {

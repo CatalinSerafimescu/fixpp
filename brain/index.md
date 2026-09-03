@@ -193,13 +193,19 @@ Two forms, two instruments, and the split is deliberate:
 | `auto lam = […]; co_spawn(ioc, lam(), tok)` — named closure | `tools/audit_co_spawn_named_closure.py` | **locally, on demand** |
 
 **Why the second is NOT in CI, which is the part that will get re-litigated.** Deciding the named
-form needs the closure's scope compared against the call that DRIVES the coroutine, which needs an
-AST and a compilation database. A full sweep is ~242 TUs at ~31 s each — ~35 min on four cores, hours
-on a 2-vCPU runner. A diff-scoped variant would be affordable and **strictly weaker**: it cannot see a
-site whose safety changed because a driving call moved in a file the diff did not touch. Either way it
-needs a build, so it could only live in a **gated** job — emitting nothing during the review rounds
-that are the only thing between a fresh unsafe site and merge, which is the window the buildless lexer
-was placed to cover.
+form needs the closure's scope compared against the call that DRIVES the coroutine, which needs an AST
+and a compilation database. A diff-scoped variant is **strictly weaker** — it cannot see a site whose
+safety changed because a driving call moved in a file the diff did not touch — and either variant
+needs a build, so it could only live in a **gated** job, emitting nothing during the review rounds
+that are the only thing between a fresh unsafe site and merge. That window is what the buildless lexer
+covers.
+
+⚠️ **COST IS NOT ONE OF THE REASONS, and an earlier version of this page said it was.** It cited
+"~242 TUs at ~31 s each — ~35 min on four cores, hours on a 2-vCPU runner", attributing the cost to
+clang parses. Profiling showed the parse was 8 % of it and a per-AST-node `realpath` was the rest; a
+measured full sweep now runs in **539 s (~9 min) at `--jobs 4`**. The decision survives on gating and
+scope, not on runtime — do not re-derive the old figure from this paragraph, and re-measure before
+citing any figure at all.
 
 Weighed against that: the immediately-invoked form is already caught in the ungated job, and the named
 form requires a closure declared in a *narrower* scope than its driving call. ⚠️ **Whether the

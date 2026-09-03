@@ -36,23 +36,17 @@
 // an absence — the same shape round 4 rejected for T6's round-2 form); filed
 // as residual T046, not bought here.
 //
-// Deterministic promptness construction (T045/SC-016 — NOT a wall-clock
-// threshold): an intermediate timer the TEST owns is armed at 500ms against
-// kFirstFrameDeadline's 5000ms — D-6.12's own T2b figure, a one-sided 10x
-// margin. The assertion is an ORDERING between two test-controlled events
-// (did the timer's handler run before stop() completed?), not a comparison
-// of elapsed wall-clock against a constant. The context is always drained to
-// stop() completion regardless of which fires first — Engine::stop() must be
-// co_await'ed to completion before the Engine is destroyed (engine.hpp), so
-// an early return mid-teardown would leave the Engine (and this TU's stack
-// locals it references) in an unsafe state.
+// Deterministic promptness construction (T045/SC-016): see kPromptHandlerBudget
+// below — ONE canonical statement, and the cells point at it. Both cells must
+// still drive the context to stop() completion: Engine::stop() has to be
+// co_await'ed to completion before the Engine is destroyed (engine.hpp), or the
+// Engine and this TU's stack locals are left in an unsafe state.
 //
 // Anchors: spec.md SC-015/FR-015; research.md D-6.1/D-6.12/D-6.12b/D-6.13a;
 //          tasks.md T022; engine_firstframe_test.cpp (probe pattern, #228).
 
 #include <gtest/gtest.h>
 
-#include <cstdio>
 
 #include <array>
 #include <asio/co_spawn.hpp>
@@ -318,26 +312,10 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
 // complete, by construction, for as long as the test cares to look. No barrier,
 // no inference, no scheduler dependence.
 //
-// THE ASSERTION IS AN ORDERING, not a wall-clock threshold — same construction
-// as the cell above (D-6.12b). The intermediate timer is armed at 500 ms
-// against the accept path's tls_handshake_timeout, which engine.cpp sets on
-// accepted_transport_config. Re-derive that value from engine.cpp rather than
-// trusting a number here; what matters is that it is the budget stop() must NOT
-// have to wait out, and that it is several times 500 ms.
-//
-// ⚠️ "ORDERING, NOT WALL-CLOCK" IS ONLY HALF TRUE, and the cell above inherits
-// the same limitation — established while reviewing #357, so it is recorded at
-// both cells rather than left in a parked issue's comment thread. The flag is
-// set by an ORDERING test (`!stop_done` inside the timer's own handler), but the
-// thing being ordered is a REAL `asio::steady_timer` against a chain of posted
-// handlers. A process-level stall of >= 500 ms landing after the timer is armed
-// and before stop() completes makes the reactor find the timer expired and
-// enqueue its handler AHEAD of stop()'s remaining strand hops — so the flag is
-// set even though stop() did no more work than usual. #357 is one observation
-// consistent with exactly that (56 tests in the same job ran 0.9-1.6 s slower
-// than in a passing re-run of the same SHA, most touching no socket at all).
-// A failure here is therefore evidence, not proof; re-run before concluding
-// regression, and check the job for a runner-wide stall first.
+// THE ASSERTION counts HANDLERS — see kPromptHandlerBudget at the top of this
+// file for the mechanism, the measured separation, and the two constructions
+// that were tried first and are vacuous. This cell adds nothing to that account
+// and deliberately does not restate it.
 //
 // ⚠️ NON-VACUITY IS THE RED ARM, and it is the only thing that proves this cell
 // can report non-zero. Revert either OUT filter in asio_tls_transport.cpp and
@@ -386,14 +364,17 @@ TEST(FirstFrameStop, StopIsPromptWhileAcceptedHandshakeIsInFlight) {
         stop_done = true;
     });
 
-    // THE BARRIER — `poll()`, never `run_one()`, and NO wall clock anywhere.
-    // poll() executes only work that is ALREADY READY and returns 0 rather than
-    // blocking. So this loop asks the discriminating question directly: can
-    // Engine::stop() complete without any real timer having to expire? Under the
-    // defect it cannot — the accept loop is pinned in async_handshake until
-    // tls_handshake_timeout fires — so the queue drains, poll() returns 0, and
-    // stop_done is still false. stop()'s own joins use ZERO-length steady_timers,
-    // which are already expired when poll() inspects them, so they do not stall it.
+    // THE BARRIER — count HANDLERS. See kPromptHandlerBudget at the top of this
+    // file for why, for the measured healthy-vs-mutant separation, and for the two
+    // constructions that were tried first and are vacuous.
+    //
+    // ⚠️ AN EARLIER VERSION OF THIS COMMENT DESCRIBED A `poll()` LOOP and is gone
+    // rather than trimmed. It did not merely fail to match the code below — it
+    // recommended the one construction that was MEASURED not to work: `poll()`
+    // runs until the queue is EMPTY, and stop()'s joins keep re-arming
+    // zero-length timers, so a single poll() call spins for the whole timeout and
+    // the RED arm PASSED with rounds == 1. A stale comment that re-proposes a
+    // refuted mechanism is worse than none.
     std::size_t handlers = 0;
     while (!stop_done) {
         ASSERT_GT(ioc.run_one(), 0u)

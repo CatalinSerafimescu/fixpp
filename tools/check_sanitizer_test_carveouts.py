@@ -81,6 +81,29 @@ it exists.
   4. `#if 0` / dead branches. A test inside one is reported if the condition text
      mentions a tracked macro, and not otherwise; no branch is evaluated.
 
+⚠️ THE C++ LEXING HERE IS A SECOND COPY, and staying a copy is a decision with
+measurements behind it. `tools/check_co_spawn_lambda.py` ships the same
+`splice`/`strip_noncode` pair for the same class of scan. `tools/` has NO
+cross-imports at all (all 20 checkers are standalone single files), so importing
+or lifting a shared module would be architecturally novel for one gate. What was
+done instead: the ONE divergence with reach — the C++14 digit separator, which
+the sibling handled and this did not — was ported, with a self-test arm so it
+cannot regress.
+
+The other divergences were MEASURED, not waved off, and are inert in this tree:
+
+  * `\r\n` continuations: **0** files under `tests/` contain CR (`git grep -lI $'\r'`).
+    And a failed splice degrades safely here — the `#if` line still carries the
+    tracked macro, so the region is still recognised.
+  * `#include <...>` angle-path stripping: irrelevant to this scanner, which looks
+    for directives and TEST macros; neither can appear inside an angle path.
+
+Both sweeps were run end to end under the two strippers and produced identical
+counters and identical finding sets. ⚠️ **That is a measurement of TODAY, and the
+next hardening will land on one copy only.** If you touch either lexer, diff it
+against the other; a third copy already exists in shell
+(`tools/check_dictionary_snapshot_exclusivity.sh`'s `strip_comments_preserve_code`).
+
 Buildless — python3 only, no compiler, no compilation database. It therefore runs
 in the UNGATED tier1 job and fires during review, unlike a per-preset test-count
 comparison, which needs two built binaries and so could only ever run behind the
@@ -202,6 +225,33 @@ def strip_noncode(text: str) -> str:
                     out[p] = " "
             i = k
             continue
+        if c == "'":
+            # C++14 digit separator (`10'000`, `0x1F'FF`) is NOT a char literal.
+            # Distinguish by the token to its left: a separator's token starts with
+            # a digit; an encoding prefix (`L'a'`, `u8'a'`) starts with a letter.
+            #
+            # ⚠️ PORTED FROM THE SIBLING LEXER, which is the point of this comment.
+            # `tools/check_co_spawn_lambda.py`'s strip_noncode/splice pair does the
+            # same job and had this guard when this file did not. Measured on the
+            # two implementations before the port:
+            #     static constexpr int kN = 10'000;  // x
+            #   sibling  -> "static constexpr int kN = 10'000;      "   (correct)
+            #   this one -> "static constexpr int kN = 10           "   (ate the line)
+            # No reachable miss existed here — the scan breaks at a newline and a
+            # digit separator cannot share a line with `#if` or `TEST(` — so this is
+            # DRIFT REPAIR, not a bug fix. `tools/` has no cross-imports by
+            # convention, so the copies stay separate; when you touch either, DIFF
+            # IT AGAINST THE OTHER. A third copy lives in shell at
+            # tools/check_dictionary_snapshot_exclusivity.sh's
+            # strip_comments_preserve_code.
+            k = i - 1
+            while k >= 0 and (text[k].isalnum() or text[k] == "'"):
+                k -= 1
+            tok = text[k + 1 : i]
+            if tok and tok[0].isdigit() and i + 1 < n and text[i + 1].isalnum():
+                i += 1
+                continue
+
         if c in ('"', "'"):
             quote = c
             j = i + 1
@@ -515,6 +565,16 @@ TEST(Suite, WithoutAsan) { }
         ["Suite.UnderAsan", "Suite.WithoutAsan"],
     ),
     (
+        "a C++14 digit separator is not a char literal (ported guard)",
+        """
+#if !defined(__SANITIZE_ADDRESS__)
+static constexpr int kN = 10'000;
+TEST(Suite, AfterDigitSeparator) { }
+#endif
+""",
+        ["Suite.AfterDigitSeparator"],
+    ),
+    (
         "backslash-continued condition still parses (C++ phase 2)",
         """
 #if !defined(__SANITIZE_ADDRESS__) && \\
@@ -534,6 +594,34 @@ TYPED_TEST(Fix, C) { }
 #endif
 """,
         ["Fix.A", "Fix.B", "Fix.C"],
+    ),
+    (
+        "#elif: dependence is OR-ed in FORWARD, so an earlier non-dependent arm stays clean",
+        # Pins the exact semantics of the `#elif` OR-in, which had no arm at all.
+        # FirstArm is compiled iff SOMETHING_UNRELATED — a sanitizer flipping does
+        # NOT change whether it exists, so it is correctly not reported. SecondArm
+        # is compiled iff (not SOMETHING_UNRELATED and not ASan), which a sanitizer
+        # DOES change. ⚠️ The first version of this arm expected BOTH and was wrong;
+        # the self-test caught the author, not the tool. Keep it asymmetric.
+        """
+#if defined(SOMETHING_UNRELATED)
+TEST(Suite, FirstArm) { }
+#elif !defined(__SANITIZE_ADDRESS__)
+TEST(Suite, SecondArm) { }
+#endif
+""",
+        ["Suite.SecondArm"],
+    ),
+    (
+        "#elif: an arm AFTER a dependent one stays dependent (the OR is sticky)",
+        """
+#if !defined(__SANITIZE_ADDRESS__)
+TEST(Suite, Guarded) { }
+#elif defined(SOMETHING_UNRELATED)
+TEST(Suite, StillDependent) { }
+#endif
+""",
+        ["Suite.Guarded", "Suite.StillDependent"],
     ),
     (
         "nested conditional inherits the outer region's dependence",

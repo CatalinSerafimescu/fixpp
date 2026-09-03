@@ -55,8 +55,17 @@ bill of health for ~190. Every MANUAL must be dispositioned by a human.
 ⚠️ THIS TOOL'S ZEROS ARE NOT SELF-PROVING. Before believing a clean sweep, seed a
 FLAG: take a real safe site, wrap its closure declaration in a bare `{ ... }` so
 the scope closes before the driving call, and confirm the walker emits FLAG.
-`--self-test` does this against synthetic fixtures; the in-tree seeded arm is what
-proves the walker works against the REAL compile flags and headers.
+`--self-test` guards the DETECTOR against synthetic fixtures, which no denominator
+can: parse counts and TU counts witness the scan's REACH, and a sweep reporting no
+FLAG is otherwise indistinguishable from a walker that CANNOT emit FLAG — a broken
+scope comparison, a VERDICT_RANK inversion, an unreachable branch. Each arm pins a
+defect this tool actually had.
+
+⚠️ `--self-test` IS NOT A SUBSTITUTE FOR THE IN-TREE SEEDED ARM. Its fixtures are
+minimal TUs with a stub `co_spawn`; they cannot prove the walker survives the real
+compile flags, the real headers, or asio's own types. Seed a real site by hand
+(wrap a closure declaration in a bare block so its scope closes before the driving
+call), run, confirm FLAG, revert — after EVERY change to the detector, not once.
 
 KNOWN FALSE-SAFE PATHS — read these before trusting a SAFE verdict
 ------------------------------------------------------------------
@@ -92,18 +101,32 @@ construct-expr, casts) sit between the co_spawn argument and the operator call.
 It only reports correctly under `set traversal IgnoreUnlessSpelledInSource`. So
 the census that produced ~190 was run through an instrument that CAN report a
 false low, and the number must be re-derived rather than reconciled against.
-`--reconcile` re-derives it a second way and diffs the site SETS.
+`tools/reconcile_co_spawn_census.py` re-derives it a second way and diffs the site
+SETS (not the counts). It consumes this tool's `--json-out`, including the exact
+file population it scanned, so the two instruments cannot silently diverge.
 
 RUN IT LOCALLY, ON DEMAND. IT IS DELIBERATELY NOT WIRED INTO CI.
 ---------------------------------------------------------------
-A full sweep is ~242 TUs at roughly 31 s each (a real clang parse of the actual
-compile command — asio, gtest, C++23, no PCH), i.e. ~35 min at 4 cores and hours
-on a 2-vCPU runner. A diff-scoped variant would be affordable but strictly
-weaker: it cannot see a site whose SAFETY changed because a driving call moved in
-a file the diff did not touch. Either way it needs a configured build, so it
-could only live in a GATED job — emitting nothing during the review rounds that
-are the only thing between a fresh unsafe site and merge, which is exactly the
-window #291's buildless lexer was placed to cover.
+A full sweep is 242 TUs and takes **539 s (~9 min) at `--jobs 4`**, measured end
+to end, so roughly 18-20 min on a 2-vCPU runner.
+
+⚠️ AN EARLIER VERSION OF THIS PARAGRAPH SAID "~31 s per TU, dominated by a real
+clang parse ... ~35 min", AND BOTH HALVES WERE WRONG. Profiling put the libclang
+parse at 2.2 s and the Python AST walk at 24.5 s of that 31 s — the parse was 8 %
+of the cost, not the cause of it. `os.path.realpath` was being called for EVERY
+cursor in the AST (4.19 M `lstat` calls against 517 distinct paths); memoising it
+took the walk 25.1 s -> 4.4 s with output verified element-wise identical. The
+figure mattered because it was cited as the reason not to wire this into CI, so
+it is corrected here rather than quietly dropped.
+
+THE DECISION STANDS ON THE OTHER ARGUMENTS, which the correction does not touch:
+a diff-scoped variant is strictly WEAKER — it cannot see a site whose SAFETY
+changed because a driving call moved in a file the diff did not touch — and
+either variant needs a configured build, so it could only live in a GATED job,
+emitting nothing during the review rounds that are the only thing between a fresh
+unsafe site and merge. That window is exactly what #291's buildless lexer covers.
+What changed is that "it is too slow" is no longer among the reasons; ~9 min is
+not the obstacle, the gating and the weaker scope are.
 
 Weigh that against what it guards. The immediately-invoked form is already caught
 by tools/check_co_spawn_lambda.py in the ungated job. What is left to this tool
@@ -118,8 +141,17 @@ WHEN THERE IS A REASON TO:
     what counts as driven and a rename there silently turns callers into FLAGs;
   * when #291's lexer fires, as the AST-level follow-up to whatever it caught.
 
-Usage:  python3 tools/audit_co_spawn_named_closure.py --jobs 4
+Usage — RUN THE PAIR, always:
+        python3 tools/audit_co_spawn_named_closure.py --self-test
+        python3 tools/audit_co_spawn_named_closure.py --jobs 4 --json-out sweep.json
+        python3 tools/reconcile_co_spawn_census.py --audit-json sweep.json
         python3 tools/audit_co_spawn_named_closure.py --filter <path-substring>
+
+⚠️ A SWEEP WITHOUT `--self-test` IS A GATE THAT CANNOT FAIL FOR THE REASON IT
+EXISTS. The sweep's own counters witness REACH; only the fixtures witness
+DETECTION. This is not hypothetical for this tool: the argument-level lambda
+prune was BROKEN and every in-tree check still passed — implicit AST nodes happen
+to wrap the argument in real code, so the bug hid. `--self-test` caught it.
 
 ⚠️ Do not record this tool's RESULT here. A count in a comment rots silently and
 nothing re-runs it. The measured outcome of a run belongs in the issue or PR that
@@ -133,7 +165,6 @@ import concurrent.futures as cf
 import json
 import os
 import shlex
-import subprocess
 import sys
 
 import clang.cindex as ci
@@ -246,7 +277,17 @@ UNKNOWN_KINDS: dict[int, int] = {}
 
 
 def kind_of(cursor):
-    """cursor.kind, or None when the bindings cannot name it (see above)."""
+    """cursor.kind, or None when the bindings cannot name it (see above).
+
+    ⚠️ UNKNOWN_KINDS IS A PER-PROCESS COUNTER AND MUST BE RETURNED, NOT READ FROM
+    THE PARENT. Every call happens inside a ProcessPoolExecutor child, so the
+    parent's copy of this module global stays EMPTY no matter what the children
+    saw. The tool shipped with `if UNKNOWN_KINDS:` in the parent as its only
+    declared mitigation for the LLVM-22-vs-libclang-18 residual — i.e. a guard
+    that was silent by construction, which is precisely the failure class this
+    tool exists to avoid, inside the tool itself. `_worker` now returns the
+    counter and the parent merges it.
+    """
     try:
         return cursor.kind
     except ValueError:
@@ -261,10 +302,16 @@ class SiteWalker:
     """One pass over a TU, tracking the enclosing compound-statement stack."""
 
     def __init__(self, tu_file: str, repo_root: str):
-        self.tu_file = os.path.realpath(tu_file)
         self.repo_root = os.path.realpath(repo_root)
+        # ⚠️ MEMOISED, and it is not a micro-optimisation. realpath() was called
+        # for EVERY cursor in the AST — 4.19 M lstat calls and 13.2 s of a 25 s
+        # walk on one TU, against 517 DISTINCT paths. Memoising made the walk
+        # 25.1 s -> 4.4 s (5.8x) with sites and events verified element-wise
+        # identical. The invariant is structural, not a survey: paths do not
+        # change during a run.
+        self._rp: dict[str, str] = {}
         self.sites: list[dict] = []
-        # scope_id -> list of (offset, kind, name) events, in source order
+        # Flat, in source order: closure_decl / ioc_decl / drive records.
         self.events: list[dict] = []
 
     # ── scope identity: the stack of COMPOUND_STMT cursor hashes ──
@@ -288,9 +335,15 @@ class SiteWalker:
         try:
             loc = cursor.location
             fn = loc.file.name if loc.file is not None else None
-            in_tu = fn is not None and os.path.realpath(fn).startswith(self.repo_root + os.sep)
-            if in_tu and (os.sep + "build" + os.sep) in os.path.realpath(fn):
+            if fn is None:
                 in_tu = False
+            else:
+                real = self._rp.get(fn)
+                if real is None:
+                    real = os.path.realpath(fn)
+                    self._rp[fn] = real
+                in_tu = real.startswith(self.repo_root + os.sep) and (
+                    os.sep + "build" + os.sep) not in real
         except Exception:
             in_tu = False
 
@@ -396,6 +449,18 @@ class SiteWalker:
             # This is the same confusion tools/check_co_spawn_lambda.py's docstring
             # calls out — telling the argument-level invocation from an inner
             # invoked lambda nested inside a correctly-passed outer one.
+            # ⚠️ THE ARGUMENT ITSELF MAY BE THE LAMBDA, and pruning only NESTED
+            # ones is not enough. A correctly-passed uninvoked `[&]{...}` is not a
+            # named-closure site, so descending into its body finds whatever it
+            # invokes internally and reports THAT as the spawned argument.
+            #
+            # This survived the in-tree check by luck: there, implicit nodes
+            # (materialize-temporary / construct-expr) sit between the call and the
+            # lambda, so `arg` was a wrapper and the nested-prune caught it. In a
+            # fixture where the lambda is the argument directly, it was not caught.
+            # Found by --self-test, which is the arm's entire purpose.
+            if kind_of(arg) == ci.CursorKind.LAMBDA_EXPR:
+                continue
             for node in [arg] + list(_descend(arg, prune_lambda_bodies=True)):
                 if kind_of(node) != ci.CursorKind.CALL_EXPR:
                     continue
@@ -518,13 +583,11 @@ def parse_tu(entry: dict, extra_args: list[str]) -> tuple[list[dict], list[dict]
     return w.sites, w.events, None
 
 
-_WORKER_CFG: dict = {}
-
-
 def _worker_init(libclang: str, repo_root: str) -> None:
-    if libclang and os.path.exists(libclang):
+    # The parent already validated existence; a child that cannot load the named
+    # library must raise rather than fall back to a different one.
+    if libclang:
         ci.Config.set_library_file(libclang)
-    _WORKER_CFG["repo_root"] = repo_root
 
 
 def _worker(job: tuple) -> tuple:
@@ -536,16 +599,17 @@ def _worker(job: tuple) -> tuple:
     """
     entry, extra, repo_root = job
     os.environ["FIXPP_REPO_ROOT"] = repo_root
+    UNKNOWN_KINDS.clear()
     sites, events, err = parse_tu(entry, extra)
     if err:
-        return (entry["file"], [], err)
+        return (entry["file"], [], err, dict(UNKNOWN_KINDS))
     out = []
     for s in sites:
         verdict, why = classify(s, events)
         s["verdict"] = verdict
         s["why"] = why
         out.append(s)
-    return (entry["file"], out, None)
+    return (entry["file"], out, None, dict(UNKNOWN_KINDS))
 
 
 # Worst-first, so a dedupe across TUs can never quietly downgrade a header site.
@@ -589,6 +653,175 @@ def load_db(build_dir: str, only_with_cospawn: bool) -> list[dict]:
     return out
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Self-test — guards the DETECTOR, which no denominator can.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Minimal stand-ins. Deliberately NOT asio: the walker keys on the callee spelling
+# `co_spawn`, on a VarDecl whose type spells `(lambda at ...)`, and on the OWNER of
+# a driving call — none of which needs the real library. Keeping the fixtures
+# library-free is what makes this runnable without a compilation database.
+SELF_TEST_PREAMBLE = """
+namespace std { template <class T> struct unique_ptr { T* get() const; }; }
+struct io_context {
+  void run();
+  void poll();
+};
+namespace fixpp { namespace test_support {
+  // Defined, not just declared: a template instantiated with a LAMBDA type has no
+  // linkage, so a declaration-only stub makes the fixture fail to compile — and a
+  // fixture that does not compile is a FAILED arm here, deliberately, never a skip.
+  template <class F> bool pump_until(io_context&, F) { return true; }
+} }
+template <class E, class A, class T> void co_spawn(E&, A, T) {}
+struct detached_t {}; static detached_t detached;
+"""
+
+SELF_TEST_CASES: list[tuple[str, str, list[tuple[str, str]]]] = [
+    (
+        "closure in a NARROWER scope than the driving call is FLAGged",
+        """
+void f() {
+  io_context ioc;
+  { auto lam = [&]() { return 0; }; co_spawn(ioc, lam(), detached); }
+  ioc.run();
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        "closure in the SAME scope, driving call after, is SAFE-DRIVEN",
+        """
+void f() {
+  io_context ioc;
+  auto lam = [&]() { return 0; };
+  co_spawn(ioc, lam(), detached);
+  ioc.run();
+}
+""",
+        [("lam", "SAFE-DRIVEN")],
+    ),
+    (
+        "closure declared BEFORE the io_context outlives it — SAFE-OUTLIVES",
+        """
+void f() {
+  auto lam = [&]() { return 0; };
+  io_context ioc;
+  co_spawn(ioc, lam(), detached);
+}
+""",
+        [("lam", "SAFE-OUTLIVES")],
+    ),
+    (
+        "a correctly-passed UNINVOKED lambda is not a named-closure site at all",
+        """
+void f() {
+  io_context ioc;
+  co_spawn(ioc, [&]() { return 0; }, detached);
+  ioc.run();
+}
+""",
+        [],
+    ),
+    (
+        "a closure invoked INSIDE the spawned lambda is not the spawned argument",
+        # The lambda-body prune. Without it this reported the inner call as the
+        # site — one false MANUAL in tests/transport/test_asio_plain_transport_config.cpp.
+        """
+void f() {
+  io_context ioc;
+  co_spawn(ioc, [&]() { auto inner = [&]() { return 1; }; return inner(); }, detached);
+  ioc.run();
+}
+""",
+        [],
+    ),
+    (
+        "unique_ptr::get() must NOT count as a driving call (owner check)",
+        # An earlier version keyed on the bare method NAME, so this read as driven
+        # and would have marked essentially every site in the tree SAFE-DRIVEN.
+        """
+void f() {
+  io_context ioc;
+  { auto lam = [&]() { return 0; }; co_spawn(ioc, lam(), detached); }
+  std::unique_ptr<int> p;
+  p.get();
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        "a NAMESPACED free pump helper does count as driving (owner_of kind check)",
+        # owner_of once tested for an empty parent SPELLING; a free function's
+        # parent is a NAMESPACE, so fixpp::test_support::pump_until was missed and
+        # produced two false FLAGs.
+        """
+void f() {
+  io_context ioc;
+  auto lam = [&]() { return 0; };
+  co_spawn(ioc, lam(), detached);
+  fixpp::test_support::pump_until(ioc, [&]{ return true; });
+}
+""",
+        [("lam", "SAFE-DRIVEN")],
+    ),
+]
+
+
+def _load_libclang(libclang: str) -> str | None:
+    """Point cindex at an EXPLICIT library, or say why not.
+
+    ⚠️ AN EXPLICIT PATH THAT DOES NOT EXIST IS AN ERROR, NOT A FALLBACK. This
+    used to be `if libclang and os.path.exists(libclang): set_library_file(...)`,
+    which silently ignored a wrong `--libclang` and loaded whatever cindex could
+    find — in practice PyPI's bundled 18, which cannot parse this C++23 tree. The
+    self-test still passed 7/7 through the fallback, because its fixtures are
+    simple enough for 18; only a full sweep would have shown the damage, as 242
+    UNSEEN files. A caller that names a library means it.
+    """
+    if not libclang:
+        return None
+    if not os.path.exists(libclang):
+        return f"--libclang {libclang!r} does not exist"
+    ci.Config.set_library_file(libclang)
+    return None
+
+
+def run_self_test(libclang: str, resource_dir: str) -> int:
+    err = _load_libclang(libclang)
+    if err:
+        print(f"ERROR: {err}")
+        return 1
+    args = ["-std=c++20", "-x", "c++"]
+    if resource_dir:
+        args += ["-resource-dir", resource_dir]
+
+    passed = failed = 0
+    for name, body, expected in SELF_TEST_CASES:
+        src = SELF_TEST_PREAMBLE + body
+        idx = ci.Index.create()
+        tu = idx.parse("selftest.cpp", args=args, unsaved_files=[("selftest.cpp", src)])
+        bad = [d for d in tu.diagnostics if d.severity >= ci.Diagnostic.Error]
+        if bad:
+            print(f"FAIL  {name}\n      fixture did not compile: {bad[0].spelling}")
+            failed += 1
+            continue
+        w = SiteWalker("selftest.cpp", os.getcwd())
+        # The fixture is an unsaved buffer, not a repo file; accept it explicitly.
+        w.repo_root = ""
+        w.walk(tu.cursor, [])
+        got = sorted((s["closure"], classify(s, w.events)[0]) for s in w.sites)
+        if got != sorted(expected):
+            print(f"FAIL  {name}\n      expected {sorted(expected)}\n      got      {got}")
+            failed += 1
+        else:
+            passed += 1
+
+    total = passed + failed
+    print(f"\nself-test: {passed}/{total} passed")
+    return 1 if failed else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--build-dir", default="build/linux-clang-debug")
@@ -606,10 +839,17 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=4, help="parallel TU parses")
     ap.add_argument("--all-files", action="store_true",
                     help="parse every TU, not just those mentioning co_spawn")
+    ap.add_argument("--self-test", action="store_true",
+                    help="run the detector fixtures and exit (needs no compilation database)")
     args = ap.parse_args()
 
-    if os.path.exists(args.libclang):
-        ci.Config.set_library_file(args.libclang)
+    if args.self_test:
+        return run_self_test(args.libclang, args.resource_dir)
+
+    err = _load_libclang(args.libclang)
+    if err:
+        print(f"ERROR: {err}")
+        return 1
 
     extra = ["-resource-dir", args.resource_dir] if args.resource_dir else []
     entries = load_db(args.build_dir, not args.all_files)
@@ -619,6 +859,21 @@ def main() -> int:
             print(f"ERROR: --filter {args.filter!r} matched no TU in the compilation database.")
             return 1
 
+    # ⚠️ THE POPULATION IS PART OF THE RESULT, not an implementation detail.
+    # tools/reconcile_co_spawn_census.py diffs its site SET against this run's, and
+    # a set-diff is only sound if both instruments saw the SAME files. When
+    # reconcile re-derived the list itself, a `--filter`ed audit made every site
+    # outside the filter appear as "only clang-query" -- the bucket whose whole
+    # point is that each entry must be hand-inspected -- while a truncated
+    # reconcile run manufactured "only libclang (ALARMING)" hits, which is the
+    # signal reserved for "the matcher is missing a shape". Both directions turn
+    # the cross-check into noise that reads like a finding. Emitting the list here
+    # makes the population shared BY CONSTRUCTION; the two DETECTORS stay
+    # independent, which is the part the cross-check actually rests on.
+    population = sorted(
+        os.path.realpath(os.path.join(e.get("directory", "."), e["file"])) for e in entries
+    )
+
     best: dict[tuple[str, int, int], dict] = {}
     errors: list[tuple[str, str]] = []
     repo_root = os.environ.get("FIXPP_REPO_ROOT", os.getcwd())
@@ -627,8 +882,10 @@ def main() -> int:
     with cf.ProcessPoolExecutor(
         max_workers=args.jobs, initializer=_worker_init, initargs=(args.libclang, repo_root)
     ) as pool:
-        for fname, sites, err in pool.map(_worker, jobs, chunksize=1):
+        for fname, sites, err, unknown in pool.map(_worker, jobs, chunksize=1):
             done += 1
+            for kid, cnt in unknown.items():
+                UNKNOWN_KINDS[kid] = UNKNOWN_KINDS.get(kid, 0) + cnt
             if err:
                 errors.append((fname, err))
             for s in sites:
@@ -669,7 +926,7 @@ def main() -> int:
 
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as fh:
-            json.dump({"sites": all_sites, "errors": errors}, fh, indent=2)
+            json.dump({"sites": all_sites, "errors": errors, "files": population}, fh, indent=2)
         print(f"\nwrote {args.json_out}")
 
     # Fails closed: a sweep that parsed nothing, or found no site, reports the
