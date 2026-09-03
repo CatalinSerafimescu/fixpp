@@ -165,7 +165,32 @@ def main() -> int:
     if not files or not cq_sites:
         print("ERROR: the reconciliation instrument reached nothing.")
         return 1
-    return 0
+
+    # ⚠️ A DISAGREEMENT IS THE FINDING, SO IT MUST FAIL. This used to print the
+    # buckets and exit 0 — including the one labelled ALARMING — so the whole
+    # cross-check was advisory text no caller could act on. A set-diff whose exit
+    # code cannot express "the sets differ" is not a cross-check.
+    #
+    # `only clang-query` is expected-but-not-benign: that matcher is deliberately
+    # over-inclusive (any operator() call in an argument), so each entry needs a
+    # human look. It fails for that reason, not because it is wrong.
+    bad = 0
+    if only_lib:
+        print(f"\nERROR: {len(only_lib)} site(s) seen ONLY by the libclang walker — the "
+              f"clang-query matcher is missing a shape.")
+        bad = 1
+    if only_cq:
+        print(f"\nERROR: {len(only_cq)} site(s) seen ONLY by clang-query. Each must be "
+              f"inspected; the matcher is over-inclusive by design, so these are not "
+              f"automatically benign.")
+        bad = 1
+    if failures:
+        print(f"\nERROR: {len(failures)} file(s) clang-query could not see. UNSEEN, not clean.")
+        bad = 1
+    if missing:
+        print(f"\nERROR: {missing} file(s) in the audit population no longer exist.")
+        bad = 1
+    return bad
 
 
 if __name__ == "__main__":

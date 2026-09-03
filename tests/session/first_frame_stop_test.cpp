@@ -269,12 +269,12 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
     EXPECT_LT(handlers, kPromptHandlerBudget)
         << "T2b (SC-015 accept-slot leg): Engine::stop() needed " << handlers
         << " handlers to complete, against a budget of " << kPromptHandlerBudget << ". "
-        << "Under the bare-deadline-arm mutant the deadline arm's own cancel is silently "
-        << "dropped, so the accept loop's read_first_frame_bounded call — and therefore "
-        << "stop()'s Step-3 join on outstanding_counter_ — cannot retire before the FULL "
-        << "5000ms kFirstFrameDeadline elapses (D-6.12b), and the join spins on its "
-        << "zero-length timers for that whole window: a bounded stall equal to the "
-        << "pre-fix tail, not the unbounded hang FR-018/T029 fixes.";
+        << "That means stop() waited for a real timer to expire while its joins spun on "
+        << "their zero-length ones. ⚠️ Do NOT read this as the bare-deadline-arm mutant: "
+        << "the note above records that mutant MEASURED as not killing this cell (it "
+        << "passed at 259 ms / 10 handlers). What this cell actually detects is any stop "
+        << "path that has to wait out a timeout instead of retiring on ready work — "
+        << "start by finding which timeout, not by assuming D-6.12b.";
 
     // Accept-slot reclaim: the peer's post-handshake read must observe a
     // server-initiated close once stop() has run.

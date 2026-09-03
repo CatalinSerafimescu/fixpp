@@ -88,6 +88,20 @@ struct ConnectInfo;
 //       that must COMPLETE. Site: TLS close_async. Cancellation takes effect at
 //       NO suspension point there, which is the whole intent.
 //
+// ⚠️ AND A FOURTH CATEGORY THIS NOTE DOES NOT FIX: an awaited op that implements
+// NO per-operation cancellation at all. `resolver.async_resolve()` is one —
+// asio/detail/resolver_service.hpp schedules its resolve op WITHOUT taking an
+// associated cancellation slot. Both transports' async_connect suspend there
+// FIRST, and arm their connect_timeout timer only AFTERWARDS, so a stop() during
+// a slow or blocked DNS lookup is bounded by neither the cancellation nor
+// `connect_timeout` — it waits for the system resolver. No reset shape fixes
+// that; it needs a timeout around the resolve itself.
+//
+// So "raw vs composed" is the discriminator for shapes (a) and (b) ONLY, and this
+// list is not a taxonomy of every awaited op. ⚠️ Derive from the op you are
+// actually awaiting, and check whether it consumes a cancellation slot at all
+// before assuming a reset can reach it.
+//
 // ⚠️ AND THE RESET IS NOT LOCAL. It replaces the bottom-frame cancellation state
 // of the WHOLE co_spawn chain, so a callee's reset silently rewrites its
 // CALLER's policy. That is not a footnote: it was a measured hang (#358), where

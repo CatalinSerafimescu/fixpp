@@ -937,7 +937,23 @@ def main() -> int:
     if not all_sites:
         print("ERROR: zero named-closure sites found — the matcher reached nothing.")
         return 1
-    # A FLAG is the whole point; fail on it.
+
+    # ⚠️ A FAILED PARSE FAILS THE RUN. It used to only PRINT, so a sweep where 1 of
+    # 242 TUs did not parse — the one holding the unsafe closure — returned 0 while
+    # the surviving TUs satisfied every denominator. The comments and the CI job
+    # both claimed parse failures were loud; only the print was. An UNSEEN file is
+    # not a clean file, and the exit code is the only part CI reads.
+    if errors:
+        print(f"\nERROR: {len(errors)} TU(s) were not parsed. They are UNSEEN, not clean.")
+        return 1
+
+    # MANUAL is not a verdict, it is an instruction to read the site. Letting it
+    # pass silently is how a sampled audit becomes a bill of health.
+    manual = [s for s in all_sites if s["verdict"] == "MANUAL"]
+    if manual:
+        print(f"\nERROR: {len(manual)} site(s) need a human disposition (MANUAL).")
+        return 1
+
     return 1 if any(s["verdict"] == "FLAG" for s in all_sites) else 0
 
 
