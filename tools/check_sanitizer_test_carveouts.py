@@ -351,12 +351,43 @@ def scan_text(text: str, path: str) -> tuple[list[dict], int, int]:
                 continue
 
             if directive == "define":
-                # Provenance propagation: a macro defined anywhere inside a
-                # preset-dependent region becomes preset-dependent itself.
-                if any(fr["dep"] for fr in stack):
-                    name = rest.split("(", 1)[0].split(None, 1)[0] if rest else ""
-                    if name:
-                        tracked.add(name)
+                name = rest.split("(", 1)[0].split(None, 1)[0] if rest else ""
+                if not name:
+                    continue
+                body = rest[len(name):]
+                # Two independent ways a macro becomes preset-dependent:
+                #
+                #  1. PROVENANCE — defined anywhere inside a preset-dependent
+                #     region (how FIXPP_SANITIZER_REPLACES_NEW and
+                #     FIXPP_CAPI_TEST_ASAN are reached).
+                #  2. ⚠️ ALIASING — its REPLACEMENT TEXT names a tracked macro,
+                #     e.g. `#define RELEASE_BUILD NDEBUG` at file scope, outside
+                #     any conditional. A later `#if RELEASE_BUILD` is then
+                #     release-only and the census used to miss it entirely. This
+                #     needs neither a header nor a -D, so it is NOT covered by the
+                #     documented provenance blind spot.
+                inside_dep = any(fr["dep"] for fr in stack)
+                aliases_tracked = bool(condition_macros(body) & tracked) or bool(
+                    HAS_FEATURE_RE.search(body)
+                )
+                if inside_dep or aliases_tracked:
+                    tracked.add(name)
+                elif name in tracked:
+                    # ⚠️ An UNCONDITIONAL redefinition to something preset-FREE
+                    # clears provenance. Without this, `tracked` was append-only:
+                    # a macro that had been preset-dependent stayed so forever, so
+                    # a later `#if MODE` guarding a test present in EVERY preset
+                    # demanded an allowlist entry and BLOCKED THE MERGE on a
+                    # non-carve-out. A gate whose false positives block is worse
+                    # than one that misses.
+                    tracked.discard(name)
+                continue
+
+            if directive == "undef":
+                # Same reasoning as the redefinition case above: after `#undef`
+                # the name carries no preset provenance at all.
+                name = rest.split(None, 1)[0] if rest else ""
+                tracked.discard(name)
                 continue
             continue
 
@@ -594,6 +625,52 @@ TYPED_TEST(Fix, C) { }
 #endif
 """,
         ["Fix.A", "Fix.B", "Fix.C"],
+    ),
+    (
+        "a file-scope ALIAS of a tracked macro is itself tracked (Codex finding)",
+        # `#define RELEASE_BUILD NDEBUG` outside any conditional: the later
+        # `#if RELEASE_BUILD` is release-only and used to be missed entirely.
+        # Needs neither a header nor a -D, so the documented provenance blind
+        # spot did not cover it.
+        """
+#define RELEASE_BUILD NDEBUG
+#if RELEASE_BUILD
+TEST(Suite, ReleaseOnly) { }
+#endif
+""",
+        ["Suite.ReleaseOnly"],
+    ),
+    (
+        "#undef clears provenance — no false positive on a non-carve-out",
+        """
+#if defined(NDEBUG)
+#define MODE 1
+#else
+#define MODE 0
+#endif
+#undef MODE
+#define MODE 1
+#if MODE
+TEST(Suite, AlwaysPresent) { }
+#endif
+""",
+        [],
+    ),
+    (
+        "an unconditional redefinition to a preset-FREE body also clears it",
+        # Without this the tracked set was append-only and CI demanded an
+        # allowlist entry for a test present in every preset — a false positive
+        # that BLOCKS merge, which is worse than one that misses.
+        """
+#if defined(__SANITIZE_ADDRESS__)
+#define MODE 1
+#endif
+#define MODE 1
+#if MODE
+TEST(Suite, PresentEverywhere) { }
+#endif
+""",
+        [],
     ),
     (
         "#elif: dependence is OR-ed in FORWARD, so an earlier non-dependent arm stays clean",
