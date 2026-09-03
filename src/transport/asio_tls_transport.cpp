@@ -1495,17 +1495,51 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
 // close_async — graceful TLS shutdown that actually reaches the wire (#348)
 // ─────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] asio::awaitable<core::expected_t<void>> asio_tls_transport::close_async() {
-    // Same cancellation policy as the five sibling async methods on this class,
-    // which all reset here — close_async was the one that did not, and its
-    // quiesce loop below is the reason that mattered: without the reset, a
-    // cancellation arriving mid-close makes the NEXT `co_await` in the loop
-    // throw operation_aborted out of a teardown path whose callers document a
-    // clean `expected_t<void>{}` return. `this_coro` awaiters are exempt from
-    // asio's throw-on-cancelled check, so this line is reachable even when the
-    // inherited state is already cancelled. ⚠️ It does NOT protect the CALLER's
-    // own `co_await t->close_async()` — that throw happens one frame up, before
-    // this body runs; see the CANCELLATION TIMING note in transport.hpp.
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    // ⚠️ `disable_cancellation`, NOT the siblings' `enable_total_cancellation` —
+    // and this line was a HANG on main until #358. Read the whole note before
+    // "restoring consistency" with the five sibling methods.
+    //
+    // WHAT WENT WRONG. `reset_cancellation_state` REPLACES the single
+    // bottom-frame cancellation state of the WHOLE co_spawn chain, not this
+    // frame's own. `Session::close()` installs `disable_cancellation` one frame
+    // up (session.cpp) precisely so teardown survives the caller's signal, and
+    // its comment there spells out the consequence of losing it: a later
+    // `co_await` aborts, close() unwinds BEFORE publishing `close_result_`, and
+    // a concurrent close() then spins forever in the `closing` branch awaiting a
+    // result nobody will ever set. Resetting to `enable_total_cancellation()`
+    // here deleted that shield from underneath its owner, and produced exactly
+    // the hang that comment was written to prevent.
+    //
+    // Measured on windows-msvc-debug at 6a1b1bb2, EngineSessionStrand.V12b:
+    // 11 wedges / 40 with this line as `enable_total_cancellation()`; 0 / 40 with
+    // the reset neutralised, and 0 / 40 with the shield re-installed after the
+    // await. Full suite wedged on iteration 1. The `Session::close()` milestone
+    // trace read `cancelled=0` before this call and `cancelled=4` after it, with
+    // 20/20 correlation between that transition and the wedge.
+    //
+    // WHY THE OLD VALUE NEVER SERVED ITS OWN STATED INTENT. The note it carried
+    // said the reset stops a cancellation arriving mid-close from throwing out of
+    // a teardown path whose callers document a clean `expected_t<void>{}` return.
+    // `enable_total_cancellation` cannot do that — it ACCEPTS cancellation, so one
+    // arriving is recorded and the next `co_await` throws regardless. All it ever
+    // achieved was discarding a cancellation recorded EARLIER. `disable_cancellation`
+    // achieves the stated intent unconditionally.
+    //
+    // ⚠️ THIS FUNCTION LEAVES THE FRAME WITH CANCELLATION DISABLED after it
+    // returns, because a reset cannot be scoped. That is a deliberate choice, not
+    // an oversight: `reset_cancellation_state` clobbers the caller whatever value
+    // is passed, so the only question is which clobber is least harmful, and for a
+    // teardown-only method it is the one both adopters already install for
+    // themselves (`Session::close()` and the detached co_spawn at engine.cpp's
+    // stop step 2). Re-derive the adopter set with `git grep close_async -- src`
+    // before assuming that still holds.
+    //
+    // `this_coro` awaiters are exempt from asio's throw-on-cancelled check, so
+    // this line is reachable even when the inherited state is already cancelled.
+    // ⚠️ It still does NOT protect the CALLER's own `co_await t->close_async()` —
+    // that throw happens one frame up, before this body runs; see the CANCELLATION
+    // TIMING note in transport.hpp.
+    co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
 
     // Idempotent, exactly like close().
     if (state_ == state_t::closed) {
@@ -1608,9 +1642,25 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
                 asio::error_code wait_ec;
                 co_await quiesce.async_wait(asio::redirect_error(asio::use_awaitable, wait_ec));
                 if (wait_ec) {
-                    // Our own cancellation. Break rather than spin to the deadline
-                    // -- every subsequent wait would complete instantly with the
-                    // same error, turning a bounded join into a hot loop.
+                    // Break rather than spin to the deadline -- every subsequent
+                    // wait would complete instantly with the same error, turning a
+                    // bounded join into a hot loop.
+                    //
+                    // ⚠️ UNREACHABLE AS OF #358, and kept deliberately. This branch
+                    // existed for "our own cancellation", which the entry-level
+                    // `disable_cancellation` now makes impossible: nothing else
+                    // cancels `quiesce` (it is a local, cancelled only at scope
+                    // exit). The cost of that is a real behaviour change and is
+                    // stated rather than hidden -- against a WEDGED SSL op the loop
+                    // now backs off at 1 ms to `close_deadline` instead of breaking
+                    // out early. That is bounded by `tls_close_timeout` and is the
+                    // designed fallback, but it is slower than before.
+                    //
+                    // Kept because the guard is correct for any state where
+                    // cancellation IS enabled, and the entry reset is one edit away
+                    // from changing. Do NOT write a cell claiming to drive it
+                    // without first re-enabling cancellation at the entry reset --
+                    // and if you do that, re-read the #358 note there first.
                     break;
                 }
             }
