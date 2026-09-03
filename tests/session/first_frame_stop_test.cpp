@@ -238,33 +238,40 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
 
     // THE promptness assertion, at engine scope.
     //
-    // ⚠️ THIS CELL DOES *NOT* KILL THE BARE-DEADLINE-ARM MUTANT, and the claim
-    // that it did — carried here since 088 as "kills the bare-deadline-arm
-    // mutant (same mutant T2a kills; D-6.12b)" — is DELETED rather than
-    // restated, because it was measured false while rewriting this assertion
-    // for #357.
+    // ⚠️ THIS CELL DOES *NOT* KILL THE BARE-DEADLINE-ARM MUTANT. The claim that
+    // it did — carried here since 088 as "kills the bare-deadline-arm mutant
+    // (same mutant T2a kills; D-6.12b)" — is DELETED rather than restated,
+    // because it was measured false while rewriting this assertion for #357.
     //
-    // What was run: `await_deadline`'s
-    // `reset_cancellation_state(enable_total_cancellation())` was removed in
-    // `src/session/read_first_frame_bounded.hpp`, making that arm terminal-only,
-    // which is the D-6.12b mutant. The cell PASSED, at 259 ms and 10 handlers —
-    // its healthy figures. The mutation was proven live rather than assumed: an
-    // fprintf probe placed in `await_deadline` printed, so the arm is both
-    // compiled with the mutant and entered on this cell's path. (A `strings`
-    // check for the mutant's comment was ALSO run and returned 0 — a worthless
-    // check, since comments never reach a binary. It is named here so nobody
-    // repeats it.)
+    // ⚠️ THE MUTANT IS REAL AND IS LETHAL — JUST NOT HERE, which is why the old
+    // claim was believable. Run against the FULL D-6.12b mutant (await_deadline
+    // reduced to a bare `co_await timer.async_wait(use_awaitable)`, dropping
+    // BOTH the total-cancel reset and redirect_error):
     //
-    // Not established: WHY it survives. The plausible reading is that
-    // `operator||`'s parallel_group cancels its losing arm with a type a
-    // terminal-only arm still honours, so only cancellation propagating in from
-    // OUTSIDE is swallowed — but that was not measured, and it is written here
-    // as a lead, not a result.
+    //     ReadFirstFrameBounded.T2a  (direct helper) FAILED at 500 ms  — kills it
+    //     this cell                  (engine scope)  passed at 259 ms  — does not
+    //
+    // So D-6.12b is witnessed at HELPER scope and unwitnessed at ENGINE scope.
+    // Tracked as a follow-up; see the #357 close-out.
+    //
+    // ⚠️ A PARTIAL MUTANT IS NOT THE MUTANT — recorded because it cost a wrong
+    // conclusion here first. Removing only the reset (keeping redirect_error)
+    // also left this cell green, and was briefly written up as "the mutant
+    // survives"; the faithful mutant is the bare arm, both changes together, and
+    // it is what T2a actually kills. When re-deriving, copy the mutation from
+    // T2a's own header rather than paraphrasing it.
+    //
+    // Mutation liveness was proven, not assumed: an fprintf probe in
+    // `await_deadline` printed, so the arm is compiled with the mutant AND
+    // entered on this cell's path. (A `strings` check for the mutant's comment
+    // was also run and returned 0 — worthless, since comments never reach a
+    // binary. Named here so nobody repeats it.)
     //
     // What this cell does witness is below and in the reclaim assertion: that
     // stop() retires on a bounded chain of handlers, and that the accept slot is
     // reclaimed. The sibling cell StopIsPromptWhileAcceptedHandshakeIsInFlight
-    // has a mutant that IS proven lethal (9 handlers healthy vs ~110,000).
+    // has a mutant that IS proven lethal at engine scope (9 handlers healthy vs
+    // ~110,000 under a reverted async_handshake OUT filter).
     EXPECT_LT(handlers, kPromptHandlerBudget)
         << "T2b (SC-015 accept-slot leg): Engine::stop() needed " << handlers
         << " handlers to complete, against a budget of " << kPromptHandlerBudget << ". "
