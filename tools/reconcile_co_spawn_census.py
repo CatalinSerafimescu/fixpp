@@ -55,12 +55,30 @@ MATCHER = (
     'hasAnyArgument(cxxOperatorCallExpr(hasOverloadedOperatorName("()"))))'
 )
 LOC_RE = re.compile(r'^(/[^:]+):(\d+):(\d+): note: "root" binds here', re.MULTILINE)
+# The message only, without the file:line:col prefix, so identical diagnostics from
+# 200 different TUs collapse to one line with a count instead of scrolling past.
+#
+# ⚠️ `fatal ` IS OPTIONAL AND THAT MATTERS. This started life as
+# `^(?:.*?:\d+:\d+: )?error: (.+)$`, which cannot match `... : fatal error: ...` —
+# and a missing resource dir, the most likely way this job breaks, reports exactly
+# `fatal error: 'stddef.h' file not found`. That regex REPLACED a naive
+# `"error:" in out` substring test, so the "improvement" was strictly worse in the
+# only direction that counts: the forced-unseen arm below went from failing (right,
+# for a clumsy reason) to reporting the file clean (wrong). The arm is the only
+# reason this is not still in the tree.
+#
+# The leading `\S` keeps it off clang's echoed SOURCE lines, which are indented and
+# routinely contain tokens like `__throw_length_error`. The `.*?: ` covers both
+# diagnostic shapes: `file:line:col: ` and a bare `clang-query: ` prefix.
+ERR_RE = re.compile(r'^(?:\S.*?: )?(?:fatal )?error: (.+)$', re.MULTILINE)
 
 
 def _one_file(job: tuple) -> tuple:
-    cq, build_dir, f, timeout = job
-    cmd = [
-        cq, "-p", build_dir, f,
+    cq, build_dir, f, timeout, extra = job
+    cmd = [cq, "-p", build_dir]
+    cmd += [f"--extra-arg={a}" for a in extra]
+    cmd += [
+        f,
         "-c", "set traversal IgnoreUnlessSpelledInSource",
         "-c", "set output diag",
         "-c", f"match {MATCHER}",
@@ -68,32 +86,46 @@ def _one_file(job: tuple) -> tuple:
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return (f, [], "timeout")
+        return (f, [], "timeout", "")
     out = r.stdout + r.stderr
-    # ⚠️ FAIL CLOSED. clang-query prints "0 matches." both for a clean file and for
-    # one it could not compile, and a compile error here is severity-error rather
-    # than fatal — so it does NOT stop the run. A file that errored is UNSEEN, not
-    # clean. This is the same trap that bit the libclang walker (which originally
-    # bailed only on Fatal) and it is the reason both instruments check for it.
-    if "error:" in out and "0 matches" in out:
-        return (f, [], "compile error(s) — file is UNSEEN, not clean")
+    # ⚠️ FAIL CLOSED ON *ANY* ERROR, whether or not the file still produced matches.
+    # clang-query prints "0 matches." both for a clean file and for one it could not
+    # compile, and a compile error here is severity-error rather than fatal — so it
+    # does NOT stop the run. This check used to read
+    #
+    #     if "error:" in out and "0 matches" in out:
+    #
+    # which accepted any file that errored but still matched something. That is the
+    # wrong half of the condition: an error means the AST is TRUNCATED, so the site
+    # list for that file is a floor, not a census — the very shape whose absence the
+    # set-diff is claiming to prove. It also hid the systemic case: on the first CI
+    # run 203 of 242 files landed in this bucket and the other 39 were exactly the
+    # files that happened to match something, so a single repo-wide diagnostic read
+    # as "203 broken files" and the count of genuinely-clean parses was unknowable.
+    # A file that errored is UNSEEN. This is the same trap that bit the libclang
+    # walker (which originally bailed only on Fatal), and both instruments now use
+    # the same rule.
+    errs = ERR_RE.findall(out)
+    if errs:
+        return (f, [], "compile error(s) — file is UNSEEN, not clean", errs[0].strip()[:180])
     if "matches." not in out and "match." not in out:
-        return (f, [], "no match tally in output")
-    return (f, [(os.path.realpath(m.group(1)), int(m.group(2))) for m in LOC_RE.finditer(out)], None)
+        return (f, [], "no match tally in output", "")
+    return (f, [(os.path.realpath(m.group(1)), int(m.group(2)))
+                for m in LOC_RE.finditer(out)], None, "")
 
 
 def run_clang_query(cq: str, build_dir: str, files: list[str], timeout: int,
-                    jobs: int) -> tuple[set, list]:
+                    jobs: int, extra: list[str]) -> tuple[set, list]:
     sites: set[tuple[str, int]] = set()
-    failures: list[tuple[str, str]] = []
+    failures: list[tuple[str, str, str]] = []
     done = 0
     with cf.ProcessPoolExecutor(max_workers=jobs) as pool:
-        for f, found, err in pool.map(
-            _one_file, [(cq, build_dir, x, timeout) for x in files], chunksize=1
+        for f, found, err, diag in pool.map(
+            _one_file, [(cq, build_dir, x, timeout, extra) for x in files], chunksize=1
         ):
             done += 1
             if err:
-                failures.append((f, err))
+                failures.append((f, err, diag))
             sites.update(found)
             if done % 20 == 0:
                 print(f"  ... {done}/{len(files)} files, {len(sites)} sites", file=sys.stderr)
@@ -116,6 +148,20 @@ def main() -> int:
     ap.add_argument("--audit-json", required=True, help="--json-out from the libclang walker")
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--jobs", type=int, default=4)
+    # ⚠️ THE TWO INSTRUMENTS MUST PARSE WITH THE SAME CONFIGURATION, or the set-diff
+    # measures the configuration rather than the detectors. The libclang walker is
+    # given `-resource-dir` explicitly because libclang cannot find its own; passing
+    # the same one here keeps the comparison about the matcher-vs-walker difference,
+    # which is the only difference the cross-check is entitled to attribute a
+    # disagreement to.
+    ap.add_argument(
+        "--extra-arg",
+        action="append",
+        default=[],
+        metavar="FLAG",
+        help="forwarded to clang-query as --extra-arg=FLAG (repeatable); pass the same "
+             "-resource-dir the libclang walker gets",
+    )
     args = ap.parse_args()
 
     if not args.clang_query or not shutil.which(args.clang_query):
@@ -160,11 +206,26 @@ def main() -> int:
               f"JSON is stale relative to the tree.")
 
     cq_sites, failures = run_clang_query(
-        args.clang_query, args.build_dir, files, args.timeout, args.jobs
+        args.clang_query, args.build_dir, files, args.timeout, args.jobs, args.extra_arg
     )
 
+    # ⚠️ A SITE IN AN UNSEEN FILE IS NOT A MATCHER GAP, and calling it one sends the
+    # reader to the wrong place. `only libclang (ALARMING)` means exactly one thing —
+    # "the clang-query matcher is missing a SHAPE" — but a file clang-query could not
+    # compile contributes every one of its libclang sites to that bucket for a reason
+    # that has nothing to do with the matcher. The first CI run reported 10 ALARMING
+    # sites, all of them in tests/sync/test_fifo_across_cycles.cpp, a file that same
+    # run listed as unseen; run locally against a file it CAN compile, the matcher
+    # finds all 10. Ninety minutes went into "which shape does the matcher miss?"
+    # before the answer turned out to be "none — read the other bucket".
+    #
+    # Unseen files contribute no clang-query sites by construction (_one_file returns
+    # an empty list for them), so only the libclang side needs partitioning.
+    unseen = {f for f, _why, _diag in failures}
     only_cq = sorted(cq_sites - lib_sites)
-    only_lib = sorted(lib_sites - cq_sites)
+    only_lib_all = lib_sites - cq_sites
+    only_lib = sorted(s for s in only_lib_all if s[0] not in unseen)
+    lib_in_unseen = sorted(s for s in only_lib_all if s[0] in unseen)
 
     print(f"files queried              : {len(files)}")
     print(f"clang-query sites (line)   : {len(cq_sites)}")
@@ -172,14 +233,27 @@ def main() -> int:
     print(f"agreed                     : {len(cq_sites & lib_sites)}")
     print(f"only clang-query (expected): {len(only_cq)}")
     print(f"only libclang  (ALARMING)  : {len(only_lib)}")
+    print(f"only libclang, in a file clang-query could not see: {len(lib_in_unseen)}")
     print(f"files clang-query could NOT see: {len(failures)}")
 
     for f, line in only_cq:
         print(f"  [only clang-query] {os.path.relpath(f)}:{line}")
     for f, line in only_lib:
         print(f"  [ONLY LIBCLANG]    {os.path.relpath(f)}:{line}")
-    for f, why in failures[:15]:
-        print(f"  [unseen by clang-query] {os.path.relpath(f)}: {why}")
+
+    # Group by diagnostic, not by file: one repo-wide cause printed 203 times reads
+    # as 203 problems, and the truncated per-file list that used to be here showed 15
+    # paths and not one error message — the tool detected the failure and threw away
+    # the only evidence of what it was.
+    by_diag: dict[str, list[str]] = {}
+    for f, why, diag in failures:
+        by_diag.setdefault(diag or why, []).append(f)
+    for diag, fs in sorted(by_diag.items(), key=lambda kv: -len(kv[1])):
+        print(f"  [unseen by clang-query] {len(fs)} file(s): {diag}")
+        for f in sorted(fs)[:5]:
+            print(f"      {os.path.relpath(f)}")
+        if len(fs) > 5:
+            print(f"      ... and {len(fs) - 5} more")
 
     if not files or not cq_sites:
         print("ERROR: the reconciliation instrument reached nothing.")

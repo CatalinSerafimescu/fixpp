@@ -2376,6 +2376,7 @@ jobs:
             --build-dir build/${{ env.PRESET }} \
             --audit-json /tmp/co-spawn-audit.json \
             --clang-query "$CLANG_QUERY" \
+            --extra-arg="-resource-dir=$RESOURCE_DIR" \
             --jobs 4
           echo "::notice::co_spawn cross-check wall-clock: $(( $(date +%s) - START ))s"
 
@@ -2384,7 +2385,7 @@ jobs:
       # and discarded.
       - name: Upload the audit site table
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: co-spawn-audit
           path: /tmp/co-spawn-audit.json
