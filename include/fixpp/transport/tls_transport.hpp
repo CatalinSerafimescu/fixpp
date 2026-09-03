@@ -103,6 +103,24 @@ public:
     //     (the OpenSSL handshake aborts mid-flight; SSL* state is broken; caller
     //     MUST close() to clean up — see [2h §6.4]).
     //
+    //     ⚠️ THIS LINE WAS FALSE UNTIL #357, AND NOTHING SAID SO. asio's SSL
+    //     composed op is terminal-only, so a `total` reached it and was dropped:
+    //     the handshake did NOT abort, it ran on, and if the tls_handshake_timeout
+    //     later fired, the operation_aborted branch read the recorded `total` and
+    //     labelled a TIMEOUT as transport_handshake_cancelled — the right variant
+    //     for the wrong reason, a whole timeout budget late. asio_tls_transport's
+    //     async_handshake now installs the two-argument reset_cancellation_state
+    //     whose OUT filter maps any accepted cancellation to `terminal`, which is
+    //     what makes the sentence above true.
+    //
+    //     ⚠️ The external-cancel branch still has NO transport-level witness:
+    //     tests/transport/test_cancellation_propagation.cpp's cells for it are
+    //     DISABLED_ + GTEST_SKIP, and test_asio_tls_transport_error_paths.cpp
+    //     defers it. What witnesses the fix is an ENGINE-level cell —
+    //     FirstFrameStop.StopIsPromptWhileAcceptedHandshakeIsInFlight — which
+    //     needs a peer that never sends a ClientHello. Re-derive that set before
+    //     claiming coverage here.
+    //
     //     Timeout: Transport::Config::tls_handshake_timeout (default 30 s)
     //     bounds the handshake's wall-clock duration; on timeout → transport_
     //     handshake_timeout. Timeout via Clock::sleep_until composed under the

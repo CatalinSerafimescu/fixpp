@@ -1067,8 +1067,40 @@ void asio_tls_transport::setup_ssl_ctx_() {
 asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     using E = core::error;
 
-    // Enable total cancellation (D-17).
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    // #357 — the SAME two-argument OUT filter async_connect and async_read_some
+    // install, for the same reason, on the third op that goes through asio's SSL
+    // composed operation. `ssl::detail::io_op` derives from
+    // base_from_cancellation_state's NO-FILTER constructor, which builds a
+    // `cancellation_state(slot)` — documented and implemented as TERMINAL-ONLY. A
+    // one-argument reset installs the filter as BOTH in and out
+    // (cancellation_state.hpp: `impl<Filter, Filter>(filter, filter)`), so
+    // Engine::stop()'s `total` was forwarded as `total` and then silently dropped
+    // by that inner terminal-only state: an in-flight handshake did not abort, and
+    // stop()'s step-3 join on outstanding_counter_ could not retire until the
+    // accepted transport's tls_handshake_timeout (1500 ms at engine.cpp's accept
+    // path) ran out. The OUT filter maps any accepted cancellation to `terminal`
+    // for the forwarded child op.
+    //
+    // The timeout-vs-cancel classification below survives this: the state records
+    // `cancelled_ = in_filter_(in)` and only THEN computes `out_filter_(cancelled_)`
+    // (cancellation_state.hpp `impl::operator()`), so `cs.cancelled()` still reads
+    // `total` and the operation_aborted branch still separates
+    // transport_handshake_cancelled from transport_handshake_timeout.
+    //
+    // ⚠️ ONE reset, not a second one before the await — unlike async_connect, which
+    // resets twice. A reset RECONSTRUCTS the state and does not replay an earlier
+    // emission, so a late second reset silently discards a cancellation that
+    // arrived between the two.
+    //
+    // ⚠️ This also makes a pure `partial` abort the handshake, where the child's
+    // terminal-only state used to drop it. That matches what the two sibling ops
+    // already do; no in-tree caller emits `partial` at a transport.
+    // [[feedback_asio_cospawn_total_cancellation_default]];
+    // [[feedback_engine_stop_must_close_transports_total_cancel_insufficient]].
+    co_await asio::this_coro::reset_cancellation_state(
+        asio::enable_total_cancellation(), [](asio::cancellation_type ct) {
+            return ct == asio::cancellation_type::none ? ct : asio::cancellation_type::terminal;
+        });
 
     // FR-006 is unconditional: after close() returns, EVERY async_* answers
     // transport_already_closed. This precedes the one-shot guard below, which
@@ -1316,8 +1348,32 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     std::span<const std::byte> bytes) {
     using E = core::error;
 
-    // Enable total cancellation (D-17).
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    // #357 — the fourth site needing the OUT filter, and the one with TWO layers
+    // to get through rather than one. See async_handshake above for the mechanism;
+    // here asio's own composed `async_write` installs `enable_partial_cancellation`
+    // (impl/write.hpp) BEFORE the SSL io_op's terminal-only state, so a pure
+    // `total` was dropped one layer higher still. Mapping to `terminal` clears
+    // both, because terminal is in enable_partial_cancellation's mask and is the
+    // only type the SSL op accepts.
+    //
+    // ⚠️ THIS IS A UNIFORMITY FIX, NOT A WITNESSED ONE, and the distinction is
+    // deliberate rather than an omission. The DEFECT is structural: two layers
+    // drop `total`, which is true by construction and does not depend on any
+    // caller. Whether an in-tree caller can currently REACH it is a survey, and a
+    // survey re-arms itself on every new call site, so no count or window is
+    // recorded here. What is recorded is why it was fixed rather than deferred:
+    // it is the same one-line defect as the three siblings, and leaving one of
+    // four wrong is how the next reader concludes the asymmetry is deliberate.
+    //
+    // To re-derive reachability if you need it: a write must be SUSPENDED when
+    // stop() fires, on a transport stop() cannot otherwise reach — i.e. before
+    // publication, since after it stop()'s step-2 close_async() calls
+    // socket_.cancel() and wakes the write. Both reviewers of #357 judged that
+    // window narrow in this tree; neither claimed it empty, and no cell drives it.
+    co_await asio::this_coro::reset_cancellation_state(
+        asio::enable_total_cancellation(), [](asio::cancellation_type ct) {
+            return ct == asio::cancellation_type::none ? ct : asio::cancellation_type::terminal;
+        });
 
     // state_ != handshaken covers both `closed` and pre-handshake states.
     // ssl_stream_ is engaged iff state_ == handshaken (see async_read_some

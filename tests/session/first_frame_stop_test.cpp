@@ -219,3 +219,127 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
         << "T2b (SC-015 accept-slot leg): the accept slot was not reclaimed — the peer's "
         << "post-handshake read never observed a close after Engine::stop().";
 }
+
+// ── #357: stop() promptness while an ACCEPTED TLS HANDSHAKE is in flight ─────
+//
+// Sibling of the cell above, one stage earlier in the accept loop. That one
+// holds the accept slot in Step 3 (read_first_frame_bounded, post-handshake);
+// this one holds it in Step 2 (async_handshake), which is a DIFFERENT
+// cancellation path and was the one that did not honour stop()'s total.
+//
+// THE DEFECT THIS KILLS. asio's SSL composed operation (ssl::detail::io_op)
+// builds its cancellation_state through base_from_cancellation_state's
+// no-filter constructor, i.e. TERMINAL-ONLY. asio_tls_transport::async_handshake
+// used to install a ONE-argument reset_cancellation_state, which sets the same
+// filter as both in and out — so Engine::stop()'s cancellation_type::total was
+// forwarded to the SSL op unchanged and then dropped by that terminal-only
+// state. The handshake did not abort, and stop()'s Step-3 join on
+// outstanding_counter_ could not retire until the accepted transport's
+// tls_handshake_timeout expired. async_connect and async_read_some already
+// carried the two-argument OUT filter that fixes this; handshake and write did
+// not. [#357]
+//
+// WHY A RAW TCP PEER RATHER THAN AN mTLS ONE. The condition under test is "the
+// server is SUSPENDED inside async_handshake when stop() runs". A real mTLS
+// client makes that a race — it is exactly the race the sibling cell's header
+// says it cannot resolve, and #357 was observed only on a runner slow enough to
+// lose it. A peer that completes the TCP connect and then never sends a
+// ClientHello makes it a CERTAINTY: the server's async_handshake cannot
+// complete, by construction, for as long as the test cares to look. No barrier,
+// no inference, no scheduler dependence.
+//
+// THE ASSERTION IS AN ORDERING, not a wall-clock threshold — same construction
+// as the cell above (D-6.12b). The intermediate timer is armed at 500 ms
+// against the accept path's tls_handshake_timeout, which engine.cpp sets on
+// accepted_transport_config. Re-derive that value from engine.cpp rather than
+// trusting a number here; what matters is that it is the budget stop() must NOT
+// have to wait out, and that it is several times 500 ms.
+//
+// ⚠️ "ORDERING, NOT WALL-CLOCK" IS ONLY HALF TRUE, and the cell above inherits
+// the same limitation — established while reviewing #357, so it is recorded at
+// both cells rather than left in a parked issue's comment thread. The flag is
+// set by an ORDERING test (`!stop_done` inside the timer's own handler), but the
+// thing being ordered is a REAL `asio::steady_timer` against a chain of posted
+// handlers. A process-level stall of >= 500 ms landing after the timer is armed
+// and before stop() completes makes the reactor find the timer expired and
+// enqueue its handler AHEAD of stop()'s remaining strand hops — so the flag is
+// set even though stop() did no more work than usual. #357 is one observation
+// consistent with exactly that (56 tests in the same job ran 0.9-1.6 s slower
+// than in a passing re-run of the same SHA, most touching no socket at all).
+// A failure here is therefore evidence, not proof; re-run before concluding
+// regression, and check the job for a runner-wide stall first.
+//
+// ⚠️ NON-VACUITY IS THE RED ARM, and it is the only thing that proves this cell
+// can report non-zero. Revert either OUT filter in asio_tls_transport.cpp and
+// this cell FAILS — stop() then waits out the whole handshake budget. A green
+// result here without that revert having been run once is a claim about
+// compilation, not about detection.
+TEST(FirstFrameStop, StopIsPromptWhileAcceptedHandshakeIsInFlight) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.executor = ioc.get_executor();
+    auto harness = EngineLoopbackHarness::build(ioc.get_executor(), std::move(eng_cfg));
+    if (!harness) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
+    ioc.run_for(50ms);
+    ioc.restart();
+    std::uint16_t const port = harness->server_endpoint().port;
+    if (port == 0) {
+        GTEST_SKIP() << "acceptor listener did not bind";
+    }
+
+    // A peer that completes the TCP connect and then says NOTHING. The server
+    // accepts it, enters async_handshake, and blocks there awaiting a
+    // ClientHello that never comes. Held open for the whole cell — closing it
+    // would let the handshake fail on EOF and dissolve the very condition under
+    // test.
+    asio::ip::tcp::socket silent_peer{ioc};
+    {
+        asio::error_code connect_ec;
+        silent_peer.connect(asio::ip::tcp::endpoint{asio::ip::make_address("127.0.0.1"), port},
+                            connect_ec);
+        ASSERT_FALSE(connect_ec) << "raw TCP connect to the acceptor failed: "
+                                 << connect_ec.message();
+    }
+
+    // Let the accept loop pick the connection up and reach async_handshake.
+    ioc.run_for(200ms);
+    ioc.restart();
+
+    bool stop_done = false;
+    bool timer_fired_before_stop = false;
+    asio::steady_timer intermediate{ioc.get_executor()};
+    intermediate.expires_after(500ms);
+    intermediate.async_wait([&](std::error_code ec) {
+        if (!ec && !stop_done) timer_fired_before_stop = true;
+    });
+
+    asio::co_spawn(ioc, harness->engine().stop(), [&](std::exception_ptr ep) {
+        EXPECT_FALSE(ep) << "#357: Engine::stop() threw.";
+        stop_done = true;
+    });
+
+    while (!stop_done) {
+        ASSERT_GT(ioc.run_one(), 0u)
+            << "#357: io_context ran out of work before Engine::stop() completed — a "
+            << "broken cell (mis-wired timer/harness), not a RED proof.";
+    }
+    intermediate.cancel();
+    ioc.poll();
+
+    EXPECT_FALSE(timer_fired_before_stop)
+        << "#357: the intermediate 500ms timer fired BEFORE Engine::stop() completed. "
+        << "The accept loop was suspended in asio_tls_transport::async_handshake, and "
+        << "stop()'s cancellation_type::total did not abort it — so stop()'s Step-3 join "
+        << "on outstanding_counter_ had to wait out the accepted transport's "
+        << "tls_handshake_timeout instead. Re-check that async_handshake still installs "
+        << "the TWO-argument reset_cancellation_state whose OUT filter maps any accepted "
+        << "cancellation to `terminal` for the child SSL op.";
+
+    asio::error_code ignored;
+    silent_peer.close(ignored);
+}
