@@ -77,6 +77,24 @@ with an abortive fallback if it will not quiesce inside the budget. The generali
 the pre-existing cell that closed a transport with nothing in flight stayed GREEN under the mutation
 that made the whole feature inert.
 
+⚠️ **#358 — the shield above was real, and then the callee DELETED it. Read the two paragraphs as a
+pair; the first one alone is how the hang shipped.** The paragraph above is correct that
+`Session::close()` disables cancellation on its own frame, so the terminal `total` never reached the
+awaited shutdown *from the caller's side*. What it does not say — because nobody had asked the
+question at the callee — is that **a caller-installed cancellation state is not transitive across a
+callee that resets it.** `close_async()` opened with
+`co_await this_coro::reset_cancellation_state(enable_total_cancellation())`, and that call does not
+layer a scope onto the caller's state: it **replaces the bottom-frame state for the whole `co_spawn`
+chain**. So the moment #356 adopted `close_async()` at `Engine::stop()` and `Session::close()`, the
+callee threw away the very shield the paragraph above relies on, and `Session::close()` hung. It was
+live on `main`, not theoretical — measured **11 of 40 runs wedged, 0 of 40 after the fix**.
+`close_async()` now enters with `asio::disable_cancellation{}`.
+
+The carry-forward is narrower and nastier than "check the call site": **a shield verified at the
+caller tells you nothing until you have also read every callee that suspends inside it.** The
+recorded #348 blocker and its refutation were both reasoning about `Session::close()`; the defect was
+one frame down.
+
 > ⚠️ `Listener::cancel()` living on the impl is a **deliberate** Gate A outcome that overrode a review
 > objection. Do not "fix" it by promoting it to the base.
 
