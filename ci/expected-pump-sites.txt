@@ -196,10 +196,10 @@ tests/session/test_send_toapp_store_collision.cpp:254
 tests/session/test_send_toapp_store_collision.cpp:262
 tests/session/test_send_toapp_store_collision.cpp:272
 tests/session/test_seqnum_drain_on_close.cpp:160
-tests/session/test_seqnum_drain_on_close.cpp:293
-tests/session/test_seqnum_drain_on_close.cpp:376
-tests/session/test_seqnum_drain_on_close.cpp:387
-tests/session/test_seqnum_drain_on_close.cpp:402
+tests/session/test_seqnum_drain_on_close.cpp:329
+tests/session/test_seqnum_drain_on_close.cpp:410
+tests/session/test_seqnum_drain_on_close.cpp:421
+tests/session/test_seqnum_drain_on_close.cpp:436
 tests/session/test_session_dict_snapshot_provenance.cpp:170
 tests/session/test_session_dict_snapshot_provenance.cpp:178
 tests/session/test_session_invariant_counter_witness.cpp:133
