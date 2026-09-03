@@ -1746,20 +1746,40 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         // nothing else can close it, so close it here and report the same
         // best-effort success close() reports — the connection IS down.
         //
-        // WITNESSED by CloseAsyncCancelledMidCloseStillClosesTheSocket in
-        // test_inflight_exclusivity.cpp, which kills the mutation that removes
-        // this socket_.close(): the peer's read then stays pending forever.
+        // ⚠️ NO CELL DRIVES THIS HANDLER AS OF #358, and this is the SECOND time
+        // this comment has been wrong about that. Read both rounds before editing.
         //
-        // ⚠️ AN EARLIER DRAFT OF THIS COMMENT SAID "NO CELL DRIVES THIS HANDLER"
-        // and explained at length why one could not — reasoning that landing a
-        // cancellation inside the microsecond-wide async_shutdown suspension
-        // would be racing. That reasoning described a path this handler is NOT
-        // usually reached by. What the cell actually does is emit during the
-        // QUIESCE; the wait_ec break then falls through with the state still
-        // cancelled, and the throw happens at the async_shutdown `co_await`'s
-        // precheck rather than inside the shutdown. The claim was refuted by
-        // running the mutation, which is the only reason it is not still here.
-        // The give-up branch above is the exit with no cell — see its comment.
+        // ROUND 1 (#348). The comment said "no cell drives this handler" and
+        // explained why one could not — landing a cancellation inside the
+        // microsecond-wide async_shutdown suspension would be racing. That was
+        // refuted by running the mutation: CloseAsyncCancelledMidCloseStillCloses
+        // TheSocket does drive it, by emitting during the QUIESCE, after which the
+        // wait_ec break falls through with the state still cancelled and the throw
+        // lands at the async_shutdown co_await's PRECHECK rather than inside it.
+        //
+        // ROUND 2 (#358). That whole route required close_async's entry reset to
+        // leave cancellation ENABLED. It no longer does — see the #358 note at the
+        // reset. With `disable_cancellation` there is no recorded cancellation, no
+        // precheck throw, and the cell reaches this handler on no path at all.
+        //
+        // MEASURED 2x2, using the cell's own documented RED-ARM contract (delete
+        // the socket_.close(ec) below):
+        //     enable_total_cancellation + close present -> PASS
+        //     enable_total_cancellation + close REMOVED -> FAIL   (cell drove it)
+        //     disable_cancellation      + close present -> PASS
+        //     disable_cancellation      + close REMOVED -> PASS   (cell does NOT)
+        // The FAIL row is what proves the mutation harness can report non-zero, so
+        // the bottom-right PASS is a real loss of power and not a dead instrument.
+        //
+        // THE HANDLER STAYS. It still guards the invariant that no exit past the
+        // state transition leaves the socket open, and the body can still throw —
+        // timer construction and asio's own allocations are the remaining sources.
+        // What is gone is the WITNESS, and that is disclosed rather than papered
+        // over: the cell above now exercises the normal path, not this one.
+        //
+        // ⚠️ DO NOT "restore" the witness by reverting the entry reset. That reset
+        // is a hang fix (#358, measured 11 wedges / 40). A witness for this handler
+        // needs a fault-injection seam, not a cancellation.
         asio::error_code ec;
         socket_.close(ec);
         co_return core::expected_t<void>{};

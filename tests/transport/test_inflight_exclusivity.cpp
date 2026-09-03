@@ -1249,8 +1249,29 @@ TEST(InflightExclusivity, CloseAsyncIsIdempotentAfterCloseAndAfterItself) {
 // returns {} on the defect too — having left the socket open. Only the peer can
 // tell the difference from outside the process.
 //
-// ⚠️ RED-ARM CONTRACT: delete the `socket_.close(ec)` from close_async's
-// catch(...) and the server's read below must stay PENDING for the full 3 s pump.
+// ⚠️ THE RED-ARM CONTRACT BELOW IS NO LONGER SATISFIED — #358. It used to read:
+// "delete the socket_.close(ec) from close_async's catch(...) and the server's
+// read below must stay PENDING for the full 3 s pump." That was true while
+// close_async's entry reset left cancellation ENABLED: this cell's emit during
+// the quiesce was recorded, and the next co_await's precheck threw into the
+// catch. #358 changed that reset to `disable_cancellation{}` to fix a measured
+// hang (11 wedges / 40 on windows-msvc-debug), so the emit is now ignored,
+// nothing throws, and this cell no longer reaches the catch at all.
+//
+// MEASURED 2x2 with the mutation above:
+//     enable_total_cancellation + close present -> PASS
+//     enable_total_cancellation + close REMOVED -> FAIL   (cell drove the catch)
+//     disable_cancellation      + close present -> PASS
+//     disable_cancellation      + close REMOVED -> PASS   (cell does NOT)
+//
+// ⚠️ SO THIS CELL STAYS GREEN WHILE HAVING LOST ITS POWER, which is the exact
+// shape this repo keeps getting caught by. What it still witnesses is that a
+// close_async racing a cancellation ends with the socket CLOSED as seen by the
+// peer — real, and worth keeping — but it is now the NORMAL path being observed,
+// not the catch(...) recovery path.
+//
+// Restoring a catch(...) witness needs a fault-injection seam, NOT a
+// cancellation, and must not be done by reverting the #358 reset.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(InflightExclusivity, CloseAsyncCancelledMidCloseStillClosesTheSocket) {
     if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
