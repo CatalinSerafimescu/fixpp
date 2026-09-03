@@ -1650,11 +1650,28 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
                     // existed for "our own cancellation", which the entry-level
                     // `disable_cancellation` now makes impossible: nothing else
                     // cancels `quiesce` (it is a local, cancelled only at scope
-                    // exit). The cost of that is a real behaviour change and is
-                    // stated rather than hidden -- against a WEDGED SSL op the loop
-                    // now backs off at 1 ms to `close_deadline` instead of breaking
-                    // out early. That is bounded by `tls_close_timeout` and is the
-                    // designed fallback, but it is slower than before.
+                    // exit).
+                    //
+                    // MEASURED, not predicted. A poll counter and an exit-reason
+                    // probe were run on both arms against
+                    // CloseAsyncCancelledMidCloseStillClosesTheSocket:
+                    //     pre-#358 : "BREAK on wait_ec after 1 polls", exit polls=1
+                    //     post-#358: no BREAK line,                    exit polls=1
+                    // So the branch really did fire before and really does not now
+                    // -- and it costs nothing here, because the loop exits after ONE
+                    // poll either way: the op genuinely quiesces (still_suspended=0).
+                    // The probe is proven able to fire (it did, pre-fix), so its
+                    // silence post-fix is meaningful rather than a dead instrument.
+                    //
+                    // ⚠️ THAT IS A BOUND, NOT AN ALL-CLEAR. The 1 s worst case needs
+                    // an SSL op that SURVIVES socket_.cancel(), which this file's own
+                    // give-up branch says nothing in the suite can produce, and which
+                    // nobody has tried to construct. Against such an op the loop now
+                    // backs off at 1 ms to `close_deadline` instead of breaking out
+                    // early -- bounded by `tls_close_timeout`, and the designed
+                    // fallback, but slower. A per-cell A/B over 36 cells put the
+                    // largest median delta at +2 ms, which measures the suites we
+                    // have, not the case they cannot reach.
                     //
                     // Kept because the guard is correct for any state where
                     // cancellation IS enabled, and the entry reset is one edit away
