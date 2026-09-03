@@ -39,6 +39,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -66,6 +67,9 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <future>
+#include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -527,4 +531,175 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
         << "state=" << static_cast<int>(st) << ". "
         << "Removing the pump's EOF arm leaves state != Disconnected "
         << "(heartbeat_interval=30s >> 4s → no other path drives Disconnected).";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cases 4-5 — #348: the PEER of a fixpp session closing down must read a clean
+// TLS EOF, not an OS-level error.
+//
+// WHY THESE LIVE IN THE READ-PUMP FILE. The defect is a property of the pump's
+// state at teardown, not of the transport in isolation. Both teardown sites --
+// Engine::stop()'s per-session transport close and Session::close(terminal)'s
+// post-root-cancel close -- fire while the pump is SUSPENDED in
+// async_read_some, and the synchronous close() refuses to send the close-notify
+// alert whenever an SSL op is suspended (mutating SSL state under a pending
+// completion is the BIO_ctrl hazard close() documents). So the alert was skipped
+// at exactly the two sites that produce every normal disconnect, and a peer of a
+// cleanly closing fixpp session read transport_read_error (104) -- measured,
+// deterministic, and normalised for long enough that alerting tuned to the
+// documented non-fatal truncation mis-classified every clean shutdown.
+//
+// The transport-level cells in tests/transport/test_inflight_exclusivity.cpp
+// witness that close_async() quiesces a suspended read and still drains the
+// alert. These two witness that the TEARDOWN PATHS CALL IT. Reverting either
+// adoption to close() leaves every transport-level cell green.
+//
+// ⚠️ The assertion is on the PEER's read outcome, deliberately: what reaches the
+// wire is the only thing that can tell a drained BIO from a discarded one from
+// outside the process, and "the close returned {}" is true of the defect too.
+//
+// ⚠️ RED-ARM CONTRACT:
+//   case 4 — revert engine.cpp's stop() step-2 lambda to `tp->close()`.
+//   case 5 — revert session.cpp's post-root-cancel close to `live->close()`.
+// Each must then report transport_read_error, and ONLY its own case must fail.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A client that logs on and then keeps reading until the connection ends. The
+// terminal read outcome is what the two cases assert on. Reading in a loop (not
+// once) is load-bearing: the acceptor answers the Logon, and a single read would
+// resolve on that reply rather than on the shutdown.
+struct HoldingClient {
+    std::unique_ptr<fixpp::transport::Transport> transport;
+    std::optional<fixpp::core::expected_t<std::size_t>> terminal_read;
+    bool logged_on = false;
+};
+
+static asio::awaitable<void> run_client_holding_read(
+    fixpp::transport::test::LoopbackTlsFixture& fixture, uint16_t acceptor_port,
+    HoldingClient& hc) {
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    try {
+        auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(hc.transport.get());
+        if (!tls) co_return;
+
+        fixpp::transport::Endpoint ep{"127.0.0.1", acceptor_port};
+        auto conn_r = co_await hc.transport->async_connect(ep);
+        if (!conn_r.has_value()) co_return;
+        auto hs_r = co_await tls->async_handshake(fixture.ssl_cfg());
+        if (!hs_r.has_value()) co_return;
+
+        auto logon = make_logon_frame("FIX.4.2", "INITIATOR", "ACCEPTOR");
+        auto w_r = co_await hc.transport->async_write(std::span<const std::byte>{logon});
+        if (!w_r.has_value()) co_return;
+        hc.logged_on = true;
+
+        std::array<std::byte, 512> buf{};
+        for (;;) {
+            auto r = co_await hc.transport->async_read_some(std::span<std::byte>{buf});
+            if (!r.has_value()) {
+                hc.terminal_read = r;
+                co_return;
+            }
+        }
+    } catch (...) {
+    }
+}
+
+// Shared assertion so the two cases cannot drift apart in what they demand.
+static void expect_clean_peer_eof(HoldingClient const& hc, const char* site) {
+    ASSERT_TRUE(hc.logged_on) << "client never completed connect+handshake+Logon — the case below "
+                                 "would be asserting on a connection that never existed";
+    ASSERT_TRUE(hc.terminal_read.has_value())
+        << "the peer's read never terminated; nothing closed the connection";
+    ASSERT_FALSE(hc.terminal_read->has_value());
+    EXPECT_EQ(hc.terminal_read->error(), fixpp::core::error::transport_read_eof)
+        << "#348: " << site
+        << " must deliver the TLS close-notify. transport_read_error (104) here means the "
+           "teardown used the synchronous close(), which skips the alert whenever an SSL op is "
+           "suspended — and the read pump is always suspended at this point.";
+}
+
+TEST(EngineReadPumpTest, EngineStopDeliversCloseNotifyToPeer_Fixes348) {
+    asio::io_context ioc;
+    auto h = build_harness(ioc);
+    if (!h) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    ASSERT_TRUE(h->engine->start().has_value()) << "engine.start() failed";
+    ioc.run_for(50ms);
+    ioc.restart();
+
+    uint16_t port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
+    ASSERT_NE(port, 0u) << "acceptor listener did not bind";
+
+    HoldingClient hc;
+    hc.transport = h->fixture->make_client(ioc.get_executor());
+    asio::co_spawn(ioc, run_client_holding_read(*h->fixture, port, hc), asio::detached);
+
+    ioc.run_for(2s);
+    ioc.restart();
+
+    ASSERT_TRUE(hc.logged_on) << "client did not reach Logon within 2s";
+    ASSERT_FALSE(hc.terminal_read.has_value())
+        << "the peer's read already terminated BEFORE stop() — this case would then witness "
+           "whatever ended it, not the teardown";
+
+    auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
+    ioc.run();
+    stop_fut.get();
+
+    expect_clean_peer_eof(hc, "Engine::stop()'s per-session transport close");
+}
+
+TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348) {
+    asio::io_context ioc;
+    auto h = build_harness(ioc);
+    if (!h) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    ASSERT_TRUE(h->engine->start().has_value()) << "engine.start() failed";
+    ioc.run_for(50ms);
+    ioc.restart();
+
+    uint16_t port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
+    ASSERT_NE(port, 0u) << "acceptor listener did not bind";
+
+    HoldingClient hc;
+    hc.transport = h->fixture->make_client(ioc.get_executor());
+    asio::co_spawn(ioc, run_client_holding_read(*h->fixture, port, hc), asio::detached);
+
+    ioc.run_for(2s);
+    ioc.restart();
+
+    // ⚠️ ASSERT, not GTEST_SKIP. The sibling cells in this file skip here because
+    // they predate the acceptance path being wired; it is live now, and this cell
+    // is the ONLY witness that session.cpp's teardown calls close_async(). A skip
+    // would let a regression that stops publishing the session delete the witness
+    // silently and still report green. The fixture-dir skip above is the only
+    // legitimate skip in this cell.
+    auto acc = h->engine->lookup(h->acc_id);
+    ASSERT_TRUE(acc) << "acceptor session was never published — this cell cannot witness "
+                        "Session::close(terminal) without it, and skipping here would hide the "
+                        "loss of the only witness for that adoption";
+    ASSERT_TRUE(hc.logged_on) << "client did not reach Logon within 2s";
+    ASSERT_FALSE(hc.terminal_read.has_value())
+        << "the peer's read already terminated BEFORE close(terminal)";
+
+    // THE DIFFERENCE FROM CASE 4: the session closes itself, so the close runs
+    // at session.cpp's post-root-cancel site rather than Engine::stop()'s.
+    auto close_fut =
+        asio::co_spawn(ioc, acc->close(fixpp::session::close_mode::terminal), asio::use_future);
+    ioc.run_for(4s);
+    ioc.restart();
+    ASSERT_EQ(close_fut.wait_for(0s), std::future_status::ready)
+        << "Session::close(terminal) did not complete within 4s";
+    (void)close_fut.get();
+
+    expect_clean_peer_eof(hc, "Session::close(terminal)'s post-root-cancel transport close");
+
+    auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
+    ioc.run();
+    stop_fut.get();
 }

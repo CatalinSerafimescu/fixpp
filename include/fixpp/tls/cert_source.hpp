@@ -44,7 +44,17 @@
 //       //    observes. No caller in this repo opts out today. Write the step
 //       //    anyway — it is correct and cheap — but do not rely on it as the
 //       //    mechanism that reports pre-call cancellation unless you also control
-//       //    the caller. Tracked as fixpp#351.
+//       //    the caller.
+//       //
+//       //    ⚠️ AND OPTING OUT IS NOT ENOUGH EITHER, WHICH IS WHY fixpp#351 CLOSED
+//       //    AS A CONTRACT NOTE RATHER THAN A CODE CHANGE. Measured against the
+//       //    in-tree caller (ReconnectFsm): with the throw suppressed the body
+//       //    runs, but the caller's own pre-load reap answers first and
+//       //    load_credentials() is never entered at all — there is no suspension
+//       //    between that reap and the call at which a cancellation could arrive.
+//       //    Delivering §6.4 needs a caller with a genuinely non-empty window,
+//       //    not merely one that opted out. The standing record is
+//       //    `spec/behaviors-and-limitations.md` L-349-1 / B-351-1.
 //       if (cs.cancelled() != asio::cancellation_type::none)
 //           co_return core::expected_t<local_credentials>{
 //               unexpect, error::tls_load_cancelled };

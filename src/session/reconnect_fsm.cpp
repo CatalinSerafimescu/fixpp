@@ -105,6 +105,34 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
 [[nodiscard]] asio::awaitable<expected_t<void>> ReconnectFsm::drive_reconnect_attempt() noexcept {
     using fixpp::core::error;
 
+    // #351 — REAP THE INHERITED EMISSION BEFORE THE RESET DISCARDS IT.
+    //
+    // This is #349's rule ("what kills a reap is a reset standing between it and
+    // the emission it is meant to see") applied at the COROUTINE HEAD, which
+    // #349 did not reach. The reset below re-constructs cancellation_state from
+    // the parent slot with `cancelled_` value-initialised, so a `total` that was
+    // emitted before this attempt was entered is not replayed into the new
+    // state -- and BOTH reaps further down then observe `none`.
+    //
+    // ⚠️ THE ONLY THING THAT STOPPED THE ATTEMPT IN THAT CASE WAS ASIO'S THROW,
+    // NOT THIS COROUTINE. `await_transform` for a child awaitable throws
+    // operation_aborted at the CALLER's `co_await drive_reconnect_attempt()`
+    // when `throw_if_cancelled_` -- default TRUE -- sees the state already
+    // cancelled, so the body never ran. MEASURED both ways in
+    // tests/session/test_reconnect_live_happy_path.cpp: with the default the
+    // caller gets the throw; with `throw_if_cancelled(false)` the body ran and,
+    // before this reap existed, CONNECTED with the caller's cancellation
+    // silently discarded. That is the same failure #349 fixed one level down.
+    //
+    // So the reap is what makes the abort a property of this FSM rather than of
+    // an asio policy the caller can turn off. Re-derive:
+    // `awaitable_frame_base::await_transform(awaitable<T, Executor>)` and
+    // `awaitable_thread::reset_cancellation_state` in asio's impl/awaitable.hpp.
+    if (auto cs = co_await asio::this_coro::cancellation_state;
+        cs.cancelled() != asio::cancellation_type::none) {
+        co_return std::unexpected{error::transport_connect_cancelled};
+    }
+
     // Enable total-cancellation so cancellation_type::total from the root
     // cancellation signal propagates through nested co_awaits.
     // [[feedback_asio_cospawn_total_cancellation_default]]: co_spawn defaults

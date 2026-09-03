@@ -93,7 +93,11 @@ struct ConnectInfo;
 // the same predicate and the throw wins. A caller that wants the error VALUE
 // rather than the exception must `co_await this_coro::throw_if_cancelled(false)`
 // around the call; no caller in this repo does, so those reaps do not currently
-// fire in production -- tracked as #351. Re-derive:
+// fire in production. ⚠️ Opting out is necessary and NOT sufficient: measured
+// against ReconnectFsm, the caller's own pre-load reap answers first and the
+// callee body is never entered, so the window stays empty either way. #351
+// closed on that measurement; the standing record is
+// `spec/behaviors-and-limitations.md` L-349-1 / B-351-1. Re-derive:
 // `awaitable_frame_base::await_transform(awaitable<T, Executor>)` in asio's
 // impl/awaitable.hpp, and the `throw_if_cancelled_` member on its entry point.
 //
@@ -282,21 +286,40 @@ public:
     //
     //     WHY ADDITIVE rather than making close() itself async: close() is a
     //     synchronous pure-virtual with implementors across the library and the
-    //     test suite, for a benefit only the TLS transport can deliver — and it
-    //     would not be usable at the call site that most wants it, since
-    //     Session's terminal close emits cancellation_type::total immediately
-    //     before closing, which would cancel an awaited shutdown.
+    //     test suite, for a benefit only the TLS transport can deliver.
+    //
+    //     ⚠️ THIS PARAGRAPH USED TO ADD "and it would not be usable at the call
+    //     site that most wants it, since Session's terminal close emits
+    //     cancellation_type::total immediately before closing, which would
+    //     cancel an awaited shutdown". THAT WAS FALSE and is struck. Session's
+    //     close() opens by disabling cancellation on its own frame precisely so
+    //     that teardown runs to completion; the root emission cancels the
+    //     session work it is tearing down, not close()'s own awaits. Re-derive:
+    //     the reset_cancellation_state(disable_cancellation{}) at the head of
+    //     Session::close in src/session/session.cpp. The real obstacle was
+    //     elsewhere and is described under the TLS override below.
     //
     //     WHAT THE TLS OVERRIDE ADDS over close(): it drives shutdown through
     //     asio's ssl::stream, which actually writes the close-notify alert to
     //     the next layer — the step whose absence is the #348 defect — bounded
     //     by Config::tls_close_timeout.
     //
-    //     Adopting this at a production call site is a separate decision;
-    //     derive the current adopters with `git grep close_async`. Witnessed by
-    //     test_inflight_exclusivity.cpp's CloseAsyncDeliversCloseNotify, which
-    //     asserts the PEER observes a clean EOF — a wire-level outcome, not
-    //     merely that the call returned.
+    //     ⚠️ AND IT QUIESCES RATHER THAN SKIPPING. close() refuses to send the
+    //     alert whenever an SSL op is suspended, because SSL_shutdown would
+    //     mutate state that op's completion is about to touch. Every real
+    //     teardown is in exactly that state — the read pump is blocked in
+    //     async_read_some — so an override that inherited the refusal would
+    //     have been inert at every call site that wanted it. The TLS override
+    //     cancels the pending op, waits for it to unwind, and then writes the
+    //     alert; if it cannot quiesce inside the budget it falls back to the
+    //     abortive close, so the worst case is close()'s behaviour plus a
+    //     bounded wait.
+    //
+    //     Derive the current adopters with `git grep close_async -- src`; do
+    //     not take a list from a comment. Witnessed at the WIRE, not at the
+    //     return value: test_inflight_exclusivity.cpp asserts the peer sees a
+    //     clean EOF, and engine_readpump_test.cpp asserts the same for the
+    //     Engine::stop() and Session::close() teardown paths.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<void>> close_async() {
         co_return close();
     }

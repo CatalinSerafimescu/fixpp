@@ -210,7 +210,10 @@ public:
 
     // #348: the graceful counterpart. Drives SSL shutdown through asio's
     // ssl::stream so the close-notify alert is actually drained to the socket,
-    // bounded by Config::tls_close_timeout. See Transport::close_async().
+    // and first CANCELS AND JOINS any suspended SSL op so that the alert is not
+    // skipped at the only call sites that have one. Quiesce + shutdown share a
+    // single Config::tls_close_timeout budget, with an abortive fallback if the
+    // op does not unwind inside it. See Transport::close_async().
     [[nodiscard]] asio::awaitable<core::expected_t<void>> close_async() override;
 
     // ── TlsTransport override ───────────────────────────────────────────────
@@ -336,11 +339,18 @@ private:
     //
     // ⚠️ SECOND ADMISSIBLE GUARD, added with close_async (#348): a state_
     // TRANSITION taken BEFORE the suspension. close_async sets state_ = closed
-    // and only then awaits async_shutdown on ssl_stream_, and every other async
-    // entry point rejects on state_ != handshaken -- so no SSL op can start
-    // underneath it and it needs no flag here. An operation that suspends on
-    // ssl_stream_ WITHOUT first closing state_ must add a flag to this
-    // predicate.
+    // and only then suspends, and every other async entry point rejects on
+    // state_ != handshaken -- so no SSL op can start underneath it and it needs
+    // no flag here. An operation that suspends on ssl_stream_ WITHOUT first
+    // closing state_ must add a flag to this predicate.
+    //
+    // ⚠️ close_async READS this predicate ACROSS its own suspensions, which no
+    // other caller does: its quiesce loop waits on a plain steady_timer while a
+    // read or write is still in flight and re-reads the predicate each time.
+    // That is sound only because the flags live in *timer_epochs_ and are
+    // cleared by inflight_flag_guard on the guarded frame's exit -- a flag
+    // cleared by a statement below a co_await would be cleared too late, or not
+    // at all on a destroyed frame, and the loop would spin to its deadline.
     [[nodiscard]] bool ssl_op_suspended_() const noexcept {
         return timer_epochs_->read_in_flight || timer_epochs_->write_in_flight ||
                timer_epochs_->handshake_in_flight;

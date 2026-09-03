@@ -35,6 +35,32 @@ Scope and conventions:
 - **B-001-4 — Trailing fractional zeros are preserved in the encoding, but compare ignores them.** `5.500` parses to `{5500, -3}` (the exponent retains scale), yet value-equality treats it as equal to `5.5`. Storage is representation-faithful; comparison is value-faithful. *(AC-P5 / AC-C1.)*
 - **B-001-5 — Swapping the decimal width is a build-time choice enforced at LINK time.** Setting `-DFIXPP_DECIMAL_T=...` widens the whole engine; two translation units built with conflicting `FIXPP_DECIMAL_T` fail with an unresolved-symbol *link* error (`decimal_alias_sentinel`), not a runtime mismatch. The alias never changes the `fixpp_decimal_t` C-ABI shape (always 16 bytes). *(AC-B3 / AC-B4.)*
 
+- **B-351-1 — `ReconnectFsm::drive_reconnect_attempt()` discarded a cancellation emitted before it
+  was entered, and connected anyway. Only asio's throw was stopping it.**
+
+  The coroutine's first statement was `reset_cancellation_state(enable_total_cancellation())`, which
+  re-constructs the state from the parent slot with `cancelled_` value-initialised — so an emission
+  that already happened is not replayed, and BOTH reaps below it (the post-backoff one #349 fixed and
+  the loop-head one #349 kept) observed `none`. The attempt then ran to a successful connect and
+  handshake with the caller's cancellation gone.
+
+  ⚠️ **This was invisible because asio masked it.** `await_transform` for a child awaitable throws
+  `operation_aborted` at the CALLER's `co_await drive_reconnect_attempt()` when `throw_if_cancelled_`
+  — default TRUE — sees the state already cancelled, so the body never ran and the reset never got
+  the chance to discard anything. The masking is a POLICY the caller can switch off, not a property
+  of the FSM: #351 proposed switching it off, which would have unmasked this.
+
+  Fixed by #349's own rule applied at the coroutine head — reap BEFORE the reset, not instead of it.
+  Both states are measured in `tests/session/test_reconnect_live_happy_path.cpp`: with the default
+  policy the caller gets the throw and the body never runs; with `throw_if_cancelled(false)` the body
+  runs and now answers `transport_connect_cancelled`. Deleting the head reap turns the second cell
+  RED by letting the attempt connect — that is its mutation kill.
+
+  ⚠️ This does NOT make `[2g §6.4]`'s `tls_load_cancelled` reachable from this caller, and L-349-1
+  below still stands: `load_credentials()` is not entered on either path, and nothing suspends
+  between the loop-head reap and the load at which a cancellation could arrive. An opt-out placed
+  around the LOAD, as #351 proposed, would guard a window that cannot open.
+
 ### Limitations
 
 - **L-001-1 — No arithmetic and no locale-aware formatting on `decimal<T>`.** No `+ - * /`, no thousands-separators / exponent-notation / per-locale decimal marks; it is a representation primitive only. **Status: wontfix.** *(spec §5 "Out of scope".)*
@@ -2374,9 +2400,9 @@ Evidence: issues #340, #341, #342.
   `test_inflight_exclusivity.cpp`'s `CloseDoesNotDeliverCloseNotify_PinsDefect348`, so a future fix
   has to come through that assertion deliberately instead of changing the wire silently.
 
-  ⚠️ Consequence for an operator TODAY: a peer of a fixpp session that closes cleanly logs a
-  transport read ERROR, not a benign truncation. Alerting tuned on the documented behaviour will
-  mis-classify every normal disconnect.
+  ⚠️ Consequence for a caller of `close()` ITSELF: the peer logs a transport read ERROR, not a
+  benign truncation. ⚠️ **This is no longer the whole story for the SHIPPED teardown paths** —
+  see the second amendment to this row below, which is where the current answer lives.
 
 - **B-340-1 — `Transport::cancel()` has NO documented failure; it returns `expected_t<void>` for
   symmetry only.** Contract-side resolution: the published contract named
@@ -2430,11 +2456,10 @@ Evidence: issues #346, #348, #349; new issue #351.
   chain.
 
 - **B-348-1 (AMENDED) — `close_async()` exists and delivers the close-notify that `close()` throws
-  away. `close()` itself is UNCHANGED, and no production caller uses `close_async()`.**
-
-  The B-348-1 row above records the defect and still stands as the shipped behaviour: a peer of a
-  fixpp session that closes cleanly observes `transport_read_error`, not a benign truncation, and
-  alerting tuned on the documented behaviour still mis-classifies every normal disconnect.
+  away. `close()` itself is UNCHANGED.** ⚠️ This row's *"no production caller uses
+  `close_async()`"* and its peer-observation paragraph were true when written and are
+  **SUPERSEDED** by the second amendment below; read that one for what ships. Nothing else in this
+  row has changed.
 
   What is new is an opt-in entry point. `Transport::close_async()` is a virtual WITH A DEFAULT
   (`co_return close();`), so the `[const §XIV.2]` five-**pure**-virtual cap is untouched and no
@@ -2449,10 +2474,77 @@ Evidence: issues #346, #348, #349; new issue #351.
   The obstacle is named at the declaration: `Session`'s terminal close emits
   `cancellation_type::total` immediately before closing, which would cancel an awaited shutdown.
 
+- **B-348-1 (AMENDED 2) — the shipped teardown paths now use `close_async()`, so a peer of a fixpp
+  session that closes cleanly observes `transport_read_eof`. `close()` is still unchanged and a
+  direct caller of it still gets the abortive close.**
+
+  Two adoptions, both measured at the PEER:
+
+  | teardown path | peer read outcome |
+  |---|---|
+  | `Engine::stop()` — the per-session transport close on each session strand | `transport_read_eof` |
+  | `Session::close(terminal)` — the close that follows the root total-cancel | `transport_read_eof` |
+  | a direct `Transport::close()` call | `transport_read_error` — unchanged, and still pinned |
+
+  ⚠️ **THE STATED OBSTACLE WAS NOT THE REAL ONE.** The first amendment named the blocker as
+  `Session`'s terminal close emitting `cancellation_type::total` before closing, which "would cancel
+  an awaited shutdown". It would not: `Session::close()` disables cancellation on its own frame as
+  its first statement, so that emission never reached the awaited close. The real blocker was in the
+  transport, not at the call site: at both sites an SSL operation is suspended — the read pump
+  is blocked in `async_read_some`, and the root total-cancel that precedes the close has not yet
+  been delivered to it — and `close_async()` inherited `close()`'s rule of skipping the alert
+  whenever that is so. Adopting it unchanged would have compiled, passed, and delivered nothing.
+
+  `close_async()` now QUIESCES instead of skipping: `socket_.cancel()` completes the pending
+  operation with `operation_aborted` without touching SSL state, the coroutine unwinds, the
+  `inflight_flag_guard` clears the flag, and only then is the alert written. `state_` is closed
+  before the cancel, so a woken pump cannot start a new read and the join terminates. The whole
+  call — quiesce plus shutdown — is bounded by ONE `Config::tls_close_timeout` budget, and an
+  operation that does not quiesce inside it falls back to the abortive close. **The worst case is
+  therefore the old behaviour plus a bounded wait, never a hang.**
+
+  ⚠️ **`close(graceful)` is NOT in that table, deliberately.** It reaches the same adopted site, but
+  only after phase 1; on the phase-1 TIMEOUT arm `session.cpp`'s FQ-G force-close has already closed
+  the transport abortively, and the `close_async` below it is then the idempotent no-op — so the
+  peer's outcome on that arm is `transport_read_error`, unchanged. The row claims only what the
+  witnesses drive.
+
+  ⚠️ **KNOWN, BOUNDED, AND NOT FIXED: a close arriving DURING an in-flight `close_async()` is told
+  `{}` before the socket is actually closed.** `close_async()` publishes `state_ = closed` before it
+  suspends, so both `close()` and a second `close_async()` become no-ops for up to
+  `tls_close_timeout` while the first call finishes. That is subsumption rather than a leak *only*
+  because every exit from `close_async()` past that transition closes the socket, including the
+  exceptional one — the `catch(...)` is what makes the second caller's `{}` honest. Making `close()`
+  fall through instead was considered and rejected: it buys a difference observable only against a
+  WEDGED operation, which nothing in the suite can produce, so it would ship an unwitnessable branch.
+  Revisit if an adopter appears that races the two entry points and acts on the early `{}`.
+
+  ⚠️ **Sites deliberately NOT adopted**, so the next reader does not read the two above as "all of
+  them": the accept-loop reject paths in `engine.cpp` (bad dynamic_cast, handshake failure,
+  first-frame failure, malformed CompIDs, registry mismatch, `open()` failure) and `session.cpp`'s
+  FQ-G force-close of a wedged logout phase 1. The reject paths are serial in the accept loop, so a
+  graceful close there lets one unresponsive peer per connection spend the close budget ahead of
+  every other pending accept; the FQ-G close exists to unwedge a blocked writer, where abortive is
+  the intent. Derive the current adopters with `git grep close_async -- src`, never from this list.
+
+  Witnesses: `tests/session/engine_readpump_test.cpp`'s
+  `EngineStopDeliversCloseNotifyToPeer_Fixes348` and
+  `SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348` assert the PEER's read outcome, and each
+  was proven RED against a tree with ONLY its own adoption reverted. The transport-level quiesce is
+  witnessed by `CloseAsyncQuiescesOwnPendingReadAndStillDeliversAlert_Fixes348`, proven RED by
+  restoring the `|| ssl_op_suspended_()` bail — a mutation under which the pre-existing
+  `CloseAsyncDeliversCloseNotify_Fixes348` stays GREEN, which is why that cell alone was not
+  evidence for any of this.
+
 ### Limitations
 
 - **L-349-1 — `[2g §6.4]`'s pre-I/O reap does not fire for any caller in this repo, and correcting
-  its ORDER (which this change did) was necessary but not sufficient.** Tracked as **#351**.
+  its ORDER was necessary but not sufficient.** **Status: wontfix — #351 closed on the measurement
+  in B-351-1 above, and this row is now the standing record.** Opting the caller out of
+  `throw_if_cancelled` is ALSO not sufficient: the in-tree caller's own pre-load reap answers first
+  and `load_credentials()` is never entered, so the §6.4 window is empty from this repo in both
+  directions. Delivering §6.4 needs a caller with a genuinely non-empty window; the recipe in
+  `include/fixpp/tls/cert_source.hpp` states that precondition for third-party implementors.
 
   asio's `await_transform` for a child awaitable throws `operation_aborted` when
   `throw_if_cancelled_` — which DEFAULTS TO TRUE and is per-`awaitable_thread` — sees the inherited
@@ -2460,7 +2552,13 @@ Evidence: issues #346, #348, #349; new issue #351.
   wins and the child body never runs. A caller gets a thrown error, not the `tls_load_cancelled`
   §6.4 names.
 
-  `git grep throw_if_cancelled -- src include` is empty. All three production callers of
+  ⚠️ This row previously offered `git grep throw_if_cancelled -- src include` as the re-derivation
+  and asserted it was empty. That command matches the explanatory comments in `transport.hpp`,
+  `cert_source.hpp` and `reconnect_fsm.cpp` and so returns hits regardless — a recipe that reports
+  the opposite of the claim. The claim it was standing in for is a CONDITION, not a count: no caller
+  in this repo turns asio's `throw_if_cancelled` OFF around a `load_credentials()` call, and each of
+  the three production callers is non-firing for its own reason. Re-derive by reading those three
+  sites, not by grepping for the identifier. All three production callers of
   `load_credentials()` are non-firing: `reconnect_fsm` awaits it with the default, and the two
   ctor-time sites use `co_spawn(..., asio::detached)`, which binds no cancellation slot at all so
   `cancelled()` is permanently `none`. The `file_cert_source` reap is therefore CORRECT AND INERT.

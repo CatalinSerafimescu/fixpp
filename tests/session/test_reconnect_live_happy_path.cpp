@@ -35,9 +35,13 @@
 
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
@@ -192,6 +196,56 @@ public:
     [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
         const noexcept override {
         return nullptr;
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProbeCertSource / ProbeFactory — #351 measurement only.
+//
+// Records whether load_credentials() was ever ENTERED. That is the observable
+// the #351 question turns on: [2g §6.4]'s pre-I/O reap and asio's
+// throw_if_cancelled are guarded by the same predicate, so which one a caller
+// gets is decided by whether the body runs at all.
+// ─────────────────────────────────────────────────────────────────────────────
+class ProbeCertSource final : public fixpp::tls::cert_source {
+public:
+    std::atomic<int> entered{0};
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::tls::local_credentials>>
+    load_credentials() override {
+        ++entered;
+        co_return std::unexpected{fixpp::core::error::tls_load_cancelled};
+    }
+
+    [[nodiscard]] fixpp::core::expected_t<std::span<const fixpp::tls::Certificate>>
+    load_trust_anchors() [[clang::lifetimebound]] override {
+        return std::span<const fixpp::tls::Certificate>{};
+    }
+};
+
+class ProbeFactory final : public fixpp::transport::TransportFactory {
+public:
+    std::shared_ptr<ProbeCertSource> src{std::make_shared<ProbeCertSource>()};
+    std::atomic<int> make_count{0};
+    std::atomic<int> connect_count{0};
+    std::atomic<int> handshake_count{0};
+
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
+        asio::any_io_executor exec, fixpp::tls::SslCtxConfig /*ssl_cfg*/,
+        std::pmr::memory_resource* /*mr*/) noexcept override {
+        ++make_count;
+        return std::make_unique<TrackingTlsTransport>(std::move(exec), connect_count,
+                                                      handshake_count);
+    }
+
+    [[nodiscard]] fixpp::core::expected_t<void> reload_credentials(
+        std::shared_ptr<fixpp::tls::cert_source> /*s*/) noexcept override {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
+        const noexcept override {
+        return src;
     }
 };
 
@@ -450,6 +504,171 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
     EXPECT_EQ(session.state(), fixpp::session::fsm_state::Active)
         << "Session did not reach Active after reconnect + Logon-ack. "
         << "SC-001: live TLS reconnect must resume the session to Active.";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #351 — WHERE a pending cancellation is actually answered in the reconnect
+// chain. MEASURED; the answer is neither reap named in the issue.
+//
+// [2g §6.4] binds the window "between `co_await cs->load_credentials()` issuing
+// the call and the awaitable taking its first suspension", and #351 observes
+// that asio's `await_transform` throws operation_aborted on exactly the
+// condition the callee's step-3 reap tests, `throw_if_cancelled_` defaulting to
+// TRUE — so the throw wins and a default caller never sees `tls_load_cancelled`.
+//
+// This cell measures what the REAL caller does, which is the thing #351 says a
+// witness must do. The answer is that the window is EMPTY here in both
+// directions: `ReconnectFsm` reaps at its loop head and co_returns
+// transport_connect_cancelled, and there is NO suspension point between that
+// reap and the `co_await snap->load_credentials()` below it — the intervening
+// `this_coro` awaiters are `await_ready()==true` and `cert_source_snapshot()` is
+// synchronous — so nothing can become cancelled in between on a strand that
+// serialises the emitter with this coroutine.
+//
+// ⚠️ WHAT THIS DOES AND DOES NOT SETTLE. It does not make §6.4 deliverable; the
+// published recipe's step 3 is still unreachable for a default caller, which is
+// what `cert_source.hpp` warns about at the recipe itself. It settles that
+// adding a `throw_if_cancelled(false)` opt-out AT THIS CALL SITE would guard a
+// window that cannot open, i.e. it would be dead code with no witness able to
+// drive it. Re-derive both halves before acting on either: walk from the
+// loop-head reap in reconnect_fsm.cpp down to the load and look for a
+// suspension.
+//
+// The `entered == 0` arm is what carries that; without it the cell would pass on
+// a tree where the reap was deleted and the callee returned the same error.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(ReconnectLiveHappyPathTest, PendingCancellationAnswersWithErrorValueNotAThrow_351) {
+    auto factory = std::make_shared<ProbeFactory>();
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(3), 30s, 2000ms);
+
+    asio::cancellation_signal sig;
+    std::optional<fixpp::core::expected_t<void>> result;
+    bool threw = false;
+    bool parent_armed = false;
+
+    // Production shape, not a bespoke one: the connect loop resets to
+    // enable_total_cancellation at its head (co_spawn's default filter passes
+    // TERMINAL only), then awaits the FSM's attempt awaitable. The timer is the
+    // suspension the emit needs — a signal fired before its slot has a handler
+    // is simply lost, which is why an emit placed before ioc.run() witnesses
+    // nothing at all.
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            asio::steady_timer gate{co_await asio::this_coro::executor};
+            gate.expires_after(100ms);
+            asio::error_code gate_ec;
+            parent_armed = true;
+            co_await gate.async_wait(asio::redirect_error(asio::use_awaitable, gate_ec));
+            try {
+                result = co_await fsm.drive_reconnect_attempt();
+            } catch (...) {
+                threw = true;
+            }
+        },
+        asio::bind_cancellation_slot(sig.slot(), asio::detached));
+
+    ioc.run_for(20ms);
+    ASSERT_TRUE(parent_armed) << "the parent never reached its suspension — the emit below would "
+                                 "land on a slot with no handler and be silently lost";
+    sig.emit(asio::cancellation_type::total);
+    ioc.run_for(1s);
+    ioc.restart();
+
+    // MEASURED, and it is not what [2g §6.4] describes: the caller of
+    // drive_reconnect_attempt() gets a THROWN operation_aborted, from asio's
+    // await_transform, before the FSM body runs at all. So the cancellation is
+    // answered one level ABOVE the FSM, and neither the FSM's loop-head reap nor
+    // the cert_source's §6.4 step-3 reap is what answers it.
+    EXPECT_TRUE(threw) << "expected asio's await_transform to throw operation_aborted when the "
+                          "awaiting frame's state is already cancelled; if this is now false, "
+                          "re-derive #351 before acting on it — the mechanism has changed.";
+    EXPECT_FALSE(result.has_value())
+        << "drive_reconnect_attempt returned a value; the throw above did not occur";
+
+    // The load never happens, so §6.4's window is empty from this caller in BOTH
+    // directions: the body does not run, and there is no suspension point
+    // between the FSM's loop-head reap and `co_await snap->load_credentials()`
+    // at which a cancellation could arrive if it did.
+    EXPECT_EQ(factory->src->entered.load(), 0)
+        << "load_credentials() was entered despite a pending cancellation";
+    EXPECT_EQ(factory->connect_count.load(), 0)
+        << "the attempt proceeded to connect despite a pending cancellation";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #351 — the counterfactual, so the disposition is chosen against evidence and
+// not against the issue's model of where the throw is.
+//
+// Same shape as the cell above with ONE difference: the parent opts out of
+// asio's throw_if_cancelled around the attempt. #351 proposes exactly this opt
+// out — one frame lower, around the load — so this cell asks what the FSM does
+// when the throw is not there to stop it.
+//
+// ⚠️ THE ANSWER, BEFORE THE HEAD REAP EXISTED, WAS THAT IT CONNECTED. The reset
+// at the top of drive_reconnect_attempt re-constructs cancellation_state from
+// the parent slot with `cancelled_` value-initialised, so the inherited
+// emission was discarded and every reap below it saw `none`. The attempt then
+// ran to a successful connect + handshake with the caller's cancellation gone —
+// the same failure #349 fixed one level down, at a site #349 did not reach.
+// asio's throw was the only thing masking it, which means #351's own proposal
+// would have UNMASKED it.
+//
+// With the head reap in place the FSM answers for itself:
+// transport_connect_cancelled, its own contract — NOT [2g §6.4]'s
+// tls_load_cancelled, and load_credentials() is still never entered, because
+// nothing suspends between that reap and the load. So no opt-out at any site
+// delivers §6.4 to this caller; that half of #351 is a documentation question,
+// and cert_source.hpp already carries the warning.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST_F(ReconnectLiveHappyPathTest, ParentOptOutYieldsFsmReapNotTheCertSourceReap_351) {
+    auto factory = std::make_shared<ProbeFactory>();
+    fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(3), 30s, 2000ms);
+
+    asio::cancellation_signal sig;
+    std::optional<fixpp::core::expected_t<void>> result;
+    bool threw = false;
+    bool parent_armed = false;
+
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            asio::steady_timer gate{co_await asio::this_coro::executor};
+            gate.expires_after(100ms);
+            asio::error_code gate_ec;
+            parent_armed = true;
+            co_await gate.async_wait(asio::redirect_error(asio::use_awaitable, gate_ec));
+            // THE ONE DIFFERENCE.
+            co_await asio::this_coro::throw_if_cancelled(false);
+            try {
+                result = co_await fsm.drive_reconnect_attempt();
+            } catch (...) {
+                threw = true;
+            }
+        },
+        asio::bind_cancellation_slot(sig.slot(), asio::detached));
+
+    ioc.run_for(20ms);
+    ASSERT_TRUE(parent_armed);
+    sig.emit(asio::cancellation_type::total);
+    ioc.run_for(1s);
+    ioc.restart();
+
+    EXPECT_FALSE(threw) << "throw_if_cancelled(false) must suppress await_transform's throw";
+    ASSERT_TRUE(result.has_value()) << "the FSM never returned";
+    ASSERT_FALSE(result->has_value());
+    EXPECT_EQ(result->error(), fixpp::core::error::transport_connect_cancelled)
+        << "with the throw suppressed the FSM's own loop-head reap answers. If this is "
+           "tls_load_cancelled instead, [2g §6.4]'s reap became reachable and #351's "
+           "disposition (1) is live — re-derive before believing either.";
+
+    EXPECT_EQ(factory->src->entered.load(), 0)
+        << "load_credentials() STILL is not entered: the loop-head reap precedes it and nothing "
+           "suspends in between. This is why an opt-out placed around the LOAD, as #351 "
+           "proposes, guards a window that cannot open.";
+    EXPECT_EQ(factory->connect_count.load(), 0);
 }
 
 }  // namespace

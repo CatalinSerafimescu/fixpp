@@ -1250,6 +1250,16 @@ asio::awaitable<void> Engine::stop() {
             //
             // Each dispatch is a non-blocking co_spawn(session_strand, ...) — control
             // strand and session strand are distinct, so no deadlock. [INV-5/C-2]
+            //
+            // ⚠️ SPAWNED ALL-AT-ONCE, THEN JOINED — not awaited one at a time, which
+            // is what this loop did while the close was synchronous. `close_async()`
+            // can spend up to `Config::tls_close_timeout` on a transport that will
+            // not quiesce; awaiting each in turn makes step 2 cost N × that budget
+            // before the joins below have even started, i.e. a 1 s default becomes
+            // minutes of stop latency on a moderately sized engine. Spawning first
+            // and joining after keeps each session strand's serialization intact
+            // while bounding the whole step at roughly ONE close budget.
+            auto close_counter = std::make_shared<std::atomic<int>>(0);
             for (auto& [id, entry] : registry_) {
                 if (entry.live_transport != nullptr && entry.session_strand.has_value()) {
                     // Capture the raw pointer BEFORE the co_spawn so the lambda owns a
@@ -1257,16 +1267,51 @@ asio::awaitable<void> Engine::stop() {
                     // since the registry_ is stable between stopped_=true and clear()).
                     // [INV-6]
                     fixpp::transport::Transport* tp = entry.live_transport;
-                    co_await asio::co_spawn(
+                    // Incremented on THIS strand before the spawn, so the counter is
+                    // > 0 the instant a close frame exists — same discipline as the
+                    // liveness/outstanding counters. counter_guard owns the matching
+                    // decrement, so an unwinding close still releases the join.
+                    close_counter->fetch_add(1, std::memory_order_release);
+                    asio::co_spawn(
                         *entry.session_strand,
-                        [tp]() -> asio::awaitable<void> {
-                            // close() is synchronous + idempotent. Running on the session
+                        [tp, close_counter]() -> asio::awaitable<void> {
+                            // #348 — close_async(), not close(). Running on the session
                             // strand serializes it with the in-flight async_read_some
-                            // completion (the BIO_ctrl touch in map_error_code). [INV-4a]
-                            tp->close();
-                            co_return;
+                            // completion (the BIO_ctrl touch in map_error_code) exactly as
+                            // close() did. [INV-4a]
+                            //
+                            // WHY THE ASYNC ONE HERE. This is the site whose own comment
+                            // above says the read pump "is blocked in async_read_some with
+                            // no peer EOF" and closes the socket to wake it — i.e. the
+                            // abortive close is deliberate here, and its cost is that every
+                            // peer of an engine shutting down reads an OS-level error
+                            // instead of a TLS close-notify (#348, measured). close_async()
+                            // wakes the pump the same way (socket_.cancel() rather than
+                            // socket_.close()), waits for the frame to unwind, and only then
+                            // writes the alert. Falls back to the abortive close if the op
+                            // does not quiesce inside tls_close_timeout, so the worst case
+                            // is today's behaviour plus a bounded wait.
+                            //
+                            // No deadlock: we are SUSPENDED on this strand while waiting, so
+                            // the pump's cancelled completion runs. The plaintext transport
+                            // inherits Transport::close_async()'s `co_return close()`, so
+                            // this is a no-op change for a non-TLS session.
+                            counter_guard guard{close_counter};
+                            (void)co_await tp->close_async();
                         },
-                        asio::use_awaitable);
+                        asio::detached);
+                }
+            }
+
+            // Join the closes before step 3. The ordering step 3's comments depend
+            // on — every transport closed before the role loops are joined — is
+            // preserved; only the concurrency changed. Zero-length timer waits are
+            // the same join idiom step 3 uses below.
+            if (close_counter->load(std::memory_order_acquire) > 0) {
+                asio::steady_timer close_join{co_await asio::this_coro::executor};
+                while (close_counter->load(std::memory_order_acquire) > 0) {
+                    close_join.expires_after(std::chrono::milliseconds{0});
+                    co_await close_join.async_wait(asio::use_awaitable);
                 }
             }
 
