@@ -178,42 +178,67 @@ struct MinimalSession {
 
 }  // anonymous namespace
 
-// ── Test 1: CloseWithHolderDoesNotTerminate (FR-011 SC-004 AC1) ──────────────
+// ── Test 1a: HolderAtDestructionTerminates (FR-011 SC-004 AC1, RED witness) ──
 //
-// **NDEBUG carve-out (debug + sanitizer builds only):** Test 1 uses the
-// FIXPP_TEST_HOOKS `mutex_test_access()` seam to directly park a holder on
-// the SeqnumManager's async_mutex. The async_mutex destructor's terminate
-// invariant is assert()-based — with NDEBUG defined (release), the
-// invariant is elided AND the synthetic detached-coroutine teardown
-// interacts with release coroutine-frame layout to produce a SegFault
-// (rather than the clean terminate that EXPECT_DEATH catches in debug).
-// The FR-011 contract is fully verified in release by Test 4
-// `DrainCalledByClose` below (which directly probes that `drain()` is
-// invoked by `close()`) plus Test 2 `NeverOpenedDestructionSafe` and
-// Test 3 `OpenThenCloseTerminalIdempotent`. Test 1's value is the
-// EXPECT_DEATH RED-witness in debug — that pattern is preserved here.
+// Directly acquire the SeqnumManager's mutex via mutex_test_access().async_lock().
+// Park the holder with asio::post — H's resume is queued but NOT run (run_one
+// drives H to acquire+park and stops there). Destruct the SeqnumManager BEFORE
+// H's resume fires. async_mutex destructor: state_ == locked_no_waiters →
+// terminate, caught by EXPECT_DEATH in a subprocess.
 //
-// RED sub-test (EXPECT_DEATH):
-//   Directly acquire the SeqnumManager's mutex via mutex_test_access().async_lock().
-//   Park the holder with asio::post — H's resume is queued but NOT run (run_one
-//   drives H to acquire+park, stops there). Destruct SeqnumManager BEFORE H's
-//   resume fires. async_mutex destructor: state_ == locked_no_waiters → terminate.
+// **Why NDEBUG is excluded:** the async_mutex destructor's terminate invariant is
+// assert()-based, so under NDEBUG it is elided; the synthetic detached-coroutine
+// teardown then interacts with release coroutine-frame layout to produce a
+// SegFault rather than the clean terminate EXPECT_DEATH is written against. This
+// half is the EXPECT_DEATH RED witness and has no meaning without that invariant.
+// Tests 2/3/4 below carry the FR-011 contract under NDEBUG.
 //
-// GREEN surviving harness (post-T022):
-//   Same holder setup on a real Session. Co_spawn close(terminal) — drain()
-//   waits for H (via active_holders_count_ latch). ioc.run_for() lets H resume
-//   and release. Drain completes → close finishes → session.reset() → no terminate.
-// Skip Test 1 in NDEBUG, ASan, and UBSan builds (synthetic
-// FIXPP_TEST_HOOKS parked-detached-coroutine pattern is fragile to
-// optimization + sanitizer instrumentation; the contract is fully
-// verified by Tests 2/3/4 in all builds). __SANITIZE_ADDRESS__ /
-// __SANITIZE_UNDEFINED__ are defined by both GCC and Clang under
-// -fsanitize=*, which covers every compiler this project supports;
-// the Clang-only __has_feature() check was removed because GCC's
-// preprocessor errors on it ("missing binary operator before token (").
-#if !defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_UNDEFINED__)
-TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
-    // ── RED sub-test: EXPECT_DEATH shows the exact terminate drain() prevents ──
+// **The sanitizer clauses are GONE, on measurement (#353).** This guard used to
+// read `!defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_UNDEFINED__)`,
+// justified as the parked-detached-coroutine pattern being "fragile to
+// optimization + sanitizer instrumentation". Both sanitizer clauses were tested
+// rather than reasoned about, and BOTH were wrong:
+//
+//   * `__SANITIZE_UNDEFINED__` was INERT. Neither clang 22.1.2 nor g++ 13.3.0
+//     defines it under `-fsanitize=undefined` — probed directly. So this cell has
+//     been running under the UBSan leg all along, and passing. The comment that
+//     claimed both macros "are defined by both GCC and Clang under -fsanitize=*"
+//     was false for the undefined half.
+//   * `__SANITIZE_ADDRESS__` was UNNECESSARY. With the clause removed the cell
+//     passes under linux-clang-asan, stably (5 cases x 20 repeats, clean), and
+//     its detector is proven LIVE there rather than merely quiet: replacing
+//     `death_ioc.run_one()` with `death_ioc.run()` releases the guard, removes
+//     the terminate, and the cell FAILS under ASan as it must.
+//
+// ⚠️ Re-derive before trusting any of that. `__SANITIZE_UNDEFINED__` is a GCC
+// feature whose availability moves with the compiler version; a future toolchain
+// may start defining it, which would silently re-arm a clause that is not here
+// any more. What is durable is the METHOD: probe the macro, then run the cell
+// with a forced-miss mutation on the leg in question.
+//
+// ⚠️ The death matcher is `""`, which matches ANY signal — it cannot tell a
+// std::terminate from a crash. #291 checked this by temporarily tightening it to
+// "terminate called": both the fixed tree and the reverted site passed, so the
+// death reason was unchanged. That tightening was NOT shipped, because the abort
+// text is libstdc++/Linux wording and this repo has MSVC legs. Treat the matcher
+// and the carve-out as one problem, and verify on Windows before narrowing it.
+//
+// ⚠️ #353 — THIS GUARD COVERS THE DEATH HALF ONLY, AND THAT SPLIT IS THE POINT.
+// Until #353 this one `#if` wrapped BOTH halves of a single test, so the GREEN
+// surviving harness below — which holds a live lambda coroutine passed to
+// co_spawn — was compiled out of the ASan and UBSan legs too. It carried one of
+// the two use-after-frees fixed in #291 for the whole life of PR #290, and the
+// sanitizer matrix could not have reported it: a skipped test and a passing test
+// look identical in a leg's summary. Measured then: `--gtest_filter='SeqnumDrainOnClose.*'`
+// ran 4 tests under linux-clang-debug and 3 under linux-clang-asan.
+//
+// The two halves are now separate TESTs so the guard can be scoped to the half
+// that actually needs it. Re-derive the per-preset test count rather than
+// trusting this comment; `tools/check_sanitizer_test_carveouts.py` is the
+// standing instrument.
+#if !defined(NDEBUG)
+TEST(SeqnumDrainOnClose, HolderAtDestructionTerminates) {
+    // ── RED witness: EXPECT_DEATH shows the exact terminate drain() prevents ──
     //
     // A standalone SeqnumManager with a holder parked (lock held, resume queued
     // but not executed). Destruction of the SeqnumManager fires std::terminate
@@ -254,11 +279,22 @@ TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
             //  shared_ptr frame and the posted handler are abandoned.)
         },
         "");  // matches any terminate/abort signal
+}
+#endif  // NDEBUG / sanitizer carve-out — DEATH HALF ONLY (see #353 note above)
 
-    // ── GREEN surviving harness: Session::close() + drain() prevents terminate ──
-    //
-    // Same holder pattern on a real Session. With T022, drain() waits for H
-    // before returning. The session destructs in a clean state.
+// ── Test 1b: CloseWithHolderDoesNotTerminate (FR-011 SC-004 AC1) ─────────────
+//
+// GREEN surviving harness: Session::close() + drain() prevents the terminate the
+// cell above witnesses. Same holder pattern on a real Session. With T022, drain()
+// waits for H before returning, and the session destructs in a clean state.
+//
+// ⚠️ #353 — DELIBERATELY UNGUARDED. This half is the one the sanitizer legs must
+// see: it holds a live lambda coroutine handed to co_spawn, which is the #291
+// shape, and ASan detects that shape as `stack-use-after-scope` (READ of size 8,
+// in `operator()() const (.resume)`) when the closure does not outlive the
+// coroutine. Nothing here needs NDEBUG or a death-test subprocess. Adding a
+// sanitizer guard to this cell re-opens #353.
+TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
     MinimalSession ctx;
     asio::io_context& ioc = ctx.ioc;
 
@@ -306,8 +342,6 @@ TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
 
     // Reaching here = no std::terminate → GREEN (FR-011 SC-004 AC1).
 }
-#endif  // NDEBUG carve-out for Test 1 (FIXPP_TEST_HOOKS parked-holder pattern;
-        // contract fully verified by Tests 2/3/4 in release)
 
 // ── Test 2: NeverOpenedDestructionSafe (FR-011 US4 AC3) ──────────────────────
 //

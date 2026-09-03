@@ -1,0 +1,59 @@
+# Dispositions for every gtest case in tests/ that a preprocessor conditional
+# makes PRESET-DEPENDENT — i.e. the set of cases a leg runs is not the same
+# across build presets. Enforced by tools/check_sanitizer_test_carveouts.py.
+#
+# WHY THIS FILE EXISTS (#353). `tests/session/test_seqnum_drain_on_close.cpp`
+# guarded a whole TEST with `!defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__)
+# && !defined(__SANITIZE_UNDEFINED__)`. That test held BOTH use-after-frees fixed
+# in #291, and the ASan leg — this repo's primary detector for that exact class —
+# could not have reported either, because a skipped test and a passing test are
+# indistinguishable in a leg's summary. Nothing reported it for the life of
+# PR #290. This file makes each such divergence a line someone had to write.
+#
+# FORMAT:  Suite.Case<TAB or 2+ spaces>justification
+#
+# ⚠️ A justification must say WHICH presets lose the case and WHY THE LOST
+# COVERAGE IS ACCEPTABLE — not merely restate the #if. "Guarded by NDEBUG" is
+# not a disposition; "the invariant under test is assert-based and elided in
+# release, and cell X covers the release side" is.
+#
+# ⚠️ A STALE ENTRY IS AN ERROR, not a pass. The checker fails if a listed case
+# has no preset-conditional definition, because an entry left behind after a
+# rename would silently absorb the next carve-out of the same name.
+#
+# ── Class A: assert-based DEBUG-ONLY trap witnesses ──────────────────────────
+# The wire/codegen generation-token trap is compiled out in release by design
+# ([2b §4.1] — release View is exactly {ptr, len}, no token), so in release
+# there is no mechanism to witness. Where a release-side counterpart exists it
+# is named below; where it does not, a static_assert covers the structural half.
+
+SeqnumDrainOnClose.HolderAtDestructionTerminates    NDEBUG only. The async_mutex destructor's terminate invariant is assert()-based, so under NDEBUG it is elided and the synthetic detached-coroutine teardown SegFaults instead of terminating cleanly. Sibling cell CloseWithHolderDoesNotTerminate (unguarded) carries the GREEN half under every preset, and cells 2/3/4 carry FR-011 under NDEBUG. ⚠️ The sanitizer clauses this guard used to carry were REMOVED on measurement in #353 — see the comment at the #if; do not re-add one without probing the macro and running a forced-miss mutation on that leg.
+
+WireLifetimeTrapDeath.StaleGenerationAborts    NDEBUG only. Debug-only generation-token trap; release strips the token entirely, witnessed by the else-branch cell WireLifetimeTrap.ReleaseStripsTokenNoTrapMachinery in the same file.
+WireLifetimeTrap.UntrackedPoolNeverTraps    NDEBUG only. Asserts pool_id 0 does NOT trap — meaningless in release where no token exists. Release side covered by WireLifetimeTrap.ReleaseStripsTokenNoTrapMachinery.
+WireLifetimeTrapDeath.ParserViewTrapsAfterArenaRecycle    NDEBUG only. Debug-only trap on arena recycle; release has no token to stale. Release side covered by WireLifetimeTrap.ReleaseStripsTokenNoTrapMachinery.
+WireLifetimeTrap.ReleaseStripsTokenNoTrapMachinery    NDEBUG-ELSE branch: this is the RELEASE-ONLY counterpart to the three cells above. Not a coverage hole — it is what makes the pair complete.
+
+WireView.StaleGenerationTrapsInDebug    NDEBUG only. Debug-only generation-token trap. No release-side runtime counterpart exists in this file BY CONSTRUCTION: in release the token is not a member, so there is nothing to stale. The release half is held by the `#ifdef NDEBUG` static_assert at the top of the file, which pins sizeof(View) == {ptr, len}.
+
+GroupEntryGenerationTrapDeath.GenerationTokenTrapOnStaleEntryRead    NDEBUG only. Debug-only trap on a stale generated group-entry read. Release side covered by the else-branch cell GroupEntryGenerationTrap.ReleaseStripsTokenNoTrapMachinery in the same file.
+GroupEntryGenerationTrap.ReleaseStripsTokenNoTrapMachinery    NDEBUG-ELSE branch: the RELEASE-ONLY counterpart to the cell above. Not a coverage hole.
+
+MessageReadGroupDeath.StaleTopLevelGroupCursorMetadataTrapsAfterRecycle    NDEBUG only. C-ABI view over the same debug-only generation-token trap; the trap machinery does not exist in release, so the cell has no release meaning.
+
+# ── Class B: fault-injection witnesses that need the TU's OWN operator new ────
+# These replace global operator new to inject an allocation failure. A sanitizer
+# already replaces operator new, so the TU must not — the interposition would be
+# lost or the sanitizer's bookkeeping corrupted. The cell is therefore compiled
+# out under ASan/TSan/MSan. ⚠️ This removes a WHOLE CELL, unlike the
+# tests/alloc_guard/ cluster, which keeps its cells and elides only one EXPECT.
+
+ReifyMembershipCopyOom.TableViewCopyOomYieldsDictReifyOom    Sanitizer presets only (FIXPP_OOM_WITNESS_ENABLED is 0 under ASan/TSan/MSan). The cell injects an OOM by replacing global operator new; under a sanitizer that replacement is not ours to make. The non-OOM behaviour of the same path is covered by the unguarded cells in this file.
+CloneMembershipCopyOom.TableViewCopyOomYieldsCapiConfigInvalid    Sanitizer presets only, same mechanism as ReifyMembershipCopyOom.TableViewCopyOomYieldsDictReifyOom — the C-ABI leg of the same OOM witness.
+
+# ── Class C: cells that EXIST ONLY under a sanitizer ──────────────────────────
+# The inverse shape. These ADD coverage on a sanitizer leg rather than removing
+# it, so they are not a hole. Listed so the preset-conditional set is COMPLETE:
+# an undispositioned new entry must be a deliberate decision either way.
+
+CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan    ASan presets ONLY (FIXPP_CAPI_TEST_ASAN). Deliberate: the cell asserts that a use-after-return on an inbound handle is CAUGHT, which requires ASan to be the oracle. Without ASan the same code is silent UB and the cell could not fail, so compiling it everywhere would ship an assertion that cannot report non-zero.

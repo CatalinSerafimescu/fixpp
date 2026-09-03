@@ -2164,6 +2164,37 @@ jobs:
       - name: "co_spawn closure-lifetime gate (#291)"
         run: python3 tools/check_co_spawn_lambda.py
 
+      # ── #353: a test compiled OUT of a sanitizer leg by its own guard ──────
+      #
+      # test_seqnum_drain_on_close.cpp guarded a whole TEST on
+      # `!defined(__SANITIZE_ADDRESS__)`. That test held BOTH use-after-frees
+      # fixed in #291, so the ASan leg — the primary detector for that class —
+      # could not have reported either one, and nothing said so: a skipped test
+      # and a passing test are indistinguishable in a leg's summary. The only
+      # signal is a per-preset test COUNT, and nobody compares those.
+      #
+      # ⚠️ WHY A SOURCE SCAN AND NOT A TEST-COUNT DIFF. Comparing
+      # `--gtest_list_tests` across presets is the more direct instrument, but it
+      # needs two BUILT binaries, so it could only live in a gated job — i.e.
+      # emit nothing until both gate labels land, which is after the review
+      # rounds that are the only thing between a fresh carve-out and merge. This
+      # runs buildless in the ungated job for the same reason the #291 guard
+      # above does. The cost is stated rather than hidden: this checks that every
+      # preset-conditional case carries a written disposition, NOT that the
+      # counts actually match at runtime.
+      #
+      # Self-test first, for the reason the #291 pair records: the denominators
+      # witness the scan's REACH, not its DETECTOR. Break the "is this test
+      # inside a sanitizer-conditional region" test and every denominator still
+      # passes on a tree that has the defect.
+      #
+      # Buildless — python3 only.
+      - name: "Regression pin — preset-conditional test census self-test (#353)"
+        run: python3 tools/check_sanitizer_test_carveouts.py --self-test
+
+      - name: "Preset-conditional test carve-out gate (#353)"
+        run: python3 tools/check_sanitizer_test_carveouts.py
+
   check-layers:
     name: check-layers
     runs-on: ubuntu-24.04
