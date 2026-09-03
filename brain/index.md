@@ -190,9 +190,9 @@ Two forms, two instruments, and the split is deliberate:
 | form | instrument | where it runs |
 |---|---|---|
 | `co_spawn(ioc, [&]{…}(), tok)` — immediately-invoked temporary | `tools/check_co_spawn_lambda.py` | **CI, ungated tier1**, buildless |
-| `auto lam = […]; co_spawn(ioc, lam(), tok)` — named closure | `tools/audit_co_spawn_named_closure.py` | **locally, on demand** |
+| `auto lam = […]; co_spawn(ioc, lam(), tok)` — named closure | `tools/audit_co_spawn_named_closure.py` | **CI, GATED** (`co-spawn-closure-audit`) — and locally on demand |
 
-**Why the second is NOT in CI, which is the part that will get re-litigated.** Deciding the named
+**The second one IS in CI now, but GATED — and that distinction is the part that will get re-litigated.** Deciding the named
 form needs the closure's scope compared against the call that DRIVES the coroutine, which needs an AST
 and a compilation database. A diff-scoped variant is **strictly weaker** — it cannot see a site whose
 safety changed because a driving call moved in a file the diff did not touch — and either variant
@@ -200,7 +200,7 @@ needs a build, so it could only live in a **gated** job, emitting nothing during
 that are the only thing between a fresh unsafe site and merge. That window is what the buildless lexer
 covers.
 
-⚠️ **COST IS NOT ONE OF THE REASONS, and an earlier version of this page said it was.** It cited
+⚠️ **THIS PAGE ONCE SAID THE JOB SHOULD NOT EXIST AT ALL, on a cost figure that was wrong.** It cited
 "~242 TUs at ~31 s each — ~35 min on four cores, hours on a 2-vCPU runner", attributing the cost to
 clang parses. Profiling showed the parse was 8 % of it and a per-AST-node `realpath` was the rest; a
 measured full sweep now runs in **539 s (~9 min) at `--jobs 4`**. The decision survives on gating and

@@ -101,10 +101,29 @@ void run_until(asio::io_context& ioc, std::atomic<bool> const& done,
 // That is #357: the failing job ran 56 tests 0.9-1.6 s slower than a passing
 // re-run of the same SHA, most of them touching no socket at all.
 //
-// COUNT HANDLERS INSTEAD. A stall pauses the process; it does not create work.
-// The count therefore measures what the assertion actually cares about — how
-// much the io_context had to do before stop() finished — and is immune to the
-// runner by construction rather than by a wider margin.
+// COUNT HANDLERS INSTEAD. A stall pauses the process; it does not create work,
+// so the count cannot be inflated by a slow runner. That much is immune by
+// construction rather than by a wider margin.
+//
+// ⚠️ BUT THIS IS NOT A PROMPTNESS MEASUREMENT, and calling it one would be the
+// same overclaim in a new form. What it detects is exactly one thing: a stop path
+// that BUSY-SPINS a join. It works here because Engine::stop()'s step-2 and
+// step-3 joins spin zero-length steady_timers while their counters are non-zero,
+// so a stop that has to wait out a timeout racks up handlers while it waits.
+//
+// A stop that BLOCKS instead of spinning is INVISIBLE to it: `run_one()` sleeps
+// on the timer, the count stays low, and the cell passes. That is measured, not
+// hypothetical — the D-6.12b mutant stalls this file's accept-slot cell for
+// 259 ms at 10 handlers and it goes GREEN. Do not copy this barrier into a cell
+// whose stall shape is a block rather than a spin.
+//
+// ⚠️ AND THE COUNT IS A STEP FUNCTION, not a smooth quantity: single digits while
+// no join spins, hundreds-to-thousands the moment one does. The healthy 9-10 here
+// means no join is currently spinning in these cells. A future change that makes
+// step 2 join a real close_async in them could push a HEALTHY run into the
+// hundreds with no defect at all — so the budget has less headroom than the
+// 9-vs-110,000 separation suggests. Re-measure the healthy value before trusting
+// it after any change to stop()'s join structure.
 //
 // WHY IT DISCRIMINATES SO SHARPLY. Engine::stop()'s step-2 and step-3 joins are
 // zero-length `steady_timer` waits in a loop (engine.cpp), i.e. a busy spin that
@@ -120,11 +139,21 @@ void run_until(asio::io_context& ioc, std::atomic<bool> const& done,
 //     for the entire timeout. The RED arm PASSED with `rounds == 1`.
 //   * any wall-clock deadline: that is the defect above.
 //
-// RE-DERIVE THE BUDGET, do not trust it. Revert an OUT filter in
-// asio_tls_transport.cpp (async_handshake for the sibling cell below,
-// async_read_some for the accept-slot cell) and re-run: the healthy count and
-// the stalled count are separated by orders of magnitude, and the budget only
-// has to land between them. It is deliberately nowhere near tight.
+// RE-DERIVING THE BUDGET — and the two cells are NOT in the same position.
+//
+// StopIsPromptWhileAcceptedHandshakeIsInFlight has a MEASURED pair: revert
+// async_handshake's OUT filter in asio_tls_transport.cpp and it goes 9 -> ~110,000
+// handlers. That cell's promptness leg is witnessed.
+//
+// ⚠️ StopReturnsPromptlyAndReclaimsAcceptSlot's PROMPTNESS LEG IS UNWITNESSED,
+// and an earlier version of this note implied otherwise by naming
+// async_read_some's filter as its mutant. That is FALSE and was measured false:
+// reverting it left the cell green at 259 ms, and so did the D-6.12b mutant the
+// cell used to claim it killed. No mutation is currently known to drive that
+// cell's handler count above the budget. What still carries it is its OTHER
+// assertion — the accept-slot reclaim, which observes the peer seeing a close.
+// Anyone adding a witness for the promptness leg must MEASURE the pair, not
+// reason about it; see #359, which tracks the same gap for D-6.12b.
 constexpr std::size_t kPromptHandlerBudget = 1000;
 
 struct PostHandshakeProbe {

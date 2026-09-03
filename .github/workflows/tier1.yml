@@ -2339,6 +2339,40 @@ jobs:
             --json-out /tmp/co-spawn-audit.json
           echo "::notice::co_spawn audit wall-clock: $(( $(date +%s) - START ))s"
 
+      # ⚠️ THE CROSS-CHECK IS PART OF THE GATE, not an optional extra. Both the
+      # tool docstring ("Usage — RUN THE PAIR, always") and brain/index.md ("Keep
+      # them as a pair; a clean sweep from a single tool with this one's defect
+      # history is not evidence") say so, and an earlier version of this job ran
+      # the audit alone and discarded its --json-out — which made both statements
+      # false and left the audit's zero resting on one instrument.
+      #
+      # It re-derives the SAME population through clang-query, a matcher sharing
+      # no code with the libclang walker, and diffs the site SETS rather than the
+      # counts: two instruments agreeing on a total while disagreeing about WHICH
+      # sites those are is a finding, not a pass. It fails on any non-empty
+      # difference, on any file it could not see, and on a population it cannot
+      # reconcile against.
+      - name: "co_spawn census cross-check (#354)"
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          python3 tools/reconcile_co_spawn_census.py \
+            --build-dir build/${{ env.PRESET }} \
+            --audit-json /tmp/co-spawn-audit.json \
+            --jobs 4
+          echo "::notice::co_spawn cross-check wall-clock: $(( $(date +%s) - START ))s"
+
+      # The site table is what a reviewer needs to disposition a FLAG or a MANUAL
+      # without re-running a 9-minute sweep locally. It was being written to /tmp
+      # and discarded.
+      - name: Upload the audit site table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: co-spawn-audit
+          path: /tmp/co-spawn-audit.json
+          if-no-files-found: warn
+
   check-layers:
     name: check-layers
     runs-on: ubuntu-24.04

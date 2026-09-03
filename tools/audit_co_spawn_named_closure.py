@@ -105,8 +105,13 @@ false low, and the number must be re-derived rather than reconciled against.
 SETS (not the counts). It consumes this tool's `--json-out`, including the exact
 file population it scanned, so the two instruments cannot silently diverge.
 
-RUN IT LOCALLY, ON DEMAND. IT IS DELIBERATELY NOT WIRED INTO CI.
----------------------------------------------------------------
+IT RUNS IN CI (GATED), AND IT ALSO RUNS LOCALLY ON DEMAND.
+----------------------------------------------------------
+⚠️ An earlier version of this paragraph said "RUN IT LOCALLY, ON DEMAND. IT IS
+DELIBERATELY NOT WIRED INTO CI" and argued the case at length. That decision was
+reversed once the cost figure below was corrected, and the job now exists:
+`co-spawn-closure-audit` in .github/workflows/tier1.yml. The argument is kept
+below because the SHAPE of the trade did not change — only the number did.
 A full sweep is 242 TUs and takes **539 s (~9 min) at `--jobs 4`**, measured end
 to end, so roughly 18-20 min on a 2-vCPU runner.
 
@@ -119,14 +124,18 @@ took the walk 25.1 s -> 4.4 s with output verified element-wise identical. The
 figure mattered because it was cited as the reason not to wire this into CI, so
 it is corrected here rather than quietly dropped.
 
-THE DECISION STANDS ON THE OTHER ARGUMENTS, which the correction does not touch:
+WHAT THE JOB CANNOT DO, which the corrected cost does not change:
 a diff-scoped variant is strictly WEAKER — it cannot see a site whose SAFETY
 changed because a driving call moved in a file the diff did not touch — and
 either variant needs a configured build, so it could only live in a GATED job,
 emitting nothing during the review rounds that are the only thing between a fresh
 unsafe site and merge. That window is exactly what #291's buildless lexer covers.
-What changed is that "it is too slow" is no longer among the reasons; ~9 min is
-not the obstacle, the gating and the weaker scope are.
+So the job is real but GATED: it cannot see a fresh unsafe site during review, and
+that window still belongs to #291's buildless lexer. Do not delete the lexer on
+the grounds that this job covers the same rule — it does not cover the same
+WINDOW.
+
+WHEN TO RUN IT LOCALLY ANYWAY, since the gated job is not enough:
 
 Weigh that against what it guards. The immediately-invoked form is already caught
 by tools/check_co_spawn_lambda.py in the ungated job. What is left to this tool
@@ -135,7 +144,7 @@ than its driving call — and the population is safe today. Installing a two-hou
 job with a pip libclang dependency to watch that is a worse trade than running
 this when there is a reason to.
 
-WHEN THERE IS A REASON TO:
+  
   * before a release, or after a wave of new co_spawn sites;
   * when touching the pump/drain helpers, since DRIVING_FREE_FUNCTIONS decides
     what counts as driven and a rename there silently turns callers into FLAGs;
@@ -226,6 +235,25 @@ DRIVING_FREE_FUNCTIONS = frozenset(
 IOC_TYPE_MARKERS = ("io_context", "thread_pool")
 
 
+def is_context_type(tspell: str) -> bool:
+    """True only for an actual execution CONTEXT, not something derived from one.
+
+    ⚠️ A SUBSTRING TEST IS WRONG HERE, and it silently mis-classified every strand
+    in the tree. `asio::make_strand(ioc)` has type
+    `asio::strand<asio::io_context::executor_type>` — which CONTAINS "io_context",
+    so a substring check called it a context declaration rather than an executor
+    derived from one. The strand then never entered the alias map, so
+    `co_spawn(strand, ...); ioc.run();` could not be resolved and read as FLAG.
+    Measured: 5 such sites in tests/sync/, all false.
+
+    The discriminator is that a context type is not PARAMETERISED BY one and is
+    not a strand/executor. Re-derive from the type spelling, not from a name.
+    """
+    if any(k in tspell for k in ("strand", "executor", "any_io_executor")):
+        return False
+    return any(m in tspell for m in IOC_TYPE_MARKERS)
+
+
 # A free function's semantic parent is a NAMESPACE or the translation unit, not
 # "" — which is what an earlier version tested for. `pump_until` lives in
 # `fixpp::test_support`, so its parent spelled "test_support" and it was never
@@ -238,6 +266,25 @@ _FREE_FUNCTION_PARENTS = frozenset(
         ci.CursorKind.UNEXPOSED_DECL,
     }
 )
+
+
+def root_object_of(cursor) -> str:
+    """Spelling of the first VarDecl a DeclRefExpr in this subtree refers to.
+
+    `ioc` for `ioc`, for `ioc.run()` and for `ioc.get_executor()`; `entry` for
+    `*entry.session_strand`. Used to decide WHICH context a co_spawn was made on
+    and WHICH context a driving call drove — without that correlation the
+    classifier silences a real FLAG whenever any unrelated io_context happens to
+    be in scope. Empty when it cannot be resolved, which the caller treats as
+    MANUAL rather than as a match.
+    """
+    for node in [cursor] + list(_descend(cursor)):
+        if kind_of(node) != ci.CursorKind.DECL_REF_EXPR:
+            continue
+        d = node.referenced
+        if d is not None and kind_of(d) in (ci.CursorKind.VAR_DECL, ci.CursorKind.PARM_DECL):
+            return d.spelling or ""
+    return ""
 
 
 def owner_of(cursor) -> str:
@@ -376,7 +423,29 @@ class SiteWalker:
                         "line": cursor.location.line,
                     }
                 )
-            elif any(m in tspell for m in IOC_TYPE_MARKERS):
+            elif not is_lambda_type(tspell) and not is_context_type(tspell):
+                # An executor/strand derived from a context: `auto s =
+                # make_strand(ioc);`, `auto ex = ioc.get_executor();`. A coroutine
+                # spawned on `s` is driven by running `ioc`, so the site's executor
+                # must resolve transitively before any drive can be matched to it.
+                # Without this, `co_spawn(strand1, ...); ioc.run();` read as FLAG —
+                # measured, 6 such sites in tests/sync/, all false.
+                #
+                # Also catches the future a co_spawn was assigned to
+                # (`auto f = co_spawn(...); f.get();`), whose `.get()` blocks until
+                # that coroutine completes and is therefore a drive for THAT site.
+                base = ""
+                for ch in cursor.get_children():
+                    base = root_object_of(ch)
+                    if base and base != cursor.spelling:
+                        break
+                if base and base != cursor.spelling:
+                    self.events.append(
+                        {"kind": "exec_alias", "name": cursor.spelling, "base": base,
+                         "off": off, "scope": self.scope_key(stack)}
+                    )
+                return
+            elif is_context_type(tspell):
                 self.events.append(
                     {
                         "kind": "ioc_decl",
@@ -399,9 +468,13 @@ class SiteWalker:
         is_method_drive = owners is not None and any(o in own for o in owners)
         is_free_drive = spelling in DRIVING_FREE_FUNCTIONS and owner_of(cursor) == ""
         if is_method_drive or is_free_drive:
+            # For a method call the object is the receiver; for a free pump helper
+            # it is the io_context passed as its first argument. root_object_of on
+            # the whole call expression resolves both.
             self.events.append(
                 {
                     "kind": "drive",
+                    "obj": root_object_of(cursor),
                     "name": spelling,
                     "off": off,
                     "scope": self.scope_key(stack),
@@ -410,15 +483,36 @@ class SiteWalker:
             )
             return
 
-        # (c) co_spawn sites with a named-closure invocation argument
+        # (c) a call to a LOCAL CLOSURE, e.g. `pump();`. Recorded because such a
+        # helper very often IS the driving call: its body runs `ioc.run()` or
+        # `ioc.poll()`, but that drive's source offset is BEFORE the co_spawn (the
+        # lambda is declared earlier) even though it EXECUTES after. Without this,
+        # every site driven through a local pump helper read as FLAG — measured, 12
+        # of them, all false.
+        if spelling == "operator()":
+            ref = cursor.referenced
+            parent = ref.semantic_parent if ref is not None else None
+            if parent is not None and is_lambda_type(parent.type.spelling if parent.type else ""):
+                pass
+            callee = root_object_of(cursor)
+            if callee:
+                self.events.append(
+                    {"kind": "closure_call", "name": callee, "off": off,
+                     "scope": self.scope_key(stack), "line": cursor.location.line}
+                )
+            return
+
+        # (d) co_spawn sites with a named-closure invocation argument
         if spelling != "co_spawn":
             return
 
         closure_var = self._named_closure_arg(cursor)
         if closure_var is None:
             return
+        exec_args = list(call.get_arguments()) if False else list(cursor.get_arguments())
         self.sites.append(
             {
+                "exec": root_object_of(exec_args[0]) if exec_args else "",
                 "file": os.path.realpath(cursor.location.file.name),
                 "line": cursor.location.line,
                 "col": cursor.location.column,
@@ -513,10 +607,40 @@ def classify(site: dict, events: list[dict]) -> tuple[str, str]:
     decl = max(closures, key=lambda e: e["off"])
     cscope = decl["scope"]
 
-    # SAFE-OUTLIVES: an io_context declared in the SAME scope AFTER the closure,
-    # or in a scope the closure's scope encloses, dies first.
+    # ⚠️ THE EXECUTOR MUST MATCH. Without this, ANY io_context in scope silenced a
+    # real finding: a closure spawned on `a` was certified SAFE because an
+    # unrelated local `b` was declared later or had `b.run()` called. Both hostile
+    # reviewers found this independently, and one DEMONSTRATED it by driving
+    # classify() on the same event list with and without one extra unrelated
+    # ioc_decl — FLAG became SAFE-OUTLIVES. It is a false-SAFE for the exact UAF
+    # this tool exists to catch.
+    #
+    # An unresolvable executor is MANUAL, never a match. Guessing in the
+    # permissive direction here is what the bug was.
+    alias = {e["name"]: e["base"] for e in events if e["kind"] == "exec_alias"}
+
+    def resolve(name: str) -> set[str]:
+        """All names this one may stand for: itself plus its alias chain.
+
+        `strand1` -> {strand1, ioc}. Matching on the SET keeps the executor
+        correlation honest (an unrelated context still cannot certify a site)
+        while accepting the legitimate indirections this tree actually uses.
+        """
+        seen, cur = {name}, name
+        while cur in alias and alias[cur] not in seen:
+            cur = alias[cur]
+            seen.add(cur)
+        return seen
+
+    site_exec = site.get("exec", "")
+    if not site_exec:
+        return ("MANUAL", "could not resolve which io_context/executor this site spawns on, "
+                          "so no driving call or context lifetime can be matched to it")
+
+    # SAFE-OUTLIVES: THIS site's io_context declared in the SAME scope AFTER the
+    # closure, or in a scope the closure's scope encloses, dies first.
     for e in events:
-        if e["kind"] != "ioc_decl":
+        if e["kind"] != "ioc_decl" or e["name"] not in resolve(site_exec):
             continue
         if e["scope"] == cscope and e["off"] > decl["off"]:
             return ("SAFE-OUTLIVES", f"io_context `{e['name']}` (line {e['line']}) is declared "
@@ -525,9 +649,35 @@ def classify(site: dict, events: list[dict]) -> tuple[str, str]:
             return ("SAFE-OUTLIVES", f"io_context `{e['name']}` (line {e['line']}) lives in a scope "
                                      f"nested inside the closure's, so the closure outlives it")
 
-    # SAFE-DRIVEN: a driving call after the co_spawn, while the closure is in scope.
+    # Which local closures drive THIS site's context somewhere in their body? A
+    # drive inside a helper lambda is recorded at the helper's own source offset,
+    # which is EARLIER than the co_spawn that the helper later drives — so it must
+    # be attributed to the CALL, not to the definition.
+    driving_closures: set[str] = set()
+    for d in events:
+        if d["kind"] != "closure_decl":
+            continue
+        body_lo, body_hi = d["off"], d.get("end", d["off"])
+        for e in events:
+            if (e["kind"] == "drive" and e.get("obj", "") in resolve(site_exec)
+                    and body_lo <= e["off"] <= body_hi):
+                driving_closures.add(d["name"])
+                break
+
+    # SAFE-DRIVEN: a driving call ON THIS SITE'S CONTEXT, after the co_spawn, while
+    # the closure is in scope — either directly, or through a local helper closure
+    # whose body drives it.
     for e in events:
-        if e["kind"] != "drive" or e["off"] <= site["off"]:
+        if e["off"] <= site["off"]:
+            continue
+        if e["kind"] == "closure_call" and e["name"] in driving_closures:
+            if encloses(cscope, e["scope"]):
+                return ("SAFE-DRIVEN", f"`{e['name']}()` at line {e['line']} runs after the "
+                                       f"co_spawn and drives `{site_exec}` in its body")
+            continue
+        if e["kind"] != "drive":
+            continue
+        if e.get("obj", "") not in resolve(site_exec):
             continue
         if encloses(cscope, e["scope"]):
             return ("SAFE-DRIVEN", f"`{e['name']}()` at line {e['line']} runs after the co_spawn "
@@ -647,8 +797,16 @@ def load_db(build_dir: str, only_with_cospawn: bool) -> list[dict]:
                 with open(f, encoding="utf-8", errors="replace") as src:
                     if "co_spawn" not in src.read():
                         continue
-            except OSError:
-                continue
+            except OSError as exc:
+                # NOT `continue`. An unreadable source used to be dropped from the
+                # population entirely -- not an error, not UNSEEN, and the `files`
+                # list handed to the cross-check shrank to match, so the second
+                # instrument could not see the hole either. Fail-toward-clean in a
+                # tool whose whole argument is "UNSEEN, not clean". Keep it: the
+                # parse will fail and be reported as an error, which now also
+                # fails the run.
+                print(f"cannot read {f}: {exc} -- kept in the population so it is "
+                      f"reported as UNSEEN rather than dropped", file=sys.stderr)
         out.append(e)
     return out
 
@@ -735,6 +893,113 @@ void f() {
 }
 """,
         [],
+    ),
+    (
+        "a LOCAL PUMP HELPER counts as the driving call (its drive is lexically earlier)",
+        # `pump` is declared before the co_spawn, so the ioc.run() inside its body
+        # has an EARLIER source offset than the site — but it EXECUTES after, via
+        # the call. Attributing the drive to the definition instead of the call
+        # produced 12 false FLAGs in tests/sync/ on a real sweep.
+        """
+void f() {
+  io_context ioc;
+  auto pump = [&]() { ioc.run(); };
+  auto lam = [&]() { return 0; };
+  co_spawn(ioc, lam(), detached);
+  pump();
+}
+""",
+        [("lam", "SAFE-DRIVEN")],
+    ),
+    (
+        "a STRAND resolves back to its io_context (co_spawn(strand,...); ioc.run())",
+        """
+struct strand_t { };
+strand_t make_strand(io_context&);
+void f() {
+  io_context ioc;
+  auto s = make_strand(ioc);
+  auto lam = [&]() { return 0; };
+  co_spawn(s, lam(), detached);
+  ioc.run();
+}
+""",
+        [("lam", "SAFE-DRIVEN")],
+    ),
+    (
+        "a strand from a DIFFERENT context still does not certify the site",
+        """
+struct strand_t { };
+strand_t make_strand(io_context&);
+void f() {
+  io_context a;
+  io_context b;
+  auto s = make_strand(b);
+  auto lam = [&]() { return 0; };
+  co_spawn(s, lam(), detached);
+  a.run();
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        "a local helper that drives a DIFFERENT context does not certify the site",
+        """
+void f() {
+  io_context a;
+  io_context b;
+  auto pump_b = [&]() { b.run(); };
+  auto lam = [&]() { return 0; };
+  co_spawn(a, lam(), detached);
+  pump_b();
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        "an UNRELATED io_context driven in scope must NOT certify the site",
+        # Both hostile reviewers found this independently; one demonstrated it by
+        # driving classify() with and without the extra ioc_decl. `lam` is spawned
+        # on `a` and only `b` is ever run, so this is a real UAF and must FLAG.
+        """
+void f() {
+  io_context a;
+  {
+    io_context b;
+    auto lam = [&]() { return 0; };
+    co_spawn(a, lam(), detached);
+    b.run();
+  }
+  a.run();
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        "an unrelated io_context declared later must NOT give SAFE-OUTLIVES",
+        """
+void f() {
+  io_context a;
+  auto lam = [&]() { return 0; };
+  co_spawn(a, lam(), detached);
+  { io_context unrelated; (void)unrelated; }
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        "driving the RIGHT context still gives SAFE-DRIVEN when two are in scope",
+        """
+void f() {
+  io_context a;
+  io_context b;
+  auto lam = [&]() { return 0; };
+  co_spawn(a, lam(), detached);
+  b.run();
+  a.run();
+}
+""",
+        [("lam", "SAFE-DRIVEN")],
     ),
     (
         "unique_ptr::get() must NOT count as a driving call (owner check)",

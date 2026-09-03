@@ -1529,10 +1529,16 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // returns, because a reset cannot be scoped. That is a deliberate choice, not
     // an oversight: `reset_cancellation_state` clobbers the caller whatever value
     // is passed, so the only question is which clobber is least harmful, and for a
-    // teardown-only method it is the one both adopters already install for
-    // themselves (`Session::close()` and the detached co_spawn at engine.cpp's
-    // stop step 2). Re-derive the adopter set with `git grep close_async -- src`
-    // before assuming that still holds.
+    // teardown-only method it is the one `Session::close()` installs for itself.
+    //
+    // ⚠️ THE OTHER ADOPTER INSTALLS NOTHING, and an earlier version of this
+    // comment claimed both did. The detached co_spawn at engine.cpp's stop step 2
+    // has no reset at all — harmlessly, because `asio::detached` leaves the slot
+    // unconnected so any reset there would be a no-op, but the claim was false and
+    // this comment tells you to re-derive the adopter set. Someone doing exactly
+    // that finds it wrong and has to work out whether it matters. It does not; the
+    // reasoning above still holds, because a frame with no connected slot cannot
+    // have a shield to lose. Re-derive with `git grep close_async -- src`.
     //
     // `this_coro` awaiters are exempt from asio's throw-on-cancelled check, so
     // this line is reachable even when the inherited state is already cancelled.

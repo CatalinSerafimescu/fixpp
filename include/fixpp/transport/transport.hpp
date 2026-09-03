@@ -80,9 +80,22 @@ struct ConnectInfo;
 //   (b) TWO-argument, with an OUT filter mapping any accepted cancellation to
 //       `terminal` — REQUIRED when the awaited op is COMPOSED and installs its
 //       own narrower state, which silently drops `total`. asio's SSL io_op is
-//       TERMINAL-ONLY; asio's composed async_write/async_read install
-//       `enable_partial_cancellation` (terminal|partial). Both discard a pure
-//       `total`. Sites: TLS connect/handshake/read/write, plain write.
+//       TERMINAL-ONLY; asio's composed async_connect/async_read/async_write
+//       install `enable_partial_cancellation` (terminal|partial). Both discard a
+//       pure `total`.
+//
+//       ⚠️ NO SITE LIST HERE, DELIBERATELY. One was written and was WRONG on its
+//       first day — it said "TLS connect/handshake/read/write, plain write",
+//       omitting plain async_connect, which does await a composed op and does
+//       carry the filter. Because this block calls itself canonical and tells you
+//       to re-derive, a reader auditing that site against the list would have
+//       REMOVED its filter and reinstated the defect on the plain connect path.
+//       A list of sites is a RESULT; it rots, and nothing re-runs a comment.
+//       Derive it instead:
+//           git grep -n 'reset_cancellation_state($' -- src/transport
+//       then read what each one AWAITS. Composed (asio::async_connect,
+//       asio::async_write, asio::async_read, any ssl_stream_ op) needs the
+//       filter; raw (socket_.async_read_some, socket_.async_write_some) does not.
 //
 //   (c) `reset_cancellation_state(disable_cancellation{})` — for a teardown path
 //       that must COMPLETE. Site: TLS close_async. Cancellation takes effect at
