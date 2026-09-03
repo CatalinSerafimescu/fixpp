@@ -47,8 +47,10 @@ import shutil
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
+import tempfile
 
 MATCHER = (
     'callExpr(callee(functionDecl(hasName("co_spawn"))), '
@@ -112,6 +114,67 @@ def _one_file(job: tuple) -> tuple:
         return (f, [], "no match tally in output", "")
     return (f, [(os.path.realpath(m.group(1)), int(m.group(2)))
                 for m in LOC_RE.finditer(out)], None, "")
+
+
+def sanitize_db(build_dir: str, out_dir: str) -> str:
+    """Copy compile_commands.json minus the `@…o.modmap` response-file arguments.
+
+    ⚠️ WHY THIS EXISTS, and why the two instruments needed it for OPPOSITE reasons.
+    CMake's C++20 module scanner puts an `@<obj>.modmap` response file into every
+    compile command. Those are written BY THE BUILD, and the CI job deliberately
+    builds only `fixpp_codegen_generate` — so on a configure-only tree not one of
+    them exists. clang-query goes through the clang DRIVER, which expands `@file`,
+    and reported
+
+        no such file or directory: '@src/session/CMakeFiles/fixpp_session.dir/engine.cpp.o.modmap'
+
+    on all 242 files. libclang never expands `@file` at all, so the walker sailed
+    past the same argument and reported a clean parse — which is exactly how one
+    instrument read 0 errors while the other read 242, on identical flags.
+
+    That asymmetry is also why this cannot be left to "libclang happens to ignore
+    it": the walker's correctness there is an accident of a parser that does not
+    implement response files, not a decision anyone made. Both tools now get the
+    same cleaned command line.
+
+    Dropping the argument is a semantic no-op HERE and the assert below is what
+    keeps that true: this tree contains no C++20 modules, so every modmap CMake
+    emits is 0 bytes. If one ever has content, the file genuinely needs it and
+    silently dropping it would mis-parse a modular TU — so that fails loudly
+    instead of quietly measuring the wrong thing.
+    """
+    src = os.path.join(build_dir, "compile_commands.json")
+    with open(src, encoding="utf-8") as fh:
+        db = json.load(fh)
+
+    def strip(args: list[str]) -> list[str]:
+        keep = []
+        for a in args:
+            if a.startswith("@") and a.endswith(".modmap"):
+                p = a[1:]
+                if not os.path.isabs(p):
+                    p = os.path.join(build_dir, p)
+                if os.path.exists(p) and os.path.getsize(p) > 0:
+                    raise SystemExit(
+                        f"ERROR: {p} is {os.path.getsize(p)} bytes, not empty. This tree has "
+                        f"started using C++20 modules and dropping the module map would "
+                        f"mis-parse that TU. Teach this script to keep it (and build the "
+                        f"modmaps in CI) rather than removing this check."
+                    )
+                continue
+            keep.append(a)
+        return keep
+
+    for e in db:
+        if "arguments" in e:
+            e["arguments"] = strip(e["arguments"])
+        elif "command" in e:
+            e["command"] = shlex.join(strip(shlex.split(e["command"])))
+
+    dst = os.path.join(out_dir, "compile_commands.json")
+    with open(dst, "w", encoding="utf-8") as fh:
+        json.dump(db, fh)
+    return out_dir
 
 
 def run_clang_query(cq: str, build_dir: str, files: list[str], timeout: int,
@@ -205,9 +268,11 @@ def main() -> int:
         print(f"⚠️ {missing} file(s) from the audit population no longer exist — the audit "
               f"JSON is stale relative to the tree.")
 
-    cq_sites, failures = run_clang_query(
-        args.clang_query, args.build_dir, files, args.timeout, args.jobs, args.extra_arg
-    )
+    with tempfile.TemporaryDirectory(prefix="cospawn-db-") as tmp:
+        cq_sites, failures = run_clang_query(
+            args.clang_query, sanitize_db(args.build_dir, tmp), files,
+            args.timeout, args.jobs, args.extra_arg
+        )
 
     # ⚠️ A SITE IN AN UNSEEN FILE IS NOT A MATCHER GAP, and calling it one sends the
     # reader to the wrong place. `only libclang (ALARMING)` means exactly one thing —

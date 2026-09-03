@@ -705,6 +705,17 @@ def parse_tu(entry: dict, extra_args: list[str]) -> tuple[list[dict], list[dict]
             continue
         if a.endswith((".cpp", ".cc", ".cxx", ".o", ".obj")):
             continue
+        # ⚠️ PARITY WITH THE CROSS-CHECK, and it is not cosmetic. CMake's C++20
+        # module scanner emits `@<obj>.modmap` into every compile command; those
+        # files are written by the BUILD, so on the configure-only tree CI parses,
+        # none exist. libclang does not implement `@file` expansion, so it sailed
+        # past a missing one and reported a clean parse while clang-query — which
+        # goes through the driver — errored on all 242 files. Relying on a parser's
+        # failure to implement a feature is not a decision; strip it explicitly so
+        # both instruments see the same command line. See sanitize_db() in
+        # tools/reconcile_co_spawn_census.py for the measurement.
+        if a.startswith("@") and a.endswith(".modmap"):
+            continue
         cleaned.append(a)
     cleaned += extra_args
 
