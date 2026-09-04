@@ -6,6 +6,13 @@ status: stable
 
 # Log
 
+- **2026-09-04 — #289 batch 9, review rounds.** `components/test.md` gains `ci/pump-get-sweep.sh`
+  and, more usefully, the script's own three-round history: every fix for a false-clean introduced
+  the next one, which `failure-classes.md` class 1 now carries as a condition. Also recorded there
+  because it is a distinct trap: a limitation can be *invisible rather than absent* — that script's
+  scope disclosure shipped as literal `\n` escapes on one 613-character line, so the honest caveat
+  nobody could read was worth nothing.
+
 - **2026-09-04 — #289 batch 9: the census gains a THIRD blind spot, and it is the one widening
   cannot reach.** `components/test.md` records it: when the pump is indirected through a helper
   (`f.drain();` between the `co_spawn` and the `get()`) there is no `ioc.run_for` for the census to
