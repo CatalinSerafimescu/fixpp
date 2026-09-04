@@ -16,7 +16,7 @@
 # No lookahead width reaches that: there is nothing to anchor on. This sweep
 # starts from the thing that actually blocks -- the `get()` -- and asks whether a
 # guard precedes it. It is therefore shape-agnostic: it needs no list of helper
-# names, and a helper form nobody anticipated cannot hide from it.
+# names, and a helper form nobody anticipated cannot hide from it.\n#\n# ⚠️ IT IS SHAPE-AGNOSTIC ABOUT THE PUMP, NOT ABOUT C++. It splices statements (so a\n# split declaration is still seen) and requires a guard to NAME the future it guards\n# (so an unrelated neighbouring guard cannot launder an unguarded get). Both of those\n# were FALSE-CLEAN modes in its first version, each reproduced on a copy of a real\n# migrated site. It still does not model scopes, aliasing, or futures returned from a\n# function -- so treat a clean file as evidence, not proof, and add a control the day\n# a new evasion is found.
 #
 # ⚠️ THAT PROPERTY IS THE WHOLE POINT, AND IT WAS LEARNED THE EXPENSIVE WAY. The
 # first detector written for this class recognised helper SHAPES. It matched a
@@ -90,26 +90,61 @@ def blank_comments(text):
     text = _BLOCK.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
     return _LINE.sub(lambda m: " " * len(m.group(0)), text)
 
-def classify(text):
-    """-> (guarded, unguarded_rows). Shape-agnostic: anchored on the get()."""
-    lines = blank_comments(text).splitlines()
-    futs = set()
+def statements(lines):
+    """Yield (start_line_index, spliced_text). A declaration may span physical lines
+    -- `auto\n    fut = asio::co_spawn(...)` is one statement -- so anchoring on a
+    single line makes such a future INVISIBLE and the file reads clean. Splice to the
+    statement terminator before matching anything."""
+    buf, start, depth = [], None, 0
     for i, l in enumerate(lines):
-        blob = " ".join(lines[i:i+3])
-        m = re.search(r'auto\s+(\w+)\s*=\s*asio::co_spawn', l)
-        if m and "use_future" in blob:
-            futs.add(m.group(1))
-    guarded, bad = 0, []
-    for i, l in enumerate(lines):
-        for m in re.finditer(r'(?:^|[^\w.])(\w+)\.get\(\)', l):
-            if m.group(1) not in futs:
+        if start is None:
+            if not l.strip():
                 continue
-            back = "\n".join(lines[max(0, i - LOOKBACK):i])
-            if GUARD.search(back):
+            start = i
+        buf.append(l)
+        depth += l.count("(") - l.count(")")
+        if depth <= 0 and (l.rstrip().endswith(";") or l.rstrip().endswith("{")
+                           or l.rstrip().endswith("}")):
+            yield start, " ".join(x.strip() for x in buf)
+            buf, start, depth = [], None, 0
+    if buf:
+        yield start, " ".join(x.strip() for x in buf)
+
+
+def classify(text):
+    """-> (guarded, unguarded_rows). Anchored on the get(), and IDENTITY-CHECKED.
+
+    Two false-CLEAN modes this must not have, both reproduced against the earlier
+    version of this script on copies of a real migrated site:
+      1. a future whose declaration is split across lines went unseen  -> statements()
+      2. an UNRELATED guard in the preceding lines was accepted as this future's
+         guard -> a guard now only counts if it NAMES the future it guards.
+    A re-declaration of the same identifier resets its guarded state, because test
+    bodies reuse `fut` many times in one function."""
+    lines = blank_comments(text).splitlines()
+    guarded_state = {}          # future name -> guarded by a call naming it?
+    known = set()
+    guarded, bad = 0, []
+    for start, stmt in statements(lines):
+        m = re.search(r'\bauto\s+(\w+)\s*=\s*asio::co_spawn', stmt)
+        if m and "use_future" in stmt:
+            known.add(m.group(1))
+            guarded_state[m.group(1)] = False      # re-binding resets the guard
+            continue
+        if GUARD.search(stmt):
+            for name in known:
+                if re.search(rf'\b{re.escape(name)}\b', stmt):
+                    guarded_state[name] = True
+        for gm in re.finditer(r'(?:^|[^\w.])(\w+)\.get\(\)', stmt):
+            name = gm.group(1)
+            if name not in known:
+                continue
+            if guarded_state.get(name):
                 guarded += 1
             else:
-                bad.append((i + 1, l.strip()))
+                bad.append((start + 1, lines[start].strip() or stmt[:70]))
     return guarded, bad
+
 
 # ── SELF-TEST on SYNTHETIC fixtures ──────────────────────────────────────────
 # Synthetic, not real files: a control anchored to a real file asserts a
@@ -159,6 +194,21 @@ COMMENT_LOOKALIKE = """
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) { return; }
     auto r = fut.get();
 """
+# Codex, batch 9: both of these read CLEAN under the first version of this script.
+SPLIT_DECL_BAD = """
+    auto
+        hidden_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    f.drain();
+    auto r = hidden_fut.get();
+"""
+FOREIGN_GUARD_BAD = """
+    auto earlier_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(ioc, earlier_fut, 200ms)) { return; }
+    (void)earlier_fut.get();
+    auto target_fut = asio::co_spawn(ioc, sess.send(p), asio::use_future);
+    f.drain();
+    auto r = target_fut.get();
+"""
 CONTROLS = [
     ("direct   window, unguarded get   -> UNGUARDED", DIRECT_BAD,    0, 1),
     ("INDIRECT window (f.drain())      -> UNGUARDED", INDIRECT_BAD,  0, 1),
@@ -167,6 +217,8 @@ CONTROLS = [
     ("guarded by a wait_for assertion  -> guarded",   ASSERT_OK,     1, 0),
     ("`.get()` on a non-future         -> ignored",   NOT_A_FUTURE,  0, 0),
     ("idiom quoted in a COMMENT        -> ignored",   COMMENT_LOOKALIKE, 1, 0),
+    ("declaration SPLIT across lines   -> UNGUARDED", SPLIT_DECL_BAD,    0, 1),
+    ("a guard naming a DIFFERENT future-> UNGUARDED", FOREIGN_GUARD_BAD, 1, 1),
 ]
 ok = True
 if not quiet:

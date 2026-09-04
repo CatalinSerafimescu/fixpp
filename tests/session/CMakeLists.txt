@@ -1378,12 +1378,21 @@ target_include_directories(application_inbound_019_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 add_test(NAME application_inbound_019 COMMAND application_inbound_019_test)
-# TIMEOUT is explicit here (#289 batch 9): these four are registered with a bare
-# add_test(), NOT via add_threading_test(), so they never inherited that macro's
-# uniform `TIMEOUT 120` and ran UNBOUNDED. That is not theoretical -- a forced-miss
-# arm on this batch wedged application_outbound_019 in futex_do_wait at 0.0% CPU,
-# and the same class already cost this repo an 86-minute UBSan lane wedge (#337).
-# A missing timeout turns a hang into a lane outage instead of a verdict.
+# ⚠️ TIMEOUT is EXPLICIT on every `application_*_019` registration below, and must
+# stay so. These are registered with a bare `add_test()` rather than through
+# `add_threading_test()`, so they do NOT inherit that macro's uniform `TIMEOUT 120`.
+# There is no global default to fall back on either: this project calls
+# `enable_testing()` without `include(CTest)`, so no `TimeOut` reaches
+# DartConfiguration.tcl and an unbounded test runs until the CI job itself is killed.
+#
+# The condition, which is what matters: a bare `add_test()` here is unbounded unless
+# it says otherwise, and an unbounded async test turns a hang into a lane outage
+# instead of a verdict (#337 is the reference instance).
+#
+# Re-derive which tests are unbounded -- do not trust a count written here:
+#   ctest -N --show-only=json-v1 | python3 -c "import json,sys; \
+#     print(sum('TIMEOUT' not in {p['name'] for p in t.get('properties',[])} \
+#               for t in json.load(sys.stdin)['tests']))"
 set_tests_properties(application_inbound_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "019;us1;inbound;application"
@@ -1407,12 +1416,7 @@ target_include_directories(application_business_reject_019_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 add_test(NAME application_business_reject_019 COMMAND application_business_reject_019_test)
-# TIMEOUT is explicit here (#289 batch 9): these four are registered with a bare
-# add_test(), NOT via add_threading_test(), so they never inherited that macro's
-# uniform `TIMEOUT 120` and ran UNBOUNDED. That is not theoretical -- a forced-miss
-# arm on this batch wedged application_outbound_019 in futex_do_wait at 0.0% CPU,
-# and the same class already cost this repo an 86-minute UBSan lane wedge (#337).
-# A missing timeout turns a hang into a lane outage instead of a verdict.
+# TIMEOUT: bare add_test() inherits none -- see the note above application_inbound_019.
 set_tests_properties(application_business_reject_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "019;us1;business_reject;application"
@@ -1434,12 +1438,7 @@ target_include_directories(application_outbound_019_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 add_test(NAME application_outbound_019 COMMAND application_outbound_019_test)
-# TIMEOUT is explicit here (#289 batch 9): these four are registered with a bare
-# add_test(), NOT via add_threading_test(), so they never inherited that macro's
-# uniform `TIMEOUT 120` and ran UNBOUNDED. That is not theoretical -- a forced-miss
-# arm on this batch wedged application_outbound_019 in futex_do_wait at 0.0% CPU,
-# and the same class already cost this repo an 86-minute UBSan lane wedge (#337).
-# A missing timeout turns a hang into a lane outage instead of a verdict.
+# TIMEOUT: bare add_test() inherits none -- see the note above application_inbound_019.
 set_tests_properties(application_outbound_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "019;us2;outbound;application"
@@ -1462,9 +1461,11 @@ target_include_directories(application_lifecycle_019_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 add_test(NAME application_lifecycle_019 COMMAND application_lifecycle_019_test)
+# TIMEOUT: bare add_test() inherits none -- see the note above application_inbound_019.
 set_tests_properties(application_lifecycle_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
-  LABELS "019;us3;lifecycle;application")
+  LABELS "019;us3;lifecycle;application"
+  TIMEOUT 120)
 
 # ── 019-app-callbacks T017 — strand serialization, drain, keepalive tests ────
 # FR-010/012; INV-2/INV-3; SC-005; research D3.
@@ -1484,12 +1485,7 @@ target_include_directories(application_strand_019_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 add_test(NAME application_strand_019 COMMAND application_strand_019_test)
-# TIMEOUT is explicit here (#289 batch 9): these four are registered with a bare
-# add_test(), NOT via add_threading_test(), so they never inherited that macro's
-# uniform `TIMEOUT 120` and ran UNBOUNDED. That is not theoretical -- a forced-miss
-# arm on this batch wedged application_outbound_019 in futex_do_wait at 0.0% CPU,
-# and the same class already cost this repo an 86-minute UBSan lane wedge (#337).
-# A missing timeout turns a hang into a lane outage instead of a verdict.
+# TIMEOUT: bare add_test() inherits none -- see the note above application_inbound_019.
 set_tests_properties(application_strand_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "019;phase6;strand;drain;application"
@@ -1512,9 +1508,11 @@ target_include_directories(application_throw_019_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 add_test(NAME application_throw_019 COMMAND application_throw_019_test)
+# TIMEOUT: bare add_test() inherits none -- see the note above application_inbound_019.
 set_tests_properties(application_throw_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
-  LABELS "019;phase6;throw;application")
+  LABELS "019;phase6;throw;application"
+  TIMEOUT 120)
 
 # ── gate-b/r1 FIX-5 — real Engine::send tests (replace substituted tests) ─────
 # Exercises Engine::send public API: (a) send from foreign thread crosses wire,
