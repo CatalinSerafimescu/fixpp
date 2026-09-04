@@ -233,34 +233,26 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 // `asio::steady_timer` the mock clock does not govern, and nothing here grows one.
 // `run_window_then_ready` adds one `kPumpSlice` of grace and no more.
 //
-// THIS IS ANOTHER COPY OF THE QUOTED SPAN, AND THE COPY SET IS A MEASUREMENT, NOT A
-// FACT TO CACHE HERE. An earlier revision of this addendum stated the population as a
-// list of file names; a later PR amended one member's span in place and the list did
-// not notice. The recipe instead -- extract each candidate's span, hash it, group:
+// THIS IS ANOTHER COPY OF THE QUOTED SPAN, and which files share it is a MEASUREMENT,
+// not a fact to cache here. An earlier revision of this addendum stated the population
+// as a list of file names; a later PR amended one listed member's span in place and the
+// list did not notice. It was then briefly replaced by a shell pipeline pasted into this
+// comment -- which is the same defect one level up: a pipeline nothing ever runs is an
+// untested instrument, and pasting the drift DETECTOR into every file that needs it
+// drifts exactly as the file list did (the two pasted copies had already diverged in
+// wording inside the commit that wrote them). Derive it instead:
 //
-//     git grep -lF 'the `run_for(W); restart(); fut.get()` migration' -- tests/ |
-//       while read -r f; do
-//         awk '/#289: the .run_for/{s=1} s{print} s && /releases exactly that waiter/{exit}' \
-//           "$f" | md5sum | tr -d '\n'; echo "  $f"
-//       done | sort
+//     .specify/decisions/289-data/audit-copy-span.sh
 //
-// ⚠️ THE EXTRACTOR MUST BE ONE-SHOT. A range extractor that can REOPEN -- `sed -n
-// '/<heading>/,/<closing>/p'` is the obvious one -- is unsafe for this job by
-// construction, because the text it delimits is prose ABOUT those delimiters and
-// addenda are free to quote either one. On a reopen the range runs to end of file, the
-// hash covers the whole TU, and a byte-identical span reports as diverged. Whether any
-// file trips it today is not the point and is deliberately not recorded here: it is a
-// property of prose that changes with every edit, and a cached answer to it would be
-// false the next time someone adds a paragraph. `awk ... {exit}` stops at the first
-// close and cannot reopen. Give any substitute extractor that property before you
-// believe its hash.
-//
-// Files whose hash matches this one are the population an audit may `diff` against; a
+// Self-testing, with a look-alike in its control set and a non-vacuous demonstration
+// that its one-shot extractor is load-bearing; it refuses to print a grouping it cannot
+// stand behind. Files sharing a hash are the population an audit may `diff` against; a
 // file that carries the heading but hashes differently has diverged DELIBERATELY, and
-// that divergence is the thing to read, not to normalise away. The audit only works if
-// this copy stays VERBATIM, not paraphrased -- an earlier revision elsewhere in the
-// series paraphrased it and silently dropped a precondition. Keep it verbatim; put
-// anything file-specific under this addenda heading instead.
+// that divergence is the thing to read, not to normalise away.
+//
+// The audit only works if this copy stays VERBATIM, not paraphrased -- an earlier
+// revision elsewhere in the series paraphrased it and silently dropped a precondition.
+// Keep it verbatim; put anything file-specific under this addenda heading instead.
 
 struct SendingTimeFixture {
     asio::io_context ioc;
