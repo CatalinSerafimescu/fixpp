@@ -16,14 +16,32 @@ python -m venv /tmp/wheel-venv && /tmp/wheel-venv/bin/pip install <the.whl> pyte
 
 ## Membership (the enumerated set, T012)
 
+> ⚠️ **THIS SECTION IS THE ALLOWLIST, AND IT IS ENFORCED (#298).**
+> `ci/assert-wheel-test-parity.py`, pinned by `ci/test-wheel-parity.sh` in the
+> `ci-script-pins` job, reads this file and fails the build on: a wheel file
+> named nowhere here; a row naming a file that does not exist; a twin whose
+> `def test_*` name set differs from its in-tree source; and a row marked
+> `as-is` whose two copies are not byte-identical. **Edit the table in the same
+> commit as the file** — a divergence introduced without its row is a build
+> failure, by design. Rows marked with a locator swap, `(suite-native)` or
+> `diverges` are exempt from byte-identity only; the other three still apply.
+
 Ports of the in-tree `bindings/python/tests/` suite — the **round-trip, smoke,
 exception, lifetime, OO-behaviour, and sub-interpreter** tests — adapted to the
-locator. For every file below **except `test_subinterpreter.py`**, the *only*
-divergence from its in-tree source is its dict helper (`_dict_path` /
-`oo_test_support.dict_path` / `_gil_staging._dict_path`), now delegating to
-`_wheeldict.resolve("FIX44")`; everything else is a faithful copy.
-`test_subinterpreter.py` is the one behavioural exception — see its table row
-and issue #298.
+locator. For a `swap `_dict_path`` row, the intended BEHAVIOURAL divergence from
+its in-tree source is its dict helper (`_dict_path` /
+`oo_test_support.dict_path` / `_gil_staging._dict_path`) delegating to
+`_wheeldict.resolve("FIX44")`; those files also carry a short port note.
+`test_subinterpreter.py` is the one behavioural exception — see its table row.
+
+> ⚠️ **WHAT THE GATE ACTUALLY ENFORCES FOR THESE ROWS IS TEST-NAME PARITY, NOT
+> BYTE IDENTITY**, and this paragraph says so rather than asserting the stronger
+> property. It previously read *"everything else is a faithful copy"* — an
+> unenforced claim stated as fact, in the very file the gate treats as the
+> contract. A review demonstrated the gap by replacing all eight test BODIES in
+> `test_roundtrip.py` with `pass`: names unchanged, gate green. Byte identity is
+> enforced only for `as-is` rows, which is why moving a file to `as-is` is the
+> way to strengthen it, and why the claim here is now scoped to what is checked.
 
 | File | Source | Locator swap |
 |---|---|---|
@@ -41,6 +59,9 @@ and issue #298.
 | `test_reentrancy.py` | as-is | via `_oo_reentrancy_staging` / `oo_test_support` |
 | `test_callback_raise_watchdog.py` | as-is | via `_gil_staging` |
 | `test_subinterpreter.py` | **diverges** | n/a — locator-independent, but NOT as-is (see below) |
+| `oo_test_support.py` | swap `_dict_path` | ✓ — `dict_path()` delegates to `_wheeldict.resolve` |
+| `_gil_staging.py` | swap `_dict_path` | ✓ — `_gil_staging._dict_path` |
+| `_oo_reentrancy_staging.py` | as-is | — |
 
 ⚠️ **`test_subinterpreter.py` is not a faithful port below Python 3.12.** The
 in-tree source uses `importorskip("_xxsubinterpreters")` on every Python
@@ -51,9 +72,20 @@ version, so an absent module skips the whole test, and it tolerates a
 broken runner, not a skip) and, below 3.12, **rejects every**
 `RunFailedError`. On 3.12+ the two files behave identically: both
 `importorskip`, and both tolerate only the import-barrier message. This is a
-known, tracked discrepancy pending reconciliation — see issue #298 — not an
-intended design; do not treat the wheel twin's stricter 3.10/3.11 behaviour as
-the documented contract.
+known discrepancy, not an intended design; do not treat the wheel twin's
+stricter 3.10/3.11 behaviour as the documented contract.
+
+> ⛔ **THIS ROW IS THE ONE THING THE PARITY GATE DOES NOT ENFORCE, AND THAT IS
+> STATED HERE SO THE EXEMPTION IS NOT MISTAKEN FOR A SANCTION.**
+> `ci/assert-wheel-test-parity.py` exempts `diverges` rows from byte-identity
+> (they still carry enumeration, no-dangling and test-name parity). So the
+> behavioural divergence above survives a green gate. **`diverges` is not a
+> general escape hatch — this is its only current member, and a second one
+> should be argued for rather than added.** Reconciling the 3.10/3.11 behaviour
+> is real Python-version semantics work and was deliberately NOT folded into
+> the #298 parity pass; it remains open on its own merits. Adding a `diverges`
+> row to dodge a gate failure would be the exact substitution this gate exists
+> to prevent: an unenforced convention replaced by a falsely enforced one.
 
 Support modules: `_wheeldict.py` (locator resolver), `oo_test_support.py`,
 `_gil_staging.py`, `_oo_reentrancy_staging.py`. The two staging modules run as

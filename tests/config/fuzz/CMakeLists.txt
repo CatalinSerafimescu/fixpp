@@ -6,9 +6,14 @@
 # Smoke command (≤30s, Gate-B gate: ≥10 min):
 #   ./build/linux-clang-asan/bin/fuzz_toml_loader \
 #       -max_total_time=20 -runs=20000 -max_len=8192 \
-#       tests/config/fuzz/corpus/toml_config_loader
+#       tests/config/fuzz/crashes
 #
-# Seed corpus: tests/config/fuzz/corpus/toml_config_loader/
+# ⚠️ THE PATH ABOVE USED TO NAME `tests/config/fuzz/corpus/toml_config_loader/`,
+# which HAS NEVER EXISTED — not on disk and not in history. This target has no
+# seed corpus; what it has is the tracked crash reproducer in `crashes/`, which
+# is what the command now points at. Same class as #209's FINDINGS.md: a
+# citation to a path nobody ever created, which reads as coverage and is none.
+# Re-derive before trusting either path: `ls tests/config/fuzz/`.
 
 # OpenSSL + ZLIB: fixpp::config_toml links fixpp_tls PRIVATE; the static TLS
 # lib pulls in OpenSSL.  Mirror the boilerplate from tests/config/CMakeLists.txt
@@ -59,3 +64,28 @@ target_link_options(fuzz_toml_loader PRIVATE -fsanitize=fuzzer,address,undefined
 set_target_properties(fuzz_toml_loader PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+
+# ── Crash-reproducer replay (#213) ───────────────────────────────────────────
+#
+# `crashes/repro_toml_assert_assume.toml` is a TRACKED reproducer for a crash
+# this harness once found, and nothing replayed it — the regression it documents
+# was unguarded. #213 is about exactly that state for the `corpus/` trees; this
+# is the same defect in a directory the corpus glob does not cover, so it is
+# fixed here rather than by widening that glob to a differently-shaped dir.
+#
+# Mechanics shared with tests/fuzz/ via fixpp_add_fuzz_replay() — see its header
+# in cmake/Helpers.cmake for why -runs=0 and the artifact redirection are not
+# adjustable per call site.
+set(_fixpp_toml_crashes "${CMAKE_CURRENT_SOURCE_DIR}/crashes")
+
+file(GLOB _fixpp_toml_crash_files CONFIGURE_DEPENDS "${_fixpp_toml_crashes}/*")
+if(NOT _fixpp_toml_crash_files)
+  # An empty scan is an instrument failure, not a clean build: the registration
+  # would silently replay nothing while still reporting green.
+  message(FATAL_ERROR
+    "tests/config/fuzz/crashes/ is empty or missing, so fuzz_replay_toml_crashes would "
+    "replay nothing while still reporting green. Restore the reproducer or delete this block.")
+endif()
+
+fixpp_add_fuzz_replay(fuzz_replay_toml_crashes fuzz_toml_loader "${_fixpp_toml_crashes}")

@@ -5,8 +5,12 @@
 #
 #   restore-disposition — steps.<id>.outputs.hit ('true' / 'false' / '' )
 #   build-outcome       — steps.<id>.outcome ('success' / 'failure' / ...)
-#   hit-floor           — OPTIONAL integer percent. Omitted = no floor (the
-#                         behaviour every existing caller gets).
+#   hit-floor           — OPTIONAL integer percent. Omitted = no floor.
+#                         Which callers pass one is a property of the
+#                         workflows, not of this file; re-derive with
+#                         `grep -rn 'ccache-stats.sh' .github/workflows/`.
+#                         A caller that CANNOT supply argument 2 must not pass
+#                         a floor — see the gate note in the opt-in block.
 #
 # ── WHAT IS ASSERTED, AND WHAT IS ONLY REPORTED ──────────────────────────────
 #
@@ -15,11 +19,17 @@
 # then a no-op that reports green — the exact ran-exited-0-measured-nothing
 # shape this repo keeps paying for.
 #
-# ⚠️ REPORTED, NOT ASSERTED: the hit rate. There is deliberately no floor. The
-# first run after a compiler bump is legitimately 0 %, and a cold run must not be
-# red. Tighten only once a warm baseline exists — and note that the evidence for
-# #240 is the PAIR (`restore HIT` AND a high hit rate), because a HIT with 0 % is
-# green under this instrument BY DESIGN and is the change failing, not passing.
+# ⚠️ THE HIT RATE IS REPORTED BY DEFAULT AND ASSERTED ONLY ON OPT-IN. There is
+# no floor unless a caller passes one (#299 turned it on for the lanes that can
+# supply a restore disposition). The default stays report-only because the first
+# run after a compiler bump is legitimately 0 %, and a cold run must not be red.
+#
+# The evidence for #240 is the PAIR (`restore HIT` AND a high hit rate): a HIT
+# with 0 % is green under the DEFAULT instrument BY DESIGN and is the change
+# failing, not passing. The opt-in floor at the end of this file is what turns
+# that pair from a sentence addressed to a human into a check — but ONLY for a
+# caller that can supply argument 2. A floor without a restore disposition is
+# inert by construction, which would reproduce the defect rather than fix it.
 #
 # ⚠️ Zero cacheable calls does NOT by itself prove the launcher was unwired.
 # ccache may have run and classified every invocation as uncacheable, or no
@@ -228,10 +238,15 @@ fi
 # Only "we pulled a cache AND it did not match" is fatal, which is the pair the
 # acceptance criterion actually names.
 #
-# Not a default, and not retrofitted onto the existing lanes here: turning this
-# on for a lane is a claim that the lane HAS a warm baseline. Making that claim
-# for lanes whose baseline nobody has measured would be the same unmeasured
-# assertion this file keeps refusing to make.
+# Not a default: turning this on for a lane is a claim that the lane HAS a warm
+# baseline. Making that claim for a lane whose baseline nobody has measured
+# would be the same unmeasured assertion this file keeps refusing to make.
+#
+# ⚠️ AND IT IS A CLAIM THE LANE CAN SUPPLY ARGUMENT 2. A caller that passes an
+# empty restore disposition can never reach the fatal branch below, so a floor
+# there is decorative — it would report "NOT evaluated" every run while looking
+# enforced in the diff. Any lane restoring through an action that exposes no
+# hit output is in that position and must NOT be given a floor.
 if [ -n "${HIT_FLOOR:-}" ]; then
   case "$HIT_FLOOR" in
     ''|*[!0-9]*)

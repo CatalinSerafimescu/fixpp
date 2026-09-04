@@ -42,6 +42,7 @@
     {
       "name": "linux-clang-asan",
       "displayName": "Linux / Clang / ASan",
+      "description": "#213. The fuzz targets carry -fsanitize=fuzzer,address,undefined, so this is their natural lane, and tier1's matrix selects lanes purely by preset name with no per-lane -D overrides -- a workflow flag would be the special case here, not the preset. It also keeps local reproduction of the CI lane accurate. COSTS: this adds one build+link per fuzz target and one fast ctest per corpus; measured small against the lane's own build, but a MEASUREMENT ROTS so re-derive rather than trusting a number here -- `cmake --build build/linux-clang-asan --target $(ninja -C build/linux-clang-asan -t targets | grep -o '^fuzz_[a-z_]*' | tr '\\n' ' ')` for build cost, `ctest --test-dir build/linux-clang-asan -L fuzz` for replay cost, `du -ch build/linux-clang-asan/bin/fuzz_*` for disk. No existing object's command line changes, so no compiler-cache entry is invalidated -- that one is STRUCTURAL and does not rot. ⚠️ DISK IS THE AXIS TO WATCH: this is the disk-tightest leg in the matrix and it has died with `ld: final link failed: No space left on device` before, so if that recurs the fuzz binaries are one of the things to weigh. ASYMMETRY, deliberate: linux-clang-libc++-asan does NOT set FIXPP_BUILD_FUZZ. One lane replaying the corpora is the regression guard #213 asked for; a second would duplicate the cost without covering any additional seed.",
       "inherits": "_base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -49,6 +50,7 @@
         "CMAKE_CXX_COMPILER": "clang++",
         "FIXPP_ENABLE_ASAN": "ON",
         "BUILD_SHARED_LIBS": "ON",
+        "FIXPP_BUILD_FUZZ": "ON",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-asan/conan_toolchain.cmake"
       }
     },

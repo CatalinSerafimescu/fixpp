@@ -58,14 +58,14 @@ jobs:
           # tier1.yml's install step (versioned binaries + unversioned symlink).
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
           CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
           test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
           sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
           sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
           clang++ --version
-          sudo apt-get install -y --no-install-recommends ninja-build python3-pip pipx
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends ninja-build python3-pip pipx
 
       - uses: actions/setup-python@v6
         with:
@@ -127,7 +127,7 @@ jobs:
       - name: Install harness runtime deps
         run: |
           pip install pyyaml
-          sudo apt-get install -y --no-install-recommends openssl
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends openssl
 
       - name: Pull counterparty + driver, recreate harness layout
         run: |

@@ -241,7 +241,7 @@ jobs:
           # llvm.sh handles GPG key + apt repo + versioned clang binaries.
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
           # but does NOT update the unversioned `clang`/`clang++` paths. The
           # sanitizer presets use clang-22/clang++-22 directly (versioned) so
@@ -256,7 +256,7 @@ jobs:
           clang++ --version
           # libc++ and libc++abi dev packages are NOT installed by llvm.sh by
           # default — must be installed explicitly.
-          sudo apt-get install -y --no-install-recommends \
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends \
             libc++-22-dev \
             libc++abi-22-dev \
             ninja-build \
@@ -317,7 +317,7 @@ jobs:
       - name: Install ccache
         run: |
           set -euo pipefail
-          sudo apt-get install -y --no-install-recommends ccache
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends ccache
           # Not decoration — this is the assertion that the exit-127 trap above
           # is closed, made here where the step name says what failed, rather
           # than 200 lines later inside a Conan dependency build.
@@ -432,17 +432,44 @@ jobs:
       # compile is a sufficient explanation for zero cacheable calls.
       #
       # ⚠️ THE EVIDENCE IS THE PAIR — a restore HIT *and* a high hit rate. A HIT
-      # with 0 % is green under this instrument BY DESIGN (the only failure path
-      # is zero-cacheable-calls) and is this change FAILING, not passing. Both
-      # numbers go to the Job Summary for that reason. Do not close #240 on
-      # "CI was green".
+      # with a near-zero rate is this change FAILING, not passing. Both numbers
+      # go to the Job Summary for that reason. Do not close #240 on "CI was
+      # green".
+      #
+      # This used to add "(the only failure path is zero-cacheable-calls)", i.e.
+      # that the pair was reported and never checked. #299 ended that for this
+      # lane: the floor below makes a restore HIT under the bound FATAL, so the
+      # pair is now enforced rather than left to whoever reads the log. The
+      # exemption for a cold/MISS run is what keeps that safe, and it is stated
+      # at the floor itself.
+      # ── HIT FLOOR (#299) ──────────────────────────────────────────────────
+      #
+      # The 4th argument opts this lane into a FATAL hit-rate floor. Until #299
+      # the floor existed in ci/ccache-stats.sh and no caller passed it, so a
+      # lane could regress to a 0 % hit rate and stay green forever — the
+      # observes-but-never-asserts shape, with the assertion sitting one
+      # argument away from being used.
+      #
+      # ⚠️ SET BELOW THE OBSERVED WARM RATE WITH MARGIN, NOT AT IT. #240's
+      # evidence for these four legs is a full-match warm restore; a floor level
+      # with that would redden on any legitimate large refactor. This bound
+      # targets the PATHOLOGICAL signature instead — restore HIT with a
+      # near-zero rate, i.e. compiler/flag/path drift the cache tag did not
+      # follow — which lands nowhere near it. A BUDGET, not a measurement: do
+      # not tighten it toward whatever the current rate happens to be.
+      #
+      # ⚠️ The seeding/MISS exemption is in ci/ccache-stats.sh and is what makes
+      # this safe — a cold run is 0 % by construction and cannot reach the fatal
+      # branch. Only "we pulled a cache AND it did not match" is fatal, which is
+      # the pair #240's acceptance criterion actually names.
       - name: ccache statistics
         id: ccache_stats
         if: always()
         run: |
           ci/ccache-stats.sh ${{ matrix.preset }} \
             "${{ steps.ccache_restore.outputs.hit }}" \
-            "${{ steps.build.outcome }}"
+            "${{ steps.build.outcome }}" \
+            70
 
       # Publish BEFORE the ctest steps, not after. The cache is a compilation
       # artifact: a red test says nothing about whether these objects are worth

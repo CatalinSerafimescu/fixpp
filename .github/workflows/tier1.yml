@@ -427,7 +427,7 @@ jobs:
           # llvm.sh handles GPG key + apt repo + clang-22/clang++-22/lld-22/llvm-22.
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
           # but does NOT update the unversioned `clang`/`clang++` paths. CMake
           # presets use unversioned `clang++`, which otherwise resolves to the
@@ -455,7 +455,7 @@ jobs:
           # Dropping python3-dev on the theory that actions/setup-python's headers
           # suffice is an UNTESTED narrowing: no CI run and no local build can
           # discriminate it, because all of them had the system headers present.
-          sudo apt-get install -y --no-install-recommends \
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends \
             gcc-13 g++-13 \
             ninja-build \
             swig \
@@ -968,7 +968,7 @@ jobs:
       # a missing tool rather than on anything about the package.
       - name: Install rpmbuild (packaging lane only)
         if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'
-        run: sudo apt-get update && sudo apt-get install -y rpm
+        run: ci/apt-guard.sh apt-update -- sudo apt-get update && ci/apt-guard.sh apt-install -- sudo apt-get install -y rpm
 
       # ⚠️ ASSERT THE COUNT, NOT JUST THE EXIT CODE. `ctest -R`/`-L` exits 0 when
       # the filter matches NOTHING (verified), so an exit-code-only check reports
@@ -1267,7 +1267,7 @@ jobs:
         run: |
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
           # but does NOT update the unversioned `clang`/`clang++` paths. CMake
           # presets use unversioned `clang++`, which otherwise resolves to the
@@ -1284,7 +1284,7 @@ jobs:
           sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
           sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
           clang++ --version
-          sudo apt-get install -y --no-install-recommends \
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends \
             ninja-build \
             python3-pip \
             pipx
@@ -1412,6 +1412,24 @@ jobs:
       # an absent disposition as `n/a` and skips the restored-but-cold warning
       # that depends on it — passing a guessed 'true'/'false' here would
       # manufacture a disposition nothing measured.
+      #
+      # ⚠️ AND THAT IS WHY THIS LANE GETS NO HIT FLOOR, while the wheel and
+      # tier-3 lanes took one in #299. THE OMISSION IS THE POINT, not an
+      # oversight to be tidied up later by adding the argument.
+      #
+      # The floor in ci/ccache-stats.sh is gated on `RESTORE == 'true'`, and
+      # that gate is what makes it safe — it is how a legitimate cold/seeding
+      # run stays green. This lane can never supply that disposition, so a
+      # floor passed here would print "hit-floor N% NOT evaluated" on every run
+      # forever: a gate that runs, exits 0 and measures nothing, which is the
+      # precise defect #299 was filed about. Adding the argument would satisfy
+      # the issue's wording while REPRODUCING its subject.
+      #
+      # ⛔ DO NOT "FIX" THIS BY PASSING A FLOOR. The prerequisite is a real
+      # restore disposition for this lane, which means migrating it off
+      # `ccache-action` onto ci/restore-ccache.sh the way #240 did for tier 3 —
+      # a cache-storage change, not a one-argument edit. Until then a floor here
+      # is unenforceable, and the honest state is to say so.
       - name: ccache statistics
         run: ci/ccache-stats.sh linux-clang-coverage '' '${{ steps.build.outcome }}'
 
@@ -1788,13 +1806,30 @@ jobs:
 
       # ── ccache statistics + liveness (#259) ───────────────────────────────
       #
-      # ⚠️ NO HIT FLOOR ON THIS LANE YET, deliberately. ci/ccache-stats.sh grew
-      # an opt-in floor in this same PR, and turning it on is a claim that the
-      # lane HAS a warm baseline. This lane has never had a warm run — the first
-      # push:main after this merges is the seeding run. Enabling a floor here
-      # now would assert a baseline nobody has measured, which is the failure
-      # this repo keeps recording. Turn it on in a follow-up once a warm rate
-      # exists, and #259's acceptance criterion 1 becomes machine-checked.
+      # ── HIT FLOOR NOW ON (#299) ───────────────────────────────────────────
+      #
+      # This is the follow-up the previous comment here asked for. That comment
+      # withheld the floor because turning it on is a claim that the lane HAS a
+      # warm baseline, and at the time this lane had never had a warm run. It
+      # has since, so #259's acceptance criterion 1 is now machine-checked
+      # instead of being prose nobody enforces.
+      #
+      # ⚠️ THE FLOOR IS SET BELOW THE OBSERVED WARM RATE WITH MARGIN, NOT AT IT.
+      # A floor level with the baseline is a flake generator: a large refactor
+      # or a codegen change legitimately depresses a warm rate without anything
+      # being wrong. This budget is sized to catch the PATHOLOGICAL signature
+      # #299 names — a cache that RESTORES but no longer matches, from a
+      # compiler bump inside an image, a flag that moved the command line, or a
+      # namespace key that stopped colliding — which lands near 0 %, nowhere
+      # near this bound. It is a BUDGET, not a measurement; re-deriving the
+      # current warm rate and tightening toward it would convert a bound into a
+      # flake.
+      #
+      # ⚠️ THE EXEMPTION IS WHAT MAKES THE FLOOR SAFE, and it lives in
+      # ci/ccache-stats.sh, gated on `RESTORE == 'true'`. A seeding run (restore
+      # MISS) is legitimately 0 % and stays green by construction — it cannot
+      # reach the fatal branch. That is the original correct reasoning
+      # preserved, not discarded.
       #
       # What IS asserted today is liveness: zero cacheable calls after a
       # SUCCESSFUL build is fatal, because a silently unwired launcher reports
@@ -1806,7 +1841,8 @@ jobs:
           ci/ccache-stats.sh \
             "${{ steps.wheel_ident.outputs.lane }}" \
             "${{ steps.ccache_restore.outputs.hit }}" \
-            "${{ steps.wheel_build.outcome }}"
+            "${{ steps.wheel_build.outcome }}" \
+            70
 
       # Publish only from main, and only when the cache actually CHANGED.
       #
@@ -2070,6 +2106,65 @@ jobs:
       - name: Regression pin — peak-RSS instrument dispositions (#266)
         run: bash ci/test-peak-rss.sh
 
+      # #300 — the install bound. Every Linux lane in every tier installs its
+      # toolchain through ci/apt-guard.sh; a wedged mirror used to burn the
+      # 180-240 min JOB timeout with nothing red and nothing naming apt.
+      #
+      # ⚠️ A BOUND THAT HAS NEVER BEEN SEEN TO FIRE IS NOT KNOWN TO BE ABLE TO.
+      # The cells here drive synthetic hang/flake/failure fixtures, and the
+      # three mutants re-run the whole suite against a copy of apt-guard.sh with
+      # exactly one property broken, each proven to redden the ONE cell that
+      # names its defect. Two of those cells are CLOCK assertions — the bound is
+      # a time claim and cannot be read off an exit code.
+      #
+      # No apt, no network, no sudo: every fixture is synthetic.
+      #
+      # ⚠️ COST, STATED RATHER THAN BURIED (same convention as the peak-RSS step
+      # above): measured ~47 s locally. It is dominated by the clock cells, whose
+      # fixtures must really sleep — a mocked hang would pin nothing, because the
+      # property under test IS elapsed time.
+      #
+      # It was ~120 s before the cell filter: each mutant re-ran the WHOLE suite,
+      # and two of the three disable the bound, so unrelated cells fell through to
+      # their fixtures' full sleep. A mutant now runs only the cell it claims to
+      # pin — which is also the more honest scoring. Re-derive with
+      # `time bash ci/test-apt-guard.sh` rather than trusting this number.
+      - name: Regression pin — apt/llvm install bound (#300)
+        run: bash ci/test-apt-guard.sh
+
+      # #298 — the tests/wheel <-> in-tree parity contract. conftest.py and
+      # tests/wheel/README.md both describe tests/wheel/ as a byte-faithful fork
+      # with an enumerated membership, and nothing enforced any of it: the
+      # convention was held by hand and had already drifted in two directions.
+      #
+      # The ALLOWLIST IS THE README, not a second list maintained beside it —
+      # otherwise two artifacts would each claim to be the contract.
+      #
+      # ⚠️ #298's own warning is why the harness exists rather than just the
+      # check: "a parity gate that silently passes is worse than none, because
+      # it converts an unenforced convention into a falsely enforced one." Each
+      # of the gate's directions is broken against a copy of the real suite and
+      # asserted to produce ITS OWN message — a cell that fails for the wrong
+      # reason is not a passing cell.
+      - name: Regression pin — wheel/in-tree test parity (#298)
+        run: bash ci/test-wheel-parity.sh
+
+      # The CALLER-side invariants for #300 and #213 — the half neither
+      # mechanism's own harness can see.
+      #
+      # ci/test-apt-guard.sh tests the WRAPPER; a bare `sudo apt-get install`
+      # added to any workflow leaves every one of its cells green while "every
+      # apt-backed install is bounded" quietly becomes false. And every fuzz
+      # replay lives under `if(FIXPP_BUILD_FUZZ)`, so flipping that flag OFF does
+      # not trip the zero-registration guard — it stops the guard being evaluated
+      # at all, returning the lane to replaying zero seeds with every script gate
+      # still green. A guard cannot guard its own enabling flag.
+      #
+      # Both invariants were true when written and pinned by nothing; a hostile
+      # review named that as the defect. Synthetic copies only, no build.
+      - name: Regression pin — CI lane policy (#300 callers, #213 fuzz lane)
+        run: bash ci/test-ci-lane-policy.sh
+
       # #209 — the bench gate's own harness. 61 cells over synthetic
       # Google-Benchmark JSON: every hard cell of tools/bench_compare.py and
       # ci/run-bench-suite.sh is proven RED for its own named reason, and the
@@ -2249,13 +2344,13 @@ jobs:
         run: |
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
           CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
           test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
           sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
           sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
-          sudo apt-get install -y ninja-build swig python3-dev
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y ninja-build swig python3-dev
           clang++ --version
 
       - uses: actions/setup-python@v6
@@ -2491,7 +2586,7 @@ jobs:
         run: |
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
           # but does NOT update the unversioned `clang`/`clang++` paths. CMake
           # presets use unversioned `clang++`, which otherwise resolves to the
@@ -2508,7 +2603,7 @@ jobs:
           sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
           sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
           clang++ --version
-          sudo apt-get install -y --no-install-recommends \
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends \
             ninja-build \
             python3-pip \
             pipx

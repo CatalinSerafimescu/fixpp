@@ -1325,5 +1325,216 @@ want_out 'hit-floor 7% satisfied' "stats/floor-leading-zero"
 want_no_out '007%' "stats/floor-leading-zero"
 ok "hit-floor 007 — parsed as DECIMAL (7), not octal or malformed, and accepted"
 
+# ═════ ci/assert-ccache-floor-callers.py — the CALL SITES (#299) ═════════════
+#
+# ⚠️ THIS SECTION PINS SOMETHING NO OTHER CELL IN THIS FILE CAN.
+#
+# #299 was not a defect in ccache-stats.sh. The floor was fully implemented and
+# is exhaustively covered above — breach, exemption, malformed, out-of-range,
+# leading-zero. The defect was that NO CALLER PASSED IT. Every cell above passes
+# the floor explicitly, so this whole suite was green while the feature was
+# unreachable in production. Only a check that reads the WORKFLOWS can see that.
+#
+# ⚠️ THE MUTANTS BELOW ARE COPIES OF THE REAL WORKFLOWS, not synthetic YAML.
+# The check walks jobs -> steps and resolves argument 2 back to the step that
+# produces it, so a hand-written two-step fixture would not exercise the pairing
+# at all. Each mutation is cmp-guarded: a sed that matches nothing would leave
+# an identical copy, and the cell would then "pass" by testing the shipped
+# workflow — reading as a thorough mutant that tested nothing.
+FLOORCHK="$repo_root/ci/assert-ccache-floor-callers.py"
+WFSAND="$sandbox/wf"
+
+# `run()` above invokes its target with `bash`, mirroring how Actions runs a
+# `run:` block. The call-site check is Python, so it needs its own runner —
+# same OUT/STATUS contract, so want_status/want_out apply unchanged.
+run_floorchk() {
+  STATUS=0
+  OUT="$(python3 "$FLOORCHK" "$1" 2>&1)" || STATUS=$?
+}
+
+# $1 = workflow basename, $2 = python mutation applied to the copy
+mutate_wf() {
+  rm -rf "$WFSAND"; mkdir -p "$WFSAND"
+  cp "$repo_root/.github/workflows/$1" "$WFSAND/$1"
+  python3 -c "$2" "$WFSAND/$1"
+  if cmp -s "$repo_root/.github/workflows/$1" "$WFSAND/$1"; then
+    fail "floor-callers: the mutation on $1 did NOT apply (re-point the pattern, do not delete the mutant)"
+  fi
+}
+
+# Direction 0 — the shipped workflows satisfy the rule.
+run_floorchk "$repo_root/.github/workflows"
+want_status 0 "floor-callers/real"
+want_out 'all consistent' "floor-callers/real"
+ok "call-site rule holds on the shipped workflows"
+
+# ⚠️ PROVE THE CHECK CAN REPORT NON-ZERO BEFORE TRUSTING ITS ZERO. Four
+# directions: the rule has three failure modes, and an empty scan is a fourth.
+
+# Direction 1 — THE #299 DEFECT ITSELF: a lane that CAN supply a restore
+# disposition, with the floor argument removed. This reconstructs the state the
+# repo was actually in.
+mutate_wf tier3-libcxx.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="\"${{ steps.build.outcome }}\" \\\n            70"
+assert old in s, "anchor missing"
+p.write_text(s.replace(old,"\"${{ steps.build.outcome }}\"",1),encoding="utf-8")'
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/mutant-floor-removed"
+want_out 'passes NO hit floor' "floor-callers/mutant-floor-removed"
+ok "MUTANT floor-removed — the #299 defect itself is detected (disposition present, floor absent)"
+
+# Direction 2 — THE DEFECT WEARING A FIX'S CLOTHING: a floor added to a lane
+# whose argument 2 is an EMPTY literal. It looks enforced in the diff and can
+# never evaluate, because the fatal branch is gated on restore == 'true'.
+mutate_wf tier1.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="ci/ccache-stats.sh linux-clang-coverage '"'"''"'"' '"'"'${{ steps.build.outcome }}'"'"'"
+assert old in s, "anchor missing"
+p.write_text(s.replace(old,old+" 70",1),encoding="utf-8")'
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/mutant-inert-floor"
+want_out 'never evaluate' "floor-callers/mutant-inert-floor"
+ok "MUTANT inert-floor — a floor on a lane with an empty disposition is rejected, not congratulated"
+
+# Direction 3 — THE SAME DEFECT THROUGH AN EXPRESSION, which is the shape a
+# non-empty-string test cannot see. `${{ steps.nope.outputs.hit }}` is non-empty
+# in the YAML and resolves to the EMPTY STRING at run time, so the floor is
+# permanently inert while every naive check calls the site consistent. This is
+# why "can supply a disposition" is resolved STRUCTURALLY — back to the step
+# that produces it — rather than by testing the argument for emptiness.
+mutate_wf tier3-libcxx.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="\"${{ steps.ccache_restore.outputs.hit }}\" \\\n            \"${{ steps.build.outcome }}\" \\\n            70"
+assert old in s, "anchor missing"
+new=old.replace("steps.ccache_restore.outputs.hit","steps.ccache_restore_TYPO.outputs.hit")
+p.write_text(s.replace(old,new,1),encoding="utf-8")'
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/mutant-dangling-step-ref"
+want_out 'can NEVER fire' "floor-callers/mutant-dangling-step-ref"
+ok "MUTANT dangling-step-ref — an expression pointing at no producer step is caught (a non-empty string that resolves to empty)"
+
+# Direction 3b — A HARDCODED LITERAL DISPOSITION. Found by a hostile review of
+# this PR, with a working defeat: replacing argument 2 with the literal `"false"`
+# and dropping the floor was accepted as "consistent". A literal is not a
+# measurement — `false` reports a MISS on every run whatever the cache did, so
+# the lane is permanently exempt from the floor it is supposed to carry.
+mutate_wf tier3-libcxx.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="\"${{ steps.ccache_restore.outputs.hit }}\" \\\n            \"${{ steps.build.outcome }}\" \\\n            70"
+assert old in s, "anchor missing"
+new="\"false\" \\\n            \"${{ steps.build.outcome }}\""
+p.write_text(s.replace(old,new,1),encoding="utf-8")'
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/mutant-literal-disposition"
+want_out 'LITERAL' "floor-callers/mutant-literal-disposition"
+ok "MUTANT literal-disposition — a hardcoded true/false is refused, not read as a measurement"
+
+# Direction 3c — A CONDITIONAL PRODUCER. The same review added `if: false` to the
+# real restore step; the checker still called the site "traceable". A step that
+# may not run is not a producer: a skipped step's outputs.hit is the EMPTY
+# STRING, so the floor — gated on restore == 'true' — silently stops evaluating.
+mutate_wf tier3-libcxx.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="        id: ccache_restore\n"
+assert s.count(old)==1, "anchor missing"
+p.write_text(s.replace(old, old+"        if: false\n",1),encoding="utf-8")'
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/mutant-conditional-producer"
+want_out 'may not run is not a producer' "floor-callers/mutant-conditional-producer"
+ok "MUTANT conditional-producer — a restore step carrying an if: is refused as a disposition source"
+
+# ── The three shapes a second adversarial review defeated ────────────────────
+#
+# All synthetic, because none exists in the tree today — which is exactly why
+# Direction 0 (the shipped workflows) cannot see any of them. A gate whose only
+# positive evidence is "the current tree passes" is untested against the tree
+# that comes next.
+mk_wf() { rm -rf "$WFSAND"; mkdir -p "$WFSAND"; cat > "$WFSAND/t.yml"; }
+
+# A call site with NO floor, followed by any other shell line. `.*` under re.S
+# ran to the END of the run: block, so `echo` became argument 4 and the site
+# reported `floor=echo`, "all consistent" — the #299 defect certified as fixed.
+mk_wf <<'YML'
+name: t
+on: push
+jobs:
+  j:
+    steps:
+      - name: restore
+        id: ccache_restore
+        run: ci/restore-ccache.sh foo
+      - name: stats
+        run: |
+          ci/ccache-stats.sh lane-a "${{ steps.ccache_restore.outputs.hit }}" "${{ steps.b.outcome }}"
+          echo "ccache step done"
+YML
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/trailing-line"
+want_out 'passes NO hit floor' "floor-callers/trailing-line"
+ok "a floorless call site followed by another shell line is caught (argument 4 is not the next command)"
+
+# TWO calls in one run: block. `search` returned only the first, so the second —
+# traceable disposition, no floor — was invisible AND uncounted, so even the
+# empty-scan guard could not help.
+mk_wf <<'YML'
+name: t
+on: push
+jobs:
+  j:
+    steps:
+      - name: restore
+        id: ccache_restore
+        run: ci/restore-ccache.sh foo
+      - name: stats
+        run: |
+          ci/ccache-stats.sh lane-a "${{ steps.ccache_restore.outputs.hit }}" "${{ steps.b.outcome }}" 70
+          ci/ccache-stats.sh lane-b "${{ steps.ccache_restore.outputs.hit }}" "${{ steps.b.outcome }}"
+YML
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/second-call-in-block"
+want_out "lane-b" "floor-callers/second-call-in-block"
+want_out '2 call site(s)' "floor-callers/second-call-in-block"
+ok "a SECOND call in the same run: block is seen, counted, and judged"
+
+# A step that only MENTIONS the restore script, in a comment. This is the shape
+# of the migration the coverage lane's own comment names as its prerequisite —
+# move to a marketplace action, leave the old name in a comment, and the floor is
+# certified traceable while outputs.hit is empty on every run.
+mk_wf <<'YML'
+name: t
+on: push
+jobs:
+  j:
+    steps:
+      - name: not really a restore
+        id: ccache_restore
+        run: |
+          # we used to call ci/restore-ccache.sh here; now a marketplace action
+          echo noop
+      - name: stats
+        run: ci/ccache-stats.sh lane "${{ steps.ccache_restore.outputs.hit }}" "${{ steps.b.outcome }}" 70
+YML
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/producer-by-comment"
+want_out 'no step in this job has that id' "floor-callers/producer-by-comment"
+ok "a step that only NAMES the restore script in a comment is not a producer"
+
+# Direction 4 — THE EMPTY SCAN. If the call sites move or the walk breaks,
+# "0 violations over 0 sites" must not read as a pass. This repo's single most
+# recurring defect is an instrument that reports clean because it could not
+# report anything else.
+rm -rf "$WFSAND"; mkdir -p "$WFSAND"
+printf 'name: nothing\non: push\njobs: {}\n' > "$WFSAND/empty.yml"
+run_floorchk "$WFSAND"
+want_status 2 "floor-callers/empty-scan"
+want_out 'ZERO ci/ccache-stats.sh call sites' "floor-callers/empty-scan"
+ok "an empty scan is an INSTRUMENT FAILURE (exit 2), not a clean result"
+
 echo
 echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache}.sh — scripts: $CI_DIR"
