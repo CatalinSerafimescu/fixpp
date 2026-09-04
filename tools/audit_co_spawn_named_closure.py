@@ -807,6 +807,29 @@ def load_db(build_dir: str, only_with_cospawn: bool) -> list[dict]:
             # reported a confident, 16.5%-incomplete clean.
             e["arguments"] = shlex.split(e["command"])
         if only_with_cospawn:
+            # ⚠️ SCOPE LIMIT (#363), AND NEITHER INSTRUMENT CAN DETECT IT. This tests the
+            # MAIN FILE's own text. A header carrying a named-closure `co_spawn`
+            # whose every including .cpp lacks the literal token is therefore never
+            # parsed — and the cross-check consumes this same population, so it
+            # cannot report the omission either. Sharing the population is what
+            # makes the set-diff mean anything; it also means the population is the
+            # one thing the pair does not check.
+            #
+            # No count is recorded here — that would rot. The CONDITION is "a header
+            # with the named-closure form, reachable only from TUs without the
+            # token". Re-derive whether it is empty with:
+            #
+            #   git grep -l co_spawn -- '*.hpp' '*.h'
+            #
+            # then screen each hit for `co_spawn(<ex>, <ident>(<args>), ...)`. ⚠️ A
+            # line-based grep UNDER-REPORTS that shape twice over: the argument list
+            # spans lines, and the closure is often invoked WITH arguments
+            # (`make_waiter(1)`), so an empty-parens pattern silently misses it —
+            # measured 2 against an AST truth of 10 on tests/sync/
+            # test_fifo_across_cycles.cpp. Validate any screen against a file whose
+            # site count this tool already reports before trusting a zero from it.
+            #
+            # `--all-files` removes the limit at the cost of parsing every TU.
             try:
                 with open(f, encoding="utf-8", errors="replace") as src:
                     if "co_spawn" not in src.read():

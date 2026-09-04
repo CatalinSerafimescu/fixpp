@@ -2588,3 +2588,45 @@ Evidence: issues #346, #348, #349; new issue #351.
   resumed, i.e. it measured "still in flight" rather than "wedged". ⚠️ Do not discharge this row
   with a cell that goes green; show it RED first against a tree with the guards reverted to plain
   assignment, which is the step that killed both attempts.
+
+## fixpp#353 / #354 / #357 / #358 — transport cancellation reach, sanitizer carve-out, closure audit (2026-09-03)
+
+### Behaviors
+
+- **B-357-1 — A `Transport` implementor's coroutine does not deliver `Engine::stop()`'s
+  `cancellation_type::total` to the operation it awaits unless it MAPS that signal down, and which
+  ops need the mapping is decided by what is awaited, not by read-vs-write.** `Engine::stop()` emits
+  `total`. asio's SSL `ssl::detail::io_op` derives from `base_from_cancellation_state`'s no-filter
+  constructor, which builds a **terminal-only** state; asio's composed `async_write` installs
+  `enable_partial_cancellation()` — a `terminal|partial` mask that also excludes `total`. A
+  one-argument `reset_cancellation_state(enable_total_cancellation())` installs that filter as
+  **both** the in and the out filter, so `total` is accepted by the outer frame and then silently
+  dropped one or two layers down: the awaited op never aborts. The two-argument form, whose OUT
+  filter maps any accepted signal to `terminal`, is what reaches it. A coroutine awaiting a **raw**
+  reactive socket op (`socket_.async_read_some`) needs none of this — that op's cancellation handler
+  accepts `terminal|partial|total` directly.
+
+  ⚠️ **Re-derive the classification from the awaited call, never from a list of methods.** The
+  discriminator is COMPOSED-or-SSL versus RAW; a list of "the sites that need it" is a result and
+  rots the moment an op changes what it awaits. The canonical note lives at
+  `include/fixpp/transport/transport.hpp` with the re-derivation recipe. *(#357; PR #362.)*
+
+- **B-358-1 — A cancellation state installed by a CALLER does not survive a callee that resets its
+  own.** `co_await this_coro::reset_cancellation_state(...)` does not layer a scope onto the
+  caller's state; it **replaces the bottom-frame state for the whole `co_spawn` chain**. So a caller
+  that shields itself with `asio::disable_cancellation{}` is unshielded the instant it awaits a
+  callee that resets — which is exactly how `Session::close()` came to hang once #356 adopted
+  `close_async()` (measured 11 of 40 runs wedged; 0 of 40 after). Verify at every callee that
+  suspends inside the shield, not at the call site. *(#358; PR #362.)*
+
+### Limitations
+
+- **L-361-1 — Neither cancellation nor `connect_timeout` bounds the DNS resolution window, so
+  `Engine::stop()` can wait on a slow or blocked resolver.** `async_connect`'s first suspension is
+  `resolver.async_resolve`, and asio's `resolve_query_op` obtains **no per-operation cancellation
+  slot at all** — a fourth category alongside raw, composed and teardown ops in B-357-1, and the one
+  no OUT filter can help. The `connect_timeout` timer is armed only *after* resolution returns
+  (`src/transport/asio_plain_transport.cpp`, `async_connect`: the `expires_after` call sits below the
+  `async_resolve` await), so it does not cover that window either. An outbound transport that is not
+  yet published is also unreachable from `stop()`'s socket-closing path. **Status: follow-up
+  (#361).** *(Found by review during PR #362, pre-existing; not introduced there.)*
