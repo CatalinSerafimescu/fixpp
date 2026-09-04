@@ -1412,6 +1412,24 @@ jobs:
       # an absent disposition as `n/a` and skips the restored-but-cold warning
       # that depends on it — passing a guessed 'true'/'false' here would
       # manufacture a disposition nothing measured.
+      #
+      # ⚠️ AND THAT IS WHY THIS LANE GETS NO HIT FLOOR, while the wheel and
+      # tier-3 lanes took one in #299. THE OMISSION IS THE POINT, not an
+      # oversight to be tidied up later by adding the argument.
+      #
+      # The floor in ci/ccache-stats.sh is gated on `RESTORE == 'true'`, and
+      # that gate is what makes it safe — it is how a legitimate cold/seeding
+      # run stays green. This lane can never supply that disposition, so a
+      # floor passed here would print "hit-floor N% NOT evaluated" on every run
+      # forever: a gate that runs, exits 0 and measures nothing, which is the
+      # precise defect #299 was filed about. Adding the argument would satisfy
+      # the issue's wording while REPRODUCING its subject.
+      #
+      # ⛔ DO NOT "FIX" THIS BY PASSING A FLOOR. The prerequisite is a real
+      # restore disposition for this lane, which means migrating it off
+      # `ccache-action` onto ci/restore-ccache.sh the way #240 did for tier 3 —
+      # a cache-storage change, not a one-argument edit. Until then a floor here
+      # is unenforceable, and the honest state is to say so.
       - name: ccache statistics
         run: ci/ccache-stats.sh linux-clang-coverage '' '${{ steps.build.outcome }}'
 
@@ -1788,13 +1806,30 @@ jobs:
 
       # ── ccache statistics + liveness (#259) ───────────────────────────────
       #
-      # ⚠️ NO HIT FLOOR ON THIS LANE YET, deliberately. ci/ccache-stats.sh grew
-      # an opt-in floor in this same PR, and turning it on is a claim that the
-      # lane HAS a warm baseline. This lane has never had a warm run — the first
-      # push:main after this merges is the seeding run. Enabling a floor here
-      # now would assert a baseline nobody has measured, which is the failure
-      # this repo keeps recording. Turn it on in a follow-up once a warm rate
-      # exists, and #259's acceptance criterion 1 becomes machine-checked.
+      # ── HIT FLOOR NOW ON (#299) ───────────────────────────────────────────
+      #
+      # This is the follow-up the previous comment here asked for. That comment
+      # withheld the floor because turning it on is a claim that the lane HAS a
+      # warm baseline, and at the time this lane had never had a warm run. It
+      # has since, so #259's acceptance criterion 1 is now machine-checked
+      # instead of being prose nobody enforces.
+      #
+      # ⚠️ THE FLOOR IS SET BELOW THE OBSERVED WARM RATE WITH MARGIN, NOT AT IT.
+      # A floor level with the baseline is a flake generator: a large refactor
+      # or a codegen change legitimately depresses a warm rate without anything
+      # being wrong. This budget is sized to catch the PATHOLOGICAL signature
+      # #299 names — a cache that RESTORES but no longer matches, from a
+      # compiler bump inside an image, a flag that moved the command line, or a
+      # namespace key that stopped colliding — which lands near 0 %, nowhere
+      # near this bound. It is a BUDGET, not a measurement; re-deriving the
+      # current warm rate and tightening toward it would convert a bound into a
+      # flake.
+      #
+      # ⚠️ THE EXEMPTION IS WHAT MAKES THE FLOOR SAFE, and it lives in
+      # ci/ccache-stats.sh, gated on `RESTORE == 'true'`. A seeding run (restore
+      # MISS) is legitimately 0 % and stays green by construction — it cannot
+      # reach the fatal branch. That is the original correct reasoning
+      # preserved, not discarded.
       #
       # What IS asserted today is liveness: zero cacheable calls after a
       # SUCCESSFUL build is fatal, because a silently unwired launcher reports
@@ -1806,7 +1841,8 @@ jobs:
           ci/ccache-stats.sh \
             "${{ steps.wheel_ident.outputs.lane }}" \
             "${{ steps.ccache_restore.outputs.hit }}" \
-            "${{ steps.wheel_build.outcome }}"
+            "${{ steps.wheel_build.outcome }}" \
+            70
 
       # Publish only from main, and only when the cache actually CHANGED.
       #
