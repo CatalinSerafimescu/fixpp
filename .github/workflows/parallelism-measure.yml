@@ -1,0 +1,704 @@
+# Per-lane A-B-A parallelism measurement campaign (#267).
+#
+# ── WHAT THIS IS FOR ─────────────────────────────────────────────────────────
+#
+# `ctest --parallel` is set on a MINORITY of test presets, and widening the rest
+# is the largest single CI lever available — test execution dominates the two
+# longest jobs in the matrix. Which presets carry it is deliberately not written
+# here (this workflow exists to CHANGE that number); re-derive it:
+#
+#   python3 -c "import json;d=json.load(open('CMakePresets.json'));\
+#   [print(p['name'], p.get('execution',{}).get('jobs','SERIAL')) for p in d['testPresets']]"
+#
+# It has been attempted three times. Every attempt was published and then
+# WITHDRAWN, all for one reason: an A/B run as two SEPARATE jobs, on lanes whose
+# between-VM wall-clock spread makes a single unpaired pair of runs meaningless.
+# `ci/ctest-parallelism-probe.md` holds the figures and the receipts, including
+# a lane whose serial time on one VM was roughly half its time on three others —
+# every "no gain" reading for it came from comparing against that one.
+#
+# The only design that survived is three passes in ONE job on ONE VM — serial,
+# parallel, serial — voided unless the two serial passes agree. This workflow
+# runs that design on demand, per lane, and emits the evidence an
+# `execution.jobs` change needs.
+#
+# ── WHY IT IS `workflow_dispatch` ONLY, AND MUST STAY THAT WAY ───────────────
+#
+# Each lane runs its suite THREE TIMES, and on the slowest lane a single pass is
+# most of an hour. This is a one-off campaign, not a standing job, and putting
+# it anywhere near a `push` or `pull_request` trigger would multiply the CI bill
+# by a factor nobody asked for. `ci/assert-ci-lane-policy.py` asserts the `on:`
+# block of this file contains nothing else, and `ci/test-ci-lane-policy.sh`
+# proves that assertion can fail — because "we all know not to" is not a
+# mechanism.
+#
+# ── HOW TO READ THE RESULT ───────────────────────────────────────────────────
+#
+# `ci/parallelism-verdict.py` prints one table per lane and exits:
+#   0 VALID   — evidence. It may say the widening is not worth it; that is a
+#               result, not a failure.
+#   1 DEFECT  — tests differ, a sanitizer report appeared, or coverage moved.
+#   2 INSTRUMENT — the apparatus did not measure what it claims to.
+#   3 VOID    — the machine moved under the experiment. Re-dispatch.
+# A red job here means one of the last three. Read the summary, not the tick.
+#
+# ⚠️ BOTH COST AXES ARE ON THE TABLE ON PURPOSE. `linux-clang-tsan`'s failure
+# mode was wall clock barely moving while AGGREGATE runner time rose 44 %. A
+# lane that finishes sooner while spending more runner-minutes may be worth it
+# on the matrix critical path and is clearly not worth it elsewhere.
+name: Parallelism measurement (#267)
+
+on:
+  workflow_dispatch:
+    inputs:
+      linux_lanes:
+        description: "Tier-1 presets, comma-separated (blank = none)"
+        default: "linux-clang-asan"
+      libcxx_lanes:
+        description: "Tier-3 libc++ presets, comma-separated (blank = none)"
+        default: ""
+      windows_lanes:
+        description: "Tier-2 MSVC presets, comma-separated (blank = none). No peak-RSS reading is possible on Windows."
+        default: ""
+      jobs:
+        description: "--parallel level for the middle pass"
+        default: "4"
+      subset:
+        description: "ctest -R regex — SMOKE ONLY. Any result is stamped NOT EVIDENCE."
+        default: ""
+      tolerance_pct:
+        description: "Max disagreement between the two serial passes before the sample voids"
+        default: "5"
+
+permissions:
+  contents: read
+  packages: read
+
+# `cancel-in-progress: false`, unlike every other workflow here: a campaign is
+# hours of runner time and a second dispatch is normally a DIFFERENT lane set,
+# not a newer version of the same thing. Cancelling would throw away a completed
+# pass to start one that measures something else.
+concurrency:
+  group: parallelism-measure-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Turn the three comma lists into matrices, and refuse an empty campaign ──
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      linux: ${{ steps.split.outputs.linux }}
+      libcxx: ${{ steps.split.outputs.libcxx }}
+      windows: ${{ steps.split.outputs.windows }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve the lane lists
+        id: split
+        env:
+          LINUX: ${{ inputs.linux_lanes }}
+          LIBCXX: ${{ inputs.libcxx_lanes }}
+          WINDOWS: ${{ inputs.windows_lanes }}
+        run: |
+          set -euo pipefail
+          # `sorted(set(...))`: a duplicated lane produces two identical matrix
+          # entries, two jobs, and two uploads of the same artifact name — which
+          # actions/upload-artifact rejects, so the second job loses its sample
+          # AFTER paying hours of runner time, on the `if: always()` upload this
+          # workflow's own comment calls load-bearing.
+          to_json() {
+            printf '%s' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+              | grep -v '^$' | python3 -c 'import json,sys; print(json.dumps(sorted({l.rstrip("\n") for l in sys.stdin})))'
+          }
+          L="$(to_json "$LINUX")"; C="$(to_json "$LIBCXX")"; W="$(to_json "$WINDOWS")"
+          echo "linux=$L"   >> "$GITHUB_OUTPUT"
+          echo "libcxx=$C"  >> "$GITHUB_OUTPUT"
+          echo "windows=$W" >> "$GITHUB_OUTPUT"
+          echo "linux=$L libcxx=$C windows=$W"
+          # ⚠️ AN EMPTY CAMPAIGN IS A DISPATCH THAT MEASURED NOTHING, and a
+          # zero-lane matrix produces a job that is SKIPPED — which renders as a
+          # green tick. Refusing here is the same rule every checker in ci/
+          # follows: an empty scan is an instrument failure, not a pass.
+          if [ "$L" = "[]" ] && [ "$C" = "[]" ] && [ "$W" = "[]" ]; then
+            echo "::error::no lanes given. All three lane inputs were blank, so this dispatch would run zero measurements and report green. Name at least one preset."
+            exit 1
+          fi
+          # A preset that does not exist would fail 30+ minutes later, inside a
+          # build, with a confusing error. Check the names against the file that
+          # defines them, now.
+          python3 - "$L" "$C" "$W" <<'CHK'
+          import json, pathlib, sys
+          names = set()
+          for raw in sys.argv[1:]:
+              names |= set(json.loads(raw))
+          known = {p["name"] for p in json.loads(
+              pathlib.Path("CMakePresets.json").read_text())["testPresets"]}
+          bad = sorted(names - known)
+          if bad:
+              print(f"::error::unknown test preset(s): {', '.join(bad)}. "
+                    f"Known: {', '.join(sorted(known))}")
+              sys.exit(1)
+          # EXISTENCE IS NOT MEMBERSHIP. A preset can be perfectly real and still
+          # be in the wrong list: `windows-msvc-asan` under `linux_lanes` passes
+          # the check above and is then dispatched to an Ubuntu runner, where it
+          # fails 30 minutes into a build for a reason that names none of this.
+          # The three jobs differ in toolchain, so the families are the jobs.
+          families = [("linux_lanes", 1, lambda n: n.startswith("linux-") and "libc++" not in n),
+                      ("libcxx_lanes", 2, lambda n: "libc++" in n),
+                      ("windows_lanes", 3, lambda n: n.startswith("windows-"))]
+          misplaced = []
+          for label, idx, belongs in families:
+              for n in sorted(json.loads(sys.argv[idx])):
+                  if not belongs(n):
+                      misplaced.append(f"{n} under {label}")
+          if misplaced:
+              print(f"::error::preset(s) in the wrong lane list: {', '.join(misplaced)}. "
+                    f"Each job has its own toolchain, so a preset in the wrong list is "
+                    f"dispatched to a runner that cannot build it.")
+              sys.exit(1)
+          print(f"lane names check out against CMakePresets.json: {sorted(names)}")
+          CHK
+
+      # ⚠️ THE PRE-FLIGHT, AND IT IS PLACED HERE FOR A REASON. The synthetic
+      # harness (ci/test-parallelism-verdict.sh, run by tier1's ci-script-pins)
+      # proves every gate in the verdict can fire, but never proves the DRIVER
+      # writes files of the shape the verdict reads. A field renamed on one side
+      # of that seam leaves all those cells green and returns "0 of 3 passes"
+      # from every real campaign — at a cost of three suite runs to find out.
+      # Paying it here, before the expensive jobs, is the whole point — a seam
+      # break costs three suite runs to discover otherwise. Its cost is a
+      # CONDITION, not a number: `time ci/test-parallelism-aba-seam.sh`.
+      - name: Apparatus self-test (driver -> verdict seam)
+        run: ci/test-parallelism-aba-seam.sh
+
+      - name: Verdict gate self-test (every gate proven able to fire)
+        run: ci/test-parallelism-verdict.sh
+
+  # ── Tier-1 Linux lanes ──────────────────────────────────────────────────────
+  linux:
+    name: "aba ${{ matrix.preset }}"
+    needs: plan
+    if: needs.plan.outputs.linux != '[]'
+    runs-on: ubuntu-24.04
+    # Three passes plus a build. The slowest Tier-1 lane's serial pass is ~35
+    # min, so ~2 h of testing on top of a cold build. 360 is the hosted ceiling;
+    # a job that hits it is killed BEFORE its upload step, which is why every
+    # artifact below is uploaded with `if: always()`.
+    timeout-minutes: 360
+    env:
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CCACHE_COMPILERCHECK: content
+      CCACHE_COMPRESSLEVEL: "5"
+      CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: ${{ fromJSON(needs.plan.outputs.linux) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+
+      - name: Install Clang 22 (apt.llvm.org) + GCC 13 + Ninja
+        run: |
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
+          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
+          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
+          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
+          sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
+          sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
+          clang++ --version
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends \
+            gcc-13 g++-13 ninja-build swig python3-dev python3-pip pipx
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Conan + pytest via pipx
+        run: |
+          pipx install conan
+          conan --version
+          pip install pytest pyyaml
+
+      - name: Initialize Conan default profile
+        run: conan profile detect --force
+
+      - name: Teach Conan about Clang 22
+        run: |
+          mkdir -p ~/.conan2
+          cat > ~/.conan2/settings_user.yml <<'EOF'
+          compiler:
+            clang:
+              version: ["19", "20", "21", "22", "23"]
+          EOF
+
+      - name: Set up oras
+        uses: oras-project/setup-oras@v2
+
+      - name: Restore Conan cache from GHCR
+        run: ci/restore-conan-cache.sh ${{ matrix.preset }}
+
+      # `save: false` UNCONDITIONALLY. A measurement job must never write to the
+      # shared compiler cache: it configures for measurement, and an entry it
+      # saved would be served to a production lane.
+      - name: ccache (install + restore, never save)
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: tier1-${{ matrix.preset }}
+          max-size: 2G
+          save: false
+
+      # ⚠️ `conan export civetweb` is done by the tier1 MATRIX job and NOT by
+      # its coverage job. Harmless either way, and kept for both so the two
+      # branches below differ in exactly the flags that change the registered
+      # test set — the thing this job has to reproduce.
+      - name: Conan install
+        run: |
+          conan export conan/recipes/civetweb --version 1.16
+          conan install . -pr conan/profiles/${{ matrix.preset }} \
+            --build=missing -of build/${{ matrix.preset }}
+
+      - name: Derive the python sanitizer identity from the preset
+        if: matrix.preset != 'linux-clang-coverage'
+        id: pysan
+        run: ci/derive-python-sanitizer.sh "${{ matrix.preset }}" >> "$GITHUB_OUTPUT"
+
+      # ⚠️ THESE FLAGS MUST TRACK tier1.yml's `Configure` STEP EXACTLY. The
+      # measurement is only worth anything if it measures the suite that SHIPS;
+      # a flag that differs here changes which tests are registered, and the
+      # speedup would then describe a configuration nobody runs. The verdict
+      # checks the executed count against ci/expected-eligible-tests.txt for
+      # exactly this reason and VOIDS the sample on a mismatch — so a drift here
+      # surfaces as a void rather than as a wrong number, but it still costs a
+      # campaign. Change one, change both.
+      - name: Configure (matrix lanes)
+        if: matrix.preset != 'linux-clang-coverage'
+        run: >
+          cmake --preset ${{ matrix.preset }}
+          -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts
+          -DFIXPP_BUILD_PYTHON=ON
+          -DFIXPP_INSTALL_PYTHON=OFF
+          -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
+
+      # tier1.yml's coverage job is a SEPARATE job with a bare
+      # `cmake --preset linux-clang-coverage` — no artifact dir, no Python
+      # bindings. Copying the matrix lanes' flags here would register a
+      # different test set and the verdict would void every coverage sample
+      # against the pinned basis of 370.
+      - name: Configure (coverage lane)
+        if: matrix.preset == 'linux-clang-coverage'
+        run: cmake --preset linux-clang-coverage
+
+      - name: Build
+        run: |
+          cmake --build --preset ${{ matrix.preset }}
+          df -h "$GITHUB_WORKSPACE" | tail -1
+
+      - name: A-B-A measurement
+        # ⚠️ VIA `env:`, NOT INTERPOLATED INTO THE SHELL SOURCE. The `plan` job
+        # already passes its lane lists this way; these three were expanded
+        # directly into `run:`, which is a standing snag on a workflow meant to
+        # be dispatched by hand many times.
+        env:
+          PRESET: ${{ matrix.preset }}
+          JOBS: ${{ inputs.jobs }}
+          SUBSET: ${{ inputs.subset }}
+        run: |
+          set -uo pipefail
+          # The lane's OWN filter, not a convenient one. `linux-gcc-release` is
+          # the only Tier-1 lane that runs the packaging tier, and the five
+          # filtered lanes exclude it — measuring them with the wrong filter
+          # would produce a count the pinned basis rejects.
+          case "$PRESET" in
+            linux-gcc-release|linux-clang-coverage) ARGS="" ;;
+            *)                                      ARGS="-LE packaging" ;;
+          esac
+          COV=""
+          [ "$PRESET" = linux-clang-coverage ] && COV="--coverage"
+          ci/run-parallelism-aba.sh \
+            --preset "$PRESET" \
+            --jobs "$JOBS" \
+            --out "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --ctest-args "$ARGS" \
+            --subset "$SUBSET" \
+            $COV
+
+      # ⚠️ BEFORE THE VERDICT, and with `if: always()`. The verdict is allowed
+      # to exit non-zero — that is its job — and a job killed at the 360-minute
+      # cap dies before any later step. Uploading first is what makes a partial
+      # campaign diagnosable instead of lost.
+      - name: Upload the raw sample
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: aba-${{ matrix.preset }}
+          path: aba-${{ matrix.preset }}
+          if-no-files-found: error
+
+      - name: Verdict
+        if: always()
+        env:
+          PRESET: ${{ matrix.preset }}
+          TOLERANCE: ${{ inputs.tolerance_pct }}
+        run: |
+          python3 ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --tolerance-pct "$TOLERANCE"
+
+  # ── Tier-3 libc++ lanes ─────────────────────────────────────────────────────
+  #
+  # A separate job because the toolchain differs: libc++/libc++abi dev packages
+  # are not installed by llvm.sh, and LD_LIBRARY_PATH must be set at JOB level so
+  # gtest_discover_tests can resolve libc++.so.1 during the build.
+  libcxx:
+    name: "aba ${{ matrix.preset }}"
+    needs: plan
+    if: needs.plan.outputs.libcxx != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      LD_LIBRARY_PATH: "/usr/lib/x86_64-linux-gnu:/usr/lib/llvm-22/lib:/usr/lib/llvm-22/lib/clang/22/lib/x86_64-unknown-linux-gnu"
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESSLEVEL: "5"
+      CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: ${{ fromJSON(needs.plan.outputs.libcxx) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+
+      - name: Install Clang 22 + libc++ + libc++abi + Ninja (apt.llvm.org)
+        run: |
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
+          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
+          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
+          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
+          sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
+          sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
+          clang++ --version
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends \
+            libc++-22-dev libc++abi-22-dev ninja-build python3-pip pipx
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Conan + pytest via pipx
+        run: |
+          pipx install conan
+          conan --version
+          pip install pytest pyyaml
+
+      - name: Initialize Conan default profile
+        run: conan profile detect --force
+
+      - name: Teach Conan about Clang 22
+        run: |
+          mkdir -p ~/.conan2
+          cat > ~/.conan2/settings_user.yml <<'EOF'
+          compiler:
+            clang:
+              version: ["19", "20", "21", "22", "23"]
+          EOF
+
+      - name: Set up oras
+        uses: oras-project/setup-oras@v2
+
+      # ⚠️ BEFORE "Conan install", and that ordering is load-bearing on this
+      # tier. libc++ has no prebuilt Conan Center binaries, so `conan install
+      # --build=missing` COMPILES the dependency closure through the job-level
+      # CMAKE_*_COMPILER_LAUNCHER=ccache. Without ccache on PATH the dependency's
+      # compiler probe fails with exit 127 and the lane goes red — a trap Tier 1
+      # never hits because its deps are prebuilt.
+      - name: Install ccache
+        run: |
+          set -euo pipefail
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends ccache
+          ccache --version
+
+      # Restore only. See the Tier-1 job: a measurement run must never write to
+      # the shared cache.
+      - name: Restore ccache from GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+          ci/restore-ccache.sh ${{ matrix.preset }}
+
+      - name: Restore Conan cache from GHCR
+        run: ci/restore-conan-cache.sh ${{ matrix.preset }}
+
+      - name: Conan install
+        run: |
+          conan install . -pr conan/profiles/${{ matrix.preset }} \
+            -o 'fixpp/*:with_otel=False' --build=missing -of build/${{ matrix.preset }}
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} -j2
+
+      # ⚠️ WITHOUT THIS THE TSAN LANE MEASURES A DIFFERENT SUITE FROM THE ONE IT
+      # DESCRIBES, and in the worst possible way. The apt libc++ is not
+      # TSan-instrumented, so TSan cannot see libc++'s internal synchronisation
+      # and reports FALSE data races in std::future / asio::use_future teardown —
+      # tier3.yml records these as RELIABLE, not occasional (#25). #267
+      # acceptance item 5 makes any sanitizer report appearing at higher
+      # concurrency a REAL DEFECT UNTIL DISPROVEN, so a campaign run against the
+      # apt libc++ would manufacture exactly the finding it is watching for, and
+      # cost a real investigation of an instrumentation artifact.
+      #
+      # Pinned by DIGEST, matching tier3.yml: this .so is loaded into the test
+      # process, so a silently re-pushed tag could fabricate or suppress TSan
+      # results. To roll forward, update it in BOTH files.
+      - name: Fetch instrumented libc++ (TSan)
+        if: matrix.preset == 'linux-clang-libc++-tsan'
+        run: |
+          IMG="ghcr.io/catalinserafimescu/fixpp-libcxx-tsan@sha256:65106764ae2318bf1e982216d84b0d45ec9c9245cb25a59728aab59f016ea161"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull "$IMG"
+          cid=$(docker create "$IMG")
+          docker cp "$cid:/libcxx-tsan" "$RUNNER_TEMP/libcxx-tsan"
+          docker rm "$cid"
+          ls -l "$RUNNER_TEMP/libcxx-tsan"
+
+      # No `-LE packaging` — these lanes run the full suite, which is why their
+      # pinned counts differ from Tier 1's.
+      #
+      # LD_LIBRARY_PATH prepends the instrumented libc++ ahead of the apt one so
+      # the soname resolves to it at runtime, exactly as tier3.yml's TSan test
+      # step does. On the other three lanes the prefix is empty and the job-level
+      # value is used unchanged.
+      - name: A-B-A measurement
+        env:
+          PRESET: ${{ matrix.preset }}
+          JOBS: ${{ inputs.jobs }}
+          SUBSET: ${{ inputs.subset }}
+          LD_LIBRARY_PATH: ${{ matrix.preset == 'linux-clang-libc++-tsan' && format('{0}/libcxx-tsan:', runner.temp) || '' }}${{ env.LD_LIBRARY_PATH }}
+        run: |
+          ci/run-parallelism-aba.sh \
+            --preset "$PRESET" \
+            --jobs "$JOBS" \
+            --out "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --subset "$SUBSET"
+
+      - name: Upload the raw sample
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: aba-${{ matrix.preset }}
+          path: aba-${{ matrix.preset }}
+          if-no-files-found: error
+
+      - name: Verdict
+        if: always()
+        env:
+          PRESET: ${{ matrix.preset }}
+          TOLERANCE: ${{ inputs.tolerance_pct }}
+        run: |
+          python3 ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --tolerance-pct "$TOLERANCE"
+
+  # ── Tier-2 MSVC lanes ───────────────────────────────────────────────────────
+  #
+  # ⚠️ NO PEAK-RSS READING IS POSSIBLE HERE, AND THAT IS STATED RATHER THAN
+  # WORKED AROUND. `ci/measure-peak-rss.py` samples `/proc/*/statm`; Windows has
+  # no /proc, so #267 acceptance item 1 CANNOT be discharged for these lanes with
+  # this apparatus. The driver writes `status=no-procfs-platform` and the verdict
+  # renders NOT MEASURED, so the gap is on the page instead of showing as a blank
+  # cell or, worse, a zero. Everything else transfers: wall clock, the executed
+  # count, the achieved parallel level, sanitizer reports, and the calibration
+  # half of the machine witness.
+  #
+  # `windows-msvc-asan` is the matrix critical path and has never been measured
+  # at all, so a wall-clock-only reading is a large improvement on nothing — but
+  # a widening merged on it would be merged without the memory figure the other
+  # lanes are held to. Say so in the PR that proposes one.
+  windows:
+    name: "aba ${{ matrix.preset }}"
+    needs: plan
+    if: needs.plan.outputs.windows != '[]'
+    runs-on: windows-2022
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: ${{ fromJSON(needs.plan.outputs.windows) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Conan
+        run: pip install conan pytest
+
+      - name: Initialize Conan default profile
+        run: conan profile detect --force
+
+      # sccache, not ccache: tier2's compiler cache. A measurement job restores
+      # it and NEVER saves — an entry written by a job configured for
+      # measurement must not be served to a production lane.
+      #
+      # ⚠️ THE `ver` AND `sha256` BELOW ARE PINNED IN-REPO AND DUPLICATED FROM
+      # tier2.yml. Bumping `ver` REQUIRES re-deriving the digest BY HAND —
+      # download the asset and hash it out of band. Fetching the .sha256 sidecar
+      # from the same mutable release checks transport integrity and pins
+      # nothing: whoever can replace the asset can replace its sidecar.
+      #
+      # The duplication is not left to a comment. `ci/assert-ci-lane-policy.py`
+      # asserts this pair equals tier2.yml's, and cell T10 of
+      # ci/test-ci-lane-policy.sh proves that assertion can fail — because a
+      # bump applied to one file and not the other is silent, and the copy that
+      # goes stale is whichever one the bumper was not looking at.
+      - name: Install sccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=v0.17.0
+          asset="sccache-${ver}-x86_64-pc-windows-msvc"
+          base="https://github.com/mozilla/sccache/releases/download/${ver}"
+          tmp="$(cygpath -u "$RUNNER_TEMP")/sccache-dl"
+          rm -rf "$tmp"; mkdir -p "$tmp"; cd "$tmp"
+          sha256=e94cfc5b58cbe439302f586c1d1bd7980c2cd371d47bdf385ade657411e6f3ac
+          curl -sSfL -o sccache.zip "${base}/${asset}.zip"
+          echo "${sha256}  sccache.zip" | sha256sum -c -
+          unzip -q sccache.zip
+          mkdir -p "$HOME/bin"
+          mv "${asset}/sccache.exe" "$HOME/bin/"
+          cygpath -w "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/sccache.exe" --version
+
+      # tier2 uses egor-tensin/vs-shell. Matching it rather than reaching for a
+      # different vcvars action: the toolset the measurement builds with has to
+      # be the one the lane ships with, or the timings describe a different
+      # binary.
+      - name: Set up MSVC environment (vcvars)
+        uses: egor-tensin/vs-shell@v2
+
+      - name: Set up oras
+        uses: oras-project/setup-oras@v2
+
+      - name: Restore Conan cache from GHCR
+        shell: bash
+        run: ci/restore-conan-cache.sh ${{ matrix.preset }}
+
+      # ⚠️ OTel-ON and `-s:b compiler.cppstd=20`, copied from tier2. These are
+      # not incidental: they decide the dependency closure and therefore which
+      # tests get registered. A measurement of a differently-configured tree is
+      # a measurement of a suite that does not ship.
+      - name: Conan install (OTel-ON)
+        shell: cmd
+        run: |
+          conan install . ^
+            -pr conan/profiles/${{ matrix.preset }} ^
+            -o "fixpp/*:with_otel=True" ^
+            -s:b compiler.cppstd=20 ^
+            --build=missing ^
+            -of build/${{ matrix.preset }}
+
+      - name: Restore sccache from GHCR
+        shell: bash
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+          ci/restore-sccache.sh ${{ matrix.preset }}
+
+      # ⚠️ `CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded` IS LOAD-BEARING, not a
+      # tuning knob. tier2 records the measurement: without /Z7 this does not
+      # degrade to a poor cache hit rate, the BUILD FAILS — cl reports C1041
+      # (cannot open program database) even with /FS, because parallel cached
+      # compiles collide on the shared PDB. Dropping it here would look like a
+      # simplification and would red the lane.
+      - name: Configure (OTel-ON)
+        shell: cmd
+        run: >
+          cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=ON
+          -DFIXPP_ARTIFACT_DIR=%GITHUB_WORKSPACE:\=/%/_artifacts
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"
+
+      - name: Build
+        shell: cmd
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: sccache statistics
+        if: always()
+        shell: bash
+        run: |
+          sccache --show-stats || true
+          sccache --stop-server >/dev/null 2>&1 || true
+
+      # ⚠️ `shell: bash` where tier2.yml's ctest steps use `shell: cmd`. The
+      # driver is a POSIX-shell script; tier2 already switches to bash for its
+      # own POSIX assertions, which is the precedent followed here.
+      #
+      # ⚠️ BUDGET. windows-msvc-asan's test phase is the matrix critical path at
+      # ~76 min. A-B-A is roughly A + B + A' = 76 + ~40 + 76 ≈ 190 min on top of
+      # the build, against a 360-minute cap — and a job that hits the cap is
+      # KILLED, so `if: always()` on the upload below does not save the sample.
+      # That is why the sccache restore above is not optional here: a cold MSVC
+      # build would eat the margin. If a future lane does not fit, dispatch it
+      # alone rather than raising anything.
+      - name: A-B-A measurement
+        shell: bash
+        env:
+          PRESET: ${{ matrix.preset }}
+          JOBS: ${{ inputs.jobs }}
+          SUBSET: ${{ inputs.subset }}
+        run: |
+          case "$PRESET" in
+            windows-msvc-release) ARGS="" ;;
+            *)                    ARGS="-LE packaging" ;;
+          esac
+          ci/run-parallelism-aba.sh \
+            --preset "$PRESET" \
+            --jobs "$JOBS" \
+            --out "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --ctest-args "$ARGS" \
+            --subset "$SUBSET" \
+            --no-peak
+
+      - name: Upload the raw sample
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: aba-${{ matrix.preset }}
+          path: aba-${{ matrix.preset }}
+          if-no-files-found: error
+
+      - name: Verdict
+        if: always()
+        shell: bash
+        env:
+          PRESET: ${{ matrix.preset }}
+          TOLERANCE: ${{ inputs.tolerance_pct }}
+        run: |
+          python ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --tolerance-pct "$TOLERANCE"
