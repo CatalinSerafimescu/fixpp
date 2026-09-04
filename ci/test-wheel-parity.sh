@@ -126,6 +126,43 @@ fresh
 rm -f "$WORK/t/wheel/README.md"
 expect "T7 a missing README is refused (it IS the allowlist)" 2 "IS the allowlist"
 
+# ── T8: THE TABLE REFORMAT — the gate's own weakest link ─────────────────────
+#
+# MENTION matches a backticked filename anywhere, so conditions (1) and (2)
+# survive a reformatted README. ROW needs an exact single-line pipe-table row.
+# Before the guard, reformatting the table made ROW match nothing: `as_is` went
+# empty, condition (4) stopped firing for EVERY file, and the script printed
+# "contract holds" and exited 0 — disabling precisely the check that catches
+# #298's original defect, with a fully green self-test suite.
+#
+# The reformat below is the most ordinary one imaginable: wrapping a row onto a
+# continuation line, which renders identically in most Markdown viewers.
+fresh
+python3 - "$WORK/t/wheel/README.md" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "| `test_smoke.py` | as-is | — |"
+assert old in s, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+# Same content, wrapped: ROW's ^\| anchor no longer matches this file's row.
+p.write_text(s.replace(old, "| `test_smoke.py`\n  | as-is | — |", 1), encoding="utf-8")
+MUT
+expect "T8 a reformatted Membership table is an instrument failure, not a pass" 2 "no parsable Membership TABLE ROW"
+
+# ── T9: an unrecognised disposition must not read as "exempt" ────────────────
+#
+# The other half of the same hole. If an unknown Source token fell through to
+# the default, renaming `as-is` to anything else would silently exempt that file
+# from byte-identity while leaving the table looking complete.
+fresh
+python3 - "$WORK/t/wheel/README.md" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "| `test_smoke.py` | as-is | — |"
+assert old in s, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "| `test_smoke.py` | as-is (verbatim) | — |", 1), encoding="utf-8")
+MUT
+expect "T9 an unrecognised Source disposition is refused, not treated as exempt" 2 "not one of"
+
 echo
 echo "wheel-parity harness: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1

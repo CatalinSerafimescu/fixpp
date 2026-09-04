@@ -42,6 +42,7 @@
     {
       "name": "linux-clang-asan",
       "displayName": "Linux / Clang / ASan",
+      "description": "#213. The fuzz targets carry -fsanitize=fuzzer,address,undefined, so this is their natural lane, and tier1's matrix selects lanes purely by preset name with no per-lane -D overrides -- a workflow flag would be the special case here, not the preset. It also keeps local reproduction of the CI lane accurate. COSTS, measured rather than assumed: ~19 s wall / 57 s user at -j6 to build all 15 fuzz targets (a 4-vCPU runner is slower, and these are 15 fresh links competing for the same cores); the 6 corpus replays run in 0.32 s. No existing object's command line changes, so no compiler-cache entry is invalidated. DISK: the 15 binaries total 357 MB against this lane's documented ~18 G of instrumented executables (~2%) -- small, but stated because this is the disk-tightest leg in the matrix and it has died with `ld: final link failed: No space left on device` before; if that recurs this is one of the things to weigh. ASYMMETRY, deliberate: linux-clang-libc++-asan does NOT set FIXPP_BUILD_FUZZ. One lane replaying the corpora is the regression guard #213 asked for; a second would duplicate the cost without covering any additional seed.",
       "inherits": "_base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -272,9 +273,9 @@
     {
       "name": "linux-clang-tsan",
       "configurePreset": "linux-clang-tsan",
-      "description": "TSan. jobs=2 — a CONSERVATIVE DEFAULT, not a measured optimum. ⚠️ The j=2-vs-j=4 comparison was made across TWO SEPARATE RUNS on a lane whose between-VM wall-clock spread is 43.3% (1903/2160/1376 s at an unchanged j=2), so it resolves nothing and an earlier claim of 'no gain at j=4' is WITHDRAWN. What IS solid: peak RSS reproduces to <2%, so j=4's +36% memory is real, and debug/ubsan both gain ~1.8-2.1x when measured properly. Settle this with the same paired A-B-A design before changing it.",
+      "description": "TSan. jobs=4 — #267 phase 1. ⚠️ ⚠️ CHANGED WITHOUT THE PAIRED A-B-A RUN THIS LANE'S OWN NOTE REQUIRED, ON AN EXPLICIT DECISION TO PROCEED. Recorded plainly so nobody later cites this value as measured: it is NOT. The prior text stands as the evidence standard and is reproduced here — the j=2-vs-j=4 comparison was made across TWO SEPARATE RUNS on a lane whose between-VM wall-clock spread is 43.3% (1903/2160/1376 s at an unchanged j=2), so it resolved nothing, and an earlier claim of 'no gain at j=4' was WITHDRAWN. What IS solid and unchanged: peak RSS reproduces to <2%, so j=4's +36% memory is real (2.53 GiB, ~16% of a 15.61 GiB runner — headroom, not a risk); and debug (2.10x, A-B-A) and ubsan (1.79x, paired) both gained when measured properly, which is the ANALOGY this change rests on rather than a measurement of THIS lane. ⚠️ THE OPEN RISK IS NOT MEMORY, IT IS SANITIZER BEHAVIOUR UNDER LOAD: per [const] and #267 acceptance item 5, any TSan warning that appears after this widening is a REAL DEFECT until disproven, never a 'parallelism artifact'. If this lane becomes flaky, revert to jobs=2 first and measure second. Settle it properly with the paired A-B-A design (serial, parallel, serial; the two serial passes must agree, as debug's did to 0.6%) before treating 4 as established. See ci/ctest-parallelism-probe.md.",
       "output": { "outputOnFailure": true },
-      "execution": { "jobs": 2 }
+      "execution": { "jobs": 4 }
     },
     {
       "name": "linux-clang-coverage",

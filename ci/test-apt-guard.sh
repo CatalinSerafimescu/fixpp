@@ -56,6 +56,20 @@ ok()   { PASS=$((PASS+1)); echo "  PASS  $1"; }
 bad()  { FAIL=$((FAIL+1)); echo "  FAIL  $1"; }
 check(){ if [ "$2" = "$3" ]; then ok "$1 ($2)"; else bad "$1 — expected '$3', got '$2'"; fi; }
 
+# ── Cell filter — a COST fix, not a style preference ────────────────────────
+#
+# Each mutant re-invokes this file against a broken copy. Replaying ALL cells
+# was measured at ~120 s for the suite, because two of the three mutants DISABLE
+# THE BOUND — so cells that normally finish in 2-5 s fall through to their
+# fixtures' full sleep instead. That roughly DOUBLED the `ci-script-pins` job's
+# documented ~117 s, for replays whose results are discarded: mutant() greps the
+# log for its OWN named cell and ignores everything else.
+#
+# So a mutant runs exactly the cell it claims to pin. That is also the more
+# honest scoring: a mutant asserting "T3 goes RED" should be judged on T3, not
+# on whatever else its broken copy happens to disturb.
+run_cell() { [ -z "${APT_GUARD_ONLY:-}" ] || [ "${APT_GUARD_ONLY}" = "$1" ]; }
+
 # Wall-clock of a command, in whole seconds. The bound is a TIME claim, so two
 # cells below can only be pinned by the clock.
 elapsed() {
@@ -108,17 +122,21 @@ chmod +x "$WORK"/*.sh
 echo "== apt-guard.sh =="
 
 # ── T1: the happy path is transparent ────────────────────────────────────────
-rc=0; "$GUARD" t1 -- true >/dev/null 2>&1 || rc=$?
-check "T1 a succeeding command exits 0" "$rc" "0"
+if run_cell T1; then
+    rc=0; "$GUARD" t1 -- true >/dev/null 2>&1 || rc=$?
+    check "T1 a succeeding command exits 0" "$rc" "0"
+fi
 
 # ── T2: a hang is BOUNDED — the load-bearing half of #300 ────────────────────
 #
 # Without this the step runs to the 240-minute job timeout. The fixture sleeps
 # 15s; the budget is 2s. If the wrapper does not bound, this cell hangs the
 # harness rather than failing it, which is itself the signal.
-rc=0
-APT_GUARD_TIMEOUT=2 APT_GUARD_ATTEMPTS=1 "$GUARD" t2 -- "$WORK/hang.sh" >/dev/null 2>&1 || rc=$?
-check "T2 a hanging command is bounded and reports timeout" "$rc" "124"
+if run_cell T2; then
+    rc=0
+    APT_GUARD_TIMEOUT=2 APT_GUARD_ATTEMPTS=1 "$GUARD" t2 -- "$WORK/hang.sh" >/dev/null 2>&1 || rc=$?
+    check "T2 a hanging command is bounded and reports timeout" "$rc" "124"
+fi
 
 # ── T3: THE discrimination — a SIGTERM-deaf command is still killed ──────────
 #
@@ -126,63 +144,75 @@ check "T2 a hanging command is bounded and reports timeout" "$rc" "124"
 # wrapper using bare `timeout` bounds hang.sh (T2 passes) and leaves deaf.sh
 # running for the fixture's full sleep. The clock is the only honest instrument
 # here — the bound is a TIME claim and cannot be read off the exit code.
-sec=$(APT_GUARD_TIMEOUT=2 APT_GUARD_KILL_AFTER=3 APT_GUARD_ATTEMPTS=1 elapsed "$GUARD" t3 -- "$WORK/deaf.sh")
-if [ "$sec" -lt 10 ]; then
-    ok "T3 a SIGTERM-deaf command is force-killed (${sec}s, budget 2s + 3s kill grace)"
-else
-    bad "T3 a SIGTERM-deaf command outlived its bound (${sec}s) — --kill-after is missing or ineffective"
+if run_cell T3; then
+    sec=$(APT_GUARD_TIMEOUT=2 APT_GUARD_KILL_AFTER=3 APT_GUARD_ATTEMPTS=1 elapsed "$GUARD" t3 -- "$WORK/deaf.sh")
+    if [ "$sec" -lt 10 ]; then
+        ok "T3 a SIGTERM-deaf command is force-killed (${sec}s, budget 2s + 3s kill grace)"
+    else
+        bad "T3 a SIGTERM-deaf command outlived its bound (${sec}s) — --kill-after is missing or ineffective"
+    fi
 fi
 
 # ── T4: the retry is real, and it stops on success ───────────────────────────
-rc=0
-APT_GUARD_BACKOFF=0 APT_GUARD_ATTEMPTS=3 \
-    "$GUARD" t4 -- "$WORK/flaky.sh" "$WORK/t4.state" 2 >/dev/null 2>&1 || rc=$?
-check "T4 a command failing twice then succeeding exits 0" "$rc" "0"
-check "T4 it stopped at the first success (3 invocations)" "$(cat "$WORK/t4.state")" "3"
+if run_cell T4; then
+    rc=0
+    APT_GUARD_BACKOFF=0 APT_GUARD_ATTEMPTS=3 \
+        "$GUARD" t4 -- "$WORK/flaky.sh" "$WORK/t4.state" 2 >/dev/null 2>&1 || rc=$?
+    check "T4 a command failing twice then succeeding exits 0" "$rc" "0"
+    check "T4 it stopped at the first success (3 invocations)" "$(cat "$WORK/t4.state")" "3"
+fi
 
 # ── T5: the retry does NOT multiply the hang ─────────────────────────────────
 #
 # The issue's explicit warning: "a retry without a timeout multiplies the hang
 # rather than bounding it." Pinned on the clock, not by reading the code. Three
 # attempts at a 2s budget must land near 6s (+ kill grace), NOT near 3 x 15s.
-sec=$(APT_GUARD_TIMEOUT=2 APT_GUARD_ATTEMPTS=3 APT_GUARD_BACKOFF=0 \
-        elapsed "$GUARD" t5 -- "$WORK/hang.sh")
-if [ "$sec" -lt 20 ]; then
-    ok "T5 every attempt is bounded, so retries stay bounded (${sec}s for 3 x 2s)"
-else
-    bad "T5 total elapsed ${sec}s — the retry is wrapped around an UNBOUNDED command"
+if run_cell T5; then
+    sec=$(APT_GUARD_TIMEOUT=2 APT_GUARD_ATTEMPTS=3 APT_GUARD_BACKOFF=0 \
+            elapsed "$GUARD" t5 -- "$WORK/hang.sh")
+    if [ "$sec" -lt 20 ]; then
+        ok "T5 every attempt is bounded, so retries stay bounded (${sec}s for 3 x 2s)"
+    else
+        bad "T5 total elapsed ${sec}s — the retry is wrapped around an UNBOUNDED command"
+    fi
 fi
 
 # ── T6: a timeout and an ordinary failure stay distinguishable ───────────────
 #
 # 124 means the mirror; 42 means the package set. A wrapper that normalises
 # both to 1 still passes T2, and sends the next reader down the wrong path.
-rc=0
-APT_GUARD_ATTEMPTS=1 "$GUARD" t6 -- "$WORK/nope.sh" >/dev/null 2>&1 || rc=$?
-check "T6 an ordinary failure preserves the command's own exit code" "$rc" "42"
+if run_cell T6; then
+    rc=0
+    APT_GUARD_ATTEMPTS=1 "$GUARD" t6 -- "$WORK/nope.sh" >/dev/null 2>&1 || rc=$?
+    check "T6 an ordinary failure preserves the command's own exit code" "$rc" "42"
+fi
 
 # ── T7: attribution — the failure names apt, not "the build" ─────────────────
 #
 # The other half of #300: the hang currently reads as a build failure because
 # nothing in the log says apt. Proven NON-EMPTY here so a later grep returning
 # 0 is known to mean absence rather than a broken pattern.
-out=$(APT_GUARD_TIMEOUT=2 APT_GUARD_ATTEMPTS=1 "$GUARD" my-label -- "$WORK/hang.sh" 2>&1 || true)
-if echo "$out" | grep -q '::error::apt-guard \[my-label\] FAILED'; then
-    ok "T7 the failure is attributed to apt-guard and names the label"
-else
-    bad "T7 no attributed ::error:: line — the failure would read as a build failure"
-fi
-if echo "$out" | grep -qi 'wedged or degraded apt mirror'; then
-    ok "T7b the timeout case says MIRROR rather than a generic failure"
-else
-    bad "T7b the timeout case does not name the mirror"
+if run_cell T7; then
+    out=$(APT_GUARD_TIMEOUT=2 APT_GUARD_ATTEMPTS=1 "$GUARD" my-label -- "$WORK/hang.sh" 2>&1 || true)
+    if echo "$out" | grep -q '::error::apt-guard \[my-label\] FAILED'; then
+        ok "T7 the failure is attributed to apt-guard and names the label"
+    else
+        bad "T7 no attributed ::error:: line — the failure would read as a build failure"
+    fi
+    if echo "$out" | grep -qi 'wedged or degraded apt mirror'; then
+        ok "T7b the timeout case says MIRROR rather than a generic failure"
+    else
+        bad "T7b the timeout case does not name the mirror"
+    fi
 fi
 
 # ── T8: misuse is loud ───────────────────────────────────────────────────────
-rc=0; "$GUARD" onlylabel >/dev/null 2>&1 || rc=$?
-check "T8 too few arguments exits 2" "$rc" "2"
-rc=0; "$GUARD" label notdashdash true >/dev/null 2>&1 || rc=$?
-check "T8b a missing '--' separator exits 2" "$rc" "2"
+if run_cell T8; then
+    rc=0; "$GUARD" onlylabel >/dev/null 2>&1 || rc=$?
+    check "T8 too few arguments exits 2" "$rc" "2"
+    rc=0; "$GUARD" label notdashdash true >/dev/null 2>&1 || rc=$?
+    check "T8b a missing '--' separator exits 2" "$rc" "2"
+fi
 
 # ═════ MUTANTS ═══════════════════════════════════════════════════════════════
 #
@@ -204,7 +234,7 @@ mutant() {
     fi
     chmod +x "$copy"
     # Re-run THIS harness against the broken copy and require it to fail.
-    if APT_GUARD_SCRIPT="$copy" "$BASH_SOURCE" >"$WORK/mutant-$name.log" 2>&1; then
+    if APT_GUARD_SCRIPT="$copy" APT_GUARD_ONLY="$cell" "$BASH_SOURCE" >"$WORK/mutant-$name.log" 2>&1; then
         bad "MUTANT $name — harness stayed GREEN against a script that $why (expected $cell to fail)"
     else
         if grep -q "FAIL  $cell" "$WORK/mutant-$name.log"; then

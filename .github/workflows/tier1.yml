@@ -427,7 +427,7 @@ jobs:
           # llvm.sh handles GPG key + apt repo + clang-22/clang++-22/lld-22/llvm-22.
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          APT_GUARD_TIMEOUT=900 ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
           # but does NOT update the unversioned `clang`/`clang++` paths. CMake
           # presets use unversioned `clang++`, which otherwise resolves to the
@@ -1267,7 +1267,7 @@ jobs:
         run: |
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          APT_GUARD_TIMEOUT=900 ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
           # but does NOT update the unversioned `clang`/`clang++` paths. CMake
           # presets use unversioned `clang++`, which otherwise resolves to the
@@ -2118,6 +2118,17 @@ jobs:
       # a time claim and cannot be read off an exit code.
       #
       # No apt, no network, no sudo: every fixture is synthetic.
+      #
+      # ⚠️ COST, STATED RATHER THAN BURIED (same convention as the peak-RSS step
+      # above): measured ~47 s locally. It is dominated by the clock cells, whose
+      # fixtures must really sleep — a mocked hang would pin nothing, because the
+      # property under test IS elapsed time.
+      #
+      # It was ~120 s before the cell filter: each mutant re-ran the WHOLE suite,
+      # and two of the three disable the bound, so unrelated cells fell through to
+      # their fixtures' full sleep. A mutant now runs only the cell it claims to
+      # pin — which is also the more honest scoring. Re-derive with
+      # `time bash ci/test-apt-guard.sh` rather than trusting this number.
       - name: Regression pin — apt/llvm install bound (#300)
         run: bash ci/test-apt-guard.sh
 
@@ -2317,7 +2328,7 @@ jobs:
         run: |
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          APT_GUARD_TIMEOUT=900 ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
           CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
           test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
@@ -2559,7 +2570,7 @@ jobs:
         run: |
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          APT_GUARD_TIMEOUT=900 ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
           # but does NOT update the unversioned `clang`/`clang++` paths. CMake
           # presets use unversioned `clang++`, which otherwise resolves to the

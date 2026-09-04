@@ -74,27 +74,18 @@ set_target_properties(fuzz_toml_loader PROPERTIES
 # is the same defect in a directory the corpus glob does not cover, so it is
 # fixed here rather than by widening that glob to a differently-shaped dir.
 #
-# ⚠️ REPLAY, NOT A CAMPAIGN — see the note in tests/fuzz/CMakeLists.txt. And
-# `-runs=0` executes N+1 inputs, libFuzzer's empty input included.
+# Mechanics shared with tests/fuzz/ via fixpp_add_fuzz_replay() — see its header
+# in cmake/Helpers.cmake for why -runs=0 and the artifact redirection are not
+# adjustable per call site.
 set(_fixpp_toml_crashes "${CMAKE_CURRENT_SOURCE_DIR}/crashes")
-set(_fixpp_toml_replay_artifacts "${CMAKE_BINARY_DIR}/fuzz-replay-artifacts")
-file(MAKE_DIRECTORY "${_fixpp_toml_replay_artifacts}")
 
 file(GLOB _fixpp_toml_crash_files CONFIGURE_DEPENDS "${_fixpp_toml_crashes}/*")
 if(NOT _fixpp_toml_crash_files)
   # An empty scan is an instrument failure, not a clean build: the registration
-  # would silently vanish and the lane would go green replaying nothing.
+  # would silently replay nothing while still reporting green.
   message(FATAL_ERROR
     "tests/config/fuzz/crashes/ is empty or missing, so fuzz_replay_toml_crashes would "
     "replay nothing while still reporting green. Restore the reproducer or delete this block.")
 endif()
 
-add_test(NAME fuzz_replay_toml_crashes
-         COMMAND fuzz_toml_loader
-                 -runs=0
-                 "-artifact_prefix=${_fixpp_toml_replay_artifacts}/toml_crashes-"
-                 "${_fixpp_toml_crashes}")
-set_tests_properties(fuzz_replay_toml_crashes PROPERTIES
-  LABELS "fuzz"
-  TIMEOUT 300
-  WORKING_DIRECTORY "${_fixpp_toml_replay_artifacts}")
+fixpp_add_fuzz_replay(fuzz_replay_toml_crashes fuzz_toml_loader "${_fixpp_toml_crashes}")

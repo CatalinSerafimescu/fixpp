@@ -241,7 +241,7 @@ jobs:
           # llvm.sh handles GPG key + apt repo + versioned clang binaries.
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          APT_GUARD_TIMEOUT=900 ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
           # but does NOT update the unversioned `clang`/`clang++` paths. The
           # sanitizer presets use clang-22/clang++-22 directly (versioned) so

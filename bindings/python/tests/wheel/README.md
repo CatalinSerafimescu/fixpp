@@ -51,6 +51,9 @@ and issue #298.
 | `test_reentrancy.py` | as-is | via `_oo_reentrancy_staging` / `oo_test_support` |
 | `test_callback_raise_watchdog.py` | as-is | via `_gil_staging` |
 | `test_subinterpreter.py` | **diverges** | n/a — locator-independent, but NOT as-is (see below) |
+| `oo_test_support.py` | swap `_dict_path` | ✓ — `dict_path()` delegates to `_wheeldict.resolve` |
+| `_gil_staging.py` | swap `_dict_path` | ✓ — `_gil_staging._dict_path` |
+| `_oo_reentrancy_staging.py` | as-is | — |
 
 ⚠️ **`test_subinterpreter.py` is not a faithful port below Python 3.12.** The
 in-tree source uses `importorskip("_xxsubinterpreters")` on every Python

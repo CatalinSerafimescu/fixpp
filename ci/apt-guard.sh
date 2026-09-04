@@ -48,11 +48,11 @@ set -euo pipefail
 # toolchain) without every caller re-stating the common case, and so the test
 # harness can drive both to small values.
 #
-# ⚠️ These are BUDGETS, not measurements. A healthy install is far under
-# APT_GUARD_TIMEOUT; the budget is sized to catch a wedged mirror, not to track
-# how long apt currently takes. Do not "tune" them toward an observed duration
-# — that converts a bound into a flake.
-APT_GUARD_TIMEOUT="${APT_GUARD_TIMEOUT:-300}"
+# ⚠️ These are BUDGETS, not measurements. A healthy install is far under the
+# budget; it is sized to catch a wedged mirror, not to track how long apt
+# currently takes. Do not "tune" one toward an observed duration — that converts
+# a bound into a flake. The per-attempt budget itself is derived from the LABEL
+# below, so a new install kind gets its budget in one place.
 APT_GUARD_ATTEMPTS="${APT_GUARD_ATTEMPTS:-3}"
 APT_GUARD_BACKOFF="${APT_GUARD_BACKOFF:-15}"
 # Grace between SIGTERM and SIGKILL. Overridable only so the harness can drive
@@ -71,6 +71,27 @@ if [ "$1" != "--" ]; then
     exit 2
 fi
 shift
+
+# ── The per-attempt budget, DERIVED FROM THE LABEL ──────────────────────────
+#
+# A full LLVM toolchain install legitimately takes far longer than an ordinary
+# package fetch, so it needs a wider budget. That budget used to be hand-carried
+# as an `APT_GUARD_TIMEOUT=900` prefix at every llvm-toolchain call site.
+#
+# ⚠️ THAT WAS THE SAME SHAPE AS THE DEFECT THIS REPO JUST FIXED IN #299: an
+# invariant that must hold across N call sites, held only by convention, with
+# nothing asserting the sites agree. One site widened and the others missed reads
+# as a mirror problem, not as a copy-paste slip. The label already carries the
+# information that decides the budget, so the wrapper decides it — one edit
+# instead of seven, and no drift surface.
+#
+# The environment variable remains, as an explicit override for a genuinely
+# exceptional caller and so the test harness can drive it small.
+case "$LABEL" in
+  llvm-toolchain) _apt_guard_default_timeout=900 ;;
+  *)              _apt_guard_default_timeout=300 ;;
+esac
+APT_GUARD_TIMEOUT="${APT_GUARD_TIMEOUT:-$_apt_guard_default_timeout}"
 
 # `sudo` is how every caller invokes apt, and sudo does not forward a SIGTERM
 # to its child. `timeout --kill-after` is what closes that: SIGTERM first (so a

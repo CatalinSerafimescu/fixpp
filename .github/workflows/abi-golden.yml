@@ -76,7 +76,7 @@ jobs:
           # gate hit when it ran under --profile=default).
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          APT_GUARD_TIMEOUT=900 ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
           CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
           test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
