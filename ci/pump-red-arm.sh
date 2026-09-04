@@ -70,6 +70,14 @@ cd "$repo_root" || exit 2
 # and far below "never", so an indirected pump is caught rather than waited on.
 # If those constants change, change this with them.
 TIMEOUT_S="${PUMP_RED_ARM_TIMEOUT:-180}"
+
+# ⚠️ CAP THE BUILD PARALLELISM. `cmake --build` with no -j uses every core, and
+# this script issues one build PER ARM, so a long arms file is a sustained
+# all-core clang load. A 23 GB box was pushed into the OOM killer by exactly
+# that, which killed the driver mid-arm -- and a driver killed mid-arm is the
+# one state that can leave a FORCED source and forced binaries behind for the
+# next reader to measure. Modest and finishing beats fast and killed.
+JOBS="${PUMP_RED_ARM_JOBS:-4}"
 TAIL='grace slice. Site: '
 
 pass=0; failed=0; inconclusive=0; declare -a NOTES=()
@@ -138,7 +146,7 @@ while IFS=$'\t' read -r file anchor label target regex; do
         echo "    !! FORCE FAILED"; failed=$((failed+1)); NOTES+=("FORCE-FAILED $label")
         restore "$file"; continue
     fi
-    if ! cmake --build "build/$preset" --target "$target" >/tmp/red_build.log 2>&1; then
+    if ! cmake --build "build/$preset" -j "$JOBS" --target "$target" >/tmp/red_build.log 2>&1; then
         echo "    !! BUILD FAILED (see /tmp/red_build.log)"; tail -15 /tmp/red_build.log
         failed=$((failed+1)); NOTES+=("BUILD-FAILED $label"); restore "$file"; continue
     fi
@@ -161,9 +169,24 @@ done < "$arms_file"
 
 # Leave no forced source behind: a restored tree with stale binaries is how a
 # later reader measures the forced state and reports phantom failures.
+#
+# ⚠️ REBUILD ONLY THE TARGETS THIS RUN FORCED, not the whole tree. A full
+# `cmake --build` here is minutes of all-core clang for no benefit -- the arms
+# only ever touched their own targets -- and on a shared box it is antisocial
+# enough to get the whole driver OOM-killed mid-arm, which is the one outcome
+# that CAN strand a forced source. Measured: two consecutive kills that way.
+#
+# ⚠️ WHAT THIS DOES NOT COVER, stated because the gap is real: a forced HEADER is
+# seen by every target that includes it, not only by the arm's target. Those other
+# targets keep objects built from the forced text until something rebuilds them.
+# That is harmless for this script (it never measures them) but NOT harmless for a
+# full `ctest` run afterwards. Rebuild the tree before any whole-suite measurement
+# that follows an arms run.
 echo
-echo "rebuilding to clear forced binaries..."
-cmake --build "build/$preset" >/dev/null 2>&1
+echo "rebuilding this run's targets to clear forced binaries..."
+for t in $(awk -F'\t' '!/^#/ && NF>=4 {print $4}' "$arms_file" | sort -u); do
+    cmake --build "build/$preset" -j "$JOBS" --target "$t" >/dev/null 2>&1
+done
 
 echo
 echo "arms: ${pass} RED-as-required, ${failed} FAILED, ${inconclusive} INCONCLUSIVE"
