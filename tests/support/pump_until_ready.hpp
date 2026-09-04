@@ -21,6 +21,7 @@
 #include <chrono>
 #include <exception>
 #include <fixpp/core/clock.hpp>
+#include <fixpp/core/error.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <future>
 
@@ -131,6 +132,63 @@ inline constexpr const char* kPumpBudgetMiss =
 inline constexpr const char* kWindowMiss =
     "#289: the operation was not ready when its preserved run window returned, and did "
     "not become ready within one boundary grace slice. Site: ";
+
+// The value a VALUE-RETURNING helper returns from its `run_window_then_ready`
+// miss branch, after it has reported the miss via `kWindowMiss`. A TEST body and
+// a void helper just `return;`; a helper that owes its caller a value needs
+// something to hand back.
+//
+// DELIBERATELY NOT LOAD-BEARING under ordinary GoogleTest execution: the
+// `ADD_FAILURE()` on the same branch records a nonfatal failure the enclosing
+// test retains, so a window miss cannot read as a pass whatever this value is.
+// `--gtest_throw_on_failure` does not change that -- it throws AFTER reporting.
+//
+// THE CONDITION THAT HOLDS UNDER, stated rather than counted: NO CALLER
+// INTERCEPTS THE FAILURE. `EXPECT_NONFATAL_FAILURE` and
+// `ScopedFakeTestPartResultReporter` (gtest-spi.h) install a fake reporter that
+// ABSORBS the failure and lets the enclosing test pass. The first caller that
+// does makes this value the only remaining signal -- and `dispatch_aborted` is
+// then ambiguous with a real `open()` / `on_inbound_frame()` outcome ([2d §6.5];
+// the `dispatch_aborted` returns in `Session::live_write_serialized_`), so an
+// assertion on the error could be satisfied by this synthetic one. The remedy at
+// that point is a distinct harness result (`std::optional<expected_t<void>>`),
+// not a different production error.
+//
+// The narrower reason that holds either way: a caller checking `has_value()`
+// must not proceed on a fabricated success.
+//
+// ⚠️ HOISTING WIDENED THIS PRECONDITION'S POPULATION, so re-measure it rather than
+// inheriting the answer. It used to range over the three files that defined the
+// constant; it now ranges over every user of a shared one, and it grows silently
+// with each new adopter. The recipe (a PROCEDURE — the answer is a measurement
+// and belongs nowhere in this comment):
+//
+//     comm -12 \
+//       <(git grep -l kWindowMissSentinel -- tests/ | grep -v pump_until_ready.hpp | sort) \
+//       <(git grep -lE 'EXPECT_NONFATAL_FAILURE|ScopedFakeTestPartResultReporter|gtest-spi' \
+//              -- tests/ | sort)
+//
+// The precondition holds while that intersection is EMPTY, transitively through
+// includes.
+//
+// ⚠️ THIS FILE MUST BE EXCLUDED FROM THE ADOPTER SIDE, and the first version of
+// this recipe was not — it reported a hit on the very first run. This header
+// appears in BOTH lists for reasons that are not adoption: it DEFINES the
+// constant, and the paragraph above NAMES the interceptor macros in prose. A
+// recipe that flags its own documentation cries wolf on every future run, which
+// is how a real hit gets waved through.
+//
+// ⚠️ Do not `head` either list — this is a claim about a whole SET, and truncating
+// one side is how a set-difference reports clean. The interceptor grep is proven
+// able to fire (it returns several files today), so an empty intersection is a
+// measurement rather than a broken pattern.
+//
+// Hoisted here from three call-site files (#324's `send_path_test.cpp`,
+// `tc_establishment_test.cpp`, `tc_seqnum_test.cpp`), which each carried a
+// verbatim copy. Keeping it local was the right call while three files needed it
+// and the shared header was being avoided mid-batch; adopting it across the
+// remaining value-returning helpers made a fourth copy the wrong trade.
+inline constexpr auto kWindowMissSentinel = fixpp::core::error::dispatch_aborted;
 
 // Shared stem for a teardown drain's residual report. The two drains below
 // diverge IMMEDIATELY after it, and the divergence is load-bearing for their

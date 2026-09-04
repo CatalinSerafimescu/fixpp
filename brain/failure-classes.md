@@ -121,6 +121,38 @@ tested there, because nothing ever got that far.
   fails open — a rejection becomes a silently wrong answer rather than a louder rejection. Verifying
   "the thing I fixed now works" cannot see it; only the acceptance diff can.
 
+### 8. Consolidating N copies dissolves the population an audit asserts over
+
+Deduplication is usually unambiguous progress: one definition instead of six, one place to fix a bug.
+What it also does — silently — is empty out any instrument whose job was to compare the copies. That
+instrument does not report "my population is gone"; it reports whatever its extractor does on inputs
+it was never designed for, and the reading of that output is usually "clean" or "broken", neither of
+which is "this check no longer has anything to check".
+
+- **Trigger:** you are hoisting a constant, extracting a shared helper, or collapsing duplicated
+  blocks — and somewhere there is a consistency check, a byte-identity audit, a "these must agree"
+  test, or a lint keyed to the duplication.
+- **Procedure:** run that check BEFORE and AFTER. Then make the after-state *coherent* rather than
+  merely quiet. The choices are to retire the check with its reason recorded, or to re-aim it at what
+  the consolidation now makes true.
+- ⚠️ **A SELECTOR THAT WAS EXACT BECOMES A PROXY.** This is the specific mechanism, and it is easy to
+  miss because the selector's text does not change: a population picked by "the file mentions `X`" is
+  identical to "the file DEFINES `X`" exactly while every mention sits beside its definition.
+  Consolidation breaks that equivalence in one step — every former definer still *uses* the name — so
+  the selector keeps matching and starts meaning something else.
+- ⚠️ **An empty population is only evidence if the instrument is shown able to report a non-empty
+  one.** Retire the population, keep a synthetic positive control that constructs the thing the
+  selector looks for and requires it to be found. Otherwise "empty" and "broken" print identically —
+  which is class 1 reached by a different road.
+
+**Reference instance:** #289 batch 10. `kWindowMissSentinel` was copy-defined in three test files and
+`audit-copy-span.sh` asserted byte-identity over the span containing it. Hoisting the constant into
+`tests/support/pump_until_ready.hpp` left all three files still *mentioning* the name, so the
+bare-token selector still selected them while the span they were selected for no longer existed —
+three `EXTRACTOR FAILED` lines. The fix was to make the selector match the definition, not the token;
+the FULL population is now empty by construction, and the control that builds a synthetic definer each
+run is what makes that emptiness readable.
+
 ---
 
 ## How to query the instances

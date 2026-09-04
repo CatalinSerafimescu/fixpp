@@ -3,8 +3,6 @@ tests/fuzz/fuzz_session_recovery_admin_parse.cpp:174
 tests/fuzz/fuzz_session_recovery_admin_parse.cpp:192
 tests/interop/parity/fix_tc_coverage_gaps_test.cpp:262
 tests/interop/parity/fix_tc_coverage_gaps_test.cpp:276
-tests/interop/parity/parity_support.hpp:179
-tests/interop/parity/parity_support.hpp:187
 tests/interop/thorny/recovery/qfj-626-resend-recomputes-checksum_test.cpp:250
 tests/interop/thorny/recovery/qfj-626-resend-recomputes-checksum_test.cpp:258
 tests/perf/test_session_recovery_alloc_guard.cpp:174
@@ -55,9 +53,6 @@ tests/session/session_send_invalid_state_test.cpp:122
 tests/session/session_send_invalid_state_test.cpp:131
 tests/session/session_send_invalid_state_test.cpp:141
 tests/session/session_send_invalid_state_test.cpp:214
-tests/session/support/group_dispatch_fixture.hpp:130
-tests/session/support/group_dispatch_fixture.hpp:136
-tests/session/support/group_dispatch_fixture.hpp:146
 tests/session/test_019_g2_enablement_witness.cpp:263
 tests/session/test_019_g2_enablement_witness.cpp:289
 tests/session/test_070_max_message_size_test.cpp:139

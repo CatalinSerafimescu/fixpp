@@ -6,6 +6,24 @@ status: stable
 
 # Log
 
+- **2026-09-04 — #289 batch 10, the shared surfaces.** `failure-classes.md` gains **class 8:
+  consolidating N copies dissolves the population an audit asserts over.** Hoisting
+  `kWindowMissSentinel` out of three test files emptied the byte-identity population
+  `audit-copy-span.sh` was built to compare — and the script did not say so; it printed three
+  `EXTRACTOR FAILED` lines, which read as a broken instrument rather than as a check with nothing
+  left to check. The mechanism worth carrying is narrower than "dedup breaks audits": **a selector
+  that was EXACT silently becomes a PROXY.** "Mentions `X`" and "defines `X`" are the same predicate
+  only while every mention sits beside its definition, and consolidation ends that in one step, with
+  the selector's own text unchanged. Fixed by matching the definition; the population is now empty
+  *by construction*, which is only readable because a control builds a synthetic definer each run.
+
+  Also recorded: **the batch's own RED-arm driver would have destroyed the work it verified.** Its
+  `restore()` was `git checkout -- <file>`, but the sources a forced-MISS arm rewrites are modified
+  in the WORKING TREE — an uncommitted migration is precisely what is under test. Arm 1 would have
+  reverted it and arms 2..N would have reported `SILENT` against a tree with no miss branch left,
+  which reads as "the migration is broken". Caught by reading, not by a run; no green result would
+  have exposed it, because the failure mode *is* the green-looking one.
+
 - **2026-09-04 — #289 batch 9, review rounds.** `components/test.md` gains `ci/pump-get-sweep.sh`
   and, more usefully, the script's own three-round history: every fix for a false-clean introduced
   the next one, which `failure-classes.md` class 1 now carries as a condition. Also recorded there
