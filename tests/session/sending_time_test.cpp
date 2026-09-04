@@ -203,9 +203,13 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 // `open_to_active` and `feed` take the `Session&` from their caller, so their drains
 // also run while the caller's `sess` is alive -- the same "scope that still owns that
 // storage" rule, reached through a parameter rather than a block-local. The same holds
-// for the frame each one spans into: `open_to_active`'s `logon` and the caller's
-// `stale_hb` / `frame` / `peer_logon` are named locals that outlive the call whose
-// drain resumes the coroutine holding a span into them.
+// for the frame each one spans into, stated as the CONDITION rather than as a list of
+// argument names: every `feed` argument, and `open_to_active`'s own `logon`, is a NAMED
+// LOCAL of the frame that calls it -- never a temporary built in the call expression --
+// so it outlives the call whose drain resumes the coroutine holding a span into it. (An
+// earlier revision listed the names instead, and listed three of the five there are.
+// It was wrong the way the paragraph below says enumerations go wrong, in the same
+// comment block, which is the argument for never writing one.)
 //
 // `cfg.transport_send` here is a synchronous `std::function` and cannot park a
 // coroutine; `TransportDouble` is not a `fixpp::transport::Transport` at all, only an
@@ -216,22 +220,43 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 // awaited coroutine is still SUSPENDED, and `get()` would block on a future nothing
 // will complete.
 //
-// THE QUOTED `sleep_until` CLAUSE HOLDS HERE, unlike at some siblings, and it is worth
-// stating because the reader's habit by now is to expect an exemption. `make_cfg()`
-// sets `cfg.heartbeat_interval = 30s`, so `Session::run_liveness_loop()` resolves a
-// NON-zero `heartbt_int`, passes its `HeartBtInt=0` early `co_return`, and reaches
-// `co_await effective_clock_->sleep_until(deadline)` -- a real registered waiter that
-// only a Clock can release. `cancel_and_drain_or_report` is load-bearing here, not the
-// harmless superset it is in a fixture whose heartbeat is zero.
+// THE QUOTED `sleep_until` CLAUSE IS REACHABLE HERE, unlike at the sibling that sets a
+// zero heartbeat -- but reachable AT FILE GRANULARITY is not the same as true at every
+// site, and the difference is the whole content of this paragraph. `make_cfg()` sets
+// `cfg.heartbeat_interval = 30s`, so `Session::run_liveness_loop()` resolves a NON-zero
+// `heartbt_int` and passes its `HeartBtInt=0` early `co_return`. Two further gates then
+// stand between that and a registered waiter, and an earlier revision of this comment
+// omitted both: `if (!effective_clock_) co_return;`, and -- load-bearing --
+// `while (fsm_state_ == fsm_state::Active)`. The loop is `co_spawn`ed AT the Active
+// transition and its first resumption is POSTED, so it registers nothing until it is
+// dispatched while still Active.
+//
+// What follows, per site rather than per file: a waiter can exist only where the session
+// has REACHED Active. That is the case at `feed`, and conditionally at
+// `open_to_active/logon` when the drain itself performs the transition. At
+// `open_to_active/open` and at every TEST-body site the session is at LogonSent or
+// NotConnected and the loop was never spawned, so `cancel_sleeps()` there is exactly the
+// harmless superset -- kept for uniformity, not because it releases anything. Do not
+// read "the clause holds in this file" as "the cancel is load-bearing at this site".
 //
 // No site in this file puts a `clock->advance()` between its window and its `get()`,
 // so none of these windows is a STAGING window of the kind
 // `cancellation_two_phase_test.cpp` / `tc_liveness_test.cpp` must preserve unmigrated.
 //
-// THE WINDOWS STAY AT 200 ms, which is also what keeps `tc_logout_test.cpp`'s
-// close-grace hazard out of this file: that hazard is a pump budget GROWN past a real
-// `asio::steady_timer` the mock clock does not govern, and nothing here grows one.
+// THE WINDOWS STAY AT 200 ms, which is what keeps `tc_logout_test.cpp`'s close-grace
+// hazard out of this file: that hazard is a pump budget GROWN past a real
+// `asio::steady_timer` the mock clock does not govern, and no window here grows.
 // `run_window_then_ready` adds one `kPumpSlice` of grace and no more.
+//
+// ⚠️ SAY WHAT THE SENTENCE ABOVE DOES NOT COVER, because a reader will take it for the
+// whole site. The MISS branch does introduce a long wait this file did not have before:
+// `cancel_and_drain_or_report` drains at the default `kQuiesceBudget`, orders of
+// magnitude above the window. That cannot reach the close-grace hazard HERE -- the
+// competing timer is armed only inside `Session::close(graceful)`, and this file never
+// calls `close()`, a condition to re-check rather than inherit if one is ever added --
+// and it is on the already-failing path, where a bounded wait buys a diagnosable failure
+// instead of a wedge. The window claim and the drain budget are separate facts; the
+// first does not vouch for the second.
 //
 // THIS IS ANOTHER COPY OF THE QUOTED SPAN, and which files share it is a MEASUREMENT,
 // not a fact to cache here. An earlier revision of this addendum stated the population
