@@ -98,7 +98,7 @@ run_label() {                      # $1 = label, $2 = "expect-red" | "expect-nos
         NOTES+=("$label: absent from every binary")
         nosite=$((nosite + 1)); return 1
     fi
-    ann=0; rep=0
+    ann=0; rep=0; timed_out=0
     for b in "${bins[@]}"; do
         # A forced binary EXITS NON-ZERO by construction (its tests fail), so the
         # exit status must be captured, not tested by `if` -- `$?` after an `if`
@@ -151,13 +151,26 @@ look for an UNMIGRATED run_for/get after this site")
             printf '    ~~   INCONCLUSIVE: %s timed out in %s with NO report\n' "$label" "$(basename "$b")"
             printf '         the arm may have zeroed a window the test never waited on\n'
             printf '         (census blind spot (c)) -- that is a finding, not a slow box.\n'
+            # ⚠️ DO NOT RETURN -- a timeout in ONE binary must not decide the LABEL's verdict.
+            # Binaries are found by SUBSTRING on `strings`, so a shorter label can pull in a
+            # binary that merely CONTAINS it inside a longer one (`RejectFixture::feed` is a
+            # suffix of `BusinessRejectFixture::feed`). Such a binary passes no seam label, can
+            # never announce, and if it wedges first an earlier revision reported INCONCLUSIVE
+            # for an arm whose real binary would have gone RED. Record it and keep going; the
+            # verdict is decided below, after every candidate has had its turn.
+            timed_out=$((timed_out + 1))
             NOTES+=("$label: TIMEOUT with no report in $(basename "$b")")
-            inconclusive=$((inconclusive + 1)); return 1
+            continue
         fi
         ann=$((ann + $(grep -cF "$ANNOUNCE$label" <<<"$out" || true)))
         rep=$((rep + $(grep -cF "$REPORT_TAIL$label" <<<"$out" || true)))
     done
     if [ "$ann" -eq 0 ]; then
+        if [ "$timed_out" -gt 0 ]; then
+            printf '    ~~   INCONCLUSIVE: %s never announced, and %d candidate binary/ies wedged\n' \
+                "$label" "$timed_out"
+            inconclusive=$((inconclusive + 1)); return 1
+        fi
         printf '    !!   NO-SUCH-SITE: %s never fired (label typo, or site unreached)\n' "$label"
         NOTES+=("$label: no announcement")
         nosite=$((nosite + 1)); return 1
@@ -182,13 +195,43 @@ done
 # announces reports RED for everything; both are indistinguishable from a real
 # result. This arm proves the NO-SUCH-SITE verdict is reachable.
 echo
-echo "=== negative control: a label no site carries MUST read NO-SUCH-SITE"
-# No counter bookkeeping is needed here: `BINS_FOR` is keyed ONLY from the labels file, so
-# this literal never has bins, and `run_label`'s expect-nosite arm returns before touching
-# `$nosite`. An earlier revision guarded that with a before/after decrement -- unreachable
-# by construction, and unreachable guards are the kind of code that later reads as evidence
-# of a hazard that does not exist.
-run_label "PumpSeamArm::__no_such_site__" expect-nosite || true
+echo "=== negative control: a REAL binary, a label it does not carry, MUST stay silent"
+# ⚠️ THIS CONTROL MUST EXECUTE A BINARY. An earlier revision "controlled" the NO-SUCH-SITE
+# verdict by forcing a made-up label -- but `BINS_FOR` is keyed only from the labels file, so
+# that label provably has no binaries and `run_label` returned WITHOUT RUNNING ANYTHING. It
+# therefore proved only that a lookup in an empty map is empty. It could not detect the two
+# failure modes that matter: an env var that never reaches the binary (everything would read
+# NO-SUCH-SITE) or a seam that announces unconditionally (everything would read RED).
+#
+# So: take a binary this run already proved carries a real label, run it with a label it does
+# NOT carry, and require ZERO announcements from a run that otherwise passes. Paired with the
+# RED arms above (env var matches -> announcement), that is both directions of the seam.
+probe_bin=""; probe_filter=""
+for l in "${LABELS[@]}"; do
+    read -r -a _pb <<<"${BINS_FOR["$l"]-}"
+    if [ "${#_pb[@]}" -gt 0 ]; then
+        probe_bin="${_pb[0]}"
+        case "$l" in *::*) probe_filter="${l%%::*}.*" ;; *) probe_filter="*" ;; esac
+        break
+    fi
+done
+if [ -z "$probe_bin" ]; then
+    echo "    !!   no binary carried ANY label -- the negative control cannot run" >&2
+    exit 4
+fi
+nc_rc=0
+nc_out=$(FIXPP_FORCE_WINDOW_MISS="PumpSeamArm::__no_such_site__" timeout "$TIMEOUT_S" \
+             "$probe_bin" --gtest_filter="$probe_filter" 2>&1) || nc_rc=$?
+nc_ann=$(grep -cF "$ANNOUNCE" <<<"$nc_out" || true)
+if [ "$nc_rc" -ne 0 ] || [ "$nc_ann" -ne 0 ]; then
+    printf '    !!BAD NEGATIVE CONTROL: %s exit=%s announcements=%s (want exit=0, 0)\n' \
+        "$(basename "$probe_bin")" "$nc_rc" "$nc_ann" >&2
+    echo "         a non-matching label must force NOTHING; the seam may be announcing" >&2
+    echo "         unconditionally, which would make every RED above meaningless." >&2
+    exit 4
+fi
+printf '    ok   NEGATIVE CONTROL: %s ran clean with a non-matching label, 0 announcements\n' \
+    "$(basename "$probe_bin")"
 
 # `ran` is incremented at the top of the loop -- a DIRECT count, deliberately not the
 # outcome-derived form ci/pump-red-arm.sh uses. See assert_ran_count's comment.
