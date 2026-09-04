@@ -2183,7 +2183,9 @@ jobs:
       # A-vs-A' agreement check is a forced-MISS arm and cannot catch it; the
       # in-flight oracle T4 pins is the other half.
       #
-      # Buildless and hermetic — python3 + coreutils. ~2 s.
+      # Buildless and hermetic — python3 + coreutils, no compiler, no network.
+      # Its cost grows with the cell count; re-derive rather than assume:
+      # `time ci/test-parallelism-verdict.sh`.
       - name: Regression pin — parallelism verdict gates (#267)
         run: bash ci/test-parallelism-verdict.sh
 

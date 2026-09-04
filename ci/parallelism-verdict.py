@@ -248,6 +248,12 @@ def parse_ctest_log(path: pathlib.Path) -> dict:
         a.append(f"{len(reals)} `Total Test time (real)` line(s); exactly 1 is expected")
     else:
         out["real_s"] = reals[0]
+    # ⚠️ THE COUNT OF DURATION LINES IS CHECKED BELOW; THE VALUES ARE NOT.
+    # `sum_s` drives the achieved-concurrency column and the runner-minutes
+    # warning, and a log carrying the right NUMBER of duration lines with wrong
+    # values is summarised without complaint. Validating the values would need a
+    # second source for them, which does not exist — so this is stated rather
+    # than implied away by the decoy-anchoring note above.
     if durations:
         out["sum_s"] = round(sum(durations), 1)
     if peak_inflight > 0:
@@ -278,6 +284,11 @@ def read_kv(path: pathlib.Path) -> dict[str, str]:
     except OSError:
         pass
     return out
+
+
+# The shipped band. Named rather than inlined so the disclosure below can say
+# what a widened value was widened FROM.
+DEFAULT_TOLERANCE_PCT = 5.0
 
 
 def pct_diff(a: float, b: float) -> float:
@@ -327,7 +338,7 @@ class Pass:
 def main() -> int:
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("run_dir")
-    ap.add_argument("--tolerance-pct", type=float, default=5.0,
+    ap.add_argument("--tolerance-pct", type=float, default=DEFAULT_TOLERANCE_PCT,
                     help="max allowed disagreement between the two serial passes")
     ap.add_argument("--steal-tolerance-ticks", type=int, default=0,
                     help="cumulative /proc/stat steal permitted across the experiment")
@@ -451,9 +462,16 @@ def main() -> int:
             f"passes bracketing the parallel one.")
 
     for p in present:
-        if p.log["ran"] is None:
-            instrument.append(f"{p.label}: ctest printed no `N% tests passed ... out of M` "
-                              f"summary, so the workload size is unknown.")
+        # ⚠️ A ZERO WALL TIME IS NOT A FAST PASS. `base / b.wall if b.wall else
+        # 0.0` printed `0.00x` for one — which is not a measurement, it is what
+        # the guard against ZeroDivisionError prints. Ten lines below, the
+        # memory clause is WITHHELD for exactly this reason ("a fabricated zero
+        # next to genuine numbers is worse than a gap"); the same reasoning
+        # applies here and the code used to do the opposite.
+        if p.wall is not None and p.wall <= 0:
+            instrument.append(
+                f"{p.label} reports a wall time of {p.wall}. No speedup can be computed from "
+                f"it, and a ratio against zero is a formatting artefact, not a result.")
         if p.log["max_inflight"] is None:
             instrument.append(f"{p.label}: no `Start <n>:` lines in the log, so the achieved "
                               f"parallel level could not be observed at all.")
@@ -494,12 +512,23 @@ def main() -> int:
                 f"{p.label} requested `--parallel 1` but ctest scheduled {got} tests "
                 f"concurrently. The serial baseline is not serial, so the speedup this "
                 f"sample would report is measured against the wrong floor.")
-        if p.jobs > 1 and got <= 1:
+        # ⚠️ `got < p.jobs`, NOT `got <= 1`. The looser form is a total-failure
+        # test, and "a little parallelism happened" satisfied it: a pass that
+        # requested 4 and never exceeded 2 in flight passed every gate, while
+        # the headline divided the speedup by the REQUESTED level — publishing
+        # "32 % parallel efficiency" for a `--parallel 4` that never ran, wrong
+        # by the ratio requested/achieved. Efficiency is precisely the number an
+        # `execution.jobs` decision is argued from. Asking "did ANY parallelism
+        # happen" is a forced-MISS arm; the spurious hit is partial widening.
+        if p.jobs > 1 and got < p.jobs:
             instrument.append(
                 f"{p.label} requested `--parallel {p.jobs}` but ctest never had more than "
-                f"{got} test in flight. The widening did NOT take effect, so this sample "
-                f"measures one configuration three times — and would report `no gain` "
-                f"having tested nothing.")
+                f"{got} test(s) in flight. The widening {'did NOT take effect' if got <= 1 else 'only PARTLY took effect'}, "
+                f"so any speedup reported for `--parallel {p.jobs}` describes a level that "
+                f"never ran, and the parallel efficiency would be divided by the wrong "
+                f"denominator. If this lane genuinely cannot reach {p.jobs} — a suite smaller "
+                f"than the level, or RUN_SERIAL/RESOURCE_LOCK properties — then {p.jobs} is the "
+                f"wrong level to be measuring, not a detail to disclose.")
 
     # ── (1) DEFECT — #267 acceptance items 2, 5 and 4 ────────────────────────
     counts = {f"pass{p.index} ({p.label})": p.log["ran"]
@@ -534,12 +563,28 @@ def main() -> int:
                 "and a failure outside the parallel pass says the lane is red for reasons that "
                 "have nothing to do with `--parallel`. Fix the lane, then measure it.")
 
+    # ⚠️ AN UNPARSABLE COUNT IS AN INSTRUMENT FAILURE, NOT A SKIP. The driver
+    # writes the literal `unreadable` when a pass's LastTest.log could not be
+    # read, and this used to `continue` past it — which dropped that pass from
+    # the dict, so the `all(... in san ...)` guard below removed the ENTIRE
+    # item-5 check with nothing on the page. Demonstrated: five sanitizer
+    # reports at --parallel 4 against zero serially read as VALID once one
+    # pass's count was `unreadable`. Item 4's identical shape was already fixed;
+    # this is the sibling that still failed toward clean.
     san = {}
+    unreadable = []
     for p in present:
         try:
             san[p.index] = int(p.san)
         except (TypeError, ValueError):
-            continue
+            unreadable.append(f"{p.label} (`san_count={p.san!r}`)")
+    if unreadable:
+        instrument.append(
+            "#267 ACCEPTANCE ITEM 5 WAS NOT DISCHARGED: no sanitizer count for "
+            + ", ".join(unreadable) + ". The driver writes `unreadable` when a pass's "
+            "LastTest.log could not be read, so the concurrency comparison was never made — "
+            "and a report appearing at higher concurrency is a real defect until disproven, "
+            "which is not something to lose quietly.")
     par = [p for p in present if p.jobs > 1]
     ser = [p for p in present if p.jobs == 1]
     if par and ser and all(p.index in san for p in par + ser):
@@ -685,6 +730,15 @@ def main() -> int:
                 f"`linux-clang-debug`'s trusted 2.10x had its serial passes agree to 0.6 %.")
         else:
             out.append(f"**A-vs-A' agreement:** {verdict_line} ✅")
+        # Same class of knob as PARALLELISM_WITNESS_*, and it deserves the same
+        # banner: a 2.35x was published over serial passes 20.5 % apart simply
+        # by passing --tolerance-pct 100, with the widening visible only as a
+        # number beside a green tick.
+        if args.tolerance_pct > DEFAULT_TOLERANCE_PCT:
+            out.append(f"> ⚠️ **The A-vs-A' tolerance was WIDENED to {args.tolerance_pct:.1f} % "
+                       f"from the shipped {DEFAULT_TOLERANCE_PCT:.1f} %.** The check that makes "
+                       f"an A-B-A worth running was applied at a band this design does not stand "
+                       f"behind, so this sample is not comparable with one judged at the default.")
         out.append("")
     elif len(ser) != 2:
         instrument.append(
@@ -727,7 +781,16 @@ def main() -> int:
             f"unreadable witness degrades a sample toward VOID; it never certifies one.")
     else:
         try:
-            steals = [int(w["steal_ticks"]) for w in wit_ok if w.get("steal_ticks", "").strip()]
+            # ⚠️ THE WITNESS INDEX TRAVELS WITH THE VALUE. A `no-procfs` witness
+            # stays in wit_ok (deliberately — it is the normal Windows state)
+            # but carries no counter, so filtering it out of a positionally
+            # labelled list shifted every later interval by one: a rise during
+            # pass 3, a SERIAL pass, was reported as "pass 2 (parallel)" and
+            # then annotated with the run_paired bypass diagnosis — the precise
+            # wrong conclusion, in the one place this code exists to get right.
+            indexed = [(i, int(w["steal_ticks"])) for i, w in enumerate(wit)
+                       if usable(w) and w.get("steal_ticks", "").strip()]
+            steals = [v for _, v in indexed]
             if not steals:
                 out.append("**Machine witness:** steal counter unavailable on this platform — "
                            "calibration drift is the only machine observation here.")
@@ -753,8 +816,14 @@ def main() -> int:
                 # on. A rise across the B interval alone is exactly the bypass,
                 # and is now named as such rather than averaged into a total.
                 labels = ["pass 1 (serial)", "pass 2 (parallel)", "pass 3 (serial)"]
-                intervals = [(labels[i], steals[i + 1] - steals[i])
-                             for i in range(min(3, len(steals) - 1))]
+                intervals = [(labels[i], hi - lo)
+                             for (i, lo), (j, hi) in zip(indexed, indexed[1:])
+                             if j == i + 1 and i < len(labels)]
+                if len(intervals) < 3:
+                    out.append(f"> ⚠️ Steal could not be attributed to every pass — "
+                               f"{3 - len(intervals)} interval(s) are not bracketed by two "
+                               f"witnesses that both carry the counter, so a transient there "
+                               f"would go unnamed.")
                 hot = [(w, d) for w, d in intervals if d > args.steal_tolerance_ticks]
                 if hot:
                     voids.append(
@@ -779,10 +848,23 @@ def main() -> int:
             out.append("> ⚠️ **The witness could not count this machine's CPUs** and fell back to "
                        "a default for its N-proc arm. That figure is not a fact about this "
                        "machine; read the N-proc calibration below as unattributed.")
+        # ⚠️ ABSENCE IS AN ANOMALY, NOT A DEFAULT. `.get(key, DEFAULT)` assumed
+        # the best about a report that does not say how it was taken — the
+        # opposite of what machine-witness.py's own docstring says. Stripping
+        # the two keys removed the WEAKENED banner entirely from a genuinely
+        # weak witness, which is reachable from any archived artifact written by
+        # an older version, and archived artifacts are exactly what an operator
+        # re-judges.
         DEFAULT_ITERS, DEFAULT_REPEATS = 3_000_000, 5
+        undeclared = [f"witness{i}" for i, w in enumerate(wit)
+                      if w in wit_ok and ("iters" not in w or "repeats" not in w)]
+        if undeclared:
+            out.append(f"> ⚠️ **{', '.join(undeclared)} does not record how it was taken** "
+                       f"(no `iters`/`repeats`), so it cannot be read as a full observation. "
+                       f"An older witness format, most likely — re-run rather than assume.")
         try:
-            got_i = min(int(w.get("iters", DEFAULT_ITERS)) for w in wit_ok)
-            got_r = min(int(w.get("repeats", DEFAULT_REPEATS)) for w in wit_ok)
+            got_i = min(int(w["iters"]) for w in wit_ok if "iters" in w)
+            got_r = min(int(w["repeats"]) for w in wit_ok if "repeats" in w)
             if got_i < DEFAULT_ITERS or got_r < DEFAULT_REPEATS:
                 out.append(f"> ⚠️ **The machine witness ran WEAKENED** (`iters={got_i}` / "
                            f"`repeats={got_r}` against defaults {DEFAULT_ITERS} / "
@@ -851,7 +933,7 @@ def main() -> int:
     if rc == 0 and ser and par:
         base = sum(p.wall for p in ser) / len(ser)
         b = par[0]
-        speedup = base / b.wall if b.wall else 0.0
+        speedup = base / b.wall
         eff = speedup / b.jobs * 100.0 if b.jobs else 0.0
         sum_ser = sum(p.log["sum_s"] or 0 for p in ser) / len(ser)
         sum_par = b.log["sum_s"] or 0

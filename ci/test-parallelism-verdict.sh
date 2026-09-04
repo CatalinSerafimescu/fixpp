@@ -70,6 +70,8 @@ ap.add_argument("--forge-inflight", type=int, default=0)# pass index injecting b
 ap.add_argument("--labels", default="")           # override the A,B,A' labels
 ap.add_argument("--jobs-shape", default="")       # override the 1,N,1 requested levels
 ap.add_argument("--preset-drift", type=int, default=0)  # pass index recording another preset
+ap.add_argument("--witness-undeclared", action="store_true")  # omit iters/repeats
+ap.add_argument("--procfs-gap", type=int, default=-1)   # witness index with no steal counter
 a = ap.parse_args()
 
 d = pathlib.Path(a.dir); d.mkdir(parents=True, exist_ok=True)
@@ -154,23 +156,34 @@ for i in range(1, 4):
 for w in range(a.witnesses):
     one = split(a.calib)[w]
     many = f"{float(one) * 1.9:.3f}" if one else ""
+    declared = ("" if a.witness_undeclared
+                else f"iters={a.witness_iters}\nrepeats={a.witness_repeats}\n")
+    gap = (w == a.procfs_gap)
     (d / f"witness{w}.env").write_text(
-        f"label=w{w}\nprocs=4\niters={a.witness_iters}\nrepeats={a.witness_repeats}\n"
+        f"label=w{w}\nprocs=4\n{declared}"
         f"calib_1proc_s={one}\n"
         f"calib_nproc_s={many}\n"
-        f"steal_ticks={'' if a.witness_status == 'no-procfs' else split(a.steal)[w]}\n"
-        f"status={a.witness_status}\nmono_s=100.0\n")
+        f"steal_ticks={'' if (gap or a.witness_status == 'no-procfs') else split(a.steal)[w]}\n"
+        f"status={'no-procfs' if gap else a.witness_status}\nmono_s=100.0\n")
 GEN
 
-# $1 = cell name, $2 = expected exit, $3 = expected fragment, rest = gen flags
+# $1 = cell name, $2 = expected exit, $3 = expected fragment, rest = gen flags.
+# Anything after a literal `--` is passed to the CHECKER instead of the generator,
+# so a cell can exercise a tolerance flag without a second harness.
 cell() {
   local name="$1" want="$2" frag="$3"; shift 3
+  local -a gen=() chk=()
+  local seen=0
+  for arg in "$@"; do
+    if [ "$seen" = 0 ] && [ "$arg" = "--" ]; then seen=1; continue; fi
+    if [ "$seen" = 0 ]; then gen+=("$arg"); else chk+=("$arg"); fi
+  done
   rm -rf "$WORK/run"
-  if ! python3 "$WORK/gen.py" "$WORK/run" "$@" 2>&1; then
+  if ! python3 "$WORK/gen.py" "$WORK/run" ${gen+"${gen[@]}"} 2>&1; then
     bad "$name — the GENERATOR failed, so this cell tested nothing"; return
   fi
   local out rc=0
-  out="$(python3 "$CHECK" "$WORK/run" 2>&1)" || rc=$?
+  out="$(python3 "$CHECK" "$WORK/run" ${chk+"${chk[@]}"} 2>&1)" || rc=$?
   if [ "$rc" -ne "$want" ]; then
     printf '%s\n' "$out" | sed 's/^/  | /'
     bad "$name — expected exit $want, got $rc"; return
@@ -412,6 +425,70 @@ cell "T22 tests failing in a SERIAL pass is an INSTRUMENT FAILURE" 2 \
 cell "T28 a witness run below the shipped defaults is disclosed" 0 \
   "machine witness ran WEAKENED" --witness-iters 200000 --witness-repeats 2
 
+# ── T36-T44: the second adversarial round ────────────────────────────────────
+#
+# An independent Opus review, run in parallel with the Codex one from a session
+# that could not see its work, returned a DISJOINT set. Each cell below is a
+# state that read VALID, or a conclusion published from a measurement that was
+# never made.
+
+# ⚠️ ITEM 5 COULD BE SWITCHED OFF BY ONE WORD. The driver writes the literal
+# `unreadable` when a pass's LastTest.log cannot be read; the verdict skipped
+# past it, which dropped that pass from the dict and removed the ENTIRE
+# comparison — five sanitizer reports at --parallel 4 against zero serially read
+# as VALID. Item 4's identical shape had already been fixed; this sibling had
+# not.
+cell "T36 an unparsable sanitizer count is an INSTRUMENT FAILURE, not a skip" 2 \
+  "ITEM 5 WAS NOT DISCHARGED" --san 0,unreadable,0
+cell "T36b ...and it does not hide a real report behind it" 2 \
+  "ITEM 5 WAS NOT DISCHARGED" --san unreadable,5,0
+
+# ⚠️ "A LITTLE PARALLELISM HAPPENED" SATISFIED THE GUARD. `got <= 1` is a
+# total-failure test; a pass that requested 4 and never exceeded 2 in flight
+# passed everything, and the headline divided the speedup by the REQUESTED
+# level — publishing a parallel efficiency wrong by the ratio requested/achieved,
+# which is the number an execution.jobs decision is argued from.
+cell "T37 a PARTIAL widening is refused, not averaged into the headline" 2 \
+  "only PARTLY took effect" --inflight 1,2,1 --wall 1140.0,900.0,1135.0
+
+# ⚠️ THE A-B-A SHAPE ITSELF WAS UNTESTED. Found by neutering each gate in turn
+# and re-running this harness: 18 of 20 reddened a named cell; this one did not.
+# `inputs.jobs` is a free-text dispatch box, so `1,1,1` is a typo away.
+cell "T38 three serial passes are not an A-B-A" 2 "not the A-B-A design" \
+  --jobs-shape 1,1,1 --inflight 1,1,1
+cell "T39 three parallel passes are not an A-B-A" 2 "not the A-B-A design" \
+  --jobs-shape 4,4,4 --inflight 4,4,4
+cell "T40 one serial pass is not an A-B-A" 2 "not the A-B-A design" \
+  --jobs-shape 1,4,4 --inflight 1,4,4
+
+# ⚠️ A WIDENED TOLERANCE TURNED THE CENTRAL GATE OFF WITH NO BANNER. A 2.35x was
+# published over serial passes 20.5 % apart simply by passing --tolerance-pct
+# 100. Same class of knob as PARALLELISM_WITNESS_*, which does get a banner.
+cell "T41 a widened A-vs-A' tolerance is disclosed" 0 "tolerance was WIDENED" \
+  --wall 1140.0,540.0,1400.0 -- --tolerance-pct 100
+
+# ⚠️ A REPORT THAT DOES NOT SAY HOW IT WAS TAKEN CANNOT BE JUDGED. `.get(key,
+# DEFAULT)` assumed the best: stripping iters/repeats removed the WEAKENED
+# banner from a genuinely weak witness. Reachable from any archived artifact
+# written by an older version — and archived artifacts are what operators
+# re-judge.
+cell "T42 a witness that does not record how it was taken is disclosed" 0 \
+  "does not record how it was taken" --witness-undeclared
+
+# ⚠️ A FALSE ATTRIBUTION IN THE ONE PLACE THE CODE EXISTS TO GET RIGHT. A
+# `no-procfs` witness stays usable but carries no counter, so filtering it out of
+# a positionally labelled list shifted every later interval: a rise during pass 3,
+# a SERIAL pass, was reported as the parallel one and annotated with the
+# run_paired bypass diagnosis.
+cell "T43 an unbracketed steal interval is declared, not misattributed" 3 \
+  "could not be attributed to every pass" --procfs-gap 1 --steal 100,100,100,140
+
+# ⚠️ 0.00x IS NOT A MEASUREMENT, it is what the ZeroDivisionError guard prints —
+# beside a real serial time, on a VALID sample. The memory clause ten lines away
+# withholds for exactly this reason.
+cell "T44 a zero wall time is refused rather than printed as 0.00x" 2 \
+  "wall time of 0.0" --wall 1140.0,0.0,1135.0
+
 # ── T20: THE WINDOWS SHAPE ───────────────────────────────────────────────────
 #
 # `windows-msvc-asan` is the matrix critical path, has no measurement of any
@@ -428,7 +505,7 @@ cell "T20 a witness with no /proc is usable, not absent" 0 \
 # A sweep must assert how many cells ran: a `cell` invocation lost to an editing
 # slip removes a gate silently, and the tally below would still read "N passed,
 # 0 failed" for a smaller N.
-MUTANTS_DECLARED=39
+MUTANTS_DECLARED=49
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$MUTANTS_DECLARED" ]; then

@@ -102,9 +102,14 @@ jobs:
           WINDOWS: ${{ inputs.windows_lanes }}
         run: |
           set -euo pipefail
+          # `sorted(set(...))`: a duplicated lane produces two identical matrix
+          # entries, two jobs, and two uploads of the same artifact name — which
+          # actions/upload-artifact rejects, so the second job loses its sample
+          # AFTER paying hours of runner time, on the `if: always()` upload this
+          # workflow's own comment calls load-bearing.
           to_json() {
             printf '%s' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-              | grep -v '^$' | python3 -c 'import json,sys; print(json.dumps([l.rstrip("\n") for l in sys.stdin]))'
+              | grep -v '^$' | python3 -c 'import json,sys; print(json.dumps(sorted({l.rstrip("\n") for l in sys.stdin})))'
           }
           L="$(to_json "$LINUX")"; C="$(to_json "$LIBCXX")"; W="$(to_json "$WINDOWS")"
           echo "linux=$L"   >> "$GITHUB_OUTPUT"
@@ -161,7 +166,9 @@ jobs:
       # writes files of the shape the verdict reads. A field renamed on one side
       # of that seam leaves all those cells green and returns "0 of 3 passes"
       # from every real campaign — at a cost of three suite runs to find out.
-      # 35 s here, before the expensive jobs, is the whole point.
+      # Paying it here, before the expensive jobs, is the whole point — a seam
+      # break costs three suite runs to discover otherwise. Its cost is a
+      # CONDITION, not a number: `time ci/test-parallelism-aba-seam.sh`.
       - name: Apparatus self-test (driver -> verdict seam)
         run: ci/test-parallelism-aba-seam.sh
 
@@ -300,24 +307,32 @@ jobs:
           df -h "$GITHUB_WORKSPACE" | tail -1
 
       - name: A-B-A measurement
+        # ⚠️ VIA `env:`, NOT INTERPOLATED INTO THE SHELL SOURCE. The `plan` job
+        # already passes its lane lists this way; these three were expanded
+        # directly into `run:`, which is a standing snag on a workflow meant to
+        # be dispatched by hand many times.
+        env:
+          PRESET: ${{ matrix.preset }}
+          JOBS: ${{ inputs.jobs }}
+          SUBSET: ${{ inputs.subset }}
         run: |
           set -uo pipefail
           # The lane's OWN filter, not a convenient one. `linux-gcc-release` is
           # the only Tier-1 lane that runs the packaging tier, and the five
           # filtered lanes exclude it — measuring them with the wrong filter
           # would produce a count the pinned basis rejects.
-          case "${{ matrix.preset }}" in
+          case "$PRESET" in
             linux-gcc-release|linux-clang-coverage) ARGS="" ;;
             *)                                      ARGS="-LE packaging" ;;
           esac
           COV=""
-          [ "${{ matrix.preset }}" = linux-clang-coverage ] && COV="--coverage"
+          [ "$PRESET" = linux-clang-coverage ] && COV="--coverage"
           ci/run-parallelism-aba.sh \
-            --preset "${{ matrix.preset }}" \
-            --jobs "${{ inputs.jobs }}" \
-            --out "$GITHUB_WORKSPACE/aba-${{ matrix.preset }}" \
+            --preset "$PRESET" \
+            --jobs "$JOBS" \
+            --out "$GITHUB_WORKSPACE/aba-$PRESET" \
             --ctest-args "$ARGS" \
-            --subset "${{ inputs.subset }}" \
+            --subset "$SUBSET" \
             $COV
 
       # ⚠️ BEFORE THE VERDICT, and with `if: always()`. The verdict is allowed
@@ -334,9 +349,12 @@ jobs:
 
       - name: Verdict
         if: always()
+        env:
+          PRESET: ${{ matrix.preset }}
+          TOLERANCE: ${{ inputs.tolerance_pct }}
         run: |
-          python3 ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-${{ matrix.preset }}" \
-            --tolerance-pct "${{ inputs.tolerance_pct }}"
+          python3 ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --tolerance-pct "$TOLERANCE"
 
   # ── Tier-3 libc++ lanes ─────────────────────────────────────────────────────
   #
@@ -478,13 +496,16 @@ jobs:
       # value is used unchanged.
       - name: A-B-A measurement
         env:
+          PRESET: ${{ matrix.preset }}
+          JOBS: ${{ inputs.jobs }}
+          SUBSET: ${{ inputs.subset }}
           LD_LIBRARY_PATH: ${{ matrix.preset == 'linux-clang-libc++-tsan' && format('{0}/libcxx-tsan:', runner.temp) || '' }}${{ env.LD_LIBRARY_PATH }}
         run: |
           ci/run-parallelism-aba.sh \
-            --preset "${{ matrix.preset }}" \
-            --jobs "${{ inputs.jobs }}" \
-            --out "$GITHUB_WORKSPACE/aba-${{ matrix.preset }}" \
-            --subset "${{ inputs.subset }}"
+            --preset "$PRESET" \
+            --jobs "$JOBS" \
+            --out "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --subset "$SUBSET"
 
       - name: Upload the raw sample
         if: always()
@@ -496,9 +517,12 @@ jobs:
 
       - name: Verdict
         if: always()
+        env:
+          PRESET: ${{ matrix.preset }}
+          TOLERANCE: ${{ inputs.tolerance_pct }}
         run: |
-          python3 ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-${{ matrix.preset }}" \
-            --tolerance-pct "${{ inputs.tolerance_pct }}"
+          python3 ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --tolerance-pct "$TOLERANCE"
 
   # ── Tier-2 MSVC lanes ───────────────────────────────────────────────────────
   #
@@ -644,17 +668,21 @@ jobs:
       # alone rather than raising anything.
       - name: A-B-A measurement
         shell: bash
+        env:
+          PRESET: ${{ matrix.preset }}
+          JOBS: ${{ inputs.jobs }}
+          SUBSET: ${{ inputs.subset }}
         run: |
-          case "${{ matrix.preset }}" in
+          case "$PRESET" in
             windows-msvc-release) ARGS="" ;;
             *)                    ARGS="-LE packaging" ;;
           esac
           ci/run-parallelism-aba.sh \
-            --preset "${{ matrix.preset }}" \
-            --jobs "${{ inputs.jobs }}" \
-            --out "$GITHUB_WORKSPACE/aba-${{ matrix.preset }}" \
+            --preset "$PRESET" \
+            --jobs "$JOBS" \
+            --out "$GITHUB_WORKSPACE/aba-$PRESET" \
             --ctest-args "$ARGS" \
-            --subset "${{ inputs.subset }}" \
+            --subset "$SUBSET" \
             --no-peak
 
       - name: Upload the raw sample
@@ -668,6 +696,9 @@ jobs:
       - name: Verdict
         if: always()
         shell: bash
+        env:
+          PRESET: ${{ matrix.preset }}
+          TOLERANCE: ${{ inputs.tolerance_pct }}
         run: |
-          python ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-${{ matrix.preset }}" \
-            --tolerance-pct "${{ inputs.tolerance_pct }}"
+          python ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --tolerance-pct "$TOLERANCE"

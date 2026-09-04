@@ -208,6 +208,37 @@ p.write_text(s.replace(old, "ver=v0.18.0", 1), encoding="utf-8")
 MUT
 expect "T10 an sccache pin bumped in one file only is caught" 1 "SCCACHE PIN DISAGREEMENT"
 
+# ── T11: PyYAML missing must not read as "all invariants hold" ───────────────
+#
+# The campaign-trigger check needs PyYAML, and with it absent it warned and
+# returned while main() printed the all-clear and exited 0 — over a tree whose
+# campaign workflow was push:-triggered. A `::warning::` does not fail a job.
+#
+# ⚠️ AND IT WAS NOT LIVE ONLY BY STEP ORDERING. PyYAML reaches ci-script-pins
+# from an UNRELATED earlier step in tier1.yml, which pip-installs it for a
+# different pin entirely. Reorder or retire that step and this invariant would
+# have stood down in silence.
+fresh
+YAMLGONE="$WORK/noyaml"; mkdir -p "$YAMLGONE"
+echo 'raise ImportError("PyYAML deliberately unavailable for cell T11")' > "$YAMLGONE/yaml.py"
+t11_out="$(PYTHONPATH="$YAMLGONE" python3 "$CHECK" "$WORK/t" 2>&1)"; t11_rc=$?
+if [ "$t11_rc" -ne 2 ]; then
+  printf '%s\n' "$t11_out" | sed 's/^/  | /'
+  bad "T11 PyYAML absent — expected exit 2, got $t11_rc"
+# ⚠️ ANCHORED TO THE SUMMARY LINE. An unanchored `grep -F "all invariants hold"`
+# matched the checker's own ERROR message, which QUOTES the phrase it is
+# refusing to print — the probe tripping over its own diagnostic, and a cell
+# that reds on a correct tree. Only the summary line means the check passed.
+elif printf '%s\n' "$t11_out" | grep -q "^ci lane policy: all invariants hold"; then
+  printf '%s\n' "$t11_out" | sed 's/^/  | /'
+  bad "T11 PyYAML absent still reported the all-clear"
+elif ! printf '%s\n' "$t11_out" | grep -qF "could not be evaluated"; then
+  printf '%s\n' "$t11_out" | sed 's/^/  | /'
+  bad "T11 PyYAML absent exited 2 but without saying which check did not run"
+else
+  ok "T11 PyYAML absent fails closed instead of reporting the all-clear"
+fi
+
 # ── T6: THE EMPTY SCAN ───────────────────────────────────────────────────────
 #
 # If the workflows move or the patterns break, "0 violations over 0 sites" must
@@ -224,7 +255,7 @@ expect "T6 an empty scan is an instrument failure, not a pass" 2 "ZERO apt-backe
 # below would still read "N passed, 0 failed" for a smaller N. Both sibling
 # harnesses in this directory assert their count; this one did not, and four
 # cells were added to it before anyone noticed.
-CELLS_DECLARED=12
+CELLS_DECLARED=13
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

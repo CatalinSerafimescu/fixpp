@@ -64,6 +64,9 @@ CAMPAIGN_TRIGGERS = {"workflow_dispatch"}
 
 # The lane that must build and replay the fuzz corpora, and the flag that does it.
 FUZZ_PRESET = "linux-clang-asan"
+# Set when the matrix-membership half actually ran; read by main()'s summary so
+# a skipped half is never reported as a passing one.
+MATRIX_CHECKED = False
 FUZZ_FLAG = "FIXPP_BUILD_FUZZ"
 
 
@@ -138,6 +141,9 @@ def check_fuzz_lane(root, violations):
         except ImportError:
             print("::warning::PyYAML unavailable — skipped the matrix-membership half "
                   "of the fuzz-lane check. The preset-value half still ran.")
+        else:
+            global MATRIX_CHECKED
+            MATRIX_CHECKED = True
     return 1
 
 
@@ -206,21 +212,29 @@ def check_campaign_trigger(root, violations):
     quietly reports clean over a subject that is not there is the failure mode
     every other file in this directory exists to remove.
 
-    Returns nothing.  An earlier version returned 1/0 for "did the check run",
-    a third convention alongside this file's `None` => exit 2 one, and the call
-    site discarded it — a documented protocol with no consumer.
+    Returns True when a verdict was actually reached, False when the check could
+    not run.  ⚠️ THE CALLER MUST CONSUME THIS. An earlier version returned a
+    value nobody looked at, and with PyYAML unavailable the function warned and
+    returned while `main()` printed **"ci lane policy: all invariants hold"** and
+    exited 0 — over a tree whose campaign workflow was `push:`-triggered. A
+    `::warning::` does not fail a job.
+
+    That was not live only by step ordering: PyYAML reaches this job from an
+    UNRELATED earlier step in tier1.yml (`Regression pin — tier1.yml python
+    policy`, which pip-installs it). Reorder or retire that step and this
+    invariant stands down silently.
     """
     path = root / ".github" / "workflows" / CAMPAIGN_WORKFLOW
     if not path.is_file():
         print(f"  campaign trigger: {CAMPAIGN_WORKFLOW} is not present — check stood down "
               f"(retiring the campaign is legitimate; this is a disclosure, not a pass).")
-        return
+        return True
     try:
         import yaml
     except ImportError:
         print("::warning::PyYAML unavailable — the campaign-trigger check did NOT run. "
               "Do not read this run as evidence that the campaign is still dispatch-only.")
-        return
+        return False
 
     # ⚠️ A PARSE ERROR IS A VIOLATION, NOT A CRASH. Caught because a mutant
     # found it: the T8 cell of ci/test-ci-lane-policy.sh produced a workflow
@@ -236,7 +250,7 @@ def check_campaign_trigger(root, violations):
             f"({exc.__class__.__name__}), so this check cannot say what triggers it — and "
             f"a workflow that does not parse does not run at all. Refusing to report it "
             f"dispatch-only.")
-        return
+        return True
     # ⚠️ YAML 1.1 resolves a bare `on:` key to the BOOLEAN True, not the string
     # "on".  A check that looked up doc["on"] would find nothing, conclude there
     # were no triggers, and pass — silently, on every future version of the file.
@@ -245,7 +259,7 @@ def check_campaign_trigger(root, violations):
         violations.append(
             f"CAMPAIGN TRIGGER UNREADABLE: {CAMPAIGN_WORKFLOW} has no parsable `on:` block, so "
             f"this check cannot say what triggers it. Refusing to report it dispatch-only.")
-        return
+        return True
 
     triggers = set(block) if isinstance(block, (dict, list)) else {str(block)}
     extra = sorted(triggers - CAMPAIGN_TRIGGERS)
@@ -259,6 +273,7 @@ def check_campaign_trigger(root, violations):
             f"It is a one-off campaign, not a standing job.")
     else:
         print(f"  campaign trigger: {CAMPAIGN_WORKFLOW} is {'/'.join(sorted(triggers))} only")
+    return True
 
 
 def main():
@@ -270,9 +285,14 @@ def main():
     violations = []
     apt_seen = check_apt_callers(root, violations)
     fuzz_seen = check_fuzz_lane(root, violations)
-    check_campaign_trigger(root, violations)
+    campaign_judged = check_campaign_trigger(root, violations)
     check_sccache_pins(root, violations)
     if apt_seen is None or fuzz_seen is None:
+        return 2
+    # A check that could not run must not be reported as one that passed.
+    if not campaign_judged:
+        print("::error::the campaign-trigger invariant could not be evaluated (see the warning "
+              "above). Refusing to report `all invariants hold` over a check that did not run.")
         return 2
 
     # ⚠️ AN EMPTY SCAN IS AN INSTRUMENT FAILURE, NOT A PASS. If the workflows move
@@ -286,7 +306,12 @@ def main():
         return 2
 
     print(f"  apt-backed install sites scanned: {apt_seen} (all must use {GUARD})")
-    print(f"  fuzz lane: {FUZZ_PRESET} {FUZZ_FLAG}=ON, in the tier1 linux matrix")
+    # ⚠️ The matrix-membership half is skipped when PyYAML is unavailable, so
+    # this line must not assert it unconditionally — that would be a positive
+    # result printed for a check that did not run.
+    print(f"  fuzz lane: {FUZZ_PRESET} {FUZZ_FLAG}=ON"
+          + (", in the tier1 linux matrix" if MATRIX_CHECKED else
+             " (matrix membership NOT checked — PyYAML unavailable)"))
 
     if violations:
         for v in violations:
