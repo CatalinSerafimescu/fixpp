@@ -727,6 +727,30 @@ If a lane's result ever turns on a margin small enough for that to matter, the a
   across an experiment everyone agrees was clean. A 10 % gate would void honest samples routinely,
   and a gate that cries wolf gets widened until it detects nothing.
 
+### Round 2 — an independent review, and what a count assertion cannot see
+
+A second adversarial review ran in parallel from a session that could not see the first, and returned
+a **disjoint** set. Four more states that read VALID:
+
+| now checked | what it caught |
+|---|---|
+| an unparsable `san_count` is an INSTRUMENT FAILURE | the driver's own literal `unreadable` removing the **entire** item-5 comparison — five sanitizer reports at `--parallel 4` against zero serially |
+| the achieved level must **reach** the requested one | a pass requesting 4 that never exceeded 2 in flight, with a parallel efficiency published for a level that never ran |
+| a widened `--tolerance-pct` is disclosed | a speedup published over serial passes 20 % apart, the widening visible only beside a green tick |
+| steal intervals carry their witness index | a rise during a **serial** pass reported as the parallel one, annotated with the bypass diagnosis above — the precise wrong conclusion |
+
+⚠️ **The most useful finding was about the harness, not the verdict: two gates could be deleted with
+every cell still green.** A harness that asserts its own cell count proves a cell was not *lost*. It
+cannot notice a gate *added and never covered* — the count rises, everything passes, and the harness
+certifies a checker one of whose gates nothing watches. That is the same failure the harness exists
+to prevent, one level up.
+
+The inverse sweep is now `ci/sweep-verdict-gates.sh`: neuter each gate in turn, run the shipped
+harness, require some cell to redden. It reports every gate covered on the current tree. It is
+deliberately **not** in CI — it runs the whole harness once per gate, on the job that already
+dominates a pre-gate PR's wall clock, and its condition only changes when someone edits the verdict.
+Run it by hand when adding or changing a gate.
+
 ### The instruments are themselves instruments
 
 `ci/test-parallelism-verdict.sh` proves every gate the verdict applies can fire, each requiring its

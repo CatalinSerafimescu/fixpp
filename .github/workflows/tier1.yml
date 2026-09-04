@@ -2162,8 +2162,19 @@ jobs:
       #
       # Both invariants were true when written and pinned by nothing; a hostile
       # review named that as the defect. Synthetic copies only, no build.
+      # ⚠️ INSTALLS ITS OWN PyYAML, and that line is not decoration. The checker
+      # now EXITS 2 rather than warning when PyYAML is missing — a `::warning::`
+      # does not fail a job, so the old behaviour printed "all invariants hold"
+      # over a tree whose campaign workflow could have been push:-triggered.
+      # Making it fail closed is only safe if the dependency is this step's own:
+      # PyYAML reached this job as a SIDE EFFECT of an unrelated earlier pin
+      # (#251's, which pip-installs it), so reordering or retiring that step
+      # would have reddened this one for a reason naming neither. Same idiom as
+      # the two steps that already do it; `pip install` is a no-op when present.
       - name: Regression pin — CI lane policy (#300 callers, #213 fuzz lane, #267 campaign trigger)
-        run: bash ci/test-ci-lane-policy.sh
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
+          bash ci/test-ci-lane-policy.sh
 
       # #267 — the A-B-A parallelism verdict's own gates, over a SYNTHETIC
       # sample: every way the verdict can reject one is proven to fire, and each
