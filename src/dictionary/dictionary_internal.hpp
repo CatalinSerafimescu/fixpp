@@ -154,6 +154,47 @@ struct GroupCtxDelim {
     return false;
 }
 
+// fixpp#264 — the ONE walk that builds a group context's ancestor chain: count
+// tags from `start` outward to the root, reversed to OUTERMOST FIRST, matching
+// `GroupCtxDelim::parent_path` and `group_ctx_key::parent_path`. Both EXCLUDE
+// the group's own `no_tag` (C-1.3 / Entity 1), so callers pass the group count
+// tag's OWN `group_no_tag`, not its `no_tag`.
+//
+// This walk is deliberately UNCLAMPED. The K = `kMaxGroupContextDepth` clamp
+// belongs to `make_group_ctx_delim` / `make_group_ctx_key` alone, which keep
+// the first — i.e. the OUTERMOST — K entries. Applying a clamp here instead
+// stops the walk early and therefore keeps the INNERMOST K, which is a
+// DIFFERENT key for the same context whenever the chain is longer than K. That
+// is what fixpp#264 was: the FR-023 completeness probe clamped during its walk
+// while `as_table_view()` and the loaders' capture path clamped after theirs,
+// so a chain of K+1 or more produced two keys, the probe's `lower_bound` missed
+// a record that was present, and a well-formed dictionary was rejected at load.
+// One walk here plus one clamp in the key builders is what keeps the two sides
+// from drifting again; do not reintroduce a bound in this function.
+//
+// `parent_of` returns 0 at the root. The `find` guard is what makes the walk
+// terminate when the parent relation contains a cycle: the per-message field
+// run is deduped to one FieldRef per tag, so a message that nests group A
+// inside B in one place and B inside A in another collapses to a two-element
+// cycle. The chain is truncated at the repeat instead of growing without bound,
+// and a truncated key matches no stored record — FR-023's fail-closed
+// disposition. This is not a new constraint on either caller: `as_table_view()`
+// already walked this relation UNBOUNDED, so the guard removes a pre-existing
+// hang rather than introducing one, and the probe's old K bound was masking the
+// same exposure on its side only by accident.
+template <typename ParentOf>
+[[nodiscard]] inline std::vector<std::uint16_t> group_parent_path(std::uint16_t start,
+                                                                  ParentOf parent_of) {
+    std::vector<std::uint16_t> path;
+    std::uint16_t cur = start;
+    while (cur != 0 && std::ranges::find(path, cur) == path.end()) {
+        path.push_back(cur);
+        cur = parent_of(cur);
+    }
+    std::ranges::reverse(path);
+    return path;
+}
+
 // 083 T026/T027 — the loaders' shared per-message capture state for Entity 2
 // (research.md D-1 "first-emission capture"; contracts/group_ctx_delims.md
 // C-1.1/C-1.2/C-1.3). Defined here rather than in either loader so the XML and
@@ -277,13 +318,10 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
         if (!has_members.contains(fr.tag)) {
             continue;  // C-3.4a: scalar reuse contributes no context
         }
-        std::vector<std::uint16_t> path;
-        std::uint16_t cur = fr.group_no_tag;
-        while (cur != 0 && path.size() < kMaxGroupContextDepth) {
-            path.push_back(cur);
-            cur = parent_of(cur);
-        }
-        std::ranges::reverse(path);
+        // fixpp#264: the chain is walked UNCLAMPED and `make_group_ctx_delim`
+        // applies the K clamp, exactly as the registration side does. Clamping
+        // here instead kept the innermost K and built a different key.
+        auto const path = group_parent_path(fr.group_no_tag, parent_of);
         GroupCtxDelim const probe = make_group_ctx_delim(path, fr.tag, /*delimiter=*/0);
         // PRECONDITION: `delims` is sorted by `group_ctx_delim_less`. Both call
         // sites (each loader's `finalize()`) sort the per-message records with

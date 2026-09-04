@@ -529,6 +529,10 @@ table_view Dictionary::as_table_view() const {
                 immediate_parent[fr.tag] = fr.group_no_tag;
             }
         }
+        auto const parent_of = [&](std::uint16_t tag) noexcept -> std::uint16_t {
+            auto const pit = immediate_parent.find(tag);
+            return (pit != immediate_parent.end()) ? pit->second : std::uint16_t{0};
+        };
         for (auto const& fr : all_fields) {
             if (group_first_field(fr.tag) == 0) {
                 continue;
@@ -573,14 +577,12 @@ table_view Dictionary::as_table_view() const {
             //    MassQuote: fr.group_no_tag == 296 (295's count-field's own
             //    enclosing group), immediate_parent[296] == 0 (296 is
             //    top-level) → path == [296].
-            std::vector<std::uint16_t> path;
-            std::uint16_t cur = fr.group_no_tag;
-            while (cur != 0) {
-                path.push_back(cur);
-                auto const pit = immediate_parent.find(cur);
-                cur = (pit != immediate_parent.end()) ? pit->second : std::uint16_t{0};
-            }
-            std::ranges::reverse(path);
+            //
+            //    fixpp#264: the walk itself is `detail::group_parent_path`,
+            //    shared with the FR-023 completeness probe that has to build
+            //    the identical key. It is unclamped; `make_group_ctx_delim` /
+            //    `make_group_ctx_key` apply the K clamp downstream.
+            auto const path = detail::group_parent_path(fr.group_no_tag, parent_of);
 
             // 4) Delimiter = the group's DECLARATION first field, NOT
             //    members.front(): `all_fields` is tag-sorted, so members.front()
