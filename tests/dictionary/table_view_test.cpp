@@ -566,3 +566,51 @@ TEST(TableViewTest, Fix44ValidationSurfaceForProxyCorruptCell) {
         << "Symbol(55) must be out-of-context on TestRequest(35=1) for the "
            "proxy_corrupt induction to yield Reject(35=3, 373=2)";
 }
+
+// ============================================================================
+// fixpp#264 follow-up — the query-side clamp precondition is ASSERTED, and this
+// is the witness that the assertion can actually fire.
+//
+// The store keys a context on the OUTERMOST `kMaxGroupContextDepth` ancestors
+// (`make_group_ctx_key`); `group_ctx_query` does NOT clamp, and
+// `group_ctx_equal::eq` compares the span with a four-iterator `std::equal`, so
+// an over-long path MISSES every record rather than matching the clamped one.
+// No production caller can build such a span — every one derives it from a
+// `wire::group_context`, whose `pushed()` drops the push at capacity — so this
+// guards a footgun the type system does not: "clamped key" and "raw ancestor
+// chain" are both `std::span<std::uint16_t const>`.
+//
+// Shipping the assertion without this test would leave a check nobody has ever
+// seen fire, which is the same defect class as a gate that cannot report.
+// ============================================================================
+TEST(TableViewCtxQuery, OverLongAncestorPathTripsTheClampAssertion) {
+#ifdef NDEBUG
+    // Deliberately still COMPILED and still COUNTED. Guarding the whole TEST
+    // with #ifndef NDEBUG would delete it from the release leg's test list
+    // instead of reporting it, and a test that silently disappears from one
+    // preset is indistinguishable from one that never existed.
+    GTEST_SKIP() << "assert() is compiled out under NDEBUG; this pins the debug-build guard.";
+#else
+    fixpp::dict::table_view tv;
+
+    // Register the context under a SHORT path — this also sets the group bit,
+    // without which `group_first_field_exact` returns early and never reaches
+    // the query the assertion guards.
+    std::array<std::uint16_t, 1> const short_path{901};
+    tv.set_group_first_ctx("M", std::span<std::uint16_t const>{short_path}, 100, 110);
+    ASSERT_EQ(tv.group_first_field_exact("M", std::span<std::uint16_t const>{short_path},
+                                         std::uint16_t{100}),
+              std::optional<std::uint16_t>{110})
+        << "precondition: the SHORT-path lookup must hit, or this test would be asserting on a "
+           "table_view that answers nothing and the death below would prove little.";
+
+    // One element past the clamp is enough: the length mismatch alone is a miss.
+    std::array<std::uint16_t, fixpp::dict::kMaxGroupContextDepth + 1> long_path{};
+    EXPECT_DEATH(
+        {
+            (void)tv.group_first_field_exact("M", std::span<std::uint16_t const>{long_path},
+                                             std::uint16_t{100});
+        },
+        "UNCLAMPED ancestor path");
+#endif
+}
