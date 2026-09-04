@@ -123,11 +123,23 @@ snapshot() {
     SNAPPED+=("$1")
     cp "$1" "$(bkp $(( ${#SNAPPED[@]} - 1 )))"
 }
+# ⚠️ A FAILED RESTORE MUST BE LOUD. Discarding cp's status means a full disk or an
+# unwritable backup dir leaves a FORCED source with no signal at all -- on a script whose own
+# header says that content is unrecoverable from git.
 restore() {
-    local i
+    local i d
     for i in "${!SNAPPED[@]}"; do
-        [ "${SNAPPED[$i]}" = "$1" ] && { cp "$(bkp "$i")" "$1"; return 0; }
+        if [ "${SNAPPED[$i]}" = "$1" ]; then
+            d=$(bkp "$i")
+            if ! cp "$d" "$1"; then
+                echo "    !! RESTORE FAILED for $1 -- it may still hold a forced branch" >&2
+                NOTES+=("RESTORE-FAILED $1")
+                return 1
+            fi
+            return 0
+        fi
     done
+    NOTES+=("NO-SNAPSHOT $1")
     return 1
 }
 
@@ -156,8 +168,23 @@ restore_all() {
 # unrecoverable from git. Verified: `trap "echo TRAPPED" INT; sleep 5; echo CONTINUED`
 # prints BOTH.
 trap 'restore_all; rm -rf "$backup_dir"' EXIT
-trap 'echo; echo "pump-red-arm: interrupted -- restoring sources"; exit 130' INT
-trap 'echo; echo "pump-red-arm: terminated -- restoring sources"; exit 143' TERM
+# ⚠️ `exit` FROM THE HANDLER SKIPS THE CLEANUP REBUILD, and restoring sources is only half
+# the invariant. The EXIT trap restores every snapshot, but the "rebuild this run's targets"
+# loop lives in the main body and never runs -- so an interrupted run leaves CORRECT sources
+# beside a binary built from zeroed-window text. That is exactly the state this repo already
+# lost 1h39m to: a later reader measures the forced binary and reports a defect that does not
+# exist. Sources are safe, so the remedy is to say so loudly rather than to start a build
+# while the user is trying to stop us.
+warn_stale_binaries() {
+    local t
+    echo "pump-red-arm: sources restored, but the cleanup rebuild did NOT run." >&2
+    echo "  These targets may still hold a FORCED branch -- rebuild before measuring:" >&2
+    for t in $(awk -F'\t' '!/^#/ && NF>=4 {print $4}' "$arms_file" | sort -u); do
+        echo "    cmake --build build/$preset --target $t" >&2
+    done
+}
+trap 'echo; echo "pump-red-arm: interrupted"; warn_stale_binaries; exit 130' INT
+trap 'echo; echo "pump-red-arm: terminated"; warn_stale_binaries; exit 143' TERM
 
 force_site() {
     # Rewrite the run_window_then_ready call that follows $2 in file $1 so both
@@ -175,6 +202,10 @@ sys.path.insert(0, os.environ["FIXPP_CI_DIR"])
 from cxx_blank import blank_non_code
 
 path, anchor = sys.argv[1], sys.argv[2]
+# NOTE: universal newlines. CRLF input is read as LF and written back as LF, so forcing a
+# site in a CRLF-line-ended file rewrites the WHOLE file's line endings, not just the call.
+# This repo is LF-only, so it is a note rather than a guard -- but a caller in a CRLF repo
+# must open with newline="" at both ends.
 src = open(path, encoding="utf-8").read()
 code = blank_non_code(src)
 assert len(code) == len(src), "lexer broke the offset-preserving contract"
@@ -279,6 +310,18 @@ echo
 # lockstep with it at four sites; a sixth arm category added to one and forgotten in the
 # other would have silently changed the exit code. Derive the split from the tags instead.
 hung=$(printf '%s\n' "${NOTES[@]-}" | grep -c '^HUNG ' || true)
+# ⚠️ ASSERT AN EXECUTION COUNT. Three parsers read this file -- two `awk`s and the `read`
+# loop -- and they disagree on a row with NO TRAILING NEWLINE: `awk` counts it, `read` returns
+# non-zero so the loop body never runs. A 1-arm file without a final newline therefore
+# satisfied the non-vacuity guard, ran nothing, and exited 0 -- defeating that guard on its
+# own terms. Patching `read` closes this instance; counting what actually executed closes the
+# class, which is the repo's standing rule for verification sweeps.
+ran=$(( pass + ${#NOTES[@]} ))
+if [ "$ran" -ne "$n_arms" ]; then
+    echo "pump-red-arm: parsed ${n_arms} arm(s) but EXECUTED ${ran} -- refusing to report" >&2
+    echo "  (a row with no trailing newline is the usual cause: the parsers disagree)" >&2
+    exit 3
+fi
 echo "arms: ${pass} RED-as-required, $(( ${#NOTES[@]} - hung )) FAILED, ${hung} INCONCLUSIVE"
 if (( ${#NOTES[@]} )); then printf '  - %s\n' "${NOTES[@]}"; fi
 [ "${#NOTES[@]}" -eq 0 ]

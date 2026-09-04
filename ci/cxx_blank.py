@@ -19,7 +19,11 @@ quote that idiom INSIDE explanatory comments. Matching raw text can therefore re
 COMMENT: the arm then builds unforced, the test passes, and the driver reports SILENT --
 which reads as "the migration does not report" rather than "the driver edited prose".
 
-Ported VERBATIM from `ci/pump-census.sh`. That copy and `pump-get-sweep.sh`'s stay where
+Ported from `ci/pump-census.sh` and since DIVERGED: the backslash-CRLF splice branch exists
+only here. That divergence is deliberate and is the reason to prefer this module -- but it
+means a `diff` against the sibling is no longer expected to be empty, and the sibling still
+carries the gap. (An earlier revision of this line said "VERBATIM", which stopped being true
+the moment the CRLF branch was added.) That copy and `pump-get-sweep.sh`'s stay where
 they are for now: each is pinned by its own harness (`ci/test-pump-census.sh`), so folding
 them in is a change to a tested instrument and belongs in its own PR, not in a batch that
 merely needed to stop making copy number five. Consolidating the remaining copies onto this
@@ -93,11 +97,18 @@ def blank_non_code(source: str) -> str:
             # characters are still blanked (preserving the physical line
             # count other callers rely on for path:line reporting).
             # ⚠️ CRLF SPLICES TOO. The sibling this was ported from recognised only
-            # backslash-LF, so on a CRLF file it ENDED the comment at the CR and handed the
-            # next physical line back as code -- which is precisely the false-clean this
-            # module exists to prevent: `// hidden \<CRLF>run_window_then_ready(...)` came
-            # out of the blanker with the call intact, and a rewriting caller would then
-            # edit commented-out text and report the arm SILENT.
+            # backslash-LF, so on CRLF input it ENDED the comment at the CR and handed the
+            # next physical line back as code: `// hidden \<CRLF>run_window_then_ready(...)`
+            # came out of the blanker with the call intact.
+            #
+            # ⚠️ SCOPE, because the first version of this comment overclaimed it: this is a
+            # MODULE-CONTRACT defect, and it is NOT reachable through `ci/pump-red-arm.sh`.
+            # That caller reads with `open(path, encoding="utf-8")`, whose universal-newline
+            # translation turns CRLF into LF *before* `blank_non_code` sees it (measured: 39
+            # bytes on disk, 38 characters as read, no CR), so the pre-existing LF branch
+            # already covered it there. The fix stands for any caller reading bytes or
+            # passing `newline=""` -- state what it protects, not a consequence it does not
+            # have.
             if ch == "\\" and i + 1 < n and source[i + 1] == "\n":
                 out.append(blank(ch))
                 out.append(blank(source[i + 1]))

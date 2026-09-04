@@ -157,6 +157,32 @@ inline constexpr const char* kWindowMiss =
 // The narrower reason that holds either way: a caller checking `has_value()`
 // must not proceed on a fabricated success.
 //
+// ⚠️ HOISTING WIDENED THIS PRECONDITION'S POPULATION, so re-measure it rather than
+// inheriting the answer. It used to range over the three files that defined the
+// constant; it now ranges over every user of a shared one, and it grows silently
+// with each new adopter. The recipe (a PROCEDURE — the answer is a measurement
+// and belongs nowhere in this comment):
+//
+//     comm -12 \
+//       <(git grep -l kWindowMissSentinel -- tests/ | grep -v pump_until_ready.hpp | sort) \
+//       <(git grep -lE 'EXPECT_NONFATAL_FAILURE|ScopedFakeTestPartResultReporter|gtest-spi' \
+//              -- tests/ | sort)
+//
+// The precondition holds while that intersection is EMPTY, transitively through
+// includes.
+//
+// ⚠️ THIS FILE MUST BE EXCLUDED FROM THE ADOPTER SIDE, and the first version of
+// this recipe was not — it reported a hit on the very first run. This header
+// appears in BOTH lists for reasons that are not adoption: it DEFINES the
+// constant, and the paragraph above NAMES the interceptor macros in prose. A
+// recipe that flags its own documentation cries wolf on every future run, which
+// is how a real hit gets waved through.
+//
+// ⚠️ Do not `head` either list — this is a claim about a whole SET, and truncating
+// one side is how a set-difference reports clean. The interceptor grep is proven
+// able to fire (it returns several files today), so an empty intersection is a
+// measurement rather than a broken pattern.
+//
 // Hoisted here from three call-site files (#324's `send_path_test.cpp`,
 // `tc_establishment_test.cpp`, `tc_seqnum_test.cpp`), which each carried a
 // verbatim copy. Keeping it local was the right call while three files needed it
