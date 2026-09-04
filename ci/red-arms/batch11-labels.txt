@@ -11,13 +11,30 @@
 # not be a SUBSTRING of another label either, because the driver locates a label by
 # substring match on `strings`. Batch 11 checked uniqueness within its own 82 and shipped
 # `Fixture::feed`, which already existed at three older sites and is a suffix of twelve
-# others; it matched 22 unrelated binaries. Derive the check, do not eyeball it:
+# others; it matched 22 unrelated binaries.
+#
+# ⚠️⚠️ THE RECIPE FIRST PUBLISHED HERE SAW HALF THE TREE, AND IT WAS THE RECIPE USED TO
+# "VERIFY" THIS BATCH'S LABELS. It was single-line:
 #
 #   git grep -ho 'kWindowMiss << "[^"]*"' -- tests/ | sed 's/.*<< "//; s/"$//' | sort -u
 #
+# clang-format wraps roughly half the call sites, putting the label on the NEXT line:
+#
+#   ADD_FAILURE() << fixpp::test_support::kWindowMiss
+#                 << "AdminEmitMixedPathTest::open_sync";
+#
+# so it found 121 labels where the tree has ~248. The batch's conclusion (no duplicate, one
+# benign substring) happened to survive re-checking with a complete extractor -- that was
+# luck, not method. Use the two-line form, which sees both shapes:
+#
+#   git grep -h -A1 kWindowMiss -- tests/ ':!tests/support/pump_until_ready.hpp' \
+#     | grep -oE '"[^"]{3,}"' | tr -d '"' | sort -u
+#
 # then require each new label to appear once in that list and to be a substring of nothing
-# else in it. A bare `Fixture::` prefix is the trap: several fixtures are literally named
-# `Fixture`, so qualify by what the file is about.
+# else in it. ⚠️ It OVER-approximates slightly (it will pick up a neighbouring string
+# literal), and that is the SAFE direction for a uniqueness check: an extra candidate costs
+# one needless look, a missing one hides a real collision. A bare `Fixture::` prefix is the
+# trap -- several fixtures are literally named `Fixture`, so qualify by what the file is about.
 AdminDistinctNowTest::close_sync
 AdminDistinctNowTest::feed_sync
 AdminDistinctNowTest::open_sync
