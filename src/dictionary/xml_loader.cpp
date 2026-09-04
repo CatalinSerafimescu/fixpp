@@ -695,8 +695,9 @@ void LoaderState::expand_field_list(
                 delim_cap->pending.pop_back();
                 delim_cap->path.pop_back();
                 if (captured != 0) {
-                    delim_cap->out.push_back(
-                        detail::make_group_ctx_delim(delim_cap->path, no_tag, captured));
+                    delim_cap->out.push_back(detail::CapturedDelim{
+                        detail::make_group_ctx_delim(delim_cap->path, no_tag, captured),
+                        delim_cap->path});
                 }
                 // 083 T036 (FR-006 / C-6.1): `captured == 0` means this
                 // <group> emitted no first member at all, so its delimiter is
@@ -1013,7 +1014,16 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         // be reached twice in a message — e.g. via a component used in both
         // header and body — and both walks read the same declaration, so the
         // duplicates agree by construction and the first is kept.
-        detail::flush_group_ctx_delims(h, delim_cap);
+        // #264 review: past kMaxGroupContextDepth two distinct contexts can
+        // clamp to one key, and the key-dedup inside would silently drop the
+        // second. Refuse the dictionary instead of answering for both.
+        if (auto const clash = detail::flush_group_ctx_delims(h, delim_cap); clash) {
+            throw xml_parse_error(
+                "dict::xml_parse_error: two distinct group contexts for NumInGroup tag " +
+                std::to_string(*clash) + " in message '" + std::string{md.msg_type} +
+                "' have ancestor chains longer than kMaxGroupContextDepth that collapse to the "
+                "same context key, so they cannot be stored separately");
+        }
     }
 
     // ── 083 T028/T029 (research D-10 / C-1.4b / C-7.2's write-order leg) ────

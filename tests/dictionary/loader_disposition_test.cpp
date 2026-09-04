@@ -338,6 +338,51 @@ inline constexpr std::uint16_t kDeepDelimBase = 1000;  // D<i>   = 1000 + i
 inline constexpr std::uint16_t kDeepLeafNoTag = 9000;
 inline constexpr std::uint16_t kDeepLeafDelim = 9001;
 
+// ── fixpp#264 review (F1) fixture: two DISTINCT contexts for the same group
+// whose ancestor chains differ only PAST the clamp, so they collapse to one
+// `group_ctx_key`. `NoLeaf` is declared under two siblings at level K+1, so its
+// two chains are `[NoA1..NoAK, NoX]` and `[NoA1..NoAK, NoY]` — identical in
+// their first K elements, which is all the key keeps.
+//
+// The two contexts also declare DIFFERENT delimiters, which is what makes the
+// collision harmful rather than merely redundant: whichever record survives a
+// key-based dedup answers for both, so a message nested under the loser parses
+// with the winner's delimiter.
+[[nodiscard]] std::string make_clamp_collision_xml() {
+    auto const k = static_cast<std::uint16_t>(fixpp::dict::kMaxGroupContextDepth);
+    std::string xml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'><fields>)"
+                      R"(<field number='35' name='MsgType' type='STRING'/>)";
+    for (std::uint16_t i = 1; i <= k; ++i) {
+        xml += "<field number='" + std::to_string(kDeepCountBase + i) + "' name='NoA" +
+               std::to_string(i) + "' type='NUMINGROUP'/>";
+        xml += "<field number='" + std::to_string(kDeepDelimBase + i) + "' name='D" +
+               std::to_string(i) + "' type='STRING'/>";
+    }
+    xml += R"(<field number='920' name='NoX' type='NUMINGROUP'/>)"
+           R"(<field number='921' name='NoY' type='NUMINGROUP'/>)"
+           R"(<field number='1920' name='DX' type='STRING'/>)"
+           R"(<field number='1921' name='DY' type='STRING'/>)"
+           R"(<field number='9000' name='NoLeaf' type='NUMINGROUP'/>)"
+           R"(<field number='9001' name='LX' type='STRING'/>)"
+           R"(<field number='9002' name='LY' type='STRING'/>)"
+           R"(</fields><messages><message name='ClashMsg' msgtype='C' msgcat='app'>)"
+           R"(<field name='MsgType' required='N'/>)";
+    for (std::uint16_t i = 1; i <= k; ++i) {
+        xml += "<group name='NoA" + std::to_string(i) + "' required='N'>";
+        xml += "<field name='D" + std::to_string(i) + "' required='N'/>";
+    }
+    // Two siblings at level K+1, each declaring NoLeaf with its OWN delimiter.
+    xml += R"(<group name='NoX' required='N'><field name='DX' required='N'/>)"
+           R"(<group name='NoLeaf' required='N'><field name='LX' required='N'/></group></group>)"
+           R"(<group name='NoY' required='N'><field name='DY' required='N'/>)"
+           R"(<group name='NoLeaf' required='N'><field name='LY' required='N'/></group></group>)";
+    for (std::uint16_t i = 0; i < k; ++i) {
+        xml += "</group>";
+    }
+    xml += R"(</message></messages></fix>)";
+    return xml;
+}
+
 [[nodiscard]] std::string make_deep_nesting_xml() {
     std::string xml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'><fields>)"
                       R"(<field number='8' name='BeginString' type='STRING'/>)"
@@ -1071,4 +1116,58 @@ TEST(LoaderDisposition, CyclicAncestorRelationIsAViolationNotATruncatedKey) {
            "probe key MATCHES the inner record in this pool, so a walk that truncates instead "
            "of refusing reports the dictionary complete and loads a wrong context table.";
     EXPECT_EQ(bad->second, 100);
+}
+
+// ============================================================================
+// fixpp#264 review F1 — two contexts that differ only PAST the clamp must be
+// REFUSED at load, not silently merged.
+//
+// Making deep dictionaries loadable (the #264 fix) is what exposes this: on
+// `main` the spurious FR-023 rejection kept every depth->K chain out of the
+// store, so the collision was unreachable. `group_ctx_key::parent_path` is a
+// fixed `kMaxGroupContextDepth` array, so these two contexts genuinely cannot be
+// stored apart; the key-dedup in `flush_group_ctx_delims` would keep the first
+// and DROP the second, leaving the survivor to answer for both.
+//
+// A lone context past the clamp is NOT affected and must keep loading — that is
+// `DeepAncestorChainLoadsAndResolvesDelimiter` above, and it is why this rejects
+// only a measured collision rather than depth alone. Every shipped dictionary
+// nests far below K, so this cannot fire on one (pinned by
+// `AllShippedContextsHaveADelimiterRecord`).
+// ============================================================================
+TEST(LoaderDisposition, ContextsCollidingPastTheClampAreRejectedAtLoad) {
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    auto const xml = make_clamp_collision_xml();
+    bool threw = false;
+    std::string what;
+    try {
+        auto dict = fixpp::dict::XmlLoader{}.load_from_string(xml, &mr);
+        // Reached only when the collision was NOT refused. Report what the
+        // merged context actually resolves to — that is the defect, and a bare
+        // "did not throw" would not show it.
+        auto const tv = dict.as_table_view();
+        std::vector<std::uint16_t> path;
+        for (std::uint16_t i = 1; i <= fixpp::dict::kMaxGroupContextDepth; ++i) {
+            path.push_back(static_cast<std::uint16_t>(kDeepCountBase + i));
+        }
+        auto const merged = tv.group_first_field_exact("C", std::span<std::uint16_t const>{path},
+                                                       std::uint16_t{9000});
+        ADD_FAILURE() << "fixpp#264 F1: two contexts for NoLeaf(9000) whose chains differ only "
+                         "past kMaxGroupContextDepth were accepted. The clamped key now answers "
+                         "for both, resolving delimiter "
+                      << (merged.has_value() ? *merged : 0)
+                      << " regardless of which parent a message nests under (LX=9001, LY=9002).";
+    } catch (xml_parse_error const& e) {
+        threw = true;
+        what = e.what();
+    }
+    ASSERT_TRUE(threw);
+    EXPECT_NE(what.find("collapse to the same context key"), std::string::npos)
+        << "the diagnostic must name the collision, not a completeness violation — the FR-023 "
+           "message would send a reader looking for a missing record that is not missing. got: "
+        << what;
+    EXPECT_NE(what.find("9000"), std::string::npos)
+        << "the diagnostic must name the offending NumInGroup tag; got: " << what;
 }

@@ -249,10 +249,22 @@ struct GroupCtxDelim {
 // group-cache expansions are not message-scoped, so they must contribute
 // NOTHING. A null pointer says that structurally — a discard vector would
 // still manufacture records keyed to no message.
+// One captured record PLUS the UNCLAMPED chain it was built from. The record's
+// own `parent_path` is already clamped to `kMaxGroupContextDepth`, which is
+// exactly what makes the extra copy necessary: past K the clamp is lossy, so two
+// genuinely different contexts can produce byte-identical keys and the key alone
+// can no longer tell a benign duplicate from a collision. `full_path` is what
+// distinguishes them, and it is loader-local — nothing in `GroupCtxDelim`,
+// `group_ctx_key`, the store, or any query path changes.
+struct CapturedDelim {
+    GroupCtxDelim rec;
+    std::vector<std::uint16_t> full_path;  // ancestors, outermost first, UNCLAMPED
+};
+
 struct DelimCapture {
     std::vector<std::uint16_t> path;     // ancestors, outermost first
     std::vector<std::uint16_t> pending;  // parallel to `path`; 0 = not yet captured
-    std::vector<GroupCtxDelim> out;      // this message's records
+    std::vector<CapturedDelim> out;      // this message's records
 };
 
 // The FIRST emission at the currently-open group's level wins. Called at every
@@ -630,20 +642,53 @@ void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) n
 // as not having one; both are lifted here so the two walks cannot drift.
 
 // Flush ONE message's captured delimiter records into the handle's pool:
-// sort → dedup by key → append → record the per-message run. Deduping by key
-// is deliberate — a group declared in both the header and the body yields two
-// captures that agree by construction, and the first is kept.
-inline void flush_group_ctx_delims(dict_metadata_handle& h, DelimCapture& cap) {
-    std::ranges::sort(cap.out, group_ctx_delim_less);
-    auto const last =
-        std::ranges::unique(cap.out, [](GroupCtxDelim const& a, GroupCtxDelim const& b) noexcept {
-            return !group_ctx_delim_less(a, b) && !group_ctx_delim_less(b, a);
-        }).begin();
+// sort → reject clamp collisions → dedup by key → append → record the run.
+//
+// Deduping by key is deliberate — a group declared in both the header and the
+// body yields two captures that agree by construction, and the first is kept.
+//
+// #264 review: that dedup is SAFE ONLY WHILE THE KEY IS LOSSLESS. Up to
+// `kMaxGroupContextDepth` it is: a record's clamped `parent_path` IS its full
+// chain, so equal keys imply equal chains and the two captures really are the
+// same context. Past K the clamp drops the innermost ancestors, so two DISTINCT
+// contexts — say a group reached under two different level-K+1 parents — produce
+// byte-identical keys, and this dedup would silently DISCARD the second. The
+// store cannot represent them separately (`group_ctx_key::parent_path` is a
+// fixed K-element array), so the surviving record would answer for both and a
+// message nested under the dropped parent would resolve the WRONG delimiter.
+//
+// Fixing that in the store is out of reach here; refusing the input is not. A
+// collision is reported as a violation, which is strictly better than answering
+// wrongly and is the same disposition FR-023 already takes. Returns the
+// offending `no_tag`, or `nullopt` when the message flushed cleanly — it returns
+// rather than throws so each loader keeps its OWN exception type (FR-006c),
+// exactly as `find_incomplete_group_context` does.
+[[nodiscard]] inline std::optional<std::uint16_t> flush_group_ctx_delims(dict_metadata_handle& h,
+                                                                         DelimCapture& cap) {
+    auto const same_key = [](CapturedDelim const& a, CapturedDelim const& b) noexcept {
+        return !group_ctx_delim_less(a.rec, b.rec) && !group_ctx_delim_less(b.rec, a.rec);
+    };
+    std::ranges::sort(cap.out, [](CapturedDelim const& a, CapturedDelim const& b) noexcept {
+        return group_ctx_delim_less(a.rec, b.rec);
+    });
+    // Equal keys are adjacent after the sort. Within a run of them, if any two
+    // chains differ then some ADJACENT pair differs — equality is transitive —
+    // so the pairwise scan is complete, not a sampling.
+    for (std::size_t i = 1; i < cap.out.size(); ++i) {
+        if (same_key(cap.out[i - 1], cap.out[i]) &&
+            cap.out[i - 1].full_path != cap.out[i].full_path) {
+            return cap.out[i].rec.no_tag;
+        }
+    }
+    auto const last = std::ranges::unique(cap.out, same_key).begin();
     cap.out.erase(last, cap.out.end());
     MsgFieldsRun const run{.start = static_cast<std::uint32_t>(h.group_ctx_delim_pool_.size()),
                            .count = static_cast<std::uint32_t>(cap.out.size())};
-    h.group_ctx_delim_pool_.insert(h.group_ctx_delim_pool_.end(), cap.out.begin(), cap.out.end());
+    for (auto const& captured : cap.out) {
+        h.group_ctx_delim_pool_.push_back(captured.rec);
+    }
     h.per_msg_group_ctx_delim_offsets_.push_back(run);
+    return std::nullopt;
 }
 
 // FR-023 / C-3.4 completeness sweep over every message. Returns the FIRST
