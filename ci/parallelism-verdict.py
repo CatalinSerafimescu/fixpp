@@ -177,6 +177,19 @@ def parse_ctest_log(path: pathlib.Path) -> dict:
     a log this parser does not understand costs a re-dispatch; summarising it
     costs a wrong `execution.jobs` decision, which is what this whole issue is
     about.
+
+    ⚠️ IN PRACTICE THE FAIL-CLOSED SIDE IS NARROW, and the reason is structural
+    rather than a hope: `--output-on-failure` prints a test's output only when
+    that test FAILS, so on an all-green pass no test output reaches this log at
+    all.  A pass with a failing test is already an INSTRUMENT FAILURE by the
+    `ctest_status` check, so the two dispositions agree.  MEASURED on a real
+    ctest run rather than argued: a `WILL_FAIL` test echoing `    Start 99: ...`
+    put that line in the log and lifted `max_inflight` from 1 to 2 on a SERIAL
+    pass — the forgery is live, not hypothetical — and this parser refused it.
+
+    Because a refusal has to be actionable, the offending lines are quoted: a
+    diagnostic that says only "11 Start records against 10 tests" sends the
+    reader back to a 300 MB artifact to find out which one.
     """
     out: dict = {"ran": None, "real_s": None, "sum_s": None,
                  "max_inflight": None, "anomalies": []}
@@ -193,6 +206,7 @@ def parse_ctest_log(path: pathlib.Path) -> dict:
     starts = 0
     completions = 0
     unmatched: list[str] = []
+    start_lines: dict[str, str] = {}
 
     for line in text.splitlines():
         m = RAN_RX.match(line)
@@ -209,8 +223,10 @@ def parse_ctest_log(path: pathlib.Path) -> dict:
         if m:
             num = m.group(1)
             if num in inflight:
-                unmatched.append(f"test #{num} started twice while already in flight")
+                unmatched.append(f"test #{num} started twice while already in flight: "
+                                 f"{line.strip()!r}")
             starts += 1
+            start_lines.setdefault(num, line.strip())
             inflight.add(num)
             peak_inflight = max(peak_inflight, len(inflight))
             continue
@@ -219,7 +235,8 @@ def parse_ctest_log(path: pathlib.Path) -> dict:
             completions += 1
             num = m.group(1)
             if num not in inflight:
-                unmatched.append(f"test #{num} completed without a matching Start")
+                unmatched.append(f"test #{num} completed without a matching Start: "
+                                 f"{line.strip()!r}")
             inflight.discard(num)
 
     a = out["anomalies"]
@@ -236,7 +253,8 @@ def parse_ctest_log(path: pathlib.Path) -> dict:
     if peak_inflight > 0:
         out["max_inflight"] = peak_inflight
     if inflight:
-        a.append(f"{len(inflight)} test(s) started and never completed")
+        quoted = ", ".join(repr(start_lines[n]) for n in sorted(inflight)[:3])
+        a.append(f"{len(inflight)} test(s) started and never completed: {quoted}")
     a.extend(unmatched[:5])
 
     ran = out["ran"]

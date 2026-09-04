@@ -292,7 +292,58 @@ else
   fi
 fi
 
-SEAM_DECLARED=9
+# ── S8: THE DECOY, ON A REAL ctest RUN ───────────────────────────────────────
+#
+# Every other check of the log parser is synthetic — strings this file wrote,
+# fed to a function. This one makes ctest itself produce the hostile input, and
+# it is the cell that showed the attack is LIVE rather than theoretical: a test
+# echoing `    Start 99: ...` puts that line in the log under
+# `--output-on-failure` and lifts max_inflight from 1 to 2 on a SERIAL pass. A
+# forged parallel level is exactly what the A-vs-A' check cannot see.
+#
+# It also pins the narrowness of the fail-closed side, which is the reason the
+# strict parser is affordable at all: --output-on-failure prints a test's output
+# only when that test FAILS, so on an all-green pass no test output reaches this
+# log — and a pass with a failing test is already an INSTRUMENT FAILURE by the
+# ctest_status check. The two dispositions agree.
+mkdir -p "$WORK/decoy"
+cat > "$WORK/decoy/CMakeLists.txt" <<'CMAKE'
+cmake_minimum_required(VERSION 3.20)
+project(decoy NONE)
+enable_testing()
+foreach(i RANGE 1 4)
+  add_test(NAME d${i} COMMAND ${CMAKE_COMMAND} -E sleep 0.2)
+endforeach()
+add_test(NAME decoy COMMAND ${CMAKE_COMMAND} -E echo "    Start 99: fake_test")
+set_tests_properties(decoy PROPERTIES WILL_FAIL TRUE)
+add_test(NAME realfail COMMAND ${CMAKE_COMMAND} -E false)
+CMAKE
+cat > "$WORK/decoy/CMakePresets.json" <<'CMAKE'
+{"version": 6,
+ "configurePresets": [{"name": "d", "binaryDir": "build/d"}],
+ "testPresets": [{"name": "d", "configurePreset": "d"}]}
+CMAKE
+( cd "$WORK/decoy" && cmake --preset d >/dev/null 2>&1   && ctest --preset d --output-on-failure --parallel 1 > "$WORK/decoy/log.txt" 2>&1 )
+if ! grep -q 'Start 99' "$WORK/decoy/log.txt"; then
+  bad "S8 the decoy line never reached the ctest log — this cell tested nothing"
+else
+  parsed="$(cd "$WORK" && python3 -c '
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("v", "ci/parallelism-verdict.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+d = m.parse_ctest_log(pathlib.Path(sys.argv[1]))
+print(len(d["anomalies"]), d["max_inflight"])' "$WORK/decoy/log.txt")"
+  n_anom="${parsed%% *}"; infl="${parsed##* }"
+  if [ "$infl" = "1" ]; then
+    bad "S8 the decoy did not forge the parallel level (max_inflight=$infl) — the cell is vacuous, re-point it"
+  elif [ "${n_anom:-0}" -eq 0 ]; then
+    bad "S8 a REAL ctest log carrying a forged Start line parsed CLEAN (max_inflight=$infl)"
+  else
+    ok "S8 a real ctest log's decoy forged max_inflight to $infl and was REFUSED ($n_anom anomalies)"
+  fi
+fi
+
+SEAM_DECLARED=10
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$SEAM_DECLARED" ]; then
