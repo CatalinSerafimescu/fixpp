@@ -172,24 +172,28 @@ struct GroupCtxDelim {
 // One walk here plus one clamp in the key builders is what keeps the two sides
 // from drifting again; do not reintroduce a bound in this function.
 //
-// `parent_of` returns 0 at the root. The `find` guard is what makes the walk
-// terminate when the parent relation contains a cycle: the per-message field
-// run is deduped to one FieldRef per tag, so a message that nests group A
-// inside B in one place and B inside A in another collapses to a two-element
-// cycle. The chain is truncated at the repeat instead of growing without bound,
-// and a truncated key matches no stored record — FR-023's fail-closed
-// disposition. This is not a new constraint on either caller: `as_table_view()`
-// already walked this relation UNBOUNDED, so the guard removes a pre-existing
-// hang rather than introducing one, and the probe's old K bound was masking the
-// same exposure on its side only by accident.
-template <typename ParentOf>
-[[nodiscard]] inline std::vector<std::uint16_t> group_parent_path(std::uint16_t start,
-                                                                  ParentOf parent_of) {
+// A tag absent from `immediate_parent` is a root. The `find` guard is what makes
+// this walk terminate on ANY relation: acyclicity is never enforced where the
+// relation is BUILT, so it cannot be assumed where the relation is READ. On a
+// cycle the chain truncates at the repeat instead of growing without bound, and
+// a truncated key matches no stored record — FR-023's fail-closed disposition.
+// (Whether a cycle is reachable through today's loaders is deliberately NOT
+// asserted here: that is a claim about callers, and it would rot silently the
+// first time one changes. The guard costs a linear scan of a vector that is
+// normally 1-2 elements.)
+//
+// The guard is not a new constraint on either caller. `as_table_view()` already
+// walked this relation UNBOUNDED, so it removes a pre-existing non-termination
+// rather than introducing a limit; the probe's old K bound was masking the same
+// exposure on its side only as a side effect of clamping in the wrong place.
+[[nodiscard]] inline std::vector<std::uint16_t> group_parent_path(
+    std::uint16_t start, std::unordered_map<std::uint16_t, std::uint16_t> const& immediate_parent) {
     std::vector<std::uint16_t> path;
     std::uint16_t cur = start;
     while (cur != 0 && std::ranges::find(path, cur) == path.end()) {
         path.push_back(cur);
-        cur = parent_of(cur);
+        auto const it = immediate_parent.find(cur);
+        cur = (it != immediate_parent.end()) ? it->second : std::uint16_t{0};
     }
     std::ranges::reverse(path);
     return path;
@@ -307,10 +311,6 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
             has_members.insert(fr.group_no_tag);
         }
     }
-    auto parent_of = [&](std::uint16_t tag) noexcept -> std::uint16_t {
-        auto const it = immediate_parent.find(tag);
-        return it == immediate_parent.end() ? std::uint16_t{0} : it->second;
-    };
     for (auto const& fr : fields) {
         if (!std::ranges::binary_search(structural_group_tags, fr.tag)) {
             continue;
@@ -321,7 +321,7 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
         // fixpp#264: the chain is walked UNCLAMPED and `make_group_ctx_delim`
         // applies the K clamp, exactly as the registration side does. Clamping
         // here instead kept the innermost K and built a different key.
-        auto const path = group_parent_path(fr.group_no_tag, parent_of);
+        auto const path = group_parent_path(fr.group_no_tag, immediate_parent);
         GroupCtxDelim const probe = make_group_ctx_delim(path, fr.tag, /*delimiter=*/0);
         // PRECONDITION: `delims` is sorted by `group_ctx_delim_less`. Both call
         // sites (each loader's `finalize()`) sort the per-message records with
