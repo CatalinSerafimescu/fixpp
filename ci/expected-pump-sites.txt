@@ -46,13 +46,6 @@ tests/session/logon_handshake_test.cpp:205
 tests/session/logon_handshake_test.cpp:214
 tests/session/logon_received_observability_test.cpp:137
 tests/session/logon_received_observability_test.cpp:145
-tests/session/sending_time_test.cpp:217
-tests/session/sending_time_test.cpp:228
-tests/session/sending_time_test.cpp:236
-tests/session/sending_time_test.cpp:299
-tests/session/sending_time_test.cpp:477
-tests/session/sending_time_test.cpp:522
-tests/session/sending_time_test.cpp:574
 tests/session/seqnum_gap_fatal_test.cpp:179
 tests/session/seqnum_gap_fatal_test.cpp:186
 tests/session/session_reject_test.cpp:167

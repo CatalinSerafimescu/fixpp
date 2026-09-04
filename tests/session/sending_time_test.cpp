@@ -52,6 +52,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
@@ -173,6 +174,94 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 
 // ── Integration fixture ───────────────────────────────────────────────────────
 
+// ── #289: the `run_for(W); restart(); fut.get()` migration ───────────────────
+//
+// The sites in this file use `run_window_then_ready`
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard
+// #289 names is the UNCONDITIONAL `get()`, not the fixed window. On a
+// manually-driven io_context a `get()` the window did not satisfy blocks with
+// nothing left to pump it -- a deadlock ctest reports as a timeout.
+//
+// Teardown is deliberately NOT a fixture-destructor drain, which is the shape
+// PRs #301 and #307 used for fixtures that OWN their Session. Here every
+// `Session` is a block-local declared AFTER the fixture, so it dies BEFORE a
+// fixture destructor body could run -- and a drain is what RESUMES a suspended
+// frame, so a destructor drain would resume it over the destroyed Session. The
+// drain runs on the MISS branch instead, in the scope that still owns that
+// storage, and it CANCELS THE MOCK CLOCK'S SLEEPS first: the first transition
+// to Active co_spawns a detached `run_liveness_loop()` that parks on
+// `sleep_until`, holding a work guard that `drain_or_report` cannot release
+// (only a Clock can). `cancel_sleeps()` releases the waiters that exist WHEN IT
+// RUNS and nothing more, so a miss whose drain itself performs the Active
+// transition registers a NEW waiter afterwards. That WAS a documented limitation of
+// the primitive, carried unchanged from PR #313; it is now FIXED. These sites call
+// `cancel_and_drain_or_report` (`pump_until_ready.hpp`), which alternates the cancel
+// with the drain and releases exactly that waiter.
+//
+// ── FILE-SPECIFIC ADDENDA (everything above is verbatim from the siblings) ───
+//
+// `open_to_active` and `feed` take the `Session&` from their caller, so their drains
+// also run while the caller's `sess` is alive -- the same "scope that still owns that
+// storage" rule, reached through a parameter rather than a block-local. The same holds
+// for the frame each one spans into: `open_to_active`'s `logon` and the caller's
+// `stale_hb` / `frame` / `peer_logon` are named locals that outlive the call whose
+// drain resumes the coroutine holding a span into them.
+//
+// `cfg.transport_send` here is a synchronous `std::function` and cannot park a
+// coroutine; `TransportDouble` is not a `fixpp::transport::Transport` at all, only an
+// in-memory frame recorder the callback appends to. So no `transport` is in play and
+// the class-4 teardown gap does not apply to this file.
+//
+// A miss returns rather than falling through to `fut.get()`: on the false path the
+// awaited coroutine is still SUSPENDED, and `get()` would block on a future nothing
+// will complete.
+//
+// THE QUOTED `sleep_until` CLAUSE HOLDS HERE, unlike at some siblings, and it is worth
+// stating because the reader's habit by now is to expect an exemption. `make_cfg()`
+// sets `cfg.heartbeat_interval = 30s`, so `Session::run_liveness_loop()` resolves a
+// NON-zero `heartbt_int`, passes its `HeartBtInt=0` early `co_return`, and reaches
+// `co_await effective_clock_->sleep_until(deadline)` -- a real registered waiter that
+// only a Clock can release. `cancel_and_drain_or_report` is load-bearing here, not the
+// harmless superset it is in a fixture whose heartbeat is zero.
+//
+// No site in this file puts a `clock->advance()` between its window and its `get()`,
+// so none of these windows is a STAGING window of the kind
+// `cancellation_two_phase_test.cpp` / `tc_liveness_test.cpp` must preserve unmigrated.
+//
+// THE WINDOWS STAY AT 200 ms, which is also what keeps `tc_logout_test.cpp`'s
+// close-grace hazard out of this file: that hazard is a pump budget GROWN past a real
+// `asio::steady_timer` the mock clock does not govern, and nothing here grows one.
+// `run_window_then_ready` adds one `kPumpSlice` of grace and no more.
+//
+// THIS IS ANOTHER COPY OF THE QUOTED SPAN, AND THE COPY SET IS A MEASUREMENT, NOT A
+// FACT TO CACHE HERE. An earlier revision of this addendum stated the population as a
+// list of file names; a later PR amended one member's span in place and the list did
+// not notice. The recipe instead -- extract each candidate's span, hash it, group:
+//
+//     git grep -lF 'the `run_for(W); restart(); fut.get()` migration' -- tests/ |
+//       while read -r f; do
+//         awk '/#289: the .run_for/{s=1} s{print} s && /releases exactly that waiter/{exit}' \
+//           "$f" | md5sum | tr -d '\n'; echo "  $f"
+//       done | sort
+//
+// ⚠️ THE EXTRACTOR MUST BE ONE-SHOT. A range extractor that can REOPEN -- `sed -n
+// '/<heading>/,/<closing>/p'` is the obvious one -- is unsafe for this job by
+// construction, because the text it delimits is prose ABOUT those delimiters and
+// addenda are free to quote either one. On a reopen the range runs to end of file, the
+// hash covers the whole TU, and a byte-identical span reports as diverged. Whether any
+// file trips it today is not the point and is deliberately not recorded here: it is a
+// property of prose that changes with every edit, and a cached answer to it would be
+// false the next time someone adds a paragraph. `awk ... {exit}` stops at the first
+// close and cannot reopen. Give any substitute extractor that property before you
+// believe its hash.
+//
+// Files whose hash matches this one are the population an audit may `diff` against; a
+// file that carries the heading but hashes differently has diverged DELIBERATELY, and
+// that divergence is the thing to read, not to normalise away. The audit only works if
+// this copy stays VERBATIM, not paraphrased -- an earlier revision elsewhere in the
+// series paraphrased it and silently dropped a precondition. Keep it verbatim; put
+// anything file-specific under this addenda heading instead.
+
 struct SendingTimeFixture {
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
@@ -214,8 +303,13 @@ struct SendingTimeFixture {
     // Uses the mock clock's "now" (2024-01-01-00:00:00) as the valid SendingTime.
     void open_to_active(Session& sess, std::string_view begin_string = "FIX.4.2") {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "SendingTimeFixture::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "SendingTimeFixture::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         // Feed a valid Logon with SendingTime matching mock clock now.
@@ -225,16 +319,25 @@ struct SendingTimeFixture {
                                                   "98=0\x01"
                                                   "108=30\x01");
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "SendingTimeFixture::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "SendingTimeFixture::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
         ASSERT_EQ(sess.state(), fsm_state::Active);
     }
 
     void feed(Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "SendingTimeFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SendingTimeFixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 };
@@ -296,8 +399,13 @@ TEST(SendingTimeIntegration, StaleLogonSendingTimeTriggersLogoutOnlyNoReject) {
 
     // Call open() — session goes to LogonSent.
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "StaleLogonSendingTimeTriggersLogoutOnlyNoReject/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "StaleLogonSendingTimeTriggersLogoutOnlyNoReject/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value()) << "open() failed";
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
@@ -474,8 +582,13 @@ TEST(SendingTimeIntegration, MissingSendingTimeInLogonReceivedRejects) {
 
     // open() as acceptor → NotConnected (stays).
     auto fut_open = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut_open, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "MissingSendingTimeInLogonReceivedRejects/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "MissingSendingTimeInLogonReceivedRejects/open";
+        return;
+    }
     ASSERT_TRUE(fut_open.get().has_value()) << "open() failed";
     ASSERT_EQ(sess.state(), fsm_state::NotConnected);
 
@@ -519,8 +632,13 @@ TEST(SendingTimeIntegration, MissingSendingTimeOnLogonEmitsLogoutOnly) {
 
     // open() as initiator → LogonSent.
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "MissingSendingTimeOnLogonEmitsLogoutOnly/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "MissingSendingTimeOnLogonEmitsLogoutOnly/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value()) << "open() failed";
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
@@ -571,8 +689,13 @@ TEST(SendingTimeIntegration, MalformedSendingTimeOnLogonEmitsLogoutOnly) {
 
     // open() as initiator → LogonSent.
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "MalformedSendingTimeOnLogonEmitsLogoutOnly/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "MalformedSendingTimeOnLogonEmitsLogoutOnly/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value()) << "open() failed";
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 

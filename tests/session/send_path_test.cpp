@@ -243,20 +243,43 @@ private:
 // awaited coroutine is still SUSPENDED, and `get()` would block on a future nothing
 // will complete.
 //
-// THIRD COPY, of TWO different populations -- the closing anchor picked below tells
-// them apart. The `── #289:` heading through "...releases exactly that waiter." is
-// byte-identical in SIX files: `tc_establishment`, `tc_liveness`, `tc_logout`,
-// `tc_reject`, `tc_seqnum`, and this one. The full span, through "...once rather than
-// twice." (additionally carrying the `kWindowMissSentinel` doc block below), is
-// byte-identical in the THREE that define that constant: `tc_establishment`,
-// `tc_seqnum`, and this one. `diff`-ing against the closing anchor you mean to audit
-// is what detects real divergence in that population; diffing against the other
-// anchor over the wrong file set will just report noise. (Anchored by those lines
-// rather than by a line COUNT: a count inside a comment about drift is itself a thing
-// that drifts, and the first revision of this addendum stated one that was already
-// wrong.) The audit only works if this copy stays VERBATIM, not paraphrased -- an
-// earlier revision paraphrased it and silently dropped the sentinel's precondition.
-// Keep it verbatim; put anything file-specific under this addenda heading instead.
+// THIS FILE CARRIES TWO NESTED COPIED SPANS, AND EACH POPULATION IS A MEASUREMENT, NOT
+// A FACT TO CACHE HERE. The PREFIX runs from the `── #289:` heading through "...releases
+// exactly that waiter."; the FULL span continues through "...once rather than twice."
+// and additionally carries the `kWindowMissSentinel` doc block, so only files that
+// define that constant can be in the second population. `diff`-ing against the closing
+// anchor you did NOT mean to audit reports noise, not divergence.
+//
+// An earlier revision of this addendum named both populations as explicit lists of file
+// names. A later PR amended one listed member's PREFIX span in place; the list did not
+// notice, and went on asserting byte-identity for a file that no longer had it. Do not
+// repair that by restating the lists with corrected names -- that is the same claim
+// again, one merge away from being wrong in the same way. Derive each population:
+//
+//     # PREFIX population. For the FULL one, swap the closing pattern for
+//     # /once rather than twice/ -- only the sentinel-defining files can match it.
+//     git grep -lF 'the `run_for(W); restart(); fut.get()` migration' -- tests/ |
+//       while read -r f; do
+//         awk '/#289: the .run_for/{s=1} s{print} s && /releases exactly that waiter/{exit}' \
+//           "$f" | md5sum | tr -d '\n'; echo "  $f"
+//       done | sort
+//
+// ⚠️ THE EXTRACTOR MUST BE ONE-SHOT. A range extractor that can REOPEN -- `sed -n
+// '/<heading>/,/<closing>/p'` is the obvious one -- is unsafe for this job by
+// construction, because the text it delimits is prose ABOUT those delimiters and
+// addenda are free to quote either one. On a reopen the range runs to end of file, the
+// hash covers the whole TU, and a byte-identical span reports as diverged. Whether any
+// file trips it today is not the point and is deliberately not recorded here: it is a
+// property of prose that changes with every edit, and a cached answer would be false
+// the next time someone adds a paragraph. `awk ... {exit}` cannot reopen. Give any
+// substitute extractor that property before you believe its hash.
+//
+// Files whose hash matches this one are the population an audit may `diff` against; a
+// file that carries the heading but hashes differently has diverged DELIBERATELY, and
+// that divergence is the thing to read, not to normalise away. The audit only works if
+// this copy stays VERBATIM, not paraphrased -- an earlier revision paraphrased it and
+// silently dropped the sentinel's precondition. Keep it verbatim; put anything
+// file-specific under this addenda heading instead.
 //
 // ⚠️ ONE CLAUSE OF THE QUOTED TEXT IS ALREADY SPENT, and it is reproduced above only
 // because the audit requires byte-identity -- not because it still holds. "so that
