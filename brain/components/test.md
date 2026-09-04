@@ -10,6 +10,7 @@ refs:
   - tests/support/pump_until_ready.hpp
   - ci/pump-census.sh
   - ci/pump-get-sweep.sh
+  - ci/pump-red-arm.sh
 codegraph_entry: [mock_transport, Clock, system_clock_source]
 constitution: ["§VII", "§VII.4", "§VIII.5"]
 ---
@@ -160,6 +161,28 @@ instead of newlines: a single 613-character line nothing would ever read, includ
 ⚠️ **A pin row can sit in DEAD CODE.** The census is lexical and has no notion of reachability, so a
 migrated site in an uncalled fixture helper drops a pin row while being unable to fire in any arm.
 Read a non-firing RED arm as a question about reachability before assuming the arm is broken.
+
+⭐ **A migrated site's miss branch is DEAD CODE under normal execution, so "the tests still pass" is
+evidence about the HIT path only** — `ci/pump-red-arm.sh` forces each site's window to miss and
+requires it to report. Two properties are load-bearing and neither is obvious:
+
+- **One arm per rebuild.** PR #316 forced fifteen at once and covered **seven**: the first miss on a
+  code path returns, and every later site on that path is never reached. Two sites in one helper, or
+  one helper a driver calls twice, mask each other exactly this way. The rebuild cost per arm is the
+  method, not overhead to optimise away.
+- **Zero BOTH durations.** `run_window_then_ready(ioc, fut, window, grace)` defaults `grace` to
+  `kPumpSlice`, so zeroing only the window leaves a live grace slice that usually still satisfies the
+  future — a vacuous arm that passes without entering the branch it claims to test.
+
+⚠️ **A TIMEOUT IS A DIFFERENT FINDING FROM A SILENT ARM, and collapsing them loses the interesting
+one.** A forced miss HANGS rather than reports when the site's pump is INDIRECTED through a helper
+(census blind spot (c)) — the arm zeroed a window the test never waited on. The driver reports that
+as `INCONCLUSIVE` and names it, which is the same question the dead-code note above asks: a
+non-firing arm is a claim about REACHABILITY before it is a claim about the branch.
+
+⚠️ **The driver is an instrument, so its REDs mean nothing until it is shown able to report non-RED.**
+Seed a site that cannot report — delete one `ADD_FAILURE()` — and require the driver to call that arm
+`SILENT`. N REDs from an unseeded driver prove only that it runs.
 
 ## ⚠️ The catalogue's `test` rows are not a coverage measure
 

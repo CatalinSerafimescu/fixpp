@@ -149,37 +149,6 @@ static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string
 // `cancel_and_drain_or_report` (`pump_until_ready.hpp`), which alternates the cancel
 // with the drain and releases exactly that waiter.
 
-// #289 harness sentinel: what the value-returning pump helpers below return
-// when the preserved run window misses.
-//
-// It is deliberately NOT load-bearing under ordinary GoogleTest execution: the
-// `ADD_FAILURE()` on the same branch records a nonfatal failure that the
-// enclosing test retains, so a window miss cannot read as a pass whatever this
-// value is. `--gtest_throw_on_failure` does not change that -- it throws AFTER
-// reporting.
-//
-// The CONDITION that holds under, stated rather than counted: NO CALLER
-// INTERCEPTS THE FAILURE. `EXPECT_NONFATAL_FAILURE` /
-// `ScopedFakeTestPartResultReporter` (gtest-spi.h) install a fake reporter that
-// absorbs the failure and lets the enclosing test pass. The first caller that
-// does makes this value the ONLY remaining signal -- and `dispatch_aborted` is
-// then ambiguous with a real `open()` / `on_inbound_frame()` outcome
-// ([2d §6.5]; the `dispatch_aborted` returns in `Session::live_write_serialized_`),
-// so an assertion on the error
-// could be satisfied by this synthetic one. The remedy at that point is a
-// distinct harness result (`std::optional<expected_t<void>>`), not a different
-// production code.
-//
-// The sentinel exists for one narrower reason that holds either way: a caller
-// that checks `has_value()` must not proceed on a fabricated success.
-//
-// Named rather than inlined so the other value-returning #289 sites adopt one
-// greppable decision. Folding it into
-// `tests/support/pump_until_ready.hpp` is deliberately deferred to the header PR
-// that also closes the class-4 transport-teardown gap, so that header is touched
-// once rather than twice.
-inline constexpr auto kWindowMissSentinel = fixpp::core::error::dispatch_aborted;
-
 struct Harness {
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
@@ -229,7 +198,7 @@ struct Harness {
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200})) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Harness::open_session");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Harness::open_session";
-            return std::unexpected(kWindowMissSentinel);
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
         }
         return fut.get();
     }
@@ -240,7 +209,7 @@ struct Harness {
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200})) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Harness::feed_frame");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Harness::feed_frame";
-            return std::unexpected(kWindowMissSentinel);
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
         }
         return fut.get();
     }

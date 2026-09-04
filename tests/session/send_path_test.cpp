@@ -198,36 +198,6 @@ private:
 // the primitive, carried unchanged from PR #313; it is now FIXED. These sites call
 // `cancel_and_drain_or_report` (`pump_until_ready.hpp`), which alternates the cancel
 // with the drain and releases exactly that waiter.
-
-// #289 harness sentinel: what the value-returning pump helpers below return
-// when the preserved run window misses.
-//
-// It is deliberately NOT load-bearing under ordinary GoogleTest execution: the
-// `ADD_FAILURE()` on the same branch records a nonfatal failure that the
-// enclosing test retains, so a window miss cannot read as a pass whatever this
-// value is. `--gtest_throw_on_failure` does not change that -- it throws AFTER
-// reporting.
-//
-// The CONDITION that holds under, stated rather than counted: NO CALLER
-// INTERCEPTS THE FAILURE. `EXPECT_NONFATAL_FAILURE` /
-// `ScopedFakeTestPartResultReporter` (gtest-spi.h) install a fake reporter that
-// absorbs the failure and lets the enclosing test pass. The first caller that
-// does makes this value the ONLY remaining signal -- and `dispatch_aborted` is
-// then ambiguous with a real `open()` / `on_inbound_frame()` outcome
-// ([2d §6.5]; the `dispatch_aborted` returns in `Session::live_write_serialized_`),
-// so an assertion on the error
-// could be satisfied by this synthetic one. The remedy at that point is a
-// distinct harness result (`std::optional<expected_t<void>>`), not a different
-// production code.
-//
-// The sentinel exists for one narrower reason that holds either way: a caller
-// that checks `has_value()` must not proceed on a fabricated success.
-//
-// Named rather than inlined so the other value-returning #289 sites adopt one
-// greppable decision. Folding it into
-// `tests/support/pump_until_ready.hpp` is deliberately deferred to the header PR
-// that also closes the class-4 transport-teardown gap, so that header is touched
-// once rather than twice.
 //
 // ── FILE-SPECIFIC ADDENDA (everything above is verbatim from the siblings) ───
 //
@@ -243,19 +213,9 @@ private:
 // awaited coroutine is still SUSPENDED, and `get()` would block on a future nothing
 // will complete.
 //
-// THIS FILE IS IN BOTH COPIED-SPAN POPULATIONS, and each population is a MEASUREMENT,
-// not a fact to cache here. The PREFIX runs from the `── #289:` heading through
-// "...releases exactly that waiter."; the FULL span continues through "...once rather
-// than twice." and additionally carries the `kWindowMissSentinel` doc block, so only
-// files DEFINING that constant can be in it. This file defines it and is in both.
-// `diff`-ing against the closing anchor you did NOT mean to audit reports noise, not
-// divergence.
-//
-// An earlier revision named both populations as explicit lists of file names. A later
-// PR amended one listed member's PREFIX span in place; the list did not notice and went
-// on asserting byte-identity for a file that no longer had it. Do not repair that by
-// restating the lists with corrected names -- that is the same claim, one merge from
-// being wrong the same way. Derive them:
+// This file is in the PREFIX copied-span population, and that population is a
+// MEASUREMENT, not a fact to cache here. The PREFIX runs from the `── #289:` heading
+// through "...releases exactly that waiter." Derive the membership:
 //
 //     .specify/decisions/289-data/audit-copy-span.sh
 //
@@ -265,39 +225,26 @@ private:
 // file that carries the heading but hashes differently has diverged DELIBERATELY, and
 // that divergence is the thing to read, not to normalise away.
 //
-// The audit only works if this copy stays VERBATIM, not paraphrased -- an earlier
-// revision paraphrased it and silently dropped the sentinel's precondition. Keep it
-// verbatim; put anything file-specific under this addenda heading instead.
+// The audit only works if the PREFIX span stays VERBATIM, not paraphrased -- an earlier
+// revision paraphrased it and silently dropped a precondition. Keep it verbatim; put
+// anything file-specific under this addenda heading instead.
 //
-// ⚠️ ONE CLAUSE OF THE QUOTED TEXT IS ALREADY SPENT, and it is reproduced above only
-// because the audit requires byte-identity -- not because it still holds. "so that
-// header is touched once rather than twice" was overtaken by `47ee7b80` (#308/#321),
-// which changed `pump_until_ready.hpp` by 364 insertions WITHOUT closing the class-4
-// gap; that commit is an ancestor of this branch. Folding the constant in would be a
-// third touch either way, so the economy the deferral was buying no longer exists.
-// The narrower reason DOES still hold and is why this batch keeps the constant local:
-// the class-4 gap is open, and a call-site batch is the wrong place to touch a shared
-// header. Correcting the quoted clause means editing all three files at once, which
-// is the hoist-to-the-header change rather than this one -- recorded as follow-up.
+// THE FULL SPAN NO LONGER EXISTS. It was the PREFIX plus a `kWindowMissSentinel` doc
+// block, and it could only ever contain files DEFINING that constant. The constant now
+// lives in `tests/support/pump_until_ready.hpp` and no test file defines it, so that
+// population is empty by construction rather than merely unpopulated today.
 //
-// ⚠️ A SECOND CLAUSE OF THE QUOTED TEXT IS INAPPLICABLE IN THIS FILE, and it too is
-// reproduced above only because the audit requires byte-identity. The quoted text says
-// the first transition to Active co_spawns a detached `run_liveness_loop()` that
-// "parks on `sleep_until`, holding a work guard that `drain_or_report` cannot release
-// (only a Clock can)". `make_cfg()` sets `cfg.heartbeat_interval = 0s` ("disable
-// liveness loop", above), and `Session::run_liveness_loop()` (session.cpp) resolves
-// `heartbt_int` from that config value and `co_return`s as soon as it is zero --
-// BEFORE the `effective_clock_` null guard and before the first `sleep_until` --
-// so no clock waiter is ever registered here. What still holds: the loop is still
-// `co_spawn`ed (session.cpp, both the initiator and acceptor establishment paths),
-// and `co_spawn` POSTS its first resumption, so the detached task still needs
-// servicing before it reaches that `co_return` -- only the *parking* is absent, not
-// the need to drain. `cancel_sleeps()` on zero registered waiters is a no-op, so
-// `cancel_and_drain_or_report` is a harmless superset here, kept for uniformity with
-// every other file in the series and for the day this fixture's heartbeat is
-// parameterised.
-inline constexpr auto kWindowMissSentinel = fixpp::core::error::dispatch_aborted;
-
+// This fixture registers no clock waiter, which is worth stating because the PREFIX span
+// above describes one: `make_cfg()` sets `cfg.heartbeat_interval = 0s` ("disable liveness
+// loop", above), and `Session::run_liveness_loop()` (session.cpp) resolves `heartbt_int`
+// from that config value and `co_return`s as soon as it is zero -- BEFORE the
+// `effective_clock_` null guard and before the first `sleep_until`. What still holds: the
+// loop is still `co_spawn`ed on both the initiator and acceptor establishment paths, and
+// `co_spawn` POSTS its first resumption, so the detached task still needs servicing before
+// it reaches that `co_return` -- only the *parking* is absent, not the need to drain.
+// `cancel_sleeps()` on zero registered waiters is a no-op, so `cancel_and_drain_or_report`
+// is a harmless superset here, kept for uniformity with the rest of the series and for the
+// day this fixture's heartbeat is parameterised.
 class SendPathTest : public ::testing::Test {
 protected:
     asio::io_context ioc;
@@ -343,7 +290,7 @@ protected:
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "SendPathTest::open_sync");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SendPathTest::open_sync";
-            return std::unexpected(kWindowMissSentinel);
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
         }
         return fut.get();
     }

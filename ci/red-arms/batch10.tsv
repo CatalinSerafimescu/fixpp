@@ -1,0 +1,7 @@
+# #289 batch 10 (shared surfaces) -- one line per forced MISS arm.
+# <source>\t<unique anchor>\t<expected label>\t<cmake target>\t<ctest -R regex>
+tests/session/support/group_dispatch_fixture.hpp	auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);	GroupDispatchFixture::open_to_active/open	test_066_group_scaffold_smoke	^test_066_group_scaffold_smoke$
+tests/session/support/group_dispatch_fixture.hpp	auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);	GroupDispatchFixture::open_to_active/logon	test_066_group_scaffold_smoke	^test_066_group_scaffold_smoke$
+tests/session/support/group_dispatch_fixture.hpp	auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);	GroupDispatchFixture::feed	test_066_group_scaffold_smoke	^test_066_group_scaffold_smoke$
+tests/interop/parity/parity_support.hpp	auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);	ParityAcceptorFixture::run_open	interop_parity_us3_tests	^interop_parity_us3_tests$
+tests/interop/parity/parity_support.hpp	auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);	ParityAcceptorFixture::feed	interop_parity_us3_tests	^interop_parity_us3_tests$
