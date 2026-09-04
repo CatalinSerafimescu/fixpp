@@ -20,18 +20,22 @@ WHY THIS EXISTS
 `ci/ctest-parallelism-probe.md` records THREE `execution.jobs` conclusions that
 were measured, published, and then WITHDRAWN — `debug`'s, `ubsan`'s, and
 `tsan`'s "no gain at j=4".  Every one failed the same way: an A/B across two
-jobs, on lanes whose between-VM wall-clock spread is **27-43 %**.  Two of them
+jobs, on lanes whose between-VM wall-clock spread swamps the effect.  Two of them
 were later re-measured properly and came back POSITIVE (2.10x and 1.79x), so
 this is not a story about parallelism being useless — it is a story about a
 measurement design.  On that
 spread a single unpaired pair of runs cannot distinguish a 1.8x speedup from VM
 luck, and the repo has the receipts:
 
-  * `linux-clang-debug` serial reads 1142 / 1135 / 1151 s on three VMs and
-    **583 s** on a fourth.  Every "no gain" reading for that lane came from
-    comparing against that one fast VM.
-  * `linux-clang-tsan`'s j=2-vs-j=4 comparison spans a **43.3 %** spread; its
-    "measured no gain at j=4" wording is withdrawn in the probe document.
+  * One lane's serial time on a single VM was roughly HALF its time on three
+    others.  Every "no gain" reading for that lane came from comparing against
+    that one.
+  * Another lane's j=2-vs-j=4 comparison spans a spread wider than the effect it
+    was trying to measure; its "measured no gain" wording is withdrawn in the
+    probe document.
+
+The figures behind both live in that document and are deliberately not copied
+here — a number in five files is a number that gets corrected in one.
 
 The design that survived is the one `linux-clang-debug` was finally settled
 with: three passes in ONE job on ONE VM, serial-parallel-serial, **voided unless
@@ -50,9 +54,10 @@ twice as well, A-B-A-B, so that a transient large enough to matter has to land
 on both B legs while sparing both A legs.
 
 **This apparatus does not do that, and the reason is budget, not disagreement.**
-A fourth pass on `linux-clang-libc++-tsan` — ~77 min serial, ~40 min parallel —
-would put a lane past the 360-minute hosted cap, and a job that hits the cap is
-killed before its upload step, losing all four passes rather than three.
+A fourth pass on the slowest lane would put it past the 360-minute hosted cap,
+and a job that hits the cap is killed before its upload step — losing all four
+passes rather than three. Re-derive the margin before assuming it still holds:
+the lane's current test-phase duration is in `ci/ctest-parallelism-probe.md`.
 
 What is done instead, and exactly how far it goes:
 
@@ -104,6 +109,7 @@ sample survived.  Voiding it would file the finding under "noisy VM".
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import pathlib
 import re
@@ -130,7 +136,7 @@ import sys
 # over a REAL ctest log and requires the same three numbers this parser reads
 # from it.  That is the only version of this claim that cannot rot.
 RAN_RX = re.compile(r"^\d+% tests passed, \d+ tests failed out of (\d+)$")
-REAL_RX = re.compile(r"Total Test time \(real\)\s*=\s*([0-9.]+)")
+REAL_RX = re.compile(r"^Total Test time \(real\) =\s+([0-9.]+) sec$")
 DUR_RX = re.compile(r"^ *\d+/\d+ +Test +#\d+.*?([0-9.]+) sec$")
 
 # The concurrency oracle.  `Start <n>: <name>` when a test is dispatched;
@@ -142,53 +148,103 @@ DONE_RX = re.compile(r"^ *\d+/\d+ +Test +#(\d+): ")
 
 
 def parse_ctest_log(path: pathlib.Path) -> dict:
-    """Extract the workload, the timing, and the ACHIEVED parallel level."""
+    """Extract the workload, the timing, and the ACHIEVED parallel level.
+
+    ⚠️ EVERY STRUCTURAL EXPECTATION IS CHECKED, AND A LOG THAT VIOLATES ONE IS
+    REFUSED RATHER THAN SUMMARISED.  A hostile review demonstrated all three of
+    the following against the permissive version this replaces, with a forged
+    log built from ordinary test output:
+
+        honest         ran=2 real=1.0 sum=2.0 max_inflight=2
+        fake-up        ran=1                  max_inflight=4   <- forged upward
+        fake-down      ran=2 sum=1.0          max_inflight=1   <- forged downward
+        timing-decoys  ran=999 real=999.0 sum=778.0
+
+    and a log claiming 362 tests while carrying one completion record read
+    **VALID**.  That matters because `--output-on-failure` puts arbitrary test
+    output in this log, so "a line that looks like ctest's" is not evidence that
+    ctest wrote it — and the achieved parallel level is the one thing standing
+    between this apparatus and measuring one configuration three times.
+
+    So: exactly one summary, exactly one total-time line, exactly `ran` starts
+    and `ran` completions with matching ids, no unmatched completion, and an
+    empty in-flight set at EOF.  Anything else sets `anomalies`, and the verdict
+    turns that into an INSTRUMENT FAILURE.
+
+    ⚠️ This is deliberately FAIL-CLOSED, and it can fire on an honest log: a
+    test that prints a ctest-shaped line would now be refused rather than
+    silently mis-parsed.  That is the correct direction — refusing to report on
+    a log this parser does not understand costs a re-dispatch; summarising it
+    costs a wrong `execution.jobs` decision, which is what this whole issue is
+    about.
+    """
     out: dict = {"ran": None, "real_s": None, "sum_s": None,
-                 "max_inflight": None, "inflight_anomalies": 0}
+                 "max_inflight": None, "anomalies": []}
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return out
 
-    total = 0.0
+    summaries: list[int] = []
+    reals: list[float] = []
+    durations: list[float] = []
     inflight: set[str] = set()
     peak_inflight = 0
-    anomalies = 0
+    starts = 0
+    completions = 0
+    unmatched: list[str] = []
 
     for line in text.splitlines():
-        # `ran` and `real_s`: LAST match wins — the summary is printed after the
-        # tests it summarises, and a re-run inside one log would leave two.
         m = RAN_RX.match(line)
         if m:
-            out["ran"] = int(m.group(1))
-        m = REAL_RX.search(line)
+            summaries.append(int(m.group(1)))
+        m = REAL_RX.match(line)
         if m:
-            out["real_s"] = float(m.group(1))
+            reals.append(float(m.group(1)))
         m = DUR_RX.match(line)
         if m:
-            total += float(m.group(1))
+            durations.append(float(m.group(1)))
 
         m = START_RX.match(line)
         if m:
             num = m.group(1)
             if num in inflight:
-                # A second Start for a test already in flight cannot happen in a
-                # well-formed log.  Count it rather than absorbing it: a parser
-                # that silently tolerates malformed input reports a plausible
-                # number from a log it did not understand.
-                anomalies += 1
+                unmatched.append(f"test #{num} started twice while already in flight")
+            starts += 1
             inflight.add(num)
             peak_inflight = max(peak_inflight, len(inflight))
             continue
         m = DONE_RX.match(line)
         if m:
-            inflight.discard(m.group(1))
+            completions += 1
+            num = m.group(1)
+            if num not in inflight:
+                unmatched.append(f"test #{num} completed without a matching Start")
+            inflight.discard(num)
 
-    if total > 0:
-        out["sum_s"] = round(total, 1)
+    a = out["anomalies"]
+    if len(summaries) != 1:
+        a.append(f"{len(summaries)} ctest summary line(s); exactly 1 is expected")
+    else:
+        out["ran"] = summaries[0]
+    if len(reals) != 1:
+        a.append(f"{len(reals)} `Total Test time (real)` line(s); exactly 1 is expected")
+    else:
+        out["real_s"] = reals[0]
+    if durations:
+        out["sum_s"] = round(sum(durations), 1)
     if peak_inflight > 0:
         out["max_inflight"] = peak_inflight
-    out["inflight_anomalies"] = anomalies
+    if inflight:
+        a.append(f"{len(inflight)} test(s) started and never completed")
+    a.extend(unmatched[:5])
+
+    ran = out["ran"]
+    if ran is not None:
+        for label, got in (("Start", starts), ("completion", completions),
+                           ("per-test duration", len(durations))):
+            if got != ran:
+                a.append(f"{got} {label} record(s) against a reported {ran} tests")
     return out
 
 
@@ -285,6 +341,22 @@ def main() -> int:
                          "loose on purpose — see the comment above")
     args = ap.parse_args()
 
+    # ⚠️ NaN DISABLES EVERY GATE IT TOUCHES, SILENTLY. `argparse(type=float)`
+    # accepts "nan", the dispatch input is unrestricted text, and every
+    # comparison with NaN is False — so `--tolerance-pct nan` made serial passes
+    # of 1000 s and 2000 s read VALID. A gate that can be turned off by a typo in
+    # a text box is not a gate.
+    for name in ("tolerance_pct", "calib_tolerance_pct"):
+        value = getattr(args, name)
+        if not math.isfinite(value) or value < 0:
+            print(f"::error::--{name.replace('_', '-')}={value!r} is not a finite "
+                  f"non-negative number. Every comparison against it would be False, which "
+                  f"turns the check it governs off without saying so.")
+            return 2
+    if args.steal_tolerance_ticks < 0:
+        print("::error::--steal-tolerance-ticks must be non-negative.")
+        return 2
+
     run_dir = pathlib.Path(args.run_dir)
     if not run_dir.is_dir():
         print(f"::error::#267 verdict: {run_dir} is not a directory. Nothing was measured.")
@@ -292,6 +364,31 @@ def main() -> int:
 
     passes = [Pass(run_dir, i) for i in (1, 2, 3)]
     present = [p for p in passes if p.present]
+
+    # ⚠️ THE PASSES ARE IDENTIFIED BY POSITION, AND THE SHAPE IS ASSERTED.
+    # An earlier version keyed counts, sanitizer totals and coverage digests by
+    # the `label` field out of each pass's own meta file. A hostile review used
+    # that twice: duplicate labels overwrote earlier passes so counts of
+    # 362/1/999 read VALID, and a B-A-A ordering read VALID because "two serial
+    # and one parallel" was accepted in any order — while the entire design is
+    # serial, parallel, serial. A file describing itself is not identification.
+    shape: list[str] = []
+    for want, p in zip(("A", "B", "A'"), passes):
+        if not p.present:
+            continue
+        if p.meta.get("label") != want:
+            shape.append(f"pass{p.index} is labelled {p.meta.get('label')!r}, expected {want!r}")
+        if p.meta.get("order") != str(p.index):
+            shape.append(f"pass{p.index} records order={p.meta.get('order')!r}")
+    if len(present) == 3:
+        jobs = [p.jobs for p in passes]
+        if not (jobs[0] == 1 and jobs[2] == 1 and jobs[1] > 1):
+            shape.append(f"requested levels are {jobs}, not the A-B-A shape 1/N/1 with N > 1")
+        for field in ("preset", "subset", "ctest_args"):
+            seen = {p.meta.get(field, "") for p in passes}
+            if len(seen) > 1:
+                shape.append(f"passes disagree on {field}: {sorted(seen)} — they did not "
+                             f"measure the same thing")
 
     preset = next((p.meta.get("preset", "") for p in passes if p.meta.get("preset")), "<unknown>")
     subset = next((p.meta.get("subset", "") for p in passes if p.meta.get("subset")), "")
@@ -322,7 +419,7 @@ def main() -> int:
             f"| {p.log['ran'] or 'n/a'} | {p.san or 'n/a'} |")
     out.append("")
 
-    instrument: list[str] = []
+    instrument: list[str] = list(shape)
     defects: list[str] = []
     voids: list[str] = []
 
@@ -342,11 +439,14 @@ def main() -> int:
         if p.log["max_inflight"] is None:
             instrument.append(f"{p.label}: no `Start <n>:` lines in the log, so the achieved "
                               f"parallel level could not be observed at all.")
-        if p.log["inflight_anomalies"]:
+        if p.log["anomalies"]:
             instrument.append(
-                f"{p.label}: {p.log['inflight_anomalies']} malformed Start/complete pairing(s) "
-                f"in the ctest log. The in-flight oracle did not understand this log; its "
-                f"max-in-flight figure is not trustworthy.")
+                f"{p.label}: this ctest log is not structurally well-formed — "
+                + "; ".join(p.log["anomalies"][:4]) +
+                ". The parser refuses to summarise a log it does not understand: "
+                "`--output-on-failure` puts arbitrary test output here, so a line that "
+                "LOOKS like ctest's is not evidence ctest wrote it, and a forged or "
+                "truncated log can move the achieved parallel level in either direction.")
         peak_status = p.peak.get("status")
         if peak_status and peak_status != "ok":
             out.append(f"> ⚠️ `{p.label}` peak RSS NOT MEASURED "
@@ -360,14 +460,13 @@ def main() -> int:
     # "no speedup available on this lane" — a wrong conclusion with a clean bill
     # of health.  The A-vs-A' check is a forced-MISS arm and cannot catch it.
     #
-    # MEASURED, because the risk is not hypothetical and the obvious mitigation
-    # is the wrong one: `ctest --preset P --parallel 1` DOES override a preset's
-    # `execution: {jobs: 4}` (8.03 s vs 2.01 s on an 8x1 s synthetic suite), but
-    # `CTEST_PARALLEL_LEVEL=1 ctest --preset P` does NOT (2.01 s — the preset
-    # wins).  Two lanes already carry `jobs: 4`, so the env-var form would have
-    # silently run all three passes at 4 on exactly the lanes a campaign would
-    # start from.  The apparatus must use the flag; this check is what notices
-    # if that ever stops being true.
+    # MEASURED, and the obvious mitigation is the WRONG one: the CLI flag
+    # overrides a preset's `execution: {jobs: N}`, and `CTEST_PARALLEL_LEVEL`
+    # does not — the preset wins.  Presets already carrying a `jobs` value are
+    # exactly the ones a campaign starts from.  ci/run-parallelism-aba.sh uses
+    # the flag for that reason and cell S2 of ci/test-parallelism-aba-seam.sh
+    # holds it there; this check is what notices if the guarantee itself ever
+    # stops being true.
     for p in present:
         got = p.log["max_inflight"]
         if got is None or p.jobs <= 0:
@@ -385,7 +484,8 @@ def main() -> int:
                 f"having tested nothing.")
 
     # ── (1) DEFECT — #267 acceptance items 2, 5 and 4 ────────────────────────
-    counts = {p.label: p.log["ran"] for p in present if p.log["ran"] is not None}
+    counts = {f"pass{p.index} ({p.label})": p.log["ran"]
+              for p in present if p.log["ran"] is not None}
     if len(set(counts.values())) > 1:
         defects.append(
             f"THE PASSES DID NOT RUN THE SAME TESTS: {counts}. #267 acceptance item 2 — a "
@@ -419,18 +519,18 @@ def main() -> int:
     san = {}
     for p in present:
         try:
-            san[p.label] = int(p.san)
+            san[p.index] = int(p.san)
         except (TypeError, ValueError):
             continue
     par = [p for p in present if p.jobs > 1]
     ser = [p for p in present if p.jobs == 1]
-    if par and ser and all(p.label in san for p in par + ser):
-        worst_serial = max(san[p.label] for p in ser)
+    if par and ser and all(p.index in san for p in par + ser):
+        worst_serial = max(san[p.index] for p in ser)
         for p in par:
-            if san[p.label] > worst_serial:
+            if san[p.index] > worst_serial:
                 defects.append(
                     f"A SANITIZER REPORT APPEARED AT HIGHER CONCURRENCY: {p.label} "
-                    f"(`--parallel {p.jobs}`) emitted {san[p.label]} report(s) against "
+                    f"(`--parallel {p.jobs}`) emitted {san[p.index]} report(s) against "
                     f"{worst_serial} in the serial pass(es). #267 acceptance item 5 — this is "
                     f"a REAL DEFECT UNTIL DISPROVEN, never a 'parallelism artifact'. "
                     f"Read the pass's LastTest.log before doing anything else with this lane.")
@@ -441,7 +541,8 @@ def main() -> int:
     # the parallelism effect.  B differing while A and A' agree is attributable
     # to `--parallel`; all three differing is a nondeterministic suite, which is
     # a finding of its own and NOT evidence about parallelism.
-    cov = {p.label: p.cov.get("sorted_info_sha256", "") for p in present if p.cov.get("sorted_info_sha256")}
+    cov = {p.index: p.cov.get("sorted_info_sha256", "") for p in present
+           if p.cov.get("sorted_info_sha256")}
 
     # ⚠️ COVERAGE WAS ATTEMPTED BUT NOT COMPARED IS NOT THE SAME AS "FINE".
     # The driver writes a `pass*.coverage.env` for every pass whenever
@@ -456,26 +557,47 @@ def main() -> int:
     # Found by running it, not by reading it: with `--coverage` on a project
     # that produces no profiles, this file previously printed VALID and said
     # nothing at all.
+    # ⚠️ THE DRIVER'S OWN DISPOSITION IS READ, not just "did three hashes turn
+    # up". It writes status=no-profiles / merge-failed / export-failed /
+    # empty-report precisely so this can tell "coverage was compared and agreed"
+    # from "coverage could not be compared" — and a nonempty lcov report can
+    # still carry zero coverage facts (`printf 'TN:\n'` hashes fine and has no
+    # DA lines), which is why lines_total is required positive too.
     cov_attempted = [p for p in present if p.cov]
-    if cov_attempted and len(cov) < len(cov_attempted):
-        why = sorted({p.cov.get("status", "unknown") for p in cov_attempted
-                      if not p.cov.get("sorted_info_sha256")})
-        out.append(f"> ⚠️ **#267 acceptance item 4 is NOT discharged: merged coverage was NOT "
-                   f"compared.** Coverage was attempted on this lane, but {len(cov_attempted) - len(cov)} "
-                   f"of {len(cov_attempted)} passes produced no digest (`{', '.join(why)}`). Whatever "
-                   f"the timing says, this run does not show that widening leaves coverage "
-                   f"unchanged — and that is the criterion this lane was blocked on.")
-        out.append("")
+
+    def cov_usable(pas):
+        if pas.cov.get("status") != "ok" or not pas.cov.get("sorted_info_sha256"):
+            return False
+        try:
+            return int(pas.cov.get("profraw_count", 0)) > 0 and int(pas.cov.get("lines_total", 0)) > 0
+        except ValueError:
+            return False
+
+    if cov_attempted and not all(cov_usable(p) for p in cov_attempted):
+        why = sorted({p.cov.get("status", "unknown") or "unknown"
+                      for p in cov_attempted if not cov_usable(p)})
+        voids.append(
+            f"#267 ACCEPTANCE ITEM 4 WAS NOT DISCHARGED: merged coverage could not be "
+            f"compared. Coverage was attempted on this lane and "
+            f"{sum(1 for p in cov_attempted if not cov_usable(p))} of {len(cov_attempted)} "
+            f"passes produced no usable digest (`{', '.join(why)}`). Whatever the timing says, "
+            f"this run does not show that widening leaves coverage unchanged — and that is the "
+            f"one criterion this lane is blocked on, so the sample is not evidence FOR IT. "
+            f"A measurement that could not be taken must not read as one that came out fine.")
+        cov = {}
 
     if len(cov) == 3 and ser and par:
-        ser_shas = {cov[p.label] for p in ser if p.label in cov}
-        par_shas = {cov[p.label] for p in par if p.label in cov}
+        ser_shas = {cov[p.index] for p in ser if p.index in cov}
+        par_shas = {cov[p.index] for p in par if p.index in cov}
         serial_agree = len(ser_shas) == 1
         if not serial_agree:
-            out.append("> ⚠️ **The two SERIAL passes produced different merged coverage.** That is "
-                       "this suite's own run-to-run coverage nondeterminism, measured at "
-                       "unchanged concurrency — so #267 item 4 cannot be attributed to "
-                       "`--parallel` from this sample either way. Worth its own issue.")
+            voids.append(
+                "THE TWO SERIAL PASSES PRODUCED DIFFERENT MERGED COVERAGE. That is this suite's "
+                "own run-to-run coverage nondeterminism, measured at UNCHANGED concurrency — a "
+                "finding of its own, and worth its own issue. It is voided rather than noted "
+                "because it means item 4 cannot be attributed to `--parallel` from this sample "
+                "in either direction: with a moving baseline there is nothing to compare the "
+                "parallel pass against.")
         elif par_shas != ser_shas:
             defects.append(
                 "MERGED COVERAGE CHANGED UNDER PARALLELISM: the two serial passes agree "
@@ -560,13 +682,31 @@ def main() -> int:
     # counter is unavailable.  Requiring `ok` would void every Windows sample
     # for want of a Linux file — on `windows-msvc-asan`, the matrix critical path
     # and the one lane with no measurement of any kind.
-    wit_ok = [w for w in wit if w.get("status") in ("ok", "no-procfs")]
-    if len(wit_ok) < 2:
+    # ⚠️ FOUR WITNESSES, EACH CARRYING A USABLE MEASUREMENT — not "at least two".
+    # A hostile review certified VALID with only witness0 and witness1 present
+    # (they bracket pass 1 and say nothing about the parallel pass or the final
+    # serial one) and again with four `status=ok` witnesses carrying no
+    # measurements at all, because the parse was wrapped in a bare except. That
+    # is an opt-in tested against the easy state rather than against its
+    # adopters: the design is four witnesses bracketing three passes.
+    def usable(w):
+        if w.get("status") not in ("ok", "no-procfs"):
+            return False
+        try:
+            return all(math.isfinite(float(w[k])) and float(w[k]) > 0
+                       for k in ("calib_1proc_s", "calib_nproc_s"))
+        except (KeyError, ValueError):
+            return False
+
+    wit_ok = [w for w in wit if usable(w)]
+    if len(wit_ok) < 4:
+        bad = [f"witness{i}" for i, w in enumerate(wit) if not usable(w)]
         voids.append(
-            f"only {len(wit_ok)} usable machine witness(es) — the experiment has no "
-            f"independent observation of the machine, so 'the machine did not change' is "
-            f"an assumption here rather than a measurement. An absent witness degrades a "
-            f"sample toward VOID; it never certifies one.")
+            f"only {len(wit_ok)} of 4 machine witnesses carry a usable observation "
+            f"(unusable: {', '.join(bad)}). The design is four witnesses BRACKETING three "
+            f"passes — two of them bracket only the first pass and say nothing about the "
+            f"parallel one, which is the leg the whole experiment turns on. An absent or "
+            f"unreadable witness degrades a sample toward VOID; it never certifies one.")
     else:
         try:
             steals = [int(w["steal_ticks"]) for w in wit_ok if w.get("steal_ticks", "").strip()]
@@ -657,6 +797,17 @@ def main() -> int:
 
     # ── The verdict ──────────────────────────────────────────────────────────
     rc = 0
+    # ⚠️ A RUN THIS FILE DECLARES "NOT EVIDENCE" MUST NOT EXIT 0. The subset
+    # banner at the top used to be the only consequence, so a smoke run went
+    # green and published a speedup for a sample expressly declared unusable —
+    # and a green tick outlives a banner.
+    if subset:
+        voids.append(
+            f"SUBSET RUN (`-R {subset}`): this exercised the apparatus, not the lane's suite, "
+            f"so it cannot support an `execution.jobs` decision for any lane. That is what the "
+            f"subset input is FOR — a cheap pre-flight — and it is voided rather than merely "
+            f"annotated so the exit code says the same thing the banner does.")
+
     if instrument:
         rc = 2
         out.append("### ⛔ INSTRUMENT FAILURE — this run measured nothing usable")

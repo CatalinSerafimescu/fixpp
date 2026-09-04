@@ -2,13 +2,20 @@
 #
 # ── WHAT THIS IS FOR ─────────────────────────────────────────────────────────
 #
-# `ctest --parallel` is set on 2 of 15 test presets. Widening the rest is the
-# largest single CI lever available — test execution is ~73 % of the two longest
-# jobs in the matrix — and it has been attempted three times. Every attempt was
-# published and then WITHDRAWN, all for one reason: an A/B run as two SEPARATE
-# jobs, on lanes whose between-VM wall-clock spread is 27-43 %.
-# `ci/ctest-parallelism-probe.md` has the receipts, including a lane that reads
-# 1142 / 1135 / 1151 s serial on three VMs and 583 s on a fourth.
+# `ctest --parallel` is set on a MINORITY of test presets, and widening the rest
+# is the largest single CI lever available — test execution dominates the two
+# longest jobs in the matrix. Which presets carry it is deliberately not written
+# here (this workflow exists to CHANGE that number); re-derive it:
+#
+#   python3 -c "import json;d=json.load(open('CMakePresets.json'));\
+#   [print(p['name'], p.get('execution',{}).get('jobs','SERIAL')) for p in d['testPresets']]"
+#
+# It has been attempted three times. Every attempt was published and then
+# WITHDRAWN, all for one reason: an A/B run as two SEPARATE jobs, on lanes whose
+# between-VM wall-clock spread makes a single unpaired pair of runs meaningless.
+# `ci/ctest-parallelism-probe.md` holds the figures and the receipts, including
+# a lane whose serial time on one VM was roughly half its time on three others —
+# every "no gain" reading for it came from comparing against that one.
 #
 # The only design that survived is three passes in ONE job on ONE VM — serial,
 # parallel, serial — voided unless the two serial passes agree. This workflow
@@ -17,8 +24,8 @@
 #
 # ── WHY IT IS `workflow_dispatch` ONLY, AND MUST STAY THAT WAY ───────────────
 #
-# Each lane runs its suite THREE TIMES. On `linux-clang-libc++-tsan` that is
-# ~77 min per pass. This is a one-off campaign, not a standing job, and putting
+# Each lane runs its suite THREE TIMES, and on the slowest lane a single pass is
+# most of an hour. This is a one-off campaign, not a standing job, and putting
 # it anywhere near a `push` or `pull_request` trigger would multiply the CI bill
 # by a factor nobody asked for. `ci/assert-ci-lane-policy.py` asserts the `on:`
 # block of this file contains nothing else, and `ci/test-ci-lane-policy.sh`
@@ -126,6 +133,24 @@ jobs:
           if bad:
               print(f"::error::unknown test preset(s): {', '.join(bad)}. "
                     f"Known: {', '.join(sorted(known))}")
+              sys.exit(1)
+          # EXISTENCE IS NOT MEMBERSHIP. A preset can be perfectly real and still
+          # be in the wrong list: `windows-msvc-asan` under `linux_lanes` passes
+          # the check above and is then dispatched to an Ubuntu runner, where it
+          # fails 30 minutes into a build for a reason that names none of this.
+          # The three jobs differ in toolchain, so the families are the jobs.
+          families = [("linux_lanes", 1, lambda n: n.startswith("linux-") and "libc++" not in n),
+                      ("libcxx_lanes", 2, lambda n: "libc++" in n),
+                      ("windows_lanes", 3, lambda n: n.startswith("windows-"))]
+          misplaced = []
+          for label, idx, belongs in families:
+              for n in sorted(json.loads(sys.argv[idx])):
+                  if not belongs(n):
+                      misplaced.append(f"{n} under {label}")
+          if misplaced:
+              print(f"::error::preset(s) in the wrong lane list: {', '.join(misplaced)}. "
+                    f"Each job has its own toolchain, so a preset in the wrong list is "
+                    f"dispatched to a runner that cannot build it.")
               sys.exit(1)
           print(f"lane names check out against CMakePresets.json: {sorted(names)}")
           CHK
@@ -420,9 +445,40 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} -j2
 
+      # ⚠️ WITHOUT THIS THE TSAN LANE MEASURES A DIFFERENT SUITE FROM THE ONE IT
+      # DESCRIBES, and in the worst possible way. The apt libc++ is not
+      # TSan-instrumented, so TSan cannot see libc++'s internal synchronisation
+      # and reports FALSE data races in std::future / asio::use_future teardown —
+      # tier3.yml records these as RELIABLE, not occasional (#25). #267
+      # acceptance item 5 makes any sanitizer report appearing at higher
+      # concurrency a REAL DEFECT UNTIL DISPROVEN, so a campaign run against the
+      # apt libc++ would manufacture exactly the finding it is watching for, and
+      # cost a real investigation of an instrumentation artifact.
+      #
+      # Pinned by DIGEST, matching tier3.yml: this .so is loaded into the test
+      # process, so a silently re-pushed tag could fabricate or suppress TSan
+      # results. To roll forward, update it in BOTH files.
+      - name: Fetch instrumented libc++ (TSan)
+        if: matrix.preset == 'linux-clang-libc++-tsan'
+        run: |
+          IMG="ghcr.io/catalinserafimescu/fixpp-libcxx-tsan@sha256:65106764ae2318bf1e982216d84b0d45ec9c9245cb25a59728aab59f016ea161"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull "$IMG"
+          cid=$(docker create "$IMG")
+          docker cp "$cid:/libcxx-tsan" "$RUNNER_TEMP/libcxx-tsan"
+          docker rm "$cid"
+          ls -l "$RUNNER_TEMP/libcxx-tsan"
+
       # No `-LE packaging` — these lanes run the full suite, which is why their
       # pinned counts differ from Tier 1's.
+      #
+      # LD_LIBRARY_PATH prepends the instrumented libc++ ahead of the apt one so
+      # the soname resolves to it at runtime, exactly as tier3.yml's TSan test
+      # step does. On the other three lanes the prefix is empty and the job-level
+      # value is used unchanged.
       - name: A-B-A measurement
+        env:
+          LD_LIBRARY_PATH: ${{ matrix.preset == 'linux-clang-libc++-tsan' && format('{0}/libcxx-tsan:', runner.temp) || '' }}${{ env.LD_LIBRARY_PATH }}
         run: |
           ci/run-parallelism-aba.sh \
             --preset "${{ matrix.preset }}" \

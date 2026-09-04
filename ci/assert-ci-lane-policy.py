@@ -20,7 +20,7 @@ silently — so each is turned into a check.
 
   2. #267 — the parallelism campaign stays on `workflow_dispatch`.
      `.github/workflows/parallelism-measure.yml` runs each named lane's suite
-     THREE times. On `linux-clang-libc++-tsan` that is ~77 min per pass. One
+     THREE times, and on the slowest lane a single pass is most of an hour. One
      `push:` or `pull_request:` key added to its trigger block — by a copy-paste
      from another workflow, or by someone "making it run automatically" —
      multiplies the repo's CI bill without anything going red to say so. It is
@@ -253,8 +253,9 @@ def check_campaign_trigger(root, violations):
         violations.append(
             f"CAMPAIGN IS NO LONGER DISPATCH-ONLY: {CAMPAIGN_WORKFLOW} triggers on "
             f"{', '.join(extra)} as well as workflow_dispatch. That workflow runs each named "
-            f"lane's suite THREE times — ~77 min per pass on the slowest lane — so an "
-            f"automatic trigger multiplies the CI bill with nothing going red to say so. "
+            f"lane's suite THREE times — on the slowest lane a single pass is most of an "
+            f"hour — so an automatic trigger multiplies the CI bill with nothing going red "
+            f"to say so. "
             f"It is a one-off campaign, not a standing job.")
     else:
         print(f"  campaign trigger: {CAMPAIGN_WORKFLOW} is {'/'.join(sorted(triggers))} only")

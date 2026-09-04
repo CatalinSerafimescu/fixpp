@@ -64,14 +64,20 @@ ap.add_argument("--subset", default="")
 ap.add_argument("--drop-pass", type=int, default=0)
 ap.add_argument("--no-start", type=int, default=0)   # pass index whose Start lines vanish
 ap.add_argument("--dup-start", type=int, default=0)  # pass index that re-Starts a live test
+ap.add_argument("--dup-summary", type=int, default=0)   # pass index that prints TWO summaries
+ap.add_argument("--truncate-done", type=int, default=0) # pass index keeping only 1 completion
+ap.add_argument("--forge-inflight", type=int, default=0)# pass index injecting bare Start lines
+ap.add_argument("--labels", default="")           # override the A,B,A' labels
+ap.add_argument("--jobs-shape", default="")       # override the 1,N,1 requested levels
+ap.add_argument("--preset-drift", type=int, default=0)  # pass index recording another preset
 a = ap.parse_args()
 
 d = pathlib.Path(a.dir); d.mkdir(parents=True, exist_ok=True)
-LABELS = ["A", "B", "A'"]
+split = lambda s: s.split(",")
+LABELS = split(a.labels) if a.labels else ["A", "B", "A'"]
 # The A-B-A shape itself: cells that need requested-vs-achieved to disagree
 # vary --inflight, never this.
-JOBS = [1, 4, 1]
-split = lambda s: s.split(",")
+JOBS = [int(x) for x in split(a.jobs_shape)] if a.jobs_shape else [1, 4, 1]
 
 for i in range(1, 4):
     if i == a.drop_pass:
@@ -99,12 +105,33 @@ for i in range(1, 4):
         n += len(batch)
     if i == a.no_start:
         lines = [ln for ln in lines if not ln.lstrip().startswith("Start ")]
+    if i == a.truncate_done:
+        # A log that CLAIMS `ran` tests while carrying one completion record —
+        # the shape a truncated upload takes, and the shape a forger would use
+        # to make a pass look fast.
+        seen = 0
+        kept = []
+        for ln in lines:
+            if " Test #" in ln:
+                seen += 1
+                if seen > 1:
+                    continue
+            kept.append(ln)
+        lines = kept
+    if i == a.forge_inflight:
+        # Bare `Start` lines with no matching completion: ordinary test output
+        # under --output-on-failure, mimicking ctest's own format to inflate the
+        # apparent parallel level.
+        lines = lines[:1] + [f"    Start {ran + j}: forged_{j}" for j in range(1, 5)] + lines[1:]
     lines += ["", f"100% tests passed, 0 tests failed out of {ran}", "",
               f"Total Test time (real) = {wall:8.2f} sec"]
+    if i == a.dup_summary:
+        lines += [f"100% tests passed, 0 tests failed out of {ran}"]
     (d / f"pass{i}.ctest.log").write_text("\n".join(lines) + "\n")
 
+    preset = a.preset + ("-other" if i == a.preset_drift else "")
     (d / f"pass{i}.meta").write_text(
-        f"preset={a.preset}\nlabel={LABELS[k]}\njobs={jobs}\norder={i}\n"
+        f"preset={preset}\nlabel={LABELS[k]}\njobs={jobs}\norder={i}\n"
         f"san_count={split(a.san)[k]}\nsubset={a.subset}\n"
         f"ctest_status={split(a.status)[k]}\n")
     (d / f"pass{i}.peak.env").write_text(
@@ -121,13 +148,16 @@ for i in range(1, 4):
         tag = split(a.cov)[k]
         sha = hashlib.sha256(tag.encode()).hexdigest()
         (d / f"pass{i}.coverage.env").write_text(
-            f"sorted_info_sha256={sha}\nlines_covered=1000\nlines_total=1200\n")
+            f"status=ok\nprofraw_count=42\nsorted_info_sha256={sha}\n"
+            f"lines_covered=1000\nlines_total=1200\n")
 
 for w in range(a.witnesses):
+    one = split(a.calib)[w]
+    many = f"{float(one) * 1.9:.3f}" if one else ""
     (d / f"witness{w}.env").write_text(
         f"label=w{w}\nprocs=4\niters={a.witness_iters}\nrepeats={a.witness_repeats}\n"
-        f"calib_1proc_s={split(a.calib)[w]}\n"
-        f"calib_nproc_s={float(split(a.calib)[w]) * 1.9:.3f}\n"
+        f"calib_1proc_s={one}\n"
+        f"calib_nproc_s={many}\n"
         f"steal_ticks={'' if a.witness_status == 'no-procfs' else split(a.steal)[w]}\n"
         f"status={a.witness_status}\nmono_s=100.0\n")
 GEN
@@ -211,8 +241,28 @@ else
 fi
 
 # ── T8: an absent witness degrades toward VOID, never certifies ──────────────
-cell "T8 no machine witnesses VOIDs the sample" 3 "no independent observation" \
+# ⚠️ FOUR, not "at least two". A hostile review certified VALID with only
+# witness0 and witness1 — they bracket pass 1 and say nothing about the parallel
+# pass, which is the leg the experiment turns on.
+cell "T8 fewer than four witnesses VOIDs the sample" 3 "of 4 machine witnesses" \
   --witnesses 1
+cell "T8b two witnesses bracket only the FIRST pass and do not certify" 3 \
+  "of 4 machine witnesses" --witnesses 2
+cell "T8c witnesses with no usable measurement do not count as witnesses" 3 \
+  "of 4 machine witnesses" --calib ,,,
+
+# ── T33-T35: pass identity is POSITIONAL, and the shape is asserted ──────────
+#
+# Counts, sanitizer totals and coverage were keyed by each pass's own `label`
+# field. A hostile review used that twice: duplicate labels overwrote earlier
+# passes so counts of 362/1/999 read VALID, and a B-A-A ordering read VALID
+# because "two serial and one parallel" was accepted in any order — while the
+# whole design is serial, parallel, serial. A file describing itself is not
+# identification.
+cell "T33 a mislabelled pass is refused" 2 "is labelled" --labels "A,A,A'"
+cell "T34 a B-A-A ordering is refused" 2 "not the A-B-A shape" --jobs-shape "4,1,1"
+cell "T35 passes that disagree on the preset did not measure the same thing" 2 \
+  "did not measure the same thing" --preset-drift 1
 
 # ── T9/T10: what A-vs-A' agreement CANNOT see ────────────────────────────────
 #
@@ -232,8 +282,10 @@ cell "T11 coverage differing only under parallelism is a DEFECT" 1 \
 # Both serial passes disagreeing is the SUITE being nondeterministic, measured
 # at unchanged concurrency — a finding of its own, and NOT attributable to
 # --parallel. Reporting it as a parallelism defect would be a false accusation.
-cell "T12 coverage differing between the two SERIAL passes is not blamed on parallelism" 0 \
-  "run-to-run coverage nondeterminism" --cov one,two,three
+# Not blamed on parallelism — but not evidence either: with a moving serial
+# baseline there is nothing to compare the parallel pass against.
+cell "T12 coverage differing between the two SERIAL passes VOIDs, and is not blamed on parallelism" 3 \
+  "DIFFERENT MERGED COVERAGE" --cov one,two,three
 
 # ── T29: COVERAGE ATTEMPTED BUT NOT COMPARED IS NOT "FINE" ───────────────────
 #
@@ -243,14 +295,31 @@ cell "T12 coverage differing between the two SERIAL passes is not blamed on para
 # lane is blocked on. A measurement that could not be taken reading as a
 # measurement that came out fine is this repo's #1 recurring defect, and it had
 # reappeared here inside the apparatus written to prevent it.
-cell "T29 coverage attempted but not compared is disclosed, not silent" 0 \
-  "acceptance item 4 is NOT discharged" --cov-status no-profiles
+cell "T29 coverage attempted but not compared VOIDs, it is not silent" 3 \
+  "ITEM 4 WAS NOT DISCHARGED" --cov-status no-profiles
 
 # ── T13: the in-flight oracle's own blind spot, made loud ────────────────────
 cell "T13 a log with no Start lines is an INSTRUMENT FAILURE" 2 \
   "could not be observed at all" --no-start 2
 cell "T14 a malformed Start/complete pairing is an INSTRUMENT FAILURE" 2 \
-  "did not understand this log" --dup-start 2
+  "not structurally well-formed" --dup-start 2
+
+# ── T30-T32: A FORGED OR TRUNCATED LOG ───────────────────────────────────────
+#
+# `--output-on-failure` puts arbitrary TEST OUTPUT in this log, so a line that
+# LOOKS like ctest's is not evidence that ctest wrote it. A hostile review built
+# all three of these and the permissive parser summarised every one — including
+# a log claiming 362 tests while carrying a single completion record, which read
+# VALID. The achieved parallel level is the one thing standing between this
+# apparatus and measuring one configuration three times, so the parser is
+# fail-closed: exactly one summary, exactly `ran` starts and completions with
+# matching ids, nothing left in flight.
+cell "T30 a log with TWO ctest summaries is refused" 2 \
+  "exactly 1 is expected" --dup-summary 2
+cell "T31 a log claiming N tests with one completion record is refused" 2 \
+  "completion record(s) against a reported" --truncate-done 2
+cell "T32 injected Start lines cannot forge the parallel level upward" 2 \
+  "started and never completed" --forge-inflight 1
 
 # ── T15: PRECEDENCE — a defect outranks a void ───────────────────────────────
 #
@@ -265,7 +334,10 @@ cell "T16 an instrument failure outranks a defect" 2 "The widening did NOT take 
   --san 0,1,0 --inflight 1,1,1
 
 # ── T17: a subset run must not be readable as lane evidence ──────────────────
-cell "T17 a subset run is stamped SMOKE — NOT EVIDENCE" 0 "SMOKE RUN — NOT EVIDENCE" \
+# ⚠️ EXIT 3, NOT 0. The banner alone used to be the whole consequence, so a
+# smoke run went GREEN and published a speedup for a sample this file expressly
+# declares unusable — and a green tick outlives a banner.
+cell "T17 a subset run VOIDS, it does not merely carry a banner" 3 "SUBSET RUN" \
   --subset "session_.*"
 
 # ── T18: a missing peak reading is disclosed, not silently omitted ───────────
@@ -356,7 +428,7 @@ cell "T20 a witness with no /proc is usable, not absent" 0 \
 # A sweep must assert how many cells ran: a `cell` invocation lost to an editing
 # slip removes a gate silently, and the tally below would still read "N passed,
 # 0 failed" for a smaller N.
-MUTANTS_DECLARED=31
+MUTANTS_DECLARED=39
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$MUTANTS_DECLARED" ]; then

@@ -10,10 +10,12 @@
 #
 # `ci/ctest-parallelism-probe.md` records three `execution.jobs` conclusions
 # that were published and then WITHDRAWN, all for the same reason: they compared
-# two SEPARATE CI jobs on lanes whose between-VM wall-clock spread is 27-43 %.
-# `linux-clang-debug` alone reads 1142 / 1135 / 1151 s serial on three VMs and
-# 583 s on a fourth; every "no gain" reading for that lane came from comparing
-# against that one fast VM.
+# two SEPARATE CI jobs, on lanes whose between-VM wall-clock spread is large
+# enough that VM luck alone explains the result. That document holds the
+# figures — including a lane whose serial time on one VM was roughly half its
+# time on three others, which is where every "no gain" reading for it came
+# from. They are not restated here, because a number copied into four files is
+# a number that will be corrected in one.
 #
 # The only design that survived is three passes in ONE job on ONE VM —
 # serial, parallel, serial — voided unless the two serial passes agree.  That is
@@ -36,13 +38,15 @@
 #    one `profiles/` dir merge into one report covering all three, and
 #    "coverage identical before and after" becomes vacuously true.
 #  * THE PARALLEL LEVEL IS SET ON THE COMMAND LINE, NEVER IN THE ENVIRONMENT.
-#    MEASURED on an 8x1 s synthetic suite: `ctest --preset P --parallel 1`
-#    overrides a preset's `execution: {jobs: 4}` (8.03 s vs 2.01 s), but
-#    `CTEST_PARALLEL_LEVEL=1 ctest --preset P` does NOT (2.01 s — the preset
-#    wins).  `linux-clang-debug` and `linux-clang-ubsan` already carry `jobs: 4`,
-#    so the env-var form would have run all three passes at 4 on exactly the
-#    lanes a campaign starts from — and A vs A' would then agree PERFECTLY.
-#    ci/parallelism-verdict.py checks the achieved level independently anyway;
+#    MEASURED, and the obvious alternative is the WRONG one: the CLI flag
+#    overrides a preset's `execution: {jobs: N}`; `CTEST_PARALLEL_LEVEL` does
+#    NOT — the preset wins. Presets already carrying a `jobs` value are exactly
+#    the ones a campaign starts from, so the env-var form would have run all
+#    three passes at the preset's level and A-vs-A' would then agree PERFECTLY
+#    while nothing was tested. Not left as a remembered measurement: cell S2 of
+#    ci/test-parallelism-aba-seam.sh runs both passes against a preset that
+#    declares `jobs: 4` and requires the in-flight oracle to read 1 and then N.
+#    ci/parallelism-verdict.py checks the achieved level independently as well;
 #    this is the other half of the same guard.
 #
 # ── EXIT STATUS ──────────────────────────────────────────────────────────────
@@ -112,14 +116,18 @@ LLVM_COV="${LLVM_COV:-llvm-cov-22}"
 # CAMPAIGN, and they are safe there for a specific reason: the seam check tests
 # the PLUMBING — that the driver writes witness files the verdict can read — and
 # the calibration's absolute value is never used as an absolute by anything.
-# Shrinking it changes nothing the seam asserts, and turns 8 witness calls from
-# ~29 s into a rounding error on a job that runs on every push.
+# Shrinking it changes nothing the seam asserts, and turns eight witness calls
+# into a rounding error on a job that runs on every push.
 #
 # ⚠️ Setting them in a real campaign WOULD degrade the observation, so it is not
 # left to trust: machine-witness.py records `iters` and `repeats` in every
 # report, and ci/parallelism-verdict.py discloses on the page when they are
 # below the shipped defaults. A weakened witness cannot pass itself off as a
 # full one.
+#
+# The CONDITION, since the cost is what justifies them: eight witness calls run
+# per seam check, on a job that runs on every push. If that stops being a
+# rounding error, this is the knob — `time ci/test-parallelism-aba-seam.sh`.
 WITNESS_ARGS=()
 [ -n "${PARALLELISM_WITNESS_ITERS:-}" ]   && WITNESS_ARGS+=(--iters "$PARALLELISM_WITNESS_ITERS")
 [ -n "${PARALLELISM_WITNESS_REPEATS:-}" ] && WITNESS_ARGS+=(--repeats "$PARALLELISM_WITNESS_REPEATS")
@@ -250,7 +258,20 @@ coverage_digest() {
     return 0
   fi
 
-  local sha; sha="$(LC_ALL=C sort "$info" | sha256sum | cut -d' ' -f1)"
+  # ⚠️ EVERY LINE IS KEYED BY ITS `SF:` RECORD BEFORE SORTING. A plain
+  # `sort "$info"` discards the record association, and a hostile review showed
+  # two genuinely different reports hashing IDENTICALLY under it: move `DA:1,1`
+  # from a.cc to b.cc and `DA:2,0` the other way, and the sorted line multiset is
+  # unchanged. Coverage could migrate between files while all three digests
+  # "agree" — which is the one thing item 4 exists to detect.
+  #
+  # Sorting is still needed: `llvm-cov export` emits per-object sections in an
+  # order that follows the object list and the filesystem, neither of which is a
+  # coverage fact, and hashing that raw would report a difference on every run
+  # until the check was discarded as noisy.
+  local sha
+  sha="$(awk '/^SF:/ { sf = $0 } { print sf "\001" $0 }' "$info" \
+         | LC_ALL=C sort | sha256sum | cut -d' ' -f1)"
   {
     printf 'status=ok\nprofraw_count=%s\nsorted_info_sha256=%s\n' "$n" "$sha"
     printf 'lines_covered=%s\n' "$(grep -c '^DA:[0-9]*,[1-9]' "$info" 2>/dev/null || echo 0)"

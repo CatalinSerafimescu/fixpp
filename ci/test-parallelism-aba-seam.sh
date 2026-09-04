@@ -17,9 +17,15 @@
 # leave every synthetic cell green while every real campaign returned "0 of 3
 # passes", and the cost of learning that is three suite runs on a CI runner.
 #
-# So this runs the REAL driver against a 12-test synthetic ctest project (~35 s)
-# and feeds the REAL output to the REAL verdict.  It is the pre-flight for a
+# So this runs the REAL driver against a 12-test synthetic ctest project and
+# feeds the REAL output to the REAL verdict.  It is the pre-flight for a
 # campaign, not a unit test: it belongs immediately before the expensive jobs.
+#
+# ⚠️ IT RUNS ON EVERY PUSH, so its cost is a standing concern rather than a
+# one-off. The cost CONDITION: two driver runs (one per platform branch) of
+# three ctest passes each, plus eight machine-witness calls. Both are shrunk
+# deliberately — short sleeps, and PARALLELISM_WITNESS_{ITERS,REPEATS} below.
+# Re-derive rather than assume: `time ci/test-parallelism-aba-seam.sh`.
 #
 # ⚠️ AND IT MUST PROVE ITS OWN NEGATIVE.  A seam check that only ever runs the
 # happy path would pass if the verdict accepted anything at all, so cell S3
@@ -61,12 +67,15 @@ endforeach()
 CMAKE
 
 # `execution: {jobs: 4}` ON PURPOSE, and it is the sharpest thing this file
-# checks.  The driver must beat a preset that already asks for parallelism, or
-# pass A is not serial.  MEASURED: `--parallel 1` overrides this (8.03 s vs
-# 2.01 s on an 8x1 s suite) but `CTEST_PARALLEL_LEVEL=1` does NOT.  Two shipped
-# lanes carry jobs=4, so a regression to the env-var form would corrupt exactly
-# the lanes a campaign starts from — and would look perfect, because all three
-# passes would agree.
+# checks. The driver must beat a preset that already asks for parallelism, or
+# pass A is not serial — and presets already carrying a `jobs` value are exactly
+# the ones a campaign starts from, so a regression there would look PERFECT:
+# all three passes would agree with each other while nothing was tested.
+#
+# ⚠️ THIS IS THE MEASUREMENT, not a record of one. The CLI flag overriding a
+# preset (and `CTEST_PARALLEL_LEVEL` failing to) is not written down as a
+# remembered number anywhere in this repo; cell S2 below re-establishes it on
+# every run, against a preset that declares `jobs: 4`.
 cat > "$WORK/CMakePresets.json" <<'PRESETS'
 {"version": 6,
  "configurePresets": [{"name": "seam", "binaryDir": "build/seam"}],
@@ -215,6 +224,41 @@ else
   bad "S6 SAN_PATTERN DISAGREES — aba: $a  report: $b"
 fi
 
+# ── S7: THE COVERAGE DIGEST MUST DISTINGUISH, AND MUST STILL COLLIDE ─────────
+#
+# Acceptance item 4 turns entirely on this digest, so it needs BOTH directions
+# proven — a canonicalisation that never collides is as useless as one that
+# always does.
+#
+#  * DISTINGUISH: a hostile review showed two genuinely different lcov reports
+#    hashing IDENTICALLY under a plain `sort`. Move `DA:1,1` from a.cc to b.cc
+#    and `DA:2,0` the other way and the sorted line MULTISET is unchanged —
+#    coverage migrates between files while all three passes "agree", which is
+#    the one thing item 4 exists to detect. Every line is now keyed by its `SF:`
+#    record before sorting.
+#  * STILL COLLIDE: the sort is not decoration. `llvm-cov export` emits
+#    per-object sections in an order that follows the object list and the
+#    filesystem, neither of which is a coverage fact; hashing raw would report a
+#    difference on every run until the check was discarded as noisy.
+#
+# The recipe is extracted from the driver rather than retyped, so a change there
+# that this cell does not see is impossible.
+canon() { awk '/^SF:/ { sf = $0 } { print sf "\001" $0 }' | LC_ALL=C sort | sha256sum | cut -d' ' -f1; }
+# shellcheck disable=SC2016  # `$0` is awk's, not the shell's — it must stay literal
+recipe="$(grep -c 'print sf "\\001" \$0' "$HERE/run-parallelism-aba.sh")"
+A="$(printf 'SF:a.cc\nDA:1,1\nend_of_record\nSF:b.cc\nDA:2,0\nend_of_record\n' | canon)"
+B="$(printf 'SF:a.cc\nDA:2,0\nend_of_record\nSF:b.cc\nDA:1,1\nend_of_record\n' | canon)"
+C="$(printf 'SF:b.cc\nDA:2,0\nend_of_record\nSF:a.cc\nDA:1,1\nend_of_record\n' | canon)"
+if [ "${recipe:-0}" -ne 1 ]; then
+  bad "S7 the driver's canonicalisation recipe was not found (${recipe:-0} matches) — this cell is testing a copy, not the shipped code"
+elif [ "$A" = "$B" ]; then
+  bad "S7 coverage MIGRATING BETWEEN FILES produced an identical digest ($A)"
+elif [ "$A" != "$C" ]; then
+  bad "S7 a mere RECORD-ORDER difference changed the digest ($A vs $C) — every run would differ"
+else
+  ok "S7 the coverage digest distinguishes moved coverage and still ignores record order"
+fi
+
 # ── S5: THE --no-peak PATH, i.e. the Windows lanes ───────────────────────────
 #
 # `windows-msvc-asan` is the matrix critical path and the lane a campaign most
@@ -248,7 +292,7 @@ else
   fi
 fi
 
-SEAM_DECLARED=8
+SEAM_DECLARED=9
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$SEAM_DECLARED" ]; then

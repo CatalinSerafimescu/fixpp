@@ -6,8 +6,9 @@
 WHY THIS EXISTS
 ===============
 
-#267's whole difficulty is that this repo's CI lanes have a **27-43 % between-VM
-wall-clock spread**, so an A/B run as two separate jobs measures VM luck.  The
+#267's whole difficulty is that this repo's CI lanes have a between-VM
+wall-clock spread wide enough that an A/B run as two separate jobs measures VM
+luck rather than the change (figures in `ci/ctest-parallelism-probe.md`).  The
 answer already recorded in `ci/ctest-parallelism-probe.md` is to run both arms
 in ONE job on ONE VM, serial-parallel-serial, and to **void the sample unless
 the two serial passes agree**.
@@ -124,7 +125,7 @@ def time_one(iters: int, repeats: int) -> float:
     return best
 
 
-def time_many(iters: int, procs: int, repeats: int) -> float:
+def time_many(iters: int, procs: int, repeats: int, single_arm_s: float) -> float:
     """Wall time until the LAST of `procs` concurrent burners finishes.
 
     PROCESSES, not threads, and not negotiable: CPython's GIL would serialise
@@ -146,8 +147,31 @@ def time_many(iters: int, procs: int, repeats: int) -> float:
         workers = [multiprocessing.Process(target=burn, args=(iters,)) for _ in range(procs)]
         for w in workers:
             w.start()
+        # ⚠️ BOUNDED, AND EVERY EXIT STATUS IS CHECKED. A hostile review replaced
+        # `burn` with `os._exit(7)` and this function returned 0.011 s — a
+        # "calibration" in which no work was done at all, recorded as
+        # `status=ok`. A crashed, OOM-killed or signalled arm would therefore
+        # read as an extraordinarily fast machine, and the verdict would compare
+        # it against a real one. The unbounded `join()` was the other half: one
+        # stuck child hung the whole campaign with no diagnostic.
+        #
+        # The budget is derived, not chosen: the single-process arm has already
+        # been timed by the caller, and N processes on a machine with at least
+        # one core cannot beat it — 10x that, floored, is loose enough never to
+        # fire on a slow runner and tight enough that a wedged child is caught.
+        deadline = time.monotonic() + max(30.0, single_arm_s * 10.0)
+        failed = []
         for w in workers:
-            w.join()
+            w.join(timeout=max(0.0, deadline - time.monotonic()))
+            if w.is_alive():
+                failed.append(f"{w.name} still running after {deadline - t0:.0f}s")
+                w.terminate()
+                w.join(timeout=5.0)
+            elif w.exitcode != 0:
+                failed.append(f"{w.name} exited {w.exitcode}")
+        if failed:
+            raise RuntimeError("N-proc calibration children did not complete cleanly: "
+                               + "; ".join(failed))
         best = min(best, time.monotonic() - t0)
     return best
 
@@ -211,9 +235,11 @@ def main() -> int:
         # Warm-up, discarded: the first call pays interpreter warm-up and page
         # faults that the timed calls must not carry.
         burn(args.iters // 10)
-        fields["calib_1proc_s"] = f"{time_one(args.iters, args.repeats):.3f}"
-        fields["calib_nproc_s"] = f"{time_many(args.iters, procs, max(2, args.repeats // 2)):.3f}"
-    except OSError as exc:
+        one = time_one(args.iters, args.repeats)
+        fields["calib_1proc_s"] = f"{one:.3f}"
+        fields["calib_nproc_s"] = \
+            f"{time_many(args.iters, procs, max(2, args.repeats // 2), one):.3f}"
+    except (OSError, RuntimeError) as exc:
         status = "calib-failed"
         fields["error"] = repr(exc)
 
