@@ -573,14 +573,25 @@ table_view Dictionary::as_table_view() const {
             //    MassQuote: fr.group_no_tag == 296 (295's count-field's own
             //    enclosing group), immediate_parent[296] == 0 (296 is
             //    top-level) → path == [296].
-            std::vector<std::uint16_t> path;
-            std::uint16_t cur = fr.group_no_tag;
-            while (cur != 0) {
-                path.push_back(cur);
-                auto const pit = immediate_parent.find(cur);
-                cur = (pit != immediate_parent.end()) ? pit->second : std::uint16_t{0};
+            //
+            //    fixpp#264: the walk itself is `detail::group_parent_path`,
+            //    shared with the FR-023 completeness probe that has to build
+            //    the identical key. It is unclamped; `make_group_ctx_delim` /
+            //    `make_group_ctx_key` apply the K clamp downstream.
+            auto const path_opt = detail::group_parent_path(fr.group_no_tag, immediate_parent);
+            if (!path_opt) {
+                // Cyclic ancestor relation (#264 review): registering the
+                // truncated path would COLLIDE with a legitimately-registered
+                // context rather than miss it, merging two groups' membership.
+                // Both loaders' FR-023 sweep rejects such a dictionary at
+                // finalize(), so this is belt-and-braces for a handle that did
+                // not come through them; it fails closed by declining to
+                // register, never by throwing (`as_table_view()` is
+                // contractually non-throwing — 072, L-063-4). Skipped BEFORE any
+                // partial registration, so no half-built context is left behind.
+                continue;
             }
-            std::ranges::reverse(path);
+            auto const& path = *path_opt;
 
             // 4) Delimiter = the group's DECLARATION first field, NOT
             //    members.front(): `all_fields` is tag-sorted, so members.front()

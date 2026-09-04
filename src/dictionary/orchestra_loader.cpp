@@ -644,8 +644,9 @@ void OrchestraLoaderState::expand_field_list(
                 delim_cap->pending.pop_back();
                 delim_cap->path.pop_back();
                 if (captured != 0) {
-                    delim_cap->out.push_back(
-                        detail::make_group_ctx_delim(delim_cap->path, no_tag, captured));
+                    delim_cap->out.push_back(detail::CapturedDelim{
+                        detail::make_group_ctx_delim(delim_cap->path, no_tag, captured),
+                        delim_cap->path});
                 }
                 // 083 T036 (FR-006 / C-6.1), symmetric with xml_loader.cpp:
                 // `captured == 0` means this group emitted no first member, so
@@ -869,7 +870,16 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
 
         // 083 T030 (Entity 2): flush this message's records — same sort, same
         // key-dedup and same run shape as xml_loader.cpp.
-        detail::flush_group_ctx_delims(h, delim_cap);
+        // #264 review: same clamp-collision refusal as xml_loader.cpp — FR-005 /
+        // C-1.5, a one-loader fix is a half-restructure. Only the exception type
+        // differs (FR-006c), which is why the shared helper returns.
+        if (auto const clash = detail::flush_group_ctx_delims(h, delim_cap); clash) {
+            throw orchestra_parse_error(
+                "dict::orchestra_parse_error: two distinct group contexts for NumInGroup tag " +
+                std::to_string(*clash) + " in message '" + std::string{md.msg_type} +
+                "' have ancestor chains longer than kMaxGroupContextDepth that collapse to the "
+                "same context key, so they cannot be stored separately");
+        }
     }
 
     // ── 083 T030 (research D-10 / C-1.4b / C-7.2's write-order leg) ─────────

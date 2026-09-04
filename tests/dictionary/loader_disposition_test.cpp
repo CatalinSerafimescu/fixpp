@@ -307,6 +307,111 @@ std::vector<DictFile> const kAllTen{
     {"Orchestra FIX Latest", "OrchestraFIXLatest.xml", true},
 };
 
+// ── fixpp#264 fixture: a COMPLETE dictionary whose deepest group context has an
+// ancestor chain one longer than `kMaxGroupContextDepth`. Past the clamp is the
+// only region where the FR-023 completeness probe and the registration path can
+// build different keys for the same context, and one-past is the minimum that
+// reaches it.
+//
+// Shape: `NoA<i>` count tags nested one inside the next, each declaring its own
+// scalar `D<i>` BEFORE its nested child group so document order gives every one
+// of them a resolvable first member. That ordering is load-bearing: a group
+// whose first emission is its child group's count tag still resolves, but a
+// group with NO scalar and no child at all would trip xml_loader's FR-006
+// `captured == 0` disposition and the load would be rejected for an unrelated
+// reason — indistinguishable, from the outside, from the rejection this fixture
+// exists to catch. `NoLeaf` sits inside the innermost `NoA<i>` with its own
+// member `LeafF`, so ITS parent path — ancestors only, own `no_tag` excluded
+// (C-1.3 / Entity 1) — is the full `kDeepChainLen` chain.
+//
+// Nothing here is malformed: every group has a member and every field is
+// declared, so a rejection of this input is a false rejection of valid input.
+// Derived, not hardcoded: the fixture must sit exactly one level past the
+// clamp, which is the minimal chain length at which two clamp orders can
+// disagree. A literal here would silently stop reproducing #264 if K grew.
+inline constexpr std::uint16_t kDeepChainLen =
+    static_cast<std::uint16_t>(fixpp::dict::kMaxGroupContextDepth + 1);
+static_assert(kDeepChainLen > fixpp::dict::kMaxGroupContextDepth,
+              "the fixture must nest PAST the clamp or it pins nothing");
+inline constexpr std::uint16_t kDeepCountBase = 900;   // NoA<i> = 900 + i
+inline constexpr std::uint16_t kDeepDelimBase = 1000;  // D<i>   = 1000 + i
+inline constexpr std::uint16_t kDeepLeafNoTag = 9000;
+inline constexpr std::uint16_t kDeepLeafDelim = 9001;
+
+// ── fixpp#264 review (F1) fixture: two DISTINCT contexts for the same group
+// whose ancestor chains differ only PAST the clamp, so they collapse to one
+// `group_ctx_key`. `NoLeaf` is declared under two siblings at level K+1, so its
+// two chains are `[NoA1..NoAK, NoX]` and `[NoA1..NoAK, NoY]` — identical in
+// their first K elements, which is all the key keeps.
+//
+// The two contexts also declare DIFFERENT delimiters, which is what makes the
+// collision harmful rather than merely redundant: whichever record survives a
+// key-based dedup answers for both, so a message nested under the loser parses
+// with the winner's delimiter.
+[[nodiscard]] std::string make_clamp_collision_xml() {
+    auto const k = static_cast<std::uint16_t>(fixpp::dict::kMaxGroupContextDepth);
+    std::string xml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'><fields>)"
+                      R"(<field number='35' name='MsgType' type='STRING'/>)";
+    for (std::uint16_t i = 1; i <= k; ++i) {
+        xml += "<field number='" + std::to_string(kDeepCountBase + i) + "' name='NoA" +
+               std::to_string(i) + "' type='NUMINGROUP'/>";
+        xml += "<field number='" + std::to_string(kDeepDelimBase + i) + "' name='D" +
+               std::to_string(i) + "' type='STRING'/>";
+    }
+    xml += R"(<field number='920' name='NoX' type='NUMINGROUP'/>)"
+           R"(<field number='921' name='NoY' type='NUMINGROUP'/>)"
+           R"(<field number='1920' name='DX' type='STRING'/>)"
+           R"(<field number='1921' name='DY' type='STRING'/>)"
+           R"(<field number='9000' name='NoLeaf' type='NUMINGROUP'/>)"
+           R"(<field number='9001' name='LX' type='STRING'/>)"
+           R"(<field number='9002' name='LY' type='STRING'/>)"
+           R"(</fields><messages><message name='ClashMsg' msgtype='C' msgcat='app'>)"
+           R"(<field name='MsgType' required='N'/>)";
+    for (std::uint16_t i = 1; i <= k; ++i) {
+        xml += "<group name='NoA" + std::to_string(i) + "' required='N'>";
+        xml += "<field name='D" + std::to_string(i) + "' required='N'/>";
+    }
+    // Two siblings at level K+1, each declaring NoLeaf with its OWN delimiter.
+    xml += R"(<group name='NoX' required='N'><field name='DX' required='N'/>)"
+           R"(<group name='NoLeaf' required='N'><field name='LX' required='N'/></group></group>)"
+           R"(<group name='NoY' required='N'><field name='DY' required='N'/>)"
+           R"(<group name='NoLeaf' required='N'><field name='LY' required='N'/></group></group>)";
+    for (std::uint16_t i = 0; i < k; ++i) {
+        xml += "</group>";
+    }
+    xml += R"(</message></messages></fix>)";
+    return xml;
+}
+
+[[nodiscard]] std::string make_deep_nesting_xml() {
+    std::string xml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'><fields>)"
+                      R"(<field number='8' name='BeginString' type='STRING'/>)"
+                      R"(<field number='9' name='BodyLength' type='INT'/>)"
+                      R"(<field number='10' name='CheckSum' type='STRING'/>)"
+                      R"(<field number='35' name='MsgType' type='STRING'/>)";
+    for (std::uint16_t i = 1; i <= kDeepChainLen; ++i) {
+        xml += "<field number='" + std::to_string(kDeepCountBase + i) + "' name='NoA" +
+               std::to_string(i) + "' type='NUMINGROUP'/>";
+        xml += "<field number='" + std::to_string(kDeepDelimBase + i) + "' name='D" +
+               std::to_string(i) + "' type='STRING'/>";
+    }
+    xml +=
+        "<field number='" + std::to_string(kDeepLeafNoTag) + "' name='NoLeaf' type='NUMINGROUP'/>";
+    xml += "<field number='" + std::to_string(kDeepLeafDelim) + "' name='LeafF' type='STRING'/>";
+    xml += R"(</fields><messages><message name='DeepMsg' msgtype='M' msgcat='app'>)"
+           R"(<field name='MsgType' required='N'/>)";
+    for (std::uint16_t i = 1; i <= kDeepChainLen; ++i) {
+        xml += "<group name='NoA" + std::to_string(i) + "' required='N'>";
+        xml += "<field name='D" + std::to_string(i) + "' required='N'/>";
+    }
+    xml += "<group name='NoLeaf' required='N'><field name='LeafF' required='N'/></group>";
+    for (std::uint16_t i = 0; i < kDeepChainLen; ++i) {
+        xml += "</group>";
+    }
+    xml += R"(</message></messages></fix>)";
+    return xml;
+}
+
 }  // namespace
 
 // ============================================================================
@@ -871,4 +976,198 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordTolerantModeSkipsGroup) {
     // And the well-formed sibling is untouched, so "skipped" did not mean
     // "gave up on the dictionary".
     EXPECT_EQ(tv.group_first_field("V1", root, std::uint16_t{600}), 610);
+}
+
+// ============================================================================
+// fixpp#264 — the FR-023 completeness probe and the registration path must
+// build the SAME key for the same group context.
+//
+// Both walk a group's ancestor chain outward and reverse it to outermost-first.
+// The K=16 clamp belongs to `make_group_ctx_delim` / `make_group_ctx_key`,
+// which keep the OUTERMOST `kMaxGroupContextDepth` entries. The probe used to
+// clamp DURING its walk instead, which keeps the INNERMOST 16 — the same 16
+// only while the chain is no longer than K. At 17 the two keys differ by
+// construction, the probe's `lower_bound` misses a record that IS there, and a
+// COMPLETE dictionary is rejected at load as an internal-invariant violation.
+//
+// The pin is that a complete deep dictionary LOADS **and** that its deepest
+// context RESOLVES — the second half catches a registration side that stores the
+// context but not its delimiter.
+//
+// This test canNOT distinguish "probe fixed" from "FR-023 deleted outright": on
+// this input the correct behaviour IS "no rejection", so it stays green either
+// way. Measured, not assumed. That property is pinned instead by
+// `ContextWithoutDelimiterRecordRejectedAtFinalize` and its Orchestra twin,
+// which go RED when the check is neutered.
+// ============================================================================
+TEST(LoaderDisposition, DeepAncestorChainLoadsAndResolvesDelimiter) {
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    auto const xml = make_deep_nesting_xml();
+
+    // The `try` deliberately wraps the LOAD and nothing else: its failure
+    // message names a load rejection, and if it also covered the assertions
+    // below, any `xml_parse_error` escaping those would be misreported as one.
+    std::optional<fixpp::dict::Dictionary> dict;
+    try {
+        dict.emplace(fixpp::dict::XmlLoader{}.load_from_string(xml, &mr));
+    } catch (xml_parse_error const& e) {
+        FAIL() << "fixpp#264: a COMPLETE dictionary nesting " << kDeepChainLen
+               << " groups was rejected at load. RED before the fix with the FR-023 completeness "
+                  "message; any other message means the fixture, not the probe, is at fault. "
+                  "what(): "
+               << e.what();
+    }
+    ASSERT_TRUE(dict.has_value());
+    auto const tv = dict->as_table_view();
+
+    // The leaf's full ancestor chain, outermost first.
+    std::vector<std::uint16_t> full_path;
+    for (std::uint16_t i = 1; i <= kDeepChainLen; ++i) {
+        full_path.push_back(static_cast<std::uint16_t>(kDeepCountBase + i));
+    }
+
+    // `make_group_ctx_key` stores this context under the OUTERMOST K of that
+    // chain. `group_ctx_query` does NOT clamp — it hashes and compares the
+    // caller's span verbatim — so the query passes the same truncated prefix
+    // the stored key holds. A caller passing the untruncated chain misses; that
+    // is a separate lookup-side divergence and is not what this case pins.
+    std::span<std::uint16_t const> const key_path{full_path.data(),
+                                                  fixpp::dict::kMaxGroupContextDepth};
+
+    auto const first = tv.group_first_field_exact("M", key_path, kDeepLeafNoTag);
+    ASSERT_TRUE(first.has_value())
+        << "fixpp#264: the depth-" << full_path.size() << " context for NoLeaf(" << kDeepLeafNoTag
+        << ") was registered by as_table_view() but cannot be found under the key "
+           "as_table_view() itself built.";
+    EXPECT_EQ(*first, kDeepLeafDelim)
+        << "fixpp#264: the deepest context must resolve to its declared first member. A 0 "
+           "here means the context is present but empty.";
+
+    // The assertion above is BLIND to every path element at index >= K: the
+    // clamp erases them, so a registration walk that wrongly included the
+    // group's own no_tag (violating C-1.3 / Entity 1) would still produce an
+    // identical clamped key and keep this test green. A depth-1 context cannot
+    // be truncated, so it sees exactly that class of error.
+    std::array<std::uint16_t, 1> const shallow_path{static_cast<std::uint16_t>(kDeepCountBase + 1)};
+    auto const shallow =
+        tv.group_first_field_exact("M", std::span<std::uint16_t const>{shallow_path},
+                                   static_cast<std::uint16_t>(kDeepCountBase + 2));
+    ASSERT_TRUE(shallow.has_value())
+        << "the depth-1 context for NoA2 must be registered under its exact one-element "
+           "ancestor path; a MISS means the registration walk built a different path than "
+           "the key builder did.";
+    EXPECT_EQ(*shallow, static_cast<std::uint16_t>(kDeepDelimBase + 2));
+}
+
+// ============================================================================
+// fixpp#264 review (Codex P1, confirmed) — a CYCLIC ancestor relation must be
+// reported as a violation, never resolved to a truncated key.
+//
+// Truncating at the repeat is not fail-closed: the truncated array is a
+// well-formed key, and for a self-parented group it is EXACTLY the key of that
+// group's own inner occurrence. The probe then matches a record that really is
+// in the pool and reports the dictionary complete — turning a load rejection
+// into a silently wrong context table.
+//
+// This is a DIRECT unit test of the sweep on a hand-built handle, deliberately
+// not an XML fixture. Reaching `immediate_parent[G] == G` through a loader
+// depends on which of two equal-tag FieldRefs survives an UNSTABLE sort, so an
+// XML fixture would pin the standard library's sort rather than this code. The
+// hand-built relation is the same state with none of that dependence — same
+// shape as FindIncompleteGroupContextDetectsMissingRecord above.
+//
+// The `[100]` delimiter record is the whole point of the fixture: it is what a
+// truncated probe key would COLLIDE with. Drop it and the test passes for the
+// wrong reason (a miss rather than a refusal to build a key).
+// ============================================================================
+TEST(LoaderDisposition, CyclicAncestorRelationIsAViolationNotATruncatedKey) {
+    std::array<std::byte, 4096> buf{};
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    fixpp::dict::detail::dict_metadata_handle h{&mr};
+
+    // NoG(100) enclosed by ITSELF — the post-dedup state a self-nested group
+    // leaves behind when the inner occurrence is the survivor.
+    fixpp::dict::FieldRef group_fr{};
+    group_fr.tag = 100;
+    group_fr.type = fixpp::dict::field_data_type::NumInGroup;
+    group_fr.group_no_tag = 100;
+
+    fixpp::dict::FieldRef member_fr{};
+    member_fr.tag = 120;
+    member_fr.type = fixpp::dict::field_data_type::String;
+    member_fr.group_no_tag = 100;
+
+    h.fields_.push_back(group_fr);
+    h.fields_.push_back(member_fr);
+    h.per_msg_field_offsets_.push_back({.start = 0, .count = 2});
+
+    // The record a truncated `[100]` key would collide with.
+    std::array<std::uint16_t, 1> const inner_path{100};
+    h.group_ctx_delim_pool_.push_back(
+        fixpp::dict::detail::make_group_ctx_delim(inner_path, 100, 120));
+    h.per_msg_group_ctx_delim_offsets_.push_back({.start = 0, .count = 1});
+
+    std::array<std::uint16_t, 1> const structural_tags{100};
+    auto const bad = fixpp::dict::detail::find_incomplete_group_context(h, structural_tags);
+    ASSERT_TRUE(bad.has_value())
+        << "a cyclic ancestor relation must be reported as a violation. A truncated `[100]` "
+           "probe key MATCHES the inner record in this pool, so a walk that truncates instead "
+           "of refusing reports the dictionary complete and loads a wrong context table.";
+    EXPECT_EQ(bad->second, 100);
+}
+
+// ============================================================================
+// fixpp#264 review F1 — two contexts that differ only PAST the clamp must be
+// REFUSED at load, not silently merged.
+//
+// Making deep dictionaries loadable (the #264 fix) is what exposes this: on
+// `main` the spurious FR-023 rejection kept every depth->K chain out of the
+// store, so the collision was unreachable. `group_ctx_key::parent_path` is a
+// fixed `kMaxGroupContextDepth` array, so these two contexts genuinely cannot be
+// stored apart; the key-dedup in `flush_group_ctx_delims` would keep the first
+// and DROP the second, leaving the survivor to answer for both.
+//
+// A lone context past the clamp is NOT affected and must keep loading — that is
+// `DeepAncestorChainLoadsAndResolvesDelimiter` above, and it is why this rejects
+// only a measured collision rather than depth alone. Every shipped dictionary
+// nests far below K, so this cannot fire on one (pinned by
+// `AllShippedContextsHaveADelimiterRecord`).
+// ============================================================================
+TEST(LoaderDisposition, ContextsCollidingPastTheClampAreRejectedAtLoad) {
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    auto const xml = make_clamp_collision_xml();
+    bool threw = false;
+    std::string what;
+    try {
+        auto dict = fixpp::dict::XmlLoader{}.load_from_string(xml, &mr);
+        // Reached only when the collision was NOT refused. Report what the
+        // merged context actually resolves to — that is the defect, and a bare
+        // "did not throw" would not show it.
+        auto const tv = dict.as_table_view();
+        std::vector<std::uint16_t> path;
+        for (std::uint16_t i = 1; i <= fixpp::dict::kMaxGroupContextDepth; ++i) {
+            path.push_back(static_cast<std::uint16_t>(kDeepCountBase + i));
+        }
+        auto const merged = tv.group_first_field_exact("C", std::span<std::uint16_t const>{path},
+                                                       std::uint16_t{9000});
+        ADD_FAILURE() << "fixpp#264 F1: two contexts for NoLeaf(9000) whose chains differ only "
+                         "past kMaxGroupContextDepth were accepted. The clamped key now answers "
+                         "for both, resolving delimiter "
+                      << (merged.has_value() ? *merged : 0)
+                      << " regardless of which parent a message nests under (LX=9001, LY=9002).";
+    } catch (xml_parse_error const& e) {
+        threw = true;
+        what = e.what();
+    }
+    ASSERT_TRUE(threw);
+    EXPECT_NE(what.find("collapse to the same context key"), std::string::npos)
+        << "the diagnostic must name the collision, not a completeness violation — the FR-023 "
+           "message would send a reader looking for a missing record that is not missing. got: "
+        << what;
+    EXPECT_NE(what.find("9000"), std::string::npos)
+        << "the diagnostic must name the offending NumInGroup tag; got: " << what;
 }

@@ -72,6 +72,64 @@ contains the thing:
 in [`nfr-and-tooling`](./nfr-and-tooling.md), where the same status column is unreliable for a
 different and possibly legitimate reason.
 
+## Group context keys — one walk, one clamp, and three rejected alternatives
+
+A repeating-group *context* is keyed by `(msg_type, ancestor count-tag chain OUTERMOST-FIRST, no_tag)`
+and clamped to `kMaxGroupContextDepth`. Several places reconstruct that chain. The decisions below are
+the **why**; verify any behavioural statement against source before citing it.
+
+**DECIDED — one walk, one clamp, in that order.** `detail::group_parent_path` walks and reverses but
+does NOT clamp; the clamp lives only in `make_group_ctx_delim` / `make_group_ctx_key`, which keep the
+first — i.e. OUTERMOST — K entries.
+
+**REJECTED — clamping inside the walk.** Stopping the walk at K keeps the INNERMOST K, which is a
+*different key for the same context* once the chain is longer than K. That was issue #264: the FR-023
+completeness probe clamped during its walk while the loaders' capture path and `as_table_view()`
+clamped after theirs, so a COMPLETE dictionary was refused at load by a message asserting an internal
+invariant violation — sending readers to look for a bug in `as_table_view()` rather than in the probe.
+⚠️ The tempting variant *"bound the walk at K+1 since the clamp discards the rest anyway"* is the same
+defect in new clothing; the walk must stay unbounded.
+
+**REJECTED — truncating the chain at a repeated tag when the relation has a cycle.** This looks
+fail-closed and is not: a truncated array is a **well-formed key**, so instead of missing every record
+it can COLLIDE with one. A self-parented group truncates to `[G]`, which is exactly the key of that
+group's own inner occurrence, so the probe *matches* and reports the dictionary complete. A cycle now
+yields no path at all, and both callers treat that as a violation.
+
+> ⚠️ **The parent relation is NOT guaranteed acyclic, and the reason is easy to miss.** Both loaders
+> reduce a message's field run to one `FieldRef` per tag using an **unstable** sort, so which of two
+> equal-tag occurrences survives is *unspecified* — and when the inner occurrence of a self-nested
+> group wins, the relation holds `immediate_parent[G] == G`. Do not re-derive how often that happens;
+> the answer is a property of the standard library's sort, not of this code.
+
+**REJECTED — refusing any chain longer than K.** Measured, not argued: a *lone* context past the clamp
+loads and resolves correctly end-to-end, because `wire::group_context::pushed` saturates by dropping
+the push at K — keeping the OUTERMOST K, the same end `make_group_ctx_key` keeps — and every production
+query derives its span from a `group_context`. Store key and wire query key therefore coincide past the
+clamp. Depth alone is not the defect, so a depth rule would refuse input that demonstrably works.
+
+**DECIDED — refuse only a measured COLLISION.** Past K the clamp is lossy, so two genuinely different
+contexts can produce byte-identical keys, and `group_ctx_key::parent_path` is a fixed K-element array
+that cannot hold them apart. The key-dedup in the shared `flush_group_ctx_delims` would keep the first
+and silently DROP the second, leaving the survivor to answer for both — a message nested under the
+dropped parent resolving the *wrong delimiter*. Each record now carries its unclamped chain beside the
+clamped key, so the flush can tell "same key, same chain" (a benign duplicate — a group declared in
+both header and body) from "same key, different chain" (unrepresentable, refused). Loader-local: the
+store, `group_ctx_key` and every query path are untouched.
+
+> ⭐ **This is failure class 7 in [`failure-classes.md`](../failure-classes.md), and #264 is its
+> reference instance.** The spurious rejection was *the only thing* keeping chains past the clamp out
+> of a store that cannot represent them. Fixing the false rejection — correctly — is what exposed the
+> silent merge behind it. The fix and the newly-reachable defect were found in the same review round,
+> by two independent reviewers, neither of which was looking for the second one.
+
+**LEAD TO VERIFY, not a known defect.** `group_ctx_query` / `group_ctx_equal` compare the caller's span
+verbatim with **no** clamp, so a caller passing an unclamped over-long path misses a key stored clamped.
+Per the paragraph above no production caller can construct such a span — but a hand-built one can, and
+the two are the same type (`std::span<std::uint16_t const>`), so nothing distinguishes "clamped key"
+from "raw chain" at a call site. Unfiled at the time of writing; confirm against source before treating
+it as either safe or broken.
+
 ## Where the design decisions live
 
 `2c-codegen.md` is **v1.4 post-sign-off** and was scanned clean in the Step-R sweep. ⚠️ Beside it sits
