@@ -2121,6 +2121,23 @@ jobs:
       - name: Regression pin — apt/llvm install bound (#300)
         run: bash ci/test-apt-guard.sh
 
+      # #298 — the tests/wheel <-> in-tree parity contract. conftest.py and
+      # tests/wheel/README.md both describe tests/wheel/ as a byte-faithful fork
+      # with an enumerated membership, and nothing enforced any of it: the
+      # convention was held by hand and had already drifted in two directions.
+      #
+      # The ALLOWLIST IS THE README, not a second list maintained beside it —
+      # otherwise two artifacts would each claim to be the contract.
+      #
+      # ⚠️ #298's own warning is why the harness exists rather than just the
+      # check: "a parity gate that silently passes is worse than none, because
+      # it converts an unenforced convention into a falsely enforced one." Each
+      # of the gate's directions is broken against a copy of the real suite and
+      # asserted to produce ITS OWN message — a cell that fails for the wrong
+      # reason is not a passing cell.
+      - name: Regression pin — wheel/in-tree test parity (#298)
+        run: bash ci/test-wheel-parity.sh
+
       # #209 — the bench gate's own harness. 61 cells over synthetic
       # Google-Benchmark JSON: every hard cell of tools/bench_compare.py and
       # ci/run-bench-suite.sh is proven RED for its own named reason, and the

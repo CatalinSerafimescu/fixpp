@@ -16,6 +16,16 @@ python -m venv /tmp/wheel-venv && /tmp/wheel-venv/bin/pip install <the.whl> pyte
 
 ## Membership (the enumerated set, T012)
 
+> ⚠️ **THIS SECTION IS THE ALLOWLIST, AND IT IS ENFORCED (#298).**
+> `ci/assert-wheel-test-parity.py`, pinned by `ci/test-wheel-parity.sh` in the
+> `ci-script-pins` job, reads this file and fails the build on: a wheel file
+> named nowhere here; a row naming a file that does not exist; a twin whose
+> `def test_*` name set differs from its in-tree source; and a row marked
+> `as-is` whose two copies are not byte-identical. **Edit the table in the same
+> commit as the file** — a divergence introduced without its row is a build
+> failure, by design. Rows marked with a locator swap, `(suite-native)` or
+> `diverges` are exempt from byte-identity only; the other three still apply.
+
 Ports of the in-tree `bindings/python/tests/` suite — the **round-trip, smoke,
 exception, lifetime, OO-behaviour, and sub-interpreter** tests — adapted to the
 locator. For every file below **except `test_subinterpreter.py`**, the *only*
