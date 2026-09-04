@@ -650,9 +650,61 @@ Two comparisons, and only their difference attributes anything. **A vs A′** is
 run-to-run coverage determinism, measured on the same VM at unchanged concurrency. **A vs B** is the
 parallelism effect. B differing while A and A′ agree is attributable to `--parallel`; all three
 differing is a nondeterministic suite — a finding of its own, and explicitly *not* evidence about
-parallelism either way. The digest is a sha256 of the **sorted** lcov `.info`, because
-`llvm-cov export` emits per-object sections whose order follows the object list and the filesystem,
-neither of which is a coverage fact.
+parallelism either way, so it voids.
+
+The digest needs **both** directions to be right, and a hostile review showed the obvious form has
+only one. A sha256 of the plain sorted lcov `.info` **collides on genuinely different reports**: move
+`DA:1,1` from `a.cc` to `b.cc` and `DA:2,0` the other way and the sorted line multiset is unchanged,
+so coverage can migrate between files while all three passes "agree". Every line is therefore keyed
+by its `SF:` record before sorting. The sort itself must stay — `llvm-cov export` emits per-object
+sections in an order following the object list and the filesystem, neither of which is a coverage
+fact, and hashing that raw would differ on every run until the check was discarded as noisy. Cell S7
+pins both: the collision is gone, and an order-only difference still collides.
+
+### What a sample must survive to be called evidence
+
+The verdict is fail-closed on every axis, because a hostile review demonstrated that each of these
+could otherwise read **VALID**:
+
+| checked | what it caught |
+|---|---|
+| exactly one ctest summary and one total-time line; `ran` starts and completions with matching ids; nothing left in flight | a log claiming 362 tests while carrying **one** completion record; `max_inflight` forged upward to 4 and downward to 1; all three timing fields moved by decoys in ordinary test output |
+| pass identity is POSITIONAL; labels, `order`, the 1/N/1 shape, and preset/subset/args agreement are asserted | duplicate labels overwriting earlier passes so counts of 362/1/999 passed; a **B-A-A** ordering passing because "two serial and one parallel" was order-blind |
+| four witnesses, each with finite positive calibrations | two witnesses that bracket only pass 1 — saying nothing about the parallel leg; four `status=ok` witnesses carrying no measurements at all |
+| tolerances must be finite and non-negative | `--tolerance-pct nan` reading serial passes of 1000 s and 2000 s as VALID: every comparison with NaN is False |
+| a `-R` subset run VOIDs | a run this apparatus itself declares NOT EVIDENCE exiting 0 and publishing a speedup — a green tick outlives a banner |
+| coverage needs `status=ok`, `profraw_count > 0` and `lines_total > 0` | `status=no-profiles` passing as agreement; a nonempty lcov report carrying zero coverage facts |
+| the N-proc calibration children are bounded and their exit codes checked | children that `_exit(7)` returning a 0.011 s "calibration" recorded `status=ok` — a crashed arm reading as an extraordinarily fast machine |
+
+⚠️ **The log parser is deliberately fail-closed and can fire on an honest log** — a test that prints a
+ctest-shaped line is now refused rather than mis-parsed. That is the correct direction: refusing to
+report on a log the parser does not understand costs a re-dispatch, and summarising it costs a wrong
+`execution.jobs` decision, which is the whole subject of this document.
+
+### ⚠️ The residual: a transient confined to the parallel leg
+
+`tools/bench_compare.py:run_paired` — this repo's *other* paired same-VM instrument — documents a
+bypass that applies to any A-B-A checking only A-vs-A′:
+
+> true base = 100, true candidate = 160. A1 = 160, B measured during a 20 % throttle = 120,
+> A2 = 160. A-vs-A = 0 % → "informative", and the middle leg is wrong.
+
+Two serial passes agreeing says nothing about a transient confined to the parallel pass between
+them. That instrument's answer was **A-B-A-B**. This one does not do that, and the reason is budget:
+a fourth pass on the slowest lane would put it past the 360-minute hosted cap, and a job that hits
+the cap is killed *before* its upload step — losing all four passes rather than three.
+
+What is done instead, and how far it goes:
+
+- **A hypervisor-caused transient confined to the parallel pass IS caught.** `/proc/stat` steal is
+  differenced **interval by interval**, not across the run, so it is attributed to the pass it landed
+  on. That is the common case on a shared runner.
+- **A non-steal transient confined to the parallel pass is NOT caught** — thermal throttling, or a
+  co-tenant whose interference does not register as steal. The calibration witnesses bracket that
+  pass but do not run during it.
+
+If a lane's result ever turns on a margin small enough for that to matter, the answer is
+`run_paired`'s: add the fourth pass and dispatch that lane alone.
 
 ### ⚠️ What this apparatus does NOT establish
 
