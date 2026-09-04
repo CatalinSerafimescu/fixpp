@@ -304,7 +304,7 @@ TEST(HeartbeatCadence8Cell, CellD_Strand_TestReqIdMismatchDetected) {
     auto fut = asio::co_spawn(fix.ioc, sess.on_inbound_frame(bad_hb), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 50ms,
                                                     "CellD_Strand_TestReqIdMismatchDetected")) {
-        fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *clock,
+        fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
                                                         "CellD_Strand_TestReqIdMismatchDetected");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "CellD_Strand_TestReqIdMismatchDetected";
@@ -331,7 +331,7 @@ TEST(HeartbeatCadence8Cell, CellD_Direct_TestReqIdMismatchDetected) {
     auto fut = asio::co_spawn(fix.ioc, sess.on_inbound_frame(bad_hb), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 50ms,
                                                     "CellD_Direct_TestReqIdMismatchDetected")) {
-        fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *clock,
+        fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
                                                         "CellD_Direct_TestReqIdMismatchDetected");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "CellD_Direct_TestReqIdMismatchDetected";

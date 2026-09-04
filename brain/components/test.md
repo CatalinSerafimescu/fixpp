@@ -11,6 +11,7 @@ refs:
   - ci/pump-census.sh
   - ci/pump-get-sweep.sh
   - ci/pump-red-arm.sh
+  - ci/pump-seam-arm.sh
 codegraph_entry: [mock_transport, Clock, system_clock_source]
 constitution: ["§VII", "§VII.4", "§VIII.5"]
 ---
@@ -183,6 +184,38 @@ non-firing arm is a claim about REACHABILITY before it is a claim about the bran
 ⚠️ **The driver is an instrument, so its REDs mean nothing until it is shown able to report non-RED.**
 Seed a site that cannot report — delete one `ADD_FAILURE()` — and require the driver to call that arm
 `SILENT`. N REDs from an unseeded driver prove only that it runs.
+
+### The RUNTIME seam — `ci/pump-seam-arm.sh`, and why it does not retire the textual driver
+
+`run_window_then_ready` takes an optional trailing site label. When it is passed,
+`FIXPP_FORCE_WINDOW_MISS=<label>` makes exactly that site take its miss branch at RUNTIME, so a batch
+costs one build and N runs instead of one rebuild per arm. That is what makes an ~80-site batch
+verifiable at all; "one arm per rebuild" above remains the rule for the TEXTUAL driver, and the
+masking reason behind it is unchanged — the seam does not fix masking, it makes forcing one site at a
+time cheap enough to do everywhere.
+
+⚠️ **It is a STRICTLY WEAKER witness, and the difference is not a detail.** The seam exercises *the
+primitive's forced path* under a site's label. The block it runs is the same block at every site, so
+it CANNOT see a site whose own miss branch has the wrong drain flavour, a missing `return`, or a
+sentinel a caller can confuse with a real value. Only textual mutation witnesses the recipe as
+written at that site. Use the seam for breadth and `ci/pump-red-arm.sh` to spot-check correctness;
+**keep both**.
+
+⚠️ **THE SEAM'S SILENCE HAS TWO CAUSES AND ONE FAILS TOWARD CLEAN.** No report can mean the miss
+branch did not report, or that the label matched nothing at all — a typo, a site that passes no
+label, or a site the run never reached. Identical empty output, opposite meanings. So the primitive
+ANNOUNCES on stderr *before* zeroing the window, and the driver requires that line: no announcement
+is `NO-SUCH-SITE`, never a pass. The driver carries a negative-control arm forcing a label no site
+carries, to prove that verdict is reachable.
+
+⚠️ **The seam forces only sites that PASS a label, which is a strict subset of the migrated sites.**
+Everything migrated before the seam existed passes none and is reachable only through textual
+mutation. Derive which sites are forceable — `ci/red-arms/batch11-labels.txt` is one batch's list,
+not the population.
+
+⚠️ **Locate a label with `strings` on the BINARY, never a source grep.** A stale binary is this
+procedure's only silent failure mode and it fails toward clean: the source says the label exists
+while the binary that actually runs contains no such string.
 
 ## ⚠️ The catalogue's `test` rows are not a coverage measure
 

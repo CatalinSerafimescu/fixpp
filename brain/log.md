@@ -74,3 +74,20 @@ status: stable
   the collision check's FALSE-POSITIVE arm is the load-bearing one because that check rejects a
   dictionary.
 
+
+- **2026-09-04 (later still) — the #289 pump gains a RUNTIME forcing seam; failure class 1 gains the
+  FALLBACK sub-lesson.** Batch 11 (82 sites / 39 files) could not have been verified under the
+  textual driver: that driver rebuilds once per arm, and one arm per site is the method rather than
+  overhead, so an 82-site batch is 82 rebuilds. `run_window_then_ready` now takes an optional site
+  label and honours `FIXPP_FORCE_WINDOW_MISS`, making forcing a runtime decision — one build, N runs.
+  Recorded in `components/test.md` with the two things that make it safe: it is a **weaker** witness
+  (it exercises the primitive's forced path, not the site's own miss block, so the textual driver is
+  NOT retired), and its silence is ambiguous, so forcing **announces itself** and an unannounced run
+  is `NO-SUCH-SITE` rather than a pass.
+
+  Class 1 gains: **a classifier's fallback is a claim, and a fallback set to the common case fails
+  toward the easy answer.** `classify-289.py`'s enclosing-function walk returned `("TEST", "<none>")`
+  when it exhausted — TEST-body being the shape with the simplest migration recipe — so three rows in
+  a libFuzzer harness that links no gtest were being offered for a migration whose miss branch is
+  `ADD_FAILURE()`. A correct row and a fallback row printed identically. This is the no-result path
+  wearing a value, and it is why the unresolved case now has its own bucket outside every recipe.

@@ -205,9 +205,9 @@ struct Fixture {
     void feed(Session& s, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
-                                                        "Fixture::feed")) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Fixture::feed");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Fixture::feed";
+                                                        "XmlNonFixPassthrough::feed")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "XmlNonFixPassthrough::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "XmlNonFixPassthrough::feed";
             return;
         }
         (void)fut.get();

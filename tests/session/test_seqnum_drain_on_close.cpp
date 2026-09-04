@@ -423,7 +423,7 @@ TEST(SeqnumDrainOnClose, DrainCalledByClose) {
         auto fut = asio::co_spawn(ioc, session.seqnum_mgr_test_access().check_inbound(2),
                                   asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "DrainCalledByClose/1")) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "DrainCalledByClose/1");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *ctx.clock, "DrainCalledByClose/1");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DrainCalledByClose/1";
             return;
         }
@@ -437,7 +437,7 @@ TEST(SeqnumDrainOnClose, DrainCalledByClose) {
         auto fut = asio::co_spawn(ioc, session.close(fixpp::session::close_mode::terminal),
                                   asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms, "DrainCalledByClose/2")) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "DrainCalledByClose/2");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *ctx.clock, "DrainCalledByClose/2");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DrainCalledByClose/2";
             return;
         }
@@ -455,7 +455,7 @@ TEST(SeqnumDrainOnClose, DrainCalledByClose) {
         auto fut = asio::co_spawn(ioc, session.seqnum_mgr_test_access().check_inbound(3),
                                   asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "DrainCalledByClose/3")) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "DrainCalledByClose/3");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *ctx.clock, "DrainCalledByClose/3");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DrainCalledByClose/3";
             return;
         }

@@ -414,6 +414,16 @@ template <class Pump>
 // The label is not new text: it already exists at every migrated site, as the operand
 // of `ADD_FAILURE() << kWindowMiss << "<Site>"`. Adopting the seam relocates that
 // literal into the call; it does not invent an identity.
+//
+// COST, because this primitive rejected an alternative on exactly this ground. The doc
+// above records the ~1 ms-slice shape being refused as a ~40x per-call regression against
+// sites measured at ~27 us. What the seam adds on a labelled call is one pointer compare,
+// one acquire load on the magic static, and a `strcmp` only when the env var is set at all.
+// Measured 2026-09-04 (clang -O2, this code shape, 50M iterations): **~0.6 ns/call**, i.e.
+// ~0.002 % of that budget. An UNLABELLED call -- every site from batches 1-10 -- pays the
+// pointer compare and nothing else.
+// ⚠️ Re-derive rather than trusting the figure: it is a measurement of a code shape on one
+// box, and the load-bearing claim is the RATIO to the ~27 us site cost, not the nanoseconds.
 inline const char* forced_window_miss_site() {
     // Read ONCE per process. `getenv` per call would put a lookup on a path whose
     // whole reason to exist is that the #289 sites measured ~27 us -- and the value
@@ -458,9 +468,16 @@ template <class Fut>
     return ready();
 }
 
-// Site-labelled call taking the DEFAULT grace. `const char*` cannot bind to
-// `steady_clock::duration`, so this never competes with the four-argument form
-// above; a site that needs a non-default grace spells both and uses that one.
+// Site-labelled call taking the DEFAULT grace. A `const char*` argument selects this and a
+// `duration` selects the form above, so the two do not compete for any call in this tree; a
+// site needing a non-default grace spells both and uses the five-argument form.
+//
+// ⚠️ NOT "cannot bind" -- that phrasing was checked and is false. A bare `0` is a NULL
+// POINTER CONSTANT, and the standard conversion to `const char*` beats the user-defined
+// conversion to `duration`, so `run_window_then_ready(ioc, fut, w, 0)` would silently mean
+// `site = nullptr` rather than `grace = 0`. Nothing in the tree passes a bare `0` for grace
+// (every caller spells a duration), so this is a hazard of the SIGNATURE, not a live defect
+// -- recorded as the condition rather than as "there is no such caller", which is a count.
 template <class Fut>
 [[nodiscard]] bool run_window_then_ready(asio::io_context& ioc, Fut& fut,
                                          std::chrono::steady_clock::duration window,

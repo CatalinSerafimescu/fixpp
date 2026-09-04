@@ -63,6 +63,8 @@ preset="${1:?usage: pump-red-arm.sh <preset> <arms-file>}"
 arms_file="${2:?usage: pump-red-arm.sh <preset> <arms-file>}"
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root" || exit 2
+# Shared with ci/pump-seam-arm.sh so the two non-vacuity guards cannot drift apart.
+. "$repo_root/ci/pump-arm-common.sh"
 
 # Observation timeout. DERIVED, not picked: the primitives grant a bounded pump
 # budget (`kPumpBudget` 10s) and a drain quiescence budget (`kQuiesceBudget` 5s),
@@ -88,11 +90,7 @@ pass=0; declare -a NOTES=()
 # verification step that cannot fail because it never ran. This repo's most recurring
 # defect is exactly that shape.
 n_arms=$(awk -F'\t' '!/^#/ && NF' "$arms_file" | wc -l)
-if [ "$n_arms" -eq 0 ]; then
-    printf 'pump-red-arm: %s contains no arms -- refusing to report success on an empty population\n' \
-        "$arms_file" >&2
-    exit 2
-fi
+assert_nonempty_population "$n_arms" "$arms_file" pump-red-arm arms
 
 # ⚠️ VALIDATE THE ARMS FILE ONCE, UP FRONT. An earlier revision let the execution loop and
 # the cleanup sweep disagree about what a row is: the loop skipped only blanks and `#`,
@@ -316,12 +314,10 @@ hung=$(printf '%s\n' "${NOTES[@]-}" | grep -c '^HUNG ' || true)
 # satisfied the non-vacuity guard, ran nothing, and exited 0 -- defeating that guard on its
 # own terms. Patching `read` closes this instance; counting what actually executed closes the
 # class, which is the repo's standing rule for verification sweeps.
+# OUTCOME-derived on purpose: an arm that ran but recorded no verdict is caught here and
+# would not be by a loop counter. See assert_ran_count's comment.
 ran=$(( pass + ${#NOTES[@]} ))
-if [ "$ran" -ne "$n_arms" ]; then
-    echo "pump-red-arm: parsed ${n_arms} arm(s) but EXECUTED ${ran} -- refusing to report" >&2
-    echo "  (a row with no trailing newline is the usual cause: the parsers disagree)" >&2
-    exit 3
-fi
+assert_ran_count "$ran" "$n_arms" pump-red-arm "arm(s)"
 echo "arms: ${pass} RED-as-required, $(( ${#NOTES[@]} - hung )) FAILED, ${hung} INCONCLUSIVE"
 if (( ${#NOTES[@]} )); then printf '  - %s\n' "${NOTES[@]}"; fi
 [ "${#NOTES[@]}" -eq 0 ]
