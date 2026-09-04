@@ -2162,8 +2162,40 @@ jobs:
       #
       # Both invariants were true when written and pinned by nothing; a hostile
       # review named that as the defect. Synthetic copies only, no build.
-      - name: Regression pin — CI lane policy (#300 callers, #213 fuzz lane)
+      - name: Regression pin — CI lane policy (#300 callers, #213 fuzz lane, #267 campaign trigger)
         run: bash ci/test-ci-lane-policy.sh
+
+      # #267 — the A-B-A parallelism verdict's own gates. 27 cells over a
+      # SYNTHETIC sample: every way the verdict can reject one is proven to
+      # fire, and each cell requires its NAMED diagnostic, not merely a non-zero
+      # exit. It exists because `ci/ctest-parallelism-probe.md` records three
+      # `execution.jobs` conclusions that were published and then WITHDRAWN —
+      # this is the question the repo has already got wrong three times, by
+      # reading numbers no checker had been proven able to reject.
+      #
+      # ⚠️ The cell worth knowing about is T4. If `--parallel N` ever stops
+      # taking effect, all three passes run identically, the two serial passes
+      # agree PERFECTLY, and the apparatus reports a clean sample saying "no
+      # gain on this lane" having tested one configuration three times. The
+      # A-vs-A' agreement check is a forced-MISS arm and cannot catch it; the
+      # in-flight oracle T4 pins is the other half.
+      #
+      # Buildless and hermetic — python3 + coreutils. ~2 s.
+      - name: Regression pin — parallelism verdict gates (#267)
+        run: bash ci/test-parallelism-verdict.sh
+
+      # #267 — the seam the harness above CANNOT see. That one varies the
+      # CONTENT of a sample the verdict is known to parse; this one runs the
+      # REAL driver against a 12-test synthetic ctest project and feeds its REAL
+      # output to the REAL verdict. A field renamed on one side of that seam
+      # leaves all 27 cells green and returns "0 of 3 passes" from every actual
+      # campaign — at a cost of three suite runs on a runner to find out.
+      #
+      # Needs cmake + ctest (preinstalled on ubuntu-24.04) and REFUSES to run
+      # without them rather than skipping: a skipped seam check is a silent pass.
+      # ~40 s, most of it `cmake -E sleep`.
+      - name: Regression pin — A-B-A driver/verdict seam (#267)
+        run: bash ci/test-parallelism-aba-seam.sh
 
       # #209 — the bench gate's own harness. 61 cells over synthetic
       # Google-Benchmark JSON: every hard cell of tools/bench_compare.py and

@@ -18,7 +18,16 @@ silently — so each is turned into a check.
      install is bounded" claim quietly becomes false. That is the same
      dead-call-site shape #299 exists to prevent, one layer out.
 
-  2. #213 — the fuzz corpora are actually replayed somewhere.
+  2. #267 — the parallelism campaign stays on `workflow_dispatch`.
+     `.github/workflows/parallelism-measure.yml` runs each named lane's suite
+     THREE times. On `linux-clang-libc++-tsan` that is ~77 min per pass. One
+     `push:` or `pull_request:` key added to its trigger block — by a copy-paste
+     from another workflow, or by someone "making it run automatically" —
+     multiplies the repo's CI bill without anything going red to say so. It is
+     the one workflow here whose cost makes its TRIGGER a correctness property,
+     and "we all know not to" is not a mechanism.
+
+  3. #213 — the fuzz corpora are actually replayed somewhere.
      The corpus replays and their zero-registration FATAL_ERROR all live under
      `if(FIXPP_BUILD_FUZZ)`. Flipping the asan preset's value ON -> OFF does not
      trip any of them: the targets, the registrations and the guard simply stop
@@ -48,6 +57,10 @@ APT_INSTALL = re.compile(r"\bsudo apt-get install\b")
 APT_UPDATE = re.compile(r"\bsudo apt-get update\b")
 LLVM_SH = re.compile(r"\bsudo /tmp/llvm\.sh \d+ all\b")
 GUARD = "ci/apt-guard.sh"
+
+# The measurement campaign, and the only trigger its cost permits.
+CAMPAIGN_WORKFLOW = "parallelism-measure.yml"
+CAMPAIGN_TRIGGERS = {"workflow_dispatch"}
 
 # The lane that must build and replay the fuzz corpora, and the flag that does it.
 FUZZ_PRESET = "linux-clang-asan"
@@ -128,6 +141,66 @@ def check_fuzz_lane(root, violations):
     return 1
 
 
+def check_campaign_trigger(root, violations):
+    """The A-B-A campaign must stay dispatch-only.
+
+    Returns 1 when the check ran, 0 when the workflow is absent.  Absence is NOT
+    a violation: the campaign is explicitly a one-off and retiring it is a
+    legitimate thing to do.  It IS disclosed, because a check that quietly
+    reports clean over a subject that is not there is the failure mode every
+    other file in this directory exists to remove.
+    """
+    path = root / ".github" / "workflows" / CAMPAIGN_WORKFLOW
+    if not path.is_file():
+        print(f"  campaign trigger: {CAMPAIGN_WORKFLOW} is not present — check stood down "
+              f"(retiring the campaign is legitimate; this is a disclosure, not a pass).")
+        return 0
+    try:
+        import yaml
+    except ImportError:
+        print("::warning::PyYAML unavailable — the campaign-trigger check did NOT run. "
+              "Do not read this run as evidence that the campaign is still dispatch-only.")
+        return 0
+
+    # ⚠️ A PARSE ERROR IS A VIOLATION, NOT A CRASH. Caught because a mutant
+    # found it: the T8 cell of ci/test-ci-lane-policy.sh produced a workflow
+    # whose YAML did not parse, and this function raised a traceback out of
+    # `main()` instead of dispositioning it. An unparsable trigger block is
+    # precisely the state where "it is dispatch-only" cannot be asserted, so it
+    # has to fail closed and say why.
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        violations.append(
+            f"CAMPAIGN TRIGGER UNREADABLE: {CAMPAIGN_WORKFLOW} does not parse as YAML "
+            f"({exc.__class__.__name__}), so this check cannot say what triggers it — and "
+            f"a workflow that does not parse does not run at all. Refusing to report it "
+            f"dispatch-only.")
+        return 1
+    # ⚠️ YAML 1.1 resolves a bare `on:` key to the BOOLEAN True, not the string
+    # "on".  A check that looked up doc["on"] would find nothing, conclude there
+    # were no triggers, and pass — silently, on every future version of the file.
+    block = doc.get("on", doc.get(True))
+    if block is None:
+        violations.append(
+            f"CAMPAIGN TRIGGER UNREADABLE: {CAMPAIGN_WORKFLOW} has no parsable `on:` block, so "
+            f"this check cannot say what triggers it. Refusing to report it dispatch-only.")
+        return 1
+
+    triggers = set(block) if isinstance(block, (dict, list)) else {str(block)}
+    extra = sorted(triggers - CAMPAIGN_TRIGGERS)
+    if extra:
+        violations.append(
+            f"CAMPAIGN IS NO LONGER DISPATCH-ONLY: {CAMPAIGN_WORKFLOW} triggers on "
+            f"{', '.join(extra)} as well as workflow_dispatch. That workflow runs each named "
+            f"lane's suite THREE times — ~77 min per pass on the slowest lane — so an "
+            f"automatic trigger multiplies the CI bill with nothing going red to say so. "
+            f"It is a one-off campaign, not a standing job.")
+    else:
+        print(f"  campaign trigger: {CAMPAIGN_WORKFLOW} is {'/'.join(sorted(triggers))} only")
+    return 1
+
+
 def main():
     root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     if not root.is_dir():
@@ -137,6 +210,7 @@ def main():
     violations = []
     apt_seen = check_apt_callers(root, violations)
     fuzz_seen = check_fuzz_lane(root, violations)
+    check_campaign_trigger(root, violations)
     if apt_seen is None or fuzz_seen is None:
         return 2
 

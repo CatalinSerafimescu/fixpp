@@ -125,6 +125,71 @@ p.write_text(s.replace(old, "", 1), encoding="utf-8")
 MUT
 expect "T5 the fuzz lane dropped from the tier1 matrix is caught" 1 "NOT IN THE MATRIX"
 
+# ── T7: the campaign gets an automatic trigger ───────────────────────────────
+#
+# .github/workflows/parallelism-measure.yml runs each named lane's suite THREE
+# times — ~77 min per pass on the slowest lane. One `push:` key copy-pasted in
+# from a sibling workflow multiplies the CI bill and NOTHING goes red to say so:
+# the runs all succeed. Its trigger block is a correctness property, which is why
+# it is asserted rather than trusted.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "on:\n  workflow_dispatch:\n"
+assert old in s, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "on:\n  push:\n    branches: [main]\n  workflow_dispatch:\n", 1),
+             encoding="utf-8")
+MUT
+expect "T7 an automatic trigger on the campaign workflow is caught" 1 "NO LONGER DISPATCH-ONLY"
+
+# ── T8: the `on:` key is YAML 1.1's boolean True, not the string "on" ─────────
+#
+# THE TRAP THIS CELL PINS. `yaml.safe_load` resolves a bare `on:` key to the
+# BOOLEAN True. A check that looked up only doc["on"] would find nothing,
+# conclude the workflow had no triggers, and pass — silently, forever. Quoting
+# the key turns it back into a string, which must ALSO be handled; if either
+# lookup is lost in a future edit, this cell reddens.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import re, sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+# Replace the WHOLE trigger block, not just its first two lines: leaving the
+# `inputs:` mapping orphaned produces a file that does not parse, which is a
+# different finding (T8b) and would not test the quoted-key path at all.
+new, n = re.subn(r"(?ms)^on:\n.*?(?=^permissions:)",
+                 '"on":\n  schedule:\n    - cron: "0 3 * * *"\n\n', s)
+assert n == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(new, encoding="utf-8")
+MUT
+expect "T8 a quoted \"on\" key is still read (YAML 1.1 boolean trap)" 1 "NO LONGER DISPATCH-ONLY"
+
+# ── T8b: a trigger block that does not parse ─────────────────────────────────
+#
+# Found by a mutant, not by reading: an unparsable workflow raised a traceback
+# out of the checker instead of being dispositioned. It is exactly the state
+# where "dispatch-only" cannot be asserted — and a workflow that does not parse
+# does not run at all — so it must fail closed.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "on:\n  workflow_dispatch:\n"
+assert old in s, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "on:\n  schedule:\n    - cron: \"0 3 * * *\"\n", 1), encoding="utf-8")
+MUT
+expect "T8b an unparsable trigger block fails closed, not with a traceback" 1 "does not parse as YAML"
+
+# ── T9: the campaign workflow is retired ─────────────────────────────────────
+#
+# Absence must NOT be a violation — retiring a one-off campaign is a legitimate
+# thing to do — but it must not be silent either. A check that reports clean
+# over a subject that is not there is the failure this whole directory exists to
+# remove, so it discloses and stands down.
+fresh
+rm -f "$WORK/t/.github/workflows/parallelism-measure.yml"
+expect "T9 a retired campaign workflow stands down with a disclosure" 0 "check stood down"
+
 # ── T6: THE EMPTY SCAN ───────────────────────────────────────────────────────
 #
 # If the workflows move or the patterns break, "0 violations over 0 sites" must

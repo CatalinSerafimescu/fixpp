@@ -584,3 +584,103 @@ Only then extend `execution.jobs` to `linux-clang-asan` / `linux-clang-ubsan` /
 
 If the lane goes red or flaky, revert this preset field — that is the entire blast radius of the
 probe.
+
+---
+
+## The measurement apparatus — `.github/workflows/parallelism-measure.yml` (#267)
+
+Everything above this line was measured by hand, once, with an ad-hoc script that was never
+committed. That is why the `debug` A-B-A — the one result in this document nobody has had to
+withdraw — could not simply be repeated on the next lane. This section describes the committed
+version of that design.
+
+### What runs
+
+`ci/run-parallelism-aba.sh` runs one lane's sample **in one job, on one VM**:
+
+```
+witness → ctest --parallel 1 → witness → ctest --parallel N → witness → ctest --parallel 1 → witness
+```
+
+`ci/parallelism-verdict.py` then judges it and exits **0 VALID / 1 DEFECT / 2 INSTRUMENT FAILURE /
+3 VOID**. A red job means one of the last three — read the summary, not the tick.
+
+Dispatch it from the Actions tab with a comma-separated lane list per platform. Nothing else
+triggers it, and `ci/assert-ci-lane-policy.py` asserts that (`ci/test-ci-lane-policy.sh` cells T7,
+T8, T8b prove the assertion can fail): each lane runs its suite **three times**, so an automatic
+trigger would multiply the CI bill with every run still green.
+
+### The four things that make a sample mean something
+
+1. **A vs A′ must agree** (default 5 %). The primary gate, and the reason for the whole shape —
+   `debug`'s trusted 2.10× had its serial passes agree to 0.6 %.
+2. **The achieved parallel level is observed, not assumed.** The verdict counts `Start`/complete
+   pairings in the ctest log and requires pass A to have run **1** test in flight and pass B to have
+   run more.
+
+   ⚠️ **This is the one failure A-vs-A′ cannot catch**, and it is not hypothetical. If the requested
+   level fails to take effect, all three passes are identical, the agreement check passes
+   *perfectly*, and the apparatus reports a clean sample saying "no gain on this lane" having tested
+   one configuration three times. Measured, because the obvious mitigation is the wrong one:
+   `ctest --preset P --parallel 1` **does** override a preset's `execution: {jobs: 4}` (8.03 s vs
+   2.01 s on an 8×1 s synthetic suite), but `CTEST_PARALLEL_LEVEL=1 ctest --preset P` **does not**
+   (2.01 s — the preset wins). `linux-clang-debug` and `linux-clang-ubsan` already carry `jobs: 4`,
+   so the env-var form would have corrupted exactly the lanes a campaign starts from.
+3. **The workload is checked against the lane's production basis** in `ci/expected-eligible-tests.txt`.
+   Three passes agreeing with each other says nothing about agreeing with what ships. A mismatch
+   VOIDs — the disposition this document already designed for a basis mismatch: *degrades toward
+   "not evidence", never toward a false acceptance*.
+4. **The machine is observed independently**, by `ci/machine-witness.py`, between passes.
+
+### What is equalised between passes, and why each one matters
+
+* **`CTestCostData.txt` is deleted before every pass.** CTest schedules longest-first from it on the
+  *next* run. Left alone, pass B inherits pass A's cost data and packs better than any production
+  run can — production always starts from a fresh checkout and never has cost data.
+* **`LastTest.log` is copied out after every pass.** CTest overwrites it, so pass A′ would destroy
+  pass B's — and pass B's is the only interesting one, since acceptance item 5 is precisely *did a
+  report appear at higher concurrency*.
+* **Coverage profiles go to a per-pass directory.** Three passes writing into one `profiles/` dir
+  merge into one report covering all three, and "coverage identical before and after" becomes
+  vacuously true.
+
+### Acceptance item 4 — how the coverage comparison is actually attributable
+
+Two comparisons, and only their difference attributes anything. **A vs A′** is the suite's own
+run-to-run coverage determinism, measured on the same VM at unchanged concurrency. **A vs B** is the
+parallelism effect. B differing while A and A′ agree is attributable to `--parallel`; all three
+differing is a nondeterministic suite — a finding of its own, and explicitly *not* evidence about
+parallelism either way. The digest is a sha256 of the **sorted** lcov `.info`, because
+`llvm-cov export` emits per-object sections whose order follows the object list and the filesystem,
+neither of which is a coverage fact.
+
+### ⚠️ What this apparatus does NOT establish
+
+* **The Windows lanes get no peak-RSS figure.** `ci/measure-peak-rss.py` samples `/proc`, which
+  Windows does not have, so **acceptance item 1 cannot be discharged for `windows-msvc-asan` by this
+  apparatus.** The driver writes `status=no-procfs-platform` and the verdict renders NOT MEASURED,
+  so the gap is on the page rather than showing as a blank cell or a zero. Everything else transfers.
+  A widening proposed on that lane would be proposed without the memory reading the Linux lanes are
+  held to; say so in the PR.
+* **A uniformly degraded VM is invisible to every check here.** A-vs-A′ and the calibration drift
+  both detect the machine *changing*; a machine that was slow for the whole experiment produces zero
+  drift and perfect agreement. Catching that needs the **absolute** calibration against a known-good
+  band, and one CI observation is not a band. The absolute figures are recorded on every run so the
+  corpus accumulates; until it does, this is an open gap and not a closed one.
+* **The calibration tolerance is loose (25 %) because that is what the signal can carry.** Six
+  back-to-back witnesses on a contended host spread **16.0 %** on the 1-proc arm and 8.4 % on the
+  4-proc arm using a min-of-5 estimator; a single timing spreads 12–15 % and does *not* tighten with
+  more iterations, because it is contention rather than sampling error. The only CI observation
+  available is `debug`'s trusted A-B-A, whose 1-proc calibration moved 2.73 → 2.94 s = **7.4 %**
+  across an experiment everyone agrees was clean. A 10 % gate would void honest samples routinely,
+  and a gate that cries wolf gets widened until it detects nothing.
+
+### The instruments are themselves instruments
+
+`ci/test-parallelism-verdict.sh` (27 cells) proves every gate the verdict applies can fire, each
+requiring its **named** diagnostic rather than merely a non-zero exit. `ci/test-parallelism-aba-seam.sh`
+(4 cells) covers what that harness structurally cannot see — that the driver writes files of the
+shape the verdict reads — by running the real driver against a 12-test synthetic ctest project and
+feeding its real output to the real verdict, including a negative arm so the accept is a judgement
+rather than a default. Both run in tier 1's `ci-script-pins`, and the seam check runs again as the
+campaign's own pre-flight, where 40 s buys back three suite runs.
