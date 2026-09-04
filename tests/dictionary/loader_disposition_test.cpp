@@ -29,6 +29,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 // Gate B r1 F1 (fixpp#216 P1-1): the direct `find_incomplete_group_context()`
@@ -380,6 +381,66 @@ inline constexpr std::uint16_t kDeepLeafDelim = 9001;
         xml += "</group>";
     }
     xml += R"(</message></messages></fix>)";
+    return xml;
+}
+
+// ── fixpp#264 review F1, ORCHESTRA twin: the same clamp collision as
+// `make_clamp_collision_xml()`, in Orchestra's grammar. FR-005 / C-1.5 — a
+// one-loader fix is a half-restructure, and the Orchestra throw shipped without
+// a witness of its own.
+//
+// `NoLeaf(9000)` is declared by TWO group definitions (ids 6100/6101) with
+// DIFFERENT first members, referenced from two siblings at level K+1, so its two
+// ancestor chains agree in their first K entries and diverge only past the
+// clamp.
+[[nodiscard]] std::string make_orchestra_clamp_collision_xml() {
+    auto const k = static_cast<std::uint16_t>(fixpp::dict::kMaxGroupContextDepth);
+    std::string xml =
+        R"(<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' )"
+        R"(name='FIX' version='FIX.Latest_EP303'>)"
+        R"(<fixr:datatypes><fixr:datatype name='String'/><fixr:datatype name='int'/>)"
+        R"(<fixr:datatype name='NumInGroup'/></fixr:datatypes>)"
+        R"(<fixr:fields><fixr:field id='35' name='MsgType' type='String'/>)";
+    for (std::uint16_t i = 1; i <= k; ++i) {
+        xml += "<fixr:field id='" + std::to_string(kDeepCountBase + i) + "' name='NoA" +
+               std::to_string(i) + "' type='NumInGroup'/>";
+        xml += "<fixr:field id='" + std::to_string(kDeepDelimBase + i) + "' name='D" +
+               std::to_string(i) + "' type='String'/>";
+    }
+    xml += R"(<fixr:field id='920' name='NoX' type='NumInGroup'/>)"
+           R"(<fixr:field id='921' name='NoY' type='NumInGroup'/>)"
+           R"(<fixr:field id='1920' name='DX' type='String'/>)"
+           R"(<fixr:field id='1921' name='DY' type='String'/>)"
+           R"(<fixr:field id='9000' name='NoLeaf' type='NumInGroup'/>)"
+           R"(<fixr:field id='9001' name='LX' type='String'/>)"
+           R"(<fixr:field id='9002' name='LY' type='String'/>)"
+           R"(</fixr:fields><fixr:groups>)";
+    // A<i> holds its own scalar then a groupRef to A<i+1>; the innermost holds
+    // both level-K+1 siblings.
+    for (std::uint16_t i = 1; i <= k; ++i) {
+        xml += "<fixr:group id='" + std::to_string(6000 + i) + "' name='AGrp" + std::to_string(i) +
+               "'><fixr:numInGroup id='" + std::to_string(kDeepCountBase + i) +
+               "'/><fixr:fieldRef id='" + std::to_string(kDeepDelimBase + i) + "'/>";
+        if (i < k) {
+            xml += "<fixr:groupRef id='" + std::to_string(6000 + i + 1) + "'/>";
+        } else {
+            xml += R"(<fixr:groupRef id='6020'/><fixr:groupRef id='6021'/>)";
+        }
+        xml += "</fixr:group>";
+    }
+    xml += R"(<fixr:group id='6020' name='XGrp'><fixr:numInGroup id='920'/>)"
+           R"(<fixr:fieldRef id='1920'/><fixr:groupRef id='6100'/></fixr:group>)"
+           R"(<fixr:group id='6021' name='YGrp'><fixr:numInGroup id='921'/>)"
+           R"(<fixr:fieldRef id='1921'/><fixr:groupRef id='6101'/></fixr:group>)"
+           // Same no_tag, DIFFERENT delimiter — the whole point.
+           R"(<fixr:group id='6100' name='LeafUnderX'><fixr:numInGroup id='9000'/>)"
+           R"(<fixr:fieldRef id='9001'/></fixr:group>)"
+           R"(<fixr:group id='6101' name='LeafUnderY'><fixr:numInGroup id='9000'/>)"
+           R"(<fixr:fieldRef id='9002'/></fixr:group>)"
+           R"(</fixr:groups><fixr:messages>)"
+           R"(<fixr:message id='1' name='ClashMsg' msgType='C'><fixr:structure>)"
+           R"(<fixr:fieldRef id='35'/><fixr:groupRef id='6001'/>)"
+           R"(</fixr:structure></fixr:message></fixr:messages></fixr:repository>)";
     return xml;
 }
 
@@ -1170,4 +1231,124 @@ TEST(LoaderDisposition, ContextsCollidingPastTheClampAreRejectedAtLoad) {
         << what;
     EXPECT_NE(what.find("9000"), std::string::npos)
         << "the diagnostic must name the offending NumInGroup tag; got: " << what;
+}
+
+// ============================================================================
+// fixpp#264 review F1, ORCHESTRA twin of
+// ContextsCollidingPastTheClampAreRejectedAtLoad.
+//
+// FR-005 / C-1.5: a one-loader fix is a half-restructure. The collision refusal
+// lives in the SHARED `flush_group_ctx_delims`, but each loader raises its own
+// exception type (FR-006c), and the Orchestra `throw` shipped with no witness —
+// so nothing proved its type or its message were right.
+// ============================================================================
+TEST(LoaderDisposition, ContextsCollidingPastTheClampAreRejectedAtLoadOrchestra) {
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    bool caught_derived = false;
+    std::string what;
+    try {
+        auto d = fixpp::dict::OrchestraLoader{}.load_from_string(
+            make_orchestra_clamp_collision_xml(), &mr);
+        (void)d;
+    } catch (orchestra_parse_error const& e) {
+        caught_derived = true;
+        what = e.what();
+    } catch (xml_parse_error const&) {
+        ADD_FAILURE() << "FR-006c / C-6.1b: OrchestraLoader threw the BASE xml_parse_error. The "
+                         "Orchestra fuzz harness catches orchestra_parse_error, so the base type "
+                         "escapes to its terminal rethrow and crashes the fuzzer.";
+    }
+    ASSERT_TRUE(caught_derived)
+        << "the clamp collision must be refused by the Orchestra loader too — the check is shared, "
+           "only the exception type differs.";
+    EXPECT_NE(what.find("collapse to the same context key"), std::string::npos)
+        << "the diagnostic must name the collision, not a completeness violation; got: " << what;
+    EXPECT_NE(what.find("9000"), std::string::npos)
+        << "the diagnostic must name the offending NumInGroup tag; got: " << what;
+}
+
+// ============================================================================
+// fixpp#264 review F1 — the FALSE-POSITIVE arm of the collision check.
+//
+// `ContextsCollidingPastTheClampAreRejectedAtLoad` proves the check FIRES. That
+// is only half of it: a forced-HIT arm cannot catch a check that fires when it
+// should not, and this one refuses to load a dictionary, so a spurious hit is a
+// hard rejection of valid input — the very defect #264 was filed about.
+//
+// The benign case the dedup exists for is a group reached TWICE in one message
+// (e.g. via a component used in both the header and the body). Both captures
+// carry the same key AND the same full chain, agree by construction, and the
+// first must simply be kept.
+//
+// Note this is a real distinction only PAST the clamp. Below it the stored key
+// IS the full chain, so "same key" already implies "same chain" and the two arms
+// coincide — which is why the fixture below is built at depth K+1.
+// ============================================================================
+TEST(LoaderDisposition, BenignDuplicateCaptureIsKeptNotRejected) {
+    std::array<std::byte, 8192> buf{};
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    fixpp::dict::detail::dict_metadata_handle h{&mr};
+
+    // A chain one longer than the clamp, so the stored key is genuinely lossy.
+    std::vector<std::uint16_t> chain;
+    for (std::uint16_t i = 1; i <= fixpp::dict::kMaxGroupContextDepth + 1; ++i) {
+        chain.push_back(static_cast<std::uint16_t>(kDeepCountBase + i));
+    }
+
+    fixpp::dict::detail::DelimCapture cap;
+    // TWO captures, same context, same chain, same delimiter — the header/body
+    // duplicate. Not a collision: nothing is being lost by keeping one.
+    cap.out.push_back({fixpp::dict::detail::make_group_ctx_delim(chain, 9000, 9001), chain});
+    cap.out.push_back({fixpp::dict::detail::make_group_ctx_delim(chain, 9000, 9001), chain});
+
+    auto const clash = fixpp::dict::detail::flush_group_ctx_delims(h, cap);
+    ASSERT_FALSE(clash.has_value())
+        << "a duplicate capture of the SAME context with the SAME ancestor chain is the benign "
+           "case the key-dedup exists for. Reporting it as a collision would reject valid "
+           "dictionaries — a spurious HIT, which the fires-correctly test cannot detect.";
+    ASSERT_EQ(h.per_msg_group_ctx_delim_offsets_.size(), 1u);
+    EXPECT_EQ(h.per_msg_group_ctx_delim_offsets_[0].count, 1u)
+        << "the duplicate must be collapsed to ONE record, not stored twice.";
+    ASSERT_EQ(h.group_ctx_delim_pool_.size(), 1u);
+    EXPECT_EQ(h.group_ctx_delim_pool_[0].delimiter, 9001);
+}
+
+// ============================================================================
+// fixpp#264 — `detail::group_parent_path`'s edges, stated as a unit.
+//
+// The walk feeds both the FR-023 probe and `as_table_view()`, and the two must
+// build byte-identical keys, so its behaviour at the edges is contract, not
+// incidental. Kept as a direct unit test because the loader-level fixtures
+// reach only the ordinary interior case.
+// ============================================================================
+TEST(LoaderDisposition, GroupParentPathEdges) {
+    using fixpp::dict::detail::group_parent_path;
+    std::unordered_map<std::uint16_t, std::uint16_t> rel{
+        {902, 901},  // 902's parent is 901
+        {901, 0},    // 901 is a root
+    };
+
+    // Ordinary interior case: innermost-out, returned OUTERMOST-first.
+    auto const ordinary = group_parent_path(902, rel);
+    ASSERT_TRUE(ordinary.has_value());
+    EXPECT_EQ(*ordinary, (std::vector<std::uint16_t>{901, 902}));
+
+    // start == 0 means "top level": no ancestors, not a one-element path.
+    auto const top = group_parent_path(0, rel);
+    ASSERT_TRUE(top.has_value());
+    EXPECT_TRUE(top->empty());
+
+    // A tag ABSENT from the relation is a root — the lookup's miss branch. It
+    // contributes itself and stops, rather than being dropped or looping.
+    auto const unknown = group_parent_path(777, rel);
+    ASSERT_TRUE(unknown.has_value());
+    EXPECT_EQ(*unknown, (std::vector<std::uint16_t>{777}));
+
+    // A cycle yields NO path. Returning a truncated one would be a well-formed
+    // key that can collide with a real context — see the walk's own comment.
+    std::unordered_map<std::uint16_t, std::uint16_t> cyclic{{100, 200}, {200, 100}};
+    EXPECT_FALSE(group_parent_path(100, cyclic).has_value());
+    EXPECT_FALSE(group_parent_path(100, {{100, 100}}).has_value()) << "self-parent is a cycle too.";
 }

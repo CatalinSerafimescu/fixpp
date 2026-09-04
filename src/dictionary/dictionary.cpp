@@ -589,6 +589,25 @@ table_view Dictionary::as_table_view() const {
                 // register, never by throwing (`as_table_view()` is
                 // contractually non-throwing — 072, L-063-4). Skipped BEFORE any
                 // partial registration, so no half-built context is left behind.
+                //
+                // COVERAGE, assessed rather than chased [const §IX.1]: this
+                // branch is UNCOVERED and stays so. Both loaders run the FR-023
+                // sweep UNCONDITIONALLY — it is not gated by
+                // `unresolved_group_policy` — and that sweep walks the same
+                // relation with the same group-ness predicate, so a cyclic
+                // dictionary is rejected at finalize() and never reaches here.
+                // The only way in is a `Dictionary` not built by a loader, which
+                // the private handle-ctor (friended to XmlLoader and
+                // OrchestraLoader alone) makes unconstructible — including from
+                // a test. Covering it would mean widening that friendship purely
+                // to exercise a guard, which buys less than it costs.
+                //
+                // It is kept rather than deleted because the two sides' group-ness
+                // predicates are EQUIVALENT TODAY BUT NOT STRUCTURALLY FORCED to
+                // be (`group_first_field(fr.tag) != 0` here vs a binary_search over
+                // caller-supplied `structural_group_tags` there) — and an
+                // unforced equivalence between these two exact call sites is
+                // what #264 was. Without this, that drift returns as a hang.
                 continue;
             }
             auto const& path = *path_opt;

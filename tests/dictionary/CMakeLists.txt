@@ -10,8 +10,20 @@
 find_package(GTest CONFIG REQUIRED)
 find_package(pugixml CONFIG REQUIRED)
 
+# WORKING_DIRECTORY is load-bearing, not decoration. The gate this drives does
+# `cd "$(git rev-parse --show-toplevel)"` and then greps RELATIVE paths
+# (src/ include/ bindings/ tools/ tests/). ctest runs a test from the BUILD dir
+# by default, so with an out-of-tree build directory — a symlinked or relocated
+# `build/<preset>`, which the repo's own presets make easy — `git rev-parse`
+# fails, every grep resolves nothing, and the run is scored against an empty
+# corpus. The gate itself catches that (its G1 liveness check reports
+# "scanner broken" and exits 1), but the harness's three RED arms expect exit 1
+# and so pass VACUOUSLY in that state: they see the scanner's failure, not the
+# removed static_asserts they exist to detect. Only the positive arm fails.
+# Pinning cwd to the source tree is what keeps those three arms meaningful.
 add_test(NAME dictionary_snapshot_exclusivity_gate
-  COMMAND bash "${CMAKE_SOURCE_DIR}/tools/test_dictionary_snapshot_exclusivity_gate.sh")
+  COMMAND bash "${CMAKE_SOURCE_DIR}/tools/test_dictionary_snapshot_exclusivity_gate.sh"
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # Path to vendored XML fixtures so tests can locate them regardless of
 # build-tree depth (used by load(path, mr) AC-L1 / AC-L2 paths and the

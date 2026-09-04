@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/dict/field_type.hpp>  // field_type (7-value enum)
@@ -151,6 +152,38 @@ struct group_ctx_equal {
                   b.no_tag);
     }
 };
+
+// fixpp#264 follow-up — the ONE place that states the query-side precondition.
+//
+// The STORE clamps: `make_group_ctx_key` keeps the first — i.e. OUTERMOST —
+// `kMaxGroupContextDepth` entries. The QUERY does not: `group_ctx_query` holds
+// the caller's span verbatim, and `group_ctx_equal::eq` compares it with a
+// four-iterator `std::equal`, which treats any length difference as a MISS. So
+// an over-long path does NOT truncate to the right key — it silently matches
+// nothing, and a caller that expected a hit reads the result as "context not
+// declared". For `group_first_field` that means falling through to the bare
+// global store; for `group_first_field_exact` it means `nullopt`.
+//
+// No production caller can reach that: every context lookup builds its span as
+// `{ctx.parent_path.data(), ctx.depth}` from a `wire::group_context`, whose
+// `parent_path` is a fixed `kMaxGroupContextDepth` array and whose `pushed()`
+// DROPS the push at capacity rather than growing. The hazard is that "clamped
+// key" and "raw ancestor chain" are the same type here — `std::span<std::uint16_t
+// const>` — so nothing at a call site distinguishes them, and the dict layer now
+// has an UNCLAMPED chain builder (`detail::group_parent_path`) one step away.
+//
+// Debug-only on purpose: these accessors are `noexcept` and sit on the
+// validator's per-group path, so this must cost nothing in release. It converts
+// a silent wrong answer into a loud one wherever tests and debug builds run.
+[[nodiscard]] inline group_ctx_query make_ctx_query(std::string_view msg_type,
+                                                    std::span<std::uint16_t const> parent_path,
+                                                    std::uint16_t no_tag) noexcept {
+    assert(parent_path.size() <= kMaxGroupContextDepth &&
+           "group context lookup with an UNCLAMPED ancestor path: the store keys on the "
+           "outermost kMaxGroupContextDepth entries, so an over-long span misses every record "
+           "rather than matching the clamped one. Clamp before querying.");
+    return group_ctx_query{msg_type, parent_path, no_tag};
+}
 
 // Per-context group payload: the delimiter tag + the full member-tag list
 // (declaration order; spans handed out by table_view alias this storage).
@@ -364,7 +397,7 @@ public:
         if (!group_bit(no_tag)) {
             return 0;
         }
-        auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
+        auto const it = group_ctx_.find(make_ctx_query(msg_type, parent_path, no_tag));
         if (it != group_ctx_.end()) {
             return it->second.group_first;
         }
@@ -432,7 +465,7 @@ public:
         if (!group_bit(no_tag)) {
             return std::uint16_t{0};  // exact: not a group in any context
         }
-        auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
+        auto const it = group_ctx_.find(make_ctx_query(msg_type, parent_path, no_tag));
         if (it != group_ctx_.end()) {
             return it->second.group_first;
         }
@@ -445,7 +478,7 @@ public:
         if (!group_bit(no_tag)) {  // same exact pre-filter as above
             return {};
         }
-        auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
+        auto const it = group_ctx_.find(make_ctx_query(msg_type, parent_path, no_tag));
         if (it != group_ctx_.end()) {
             return {it->second.members.data(), it->second.members.size()};
         }
@@ -461,7 +494,7 @@ public:
         if (!group_bit(no_tag)) {  // same exact pre-filter as the accessors above
             return {};
         }
-        auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
+        auto const it = group_ctx_.find(make_ctx_query(msg_type, parent_path, no_tag));
         if (it != group_ctx_.end()) {
             return {it->second.required_members.data(), it->second.required_members.size()};
         }
