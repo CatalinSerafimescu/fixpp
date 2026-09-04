@@ -125,11 +125,26 @@ bash ci/pump-census.sh        # exit 0 iff the tree matches ci/expected-pump-sit
 bash ci/test-pump-census.sh   # the census's own assertions
 ```
 
-⚠️ **The census has two blind spots and neither is visible in the pin**: a site whose `.get()` sits
-beyond the lookahead was never *in* the pin and cannot leave it, and a site you deliberately preserve
-de-censuses itself when a neighbour's migration shifts its `.get()` past that lookahead. **An empty
-pin would be a statement about the census, not about the tree.** The registry of blind spots lives in
+⚠️ **The census has THREE blind spots and none is visible in the pin.** A site you deliberately
+preserve de-censuses itself when a neighbour's migration shifts its `.get()` past the lookahead; a
+site whose `.get()` was always beyond it was never *in* the pin and cannot leave it; and — the one
+that widening cannot reach — **the window may not be lexically present at all**, because the pump is
+indirected through a helper (`f.drain();` between the `co_spawn` and the `get()`). There is no
+`ioc.run_for` to anchor on, so no lookahead width finds it.
+
+**An empty pin would be a statement about the census, not about the tree.** The registry lives in
 `ci/pump-census.sh`'s header — add to it, do not renumber it.
+
+⭐ **The sweep that answers "does this file still have an unguarded `get()`?" must start from the
+`get()`, not from the pump.** A detector that recognises helper SHAPES can only find the shapes its
+author thought of: the first one written for the indirected class matched a bare `run()` but excluded
+a preceding `.`, so `f.drain()` was invisible and it reported **zero for the very file that then
+hung** under a forced-miss arm. Enumerate every `.get()` on a `co_spawn` future and ask whether a
+guard precedes it; that is shape-agnostic and needs no list of helper names kept current.
+
+⚠️ **A pin row can sit in DEAD CODE.** The census is lexical and has no notion of reachability, so a
+migrated site in an uncalled fixture helper drops a pin row while being unable to fire in any arm.
+Read a non-firing RED arm as a question about reachability before assuming the arm is broken.
 
 ## ⚠️ The catalogue's `test` rows are not a coverage measure
 

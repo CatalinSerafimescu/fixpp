@@ -73,6 +73,29 @@
 # against this census. Prove the widened scan non-vacuous first: run it over a
 # tree that still contains a known far `.get()` and confirm it reports it.
 #
+# A THIRD blind spot, and WIDENING THE LOOKAHEAD DOES NOT REACH IT: the window is
+# not lexically present at all, because the pump is indirected through a HELPER.
+#
+#     auto fut = asio::co_spawn(f.ioc, sess.send(payload), asio::use_future);
+#     f.drain();                  // <- the window, behind a member call
+#     auto result = fut.get();    // <- unconditional
+#
+# There is no `ioc.run_for` for this scanner to anchor on, so no lookahead width
+# finds it; blind spot (b)'s widening recipe reports nothing here and that zero
+# means only that the anchor is absent. Found 2026-09-04 in batch 9, by a
+# forced-miss arm rather than by reading: the arm did not go RED, it HUNG
+# (futex_do_wait, 0.0% CPU) three lines below a site that had just been migrated.
+#
+# ⚠️ DO NOT DETECT THIS BY RECOGNISING THE HELPER. The first detector written for
+# it matched a bare `run()` but excluded a preceding '.', so `f.drain()` was
+# invisible and it reported ZERO for the one file that then hung. Start from the
+# thing that actually blocks instead -- every `.get()` on a co_spawn future -- and
+# ask whether a guard precedes it. That cannot miss a helper form nobody thought
+# of, and it needs no list of helper names to stay current.
+#
+# Its size across the tree is NOT recorded here, deliberately: it is a property of
+# a moving tree, and the per-`.get()` sweep re-derives it in seconds.
+#
 # ── EXACT SET, NOT A COUNT ────────────────────────────────────────────────────
 # Comparison is by exact set equality against ci/expected-pump-sites.txt, in
 # BOTH directions. A count alone is satisfied by one site removed plus one
