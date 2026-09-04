@@ -188,6 +188,18 @@ fresh
 printf '\n| `test_reentrancy.py` | **diverges** | visible override |\n' >> "$WORK/t/wheel/README.md"
 expect "T11 a duplicate Membership row with a different disposition is refused" 2 "MORE THAN ONE"
 
+# ── T12: DELETING A WHOLE WHEEL TWIN ────────────────────────────────────────
+#
+# Found by an adversarial review. The dangling check fired only when a file was
+# absent from BOTH sides, so a file removed from the FORK alone raised nothing —
+# it still existed in-tree — and stopped being a twin, so the name-parity and
+# byte-identity conditions skipped it entirely. Seven kilobytes of tests silently
+# stopped exercising the shipped wheel and the gate said "contract holds". This
+# is #298 item 1 at file granularity, strictly larger than the drift T1 catches.
+fresh
+rm -f "$WORK/t/wheel/test_close_flow.py"
+expect "T12 deleting an entire wheel twin is caught" 1 "MISSING FROM THE FORK"
+
 echo
 echo "wheel-parity harness: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1

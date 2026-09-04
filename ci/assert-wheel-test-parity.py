@@ -160,7 +160,24 @@ def main():
                 f"nowhere. Add it to the Membership table (with its Source disposition) "
                 f"so the fork's contents stay auditable rather than tribal.")
 
-    # (2) NO DANGLING ROWS — every file the README names exists somewhere.
+    # (2a) A MEMBERSHIP ROW IS A CLAIM ABOUT tests/wheel/, so it is checked there.
+    #
+    # ⚠️ THE `either side` CHECK BELOW CANNOT SEE A DELETED TWIN. A file removed
+    # from the FORK alone still exists in-tree, so it raised no DANGLING row; it
+    # also stopped being a twin, so the test-name and byte-identity conditions
+    # skipped it entirely. Deleting a whole wheel twin was therefore invisible —
+    # #298 item 1 at file granularity, strictly larger than the drift (3) exists
+    # to catch, and the gate said "contract holds".
+    for name in sorted(dispositions):
+        if not (wheel / name).exists():
+            violations.append(
+                f"MISSING FROM THE FORK: the README's Membership table has a row for "
+                f"`{name}`, but tests/wheel/{name} does not exist. A row is a claim that "
+                f"the fork CONTAINS that file; deleting it silently stops those tests "
+                f"exercising the shipped wheel. Port it back, or remove its row and add "
+                f"it to Deliberate exclusions with a reason.")
+
+    # (2b) NO DANGLING ROWS — every file the README names exists somewhere.
     for name in sorted(mentioned):
         if not (wheel / name).exists() and not (root / name).exists():
             violations.append(

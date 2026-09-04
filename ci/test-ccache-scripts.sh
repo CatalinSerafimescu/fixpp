@@ -1449,6 +1449,82 @@ want_status 1 "floor-callers/mutant-conditional-producer"
 want_out 'may not run is not a producer' "floor-callers/mutant-conditional-producer"
 ok "MUTANT conditional-producer — a restore step carrying an if: is refused as a disposition source"
 
+# ── The three shapes a second adversarial review defeated ────────────────────
+#
+# All synthetic, because none exists in the tree today — which is exactly why
+# Direction 0 (the shipped workflows) cannot see any of them. A gate whose only
+# positive evidence is "the current tree passes" is untested against the tree
+# that comes next.
+mk_wf() { rm -rf "$WFSAND"; mkdir -p "$WFSAND"; cat > "$WFSAND/t.yml"; }
+
+# A call site with NO floor, followed by any other shell line. `.*` under re.S
+# ran to the END of the run: block, so `echo` became argument 4 and the site
+# reported `floor=echo`, "all consistent" — the #299 defect certified as fixed.
+mk_wf <<'YML'
+name: t
+on: push
+jobs:
+  j:
+    steps:
+      - name: restore
+        id: ccache_restore
+        run: ci/restore-ccache.sh foo
+      - name: stats
+        run: |
+          ci/ccache-stats.sh lane-a "${{ steps.ccache_restore.outputs.hit }}" "${{ steps.b.outcome }}"
+          echo "ccache step done"
+YML
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/trailing-line"
+want_out 'passes NO hit floor' "floor-callers/trailing-line"
+ok "a floorless call site followed by another shell line is caught (argument 4 is not the next command)"
+
+# TWO calls in one run: block. `search` returned only the first, so the second —
+# traceable disposition, no floor — was invisible AND uncounted, so even the
+# empty-scan guard could not help.
+mk_wf <<'YML'
+name: t
+on: push
+jobs:
+  j:
+    steps:
+      - name: restore
+        id: ccache_restore
+        run: ci/restore-ccache.sh foo
+      - name: stats
+        run: |
+          ci/ccache-stats.sh lane-a "${{ steps.ccache_restore.outputs.hit }}" "${{ steps.b.outcome }}" 70
+          ci/ccache-stats.sh lane-b "${{ steps.ccache_restore.outputs.hit }}" "${{ steps.b.outcome }}"
+YML
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/second-call-in-block"
+want_out "lane-b" "floor-callers/second-call-in-block"
+want_out '2 call site(s)' "floor-callers/second-call-in-block"
+ok "a SECOND call in the same run: block is seen, counted, and judged"
+
+# A step that only MENTIONS the restore script, in a comment. This is the shape
+# of the migration the coverage lane's own comment names as its prerequisite —
+# move to a marketplace action, leave the old name in a comment, and the floor is
+# certified traceable while outputs.hit is empty on every run.
+mk_wf <<'YML'
+name: t
+on: push
+jobs:
+  j:
+    steps:
+      - name: not really a restore
+        id: ccache_restore
+        run: |
+          # we used to call ci/restore-ccache.sh here; now a marketplace action
+          echo noop
+      - name: stats
+        run: ci/ccache-stats.sh lane "${{ steps.ccache_restore.outputs.hit }}" "${{ steps.b.outcome }}" 70
+YML
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/producer-by-comment"
+want_out 'no step in this job has that id' "floor-callers/producer-by-comment"
+ok "a step that only NAMES the restore script in a comment is not a producer"
+
 # Direction 4 — THE EMPTY SCAN. If the call sites move or the walk breaks,
 # "0 violations over 0 sites" must not read as a pass. This repo's single most
 # recurring defect is an instrument that reports clean because it could not

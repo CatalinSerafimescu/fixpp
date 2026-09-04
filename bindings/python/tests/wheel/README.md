@@ -28,12 +28,20 @@ python -m venv /tmp/wheel-venv && /tmp/wheel-venv/bin/pip install <the.whl> pyte
 
 Ports of the in-tree `bindings/python/tests/` suite — the **round-trip, smoke,
 exception, lifetime, OO-behaviour, and sub-interpreter** tests — adapted to the
-locator. For every file below **except `test_subinterpreter.py`**, the *only*
-divergence from its in-tree source is its dict helper (`_dict_path` /
-`oo_test_support.dict_path` / `_gil_staging._dict_path`), now delegating to
-`_wheeldict.resolve("FIX44")`; everything else is a faithful copy.
-`test_subinterpreter.py` is the one behavioural exception — see its table row
-and issue #298.
+locator. For a `swap `_dict_path`` row, the intended BEHAVIOURAL divergence from
+its in-tree source is its dict helper (`_dict_path` /
+`oo_test_support.dict_path` / `_gil_staging._dict_path`) delegating to
+`_wheeldict.resolve("FIX44")`; those files also carry a short port note.
+`test_subinterpreter.py` is the one behavioural exception — see its table row.
+
+> ⚠️ **WHAT THE GATE ACTUALLY ENFORCES FOR THESE ROWS IS TEST-NAME PARITY, NOT
+> BYTE IDENTITY**, and this paragraph says so rather than asserting the stronger
+> property. It previously read *"everything else is a faithful copy"* — an
+> unenforced claim stated as fact, in the very file the gate treats as the
+> contract. A review demonstrated the gap by replacing all eight test BODIES in
+> `test_roundtrip.py` with `pass`: names unchanged, gate green. Byte identity is
+> enforced only for `as-is` rows, which is why moving a file to `as-is` is the
+> way to strengthen it, and why the claim here is now scoped to what is checked.
 
 | File | Source | Locator swap |
 |---|---|---|

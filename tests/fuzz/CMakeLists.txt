@@ -229,6 +229,21 @@ foreach(_corpus_path IN LISTS _fixpp_fuzz_corpus_dirs)
   endif()
   get_filename_component(_corpus_name "${_corpus_path}" NAME)
 
+  # ⚠️ A DIRECTORY IS NOT SEEDS. The sibling tests/config/fuzz/CMakeLists.txt
+  # checks its crash directory is non-empty; this loop globbed DIRECTORIES and
+  # registered one replay each without ever looking inside. An emptied corpus dir
+  # — which a `git rm corpus/<name>/*` leaves behind in a working tree —
+  # registered a replay that executes only libFuzzer's implicit empty input and
+  # exits 0. The zero-REGISTRATIONS guard below is the whole-set version of this
+  # sentence; this is the per-directory one it does not cover.
+  file(GLOB _corpus_seeds CONFIGURE_DEPENDS "${_corpus_path}/*")
+  if(NOT _corpus_seeds)
+    message(FATAL_ERROR
+      "tests/fuzz/corpus/${_corpus_name}/ exists but is EMPTY, so fuzz_replay_${_corpus_name} "
+      "would execute only libFuzzer's implicit empty input and report green — a replay that "
+      "replays nothing. Restore the seeds or remove the directory.")
+  endif()
+
   # ⚠️ THE COMPLETENESS CHECK, IN THE ONLY DIRECTION THAT IS SATISFIABLE.
   # A corpus directory whose harness does not exist is a set of seeds nothing
   # can ever replay — fixpp_add_fuzz_replay() makes that fatal. The OPPOSITE

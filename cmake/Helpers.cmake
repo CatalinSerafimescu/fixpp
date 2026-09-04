@@ -78,8 +78,23 @@ function(fixpp_add_fuzz_replay test_name fuzz_target input_dir)
                    -runs=0
                    "-artifact_prefix=${_artifacts}/${test_name}-"
                    "${input_dir}")
+  # ⚠️ UBSan IS RECOVERABLE BY DEFAULT, AND THESE BINARIES CARRY IT.
+  # The fuzz targets are built with -fsanitize=fuzzer,address,undefined, but they
+  # run on the ASan lane, whose preset adds only -fsanitize=address and sets no
+  # UBSAN_OPTIONS. So without this, a UBSan finding in a replayed seed prints
+  # `runtime error:`, execution continues, the process exits 0 and the replay is
+  # GREEN — verbatim the defect #268 records for the ubsan lanes ("this lane ran
+  # the whole suite for its entire existence and could not go red on a UBSan
+  # finding"), reintroduced on a different lane by the change that enabled these
+  # binaries.
+  #
+  # FAIL_REGULAR_EXPRESSION is the belt to that braces: halt_on_error makes the
+  # process exit non-zero, and the pattern reddens the test even if some future
+  # option or a suppression file lets execution continue.
   set_tests_properties(${test_name} PROPERTIES
     LABELS "fuzz"
     TIMEOUT 300
-    WORKING_DIRECTORY "${_artifacts}")
+    WORKING_DIRECTORY "${_artifacts}"
+    ENVIRONMENT "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1"
+    FAIL_REGULAR_EXPRESSION "runtime error:")
 endfunction()

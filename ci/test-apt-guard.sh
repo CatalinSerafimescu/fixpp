@@ -48,6 +48,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Overridable so the MUTANT section can re-invoke this same file against
 # deliberately broken copies. Default is the shipped script.
 GUARD="${APT_GUARD_SCRIPT:-${HERE}/apt-guard.sh}"
+REPO_ROOT="$(cd "$HERE/.." && pwd)"
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 PASS=0; FAIL=0
@@ -114,6 +115,16 @@ SH
 # Fails every time with a distinctive non-124 code — pins exit-code fidelity.
 cat > "$WORK/nope.sh" <<'SH'
 #!/usr/bin/env bash
+exit 42
+SH
+
+# Attempt 1 hangs; every later attempt fails fast with 42. The ONLY fixture that
+# mixes outcomes ACROSS attempts — every other cell runs with ATTEMPTS=1, which
+# is why a sticky timeout flag went undetected until a review demonstrated it.
+cat > "$WORK/mixed.sh" <<'SH'
+#!/usr/bin/env bash
+n=0; [ -f "$1" ] && n=$(cat "$1"); n=$(( n + 1 )); echo "$n" > "$1"
+[ "$n" -eq 1 ] && sleep 30
 exit 42
 SH
 
@@ -250,6 +261,80 @@ if run_cell T8; then
     check "T8b a missing '--' separator exits 2" "$rc" "2"
 fi
 
+# ── T9: THE DEPLOYED DEFAULT BUDGET, which no other cell exercises ──────────
+#
+# Every timing cell above sets APT_GUARD_TIMEOUT explicitly, and NO workflow call
+# site sets it at all (`grep -rn APT_GUARD_TIMEOUT .github/workflows/` is empty).
+# So the `case "$LABEL"` dispatch — the value all 18 production sites actually
+# run with — was pinned by nothing: a review set both defaults to 24 hours,
+# restoring #300's unbounded hang at every real call site, and this harness
+# stayed 19/19 green.
+#
+# ⚠️ An opt-in written against the EASY state is not evidence about its adopters.
+# The banner already prints the budget, so this asserts the deployed value.
+if run_cell T9; then
+    out=$(APT_GUARD_ATTEMPTS=1 "$GUARD" llvm-toolchain -- true 2>&1)
+    if echo "$out" | grep -q '(bound 900s)'; then
+        ok "T9 llvm-toolchain keeps its wide default budget"
+    else
+        bad "T9 llvm-toolchain's default budget changed — a full toolchain install needs the wide one, and no call site passes it explicitly"
+    fi
+    out=$(APT_GUARD_ATTEMPTS=1 "$GUARD" apt-install -- true 2>&1)
+    if echo "$out" | grep -q '(bound 300s)'; then
+        ok "T9 an ordinary install keeps the tight default budget"
+    else
+        bad "T9 the ordinary default budget changed — this is the value all non-llvm call sites run with"
+    fi
+fi
+
+# ── T10: mixed outcomes ACROSS attempts ─────────────────────────────────────
+#
+# A transient timeout followed by a genuine, reproducible failure must report the
+# FINAL attempt, which is what the EXIT CODES block promises. A sticky flag made
+# the guard print "all N attempts exceeded Ns" directly beneath its own log
+# saying otherwise, and return 124 where the real answer was 42.
+if run_cell T10; then
+    rc=0
+    out=$(APT_GUARD_TIMEOUT=2 APT_GUARD_ATTEMPTS=3 APT_GUARD_BACKOFF=0 \
+            "$GUARD" t10 -- "$WORK/mixed.sh" "$WORK/t10.state" 2>&1) || rc=$?
+    check "T10 a transient timeout then a real failure exits with the REAL code" "$rc" "42"
+    if echo "$out" | grep -qi 'wedged or degraded apt mirror'; then
+        bad "T10 the final verdict blamed the mirror although the last attempts failed for their own reason — the flag is sticky across attempts"
+    else
+        ok "T10 the final verdict is not poisoned by an earlier attempt's timeout"
+    fi
+fi
+
+# ── T11: the labels the WORKFLOWS pass are labels the dispatch knows ────────
+#
+# A typo (`llvm-toolchian`) silently downgrades 900s to 300s and then reads as a
+# slow mirror. Derived from the workflows, so a new label must be added here
+# deliberately rather than defaulting quietly.
+if run_cell T11; then
+    known="apt-install apt-update llvm-toolchain"
+    # ⚠️ COMMENT LINES EXCLUDED. Without this the probe matched prose about the
+    # wrapper ("ci/apt-guard.sh tests the WRAPPER") and reported `tests` as an
+    # unknown label — a false RED, and a reminder that a census over source text
+    # has to say what counts as a call before it can count them.
+    used=$(grep -rh 'apt-guard\.sh' "$REPO_ROOT/.github/workflows/" 2>/dev/null \
+             | grep -v '^[[:space:]]*#' \
+             | grep -o 'apt-guard\.sh [a-z-]* --' \
+             | awk '{print $2}' | sort -u)
+    if [ -z "$used" ]; then
+        bad "T11 found ZERO apt-guard labels in the workflows — the probe is broken, not the tree"
+    else
+        unknown=""
+        for l in $used; do
+            case " $known " in *" $l "*) ;; *) unknown="$unknown $l" ;; esac
+        done
+        if [ -n "$unknown" ]; then
+            bad "T11 workflows pass label(s) the case dispatch does not know:$unknown — they fall to the default budget silently"
+        else
+            ok "T11 every label the workflows pass is known to the budget dispatch ($(echo $used | tr '\n' ' '))"
+        fi
+    fi
+fi
+
 # ═════ MUTANTS ═══════════════════════════════════════════════════════════════
 #
 # Each mutant breaks exactly one property and names the cell that must go RED.
@@ -309,6 +394,18 @@ mutant no-timeout \
 mutant infer-timeout-from-exit-code \
     's|^    if \[ "\$rc" -eq 124 \] \|\| \[ "\$rc" -eq 137 \]; then$|    if [ "$rc" -eq 124 ]; then|' \
     "T3" "classifies a wedged mirror from the raw exit code, so a SIGTERM-deaf hang (137) reads as an ordinary failure"
+
+# 5. Widen the DEPLOYED default budget back to an unbounded-in-practice value.
+#    Every timing cell overrides it, so only T9 sees this.
+mutant widen-default-budget \
+    's|^  llvm-toolchain) _apt_guard_default_timeout=900 ;;$|  llvm-toolchain) _apt_guard_default_timeout=86400 ;;|' \
+    "T9" "restores an effectively unbounded budget at every real llvm-toolchain call site"
+
+# 6. Make the timeout flag STICKY across attempts — the defect a review found in
+#    this PR's own first fix round.
+mutant sticky-timeout-flag \
+    's|^if \[ "\$attempt_timed_out" -eq 1 \]; then$|if [ "$attempt_timed_out" -eq 1 ] \|\| [ "$attempt" -gt 1 ]; then|' \
+    "T10" "lets an earlier attempt's timeout poison the final verdict and exit code"
 
 # 3. Normalise every failure to 1, losing the mirror-vs-package distinction.
 mutant flatten-exit \

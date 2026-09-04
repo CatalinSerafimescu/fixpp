@@ -140,9 +140,6 @@ recover_dpkg() {
 
 rc=0
 attempt=1
-# Sticky: set by any attempt the watchdog ended, and what the final disposition
-# and exit code are derived from.
-timed_out=0
 while [ "$attempt" -le "$APT_GUARD_ATTEMPTS" ]; do
     echo "── apt-guard [$LABEL] attempt $attempt/$APT_GUARD_ATTEMPTS (bound ${APT_GUARD_TIMEOUT}s): $*"
     rc=0
@@ -157,7 +154,6 @@ while [ "$attempt" -le "$APT_GUARD_ATTEMPTS" ]; do
     # two need different responses from whoever reads the log, so they are
     # distinguished on the watchdog flag rather than on the raw exit code.
     if [ "$attempt_timed_out" -eq 1 ]; then
-        timed_out=1
         echo "::warning::apt-guard [$LABEL] attempt $attempt exceeded ${APT_GUARD_TIMEOUT}s (mirror slow or wedged; raw exit $rc)"
     else
         echo "::warning::apt-guard [$LABEL] attempt $attempt failed with exit $rc"
@@ -175,7 +171,14 @@ done
 # Attribution: the whole point of the issue is that this failure currently
 # reads as "the build timed out". Name apt, the label, and the budget, so the
 # log line that survives says what actually broke.
-if [ "$timed_out" -eq 1 ]; then
+# ⚠️ THE FINAL ATTEMPT'S DISPOSITION, NOT A STICKY OR ACROSS ATTEMPTS.
+# A first version of this fix OR-ed the flag across attempts, so one transient
+# mirror hiccup on attempt 1 followed by a genuine, reproducible package failure
+# printed "all N attempts exceeded Ns" directly beneath its own log saying two of
+# them failed with 42 — a false claim emitted by the instrument at the moment of
+# failure, which is #300's attribution defect inverted — and returned 124 where
+# the EXIT CODES block above promises the command's own final status.
+if [ "$attempt_timed_out" -eq 1 ]; then
     echo "::error::apt-guard [$LABEL] FAILED — all $APT_GUARD_ATTEMPTS attempts exceeded ${APT_GUARD_TIMEOUT}s. This is a wedged or degraded apt mirror, not a build failure."
     # NORMALISED to 124, which is what the EXIT CODES block above promises. The
     # raw code may be 137 when --kill-after escalated; a caller reading for "the

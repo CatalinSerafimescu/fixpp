@@ -83,9 +83,29 @@ except ImportError:                                    # pragma: no cover
           "a step belongs to).")
     sys.exit(2)
 
-CALL = re.compile(r"ci/ccache-stats\.sh\s+(?P<args>.*)", re.S)
+# ⚠️ NOT `.*` WITH re.S, AND NOT `search`. A first version used both, and each
+# was independently fatal to the check's PRIMARY direction:
+#
+#   * `.*` under re.S ran past the command to the END OF THE WHOLE `run:` BLOCK,
+#     so the next shell line's first word became argument 4. A call site with NO
+#     floor followed by `echo "done"` reported `floor=echo` and "all consistent" —
+#     the #299 defect certified as fixed.
+#   * `search` returned only the FIRST call per block, so a second, floorless
+#     invocation in the same step was invisible, and not even counted as a site,
+#     so the empty-scan guard could not help either.
+#
+# The argument list therefore ends at the first unescaped newline (backslash
+# continuations are joined first), and every call in a block is matched.
+CALL = re.compile(r"ci/ccache-stats\.sh[ \t]+(?P<args>(?:\\\n|[^\n])*)")
 STEP_HIT = re.compile(r"^\$\{\{\s*steps\.(?P<id>[\w-]+)\.outputs\.hit\s*\}\}$")
 RESTORE_SCRIPT = "ci/restore-ccache.sh"
+# ⚠️ AN INVOCATION, NOT A SUBSTRING. A step whose `run:` merely NAMES the script —
+# in a comment such as "we used to call ci/restore-ccache.sh here; now we use a
+# marketplace action" — was accepted as a producer, certifying a floor as
+# traceable while `steps.<id>.outputs.hit` resolved to the empty string on every
+# run. That is not hypothetical: it is the exact shape of the migration the
+# coverage lane's own comment names as the prerequisite for giving it a floor.
+INVOKES_RESTORE = re.compile(r"(?m)^[ \t]*(?![#])(?:[^\n#]*[ \t])?ci/restore-ccache\.sh\b")
 
 
 def split_args(text):
@@ -166,7 +186,7 @@ def restore_step_ids(job):
         if not isinstance(step, dict):
             continue
         sid, run = step.get("id"), step.get("run") or ""
-        if sid and RESTORE_SCRIPT in run:
+        if sid and INVOKES_RESTORE.search(run):
             if "if" in step:
                 conditional[sid] = str(step.get("if"))
             else:
@@ -213,6 +233,24 @@ def classify(restore_arg, providers, conditional):
     return True, None
 
 
+def record_violation(violations, where, preset, can_supply, floor, untraceable):
+    """The two rule directions, plus the refusals, for one call site."""
+    if untraceable:
+        violations.append(f"{where}: call site for '{preset}' — {untraceable}.")
+        return
+    if can_supply and not floor:
+        violations.append(
+            f"{where}: call site for '{preset}' supplies a restore disposition but "
+            f"passes NO hit floor. The floor exists in ci/ccache-stats.sh and nothing "
+            f"invokes it — this lane can regress to a 0 % hit rate and stay green (#299).")
+    if not can_supply and floor:
+        violations.append(
+            f"{where}: call site for '{preset}' passes hit floor '{floor}' but no usable "
+            f"restore disposition. The floor is gated on restore == 'true', so it can "
+            f"never evaluate — it would report 'NOT evaluated' every run while looking "
+            f"enforced. Give the lane a real restore disposition, or pass no floor.")
+
+
 def main():
     wf_dir = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".github/workflows")
     if not wf_dir.is_dir():
@@ -238,35 +276,17 @@ def main():
                 run = step.get("run") or ""
                 if "ci/ccache-stats.sh" not in run:
                     continue
-                m = CALL.search(run)
-                if not m:
-                    continue
-                args = split_args(m.group("args"))
-                preset = args[0] if args else "?"
-                restore = args[1] if len(args) > 1 else ""
-                floor = args[3] if len(args) > 3 else ""
-                can_supply, untraceable = classify(restore, providers, conditional)
+                for m in CALL.finditer(run):
+                    args = split_args(m.group("args"))
+                    preset = args[0] if args else "?"
+                    restore = args[1] if len(args) > 1 else ""
+                    floor = args[3] if len(args) > 3 else ""
+                    can_supply, untraceable = classify(restore, providers, conditional)
 
-                where = f"{path.name}:{job_name}"
-                sites.append((where, preset, can_supply, floor))
-
-                if untraceable:
-                    violations.append(f"{where}: call site for '{preset}' — {untraceable}.")
-                    continue
-                if can_supply and not floor:
-                    violations.append(
-                        f"{where}: call site for '{preset}' supplies a restore "
-                        f"disposition but passes NO hit floor. The floor exists in "
-                        f"ci/ccache-stats.sh and nothing invokes it — this lane can "
-                        f"regress to a 0 % hit rate and stay green (#299).")
-                if not can_supply and floor:
-                    violations.append(
-                        f"{where}: call site for '{preset}' passes hit floor "
-                        f"'{floor}' but no usable restore disposition. The floor is "
-                        f"gated on restore == 'true', so it can never evaluate — it "
-                        f"would report 'NOT evaluated' every run while looking "
-                        f"enforced. Give the lane a real restore disposition, or "
-                        f"pass no floor.")
+                    where = f"{path.name}:{job_name}"
+                    sites.append((where, preset, can_supply, floor))
+                    record_violation(violations, where, preset, can_supply,
+                                     floor, untraceable)
 
     # ⚠️ AN EMPTY RESULT IS AN INSTRUMENT FAILURE, NOT A PASS. If the call sites
     # move, are renamed, or the walk stops matching, "0 violations over 0 sites"
