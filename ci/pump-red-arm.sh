@@ -83,6 +83,17 @@ TAIL='grace slice. Site: '
 
 pass=0; declare -a NOTES=()
 
+# ⚠️ AN EMPTY ARM POPULATION IS NOT A PASS. Without this, a comment-only or empty TSV
+# builds nothing, runs nothing, prints "0 RED-as-required, 0 FAILED" and exits 0 -- a
+# verification step that cannot fail because it never ran. This repo's most recurring
+# defect is exactly that shape.
+n_arms=$(awk -F'\t' '!/^#/ && NF' "$arms_file" | wc -l)
+if [ "$n_arms" -eq 0 ]; then
+    printf 'pump-red-arm: %s contains no arms -- refusing to report success on an empty population\n' \
+        "$arms_file" >&2
+    exit 2
+fi
+
 # ⚠️ VALIDATE THE ARMS FILE ONCE, UP FRONT. An earlier revision let the execution loop and
 # the cleanup sweep disagree about what a row is: the loop skipped only blanks and `#`,
 # while the sweep required `NF>=4`. A 3-field row therefore RAN with an empty target and an
@@ -136,7 +147,17 @@ restore_all() {
     local i
     for i in "${!SNAPPED[@]}"; do cp "$(bkp "$i")" "${SNAPPED[$i]}" 2>/dev/null || true; done
 }
-trap 'restore_all; rm -rf "$backup_dir"' EXIT INT TERM
+# ⚠️ A SIGNAL TRAP MUST TERMINATE. Bash RESUMES the script after a trapped INT/TERM
+# handler returns, so sharing one handler with EXIT was actively harmful: the handler
+# restored the sources and deleted $backup_dir, then the loop carried on to the next arm --
+# where `snapshot` skips a path already in SNAPPED and `restore` finds no backup file and
+# silently does nothing. The run would then end having FORCED a source with no copy of it
+# anywhere, and for the uncommitted migration this script exists to verify, that content is
+# unrecoverable from git. Verified: `trap "echo TRAPPED" INT; sleep 5; echo CONTINUED`
+# prints BOTH.
+trap 'restore_all; rm -rf "$backup_dir"' EXIT
+trap 'echo; echo "pump-red-arm: interrupted -- restoring sources"; exit 130' INT
+trap 'echo; echo "pump-red-arm: terminated -- restoring sources"; exit 143' TERM
 
 force_site() {
     # Rewrite the run_window_then_ready call that follows $2 in file $1 so both
@@ -244,7 +265,13 @@ done < "$arms_file"
 echo
 echo "rebuilding this run's targets to clear forced binaries..."
 for t in $(awk -F'\t' '!/^#/ && NF>=4 {print $4}' "$arms_file" | sort -u); do
-    cmake --build "build/$preset" -j "$JOBS" --target "$t" >/dev/null 2>&1
+    # ⚠️ A FAILED CLEANUP REBUILD IS A FINDING, NOT A SHRUG. Unchecked, the script exits 0
+    # with every arm RED while the target binary still holds the forced branch -- and the
+    # next reader measures that binary. It goes in NOTES so it also flips the exit code.
+    if ! cmake --build "build/$preset" -j "$JOBS" --target "$t" >/dev/null 2>&1; then
+        echo "  !! CLEANUP REBUILD FAILED for $t -- its binary may still hold a forced branch"
+        NOTES+=("CLEANUP-REBUILD-FAILED $t")
+    fi
 done
 
 echo

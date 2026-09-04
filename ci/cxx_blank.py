@@ -1,11 +1,17 @@
-"""Blank C++ comments and literals while preserving every byte offset and newline.
+r"""Blank C++ comments and literals while preserving every offset and newline.
 
-⚠️ WHY THIS IS A MODULE AND NOT A FIFTH COPY. This lexer already existed FOUR times in
-this repo -- `ci/pump-census.sh`, `ci/pump-get-sweep.sh`, `tools/check_sanitizer_test_carveouts.py`
-(whose own comment reads "PORTED FROM THE SIBLING LEXER, which is the point of this
-comment") and `tools/check_dictionary_snapshot_exclusivity.sh`. `ci/pump-red-arm.sh` needed
-a fifth, and it needed the strictest variant: it REWRITES source at a byte offset, so its
-lexer must be offset-preserving, not merely line-preserving.
+⚠️ WHY THIS IS A MODULE AND NOT ANOTHER COPY. This repo keeps re-deriving this lexer:
+`tools/check_sanitizer_test_carveouts.py`'s copy carries the comment "PORTED FROM THE
+SIBLING LEXER, which is the point of this comment", i.e. the duplication was already known
+and unfixed. ⚠️ **HOW MANY COPIES EXIST TODAY IS A MEASUREMENT, NOT A FACT TO CACHE HERE** --
+an earlier revision of this paragraph wrote the number down, which is the defect this file's
+own callers exist to catch. Derive it:
+
+    git grep -ln 'def blank_non_code\|strip_comments_preserve_code\|def blank_comments'
+
+What is durable is the CONDITION: `ci/pump-red-arm.sh` needs the STRICTEST variant, because
+it REWRITES source at an offset. A line-preserving lexer is not enough for that; only an
+offset-preserving one is.
 
 ⚠️ THE FAILURE IT PREVENTS FAILS TOWARD CLEAN, which is why it is worth a module. A
 forced-MISS arm locates `run_window_then_ready(` after an anchor. #289's own migrated files
@@ -19,8 +25,16 @@ them in is a change to a tested instrument and belongs in its own PR, not in a b
 merely needed to stop making copy number five. Consolidating the remaining copies onto this
 module is recorded as follow-up.
 
-Offset-preserving contract, relied on by every rewriting caller: the returned string has
+OFFSET-PRESERVING CONTRACT, relied on by every rewriting caller: the returned string has
 EXACTLY the same length as the input, and a newline in the input is a newline in the output.
+
+⚠️ THE UNIT IS A PYTHON CHARACTER, NOT A BYTE, and the distinction is not pedantry: this
+operates on decoded text, so a multi-byte UTF-8 character inside a comment is replaced by a
+one-byte space and `len(out) == len(src)` holds in CHARACTERS while the byte counts differ
+(`/*e-acute*/X` is 7 bytes in, 6 out). Every caller must therefore index the SAME decoded
+string it passed in -- which `ci/pump-red-arm.sh` does. A caller that seeks into the file by
+byte offset, or re-reads it as bytes, will land in the wrong place on any file containing
+non-ASCII, and this repo's sources are full of non-ASCII comment glyphs.
 """
 import re
 
@@ -78,15 +92,28 @@ def blank_non_code(source: str) -> str:
             # line, so the newline must NOT end the comment here. Both
             # characters are still blanked (preserving the physical line
             # count other callers rely on for path:line reporting).
+            # ⚠️ CRLF SPLICES TOO. The sibling this was ported from recognised only
+            # backslash-LF, so on a CRLF file it ENDED the comment at the CR and handed the
+            # next physical line back as code -- which is precisely the false-clean this
+            # module exists to prevent: `// hidden \<CRLF>run_window_then_ready(...)` came
+            # out of the blanker with the call intact, and a rewriting caller would then
+            # edit commented-out text and report the arm SILENT.
             if ch == "\\" and i + 1 < n and source[i + 1] == "\n":
                 out.append(blank(ch))
                 out.append(blank(source[i + 1]))
                 i += 2
                 continue
+            if ch == "\\" and i + 2 < n and source[i + 1] == "\r" and source[i + 2] == "\n":
+                out.append(blank(ch))
+                out.append(blank(source[i + 1]))
+                out.append(blank(source[i + 2]))
+                i += 3
+                continue
             out.append(blank(ch))
             i += 1
             if ch == "\n":
                 state = "code"
+
 
         elif state == "block-comment":
             if source.startswith("*/", i):
@@ -108,3 +135,38 @@ def blank_non_code(source: str) -> str:
                 state = "code"
 
     return "".join(out)
+
+
+# ── Self-test ────────────────────────────────────────────────────────────────
+#
+# ⚠️ EVERY CASE HERE MUST INCLUDE A POSITIVE CONTROL -- a blanker that returns all spaces
+# passes every "the call is hidden" assertion and is useless. `real code` is that control.
+# Run: python3 ci/cxx_blank.py
+if __name__ == "__main__":
+    CALL = "run_window_then_ready"
+    CASES = [
+        # (name, source, must the CALL still be visible after blanking?)
+        ("real code",           f"{CALL}(a); // trailing\n",                      True),
+        ("line comment",        f"// {CALL}(a)\nint x;\n",                        False),
+        ("block comment",       f"/* {CALL}(a) */\nint x;\n",                     False),
+        ("string literal",      f'const char* s = "{CALL}(a)";\n',                False),
+        ("LF line splice",      f"// hidden \\\n{CALL}(a);\n",                    False),
+        ("CRLF line splice",    f"// hidden \\\r\n{CALL}(a);\n",                  False),
+        ("raw string",          f'auto r = R"({CALL}(a))";\n',                    False),
+        ("comment then code",   f"// note\n{CALL}(a);\n",                         True),
+    ]
+    ok = True
+    for name, src, want in CASES:
+        out = blank_non_code(src)
+        seen = CALL in out
+        same_len = len(out) == len(src)
+        same_nl = out.count("\n") == src.count("\n")
+        good = seen == want and same_len and same_nl
+        ok &= good
+        print(f"  {'ok   ' if good else '!!BAD!!'} {name:<18} visible={seen} (want {want})"
+              f" len={'=' if same_len else 'DIFFERS'} nl={'=' if same_nl else 'DIFFERS'}")
+    import sys
+    if not ok:
+        sys.exit("\nCONTROL FAILED -- blank_non_code is not trustworthy. Fix before using it.")
+    print("\nblank_non_code PROVEN: hides comments and literals, keeps real code, "
+          "preserves length and newlines.")
