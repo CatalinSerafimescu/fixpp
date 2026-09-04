@@ -48,3 +48,11 @@ status: stable
   rather than taste. Class 7 (*removing a spurious gate unmasks whatever it was holding back*) is added
   with #264 as its reference instance: the false rejection was the only thing keeping unrepresentable
   contexts out of the store, so fixing it correctly is what exposed a silent merge behind it.
+
+- **2026-09-04 (later) — `dictionary` query-side clamp: lead → guarded.** PR #367 added a debug-only
+  assertion on the precondition the page had recorded as an unguarded lead, so the page said the tree
+  was less protected than it is. Also records what was NOT done and why (a `group_ctx_path` type that
+  makes the wrong key unrepresentable — a public-header change, out of scope for the fix), and that
+  the collision check's FALSE-POSITIVE arm is the load-bearing one because that check rejects a
+  dictionary.
+

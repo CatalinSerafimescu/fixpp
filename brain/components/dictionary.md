@@ -117,18 +117,43 @@ clamped key, so the flush can tell "same key, same chain" (a benign duplicate �
 both header and body) from "same key, different chain" (unrepresentable, refused). Loader-local: the
 store, `group_ctx_key` and every query path are untouched.
 
+⚠️ **This check REJECTS a dictionary, so its false-positive arm is the load-bearing one.** A test that
+only proves it fires cannot catch it firing when it should not — and a spurious hit here is a hard
+rejection of valid input, which is the defect #264 was filed about. Both arms are witnessed, and both
+loaders are, because the refusal is shared but each raises its own exception type (FR-006c).
+
 > ⭐ **This is failure class 7 in [`failure-classes.md`](../failure-classes.md), and #264 is its
 > reference instance.** The spurious rejection was *the only thing* keeping chains past the clamp out
 > of a store that cannot represent them. Fixing the false rejection — correctly — is what exposed the
 > silent merge behind it. The fix and the newly-reachable defect were found in the same review round,
 > by two independent reviewers, neither of which was looking for the second one.
 
-**LEAD TO VERIFY, not a known defect.** `group_ctx_query` / `group_ctx_equal` compare the caller's span
-verbatim with **no** clamp, so a caller passing an unclamped over-long path misses a key stored clamped.
-Per the paragraph above no production caller can construct such a span — but a hand-built one can, and
-the two are the same type (`std::span<std::uint16_t const>`), so nothing distinguishes "clamped key"
-from "raw chain" at a call site. Unfiled at the time of writing; confirm against source before treating
-it as either safe or broken.
+**The query side does NOT clamp, and that is now ASSERTED rather than left as a lead.**
+`group_ctx_query` / `group_ctx_equal` compare the caller's span verbatim — a four-iterator
+`std::equal`, so any length difference is a MISS, not a truncation. An over-long path therefore
+matches *nothing* and reads to the caller as "context not declared": a fall-through to the bare global
+store for `group_first_field`, a `nullopt` for `group_first_field_exact`.
+
+No production caller can reach it. Every context lookup builds its span as
+`{ctx.parent_path.data(), ctx.depth}` from a `wire::group_context`, whose `parent_path` is a fixed
+`kMaxGroupContextDepth` array and whose `pushed()` DROPS the push at capacity. The residual hazard is a
+TYPE one: "clamped key" and "raw ancestor chain" are both `std::span<std::uint16_t const>`, so nothing
+at a call site distinguishes them — and the dict layer now has an unclamped chain builder
+(`detail::group_parent_path`) one step away.
+
+The precondition is stated ONCE, in `make_ctx_query`, which all four context accessors go through. It
+is `assert`-based deliberately: those accessors are `noexcept` and sit on the validator's per-group
+path, so it must cost nothing in release. That means the guard exists only where `NDEBUG` is undefined
+— it converts a silent wrong answer into a loud one under test and debug builds, and changes nothing
+in release. ⚠️ A release build therefore proves nothing about it; the witness
+(`TableViewCtxQuery.OverLongAncestorPathTripsTheClampAssertion`) is compiled and COUNTED under
+`NDEBUG` via `GTEST_SKIP` rather than `#ifdef`'d away, so the release leg reports a skip instead of the
+test silently vanishing from the suite.
+
+**Making the wrong key unrepresentable — a `group_ctx_path` type producible only by clamping — was
+considered and NOT done.** It would change key types in an installed public header and touch every
+consumer, which is a different change from the one that fixed #264. The assertion is the proportionate
+guard for a footgun that is real but currently unreachable.
 
 ## Where the design decisions live
 
