@@ -81,10 +81,10 @@ while [ $# -gt 0 ]; do
     *) echo "::error::unknown argument: $1"; exit 2 ;;
   esac
 done
-[ -n "$PRESET" ] && [ -n "$JOBS" ] && [ -n "$OUT" ] || {
+if [ -z "$PRESET" ] || [ -z "$JOBS" ] || [ -z "$OUT" ]; then
   echo "::error::usage: $0 --preset P --jobs N --out DIR [--ctest-args ...] [--subset R] [--no-peak] [--coverage]"
   exit 2
-}
+fi
 mkdir -p "$OUT"
 
 BUILD="$REPO/build/$PRESET"
@@ -114,7 +114,16 @@ run_pass() {
   # See the header: production never has cost data, so neither may any pass.
   rm -f "$TMPDIR_CTEST/CTestCostData.txt"
 
-  local -a cmd=(ctest --preset "$PRESET" --output-on-failure --timeout 1800 --parallel "$par")
+  # `--no-tests=error`: tier1's own test steps carry it, and it matters more
+  # here than there. `ctest -R` exits 0 when the filter matches NOTHING, so a
+  # mistyped `--subset` would produce three passes of zero tests that agree
+  # perfectly with each other — a VOID at best, and a confusing one. This makes
+  # the empty selection fail at ctest, where the message says so.
+  # `--timeout 1800` is the repo's wedge guard; see tier1.yml's first Test step
+  # for why it exists and why it must not be tightened into a performance
+  # assertion.
+  local -a cmd=(ctest --preset "$PRESET" --output-on-failure --no-tests=error
+                --timeout 1800 --parallel "$par")
   # Word-splitting is INTENDED here: --ctest-args carries the lane's own filter
   # (e.g. `-LE packaging`), which must match what the lane really runs or the
   # measurement describes a workload that does not ship.
@@ -194,8 +203,13 @@ coverage_digest() {
   llvm-profdata-22 merge -sparse "$prof"/*.profraw -o "$pd" 2>/dev/null || status="merge-failed"
   if [ "$status" = "ok" ]; then
     local objects=""
+    # ⚠️ COPIED FROM tier1.yml's `Generate LCOV report` STEP, deliberately
+    # including its `-object` enumeration: that step's own comment records that
+    # listing only core+capi silently dropped all dictionary/codegen/wire
+    # coverage. A digest computed over a different object set is not comparable
+    # with the lane's real report, so this must stay in step with it.
     for b in "$BUILD"/bin/*; do
-      [ -f "$b" ] && [ -x "$b" ] || continue
+      if [ ! -f "$b" ] || [ ! -x "$b" ]; then continue; fi
       [ "$(basename "$b")" = fixpp_core_tests ] && continue
       objects="$objects -object $b"
     done

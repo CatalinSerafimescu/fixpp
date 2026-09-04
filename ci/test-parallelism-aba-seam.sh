@@ -33,12 +33,12 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "  PASS  $1"; }
 bad() { FAIL=$((FAIL+1)); echo "  FAIL  $1"; }
 
-command -v ctest >/dev/null && command -v cmake >/dev/null || {
+if ! command -v ctest >/dev/null || ! command -v cmake >/dev/null; then
   echo "::error::ci/test-parallelism-aba-seam.sh needs cmake and ctest on PATH."
   echo "Refusing to report a result without them — a skipped seam check is a silent pass,"
   echo "and this file exists because the synthetic harness cannot see this failure."
   exit 2
-}
+fi
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/ci"
