@@ -49,6 +49,7 @@
         "CMAKE_CXX_COMPILER": "clang++",
         "FIXPP_ENABLE_ASAN": "ON",
         "BUILD_SHARED_LIBS": "ON",
+        "FIXPP_BUILD_FUZZ": "ON",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-asan/conan_toolchain.cmake"
       }
     },

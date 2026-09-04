@@ -202,3 +202,76 @@ target_include_directories(fuzz_session_recovery_admin_parse PRIVATE
 )
 set_target_properties(fuzz_session_recovery_admin_parse PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+# ── Corpus replay as ordinary ctest tests (#213) ─────────────────────────────
+#
+# The repo carried fuzz corpus seeds and NOTHING replayed any of them: no CI job,
+# no ctest registration. A seed is kept because it once found a crash or
+# represents an interesting input class, so kept-but-never-replayed seeds
+# document past bugs without guarding against their return — the same shape as a
+# gate that observes without asserting.
+#
+# ⚠️ THIS IS A REPLAY, NOT A FUZZING RUN. `-runs=0` executes each corpus file
+# once and exits non-zero on any crash: fast, deterministic and CI-safe. It must
+# never be turned into a time- or run-bounded campaign here; a campaign belongs
+# in a dedicated job, not in the test suite every lane runs.
+#
+# ⚠️ `-runs=0` EXECUTES N+1 INPUTS, not N — libFuzzer adds the empty input.
+# Anything that ever asserts a count here must account for that, or it will
+# report an off-by-one and be "fixed" in the wrong direction.
+#
+# ⚠️ ARTIFACTS ARE REDIRECTED OUT OF THE SOURCE TREE. On a crash libFuzzer writes
+# a `crash-<sha1>` file to its CWD; without both the working directory and
+# -artifact_prefix below, a red replay would litter the repo root with untracked
+# files (observed while proving this instrument can go RED at all).
+set(_fixpp_fuzz_corpus_root "${CMAKE_CURRENT_SOURCE_DIR}/corpus")
+set(_fixpp_fuzz_replay_artifacts "${CMAKE_BINARY_DIR}/fuzz-replay-artifacts")
+file(MAKE_DIRECTORY "${_fixpp_fuzz_replay_artifacts}")
+
+file(GLOB _fixpp_fuzz_corpus_dirs
+     LIST_DIRECTORIES true
+     CONFIGURE_DEPENDS
+     "${_fixpp_fuzz_corpus_root}/*")
+
+set(_fixpp_fuzz_replays_registered 0)
+foreach(_corpus_path IN LISTS _fixpp_fuzz_corpus_dirs)
+  if(NOT IS_DIRECTORY "${_corpus_path}")
+    continue()
+  endif()
+  get_filename_component(_corpus_name "${_corpus_path}" NAME)
+
+  # ⚠️ THE COMPLETENESS CHECK, IN THE ONLY DIRECTION THAT IS SATISFIABLE.
+  # A corpus directory whose harness does not exist is a set of seeds nothing
+  # can ever replay, so it is fatal. The OPPOSITE direction — a fuzz target with
+  # no corpus — is deliberately NOT an error: most targets here have none, and a
+  # gate on that would red the build for a pre-existing condition rather than
+  # for a regression.
+  if(NOT TARGET fuzz_${_corpus_name})
+    message(FATAL_ERROR
+      "tests/fuzz/corpus/${_corpus_name}/ has no fuzz_${_corpus_name} target, so nothing "
+      "can replay its seeds. Either add the harness or remove the corpus — a corpus that "
+      "cannot be replayed is the accumulated-but-unenforced state #213 was filed about.")
+  endif()
+
+  add_test(NAME fuzz_replay_${_corpus_name}
+           COMMAND fuzz_${_corpus_name}
+                   -runs=0
+                   "-artifact_prefix=${_fixpp_fuzz_replay_artifacts}/${_corpus_name}-"
+                   "${_corpus_path}")
+  set_tests_properties(fuzz_replay_${_corpus_name} PROPERTIES
+    LABELS "fuzz"
+    TIMEOUT 300
+    WORKING_DIRECTORY "${_fixpp_fuzz_replay_artifacts}")
+  math(EXPR _fixpp_fuzz_replays_registered "${_fixpp_fuzz_replays_registered} + 1")
+endforeach()
+
+# ⚠️ AN EMPTY REGISTRATION IS AN INSTRUMENT FAILURE, NOT A CLEAN BUILD. If the
+# corpus root moves or the glob stops matching, zero replays register and the
+# lane goes green having replayed nothing — which is precisely the state before
+# this block existed, restored silently.
+if(_fixpp_fuzz_replays_registered EQUAL 0)
+  message(FATAL_ERROR
+    "FIXPP_BUILD_FUZZ is ON but ZERO corpus replays were registered from "
+    "${_fixpp_fuzz_corpus_root}. Refusing to configure a fuzz build that replays nothing.")
+endif()
+message(STATUS "fixpp: registered ${_fixpp_fuzz_replays_registered} fuzz corpus replay test(s)")
