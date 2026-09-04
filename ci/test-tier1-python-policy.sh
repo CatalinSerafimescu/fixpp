@@ -409,6 +409,11 @@ wheel_identity_steps = [
         "if":   str(step.get("if", "")),
         "run":  str(step.get("run", "")),
         "env":  {str(k): str(v) for k, v in (step.get("env") or {}).items()},
+        # #271: projected AND compared. `raw_keys` pins only that the key is
+        # PRESENT; a `continue-on-error` flipped true->false (or the reverse)
+        # keeps the key set identical while changing whether a failing publish
+        # reddens the lane.
+        "continue_on_error": str(step.get("continue-on-error", "")),
         "raw_keys": sorted(str(k) for k in step.keys()),
     }
     for step in wheel_steps
@@ -961,6 +966,51 @@ EXPECTED_WHEEL_ASSERT_RUN='ci/assert-wheel-image.sh /tmp/cibuildwheel.log \
   '"'"'${{ steps.wheel_ident.outputs.image_ref }}'"'"' \
   '"'"'${{ steps.wheel_build.outcome }}'"'"''
 
+# ── #271: the fields the extractor projected but nobody COMPARED ────────────
+#
+# assert_wheel_identity_steps extracted six fields per identity step and
+# compared four. `raw_keys` pins the key SET, and the `run:` golden pins the
+# script text — so ADDING or REMOVING a key was already caught, and PR #270's
+# round-4 audit measured that: deleting the assert step's `if:` was killed.
+#
+# ⚠️ WHAT SURVIVED IS VALUE DRIFT ON A KEY THAT MUST REMAIN PRESENT, and it was
+# measured too: setting the assert step's `if:` value to `false` left the
+# harness passing 49/49 while the pinned-image assertion silently never ran.
+# Every scalar the extractor sees is therefore compared below, not just the one.
+#
+# These are GOLDENS in the same discipline as the run: blocks above — they red
+# on any change, cosmetic included. Update them in the same commit as the
+# workflow. Do NOT relax one to a regex or a substring to make an edit survive:
+# that is the exact defect class PR #270 spent four Gate B rounds removing.
+
+EXPECTED_WHEEL_RESTORE_ID="ccache_restore"
+EXPECTED_WHEEL_RESTORE_IF=""
+EXPECTED_WHEEL_RESTORE_COE=""
+
+EXPECTED_WHEEL_ASSERT_ID=""
+# ⚠️ THE ONE MEASURED TO BE SWITCHABLE-OFF UNDETECTED. `always()` is what makes
+# the image assertion run even after a failed wheel build — the case where a
+# substituted image is most likely to be the cause.
+EXPECTED_WHEEL_ASSERT_IF="always() && steps.wheel_build.outcome != 'skipped'"
+EXPECTED_WHEEL_ASSERT_COE=""
+
+EXPECTED_WHEEL_SEED_ID=""
+# `continue-on-error: true` is CORRECT here — a cache that cannot publish must
+# not redden a lane whose wheel built and tested fine — but it is exactly the
+# key whose value silently converts a hard failure into a green tick, so it is
+# pinned rather than merely present.
+EXPECTED_WHEEL_SEED_COE="True"
+
+# ⚠️ PINNED BECAUSE DRIFT HERE IS SEMI-SILENT AND COSTS A SCOPE. Losing
+# GHCR_PAT falls back to GITHUB_TOKEN, which lacks `delete:packages`, so the
+# pruner stops reclaiming and the GHCR backlog accumulates — reported as
+# `prune: PENDING` rather than as a failure.
+EXPECTED_WHEEL_SEED_ENV='{"GH_TOKEN":"${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}"}'
+
+# Steps that must carry NO step-level env at all. An env map appearing where
+# none belongs is a new, unreviewed input to an identity call site.
+EXPECTED_WHEEL_EMPTY_ENV='{}'
+
 EXPECTED_WHEEL_SEED_IF="(github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'"
 
 EXPECTED_WHEEL_SEED_RUN='echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -1018,6 +1068,58 @@ $(diff <(printf '%s\n' "$_expected") <(printf '%s\n' "$_got") || true)"
   assert_wheel_step_keys "$restore_step" "id,name,run" "Restore ccache from GHCR"
   assert_wheel_step_keys "$assert_step"  "if,name,run" "Assert the pinned manylinux image is the one used"
   assert_wheel_step_keys "$seed_step"    "continue-on-error,env,if,name,run" "Save ccache to GHCR (push:main / dispatch on main, cache changed)"
+
+  # ── #271: every projected scalar is COMPARED, not just extracted ──────────
+  assert_wheel_step_scalar() {  # <step-json> <jq-field> <expected> <label> <why>
+    local _got
+    _got="$(echo "$1" | jq -r --arg f "$2" '.[$f] // ""')"
+    [ "$_got" = "$3" ] \
+      || fail "$case_id: the wheel step '$4' \`$2\` is \`$_got\`, expected exactly \`$3\`. $5
+
+This is a GOLDEN on a VALUE, not on key presence: \`raw_keys\` already catches an added or
+removed key, and #271 exists because value drift on a key that must REMAIN present was the
+gap that survived. If the change is intended, update the expected value here in the same
+commit — do not relax this to a substring or regex."
+  }
+
+  assert_wheel_step_env() {  # <step-json> <expected compact json> <label>
+    local _got
+    _got="$(echo "$1" | jq -cS '.env // {}')"
+    [ "$_got" = "$(echo "$2" | jq -cS '.')" ] \
+      || fail "$case_id: the wheel step '$3' env map is '$_got', expected exactly '$2'. A step-level env value is an unreviewed input to an identity call site, and it was projected here but never compared until #271."
+  }
+
+  assert_wheel_step_scalar "$restore_step" "id" "$EXPECTED_WHEEL_RESTORE_ID" \
+    "Restore ccache from GHCR" \
+    "The id is what every downstream \`steps.<id>.outputs.hit\` reference resolves against; a renamed id makes those expressions resolve to the EMPTY STRING with no error."
+  assert_wheel_step_scalar "$restore_step" "if" "$EXPECTED_WHEEL_RESTORE_IF" \
+    "Restore ccache from GHCR" \
+    "This step is unconditional; an \`if:\` appearing here would let the restore be skipped while everything downstream still reads its outputs."
+  assert_wheel_step_scalar "$restore_step" "continue_on_error" "$EXPECTED_WHEEL_RESTORE_COE" \
+    "Restore ccache from GHCR" \
+    "A \`continue-on-error\` here would convert a failed restore into a green step feeding a cold build."
+  assert_wheel_step_env "$restore_step" "$EXPECTED_WHEEL_EMPTY_ENV" "Restore ccache from GHCR"
+
+  assert_wheel_step_scalar "$assert_step" "if" "$EXPECTED_WHEEL_ASSERT_IF" \
+    "Assert the pinned manylinux image is the one used" \
+    "MEASURED (PR #270 round 4): setting this value to \`false\` left the harness passing 49/49 while the pinned-image assertion silently never ran. \`always()\` is what keeps it running after a failed wheel build — the case where a substituted image is most likely to be the cause."
+  assert_wheel_step_scalar "$assert_step" "id" "$EXPECTED_WHEEL_ASSERT_ID" \
+    "Assert the pinned manylinux image is the one used" \
+    "This step carries no id; one appearing here is a new, unreviewed reference point."
+  assert_wheel_step_scalar "$assert_step" "continue_on_error" "$EXPECTED_WHEEL_ASSERT_COE" \
+    "Assert the pinned manylinux image is the one used" \
+    "A \`continue-on-error\` here would make the image assertion advisory — it would run, fail, and leave the lane green."
+  assert_wheel_step_env "$assert_step" "$EXPECTED_WHEEL_EMPTY_ENV" \
+    "Assert the pinned manylinux image is the one used"
+
+  assert_wheel_step_scalar "$seed_step" "id" "$EXPECTED_WHEEL_SEED_ID" \
+    "Save ccache to GHCR (push:main / dispatch on main, cache changed)" \
+    "This step carries no id."
+  assert_wheel_step_scalar "$seed_step" "continue_on_error" "$EXPECTED_WHEEL_SEED_COE" \
+    "Save ccache to GHCR (push:main / dispatch on main, cache changed)" \
+    "\`true\` is correct — a cache that cannot publish must not redden a lane whose wheel built and tested fine — but this is precisely the key whose value turns a hard failure into a green tick, so it is pinned rather than merely present."
+  assert_wheel_step_env "$seed_step" "$EXPECTED_WHEEL_SEED_ENV" \
+    "Save ccache to GHCR (push:main / dispatch on main, cache changed)"
 
   seed_if="$(echo "$seed_step" | jq -r '.["if"] // ""')"
   [ "$seed_if" = "$EXPECTED_WHEEL_SEED_IF" ] \
@@ -1252,7 +1354,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=55  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
+MUTANTS_DECLARED=58  # M70 M71 M72 (#271) + M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -1707,6 +1809,61 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "        run: bash ci/test-pump-census.sh\n"
 new = "        run: echo \"bash ci/test-pump-census.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # ── #271: the wheel identity steps' VALUE drift (M70-M72) ───────────────────
+  #
+  # assert_wheel_identity_steps extracted six fields per step and compared four.
+  # ADDING or REMOVING a key was already killed by the `raw_keys` exact-set pin;
+  # what survived was VALUE drift on a key that must remain present. These three
+  # are the shapes PR #270's round-4 audit named, each RED for its own reason.
+
+  # M70: THE MEASURED ONE. Round 4 set this `if:` value to `false` and the
+  # harness still passed 49/49 — the pinned-image assertion silently never ran,
+  # and nothing in the repo could tell. `always()` is what keeps it running
+  # after a FAILED wheel build, which is exactly when a substituted image is
+  # most likely to be the cause.
+  mutate_workflow M70 "the image-assert step's if: value switched off" "\`if\` is .*expected exactly" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        if: always() && steps.wheel_build.outcome != \x27skipped\x27\n"
+new = "        if: false\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M71: the seed step's GH_TOKEN. Drift here is SEMI-silent and costs a scope:
+  # falling back to GITHUB_TOKEN loses `delete:packages`, so the pruner stops
+  # reclaiming and the GHCR backlog grows — surfaced as `prune: PENDING`, not as
+  # a failure. `env` was projected by the extractor and compared by nothing.
+  mutate_workflow M71 "the seed step's GH_TOKEN drops its GHCR_PAT preference" "env map is .*expected exactly" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}"
+new = "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M72: the restore step's `id`. ⚠️ #271 asks for "restore step `if:` value
+  # drift", which is NOT EXPRESSIBLE: that step carries no `if:`, so adding one
+  # is a key-SET change already killed by `raw_keys` (round 4 measured exactly
+  # that). Its actual unpinned value is the `id`, and the consequence is worse:
+  # every `steps.ccache_restore.outputs.*` reference resolves to the EMPTY
+  # STRING with no error, so ccache-stats.sh reads an absent disposition and the
+  # #299 hit floor silently stops evaluating. Substituted deliberately, and
+  # recorded here so the substitution is visible rather than looking like the
+  # issue's item was done.
+  mutate_workflow M72 "the ccache_restore step id renamed, orphaning every outputs reference" "\`id\` is .*expected exactly" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        id: ccache_restore\n"
+new = "        id: ccache_restore_renamed\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
