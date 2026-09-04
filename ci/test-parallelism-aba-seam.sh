@@ -207,11 +207,18 @@ fi
 #
 # ci/run-parallelism-aba.sh counts sanitizer reports with a pattern copied from
 # ci/peak-memory-report.sh, and the agreement was written as a comment saying
-# "kept in step with it deliberately". That is an instruction someone has to
-# follow. The consequence if they do not is subtle and bad: a campaign would
-# report a "new report at higher concurrency" that is only a DIFFERENT
-# DEFINITION of a report — #267 acceptance item 5 says such a finding is a real
-# defect until disproven, so a spurious one costs a real investigation.
+# "kept in step". That is an instruction someone has to follow. The consequence
+# if they do not is subtle and bad: a campaign would report a "new report at
+# higher concurrency" that is only a DIFFERENT DEFINITION of a report — and
+# item 5 makes such a finding a real defect until disproven, so a spurious one
+# costs a real investigation.
+#
+# ⚠️ THIS CELL CHECKS THE PATTERN AND NOTHING MORE, and the distinction matters
+# because the two files deliberately report DIFFERENT QUANTITIES from it: the CI
+# gate subtracts ci/expected-sanitizer-reports.txt to get an UNEXPLAINED count,
+# the driver keeps the raw one. Both are right for their own question
+# (absolute vs pass-to-pass) — see the driver's own comment. Asserting more than
+# pattern equality here would pin an agreement that does not exist.
 #
 # Same standard as S4 above, applied to the other duplicated constant.
 a="$(sed -n "s/^SAN_PATTERN=//p" "$HERE/run-parallelism-aba.sh")"

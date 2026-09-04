@@ -94,9 +94,24 @@ mkdir -p "$OUT"
 BUILD="$REPO/build/$PRESET"
 TMPDIR_CTEST="$BUILD/Testing/Temporary"
 
-# Identical to ci/peak-memory-report.sh's SAN_PATTERN.  Kept in step with it
-# deliberately: a sample whose sanitizer counting differs from the standing CI
-# gate's would produce a "new" report that is only a different definition.
+# ⚠️ THE PATTERN IS IDENTICAL TO ci/peak-memory-report.sh's; THE QUANTITY IS
+# NOT, AND THAT IS DELIBERATE.  Saying they are "kept in step" would overstate
+# it: that script reports UNEXPLAINED = raw minus whatever
+# ci/expected-sanitizer-reports.txt allowlists for the lane, because it asks an
+# ABSOLUTE question ("did a report fire that nobody has accounted for?") and one
+# lane emits one by design on every run — an always-on warning is one nobody
+# reads.
+#
+# This records the RAW count, because the question here is RELATIVE: did MORE
+# reports appear at higher concurrency than at j=1, in the same job on the same
+# VM?  A report that fires by design fires in all three passes and cancels, and
+# subtracting the allowlist would additionally hide a SECOND occurrence of the
+# allowlisted kind — which under `--parallel` is exactly the finding item 5
+# exists for.
+#
+# What must stay in step is the PATTERN, so the two files agree on what counts
+# as a report at all; cell S6 of ci/test-parallelism-aba-seam.sh checks that and
+# nothing more.
 SAN_PATTERN='WARNING: ThreadSanitizer:|ERROR: (Address|Leak|Memory)Sanitizer:|runtime error:'
 
 # Overridable, matching tools/run_coverage.sh rather than hardcoding the

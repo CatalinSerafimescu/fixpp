@@ -36,13 +36,43 @@ cp -r "$HERE" "$WORK/ci"
 CHECK="$WORK/ci/parallelism-verdict.py"
 cp "$CHECK" "$WORK/pristine.py"
 
-mapfile -t LINES < <(grep -n '^\s*\(instrument\|defects\|voids\)\.append(' "$CHECK" | cut -d: -f1)
+# ── THE CENSUS, AND WHY IT ACCOUNTS FOR EVERY `.append(` ─────────────────────
+#
+# ⚠️ THE UNIVERSE SIDE OF THIS SET-DIFFERENCE IS AN INSTRUMENT TOO. The first
+# version matched only `instrument|defects|voids`, reported "all 21 gates are
+# covered", and was silently blind to two more sinks the verdict had grown:
+# `shape.append(` (the A-B-A structural checks, which are copied INTO
+# `instrument`) and the log parser's `a.append(` (the anomalies that become an
+# INSTRUMENT FAILURE). A census narrower than its own claim is the same defect
+# as an uncovered gate, one level out — and it reported a clean sweep with a
+# straight face.
+#
+# So: gates are the sinks below, and EVERY OTHER `.append(` in the file must be
+# a receiver named in NON_GATES. An unrecognised one stops the sweep, because it
+# is either a new gate this would not sweep or a new accumulator nobody has
+# classified — and there is no safe default between those.
+GATE_SINKS='instrument|defects|voids|shape|a'
+NON_GATES='out|unmatched|unreadable|summaries|reals|durations'
+
+mapfile -t LINES < <(grep -nE "^[[:space:]]*($GATE_SINKS)\.append\(" "$CHECK" | cut -d: -f1)
 if [ "${#LINES[@]}" -eq 0 ]; then
   echo "::error::found ZERO gates to neuter. Either the append() shape changed or this"
   echo "sweep's pattern is broken; refusing to report a clean sweep over nothing."
   exit 2
 fi
-echo "gates found: ${#LINES[@]}"
+
+total_appends="$(grep -cE '[A-Za-z_][A-Za-z0-9_]*\.append\(' "$CHECK")"
+accounted="$(grep -cE "^[[:space:]]*($GATE_SINKS|$NON_GATES)\.append\(" "$CHECK")"
+if [ "$total_appends" -ne "$accounted" ]; then
+  echo "::error::${total_appends} \`.append(\` call(s) in $CHECK but only ${accounted} are"
+  echo "classified. An unrecognised sink is either a GATE this sweep would not test or an"
+  echo "accumulator nobody has classified; there is no safe default. Unclassified:"
+  grep -nE '[A-Za-z_][A-Za-z0-9_]*\.append\(' "$CHECK" \
+    | grep -vE "^[0-9]+:[[:space:]]*($GATE_SINKS|$NON_GATES)\.append\(" | sed 's/^/  /'
+  echo "Add it to GATE_SINKS or NON_GATES in this file, deliberately."
+  exit 2
+fi
+echo "gates found: ${#LINES[@]} (of ${total_appends} appends; the rest are classified non-gates)"
 
 # Prove the harness is green BEFORE any mutation, or every 'redden' below is
 # meaningless — the baseline is the control arm.
@@ -52,6 +82,34 @@ if ! ( cd "$WORK" && bash ci/test-parallelism-verdict.sh >/dev/null 2>&1 ); then
   exit 2
 fi
 echo "baseline: harness green on the unmutated copy"
+
+# ⚠️ A GOLDEN SAMPLE, BECAUSE THIS SWEEP INHERITS THE FAILURE MODE IT EXISTS TO
+# CATCH. "The harness went red" is credited as "the gate is covered" — but a
+# neuter that BREAKS the checker (a mis-detected statement end, a gate rewritten
+# so the paren walk lands wrong) also makes every cell fail, and would be
+# credited identically. That is a zero this sweep could not have reported
+# otherwise, which is the whole class it was written against.
+#
+# So each neutered copy is first run against a clean sample that trips NO gate:
+# it must still exit 0. A checker that cannot judge a good sample has not had
+# one gate removed, it has been broken, and its "coverage" proves nothing.
+# shellcheck disable=SC2016  # `$WORK` here is literal TEXT being matched inside
+# the harness file, not a variable this script expands.
+sed -n '/^cat > "\$WORK\/gen.py"/,/^GEN$/p' "$HERE/test-parallelism-verdict.sh" \
+  | sed '1d;$d' > "$WORK/gen.py"
+if [ ! -s "$WORK/gen.py" ]; then
+  echo "::error::could not extract the sample generator from ci/test-parallelism-verdict.sh."
+  echo "Without a golden sample the control arm below is absent, and a broken neuter would"
+  echo "read as a covered gate. Refusing to sweep."
+  exit 2
+fi
+python3 "$WORK/gen.py" "$WORK/golden" >/dev/null 2>&1
+if ! ( cd "$WORK" && python3 ci/parallelism-verdict.py golden >/dev/null 2>&1 ); then
+  echo "::error::the golden sample is not VALID against the unmutated checker, so it cannot"
+  echo "serve as a control. Regenerate it."
+  exit 2
+fi
+echo "control: golden sample reads VALID on the unmutated checker"
 
 UNCOVERED=0
 for ln in "${LINES[@]}"; do
@@ -83,6 +141,14 @@ MUT
     UNCOVERED=$((UNCOVERED + 1)); continue
   fi
   text="$(sed -n "${ln}p" "$WORK/pristine.py" | sed 's/^ *//' | cut -c1-60)"
+  # The control arm: one gate removed must not stop the checker judging a clean
+  # sample. If it does, the neuter broke the checker and any red the harness
+  # then shows is not evidence about THIS gate.
+  if ! ( cd "$WORK" && python3 ci/parallelism-verdict.py golden >/dev/null 2>&1 ); then
+    echo "  !! line $ln — neutering BROKE the checker (the golden sample no longer"
+    echo "               reads VALID), so this gate was not actually tested: $text"
+    UNCOVERED=$((UNCOVERED + 1)); continue
+  fi
   if ( cd "$WORK" && bash ci/test-parallelism-verdict.sh >/dev/null 2>&1 ); then
     echo "  UNCOVERED  line $ln: $text"
     UNCOVERED=$((UNCOVERED + 1))

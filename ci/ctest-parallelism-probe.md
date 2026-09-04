@@ -746,8 +746,23 @@ certifies a checker one of whose gates nothing watches. That is the same failure
 to prevent, one level up.
 
 The inverse sweep is now `ci/sweep-verdict-gates.sh`: neuter each gate in turn, run the shipped
-harness, require some cell to redden. It reports every gate covered on the current tree. It is
-deliberately **not** in CI — it runs the whole harness once per gate, on the job that already
+harness, require some cell to redden. It reports every gate covered on the current tree.
+
+⚠️ **It inherits the failure mode it exists to catch, twice, and both are closed explicitly.**
+
+- *A neuter that breaks the checker* makes every cell fail, which the naive form credits as
+  "covered" — a zero it could not have reported otherwise. Each neutered copy is therefore first run
+  against a **golden sample that trips no gate** and must still read VALID. A checker that cannot
+  judge a good sample has not had one gate removed; it has been broken.
+- *A census narrower than its own claim.* The first version matched only `instrument|defects|voids`
+  and announced "all 21 gates are covered" while blind to two further sinks the verdict had grown.
+  Widening it to 29 surfaced two uncovered gates at once — and one of those exposed a real
+  **misdiagnosis**: a log with two `Total Test time (real)` lines left `real_s` unset, so the pass
+  failed the `present` check and the verdict reported *"pass2 is missing"* about a file that was
+  right there. Right exit code, wrong diagnosis, which is the harder kind to notice. The sweep now
+  accounts for **every** `.append(` in the file and refuses to run on an unclassified sink.
+
+It is deliberately **not** in CI — it runs the whole harness once per gate, on the job that already
 dominates a pre-gate PR's wall clock, and its condition only changes when someone edits the verdict.
 Run it by hand when adding or changing a gate.
 

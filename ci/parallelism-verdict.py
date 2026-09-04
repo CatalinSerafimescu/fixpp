@@ -192,11 +192,12 @@ def parse_ctest_log(path: pathlib.Path) -> dict:
     reader back to a 300 MB artifact to find out which one.
     """
     out: dict = {"ran": None, "real_s": None, "sum_s": None,
-                 "max_inflight": None, "anomalies": []}
+                 "max_inflight": None, "anomalies": [], "read": False}
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return out
+    out["read"] = True
 
     summaries: list[int] = []
     reals: list[float] = []
@@ -328,7 +329,15 @@ class Pass:
 
     @property
     def present(self) -> bool:
-        return bool(self.meta) and self.log["real_s"] is not None
+        # ⚠️ "PRESENT" MEANS THE LOG WAS THERE, NOT THAT IT PARSED CLEANLY.
+        # Keying this on `real_s` conflated a MALFORMED pass with a MISSING one:
+        # a log carrying two `Total Test time (real)` lines left `real_s` unset,
+        # the pass dropped out of `present`, and the verdict reported "pass2 is
+        # missing" about a file that was right there — sending the reader to
+        # look for an upload failure instead of at the two summary lines. Both
+        # are INSTRUMENT FAILURES, so the exit code was right and the diagnosis
+        # was wrong, which is the harder kind to notice.
+        return bool(self.meta) and self.log["read"]
 
     @property
     def wall(self) -> float | None:
@@ -441,8 +450,10 @@ def main() -> int:
             continue
         conc = ("n/a" if not (p.log["sum_s"] and p.wall)
                 else f"{p.log['sum_s'] / p.wall:.2f}x")
+        # `wall` can be None on a present-but-malformed pass — see Pass.present.
+        wall = "n/a" if p.wall is None else f"{p.wall:.1f} s"
         out.append(
-            f"| {p.label} | {p.index} | {p.jobs} | {p.wall:.1f} s "
+            f"| {p.label} | {p.index} | {p.jobs} | {wall} "
             f"| {p.log['max_inflight'] or 'n/a'} | {conc} "
             f"| {p.log['sum_s'] or 'n/a'} s | {gib(p.peak.get('peak_bytes', ''))} "
             f"| {p.log['ran'] or 'n/a'} | {p.san or 'n/a'} |")
@@ -826,14 +837,24 @@ def main() -> int:
                                f"would go unnamed.")
                 hot = [(w, d) for w, d in intervals if d > args.steal_tolerance_ticks]
                 if hot:
+                    # ⚠️ THE BYPASS SENTENCE IS CONDITIONAL. Attached to a rise
+                    # in a SERIAL pass it sends the reader to the parallel
+                    # pass's LastTest.log to find nothing — a correct VOID with
+                    # a diagnosis pointing at the wrong leg. The bypass is
+                    # specifically about a transient the two serial passes
+                    # cannot see, so it applies only when the parallel interval
+                    # is the one that moved.
+                    bypass = ""
+                    if any("parallel" in w for w, _ in hot):
+                        bypass = (" ⚠️ This rise is in the PARALLEL pass — the bypass that "
+                                  "A-vs-A' agreement cannot see, because the two serial passes "
+                                  "would still agree perfectly.")
                     voids.append(
                         "/proc/stat STEAL ROSE DURING " +
                         ", ".join(f"{w} (+{d} ticks)" for w, d in hot) +
                         f" against a tolerance of {args.steal_tolerance_ticks}. Another tenant "
-                        f"was on the physical host while that pass ran. `linux-clang-debug`'s "
-                        f"trusted sample had steal 0 throughout. ⚠️ A rise confined to the "
-                        f"PARALLEL pass is the bypass that A-vs-A' agreement cannot see — the "
-                        f"two serial passes would still agree perfectly.")
+                        f"was on the physical host while that pass ran; `linux-clang-debug`'s "
+                        f"trusted sample had steal 0 throughout." + bypass)
                 else:
                     out.append("**Machine witness:** steal per interval "
                                + ", ".join(f"{w.split()[1]}=+{d}" for w, d in intervals)

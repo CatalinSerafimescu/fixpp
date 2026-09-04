@@ -65,6 +65,8 @@ ap.add_argument("--drop-pass", type=int, default=0)
 ap.add_argument("--no-start", type=int, default=0)   # pass index whose Start lines vanish
 ap.add_argument("--dup-start", type=int, default=0)  # pass index that re-Starts a live test
 ap.add_argument("--dup-summary", type=int, default=0)   # pass index that prints TWO summaries
+ap.add_argument("--dup-real", type=int, default=0)      # pass index that prints TWO total-time lines
+ap.add_argument("--order-drift", type=int, default=0)   # pass index recording the wrong order
 ap.add_argument("--truncate-done", type=int, default=0) # pass index keeping only 1 completion
 ap.add_argument("--forge-inflight", type=int, default=0)# pass index injecting bare Start lines
 ap.add_argument("--labels", default="")           # override the A,B,A' labels
@@ -129,11 +131,14 @@ for i in range(1, 4):
               f"Total Test time (real) = {wall:8.2f} sec"]
     if i == a.dup_summary:
         lines += [f"100% tests passed, 0 tests failed out of {ran}"]
+    if i == a.dup_real:
+        lines += [f"Total Test time (real) = {wall * 2:8.2f} sec"]
     (d / f"pass{i}.ctest.log").write_text("\n".join(lines) + "\n")
 
     preset = a.preset + ("-other" if i == a.preset_drift else "")
+    order = (i + 1) if i == a.order_drift else i
     (d / f"pass{i}.meta").write_text(
-        f"preset={preset}\nlabel={LABELS[k]}\njobs={jobs}\norder={i}\n"
+        f"preset={preset}\nlabel={LABELS[k]}\njobs={jobs}\norder={order}\n"
         f"san_count={split(a.san)[k]}\nsubset={a.subset}\n"
         f"ctest_status={split(a.status)[k]}\n")
     (d / f"pass{i}.peak.env").write_text(
@@ -480,14 +485,53 @@ cell "T42 a witness that does not record how it was taken is disclosed" 0 \
 # a positionally labelled list shifted every later interval: a rise during pass 3,
 # a SERIAL pass, was reported as the parallel one and annotated with the
 # run_paired bypass diagnosis.
-cell "T43 an unbracketed steal interval is declared, not misattributed" 3 \
+cell "T43 an unbracketed steal interval is declared" 3 \
   "could not be attributed to every pass" --procfs-gap 1 --steal 100,100,100,140
+# ⚠️ THE ATTRIBUTION ITSELF, both directions. Declaring the gap is only half of
+# it: the defect was that the rise got attached to the WRONG pass, and a cell
+# that only checks the disclosure would still pass with the misattribution
+# live. T43b requires the serial pass to be named; T43c requires the parallel
+# one NOT to be, which is the assertion the positive form cannot make.
+cell "T43b a rise in a SERIAL pass names that pass" 3 \
+  "STEAL ROSE DURING pass 3 (serial)" --procfs-gap 1 --steal 100,100,100,140
+rm -rf "$WORK/run"
+python3 "$WORK/gen.py" "$WORK/run" --procfs-gap 1 --steal 100,100,100,140
+out="$(python3 "$CHECK" "$WORK/run" 2>&1)"; rc=$?
+if [ "$rc" -eq 3 ] && ! printf '%s' "$out" | grep -qF "pass 2 (parallel)"; then
+  ok "T43c a serial-pass rise does not name the parallel pass or its bypass"
+else
+  printf '%s\n' "$out" | sed 's/^/  | /'
+  bad "T43c a serial-pass rise still named the parallel pass (exit $rc)"
+fi
+# ...and the parallel case must still get the bypass sentence it is for.
+cell "T43d a rise in the PARALLEL pass still carries the bypass diagnosis" 3 \
+  "This rise is in the PARALLEL pass" --steal 100,100,140,140
 
 # ⚠️ 0.00x IS NOT A MEASUREMENT, it is what the ZeroDivisionError guard prints —
 # beside a real serial time, on a VALID sample. The memory clause ten lines away
 # withholds for exactly this reason.
 cell "T44 a zero wall time is refused rather than printed as 0.00x" 2 \
   "wall time of 0.0" --wall 1140.0,0.0,1135.0
+
+# ── T45/T46: found by BROADENING THE SWEEP'S OWN CENSUS ─────────────────────
+#
+# The sweep first matched only `instrument|defects|voids` appends and reported
+# "all 21 gates are covered". The verdict had grown two more sinks it could not
+# see — `shape.append(` and the log parser's `a.append(` — so a census narrower
+# than its own claim was reporting a clean sweep with a straight face. That is
+# the same defect as an uncovered gate, one level out. Widening it to 29 gates
+# surfaced these two immediately.
+#
+# A second `Total Test time (real)` is not the same shape as a second summary
+# (T30): a truncated-and-reappended artifact, or two ctest invocations teed into
+# one file, produces one and not the other, and `real_s` is the denominator of
+# every concurrency figure on the page.
+cell "T45 a log with TWO total-time lines is refused" 2 \
+  "Total Test time (real)\` line(s); exactly 1 is expected" --dup-real 2
+# T33 checks the LABEL; the `order` field is a second, independent claim a pass
+# makes about its own position, and identity here is positional.
+cell "T46 a pass whose order field disagrees with its position is refused" 2 \
+  "records order=" --order-drift 2
 
 # ── T20: THE WINDOWS SHAPE ───────────────────────────────────────────────────
 #
@@ -505,7 +549,7 @@ cell "T20 a witness with no /proc is usable, not absent" 0 \
 # A sweep must assert how many cells ran: a `cell` invocation lost to an editing
 # slip removes a gate silently, and the tally below would still read "N passed,
 # 0 failed" for a smaller N.
-MUTANTS_DECLARED=49
+MUTANTS_DECLARED=54
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$MUTANTS_DECLARED" ]; then

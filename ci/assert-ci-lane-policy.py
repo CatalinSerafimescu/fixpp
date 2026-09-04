@@ -219,10 +219,16 @@ def check_campaign_trigger(root, violations):
     exited 0 — over a tree whose campaign workflow was `push:`-triggered. A
     `::warning::` does not fail a job.
 
-    That was not live only by step ordering: PyYAML reaches this job from an
-    UNRELATED earlier step in tier1.yml (`Regression pin — tier1.yml python
-    policy`, which pip-installs it). Reorder or retire that step and this
-    invariant stands down silently.
+    That was not live only by step ordering: PyYAML reached this job from an
+    UNRELATED earlier step in tier1.yml, so a reorder would have stood this
+    invariant down silently.  The step now installs its own.
+
+    ⚠️ `tools/check_workflows.py` is this repo's OTHER workflow-policy checker
+    and independently solves the same bare-`on:`-is-`True` YAML trap (its
+    `doc.get(True) or doc.get("on")`).  It takes the same line on missing
+    PyYAML — refuse rather than warn.  They are deliberately NOT merged: that
+    one runs only in `brain-freshness.yml`, this one in tier 1's
+    `ci-script-pins`, so relocating either would weaken enforcement.
     """
     path = root / ".github" / "workflows" / CAMPAIGN_WORKFLOW
     if not path.is_file():
