@@ -54,9 +54,9 @@
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
-// The bounded-pump sites below call `run_window_then_ready` with a miss-branch drain
-// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289
-// names is the UNCONDITIONAL `get()`, not the fixed window.
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
 //
 // Rationale and the teardown-shape rule live at the primitive, not duplicated here
 // (#324).

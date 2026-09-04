@@ -82,19 +82,18 @@
 #
 # There is no `ioc.run_for` for this scanner to anchor on, so no lookahead width
 # finds it; blind spot (b)'s widening recipe reports nothing here and that zero
-# means only that the anchor is absent. Found 2026-09-04 in batch 9, by a
-# forced-miss arm rather than by reading: the arm did not go RED, it HUNG
-# (futex_do_wait, 0.0% CPU) three lines below a site that had just been migrated.
+# means only that the anchor is absent. A site of this shape wedges rather than
+# failing, so it costs a lane rather than an assertion (#337 is the reference
+# instance).
 #
-# ⚠️ DO NOT DETECT THIS BY RECOGNISING THE HELPER. The first detector written for
-# it matched a bare `run()` but excluded a preceding '.', so `f.drain()` was
-# invisible and it reported ZERO for the one file that then hung. Start from the
-# thing that actually blocks instead -- every `.get()` on a co_spawn future -- and
-# ask whether a guard precedes it. That cannot miss a helper form nobody thought
-# of, and it needs no list of helper names to stay current.
+# ⚠️ DO NOT DETECT THIS BY RECOGNISING THE HELPER -- a detector that matches helper
+# SHAPES can only find the shapes its author thought of. Start from the thing that
+# actually blocks instead: every `.get()` on a co_spawn future, asking whether a
+# guard precedes it and NAMES that future. `ci/pump-get-sweep.sh` implements it,
+# with a control per known evasion; add a control the day a new one is found.
 #
 # Its size across the tree is NOT recorded here, deliberately: it is a property of
-# a moving tree, and the per-`.get()` sweep re-derives it in seconds.
+# a moving tree, and that sweep re-derives it in seconds.
 #
 # ── EXACT SET, NOT A COUNT ────────────────────────────────────────────────────
 # Comparison is by exact set equality against ci/expected-pump-sites.txt, in

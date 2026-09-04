@@ -15,15 +15,25 @@
 #
 # No lookahead width reaches that: there is nothing to anchor on. This sweep
 # starts from the thing that actually blocks -- the `get()` -- and asks whether a
-# guard precedes it. It is therefore shape-agnostic: it needs no list of helper
-# names, and a helper form nobody anticipated cannot hide from it.\n#\n# ⚠️ IT IS SHAPE-AGNOSTIC ABOUT THE PUMP, NOT ABOUT C++. It splices statements (so a\n# split declaration is still seen) and requires a guard to NAME the future it guards\n# (so an unrelated neighbouring guard cannot launder an unguarded get). Both of those\n# were FALSE-CLEAN modes in its first version, each reproduced on a copy of a real\n# migrated site. It still does not model scopes, aliasing, or futures returned from a\n# function -- so treat a clean file as evidence, not proof, and add a control the day\n# a new evasion is found.
+# guard precedes it, so it needs no list of helper names to keep current.
 #
-# ⚠️ THAT PROPERTY IS THE WHOLE POINT, AND IT WAS LEARNED THE EXPENSIVE WAY. The
-# first detector written for this class recognised helper SHAPES. It matched a
-# bare `run()` but excluded a preceding '.', so `f.drain()` was invisible and it
-# reported ZERO for the one file that then HUNG under a forced-miss arm
-# (futex_do_wait, 0.0% CPU). Do not "improve" this script by teaching it to find
-# pumps.
+# ⚠️ IT IS SHAPE-AGNOSTIC ABOUT THE PUMP. IT IS NOT A C++ PARSER.
+# Do not read a clean file as proof. Known limitations, each with a control or a
+# named population, because an undisclosed limitation is how this class recurs:
+#
+#   - Futures held in CONTAINERS are invisible. It recognises `auto NAME =
+#     asio::co_spawn(...)`; `futs.push_back(asio::co_spawn(...))` consumed by
+#     `for (auto& f : futs) f.get()` registers nothing. Real population exists in
+#     tests/sync and the perf harnesses; re-derive with
+#     `git grep -n 'push_back(asio::co_spawn\|emplace_back(asio::co_spawn'`.
+#   - No aliasing, no `decltype(auto)`, no futures returned from a function.
+#   - State resets at each function/TEST boundary, not at each C++ scope, so two
+#     sibling blocks in one function share a future's guarded state.
+#
+# ⚠️ DO NOT "IMPROVE" THIS BY TEACHING IT TO RECOGNISE PUMPS. A detector that
+# recognises helper SHAPES can only find the shapes its author thought of, and the
+# cost of a miss here is a wedged lane rather than a failed assertion (#337 is the
+# reference instance). Anchor on the `get()`, which every hazard must reach.
 #
 # ⚠️ ITS OUTPUT IS A CANDIDATE LIST, NOT A DEFECT LIST, AND MUST NOT BE PINNED.
 # A `get()` is only a hazard when THIS thread is the one that must pump the
@@ -58,7 +68,7 @@ while [ "$#" -gt 0 ]; do
         --root)  [ "$#" -ge 2 ] || fail "--root requires an argument";  scan_root="$2"; shift 2 ;;
         --dir)   [ "$#" -ge 2 ] || fail "--dir requires an argument";   sub="$2";       shift 2 ;;
         --quiet) quiet=1; shift ;;
-        -h|--help) sed -n '1,50p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        -h|--help) sed -n '1,55p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) fail "unknown argument: $1" ;;
     esac
 done
@@ -74,27 +84,39 @@ root, sub, quiet = Path(sys.argv[1]), sys.argv[2], sys.argv[3] == "1"
 GUARD = re.compile(r"run_window_then_ready|pump_until_ready|pump_until\(|"
                    r"wait_for\([^)]*\)\s*[=!]=\s*std::future_status|"
                    r"std::future_status::ready")
-LOOKBACK = 8
+# A new function/TEST body resets what we know. Without this, a guarded `fut` in
+# one test marks a DIFFERENT test's `fut` guarded -- an affirmative false clean.
+BOUNDARY = re.compile(r'^(?:TEST|TEST_F|TEST_P|TYPED_TEST\w*)\s*\(|'
+                      r'^[A-Za-z_][\w:<>,\s\*&]*\s+[A-Za-z_]\w*\s*\([^;]*\)\s*\{?\s*$')
+MAX_SPLICE = 12          # a statement longer than this is a splice failure, not a statement
 
 _BLOCK = re.compile(r"/\*.*?\*/", re.S)
 _LINE = re.compile(r"//[^\n]*")
+_STR = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
 def blank_comments(text):
     """Blank comment CONTENT but keep newlines, so reported line numbers stay true.
 
-    A token inside a comment is not evidence about the code -- the same rule
-    classify-289.py already applies on both its axes. It matters here because the
-    #289 migration comments QUOTE the very idiom this sweep looks for
+    The #289 migration comments QUOTE the very idiom this sweep looks for
     (`run_for(W); restart(); fut.get()`), so without this every migrated file
     reports its own header block as an unguarded site."""
     text = _BLOCK.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
     return _LINE.sub(lambda m: " " * len(m.group(0)), text)
 
+def depth_text(line):
+    """Parens for splicing must ignore those inside string literals -- an
+    unbalanced `(` in a literal (e.g. EXPECT_FATAL_FAILURE's message) otherwise
+    swallows an entire test body into one 'statement'."""
+    return _STR.sub('""', line)
+
 def statements(lines):
-    """Yield (start_line_index, spliced_text). A declaration may span physical lines
-    -- `auto\n    fut = asio::co_spawn(...)` is one statement -- so anchoring on a
-    single line makes such a future INVISIBLE and the file reads clean. Splice to the
-    statement terminator before matching anything."""
+    """Yield (start_line_index, spliced_text).
+
+    A declaration may span physical lines -- `auto\\n    fut = asio::co_spawn(...)`
+    is one statement -- so anchoring on a single line makes such a future INVISIBLE.
+    ⚠️ Splicing must FAIL SAFE: if the terminator is not found within MAX_SPLICE
+    lines the depth tracking has gone wrong, so emit the buffered lines singly
+    rather than swallowing the region. A swallowed region is a silent false clean."""
     buf, start, depth = [], None, 0
     for i, l in enumerate(lines):
         if start is None:
@@ -102,35 +124,42 @@ def statements(lines):
                 continue
             start = i
         buf.append(l)
-        depth += l.count("(") - l.count(")")
-        if depth <= 0 and (l.rstrip().endswith(";") or l.rstrip().endswith("{")
-                           or l.rstrip().endswith("}")):
+        d = depth_text(l)
+        depth += d.count("(") - d.count(")")
+        done = depth <= 0 and l.rstrip().endswith((";", "{", "}"))
+        if done:
             yield start, " ".join(x.strip() for x in buf)
             buf, start, depth = [], None, 0
+        elif len(buf) >= MAX_SPLICE:
+            for k, b in enumerate(buf):
+                yield start + k, b.strip()
+            buf, start, depth = [], None, 0
     if buf:
-        yield start, " ".join(x.strip() for x in buf)
-
+        for k, b in enumerate(buf):
+            yield start + k, b.strip()
 
 def classify(text):
     """-> (guarded, unguarded_rows). Anchored on the get(), and IDENTITY-CHECKED.
 
-    Two false-CLEAN modes this must not have, both reproduced against the earlier
-    version of this script on copies of a real migrated site:
-      1. a future whose declaration is split across lines went unseen  -> statements()
-      2. an UNRELATED guard in the preceding lines was accepted as this future's
-         guard -> a guard now only counts if it NAMES the future it guards.
-    A re-declaration of the same identifier resets its guarded state, because test
-    bodies reuse `fut` many times in one function."""
+    False-CLEAN modes this must not have, each reproduced before being closed:
+      1. a future whose declaration is split across lines went unseen -> statements()
+      2. an UNRELATED guard nearby was accepted as this future's guard -> a guard
+         only counts if it NAMES the future it guards
+      3. state leaking across functions marked a later test's future guarded
+         -> BOUNDARY resets
+      4. a `continue` after a declaration skipped that statement's own `.get()`
+         -> the declaration branch now falls through to the get() scan"""
     lines = blank_comments(text).splitlines()
-    guarded_state = {}          # future name -> guarded by a call naming it?
-    known = set()
+    guarded_state, known = {}, set()
     guarded, bad = 0, []
     for start, stmt in statements(lines):
+        if BOUNDARY.match(stmt):
+            guarded_state, known = {}, set()
         m = re.search(r'\bauto\s+(\w+)\s*=\s*asio::co_spawn', stmt)
         if m and "use_future" in stmt:
             known.add(m.group(1))
             guarded_state[m.group(1)] = False      # re-binding resets the guard
-            continue
+            # NO `continue` here: the same statement may also consume the future.
         if GUARD.search(stmt):
             for name in known:
                 if re.search(rf'\b{re.escape(name)}\b', stmt):
@@ -144,7 +173,6 @@ def classify(text):
             else:
                 bad.append((start + 1, lines[start].strip() or stmt[:70]))
     return guarded, bad
-
 
 # ── SELF-TEST on SYNTHETIC fixtures ──────────────────────────────────────────
 # Synthetic, not real files: a control anchored to a real file asserts a
@@ -186,8 +214,6 @@ NOT_A_FUTURE = """
     auto ptr = make_thing();
     auto r = ptr.get();
 """
-# The migration comments QUOTE the idiom. Without comment-blanking every migrated
-# file reports its own header block; this control is the look-alike that bites.
 COMMENT_LOOKALIKE = """
     // The `run_for(W); restart(); fut.get()` sites in this file are migrated.
     auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
@@ -209,16 +235,43 @@ FOREIGN_GUARD_BAD = """
     f.drain();
     auto r = target_fut.get();
 """
+# Opus, batch 9: these read CLEAN under the FIX for the two above.
+CROSS_FUNCTION_BAD = """
+TEST_F(Fixture, First) {
+    auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) { return; }
+    (void)fut.get();
+}
+TEST_F(Fixture, Second) {
+    auto fut = asio::co_spawn(f.ioc, sess.send(p), asio::use_future);
+    f.drain();
+    auto r = fut.get();
+}
+"""
+# An unbalanced '(' inside a STRING must not swallow the body that follows it.
+STRING_PAREN_BAD = """
+    EXPECT_FATAL_FAILURE(helper(), "unbalanced ( inside a literal");
+    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    f.drain();
+    auto r = fut.get();
+"""
+# The declaration and its consumption on ONE statement must still be classified.
+DECL_AND_GET_BAD = """
+    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future); auto r = fut.get();
+"""
 CONTROLS = [
-    ("direct   window, unguarded get   -> UNGUARDED", DIRECT_BAD,    0, 1),
-    ("INDIRECT window (f.drain())      -> UNGUARDED", INDIRECT_BAD,  0, 1),
-    ("indirect window, DOTLESS run()   -> UNGUARDED", DOTLESS_BAD,   0, 1),
-    ("guarded by run_window_then_ready -> guarded",   GUARDED_OK,    1, 0),
-    ("guarded by a wait_for assertion  -> guarded",   ASSERT_OK,     1, 0),
-    ("`.get()` on a non-future         -> ignored",   NOT_A_FUTURE,  0, 0),
+    ("direct   window, unguarded get   -> UNGUARDED", DIRECT_BAD,        0, 1),
+    ("INDIRECT window (f.drain())      -> UNGUARDED", INDIRECT_BAD,      0, 1),
+    ("indirect window, DOTLESS run()   -> UNGUARDED", DOTLESS_BAD,       0, 1),
+    ("guarded by run_window_then_ready -> guarded",   GUARDED_OK,        1, 0),
+    ("guarded by a wait_for assertion  -> guarded",   ASSERT_OK,         1, 0),
+    ("`.get()` on a non-future         -> ignored",   NOT_A_FUTURE,      0, 0),
     ("idiom quoted in a COMMENT        -> ignored",   COMMENT_LOOKALIKE, 1, 0),
     ("declaration SPLIT across lines   -> UNGUARDED", SPLIT_DECL_BAD,    0, 1),
     ("a guard naming a DIFFERENT future-> UNGUARDED", FOREIGN_GUARD_BAD, 1, 1),
+    ("guard state LEAKING across tests -> UNGUARDED", CROSS_FUNCTION_BAD,1, 1),
+    ("unbalanced '(' in a STRING       -> UNGUARDED", STRING_PAREN_BAD,  0, 1),
+    ("declaration and get in ONE stmt  -> UNGUARDED", DECL_AND_GET_BAD,  0, 1),
 ]
 ok = True
 if not quiet:
@@ -232,7 +285,8 @@ for name, src, want_g, want_b in CONTROLS:
 if not ok:
     sys.exit("\nCONTROL FAILED -- sweep output is NOT evidence. Fix before trusting a number.")
 if not quiet:
-    print("SWEEP PROVEN: reports BOTH classes, and sees the indirected window in both spellings.\n")
+    print("SWEEP PROVEN: reports both classes; sees the indirected window in both")
+    print("spellings, a split declaration, a foreign guard, and cross-test leakage.\n")
 
 # ── the real scan ────────────────────────────────────────────────────────────
 files = sorted(p for p in (root / sub).rglob("*")
