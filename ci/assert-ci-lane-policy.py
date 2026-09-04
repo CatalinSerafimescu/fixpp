@@ -141,26 +141,86 @@ def check_fuzz_lane(root, violations):
     return 1
 
 
+SCCACHE_PIN = re.compile(r"^\s*ver=(?P<ver>v[\d.]+)\s*$|^\s*sha256=(?P<sha>[0-9a-f]{64})\s*$",
+                         re.M)
+
+
+def sccache_pin(path):
+    """The (version, digest) an `Install sccache` step pins, or None."""
+    if not path.is_file():
+        return None
+    found = {}
+    for m in SCCACHE_PIN.finditer(path.read_text(encoding="utf-8")):
+        for key in ("ver", "sha"):
+            if m.group(key):
+                found.setdefault(key, m.group(key))
+    return (found["ver"], found["sha"]) if len(found) == 2 else None
+
+
+def check_sccache_pins(root, violations):
+    """The sccache version+digest must agree wherever it is pinned.
+
+    `parallelism-measure.yml` duplicates tier2.yml's `Install sccache` step —
+    the repo has no composite actions, so the three tier workflows already
+    duplicate their setup between themselves and this follows that convention.
+    What does NOT follow is leaving a pinned SHA-256 in two files with nothing
+    asserting they agree: a bump applied to one and not the other is silent, and
+    the stale copy is whichever file the bumper was not looking at.
+
+    Returns the number of pinning sites found.  ZERO IS A FAILURE, not a pass —
+    if the step is renamed or the pin's shape changes, "0 sites, 0 mismatches"
+    is indistinguishable from agreement.
+    """
+    wf = root / ".github" / "workflows"
+    pins = {name: sccache_pin(wf / name)
+            for name in ("tier2.yml", CAMPAIGN_WORKFLOW)
+            if (wf / name).is_file()}
+    pins = {k: v for k, v in pins.items() if v is not None}
+    if len(pins) < 2:
+        # One site is legitimate (the campaign may be retired); zero, or a site
+        # whose pin no longer parses, is the check losing its subject.
+        print(f"  sccache pin: {len(pins)} site(s) found "
+              f"({', '.join(sorted(pins)) or 'none'}) — nothing to cross-check.")
+        return len(pins)
+    values = set(pins.values())
+    if len(values) > 1:
+        violations.append(
+            "SCCACHE PIN DISAGREEMENT: " +
+            "; ".join(f"{k} pins {v[0]} / {v[1][:12]}..." for k, v in sorted(pins.items())) +
+            ". These are copies of one pinned download. A bump applied to one file and not the "
+            "other is silent — the build still succeeds, on a different sccache than the lane "
+            "it is supposed to mirror. Re-derive the digest by hand (download and hash out of "
+            "band; the .sha256 sidecar from the same mutable release pins nothing) and update "
+            "both.")
+    else:
+        ver, sha = values.pop()
+        print(f"  sccache pin: {ver} / {sha[:12]}... agrees across {len(pins)} sites")
+    return len(pins)
+
+
 def check_campaign_trigger(root, violations):
     """The A-B-A campaign must stay dispatch-only.
 
-    Returns 1 when the check ran, 0 when the workflow is absent.  Absence is NOT
-    a violation: the campaign is explicitly a one-off and retiring it is a
-    legitimate thing to do.  It IS disclosed, because a check that quietly
-    reports clean over a subject that is not there is the failure mode every
-    other file in this directory exists to remove.
+    Absence is NOT a violation: the campaign is explicitly a one-off and retiring
+    it is a legitimate thing to do.  It IS disclosed, because a check that
+    quietly reports clean over a subject that is not there is the failure mode
+    every other file in this directory exists to remove.
+
+    Returns nothing.  An earlier version returned 1/0 for "did the check run",
+    a third convention alongside this file's `None` => exit 2 one, and the call
+    site discarded it — a documented protocol with no consumer.
     """
     path = root / ".github" / "workflows" / CAMPAIGN_WORKFLOW
     if not path.is_file():
         print(f"  campaign trigger: {CAMPAIGN_WORKFLOW} is not present — check stood down "
               f"(retiring the campaign is legitimate; this is a disclosure, not a pass).")
-        return 0
+        return
     try:
         import yaml
     except ImportError:
         print("::warning::PyYAML unavailable — the campaign-trigger check did NOT run. "
               "Do not read this run as evidence that the campaign is still dispatch-only.")
-        return 0
+        return
 
     # ⚠️ A PARSE ERROR IS A VIOLATION, NOT A CRASH. Caught because a mutant
     # found it: the T8 cell of ci/test-ci-lane-policy.sh produced a workflow
@@ -176,7 +236,7 @@ def check_campaign_trigger(root, violations):
             f"({exc.__class__.__name__}), so this check cannot say what triggers it — and "
             f"a workflow that does not parse does not run at all. Refusing to report it "
             f"dispatch-only.")
-        return 1
+        return
     # ⚠️ YAML 1.1 resolves a bare `on:` key to the BOOLEAN True, not the string
     # "on".  A check that looked up doc["on"] would find nothing, conclude there
     # were no triggers, and pass — silently, on every future version of the file.
@@ -185,7 +245,7 @@ def check_campaign_trigger(root, violations):
         violations.append(
             f"CAMPAIGN TRIGGER UNREADABLE: {CAMPAIGN_WORKFLOW} has no parsable `on:` block, so "
             f"this check cannot say what triggers it. Refusing to report it dispatch-only.")
-        return 1
+        return
 
     triggers = set(block) if isinstance(block, (dict, list)) else {str(block)}
     extra = sorted(triggers - CAMPAIGN_TRIGGERS)
@@ -198,7 +258,6 @@ def check_campaign_trigger(root, violations):
             f"It is a one-off campaign, not a standing job.")
     else:
         print(f"  campaign trigger: {CAMPAIGN_WORKFLOW} is {'/'.join(sorted(triggers))} only")
-    return 1
 
 
 def main():
@@ -211,6 +270,7 @@ def main():
     apt_seen = check_apt_callers(root, violations)
     fuzz_seen = check_fuzz_lane(root, violations)
     check_campaign_trigger(root, violations)
+    check_sccache_pins(root, violations)
     if apt_seen is None or fuzz_seen is None:
         return 2
 

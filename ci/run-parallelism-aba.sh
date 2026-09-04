@@ -95,6 +95,15 @@ TMPDIR_CTEST="$BUILD/Testing/Temporary"
 # gate's would produce a "new" report that is only a different definition.
 SAN_PATTERN='WARNING: ThreadSanitizer:|ERROR: (Address|Leak|Memory)Sanitizer:|runtime error:'
 
+# Overridable, matching tools/run_coverage.sh rather than hardcoding the
+# versioned names: this is the THIRD copy of the profdata-merge/lcov-export
+# recipe in the repo (tools/run_coverage.sh and tier1.yml's coverage job are the
+# others), and the override form is the axis on which a hardcoded copy diverges
+# first — a toolchain bump would leave this one silently unable to produce a
+# digest at all, on the one lane acceptance item 4 is about.
+LLVM_PROFDATA="${LLVM_PROFDATA:-llvm-profdata-22}"
+LLVM_COV="${LLVM_COV:-llvm-cov-22}"
+
 # Never fatal — a missing witness must degrade the sample toward VOID, not abort
 # a campaign mid-lane. But it is ANNOUNCED: a silent `|| true` would leave the
 # diagnosis inferable only from the verdict's "0 usable machine witness(es)"
@@ -117,7 +126,6 @@ WITNESS_ARGS=()
 
 witness() {
   "$PY" "$HERE/machine-witness.py" --out "$OUT/witness$1.env" --label "$2" \
-    --procs "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
     ${WITNESS_ARGS+"${WITNESS_ARGS[@]}"} \
     || echo "::warning::#267 machine witness $1 ($2) failed to run; the sample will VOID for want of an observation of the machine."
 }
@@ -217,22 +225,21 @@ coverage_digest() {
     return 0
   fi
 
-  llvm-profdata-22 merge -sparse "$prof"/*.profraw -o "$pd" 2>/dev/null || status="merge-failed"
+  "$LLVM_PROFDATA" merge -sparse "$prof"/*.profraw -o "$pd" 2>/dev/null || status="merge-failed"
   if [ "$status" = "ok" ]; then
-    local objects=""
     # ⚠️ COPIED FROM tier1.yml's `Generate LCOV report` STEP, deliberately
     # including its `-object` enumeration: that step's own comment records that
     # listing only core+capi silently dropped all dictionary/codegen/wire
     # coverage. A digest computed over a different object set is not comparable
     # with the lane's real report, so this must stay in step with it.
+    local -a objects=()
     for b in "$BUILD"/bin/*; do
       if [ ! -f "$b" ] || [ ! -x "$b" ]; then continue; fi
-      [ "$(basename "$b")" = fixpp_core_tests ] && continue
-      objects="$objects -object $b"
+      if [ "$(basename "$b")" = fixpp_core_tests ]; then continue; fi
+      objects+=(-object "$b")
     done
-    # shellcheck disable=SC2086
-    llvm-cov-22 export --format=lcov --instr-profile="$pd" \
-      "$BUILD/bin/fixpp_core_tests" $objects include src > "$info" 2>/dev/null \
+    "$LLVM_COV" export --format=lcov --instr-profile="$pd" \
+      "$BUILD/bin/fixpp_core_tests" "${objects[@]}" include src > "$info" 2>/dev/null \
       || status="export-failed"
   fi
 

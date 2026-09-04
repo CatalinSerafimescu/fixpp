@@ -677,9 +677,9 @@ neither of which is a coverage fact.
 
 ### The instruments are themselves instruments
 
-`ci/test-parallelism-verdict.sh` (27 cells) proves every gate the verdict applies can fire, each
-requiring its **named** diagnostic rather than merely a non-zero exit. `ci/test-parallelism-aba-seam.sh`
-(4 cells) covers what that harness structurally cannot see — that the driver writes files of the
+`ci/test-parallelism-verdict.sh` proves every gate the verdict applies can fire, each requiring its
+**named** diagnostic rather than merely a non-zero exit. `ci/test-parallelism-aba-seam.sh` covers
+what that harness structurally cannot see — that the driver writes files of the
 shape the verdict reads — by running the real driver against a 12-test synthetic ctest project and
 feeding its real output to the real verdict, including a negative arm so the accept is a judgement
 rather than a default. Both run in tier 1's `ci-script-pins`, and the seam check runs again as the

@@ -39,19 +39,19 @@ bad() { FAIL=$((FAIL+1)); echo "  FAIL  $1"; }
 # plus four machine witnesses.  Every knob a cell needs to break is a flag, so
 # a cell is one line and the thing it changed is visible in that line.
 cat > "$WORK/gen.py" <<'GEN'
-import argparse, hashlib, os, pathlib, sys
+import argparse, hashlib, pathlib
 
 ap = argparse.ArgumentParser()
 ap.add_argument("dir")
 ap.add_argument("--ran", default="361,361,361")
 ap.add_argument("--wall", default="1140.0,540.0,1135.0")
-ap.add_argument("--jobs", default="1,4,1")
 ap.add_argument("--inflight", default="1,4,1")
 ap.add_argument("--sum", default="1130.0,1400.0,1125.0")
 ap.add_argument("--san", default="0,0,0")
 ap.add_argument("--peak", default="700000000,930000000,700000000")
 ap.add_argument("--peak-status", default="ok,ok,ok")
 ap.add_argument("--cov", default="")              # 3 tags; empty = no coverage files
+ap.add_argument("--cov-status", default="")       # write coverage.env with NO digest
 ap.add_argument("--steal", default="100,100,100,100")
 ap.add_argument("--calib", default="2.70,2.72,2.74,2.76")
 ap.add_argument("--witnesses", type=int, default=4)
@@ -68,6 +68,9 @@ a = ap.parse_args()
 
 d = pathlib.Path(a.dir); d.mkdir(parents=True, exist_ok=True)
 LABELS = ["A", "B", "A'"]
+# The A-B-A shape itself: cells that need requested-vs-achieved to disagree
+# vary --inflight, never this.
+JOBS = [1, 4, 1]
 split = lambda s: s.split(",")
 
 for i in range(1, 4):
@@ -75,7 +78,7 @@ for i in range(1, 4):
         continue
     k = i - 1
     ran = int(split(a.ran)[k]); wall = float(split(a.wall)[k])
-    jobs = int(split(a.jobs)[k]); infl = int(split(a.inflight)[k])
+    jobs = JOBS[k]; infl = int(split(a.inflight)[k])
     total = float(split(a.sum)[k]); per = total / ran
 
     lines = ["Test project /build/preset"]
@@ -109,7 +112,12 @@ for i in range(1, 4):
         f"peak_bytes={split(a.peak)[k]}\npeak_max_single_bytes=400000000\n"
         f"mem_total_bytes=16766894080\npeak_procs=6\ncmd_status=0\n")
 
-    if a.cov:
+    if a.cov_status:
+        # Coverage attempted, no digest produced — the shape a real coverage
+        # lane takes when its profiles fail to appear.
+        (d / f"pass{i}.coverage.env").write_text(
+            f"status={a.cov_status}\nprofraw_count=0\n")
+    elif a.cov:
         tag = split(a.cov)[k]
         sha = hashlib.sha256(tag.encode()).hexdigest()
         (d / f"pass{i}.coverage.env").write_text(
@@ -227,6 +235,17 @@ cell "T11 coverage differing only under parallelism is a DEFECT" 1 \
 cell "T12 coverage differing between the two SERIAL passes is not blamed on parallelism" 0 \
   "run-to-run coverage nondeterminism" --cov one,two,three
 
+# ── T29: COVERAGE ATTEMPTED BUT NOT COMPARED IS NOT "FINE" ───────────────────
+#
+# Found by RUNNING the driver with --coverage against a project that produces no
+# profiles, not by reading the code: the verdict printed VALID with a real
+# speedup and said nothing at all about item 4 — the one criterion the coverage
+# lane is blocked on. A measurement that could not be taken reading as a
+# measurement that came out fine is this repo's #1 recurring defect, and it had
+# reappeared here inside the apparatus written to prevent it.
+cell "T29 coverage attempted but not compared is disclosed, not silent" 0 \
+  "acceptance item 4 is NOT discharged" --cov-status no-profiles
+
 # ── T13: the in-flight oracle's own blind spot, made loud ────────────────────
 cell "T13 a log with no Start lines is an INSTRUMENT FAILURE" 2 \
   "could not be observed at all" --no-start 2
@@ -337,7 +356,7 @@ cell "T20 a witness with no /proc is usable, not absent" 0 \
 # A sweep must assert how many cells ran: a `cell` invocation lost to an editing
 # slip removes a gate silently, and the tally below would still read "N passed,
 # 0 failed" for a smaller N.
-MUTANTS_DECLARED=30
+MUTANTS_DECLARED=31
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$MUTANTS_DECLARED" ]; then

@@ -14,7 +14,7 @@
 # varies the CONTENT of a sample the verdict is known to parse; this varies
 # nothing and checks the one thing that harness assumes — that the producer and
 # the consumer agree at all.  A field renamed on one side of that seam would
-# leave 24 synthetic cells green while every real campaign returned "0 of 3
+# leave every synthetic cell green while every real campaign returned "0 of 3
 # passes", and the cost of learning that is three suite runs on a CI runner.
 #
 # So this runs the REAL driver against a 12-test synthetic ctest project (~35 s)
@@ -92,9 +92,39 @@ else
   ok "S0 the driver ran to completion"
 fi
 
-# The tolerances are the DEFAULTS.  A seam check that relaxed them would not be
-# checking the configuration a campaign runs with.
-out="$(python3 ci/parallelism-verdict.py "$WORK/run" 2>&1)"; rc=$?
+# ⚠️ THE CALIBRATION TOLERANCE IS RELAXED HERE, AND ONLY IT. This file
+# deliberately runs a WEAKENED witness (200k iterations, 2 repeats) so 8 witness
+# calls cost a rounding error on a job that runs on every push. A weakened
+# witness has correspondingly higher variance — and judging it against a
+# tolerance calibrated for the full-strength one made this cell FLAKY, observed
+# voiding on a contended host between two otherwise identical runs. An
+# intermittent red on ci-script-pins is worse than no cell at all: it trains
+# everyone to re-run.
+#
+# It is the tolerance the weakened input cannot support, so it is the tolerance
+# that moves. Nothing else is relaxed, and this does not make the accept
+# vacuous: the verdict's tolerances are pinned by T1/T9/T10/T28 of
+# ci/test-parallelism-verdict.sh, where the inputs are synthetic and exact, and
+# cell S3 below proves this same invocation still REJECTS a corrupted sample.
+# What this file checks is the plumbing — that the driver writes what the
+# verdict reads — which is exactly what those synthetic cells cannot see.
+VERDICT_ARGS=(--calib-tolerance-pct 500)
+
+# The witness files themselves, asserted directly rather than inferred from the
+# verdict's happiness: a verdict that stopped reading them would otherwise still
+# say VALID.
+missing=""
+for w in 0 1 2 3; do
+  [ -s "$WORK/run/witness${w}.env" ] || missing="$missing witness${w}.env"
+  grep -q '^status=' "$WORK/run/witness${w}.env" 2>/dev/null || missing="$missing witness${w}.env(no-status)"
+done
+if [ -n "$missing" ]; then
+  bad "S1a the driver wrote all four machine witnesses —missing:$missing"
+else
+  ok "S1a the driver wrote all four machine witnesses, each with a status"
+fi
+
+out="$(python3 ci/parallelism-verdict.py "$WORK/run" "${VERDICT_ARGS[@]}" 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qF "VALID — this sample is evidence"; then
   ok "S1 the verdict accepts what the driver produced"
 else
@@ -122,7 +152,7 @@ sed -i 's/^san_count=.*/san_count=7/' "$WORK/run-mut/pass2.meta"
 if [ "$before" = "$(md5sum < "$WORK/run-mut/pass2.meta")" ]; then
   bad "S3 MUTATION DID NOT APPLY — re-point it, do not delete the cell"
 else
-  mout="$(python3 ci/parallelism-verdict.py "$WORK/run-mut" 2>&1)"; mrc=$?
+  mout="$(python3 ci/parallelism-verdict.py "$WORK/run-mut" "${VERDICT_ARGS[@]}" 2>&1)"; mrc=$?
   if [ "$mrc" -eq 1 ] && printf '%s' "$mout" | grep -qF "SANITIZER REPORT APPEARED"; then
     ok "S3 a corrupted sample is REJECTED (the accept in S1 was a judgement)"
   else
@@ -164,6 +194,27 @@ else
   bad "S4 parsers DISAGREE — awk: '$awk_ran $awk_real $awk_sum'  verdict: '$py'"
 fi
 
+# ── S6: SAN_PATTERN must equal the shipped CI gate's ─────────────────────────
+#
+# ci/run-parallelism-aba.sh counts sanitizer reports with a pattern copied from
+# ci/peak-memory-report.sh, and the agreement was written as a comment saying
+# "kept in step with it deliberately". That is an instruction someone has to
+# follow. The consequence if they do not is subtle and bad: a campaign would
+# report a "new report at higher concurrency" that is only a DIFFERENT
+# DEFINITION of a report — #267 acceptance item 5 says such a finding is a real
+# defect until disproven, so a spurious one costs a real investigation.
+#
+# Same standard as S4 above, applied to the other duplicated constant.
+a="$(sed -n "s/^SAN_PATTERN=//p" "$HERE/run-parallelism-aba.sh")"
+b="$(sed -n "s/^SAN_PATTERN=//p" "$HERE/peak-memory-report.sh")"
+if [ -z "$a" ] || [ -z "$b" ]; then
+  bad "S6 SAN_PATTERN not found in one or both files (aba='$a' report='$b') — the comparison would have been vacuous"
+elif [ "$a" = "$b" ]; then
+  ok "S6 SAN_PATTERN agrees with ci/peak-memory-report.sh"
+else
+  bad "S6 SAN_PATTERN DISAGREES — aba: $a  report: $b"
+fi
+
 # ── S5: THE --no-peak PATH, i.e. the Windows lanes ───────────────────────────
 #
 # `windows-msvc-asan` is the matrix critical path and the lane a campaign most
@@ -176,7 +227,7 @@ if ! bash ci/run-parallelism-aba.sh --preset seam --jobs 4 --out "$WORK/run-np" 
   sed 's/^/  | /' "$WORK/driver-np.log"
   bad "S5 the --no-peak driver path ran to completion"
 else
-  npout="$(python3 ci/parallelism-verdict.py "$WORK/run-np" 2>&1)"; nprc=$?
+  npout="$(python3 ci/parallelism-verdict.py "$WORK/run-np" "${VERDICT_ARGS[@]}" 2>&1)"; nprc=$?
   if ! grep -q '^status=no-procfs-platform$' "$WORK/run-np/pass2.peak.env"; then
     sed 's/^/  | /' "$WORK/run-np/pass2.peak.env"
     bad "S5 --no-peak did not disposition the missing reading"
@@ -197,7 +248,7 @@ else
   fi
 fi
 
-SEAM_DECLARED=6
+SEAM_DECLARED=8
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$SEAM_DECLARED" ]; then

@@ -190,6 +190,24 @@ fresh
 rm -f "$WORK/t/.github/workflows/parallelism-measure.yml"
 expect "T9 a retired campaign workflow stands down with a disclosure" 0 "check stood down"
 
+# ── T10: the sccache pin bumped in one file and not the other ────────────────
+#
+# `parallelism-measure.yml` duplicates tier2.yml's `Install sccache` step, pinned
+# version and SHA-256 included — the repo has no composite actions, so the tier
+# workflows already duplicate their setup between themselves. What must not be
+# duplicated silently is a PIN: a bump applied to one file and not the other
+# still builds, on a different sccache than the lane it mirrors, and the stale
+# copy is whichever file the bumper was not looking at.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "ver=v0.17.0"
+assert old in s, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "ver=v0.18.0", 1), encoding="utf-8")
+MUT
+expect "T10 an sccache pin bumped in one file only is caught" 1 "SCCACHE PIN DISAGREEMENT"
+
 # ── T6: THE EMPTY SCAN ───────────────────────────────────────────────────────
 #
 # If the workflows move or the patterns break, "0 violations over 0 sites" must
@@ -199,7 +217,21 @@ cp "$REPO/CMakePresets.json" "$WORK/t/"
 printf 'name: nothing\non: push\njobs: {}\n' > "$WORK/t/.github/workflows/empty.yml"
 expect "T6 an empty scan is an instrument failure, not a pass" 2 "ZERO apt-backed install sites"
 
+# ── The harness's own execution count ────────────────────────────────────────
+#
+# ⚠️ ADDED WITH THE FOUR NEW CELLS, and the omission is the point: a `cell`
+# invocation lost to an editing slip removes a gate SILENTLY, and the tally
+# below would still read "N passed, 0 failed" for a smaller N. Both sibling
+# harnesses in this directory assert their count; this one did not, and four
+# cells were added to it before anyone noticed.
+CELLS_DECLARED=12
+TOTAL=$((PASS + FAIL))
 echo
-echo "ci-lane-policy harness: ${PASS} passed, ${FAIL} failed"
+if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then
+  echo "ci-lane-policy harness: EXECUTION COUNT MISMATCH — ran ${TOTAL} cells, declared ${CELLS_DECLARED}."
+  echo "A cell was added or lost without updating CELLS_DECLARED. Refusing to report a result."
+  exit 1
+fi
+echo "ci-lane-policy harness: ${PASS} passed, ${FAIL} failed (${TOTAL} cells)"
 [ "$FAIL" -eq 0 ] || exit 1
 exit 0

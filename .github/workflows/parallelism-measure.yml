@@ -310,7 +310,7 @@ jobs:
       - name: Verdict
         if: always()
         run: |
-          ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-${{ matrix.preset }}" \
+          python3 ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-${{ matrix.preset }}" \
             --tolerance-pct "${{ inputs.tolerance_pct }}"
 
   # ── Tier-3 libc++ lanes ─────────────────────────────────────────────────────
@@ -441,7 +441,7 @@ jobs:
       - name: Verdict
         if: always()
         run: |
-          ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-${{ matrix.preset }}" \
+          python3 ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-${{ matrix.preset }}" \
             --tolerance-pct "${{ inputs.tolerance_pct }}"
 
   # ── Tier-2 MSVC lanes ───────────────────────────────────────────────────────
@@ -485,6 +485,18 @@ jobs:
       # sccache, not ccache: tier2's compiler cache. A measurement job restores
       # it and NEVER saves — an entry written by a job configured for
       # measurement must not be served to a production lane.
+      #
+      # ⚠️ THE `ver` AND `sha256` BELOW ARE PINNED IN-REPO AND DUPLICATED FROM
+      # tier2.yml. Bumping `ver` REQUIRES re-deriving the digest BY HAND —
+      # download the asset and hash it out of band. Fetching the .sha256 sidecar
+      # from the same mutable release checks transport integrity and pins
+      # nothing: whoever can replace the asset can replace its sidecar.
+      #
+      # The duplication is not left to a comment. `ci/assert-ci-lane-policy.py`
+      # asserts this pair equals tier2.yml's, and cell T10 of
+      # ci/test-ci-lane-policy.sh proves that assertion can fail — because a
+      # bump applied to one file and not the other is silent, and the copy that
+      # goes stale is whichever one the bumper was not looking at.
       - name: Install sccache
         shell: bash
         run: |
@@ -532,7 +544,6 @@ jobs:
             -of build/${{ matrix.preset }}
 
       - name: Restore sccache from GHCR
-        id: sccache_restore
         shell: bash
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true

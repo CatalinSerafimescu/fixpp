@@ -2165,10 +2165,13 @@ jobs:
       - name: Regression pin — CI lane policy (#300 callers, #213 fuzz lane, #267 campaign trigger)
         run: bash ci/test-ci-lane-policy.sh
 
-      # #267 — the A-B-A parallelism verdict's own gates. 27 cells over a
-      # SYNTHETIC sample: every way the verdict can reject one is proven to
-      # fire, and each cell requires its NAMED diagnostic, not merely a non-zero
-      # exit. It exists because `ci/ctest-parallelism-probe.md` records three
+      # #267 — the A-B-A parallelism verdict's own gates, over a SYNTHETIC
+      # sample: every way the verdict can reject one is proven to fire, and each
+      # cell requires its NAMED diagnostic, not merely a non-zero exit. The
+      # harness asserts its OWN cell count against a declared constant and
+      # refuses to report a result on a mismatch, so a cell lost to an editing
+      # slip cannot pass as a smaller green run. That is why no number is
+      # written here: the count re-derives itself, and a copy of it would not. It exists because `ci/ctest-parallelism-probe.md` records three
       # `execution.jobs` conclusions that were published and then WITHDRAWN —
       # this is the question the repo has already got wrong three times, by
       # reading numbers no checker had been proven able to reject.
@@ -2188,7 +2191,7 @@ jobs:
       # CONTENT of a sample the verdict is known to parse; this one runs the
       # REAL driver against a 12-test synthetic ctest project and feeds its REAL
       # output to the REAL verdict. A field renamed on one side of that seam
-      # leaves all 27 cells green and returns "0 of 3 passes" from every actual
+      # leaves every one of those cells green and returns "0 of 3 passes" from every actual
       # campaign — at a cost of three suite runs on a runner to find out.
       #
       # Needs cmake + ctest (preinstalled on ubuntu-24.04) and REFUSES to run

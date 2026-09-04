@@ -175,8 +175,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--label", default="", help="free-text tag (e.g. `before-pass-1`)")
-    ap.add_argument("--procs", type=int, default=4,
-                    help="concurrency of the N-proc arm; match the runner's vCPU count")
+    # ⚠️ DETECTED HERE, NOT PASSED IN — and `procs_source` says which happened.
+    # The driver used to compute this as
+    # `getconf _NPROCESSORS_ONLN || echo 4`, which INVENTS a 4 when detection
+    # fails and hands the machine observer a fabricated fact about the machine.
+    # The verdict then prints it beside real figures ("4-proc 2.73 -> 2.94 s"),
+    # which is the exact thing it refuses to do for peak RSS. An observer that
+    # cannot count the CPUs must say so, not guess.
+    ap.add_argument("--procs", type=int, default=0,
+                    help="concurrency of the N-proc arm; 0 (default) detects it")
     ap.add_argument("--iters", type=int, default=3_000_000,
                     help="loop iterations per burner (~0.6-1 s on a CI runner)")
     ap.add_argument("--repeats", type=int, default=5,
@@ -186,7 +193,17 @@ def main() -> int:
     # `repeats` is recorded alongside `iters` so the verdict can tell a full
     # observation from a weakened one — a report that does not say how it was
     # taken cannot be judged.
-    fields: dict[str, object] = {"label": args.label, "procs": args.procs,
+    if args.procs > 0:
+        procs, procs_source = args.procs, "override"
+    else:
+        detected = os.cpu_count()
+        procs, procs_source = (detected, "detected") if detected else (4, "UNDETECTED-fallback")
+
+    # `repeats` is recorded alongside `iters` so the verdict can tell a full
+    # observation from a weakened one — a report that does not say how it was
+    # taken cannot be judged. `procs_source` is there for the same reason.
+    fields: dict[str, object] = {"label": args.label, "procs": procs,
+                                 "procs_source": procs_source,
                                  "iters": args.iters, "repeats": args.repeats}
     status = "ok"
 
@@ -195,7 +212,7 @@ def main() -> int:
         # faults that the timed calls must not carry.
         burn(args.iters // 10)
         fields["calib_1proc_s"] = f"{time_one(args.iters, args.repeats):.3f}"
-        fields["calib_nproc_s"] = f"{time_many(args.iters, args.procs, max(2, args.repeats // 2)):.3f}"
+        fields["calib_nproc_s"] = f"{time_many(args.iters, procs, max(2, args.repeats // 2)):.3f}"
     except OSError as exc:
         status = "calib-failed"
         fields["error"] = repr(exc)

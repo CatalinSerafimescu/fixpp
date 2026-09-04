@@ -2,6 +2,17 @@
 """Decide whether one lane's A-B-A parallelism sample is EVIDENCE (#267).
 
     ci/parallelism-verdict.py <run-dir> [--tolerance-pct 5.0]
+                                        [--steal-tolerance-ticks 0]
+                                        [--calib-tolerance-pct 25.0]
+
+⚠️ The two extra tolerances have no caller today, and that is deliberate rather
+than dead: the raw sample is uploaded as a build artifact, so re-judging an
+ARCHIVED campaign at a different band is a thing an operator does — and it must
+not require editing a version-controlled file that a harness pins. Only
+`--tolerance-pct` is wired to a workflow input. The other two default to values
+whose derivation is recorded at their definitions below; they are documented
+here because an undocumented flag with no caller is indistinguishable from a
+forgotten one.
 
 WHY THIS EXISTS
 ===============
@@ -27,6 +38,37 @@ with: three passes in ONE job on ONE VM, serial-parallel-serial, **voided unless
 the two serial passes agree** (they agreed to 0.6 %).  This file is that
 design's judgement, made mechanical — because the same document shows the
 judgement is exactly the part that gets skipped when a number looks convincing.
+
+⚠️ THE RESIDUAL THIS DESIGN DOES NOT CLOSE
+==========================================
+
+`tools/bench_compare.py:run_paired` — this repo's OTHER paired same-VM
+instrument — documents a real bypass in any A-B-A that checks only A-vs-A':
+a transient confined to the middle leg leaves the two outer legs agreeing
+perfectly while the middle one is wrong.  Its answer was to measure the base
+twice as well, A-B-A-B, so that a transient large enough to matter has to land
+on both B legs while sparing both A legs.
+
+**This apparatus does not do that, and the reason is budget, not disagreement.**
+A fourth pass on `linux-clang-libc++-tsan` — ~77 min serial, ~40 min parallel —
+would put a lane past the 360-minute hosted cap, and a job that hits the cap is
+killed before its upload step, losing all four passes rather than three.
+
+What is done instead, and exactly how far it goes:
+
+* **A hypervisor-caused transient confined to the parallel pass IS caught**, by
+  differencing `/proc/stat` steal interval by interval rather than across the
+  run.  That is the common case on a shared runner and it is attributed to the
+  pass it landed on.
+* **A non-steal transient confined to the parallel pass is NOT caught** —
+  thermal throttling, or a co-tenant whose interference does not register as
+  steal.  The calibration witnesses bracket that pass but do not run during it,
+  so a transient that begins after one witness and ends before the next is
+  invisible to every check here.
+
+That residual is stated rather than closed.  If a lane's result ever turns on a
+margin small enough for it to matter, the answer is `run_paired`'s — add the
+fourth pass and dispatch that lane alone.
 
 WHAT IT REFUSES TO DO
 =====================
@@ -400,16 +442,41 @@ def main() -> int:
     # to `--parallel`; all three differing is a nondeterministic suite, which is
     # a finding of its own and NOT evidence about parallelism.
     cov = {p.label: p.cov.get("sorted_info_sha256", "") for p in present if p.cov.get("sorted_info_sha256")}
+
+    # ⚠️ COVERAGE WAS ATTEMPTED BUT NOT COMPARED IS NOT THE SAME AS "FINE".
+    # The driver writes a `pass*.coverage.env` for every pass whenever
+    # `--coverage` is given, so its presence means the coverage lane was being
+    # measured. If those files carry no digest — no .profraw produced, a merge
+    # that failed, an empty report — then item 4 was NOT discharged, and without
+    # this the run reports VALID with a real speedup and complete silence about
+    # the one criterion the coverage lane exists to satisfy. That is the
+    # repo's own #1 failure: a measurement that could not be taken reading as a
+    # measurement that came out fine.
+    #
+    # Found by running it, not by reading it: with `--coverage` on a project
+    # that produces no profiles, this file previously printed VALID and said
+    # nothing at all.
+    cov_attempted = [p for p in present if p.cov]
+    if cov_attempted and len(cov) < len(cov_attempted):
+        why = sorted({p.cov.get("status", "unknown") for p in cov_attempted
+                      if not p.cov.get("sorted_info_sha256")})
+        out.append(f"> ⚠️ **#267 acceptance item 4 is NOT discharged: merged coverage was NOT "
+                   f"compared.** Coverage was attempted on this lane, but {len(cov_attempted) - len(cov)} "
+                   f"of {len(cov_attempted)} passes produced no digest (`{', '.join(why)}`). Whatever "
+                   f"the timing says, this run does not show that widening leaves coverage "
+                   f"unchanged — and that is the criterion this lane was blocked on.")
+        out.append("")
+
     if len(cov) == 3 and ser and par:
-        ser_shas = {p.label: cov[p.label] for p in ser if p.label in cov}
-        par_shas = {p.label: cov[p.label] for p in par if p.label in cov}
-        serial_agree = len(set(ser_shas.values())) == 1
+        ser_shas = {cov[p.label] for p in ser if p.label in cov}
+        par_shas = {cov[p.label] for p in par if p.label in cov}
+        serial_agree = len(ser_shas) == 1
         if not serial_agree:
             out.append("> ⚠️ **The two SERIAL passes produced different merged coverage.** That is "
                        "this suite's own run-to-run coverage nondeterminism, measured at "
                        "unchanged concurrency — so #267 item 4 cannot be attributed to "
                        "`--parallel` from this sample either way. Worth its own issue.")
-        elif set(par_shas.values()) != set(ser_shas.values()):
+        elif par_shas != ser_shas:
             defects.append(
                 "MERGED COVERAGE CHANGED UNDER PARALLELISM: the two serial passes agree "
                 "byte-for-byte on a sorted lcov `.info`, and the parallel pass does not. "
@@ -446,7 +513,7 @@ def main() -> int:
     except OSError:
         pass
     if subset:
-        pass                       # a subset run is already stamped NOT EVIDENCE
+        pass                       # already stamped NOT EVIDENCE at the top
     elif expected is None:
         out.append(f"> ⚠️ No line for `{preset}` in `ci/expected-eligible-tests.txt`, so the "
                    f"workload could not be checked against the lane's production basis. "
@@ -507,21 +574,53 @@ def main() -> int:
                 out.append("**Machine witness:** steal counter unavailable on this platform — "
                            "calibration drift is the only machine observation here.")
             else:
-                delta = max(steals) - min(steals)
-                if delta > args.steal_tolerance_ticks:
+                # ⚠️ ATTRIBUTED PER PASS, not max-minus-min across the run, and
+                # the difference is the whole point.
+                #
+                # `tools/bench_compare.py:run_paired` works through the bypass
+                # this design would otherwise have — Codex found it there, on
+                # the repo's other paired instrument:
+                #
+                #     A1 = 160, B measured during a 20 % throttle = 120, A2 = 160
+                #     A-vs-A' = 0 %  ->  "the machine held still"
+                #     ...and the B leg is wrong by 25 %.
+                #
+                # Two serial passes agreeing says NOTHING about a transient
+                # confined to the parallel pass between them. Its answer was to
+                # measure the base twice as well (A-B-A-B). This apparatus does
+                # not, because four passes do not fit the job budget on the lane
+                # that most needs measuring (see the residual note below) — so
+                # the steal counter is differenced INTERVAL BY INTERVAL, which
+                # attributes a hypervisor-caused transient to the pass it landed
+                # on. A rise across the B interval alone is exactly the bypass,
+                # and is now named as such rather than averaged into a total.
+                labels = ["pass 1 (serial)", "pass 2 (parallel)", "pass 3 (serial)"]
+                intervals = [(labels[i], steals[i + 1] - steals[i])
+                             for i in range(min(3, len(steals) - 1))]
+                hot = [(w, d) for w, d in intervals if d > args.steal_tolerance_ticks]
+                if hot:
                     voids.append(
-                        f"/proc/stat STEAL ROSE BY {delta} ticks across the experiment "
-                        f"(tolerance {args.steal_tolerance_ticks}). Another tenant was on the "
-                        f"physical host while these passes ran. `linux-clang-debug`'s "
-                        f"trusted sample had steal 0 throughout.")
+                        "/proc/stat STEAL ROSE DURING " +
+                        ", ".join(f"{w} (+{d} ticks)" for w, d in hot) +
+                        f" against a tolerance of {args.steal_tolerance_ticks}. Another tenant "
+                        f"was on the physical host while that pass ran. `linux-clang-debug`'s "
+                        f"trusted sample had steal 0 throughout. ⚠️ A rise confined to the "
+                        f"PARALLEL pass is the bypass that A-vs-A' agreement cannot see — the "
+                        f"two serial passes would still agree perfectly.")
                 else:
-                    out.append(f"**Machine witness:** steal delta {delta} ticks ✅")
+                    out.append("**Machine witness:** steal per interval "
+                               + ", ".join(f"{w.split()[1]}=+{d}" for w, d in intervals)
+                               + " ✅")
         except (ValueError, KeyError):
             pass
         # A witness run with fewer iterations or repeats than the shipped
         # defaults is a WEAKER observation, and must not pass itself off as a
         # full one — the knobs exist for the seam harness, where the absolute
         # figure is irrelevant, and they would silently degrade a campaign.
+        if any(w.get("procs_source") == "UNDETECTED-fallback" for w in wit_ok):
+            out.append("> ⚠️ **The witness could not count this machine's CPUs** and fell back to "
+                       "a default for its N-proc arm. That figure is not a fact about this "
+                       "machine; read the N-proc calibration below as unattributed.")
         DEFAULT_ITERS, DEFAULT_REPEATS = 3_000_000, 5
         try:
             got_i = min(int(w.get("iters", DEFAULT_ITERS)) for w in wit_ok)
