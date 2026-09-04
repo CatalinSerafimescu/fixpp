@@ -19,6 +19,9 @@
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/error.hpp>
@@ -373,10 +376,77 @@ template <class Pump>
 // whatever the caller passed it. The caller MUST then drain while that state is
 // still alive — see `drain_or_report` and its warning about storage that is not
 // a fixture member.
+//
+// ── THE SITE-KEYED FORCING SEAM (optional `site`) ────────────────────────────
+//
+// Passing a site label opts the call into RUNTIME forcing: exporting
+// `FIXPP_FORCE_WINDOW_MISS=<label>` makes exactly that site take its miss branch,
+// with no source edit and no rebuild.
+//
+// WHY IT EXISTS. Verifying a migrated site means proving its miss branch actually
+// reports, which means forcing a miss. The textual driver (`ci/pump-red-arm.sh`)
+// does that by rewriting the source and rebuilding ONCE PER SITE, because forcing
+// every site at once does not work: the first miss on a code path returns and masks
+// every later site on it (PR #316 forced fifteen and covered seven). At batch-11
+// scale that is one full rebuild per site. Here it is one build and N runs.
+//
+// ⚠️ IT IS A STRICTLY WEAKER WITNESS THAN TEXTUAL MUTATION, AND DOES NOT REPLACE IT.
+// This seam proves *the primitive's forced path reports under that site's label*. It
+// does NOT prove the site's own miss block is correct: a site whose drain has the
+// wrong flavour, or whose `return` is missing, is invisible to it because the block
+// it exercises is the same one at every site. Use the seam for breadth and textual
+// mutation to spot-check recipe correctness. Do not retire `ci/pump-red-arm.sh`.
+//
+// ⚠️ SILENCE IS AMBIGUOUS, WHICH IS WHY FORCING ANNOUNCES ITSELF. A run that produces
+// no `kWindowMiss` report can mean the seam fired and the miss branch failed to
+// report, or that the label matched NOTHING (a typo, a site that passes no label, or
+// a site the run never reached) -- the same empty output from opposite causes, with
+// the second failing toward clean. So a firing seam writes `kWindowMissForced` +
+// the label to stderr BEFORE zeroing the window. A driver MUST require that line and
+// treat its absence as "no such site", never as a silent pass.
+// [[feedback_every_broken_instrument_in_this_repo_fails_toward_clean]]
+//
+// ⚠️ ADOPTION IS INCREMENTAL AND THE PARAMETER IS DEFAULTED, SO "the seam can force
+// any site" IS FALSE. It forces only sites that pass a label. Sites migrated before
+// the seam existed pass none and are reachable only through textual mutation. Derive
+// which sites are forceable -- do not assume a batch's whole population is.
+//
+// The label is not new text: it already exists at every migrated site, as the operand
+// of `ADD_FAILURE() << kWindowMiss << "<Site>"`. Adopting the seam relocates that
+// literal into the call; it does not invent an identity.
+inline const char* forced_window_miss_site() {
+    // Read ONCE per process. `getenv` per call would put a lookup on a path whose
+    // whole reason to exist is that the #289 sites measured ~27 us -- and the value
+    // cannot change usefully mid-run anyway. A test that `setenv`s after the first
+    // pump will NOT be seen by this; that is deliberate, not an oversight.
+    static const char* const forced = std::getenv("FIXPP_FORCE_WINDOW_MISS");
+    return forced;
+}
+
+// Announced on stderr when the seam fires. Distinct from `kWindowMiss` on purpose:
+// this says "the window was zeroed HERE", the other says "the wait missed".
+inline constexpr const char* kWindowMissForced = "#289 FORCED window miss at site: ";
+
 template <class Fut>
 [[nodiscard]] bool run_window_then_ready(asio::io_context& ioc, Fut& fut,
                                          std::chrono::steady_clock::duration window,
-                                         std::chrono::steady_clock::duration grace = kPumpSlice) {
+                                         std::chrono::steady_clock::duration grace = kPumpSlice,
+                                         const char* site = nullptr) {
+    if (site != nullptr) {
+        if (const char* forced = forced_window_miss_site();
+            forced != nullptr && std::strcmp(forced, site) == 0) {
+            // Announce BEFORE zeroing, so the line is emitted even if what follows
+            // hangs -- a hang is exactly the blind-spot-(c) outcome a driver must be
+            // able to tell apart from "the label matched nothing".
+            std::fprintf(stderr, "%s%s\n", kWindowMissForced, site);
+            std::fflush(stderr);
+            // BOTH, never just the window: `grace` defaults to a live `kPumpSlice`,
+            // and zeroing only the window leaves that slice to satisfy the future --
+            // a vacuous arm that reads as "the miss branch is unreachable".
+            window = std::chrono::steady_clock::duration::zero();
+            grace = std::chrono::steady_clock::duration::zero();
+        }
+    }
     const auto ready = [&fut] {
         return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
     };
@@ -386,6 +456,16 @@ template <class Fut>
     ioc.run_for(grace);
     ioc.restart();
     return ready();
+}
+
+// Site-labelled call taking the DEFAULT grace. `const char*` cannot bind to
+// `steady_clock::duration`, so this never competes with the four-argument form
+// above; a site that needs a non-default grace spells both and uses that one.
+template <class Fut>
+[[nodiscard]] bool run_window_then_ready(asio::io_context& ioc, Fut& fut,
+                                         std::chrono::steady_clock::duration window,
+                                         const char* site) {
+    return run_window_then_ready(ioc, fut, window, kPumpSlice, site);
 }
 
 // Drain `ioc` and REPORT whether it reached quiescence. The teardown half of
