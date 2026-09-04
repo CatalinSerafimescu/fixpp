@@ -50,6 +50,19 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// The `run_for(W); restart(); get()` sites below call `run_window_then_ready` with a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The rationale and the teardown-shape rule -- why the drain runs on the miss branch
+// and not in a fixture destructor -- are documented AT the primitive. Read it there.
+// That text is deliberately NOT copied into this file: each earlier per-file copy
+// acquired clauses that are false at its own sites (#324's FILE-SPECIFIC ADDENDA), a
+// cost paid once per copy and avoided entirely by pointing.
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
@@ -211,15 +224,25 @@ struct OutboundFixture {
     // Acceptor role: session waits for peer Logon (peer = "TW" → us = "ISLD").
     void open_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "OutboundFixture::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "OutboundFixture::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         // Acceptor receives Logon from TW (sender=TW, target=ISLD).
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "OutboundFixture::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "OutboundFixture::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon feed failed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
@@ -442,8 +465,11 @@ TEST(ApplicationOutbound, EnginesSendWithUnknownIdReturnsInvalidArgument) {
         ioc,
         engine.send(unknown_id, std::span<const std::byte>(payload)),
         asio::use_future);
-    ioc.run_for(300ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "EngineSendUnknownId/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendUnknownId/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_FALSE(result.has_value()) << "Engine::send with unknown id must return error";
@@ -456,7 +482,11 @@ TEST(ApplicationOutbound, EnginesSendWithUnknownIdReturnsInvalidArgument) {
     // Clean up engine (stop + drain ioc)
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.restart();
-    ioc.run_for(300ms);
+    if (!fixpp::test_support::run_window_then_ready(ioc, stop_fut, 300ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "EngineSendUnknownId/stop");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendUnknownId/stop";
+        return;
+    }
     stop_fut.get();
 }
 
@@ -506,8 +536,12 @@ TEST(ApplicationOutbound, EnginesSendOnRegisteredButNotEstablishedSession) {
         ioc,
         engine.send(id, std::span<const std::byte>(payload)),
         asio::use_future);
-    ioc.run_for(300ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "EngineSendNotEstablished/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendNotEstablished/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_FALSE(result.has_value()) << "Engine::send must fail on non-established session";
@@ -516,7 +550,12 @@ TEST(ApplicationOutbound, EnginesSendOnRegisteredButNotEstablishedSession) {
 
     auto stop_fut2 = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.restart();
-    ioc.run_for(300ms);
+    if (!fixpp::test_support::run_window_then_ready(ioc, stop_fut2, 300ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "EngineSendNotEstablished/stop");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendNotEstablished/stop";
+        return;
+    }
     stop_fut2.get();
 }
 

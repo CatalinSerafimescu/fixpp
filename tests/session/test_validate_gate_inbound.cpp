@@ -55,8 +55,21 @@
 #include <vector>
 
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/transport_double.hpp"
 #include "support/validation_test_dictionary.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// The `run_for(W); restart(); get()` sites below call `run_window_then_ready` with a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The rationale and the teardown-shape rule -- why the drain runs on the miss branch
+// and not in a fixture destructor -- are documented AT the primitive. Read it there.
+// That text is deliberately NOT copied into this file: each earlier per-file copy
+// acquired clauses that are false at its own sites (#324's FILE-SPECIFIC ADDENDA), a
+// cost paid once per copy and avoided entirely by pointing.
 
 using namespace std::chrono_literals;
 
@@ -186,16 +199,26 @@ struct ValidateGateFixture {
     void open_to_active(Session& sess) {
         transport.reset();
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "ValidateGateFixture::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ValidateGateFixture::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         // Now in LogonSent. Feed a valid peer Logon to reach Active.
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
         transport.reset();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "ValidateGateFixture::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ValidateGateFixture::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value());
         ASSERT_EQ(sess.state(), fsm_state::Active);
     }
@@ -204,8 +227,12 @@ struct ValidateGateFixture {
     void feed(Session& sess, std::span<const std::byte> frame) {
         transport.reset();
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ValidateGateFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ValidateGateFixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 

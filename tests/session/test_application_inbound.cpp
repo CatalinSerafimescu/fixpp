@@ -49,6 +49,19 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// The `run_for(W); restart(); get()` sites below call `run_window_then_ready` with a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The rationale and the teardown-shape rule -- why the drain runs on the miss branch
+// and not in a fixture destructor -- are documented AT the primitive. Read it there.
+// That text is deliberately NOT copied into this file: each earlier per-file copy
+// acquired clauses that are false at its own sites (#324's FILE-SPECIFIC ADDENDA), a
+// cost paid once per copy and avoided entirely by pointing.
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
@@ -189,22 +202,35 @@ struct InboundFixture {
     // Open session, feed peer Logon, advance to Active.
     void open_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "InboundFixture::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "InboundFixture::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "InboundFixture::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "InboundFixture::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon feed failed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
 
     void feed(Session& s, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "InboundFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "InboundFixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 
@@ -287,8 +313,13 @@ TEST(ApplicationInbound, INV6_FSMInvalidMessage_NeverReachesCallback) {
 
     // Open but do NOT drive to Active.
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "INV6_FSMInvalidMessage_NeverReachesCallback/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "INV6_FSMInvalidMessage_NeverReachesCallback/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value());
 
     // In LogonSent state, feed an app message (35=D) — FSM will reject it.

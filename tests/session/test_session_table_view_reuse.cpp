@@ -74,8 +74,21 @@
 #include "support/fix44_dictionary.hpp"
 #include "support/fix44_group_frame_bodies.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/transport_double.hpp"
 #include "support/validation_test_dictionary.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// The `run_for(W); restart(); get()` sites below call `run_window_then_ready` with a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The rationale and the teardown-shape rule -- why the drain runs on the miss branch
+// and not in a fixture destructor -- are documented AT the primitive. Read it there.
+// That text is deliberately NOT copied into this file: each earlier per-file copy
+// acquired clauses that are false at its own sites (#324's FILE-SPECIFIC ADDENDA), a
+// cost paid once per copy and avoided entirely by pointing.
 
 using namespace std::chrono_literals;
 
@@ -148,16 +161,22 @@ struct Fixture {
     void run_open(Session& sess) {
         transport.reset();
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Fixture::run_open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Fixture::run_open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
     }
 
     void feed(Session& sess, std::span<const std::byte> frame) {
         transport.reset();
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Fixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Fixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 };
@@ -320,8 +339,11 @@ TEST(SessionTableViewReuse, AdoptedSnapshotDrivesGroupBoundaries) {
     // open() -> our Logon out; feed the peer's Logon reply -> Active.
     {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "AdoptedSnapshot/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "AdoptedSnapshot/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         std::string logon_body = "35=A\x01" "34=1\x01" "49=TW\x01"
@@ -329,8 +351,11 @@ TEST(SessionTableViewReuse, AdoptedSnapshotDrivesGroupBoundaries) {
                                  "98=0\x01" "108=0\x01";
         auto logon = fixpp_test_support::make_frame("FIX.4.4", logon_body);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "AdoptedSnapshot/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "AdoptedSnapshot/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value());
         ASSERT_EQ(sess.state(), fsm_state::Active);
     }
@@ -339,8 +364,11 @@ TEST(SessionTableViewReuse, AdoptedSnapshotDrivesGroupBoundaries) {
     auto frame = fixpp_test_support::make_execution_report_frame(suffix, /*seq=*/2, "TW", "ISLD");
     {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "AdoptedSnapshot/feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "AdoptedSnapshot/feed";
+            return;
+        }
         (void)fut.get();
     }
 
