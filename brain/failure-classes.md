@@ -12,7 +12,7 @@ codegraph_entry: []
 
 # Recurring failure classes
 
-**This page is a taxonomy, not a list.** Six classes have produced most of the defects found in this
+**This page is a taxonomy, not a list.** Seven classes have produced most of the defects found in this
 project — including several found *in the documents and tools built to prevent them*. Each entry gives
 the **trigger** (when you are at risk) and the **procedure** (what refutes it). No counts, no instances.
 
@@ -84,6 +84,21 @@ delegated work, a gate that skipped rather than passed.
 - **Trigger:** you are about to accept evidence produced somewhere other than where the change lives.
 - **Procedure:** check the SHA, the tree, and the *scope* of what ran. `continue-on-error` makes an
   `exit 1` inert; a path-skipped required check never reports at all.
+
+### 7. Removing a spurious gate unmasks whatever the gate was holding back
+
+A rejection you have *correctly* proven wrong is still a rejection. Deleting it is right, and it also
+lets input reach code behind it that has never run on that input — code whose own correctness was never
+tested there, because nothing ever got that far.
+
+- **Trigger:** you are about to make something loadable, reachable, or acceptable that previously was
+  not — fixing a false rejection, widening a filter, relaxing a guard proven over-strict.
+- **Procedure:** ask what sits BEHIND the gate that has never seen this input, and test *that*, not
+  only the gate. Diff acceptance in both directions: enumerate what the old code rejected and the new
+  code accepts, then check each one is handled correctly downstream.
+- ⚠️ **The unmasked defect usually has the OPPOSITE polarity.** The gate failed closed, so what it hid
+  fails open — a rejection becomes a silently wrong answer rather than a louder rejection. Verifying
+  "the thing I fixed now works" cannot see it; only the acceptance diff can.
 
 ---
 
