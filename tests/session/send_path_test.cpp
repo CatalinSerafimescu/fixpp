@@ -229,11 +229,6 @@ private:
 // revision paraphrased it and silently dropped a precondition. Keep it verbatim; put
 // anything file-specific under this addenda heading instead.
 //
-// THE FULL SPAN NO LONGER EXISTS. It was the PREFIX plus a `kWindowMissSentinel` doc
-// block, and it could only ever contain files DEFINING that constant. The constant now
-// lives in `tests/support/pump_until_ready.hpp` and no test file defines it, so that
-// population is empty by construction rather than merely unpopulated today.
-//
 // This fixture registers no clock waiter, which is worth stating because the PREFIX span
 // above describes one: `make_cfg()` sets `cfg.heartbeat_interval = 0s` ("disable liveness
 // loop", above), and `Session::run_liveness_loop()` (session.cpp) resolves `heartbt_int`

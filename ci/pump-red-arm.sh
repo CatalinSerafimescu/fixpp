@@ -53,7 +53,8 @@
 #
 # arms-file: one arm per line, TAB-separated, '#' comments and blanks ignored
 #     <source-path> <TAB> <unique anchor substring> <TAB> <expected label>
-#     <TAB> <cmake target> <TAB> <ctest -R regex>
+#     <TAB> <cmake target> [<TAB> <ctest -R regex>]
+# The regex defaults to `^<cmake target>$`; give it only when they differ.
 # The anchor must occur EXACTLY ONCE in the source file and must be on or just
 # above the `run_window_then_ready(` call to force.
 set -uo pipefail
@@ -80,7 +81,19 @@ TIMEOUT_S="${PUMP_RED_ARM_TIMEOUT:-180}"
 JOBS="${PUMP_RED_ARM_JOBS:-4}"
 TAIL='grace slice. Site: '
 
-pass=0; failed=0; inconclusive=0; declare -a NOTES=()
+pass=0; declare -a NOTES=()
+
+# ⚠️ VALIDATE THE ARMS FILE ONCE, UP FRONT. An earlier revision let the execution loop and
+# the cleanup sweep disagree about what a row is: the loop skipped only blanks and `#`,
+# while the sweep required `NF>=4`. A 3-field row therefore RAN with an empty target and an
+# empty regex -- `cmake --build --target ''` then `ctest -R ''`, which matches the WHOLE
+# SUITE -- and was then skipped by the cleanup. Two parsers, two acceptance rules, one file.
+bad=$(awk -F'\t' '!/^#/ && NF { if (NF < 4 || NF > 5) printf "    line %d: %d field(s)\n", NR, NF }' "$arms_file")
+if [ -n "$bad" ]; then
+    printf 'pump-red-arm: %s has malformed row(s) -- an arm needs 4 fields, or 5 with an explicit ctest regex\n' "$arms_file" >&2
+    printf '%s\n' "$bad" >&2
+    exit 2
+fi
 
 # ⚠️ RESTORE FROM A BYTE COPY, NEVER `git checkout -- <file>`. The sources this
 # script forces are normally MODIFIED IN THE WORKING TREE -- the migration being
@@ -90,79 +103,125 @@ pass=0; failed=0; inconclusive=0; declare -a NOTES=()
 # branch to force. The arms would then all report SILENT, and the obvious reading
 # of that is "the migration is broken" rather than "the harness ate it".
 backup_dir="$(mktemp -d)"
-trap 'rm -rf "$backup_dir"' EXIT
+declare -a SNAPPED=()          # original paths, parallel to $backup_dir/N
+bkp() { printf '%s/%s' "$backup_dir" "$1"; }
+
 snapshot() {
-    local dest="$backup_dir/$(printf '%s' "$1" | tr / _)"
-    [ -f "$dest" ] || cp "$1" "$dest"
+    local i
+    for i in "${!SNAPPED[@]}"; do [ "${SNAPPED[$i]}" = "$1" ] && return 0; done
+    SNAPPED+=("$1")
+    cp "$1" "$(bkp $(( ${#SNAPPED[@]} - 1 )))"
 }
-restore() { cp "$backup_dir/$(printf '%s' "$1" | tr / _)" "$1"; }
+restore() {
+    local i
+    for i in "${!SNAPPED[@]}"; do
+        [ "${SNAPPED[$i]}" = "$1" ] && { cp "$(bkp "$i")" "$1"; return 0; }
+    done
+    return 1
+}
+
+# ⚠️ BACKUPS ARE INDEXED, NOT NAME-MANGLED, AND THE ORIGINAL PATH IS KEPT VERBATIM. The
+# obvious encoding -- flatten `a/b.hpp` to `a_b.hpp` -- is LOSSY and cannot be inverted,
+# because real paths contain underscores: restoring `group_dispatch_fixture.hpp` that way
+# reconstructs `group/dispatch/fixture.hpp` and silently restores NOTHING. Caught before it
+# ran; it would have left every forced source in the tree while reporting success.
+#
+# ⚠️ RESTORE EVERY SNAPSHOT ON THE WAY OUT, NOT ONLY ON THE LOOP'S PATHS. An earlier
+# revision restored inside the loop body while the trap merely removed the backup
+# directory, so any exit skipping the loop's tail -- Ctrl-C, SIGTERM, `set -u` on a typo --
+# left a FORCED source for the next reader to measure. This does NOT cover SIGKILL, which
+# is untrappable and is exactly how this script died twice to the OOM killer; that is why
+# the parallelism cap above is load-bearing rather than a nicety.
+restore_all() {
+    local i
+    for i in "${!SNAPPED[@]}"; do cp "$(bkp "$i")" "${SNAPPED[$i]}" 2>/dev/null || true; done
+}
+trap 'restore_all; rm -rf "$backup_dir"' EXIT INT TERM
 
 force_site() {
     # Rewrite the run_window_then_ready call that follows $2 in file $1 so both
     # its window and its grace are zero.
-    python3 - "$1" "$2" <<'PY'
-import re, sys
+    #
+    # ⚠️ SEARCHES A BLANKED COPY, SPLICES THE ORIGINAL. #289's migrated files quote
+    # `run_window_then_ready(` inside their explanatory comments, so a raw-text search can
+    # land on PROSE. The arm would then build unforced, its test would pass, and this
+    # script would report SILENT -- indistinguishable from a miss branch that does not
+    # report. `blank_non_code` is offset-preserving, so an offset found on the blanked copy
+    # indexes the same byte in the original.
+    FIXPP_CI_DIR="$repo_root/ci" python3 - "$1" "$2" <<'PYFORCE'
+import os, re, sys
+sys.path.insert(0, os.environ["FIXPP_CI_DIR"])
+from cxx_blank import blank_non_code
+
 path, anchor = sys.argv[1], sys.argv[2]
 src = open(path, encoding="utf-8").read()
-if src.count(anchor) != 1:
-    sys.exit(f"anchor not unique ({src.count(anchor)} hits): {anchor!r}")
-i = src.index(anchor)
-m = re.compile(r"run_window_then_ready\s*\(").search(src, i)
+code = blank_non_code(src)
+assert len(code) == len(src), "lexer broke the offset-preserving contract"
+
+# The anchor is matched on the BLANKED copy too: an anchor that occurs only inside a
+# comment is not a site, and checking uniqueness against raw text would not notice.
+if code.count(anchor) != 1:
+    sys.exit(f"anchor not unique in code (raw={src.count(anchor)}, code={code.count(anchor)}): {anchor!r}")
+i = code.index(anchor)
+m = re.compile(r"run_window_then_ready\s*\(").search(code, i)
 if not m:
     sys.exit(f"no run_window_then_ready after anchor in {path}")
-# balance parens from the opening one
-k, depth = m.end() - 1, 0
-while k < len(src):
-    if src[k] == "(": depth += 1
-    elif src[k] == ")":
+
+# One scan: balance to the closing paren, recording top-level comma offsets. Only the
+# SECOND is needed (the boundary between `fut` and `window`); an earlier revision rebuilt
+# every argument as a string and then discarded all but two.
+depth, commas, k = 0, [], m.end() - 1
+while k < len(code):
+    c = code[k]
+    if c in "([{":
+        depth += 1
+    elif c in ")]}":
         depth -= 1
-        if depth == 0: break
+        if depth == 0:
+            break
+    elif c == "," and depth == 1:
+        commas.append(k)
     k += 1
 else:
-    sys.exit("unbalanced call")
-inner = src[m.end():k]
-# args split at depth 0
-parts, d, cur = [], 0, ""
-for ch in inner:
-    if ch in "(<[": d += 1
-    elif ch in ")>]": d -= 1
-    if ch == "," and d == 0:
-        parts.append(cur); cur = ""
-    else:
-        cur += ch
-parts.append(cur)
-if len(parts) < 3:
-    sys.exit(f"expected >=3 args, got {len(parts)}: {inner!r}")
-forced = f"{parts[0]},{parts[1]}, std::chrono::milliseconds{{0}}, std::chrono::milliseconds{{0}}"
-open(path, "w", encoding="utf-8").write(src[:m.end()] + forced + src[k:])
-PY
+    sys.exit(f"unbalanced run_window_then_ready call in {path}")
+if len(commas) < 2:
+    sys.exit(f"expected >=3 args to run_window_then_ready in {path}, found {len(commas) + 1}")
+
+zero = " std::chrono::milliseconds{0}"
+open(path, "w", encoding="utf-8").write(src[:commas[1]] + f",{zero},{zero}" + src[k:])
+PYFORCE
 }
 
 while IFS=$'\t' read -r file anchor label target regex; do
     case "$file" in ''|\#*) continue ;; esac
+    # Column 5 is optional and defaults to the target's own exact-match regex. It used to be
+    # mandatory and was mechanically `^`+target in every row -- two columns carrying one
+    # datum, where a typo makes `ctest -R` match NOTHING while the arm still reports a
+    # verdict on an empty run.
+    regex="${regex:-^$target$}"
     printf '\n=== ARM %s\n    label: %s\n' "$file" "$label"
     snapshot "$file"
     if ! force_site "$file" "$anchor"; then
-        echo "    !! FORCE FAILED"; failed=$((failed+1)); NOTES+=("FORCE-FAILED $label")
+        echo "    !! FORCE FAILED"; NOTES+=("FORCE-FAILED $label")
         restore "$file"; continue
     fi
     if ! cmake --build "build/$preset" -j "$JOBS" --target "$target" >/tmp/red_build.log 2>&1; then
         echo "    !! BUILD FAILED (see /tmp/red_build.log)"; tail -15 /tmp/red_build.log
-        failed=$((failed+1)); NOTES+=("BUILD-FAILED $label"); restore "$file"; continue
+        NOTES+=("BUILD-FAILED $label"); restore "$file"; continue
     fi
     out=$(cd "build/$preset" && timeout "$TIMEOUT_S" ctest -R "$regex" --output-on-failure 2>&1)
     rc=$?
     if [ "$rc" -eq 124 ]; then
         echo "    ~~ INCONCLUSIVE: timed out after ${TIMEOUT_S}s -- the pump this arm zeroed is"
         echo "       probably NOT the one the test waits on (indirected pump)."
-        inconclusive=$((inconclusive+1)); NOTES+=("HUNG $label")
+        NOTES+=("HUNG $label")
     elif printf '%s' "$out" | grep -qF "$TAIL$label"; then
         echo "    RED as required: reported '${TAIL}${label}'"
         pass=$((pass+1))
     else
         echo "    !! NO REPORT -- the miss branch did not announce itself"
         printf '%s\n' "$out" | grep -iE "window|Site:|FAILED|Passed" | head -12
-        failed=$((failed+1)); NOTES+=("SILENT $label")
+        NOTES+=("SILENT $label")
     fi
     restore "$file"
 done < "$arms_file"
@@ -189,6 +248,10 @@ for t in $(awk -F'\t' '!/^#/ && NF>=4 {print $4}' "$arms_file" | sort -u); do
 done
 
 echo
-echo "arms: ${pass} RED-as-required, ${failed} FAILED, ${inconclusive} INCONCLUSIVE"
-for n in "${NOTES[@]:-}"; do [ -n "$n" ] && echo "  - $n"; done
-[ "$failed" -eq 0 ] && [ "$inconclusive" -eq 0 ]
+# The two counters this used to keep were derivable from NOTES and had to be updated in
+# lockstep with it at four sites; a sixth arm category added to one and forgotten in the
+# other would have silently changed the exit code. Derive the split from the tags instead.
+hung=$(printf '%s\n' "${NOTES[@]-}" | grep -c '^HUNG ' || true)
+echo "arms: ${pass} RED-as-required, $(( ${#NOTES[@]} - hung )) FAILED, ${hung} INCONCLUSIVE"
+if (( ${#NOTES[@]} )); then printf '  - %s\n' "${NOTES[@]}"; fi
+[ "${#NOTES[@]}" -eq 0 ]
