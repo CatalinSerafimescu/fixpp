@@ -61,9 +61,20 @@ version, so an absent module skips the whole test, and it tolerates a
 broken runner, not a skip) and, below 3.12, **rejects every**
 `RunFailedError`. On 3.12+ the two files behave identically: both
 `importorskip`, and both tolerate only the import-barrier message. This is a
-known, tracked discrepancy pending reconciliation — see issue #298 — not an
-intended design; do not treat the wheel twin's stricter 3.10/3.11 behaviour as
-the documented contract.
+known discrepancy, not an intended design; do not treat the wheel twin's
+stricter 3.10/3.11 behaviour as the documented contract.
+
+> ⛔ **THIS ROW IS THE ONE THING THE PARITY GATE DOES NOT ENFORCE, AND THAT IS
+> STATED HERE SO THE EXEMPTION IS NOT MISTAKEN FOR A SANCTION.**
+> `ci/assert-wheel-test-parity.py` exempts `diverges` rows from byte-identity
+> (they still carry enumeration, no-dangling and test-name parity). So the
+> behavioural divergence above survives a green gate. **`diverges` is not a
+> general escape hatch — this is its only current member, and a second one
+> should be argued for rather than added.** Reconciling the 3.10/3.11 behaviour
+> is real Python-version semantics work and was deliberately NOT folded into
+> the #298 parity pass; it remains open on its own merits. Adding a `diverges`
+> row to dodge a gate failure would be the exact substitution this gate exists
+> to prevent: an unenforced convention replaced by a falsely enforced one.
 
 Support modules: `_wheeldict.py` (locator resolver), `oo_test_support.py`,
 `_gil_staging.py`, `_oo_reentrancy_staging.py`. The two staging modules run as

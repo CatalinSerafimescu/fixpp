@@ -1335,12 +1335,12 @@ ok "hit-floor 007 — parsed as DECIMAL (7), not octal or malformed, and accepte
 # the floor explicitly, so this whole suite was green while the feature was
 # unreachable in production. Only a check that reads the WORKFLOWS can see that.
 #
-# ⚠️ THE FIXTURES BELOW ARE EXTRACTED FROM THE REAL WORKFLOWS AT RUN TIME, not
-# written by hand. A fixture written from the checker's own behaviour would
-# certify the checker's bugs — which is not hypothetical here: running this
-# check against reality is what exposed two parser defects (an empty quoted ''
-# argument vanishing, and ${{ ... }} being split on its spaces), and a
-# hand-written fixture would have had neither shape.
+# ⚠️ THE MUTANTS BELOW ARE COPIES OF THE REAL WORKFLOWS, not synthetic YAML.
+# The check walks jobs -> steps and resolves argument 2 back to the step that
+# produces it, so a hand-written two-step fixture would not exercise the pairing
+# at all. Each mutation is cmp-guarded: a sed that matches nothing would leave
+# an identical copy, and the cell would then "pass" by testing the shipped
+# workflow — reading as a thorough mutant that tested nothing.
 FLOORCHK="$repo_root/ci/assert-ccache-floor-callers.py"
 WFSAND="$sandbox/wf"
 
@@ -1352,65 +1352,72 @@ run_floorchk() {
   OUT="$(python3 "$FLOORCHK" "$1" 2>&1)" || STATUS=$?
 }
 
+# $1 = workflow basename, $2 = python mutation applied to the copy
+mutate_wf() {
+  rm -rf "$WFSAND"; mkdir -p "$WFSAND"
+  cp "$repo_root/.github/workflows/$1" "$WFSAND/$1"
+  python3 -c "$2" "$WFSAND/$1"
+  if cmp -s "$repo_root/.github/workflows/$1" "$WFSAND/$1"; then
+    fail "floor-callers: the mutation on $1 did NOT apply (re-point the pattern, do not delete the mutant)"
+  fi
+}
+
 # Direction 0 — the shipped workflows satisfy the rule.
 run_floorchk "$repo_root/.github/workflows"
 want_status 0 "floor-callers/real"
 want_out 'all consistent' "floor-callers/real"
 ok "call-site rule holds on the shipped workflows"
 
-# Pull the two real call sites out, so the mutants below are reality-derived.
-# `grep -A3` follows the backslash-folded form; the checker joins continuations
-# itself, so the fixture needs the same shape the workflow has.
-extract_call() {
-  grep -A3 'ci/ccache-stats\.sh' "$1" | sed -n "/$2/,/^--$/p" | grep -v '^--$'
-}
+# ⚠️ PROVE THE CHECK CAN REPORT NON-ZERO BEFORE TRUSTING ITS ZERO. Four
+# directions: the rule has three failure modes, and an empty scan is a fourth.
 
-mk_fixture() {
-  # $1 = destination file, $2... = the call-site lines
-  rm -rf "$WFSAND"; mkdir -p "$WFSAND"
-  { echo 'name: fixture'
-    echo 'on: push'
-    echo 'jobs:'
-    echo '  j:'
-    echo '    runs-on: ubuntu-24.04'
-    echo '    steps:'
-    echo '      - name: ccache statistics'
-    echo '        run: |'
-    cat
-  } > "$WFSAND/$1"
-}
-
-# ⚠️ PROVE THE CHECK CAN REPORT NON-ZERO BEFORE TRUSTING ITS ZERO. Three
-# directions: the rule has two failure modes, and an empty scan is a third.
-
-# Direction 1 — THE #299 DEFECT ITSELF. A lane that CAN supply a restore
-# disposition, with the floor argument absent. This is the state the repo was
-# actually in, reconstructed from the tier-3 call site with its floor stripped.
-grep -A4 'ci/ccache-stats.sh ${{ matrix.preset }}' "$repo_root/.github/workflows/tier3-libcxx.yml" \
-  | grep -v '^ *70$' \
-  | sed 's/" \\$/"/' \
-  | mk_fixture defect.yml
-grep -q 'ccache-stats' "$WFSAND/defect.yml" || fail "floor-callers/mutant-floor-removed: fixture extraction produced no call site"
-grep -q '70' "$WFSAND/defect.yml" && fail "floor-callers/mutant-floor-removed: the floor was NOT stripped — the mutation did not apply"
+# Direction 1 — THE #299 DEFECT ITSELF: a lane that CAN supply a restore
+# disposition, with the floor argument removed. This reconstructs the state the
+# repo was actually in.
+mutate_wf tier3-libcxx.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="\"${{ steps.build.outcome }}\" \\\n            70"
+assert old in s, "anchor missing"
+p.write_text(s.replace(old,"\"${{ steps.build.outcome }}\"",1),encoding="utf-8")'
 run_floorchk "$WFSAND"
 want_status 1 "floor-callers/mutant-floor-removed"
 want_out 'passes NO hit floor' "floor-callers/mutant-floor-removed"
 ok "MUTANT floor-removed — the #299 defect itself is detected (disposition present, floor absent)"
 
-# Direction 2 — THE DEFECT WEARING A FIX'S CLOTHING. A floor added to a lane
-# that passes an EMPTY restore disposition. It looks enforced in the diff and
-# can never evaluate, because the fatal branch is gated on restore == 'true'.
-# A check implementing only direction 1 would call this a fix.
-grep 'ci/ccache-stats.sh linux-clang-coverage' "$repo_root/.github/workflows/tier1.yml" \
-  | sed "s/^ *run: /          /; s/\$/ 70/" \
-  | mk_fixture inert.yml
-grep -q "'' " "$WFSAND/inert.yml" || fail "floor-callers/mutant-inert-floor: fixture lost the empty disposition argument"
+# Direction 2 — THE DEFECT WEARING A FIX'S CLOTHING: a floor added to a lane
+# whose argument 2 is an EMPTY literal. It looks enforced in the diff and can
+# never evaluate, because the fatal branch is gated on restore == 'true'.
+mutate_wf tier1.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="ci/ccache-stats.sh linux-clang-coverage '"'"''"'"' '"'"'${{ steps.build.outcome }}'"'"'"
+assert old in s, "anchor missing"
+p.write_text(s.replace(old,old+" 70",1),encoding="utf-8")'
 run_floorchk "$WFSAND"
 want_status 1 "floor-callers/mutant-inert-floor"
-want_out 'can never evaluate' "floor-callers/mutant-inert-floor"
-ok "MUTANT inert-floor — a floor on a lane with no restore disposition is rejected, not congratulated"
+want_out 'never evaluate' "floor-callers/mutant-inert-floor"
+ok "MUTANT inert-floor — a floor on a lane with an empty disposition is rejected, not congratulated"
 
-# Direction 3 — THE EMPTY SCAN. If the call sites move or the pattern breaks,
+# Direction 3 — THE SAME DEFECT THROUGH AN EXPRESSION, which is the shape a
+# non-empty-string test cannot see. `${{ steps.nope.outputs.hit }}` is non-empty
+# in the YAML and resolves to the EMPTY STRING at run time, so the floor is
+# permanently inert while every naive check calls the site consistent. This is
+# why "can supply a disposition" is resolved STRUCTURALLY — back to the step
+# that produces it — rather than by testing the argument for emptiness.
+mutate_wf tier3-libcxx.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="\"${{ steps.ccache_restore.outputs.hit }}\" \\\n            \"${{ steps.build.outcome }}\" \\\n            70"
+assert old in s, "anchor missing"
+new=old.replace("steps.ccache_restore.outputs.hit","steps.ccache_restore_TYPO.outputs.hit")
+p.write_text(s.replace(old,new,1),encoding="utf-8")'
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/mutant-dangling-step-ref"
+want_out 'can NEVER fire' "floor-callers/mutant-dangling-step-ref"
+ok "MUTANT dangling-step-ref — an expression pointing at no producer step is caught (a non-empty string that resolves to empty)"
+
+# Direction 4 — THE EMPTY SCAN. If the call sites move or the walk breaks,
 # "0 violations over 0 sites" must not read as a pass. This repo's single most
 # recurring defect is an instrument that reports clean because it could not
 # report anything else.
