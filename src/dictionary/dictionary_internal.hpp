@@ -172,25 +172,56 @@ struct GroupCtxDelim {
 // One walk here plus one clamp in the key builders is what keeps the two sides
 // from drifting again; do not reintroduce a bound in this function.
 //
-// A tag absent from `immediate_parent` is a root. The `find` guard is what makes
-// this walk terminate on ANY relation: acyclicity is never enforced where the
-// relation is BUILT, so it cannot be assumed where the relation is READ. On a
-// cycle the chain truncates at the repeat instead of growing without bound, and
-// a truncated key matches no stored record — FR-023's fail-closed disposition.
-// (Whether a cycle is reachable through today's loaders is deliberately NOT
-// asserted here: that is a claim about callers, and it would rot silently the
-// first time one changes. The guard costs a linear scan of a vector that is
-// normally 1-2 elements.)
+// A tag absent from `immediate_parent` is a root. A CYCLE yields `nullopt`, and
+// that distinction is the whole point: it must NOT yield a shortened path.
 //
-// The guard is not a new constraint on either caller. `as_table_view()` already
-// walked this relation UNBOUNDED, so it removes a pre-existing non-termination
-// rather than introducing a limit; the probe's old K bound was masking the same
-// exposure on its side only as a side effect of clamping in the wrong place.
-[[nodiscard]] inline std::vector<std::uint16_t> group_parent_path(
+// Truncating at the repeat looks fail-closed and is not. The truncated array is
+// a WELL-FORMED key, so it can COLLIDE with a context the loaders legitimately
+// registered rather than miss every one of them. A self-parented group
+// (`immediate_parent[G] == G`) truncates to `[G]` — exactly the key of that
+// group's own inner occurrence — so the completeness probe MATCHES a record
+// instead of reporting a violation, and the dictionary loads with the outer
+// context absent and the count tag injected into the inner one's member set.
+// That is an acceptance change at ANY depth, not just past the clamp, and it
+// turns a rejection into a silently wrong answer.
+//
+// This is reachable, not theoretical. Each loader reduces a message's field run
+// to one `FieldRef` per tag with an UNSTABLE sort (`std::ranges::sort` +
+// `unique`, `xml_loader.cpp` / `orchestra_loader.cpp`), so which of two
+// equal-tag occurrences survives is unspecified — and when the inner occurrence
+// of a self-nested group wins, `immediate_parent[G] == G` is what the relation
+// holds. Do not re-derive how often that happens: it depends on the standard
+// library's sort, so any count measured here would be a fact about one
+// toolchain. The CONDITION is that the relation is not guaranteed acyclic; the
+// walk owes termination and a non-colliding answer regardless.
+//
+// Both callers treat `nullopt` as a violation: the FR-023 probe reports the
+// offending tag (rejecting the load, which is what this did before #264 shared
+// the walk) and `as_table_view()` skips the context rather than registering a
+// colliding one.
+//
+// The bound is PIGEONHOLE, not a scan. `immediate_parent` maps each tag to one
+// parent, so a walk that has pushed more entries than the relation has keys must
+// have revisited one. That is exact, costs O(depth), and — unlike a
+// `std::ranges::find` over the accumulated path — does not make a deep chain
+// quadratic per walk and cubic across a dictionary.
+//
+// The walk is otherwise UNCLAMPED by design. The K = `kMaxGroupContextDepth`
+// clamp belongs to `make_group_ctx_delim` / `make_group_ctx_key` alone, which
+// keep the first — i.e. the OUTERMOST — K entries. Clamping here instead stops
+// the walk early and so keeps the INNERMOST K, a different key for the same
+// context once the chain is longer than K. That was #264. One walk plus one
+// clamp, in that order, is what keeps the two sides from drifting again — do not
+// reintroduce a depth bound here, INCLUDING a "we discard past K anyway" bound,
+// which reproduces the original defect exactly.
+[[nodiscard]] inline std::optional<std::vector<std::uint16_t>> group_parent_path(
     std::uint16_t start, std::unordered_map<std::uint16_t, std::uint16_t> const& immediate_parent) {
     std::vector<std::uint16_t> path;
     std::uint16_t cur = start;
-    while (cur != 0 && std::ranges::find(path, cur) == path.end()) {
+    while (cur != 0) {
+        if (path.size() > immediate_parent.size()) {
+            return std::nullopt;  // pigeonhole: a tag was revisited ⇒ cycle
+        }
         path.push_back(cur);
         auto const it = immediate_parent.find(cur);
         cur = (it != immediate_parent.end()) ? it->second : std::uint16_t{0};
@@ -322,7 +353,13 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
         // applies the K clamp, exactly as the registration side does. Clamping
         // here instead kept the innermost K and built a different key.
         auto const path = group_parent_path(fr.group_no_tag, immediate_parent);
-        GroupCtxDelim const probe = make_group_ctx_delim(path, fr.tag, /*delimiter=*/0);
+        if (!path) {
+            // A cyclic ancestor relation has no context key, so no record can
+            // satisfy it. Report the violation — the disposition this check had
+            // before #264 made the walk unbounded, restored deliberately.
+            return fr.tag;
+        }
+        GroupCtxDelim const probe = make_group_ctx_delim(*path, fr.tag, /*delimiter=*/0);
         // PRECONDITION: `delims` is sorted by `group_ctx_delim_less`. Both call
         // sites (each loader's `finalize()`) sort the per-message records with
         // exactly that comparator immediately before flushing them into the

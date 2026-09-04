@@ -946,9 +946,14 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordTolerantModeSkipsGroup) {
 // COMPLETE dictionary is rejected at load as an internal-invariant violation.
 //
 // The pin is that a complete deep dictionary LOADS **and** that its deepest
-// context RESOLVES. "Loads" alone would also pass with the FR-023 check
-// deleted outright; the delimiter assertion is what keeps the check's removal
-// visible from this test.
+// context RESOLVES — the second half catches a registration side that stores the
+// context but not its delimiter.
+//
+// This test canNOT distinguish "probe fixed" from "FR-023 deleted outright": on
+// this input the correct behaviour IS "no rejection", so it stays green either
+// way. Measured, not assumed. That property is pinned instead by
+// `ContextWithoutDelimiterRecordRejectedAtFinalize` and its Orchestra twin,
+// which go RED when the check is neutered.
 // ============================================================================
 TEST(LoaderDisposition, DeepAncestorChainLoadsAndResolvesDelimiter) {
     std::vector<std::byte> buf(2u * 1024u * 1024u);
@@ -993,6 +998,77 @@ TEST(LoaderDisposition, DeepAncestorChainLoadsAndResolvesDelimiter) {
            "as_table_view() itself built.";
     EXPECT_EQ(*first, kDeepLeafDelim)
         << "fixpp#264: the deepest context must resolve to its declared first member. A 0 "
-           "here means the context is present but empty — which is also what deleting the "
-           "FR-023 check would leave behind.";
+           "here means the context is present but empty.";
+
+    // The assertion above is BLIND to every path element at index >= K: the
+    // clamp erases them, so a registration walk that wrongly included the
+    // group's own no_tag (violating C-1.3 / Entity 1) would still produce an
+    // identical clamped key and keep this test green. A depth-1 context cannot
+    // be truncated, so it sees exactly that class of error.
+    std::array<std::uint16_t, 1> const shallow_path{static_cast<std::uint16_t>(kDeepCountBase + 1)};
+    auto const shallow =
+        tv.group_first_field_exact("M", std::span<std::uint16_t const>{shallow_path},
+                                   static_cast<std::uint16_t>(kDeepCountBase + 2));
+    ASSERT_TRUE(shallow.has_value())
+        << "the depth-1 context for NoA2 must be registered under its exact one-element "
+           "ancestor path; a MISS means the registration walk built a different path than "
+           "the key builder did.";
+    EXPECT_EQ(*shallow, static_cast<std::uint16_t>(kDeepDelimBase + 2));
+}
+
+// ============================================================================
+// fixpp#264 review (Codex P1, confirmed) — a CYCLIC ancestor relation must be
+// reported as a violation, never resolved to a truncated key.
+//
+// Truncating at the repeat is not fail-closed: the truncated array is a
+// well-formed key, and for a self-parented group it is EXACTLY the key of that
+// group's own inner occurrence. The probe then matches a record that really is
+// in the pool and reports the dictionary complete — turning a load rejection
+// into a silently wrong context table.
+//
+// This is a DIRECT unit test of the sweep on a hand-built handle, deliberately
+// not an XML fixture. Reaching `immediate_parent[G] == G` through a loader
+// depends on which of two equal-tag FieldRefs survives an UNSTABLE sort, so an
+// XML fixture would pin the standard library's sort rather than this code. The
+// hand-built relation is the same state with none of that dependence — same
+// shape as FindIncompleteGroupContextDetectsMissingRecord above.
+//
+// The `[100]` delimiter record is the whole point of the fixture: it is what a
+// truncated probe key would COLLIDE with. Drop it and the test passes for the
+// wrong reason (a miss rather than a refusal to build a key).
+// ============================================================================
+TEST(LoaderDisposition, CyclicAncestorRelationIsAViolationNotATruncatedKey) {
+    std::array<std::byte, 4096> buf{};
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    fixpp::dict::detail::dict_metadata_handle h{&mr};
+
+    // NoG(100) enclosed by ITSELF — the post-dedup state a self-nested group
+    // leaves behind when the inner occurrence is the survivor.
+    fixpp::dict::FieldRef group_fr{};
+    group_fr.tag = 100;
+    group_fr.type = fixpp::dict::field_data_type::NumInGroup;
+    group_fr.group_no_tag = 100;
+
+    fixpp::dict::FieldRef member_fr{};
+    member_fr.tag = 120;
+    member_fr.type = fixpp::dict::field_data_type::String;
+    member_fr.group_no_tag = 100;
+
+    h.fields_.push_back(group_fr);
+    h.fields_.push_back(member_fr);
+    h.per_msg_field_offsets_.push_back({.start = 0, .count = 2});
+
+    // The record a truncated `[100]` key would collide with.
+    std::array<std::uint16_t, 1> const inner_path{100};
+    h.group_ctx_delim_pool_.push_back(
+        fixpp::dict::detail::make_group_ctx_delim(inner_path, 100, 120));
+    h.per_msg_group_ctx_delim_offsets_.push_back({.start = 0, .count = 1});
+
+    std::array<std::uint16_t, 1> const structural_tags{100};
+    auto const bad = fixpp::dict::detail::find_incomplete_group_context(h, structural_tags);
+    ASSERT_TRUE(bad.has_value())
+        << "a cyclic ancestor relation must be reported as a violation. A truncated `[100]` "
+           "probe key MATCHES the inner record in this pool, so a walk that truncates instead "
+           "of refusing reports the dictionary complete and loads a wrong context table.";
+    EXPECT_EQ(bad->second, 100);
 }
