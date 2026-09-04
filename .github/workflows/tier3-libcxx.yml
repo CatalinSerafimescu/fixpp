@@ -241,7 +241,7 @@ jobs:
           # llvm.sh handles GPG key + apt repo + versioned clang binaries.
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          sudo /tmp/llvm.sh 22 all
+          APT_GUARD_TIMEOUT=900 ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
           # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
           # but does NOT update the unversioned `clang`/`clang++` paths. The
           # sanitizer presets use clang-22/clang++-22 directly (versioned) so
@@ -256,7 +256,7 @@ jobs:
           clang++ --version
           # libc++ and libc++abi dev packages are NOT installed by llvm.sh by
           # default — must be installed explicitly.
-          sudo apt-get install -y --no-install-recommends \
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends \
             libc++-22-dev \
             libc++abi-22-dev \
             ninja-build \
@@ -317,7 +317,7 @@ jobs:
       - name: Install ccache
         run: |
           set -euo pipefail
-          sudo apt-get install -y --no-install-recommends ccache
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends ccache
           # Not decoration — this is the assertion that the exit-127 trap above
           # is closed, made here where the step name says what failed, rather
           # than 200 lines later inside a Conan dependency build.
