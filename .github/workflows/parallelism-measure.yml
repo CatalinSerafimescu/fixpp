@@ -476,18 +476,39 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Conan + pytest
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          pip install conan pytest pyyaml
-          conan --version
+      - name: Install Conan
+        run: pip install conan pytest
 
       - name: Initialize Conan default profile
-        shell: bash
         run: conan profile detect --force
 
-      - uses: ilammy/msvc-dev-cmd@v1
+      # sccache, not ccache: tier2's compiler cache. A measurement job restores
+      # it and NEVER saves — an entry written by a job configured for
+      # measurement must not be served to a production lane.
+      - name: Install sccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=v0.17.0
+          asset="sccache-${ver}-x86_64-pc-windows-msvc"
+          base="https://github.com/mozilla/sccache/releases/download/${ver}"
+          tmp="$(cygpath -u "$RUNNER_TEMP")/sccache-dl"
+          rm -rf "$tmp"; mkdir -p "$tmp"; cd "$tmp"
+          sha256=e94cfc5b58cbe439302f586c1d1bd7980c2cd371d47bdf385ade657411e6f3ac
+          curl -sSfL -o sccache.zip "${base}/${asset}.zip"
+          echo "${sha256}  sccache.zip" | sha256sum -c -
+          unzip -q sccache.zip
+          mkdir -p "$HOME/bin"
+          mv "${asset}/sccache.exe" "$HOME/bin/"
+          cygpath -w "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/sccache.exe" --version
+
+      # tier2 uses egor-tensin/vs-shell. Matching it rather than reaching for a
+      # different vcvars action: the toolset the measurement builds with has to
+      # be the one the lane ships with, or the timings describe a different
+      # binary.
+      - name: Set up MSVC environment (vcvars)
+        uses: egor-tensin/vs-shell@v2
 
       - name: Set up oras
         uses: oras-project/setup-oras@v2
@@ -496,23 +517,64 @@ jobs:
         shell: bash
         run: ci/restore-conan-cache.sh ${{ matrix.preset }}
 
-      - name: Conan install
+      # ⚠️ OTel-ON and `-s:b compiler.cppstd=20`, copied from tier2. These are
+      # not incidental: they decide the dependency closure and therefore which
+      # tests get registered. A measurement of a differently-configured tree is
+      # a measurement of a suite that does not ship.
+      - name: Conan install (OTel-ON)
+        shell: cmd
+        run: |
+          conan install . ^
+            -pr conan/profiles/${{ matrix.preset }} ^
+            -o "fixpp/*:with_otel=True" ^
+            -s:b compiler.cppstd=20 ^
+            --build=missing ^
+            -of build/${{ matrix.preset }}
+
+      - name: Restore sccache from GHCR
+        id: sccache_restore
         shell: bash
         run: |
-          conan install . -pr conan/profiles/${{ matrix.preset }} \
-            --build=missing -of build/${{ matrix.preset }}
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+          ci/restore-sccache.sh ${{ matrix.preset }}
 
-      - name: Configure
-        shell: bash
-        run: cmake --preset ${{ matrix.preset }}
+      # ⚠️ `CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded` IS LOAD-BEARING, not a
+      # tuning knob. tier2 records the measurement: without /Z7 this does not
+      # degrade to a poor cache hit rate, the BUILD FAILS — cl reports C1041
+      # (cannot open program database) even with /FS, because parallel cached
+      # compiles collide on the shared PDB. Dropping it here would look like a
+      # simplification and would red the lane.
+      - name: Configure (OTel-ON)
+        shell: cmd
+        run: >
+          cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=ON
+          -DFIXPP_ARTIFACT_DIR=%GITHUB_WORKSPACE:\=/%/_artifacts
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"
 
       - name: Build
-        shell: bash
+        shell: cmd
         run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: sccache statistics
+        if: always()
+        shell: bash
+        run: |
+          sccache --show-stats || true
+          sccache --stop-server >/dev/null 2>&1 || true
 
       # ⚠️ `shell: bash` where tier2.yml's ctest steps use `shell: cmd`. The
       # driver is a POSIX-shell script; tier2 already switches to bash for its
       # own POSIX assertions, which is the precedent followed here.
+      #
+      # ⚠️ BUDGET. windows-msvc-asan's test phase is the matrix critical path at
+      # ~76 min. A-B-A is roughly A + B + A' = 76 + ~40 + 76 ≈ 190 min on top of
+      # the build, against a 360-minute cap — and a job that hits the cap is
+      # KILLED, so `if: always()` on the upload below does not save the sample.
+      # That is why the sccache restore above is not optional here: a cold MSVC
+      # build would eat the margin. If a future lane does not fit, dispatch it
+      # alone rather than raising anything.
       - name: A-B-A measurement
         shell: bash
         run: |

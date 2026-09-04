@@ -251,6 +251,28 @@ cell "T17 a subset run is stamped SMOKE — NOT EVIDENCE" 0 "SMOKE RUN — NOT E
 cell "T18 an unmeasured peak RSS is disclosed" 0 "peak RSS NOT MEASURED" \
   --peak-status ok,no-samples,ok
 
+# ── T26/T27: THE WINDOWS SUMMARY MUST NOT INVENT A MEMORY FIGURE ─────────────
+#
+# `peak_bytes` is EMPTY on the Windows lanes — there is no /proc to sample — and
+# `int("" or 0)` is 0. A formatted clause would print
+# `peak RSS +0.0 % (0.00 GiB -> 0.00 GiB)` beside a real speedup on a VALID
+# sample: a fabricated zero next to genuine numbers, read as measured headroom,
+# which is the exact figure acceptance item 1 exists to require. T27 is the one
+# that matters — it asserts the fabricated string is ABSENT, which no assertion
+# about the correct string can do.
+cell "T26 a sample with no peak reading says NOT MEASURED in its summary" 0 \
+  "peak RSS **NOT MEASURED**" --peak-status no-procfs-platform,no-procfs-platform,no-procfs-platform \
+  --peak ,,
+rm -rf "$WORK/run"
+python3 "$WORK/gen.py" "$WORK/run" --peak-status no-procfs-platform,no-procfs-platform,no-procfs-platform --peak ,,
+out="$(python3 "$CHECK" "$WORK/run" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -qF "0.00 GiB"; then
+  ok "T27 a sample with no peak reading prints NO fabricated 0.00 GiB"
+else
+  printf '%s\n' "$out" | sed 's/^/  | /'
+  bad "T27 a fabricated 0.00 GiB reached the summary (exit $rc)"
+fi
+
 # ── T19: THE COST AXIS IS NOT DECORATION ─────────────────────────────────────
 #
 # linux-clang-tsan's failure mode was wall clock barely moving while AGGREGATE
@@ -303,7 +325,7 @@ cell "T20 a witness with no /proc is usable, not absent" 0 \
 # A sweep must assert how many cells ran: a `cell` invocation lost to an editing
 # slip removes a gate silently, and the tally below would still read "N passed,
 # 0 failed" for a smaller N.
-MUTANTS_DECLARED=27
+MUTANTS_DECLARED=29
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$MUTANTS_DECLARED" ]; then

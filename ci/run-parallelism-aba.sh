@@ -57,6 +57,17 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 
+# ⚠️ RESOLVE THE INTERPRETER ONCE. `python3` is not guaranteed to be on PATH in
+# Git Bash on a windows-2022 runner, where `python` is the name the setup-python
+# action puts there — and the Windows lanes are the ones this script was
+# extended for. A `python3` that does not resolve would leave every witness file
+# unwritten, and the verdict would then VOID every Windows sample for want of an
+# observation that was never attempted: a three-suite-run diagnosis of a PATH
+# problem.
+PY="${PYTHON:-python3}"
+command -v "$PY" >/dev/null 2>&1 || PY=python
+command -v "$PY" >/dev/null 2>&1 || { echo "::error::no python interpreter on PATH (tried python3, python)"; exit 2; }
+
 PRESET=""; JOBS=""; OUT=""; CTEST_ARGS=""; SUBSET=""; NO_PEAK=0; COVERAGE=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -84,9 +95,14 @@ TMPDIR_CTEST="$BUILD/Testing/Temporary"
 # gate's would produce a "new" report that is only a different definition.
 SAN_PATTERN='WARNING: ThreadSanitizer:|ERROR: (Address|Leak|Memory)Sanitizer:|runtime error:'
 
+# Never fatal — a missing witness must degrade the sample toward VOID, not abort
+# a campaign mid-lane. But it is ANNOUNCED: a silent `|| true` would leave the
+# diagnosis inferable only from the verdict's "0 usable machine witness(es)"
+# three suite runs later.
 witness() {
-  python3 "$HERE/machine-witness.py" --out "$OUT/witness$1.env" --label "$2" \
-    --procs "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" || true
+  "$PY" "$HERE/machine-witness.py" --out "$OUT/witness$1.env" --label "$2" \
+    --procs "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
+    || echo "::warning::#267 machine witness $1 ($2) failed to run; the sample will VOID for want of an observation of the machine."
 }
 
 # $1 = pass index, $2 = label, $3 = parallel level
@@ -127,7 +143,7 @@ run_pass() {
     printf 'label=%s\nstatus=no-procfs-platform\npeak_bytes=\ncmd_status=%s\n' \
       "$PRESET" "$rc" > "$OUT/pass${idx}.peak.env"
   else
-    python3 "$HERE/measure-peak-rss.py" \
+    "$PY" "$HERE/measure-peak-rss.py" \
       --out "$OUT/pass${idx}.peak.env" --log "$log" --label "$PRESET" \
       -- "${cmd[@]}" || rc=$?
   fi

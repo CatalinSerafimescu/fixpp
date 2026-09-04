@@ -69,14 +69,24 @@ import sys
 
 # ── ctest log parsers ────────────────────────────────────────────────────────
 #
-# ⚠️ THE FIRST THREE ARE COPIED VERBATIM FROM ci/peak-memory-report.sh (the
-# RAN / CTEST_REAL / SUM_S block).  They are anchored at BOTH ends against a
-# decoy, because `--output-on-failure` puts arbitrary test output in this log
-# and a test asserting ON ctest output naturally quotes ctest's phrasing.  Both
-# looser forms were tried there and both were defeated; neither was caught by
-# reading — T14b of ci/test-peak-rss.sh caught them.  Re-deriving them here
-# rather than copying would re-open a closed hole, so if you change one, change
-# both and re-run that harness.
+# ⚠️ THE FIRST THREE ARE PYTHON RE-DERIVATIONS OF awk EXPRESSIONS IN
+# ci/peak-memory-report.sh (its RAN / CTEST_REAL / SUM_S block) — semantics for
+# semantics, NOT copies, because the two files are not in the same language.
+# Saying "copied verbatim" would be a claim this file cannot support, and an
+# unsupportable claim in a comment is the defect class this repo spends whole
+# Gate B rounds on.
+#
+# What they inherit is the reason for their SHAPE: both are anchored at both
+# ends against a decoy, because `--output-on-failure` puts arbitrary test output
+# in this log and a test asserting ON ctest output naturally quotes ctest's
+# phrasing.  Two looser forms were tried there and both were defeated by exactly
+# that; neither was caught by reading — T14b of ci/test-peak-rss.sh caught them.
+#
+# ⚠️ THE AGREEMENT IS CHECKED, NOT ASSERTED.  A comment saying "change one,
+# change both" is an instruction someone has to follow; cell S4 of
+# ci/test-parallelism-aba-seam.sh runs peak-memory-report.sh's awk expressions
+# over a REAL ctest log and requires the same three numbers this parser reads
+# from it.  That is the only version of this claim that cannot rot.
 RAN_RX = re.compile(r"^\d+% tests passed, \d+ tests failed out of (\d+)$")
 REAL_RX = re.compile(r"Total Test time \(real\)\s*=\s*([0-9.]+)")
 DUR_RX = re.compile(r"^ *\d+/\d+ +Test +#\d+.*?([0-9.]+) sec$")
@@ -562,13 +572,32 @@ def main() -> int:
         sum_ser = sum(p.log["sum_s"] or 0 for p in ser) / len(ser)
         sum_par = b.log["sum_s"] or 0
         infl = (sum_par - sum_ser) / sum_ser * 100.0 if sum_ser else 0.0
+        # ⚠️ THE MEMORY CLAUSE IS WITHHELD, NOT ZEROED, WHEN THERE IS NO READING.
+        # `peak_bytes` is EMPTY on the Windows lanes — there is no /proc to
+        # sample — and `int("" or 0)` is 0, so a formatted clause would print
+        # `peak RSS +0.0 % (0.00 GiB -> 0.00 GiB)` beside a real speedup on a
+        # VALID sample.  A fabricated zero next to genuine numbers is worse than
+        # a gap: it reads as measured headroom, which is precisely the figure
+        # #267 acceptance item 1 exists to require.
         peak_ser = max((int(p.peak.get("peak_bytes") or 0) for p in ser), default=0)
         peak_par = int(b.peak.get("peak_bytes") or 0)
-        mem = ((peak_par - peak_ser) / peak_ser * 100.0) if peak_ser else 0.0
+        if peak_ser and peak_par:
+            mem = (peak_par - peak_ser) / peak_ser * 100.0
+            mem_clause = (f"peak RSS {mem:+.1f} % "
+                          f"({gib(str(peak_ser))} -> {gib(str(peak_par))})")
+        else:
+            why = next((p.peak.get("status") for p in ser + [b]
+                        if p.peak.get("status") not in ("ok", None)), "unavailable")
+            mem_clause = f"peak RSS **NOT MEASURED** (`{why}`)"
         out.append(f"**`--parallel {b.jobs}` on `{preset}`: {speedup:.2f}x** "
                    f"({base:.1f} s serial -> {b.wall:.1f} s), parallel efficiency "
-                   f"{eff:.0f} %, summed test time {infl:+.1f} %, peak RSS {mem:+.1f} % "
-                   f"({gib(str(peak_ser))} -> {gib(str(peak_par))}).")
+                   f"{eff:.0f} %, summed test time {infl:+.1f} %, {mem_clause}.")
+        if not (peak_ser and peak_par):
+            out.append("")
+            out.append("> ⚠️ **#267 acceptance item 1 is NOT discharged by this sample.** The "
+                       "timing half stands on its own; a widening proposed on it would be "
+                       "proposed without the memory reading every other lane is held to. Say "
+                       "so in the PR.")
         out.append("")
         # ⚠️ BOTH AXES, ALWAYS.  `linux-clang-tsan`'s failure mode was wall clock
         # barely moving while AGGREGATE runner time rose 44 %.  A lane that

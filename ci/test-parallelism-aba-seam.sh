@@ -123,7 +123,73 @@ else
   fi
 fi
 
-SEAM_DECLARED=4
+# ── S4: THE TWO PARSERS OF THE SAME LOG MUST AGREE ───────────────────────────
+#
+# ci/parallelism-verdict.py re-derives three quantities that ci/peak-memory-
+# report.sh already reads out of a ctest log — the executed count, the total
+# real time, and the summed per-test durations. They are in different languages
+# (Python re vs awk), so they are re-derivations, not copies, and a comment
+# saying "if you change one, change both" is an instruction someone has to
+# remember. This runs the shipped awk over the REAL log the driver just produced
+# and requires the same three numbers. It is the version of that claim that
+# cannot rot.
+LOG="$WORK/run/pass1.ctest.log"
+awk_ran="$(awk 'match($0, /^[0-9]+% tests passed, [0-9]+ tests failed out of [0-9]+$/) { m = $0; sub(/.* out of /, "", m); n = m } END { print n }' "$LOG")"
+awk_real="$(awk -F'= *' '/Total Test time \(real\)/ { t = $2 } END { gsub(/[^0-9.]/, "", t); print t }' "$LOG")"
+awk_sum="$(awk '/^ *[0-9]+\/[0-9]+ +Test +#[0-9]+/ && match($0, /[0-9.]+ sec$/) { s += substr($0, RSTART, RLENGTH-4) } END { if (s > 0) printf "%.1f", s }' "$LOG")"
+py="$(cd "$WORK" && python3 -c '
+import pathlib, sys
+sys.path.insert(0, "ci")
+import importlib.util
+spec = importlib.util.spec_from_file_location("v", "ci/parallelism-verdict.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+d = m.parse_ctest_log(pathlib.Path(sys.argv[1]))
+print(f"{d["ran"]} {d["real_s"]} {d["sum_s"]}")' "$LOG")"
+# ⚠️ The awk figures must be NON-EMPTY first. Two empty strings compare equal,
+# so a broken awk would agree with a broken parser and this cell would pass
+# having compared nothing.
+if [ -z "$awk_ran" ] || [ -z "$awk_real" ] || [ -z "$awk_sum" ]; then
+  bad "S4 the shipped awk read NOTHING from a real log (ran='$awk_ran' real='$awk_real' sum='$awk_sum') — the comparison would have been vacuous"
+elif [ "$py" = "$awk_ran $awk_real $awk_sum" ]; then
+  ok "S4 both parsers agree on the same real log ($py)"
+else
+  bad "S4 parsers DISAGREE — awk: '$awk_ran $awk_real $awk_sum'  verdict: '$py'"
+fi
+
+# ── S5: THE --no-peak PATH, i.e. the Windows lanes ───────────────────────────
+#
+# `windows-msvc-asan` is the matrix critical path and the lane a campaign most
+# needs to decide, and it is the ONLY lane whose driver branch nothing else
+# exercises. Two things have to hold: the missing peak reading is DISPOSITIONED
+# rather than absent, and no fabricated `0.00 GiB` reaches a VALID summary —
+# `int("" or 0)` is 0, so that clause formats perfectly well from nothing.
+rm -rf "$WORK/run-np"
+if ! bash ci/run-parallelism-aba.sh --preset seam --jobs 4 --out "$WORK/run-np" --no-peak      >"$WORK/driver-np.log" 2>&1; then
+  sed 's/^/  | /' "$WORK/driver-np.log"
+  bad "S5 the --no-peak driver path ran to completion"
+else
+  npout="$(python3 ci/parallelism-verdict.py "$WORK/run-np" 2>&1)"; nprc=$?
+  if ! grep -q '^status=no-procfs-platform$' "$WORK/run-np/pass2.peak.env"; then
+    sed 's/^/  | /' "$WORK/run-np/pass2.peak.env"
+    bad "S5 --no-peak did not disposition the missing reading"
+  elif [ "$nprc" -ne 0 ]; then
+    printf '%s
+' "$npout" | sed 's/^/  | /'
+    bad "S5 a --no-peak sample did not reach VALID (exit $nprc)"
+  elif printf '%s' "$npout" | grep -qF "0.00 GiB"; then
+    printf '%s
+' "$npout" | sed 's/^/  | /'
+    bad "S5 a fabricated 0.00 GiB reached a VALID --no-peak summary"
+  elif ! printf '%s' "$npout" | grep -qF "NOT MEASURED"; then
+    printf '%s
+' "$npout" | sed 's/^/  | /'
+    bad "S5 the missing peak reading was not declared NOT MEASURED"
+  else
+    ok "S5 --no-peak: VALID, peak declared NOT MEASURED, no fabricated zero"
+  fi
+fi
+
+SEAM_DECLARED=6
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$SEAM_DECLARED" ]; then
