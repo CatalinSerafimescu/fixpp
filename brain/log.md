@@ -92,8 +92,13 @@ status: stable
   `ADD_FAILURE()`. A correct row and a fallback row printed identically. This is the no-result path
   wearing a value, and it is why the unresolved case now has its own bucket outside every recipe.
 
-- **2026-09-05 — batch 11's verification found three defects in the INSTRUMENTS and none in the 82
-  migrated sites.** (1) `ci/pump-red-arm.sh` could report a false `SILENT` — `pipefail` plus
+- **2026-09-05 — batch 11's ARM PHASE found three defects in the INSTRUMENTS; the SITE defects were
+  caught earlier, by the compiler.** ⚠️ An earlier wording of this entry said the batch found "none
+  in the 82 migrated sites", which is false as written and contradicted by its own sibling commit
+  (*"SIX REAL DEFECTS, ONE CLASS"*): six sites had a clock expression derived per FILE where C++
+  scope is per SITE, and `*clock` bound to `::clock` from `<ctime>`. Those were found at BUILD time
+  and fixed before any arm ran. The true statement is narrower and still worth keeping: **once the
+  tree compiled, forcing all 82 miss branches found defects only in the drivers.** (1) `ci/pump-red-arm.sh` could report a false `SILENT` — `pipefail` plus
   `grep -q` in a pipeline exits 141 *when the pattern matches*, size-dependently, so it had shipped
   in batch 10 and passed on small arms. Recorded as a new bullet under failure class 1, because the
   tell is a CONTRADICTION (the matcher says "not found" while the diagnostic prints the text) rather

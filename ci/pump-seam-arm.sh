@@ -30,7 +30,36 @@
 set -euo pipefail
 
 preset="${1:?usage: pump-seam-arm.sh <preset> <labels-file>}"
-labels_file="${2:?usage: pump-seam-arm.sh <preset> <labels-file>}"
+labels_file="${2:?usage: pump-seam-arm.sh <preset> <labels-file> | <preset> --self-test}"
+
+# ── --self-test: exercise the NO-SUCH-SITE verdict path ──────────────────────
+# ⚠️ THE INERTNESS CONTROL BELOW DOES NOT COVER THIS. It proves the seam stays quiet for a
+# label it was not given; it never produces a NO-SUCH-SITE verdict, so both of that verdict's
+# paths (empty candidate set, and announced-nothing) were exercised by nothing at all. This
+# re-invokes the driver on a label no binary can carry and requires exactly that verdict.
+if [ "$labels_file" = "--self-test" ]; then
+    st_tmp="$(mktemp)"; trap 'rm -f "$st_tmp"' EXIT
+    printf '%s\n' '# synthetic: no binary carries this' 'PumpSeamArm::__self_test_absent__' > "$st_tmp"
+    # ⚠️ `set -e` is on and the nested run is EXPECTED to exit non-zero (that is half of what
+    # this control asserts), so the status must be captured with `||`, never left to `$?`
+    # after a bare assignment -- that form aborts the script before anything prints.
+    st_rc=0
+    st_out=$(PUMP_SEAM_ARM_SELFTEST=1 "$0" "$preset" "$st_tmp" 2>&1) || st_rc=$?
+    ok=0; bad=0
+    if grep -q "NO-SUCH-SITE=1" <<<"$st_out"; then
+        echo "  ok    an absent label reads NO-SUCH-SITE=1"; ok=$((ok+1))
+    else
+        echo "  !!BAD an absent label did NOT read NO-SUCH-SITE=1"; bad=$((bad+1))
+        printf '%s\n' "$st_out" | sed 's/^/        | /' | tail -6
+    fi
+    if [ "$st_rc" -ne 0 ]; then
+        echo "  ok    the run exits non-zero when not every label went RED (exit=$st_rc)"; ok=$((ok+1))
+    else
+        echo "  !!BAD the run exited 0 despite a non-RED verdict"; bad=$((bad+1))
+    fi
+    echo "pump-seam-arm self-test: ${ok} ok, ${bad} bad"
+    [ "$bad" -eq 0 ]; exit $?
+fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -86,14 +115,10 @@ while IFS=$'\t' read -r hit b; do
     BINS_FOR["$hit"]="${BINS_FOR["$hit"]-} $b"
 done < <(printf '%s\n' "$bindir"/* | xargs -r -P "$(nproc)" -I{} bash -c 'scan_one "$@"' _ {} || true)
 
-run_label() {                      # $1 = label, $2 = "expect-red" | "expect-nosite"
-    local label="$1" mode="$2" bins=() b out ann rep
+run_label() {                      # $1 = label
+    local label="$1" bins=() b out ann rep timed_out
     read -r -a bins <<<"${BINS_FOR["$label"]-}"
     if [ "${#bins[@]}" -eq 0 ]; then
-        if [ "$mode" = "expect-nosite" ]; then
-            printf '    ok   NEGATIVE CONTROL: %s is in no binary\n' "$label"
-            return 0
-        fi
         printf '    !!   NO BINARY carries %s -- stale build, or the label never shipped\n' "$label"
         NOTES+=("$label: absent from every binary")
         nosite=$((nosite + 1)); return 1
@@ -180,20 +205,29 @@ look for an UNMIGRATED run_for/get after this site")
         NOTES+=("$label: forced but silent")
         silent=$((silent + 1)); return 1
     fi
+    if [ "$timed_out" -gt 0 ]; then
+        # RED, but a candidate binary wedged on the way. Count it: the summary line is the
+        # only place a wedge is visible, and "RED=N of N" with a hidden wedge is the
+        # fails-toward-clean shape this driver exists to avoid.
+        printf '    RED  %-46s forced %2d  reported %2d  (%d candidate binary/ies wedged)\n' \
+            "$label" "$ann" "$rep" "$timed_out"
+        red=$((red + 1)); wedged=$((wedged + 1)); return 0
+    fi
     printf '    RED  %-46s forced %2d  reported %2d\n' "$label" "$ann" "$rep"
     red=$((red + 1)); return 0
 }
 
 echo "=== pump-seam-arm: ${#LABELS[@]} label(s), preset $preset"
 for label in "${LABELS[@]}"; do
-    ran=$((ran + 1))
-    run_label "$label" expect-red || true
+    run_label "$label" || true
 done
 
-# ⚠️ THE NEGATIVE CONTROL IS NOT OPTIONAL. Without it, a driver whose env var never
-# reaches the binary reports NO-SUCH-SITE for everything and a driver that always
-# announces reports RED for everything; both are indistinguishable from a real
-# result. This arm proves the NO-SUCH-SITE verdict is reachable.
+# ⚠️ THE NEGATIVE CONTROL IS NOT OPTIONAL. Without it, a seam that announces
+# UNCONDITIONALLY would report RED for everything, which is indistinguishable from a real
+# result. What follows proves the seam is INERT for a label it was not given -- it does NOT
+# produce a NO-SUCH-SITE verdict, and an earlier revision of this comment claimed it did,
+# describing an arm that had already been replaced. See `--self-test` for the control that
+# does exercise the NO-SUCH-SITE path.
 echo
 echo "=== negative control: a REAL binary, a label it does not carry, MUST stay silent"
 # ⚠️ THIS CONTROL MUST EXECUTE A BINARY. An earlier revision "controlled" the NO-SUCH-SITE
@@ -216,9 +250,17 @@ for l in "${LABELS[@]}"; do
     fi
 done
 if [ -z "$probe_bin" ]; then
-    echo "    !!   no binary carried ANY label -- the negative control cannot run" >&2
-    exit 4
+    if [ -n "${PUMP_SEAM_ARM_SELFTEST:-}" ]; then
+        # The self-test deliberately supplies a label no binary carries, so there is nothing
+        # to probe with. Skipping is correct HERE and only here.
+        echo "    --   inertness control skipped (self-test supplies no real label)"
+        probe_bin=""
+    else
+        echo "    !!   no binary carried ANY label -- the negative control cannot run" >&2
+        exit 4
+    fi
 fi
+if [ -n "$probe_bin" ]; then
 nc_rc=0
 nc_out=$(FIXPP_FORCE_WINDOW_MISS="PumpSeamArm::__no_such_site__" timeout "$TIMEOUT_S" \
              "$probe_bin" --gtest_filter="$probe_filter" 2>&1) || nc_rc=$?
@@ -232,9 +274,15 @@ if [ "$nc_rc" -ne 0 ] || [ "$nc_ann" -ne 0 ]; then
 fi
 printf '    ok   NEGATIVE CONTROL: %s ran clean with a non-matching label, 0 announcements\n' \
     "$(basename "$probe_bin")"
+fi
 
-# `ran` is incremented at the top of the loop -- a DIRECT count, deliberately not the
-# outcome-derived form ci/pump-red-arm.sh uses. See assert_ran_count's comment.
+# ⚠️ DERIVED FROM OUTCOMES, NOT COUNTED IN THE LOOP. An earlier revision incremented `ran`
+# at the top of the loop body, which made this assertion an IDENTITY -- `ran` was
+# `${#LABELS[@]}` by construction and the check could not fail. Summing the verdicts instead
+# means a label that falls out of `run_label` through some path that records nothing makes
+# the totals disagree, which is the whole point. Same reasoning as ci/pump-red-arm.sh's
+# `pass + ${#NOTES[@]}`. [[feedback_a_verification_sweep_must_assert_an_execution_count]]
+ran=$(( red + silent + nosite + inconclusive ))
 assert_ran_count "$ran" "${#LABELS[@]}" pump-seam-arm "label(s)"
 
 echo

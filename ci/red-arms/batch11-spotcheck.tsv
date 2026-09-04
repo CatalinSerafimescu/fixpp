@@ -14,5 +14,5 @@
 #
 # columns: source <TAB> unique-code-anchor <TAB> expected label <TAB> cmake target
 tests/session/admin_builder_distinct_now_test.cpp	expected_t<void> open_sync(Session& s) {	AdminDistinctNowTest::open_sync	session_pure_tests
-tests/session/session_reject_test.cpp	void feed(	RejectFixture::feed	session_pure_tests
+tests/session/session_reject_test.cpp	void feed(	session_reject:RejectFixture::feed	session_pure_tests
 tests/session/durable_before_transmit_test.cpp	InboundStoreBeforeFromAdminDispatch	InboundStoreBeforeFromAdminDispatch	session_pure_tests

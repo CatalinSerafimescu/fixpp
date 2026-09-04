@@ -211,9 +211,9 @@ struct RejectFixture {
 
     void feed(Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms, "RejectFixture::feed")) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "RejectFixture::feed");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "RejectFixture::feed";
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms, "session_reject:RejectFixture::feed")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "session_reject:RejectFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "session_reject:RejectFixture::feed";
             return;
         }
         (void)fut.get();

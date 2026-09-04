@@ -104,7 +104,7 @@ RecoveryGapfillNearCapacityTest::feed
 RecoveryGapfillNearCapacityTest::run_open
 RecoveryStoreHorizonTest::feed
 RecoveryStoreHorizonTest::run_open
-RejectFixture::feed
+session_reject:RejectFixture::feed
 ReloadCredentialsTest::run_open
 ResetSeqnumPolicyMatrixTest::feed
 ResetSeqnumPolicyMatrixTest::run_open
