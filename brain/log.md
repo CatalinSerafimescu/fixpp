@@ -91,3 +91,17 @@ status: stable
   a libFuzzer harness that links no gtest were being offered for a migration whose miss branch is
   `ADD_FAILURE()`. A correct row and a fallback row printed identically. This is the no-result path
   wearing a value, and it is why the unresolved case now has its own bucket outside every recipe.
+
+- **2026-09-05 — batch 11's verification found three defects in the INSTRUMENTS and none in the 82
+  migrated sites.** (1) `ci/pump-red-arm.sh` could report a false `SILENT` — `pipefail` plus
+  `grep -q` in a pipeline exits 141 *when the pattern matches*, size-dependently, so it had shipped
+  in batch 10 and passed on small arms. Recorded as a new bullet under failure class 1, because the
+  tell is a CONTRADICTION (the matcher says "not found" while the diagnostic prints the text) rather
+  than an error. (2) A timeout discarded the output, collapsing "reported then wedged" into
+  "inconclusive"; the driver now reads the partial output and surfaces the wedge count on the summary
+  line. (3) The arm timeout was a round 180 s where the competing quantity is `kQuiesceBudget` x the
+  forced count — measured 48 for one label — so it manufactured three false timeouts.
+
+  All three wedges turned out to be the SAME thing and it is worth keeping: forcing a miss wedged the
+  run at an **unmigrated** `run_for(); … get()` later in the same test. That is #289's hazard shown
+  live, and it is evidence for the remaining migration rather than against the migrated sites.

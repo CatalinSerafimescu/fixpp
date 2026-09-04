@@ -40,10 +40,14 @@ cd "$repo_root"
 bindir="build/$preset/bin"
 [ -d "$bindir" ] || { echo "pump-seam-arm: no $bindir -- build first" >&2; exit 2; }
 
-# A forced miss makes a test fail fast, so a slow arm means a HANG, not a slow box.
-# Derived from the primitive's own drain budget (kQuiesceBudget = 5 s) with room
-# for a suite of them, NOT taken as a round default.
-TIMEOUT_S="${PUMP_SEAM_ARM_TIMEOUT:-180}"
+# ⚠️ DERIVE THIS FROM THE COMPETING QUANTITY, DO NOT TAKE A ROUND DEFAULT. A forced miss
+# is NOT fast: every miss runs the primitive's drain, bounded by `kQuiesceBudget` = 5 s, and
+# one label can be forced once per test that reaches it. Batch 11 measured a single label
+# forced 48 times legitimately, so a flat 180 s admits only ~36 misses and turns a healthy
+# arm into a false timeout -- which is what it did, three times.
+# 600 s = 120 forced misses at the full drain budget, which is comfortably above the
+# measured maximum. Raise it if a batch's max forced count approaches that.
+TIMEOUT_S="${PUMP_SEAM_ARM_TIMEOUT:-600}"
 
 ANNOUNCE='#289 FORCED window miss at site: '
 # Match the kWindowMiss TAIL plus the label, never the bare label: the drain's
@@ -53,7 +57,7 @@ REPORT_TAIL='grace slice. Site: '
 mapfile -t LABELS < <(grep -vE '^\s*(#|$)' "$labels_file" || true)
 assert_nonempty_population "${#LABELS[@]}" "$labels_file" pump-seam-arm labels
 
-red=0; silent=0; nosite=0; inconclusive=0; ran=0
+red=0; silent=0; nosite=0; inconclusive=0; ran=0; wedged=0
 declare -a NOTES=()
 
 # ── Index label -> binaries with ONE `strings` pass per binary ───────────────
@@ -119,10 +123,35 @@ run_label() {                      # $1 = label, $2 = "expect-red" | "expect-nos
             out=$(FIXPP_FORCE_WINDOW_MISS="$label" timeout "$TIMEOUT_S" "$b" 2>&1) || rc=$?
         fi
         if [ "$rc" -eq 124 ]; then
-            printf '    ~~   INCONCLUSIVE: %s timed out in %s\n' "$label" "$(basename "$b")"
-            printf '         a forced miss HANGS when the pump is indirected through a helper\n'
+            # ⚠️ A TIMEOUT MUST NOT DISCARD THE OUTPUT. The partial output already says
+            # whether the miss branch REPORTED before the process wedged, and those are two
+            # different findings:
+            #   reported, then hung -> the ARM is RED. The hang is somewhere AFTER the site,
+            #       and in this batch it was always the same thing: an UNMIGRATED
+            #       `run_for(); get()` later in the same test, which is exactly the #289
+            #       hazard -- a missed window plus an unconditional get() is a wedge. That
+            #       is evidence FOR the remaining migration, not against this site.
+            #   never reported     -> genuinely inconclusive; the arm zeroed a window the
+            #       test never waited on (census blind spot (c)).
+            # An earlier revision collapsed both into INCONCLUSIVE and cost a manual
+            # per-test bisect to separate them.
+            local t_ann t_rep
+            t_ann=$(grep -cF "$ANNOUNCE$label" <<<"$out" || true)
+            t_rep=$(grep -cF "$REPORT_TAIL$label" <<<"$out" || true)
+            if [ "$t_ann" -gt 0 ] && [ "$t_rep" -gt 0 ]; then
+                printf '    RED* %-46s forced %2d  reported %2d  THEN HUNG in %s\n' \
+                    "$label" "$t_ann" "$t_rep" "$(basename "$b")"
+                printf '         the miss branch REPORTED; the wedge is later in the run.\n'
+                printf '         last test started: %s\n' \
+                    "$(grep -E '^\[ RUN' <<<"$out" | tail -1 | sed 's/^\[ RUN *\] *//')"
+                NOTES+=("$label: reported, then the run wedged in $(basename "$b") -- \
+look for an UNMIGRATED run_for/get after this site")
+                red=$((red + 1)); wedged=$((wedged + 1)); return 0
+            fi
+            printf '    ~~   INCONCLUSIVE: %s timed out in %s with NO report\n' "$label" "$(basename "$b")"
+            printf '         the arm may have zeroed a window the test never waited on\n'
             printf '         (census blind spot (c)) -- that is a finding, not a slow box.\n'
-            NOTES+=("$label: TIMEOUT in $(basename "$b")")
+            NOTES+=("$label: TIMEOUT with no report in $(basename "$b")")
             inconclusive=$((inconclusive + 1)); return 1
         fi
         ann=$((ann + $(grep -cF "$ANNOUNCE$label" <<<"$out" || true)))
@@ -166,7 +195,11 @@ run_label "PumpSeamArm::__no_such_site__" expect-nosite || true
 assert_ran_count "$ran" "${#LABELS[@]}" pump-seam-arm "label(s)"
 
 echo
-echo "=== summary: RED=$red SILENT=$silent NO-SUCH-SITE=$nosite INCONCLUSIVE=$inconclusive of ${#LABELS[@]}"
+# ⚠️ THE WEDGE COUNT IS ON THE SUMMARY LINE ON PURPOSE. A RED* arm PASSES -- the branch it
+# tests reported -- so without this the only trace of a wedged run is a note, and a summary
+# that reads "RED=N of N" with a hidden wedge is the fails-toward-clean shape.
+echo "=== summary: RED=$red (of which $wedged reported THEN WEDGED) SILENT=$silent" \
+     "NO-SUCH-SITE=$nosite INCONCLUSIVE=$inconclusive of ${#LABELS[@]}"
 if [ "${#NOTES[@]}" -gt 0 ]; then
     printf '  note: %s\n' "${NOTES[@]}"
 fi

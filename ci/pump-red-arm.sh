@@ -265,7 +265,17 @@ while IFS=$'\t' read -r file anchor label target regex; do
         echo "    ~~ INCONCLUSIVE: timed out after ${TIMEOUT_S}s -- the pump this arm zeroed is"
         echo "       probably NOT the one the test waits on (indirected pump)."
         NOTES+=("HUNG $label")
-    elif printf '%s' "$out" | grep -qF "$TAIL$label"; then
+    # ⚠️ HERESTRING, NOT A PIPELINE -- AND THIS WAS A REAL FALSE "SILENT".
+    # `set -o pipefail` is on. `grep -q` exits at the FIRST match and closes the pipe, so
+    # `printf` dies with SIGPIPE (141) and pipefail makes the PIPELINE non-zero even though
+    # the match succeeded. The bug is SIZE-DEPENDENT: with little output printf finishes
+    # before grep exits and the pipeline reads 0, which is why batch 10's small arms never
+    # saw it. Against a 438-test binary it fired every time, and it fails toward the WRONG
+    # VERDICT -- three correctly-reporting sites were called SILENT, i.e. "the miss branch
+    # did not announce itself", which would have sent someone to fix migrations that were
+    # already right. Reproduce: `set -o pipefail; printf '%s' "$big" | grep -qF x` -> 141.
+    # [[feedback_every_broken_instrument_in_this_repo_fails_toward_clean]]
+    elif grep -qF "$TAIL$label" <<<"$out"; then
         echo "    RED as required: reported '${TAIL}${label}'"
         pass=$((pass+1))
     else

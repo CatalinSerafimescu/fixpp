@@ -68,6 +68,17 @@ prints `0` for a whole syntax.
   migrating it — and add a control that fails if the fallback is reverted, since a control asserting
   the common case would have passed the whole time it was wrong.
 
+- ⚠️ **A SHELL PIPELINE CAN TURN A SUCCESSFUL MATCH INTO A FAILURE, AND IT DOES SO ONLY ON LARGE
+  INPUTS.** Under `set -o pipefail`, `printf '%s' "$out" | grep -q PATTERN` exits **141** when the
+  pattern MATCHES: `grep -q` stops at the first hit and closes the pipe, `printf` takes SIGPIPE, and
+  pipefail propagates it. Measured in `ci/pump-red-arm.sh`, where the `else` branch reads *"NO
+  REPORT — the miss branch did not announce itself"*: three correctly-migrated sites were reported
+  SILENT. **It is size-dependent**, so it had shipped a batch earlier and passed every time — with
+  little output `printf` finishes before `grep` exits. A fixture-sized self-test cannot see it.
+  Use a herestring (`grep -q PATTERN <<<"$out"`). ⚠️ **The tell is a contradiction, not an error**:
+  the matcher says "not found" while the surrounding diagnostic prints the very text it wanted —
+  chase that rather than re-reading the pattern.
+
 - ⚠️ **Ask what the instrument does when it finds NOTHING — and require that to be an error.** An
   extractor that runs to EOF, a query that returns empty, a matcher that never fires: if the
   no-result path exits 0 and yields a value, the value is wrong and confident. **Fail closed**, then
