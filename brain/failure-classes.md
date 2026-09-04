@@ -37,6 +37,20 @@ prints `0` for a whole syntax.
   no match. Assert how many files the sweep actually examined, and check whether any root is a link.
 - ⚠️ **A self-test written from the implementation certifies the implementation**, bug included. Build
   fixtures from the real artefact, verbatim.
+- ⚠️ **A control set thorough about ONE of an instrument's configurations proves nothing about the
+  others.** If the instrument is parameterised — two closing markers, two directories, two presets,
+  two file classes — then "the controls pass" is a claim about whichever parameter the controls
+  happened to use. Enumerate the configurations the *real run* uses and require a control per
+  configuration; a suite that is exhaustive within one of them still reports PROVEN while another is
+  broken.
+- ⚠️ **Controls anchored to REAL artefacts assert a contingent fact about today's tree; controls built
+  from SYNTHETIC fixtures assert a property of the instrument.** Prefer synthetic. A real-file anchor
+  fails when the tree legitimately changes, and a later reader cannot distinguish a rotted anchor from
+  a broken instrument.
+- ⚠️ **Ask what the instrument does when it finds NOTHING — and require that to be an error.** An
+  extractor that runs to EOF, a query that returns empty, a matcher that never fires: if the
+  no-result path exits 0 and yields a value, the value is wrong and confident. **Fail closed**, then
+  mutate the tool to confirm the closed path is reachable.
 
 ### 2. A fix that replaces a wrong claim with a NEW claim reproduces the defect
 

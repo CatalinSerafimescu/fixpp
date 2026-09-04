@@ -243,20 +243,31 @@ private:
 // awaited coroutine is still SUSPENDED, and `get()` would block on a future nothing
 // will complete.
 //
-// THIRD COPY, of TWO different populations -- the closing anchor picked below tells
-// them apart. The `── #289:` heading through "...releases exactly that waiter." is
-// byte-identical in SIX files: `tc_establishment`, `tc_liveness`, `tc_logout`,
-// `tc_reject`, `tc_seqnum`, and this one. The full span, through "...once rather than
-// twice." (additionally carrying the `kWindowMissSentinel` doc block below), is
-// byte-identical in the THREE that define that constant: `tc_establishment`,
-// `tc_seqnum`, and this one. `diff`-ing against the closing anchor you mean to audit
-// is what detects real divergence in that population; diffing against the other
-// anchor over the wrong file set will just report noise. (Anchored by those lines
-// rather than by a line COUNT: a count inside a comment about drift is itself a thing
-// that drifts, and the first revision of this addendum stated one that was already
-// wrong.) The audit only works if this copy stays VERBATIM, not paraphrased -- an
-// earlier revision paraphrased it and silently dropped the sentinel's precondition.
-// Keep it verbatim; put anything file-specific under this addenda heading instead.
+// THIS FILE IS IN BOTH COPIED-SPAN POPULATIONS, and each population is a MEASUREMENT,
+// not a fact to cache here. The PREFIX runs from the `── #289:` heading through
+// "...releases exactly that waiter."; the FULL span continues through "...once rather
+// than twice." and additionally carries the `kWindowMissSentinel` doc block, so only
+// files DEFINING that constant can be in it. This file defines it and is in both.
+// `diff`-ing against the closing anchor you did NOT mean to audit reports noise, not
+// divergence.
+//
+// An earlier revision named both populations as explicit lists of file names. A later
+// PR amended one listed member's PREFIX span in place; the list did not notice and went
+// on asserting byte-identity for a file that no longer had it. Do not repair that by
+// restating the lists with corrected names -- that is the same claim, one merge from
+// being wrong the same way. Derive them:
+//
+//     .specify/decisions/289-data/audit-copy-span.sh
+//
+// Self-testing, with a look-alike in its control set and a non-vacuous demonstration
+// that its one-shot extractor is load-bearing; it refuses to print a grouping it cannot
+// stand behind. Files sharing a hash are the population an audit may `diff` against; a
+// file that carries the heading but hashes differently has diverged DELIBERATELY, and
+// that divergence is the thing to read, not to normalise away.
+//
+// The audit only works if this copy stays VERBATIM, not paraphrased -- an earlier
+// revision paraphrased it and silently dropped the sentinel's precondition. Keep it
+// verbatim; put anything file-specific under this addenda heading instead.
 //
 // ⚠️ ONE CLAUSE OF THE QUOTED TEXT IS ALREADY SPENT, and it is reproduced above only
 // because the audit requires byte-identity -- not because it still holds. "so that

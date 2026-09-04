@@ -7,6 +7,8 @@ refs:
   - include/fixpp/transport/test/mock_transport.hpp
   - .specify/constitution.md
   - tools/check_alloc.py
+  - tests/support/pump_until_ready.hpp
+  - ci/pump-census.sh
 codegraph_entry: [mock_transport, Clock, system_clock_source]
 constitution: ["§VII", "§VII.4", "§VIII.5"]
 ---
@@ -60,6 +62,74 @@ markers enclose: *"zero allocations"* means *zero in that window*, never *anywhe
 ```bash
 ls tests/alloc_guard/ && sed -n '1,12p' tools/check_alloc.py
 ```
+
+## ⭐ Bounded pumps (#289): the hazard is the unconditional `get()`, not the fixed window
+
+Tests drive a manually-pumped `io_context`. The idiom
+`ioc.run_for(W); ioc.restart(); fut.get()` **deadlocks** whenever the awaited op posts its completion
+after `W` closes and nothing pumps again — reported by ctest as a timeout, and on a lane with no ctest
+timeout configured, as a wedged job. `tests/support/pump_until_ready.hpp` holds the replacements.
+
+**Why the window is PRESERVED rather than replaced by a self-driving pump.** Two reasons, both
+measured and both still binding:
+
+- `pump_until_ready` takes a **work guard**, so `run_for` cannot drain early and every call burns a
+  slice. That is a documented per-call cost floor, and the migrated sites are microsecond-scale.
+- The first transition to Active `co_spawn`s a **detached** `run_liveness_loop()`, and `co_spawn`
+  POSTS its first resumption. An early-exit pump that stopped at future-readiness would leave that
+  task unserviced; running the original window services it exactly as before.
+
+So `run_window_then_ready` runs the caller's own window, then grants **one** boundary grace slice —
+because `run_one_until` tests `now < abs_time` *before* dispatching, leaving a handler that became
+ready at the instant the window closed merely QUEUED. The grace is not a CI tolerance and must not be
+grown into one.
+
+⚠️ **The teardown shape is a property of the FIXTURE, not a style choice.** A drain is what RESUMES a
+suspended frame, so draining in the wrong scope is worse than not draining:
+
+| the `Session` is… | teardown |
+|---|---|
+| owned by the fixture | drain in the fixture destructor **body** |
+| a block-local declared AFTER the fixture | drain on the **miss branch**, in the scope that still owns the storage — a destructor drain there is a measured `stack-use-after-scope` |
+
+⚠️ **`ioc` must stay the FIRST fixture member.** Nothing holding a strand taken from the context may
+outlive the context.
+
+### ⚠️⚠️ A state assertion after a helper call is NOT a masking barrier
+
+When designing forced-miss (RED) arms, the natural model is that a helper's miss-branch `return` will
+be caught by the caller's next `ASSERT_EQ(sess.state(), …)`, aborting the test and masking every later
+site on that path. **That model is wrong, and it is wrong in the direction that makes an arm look
+masked when it is live.**
+
+The miss branch calls `cancel_and_drain_or_report`, whose drain is generously budgeted. That drain
+**completes the suspended coroutine** — which is its entire purpose — so the session reaches the state
+the assertion is checking, the assertion PASSES, and execution continues into the sites the model
+predicted were unreachable.
+
+- **Trigger:** you are partitioning forced-miss arms and reasoning about which sites mask which.
+- **Procedure:** treat the predicted firing count as **falsifiable**, run the arm, and count. What
+  actually masks is an early `return` reaching a caller that cannot continue *for a reason the drain
+  cannot repair* — not a state check the drain satisfies on its way past.
+- ⚠️ Count on the **miss message's own distinctive tail**, not on the site label: the drain's residual
+  report carries the same label, so a label-only count conflates the two.
+
+This is the same family as [`message-store-quiescence.md`](./message-store-quiescence.md)'s warning
+that a cleanup which completes a pending operation writes the state your verdict then reads.
+
+**What remains to migrate is derived, never remembered** — the pin is an exact set, checked both
+directions:
+
+```bash
+bash ci/pump-census.sh        # exit 0 iff the tree matches ci/expected-pump-sites.txt
+bash ci/test-pump-census.sh   # the census's own assertions
+```
+
+⚠️ **The census has two blind spots and neither is visible in the pin**: a site whose `.get()` sits
+beyond the lookahead was never *in* the pin and cannot leave it, and a site you deliberately preserve
+de-censuses itself when a neighbour's migration shifts its `.get()` past that lookahead. **An empty
+pin would be a statement about the census, not about the tree.** The registry of blind spots lives in
+`ci/pump-census.sh`'s header — add to it, do not renumber it.
 
 ## ⚠️ The catalogue's `test` rows are not a coverage measure
 
