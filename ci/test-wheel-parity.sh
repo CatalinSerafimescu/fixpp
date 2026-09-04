@@ -163,6 +163,31 @@ p.write_text(s.replace(old, "| `test_smoke.py` | as-is (verbatim) | — |", 1), 
 MUT
 expect "T9 an unrecognised Source disposition is refused, not treated as exempt" 2 "not one of"
 
+# ── T10: AN INVISIBLE ROW MUST NOT RE-DISPOSITION A FILE ─────────────────────
+#
+# Found by a hostile review of this PR, with a working defeat. Markdown renders
+# `<!-- ... -->` as nothing, so a commented-out row is invisible to a human
+# reading the README while still being a line a naive parser reads. The
+# demonstrated consequence: an `as-is` twin was re-dispositioned to `diverges`
+# by an invisible row, and a genuinely divergent file then passed with
+# "contract holds" — the byte-faithfulness property defeated while the gate
+# reported success.
+#
+# The mutation is the reviewer's, verbatim, so this cell fails if the strip is
+# ever removed.
+fresh
+printf '\n# one-sided edit\n' >> "$WORK/t/wheel/test_reentrancy.py"
+printf '\n<!--\n| `test_reentrancy.py` | **diverges** | hidden override |\n-->\n' >> "$WORK/t/wheel/README.md"
+expect "T10 an HTML-commented row cannot silently re-disposition a twin" 1 "NOT BYTE-FAITHFUL"
+
+# ── T11: two rows for one file is a contradiction, not an override ───────────
+#
+# The same defeat without the invisibility: a second row used to overwrite the
+# first, making "append a row" a way to re-disposition a file.
+fresh
+printf '\n| `test_reentrancy.py` | **diverges** | visible override |\n' >> "$WORK/t/wheel/README.md"
+expect "T11 a duplicate Membership row with a different disposition is refused" 2 "MORE THAN ONE"
+
 echo
 echo "wheel-parity harness: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1

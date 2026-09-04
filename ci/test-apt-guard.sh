@@ -117,6 +117,13 @@ cat > "$WORK/nope.sh" <<'SH'
 exit 42
 SH
 
+# Exits 124 IMMEDIATELY and by its own choice — 124 is `timeout`'s code, so a
+# wrapper that reads the exit code alone would call this a wedged mirror.
+cat > "$WORK/self124.sh" <<'SH'
+#!/usr/bin/env bash
+exit 124
+SH
+
 chmod +x "$WORK"/*.sh
 
 echo "== apt-guard.sh =="
@@ -150,6 +157,35 @@ if run_cell T3; then
         ok "T3 a SIGTERM-deaf command is force-killed (${sec}s, budget 2s + 3s kill grace)"
     else
         bad "T3 a SIGTERM-deaf command outlived its bound (${sec}s) — --kill-after is missing or ineffective"
+    fi
+
+    # ⚠️ ELAPSED TIME ALONE WAS NOT ENOUGH, and this cell shipped that way. It
+    # proved the kill HAPPENED and never that it was REPORTED correctly — a
+    # forced-MISS arm that cannot catch a spurious HIT. GNU timeout returns 124
+    # when SIGTERM sufficed but 137 when --kill-after escalated, so the one path
+    # this flag exists for was being logged as an ordinary command failure
+    # instead of a wedged mirror, defeating #300's attribution half. The status
+    # and the diagnostic are now asserted alongside the clock.
+    rc=0
+    out=$(APT_GUARD_TIMEOUT=2 APT_GUARD_KILL_AFTER=1 APT_GUARD_ATTEMPTS=1 \
+            "$GUARD" t3b -- "$WORK/deaf.sh" 2>&1) || rc=$?
+    check "T3 a SIGTERM-deaf timeout still reports the documented 124" "$rc" "124"
+    if echo "$out" | grep -qi 'wedged or degraded apt mirror'; then
+        ok "T3 a SIGTERM-deaf timeout is attributed to the MIRROR, not to the package set"
+    else
+        bad "T3 a SIGTERM-deaf timeout was not attributed to the mirror — it reads as an ordinary command failure, which is the attribution defect #300 is about"
+    fi
+
+    # The other direction: a command that exits 124 BY ITSELF, fast, is not a
+    # timeout. Without the elapsed check, keying on the exit code alone would
+    # label it a wedged mirror and send the next reader down the wrong path.
+    rc=0
+    out=$(APT_GUARD_TIMEOUT=30 APT_GUARD_ATTEMPTS=1 "$GUARD" t3c -- "$WORK/self124.sh" 2>&1) || rc=$?
+    check "T3 a command exiting 124 on its own keeps its code" "$rc" "124"
+    if echo "$out" | grep -qi 'wedged or degraded apt mirror'; then
+        bad "T3 a fast, self-inflicted 124 was mislabelled as a wedged mirror — the watchdog flag is being inferred from the exit code"
+    else
+        ok "T3 a fast, self-inflicted 124 is NOT mislabelled as a mirror"
     fi
 fi
 
@@ -265,6 +301,14 @@ mutant no-kill-after \
 mutant no-timeout \
     's|^    timeout --kill-after=.*$|    "$@"|' \
     "T2" "retries an UNBOUNDED command — the hang-multiplying shape #300 warns about"
+
+# 4. THE DEFECT THIS PR SHIPPED AND A REVIEW CAUGHT: infer the timeout from the
+#    raw exit code instead of tracking whether the watchdog fired. Passes the
+#    clock half of T3 (the kill still happens) and misreports the sudo-shaped
+#    case, which returns 137 rather than 124.
+mutant infer-timeout-from-exit-code \
+    's|^    if \[ "\$rc" -eq 124 \] \|\| \[ "\$rc" -eq 137 \]; then$|    if [ "$rc" -eq 124 ]; then|' \
+    "T3" "classifies a wedged mirror from the raw exit code, so a SIGTERM-deaf hang (137) reads as an ordinary failure"
 
 # 3. Normalise every failure to 1, losing the mirror-vs-package distinction.
 mutant flatten-exit \

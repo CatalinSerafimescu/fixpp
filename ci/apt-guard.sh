@@ -37,9 +37,10 @@
 #
 # EXIT CODES
 #   0    the command succeeded (on some attempt)
-#   124  every attempt timed out — `timeout`'s own code, preserved deliberately
-#        so a wedged mirror is distinguishable from a package that does not
-#        exist
+#   124  every attempt was ended by the watchdog — a wedged or degraded mirror,
+#        distinguishable from a package that does not exist. NORMALISED: the raw
+#        status is 124 when SIGTERM sufficed and 137 when --kill-after had to
+#        escalate, and the caller should not have to know which
 #   *    the command's own failing exit code from the final attempt
 set -euo pipefail
 
@@ -95,11 +96,36 @@ APT_GUARD_TIMEOUT="${APT_GUARD_TIMEOUT:-$_apt_guard_default_timeout}"
 
 # `sudo` is how every caller invokes apt, and sudo does not forward a SIGTERM
 # to its child. `timeout --kill-after` is what closes that: SIGTERM first (so a
-# well-behaved apt can unwind), SIGKILL 10s later if it is genuinely wedged.
-# Without --kill-after a hung `sudo apt-get` survives its own timeout and the
-# bound is decorative.
+# well-behaved apt can unwind), SIGKILL after the grace if it is genuinely
+# wedged. Without --kill-after a hung `sudo apt-get` survives its own timeout and
+# the bound is decorative.
+#
+# ⚠️ THE EXIT CODE ALONE CANNOT TELL YOU THE WATCHDOG FIRED, and believing it
+# could was a real defect here. GNU `timeout` returns 124 when its SIGTERM ended
+# the child, but 128+9 = 137 when --kill-after had to escalate to SIGKILL — which
+# is EXACTLY the sudo-shaped case --kill-after exists for. So the one path the
+# flag was added to support was being reported as an ordinary command failure
+# rather than as a wedged mirror, defeating the attribution half of #300.
+#
+# Neither code is sufficient on its own in the other direction either: 137 is
+# also what an OOM kill looks like, and a command is free to exit 124 by itself.
+# So a timeout is identified by BOTH a watchdog-shaped status AND the attempt
+# having actually reached its budget. Milliseconds, because a whole-second clock
+# reads a 1.99 s attempt against a 2 s budget as "did not reach it".
+attempt_timed_out=0
 run_attempt() {
-    timeout --kill-after="${APT_GUARD_KILL_AFTER}s" "${APT_GUARD_TIMEOUT}s" "$@"
+    local t0 t1 rc=0
+    t0=$(date +%s%N)
+    timeout --kill-after="${APT_GUARD_KILL_AFTER}s" "${APT_GUARD_TIMEOUT}s" "$@" || rc=$?
+    t1=$(date +%s%N)
+    attempt_timed_out=0
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+        # 50 ms of slack absorbs timer granularity; it is far below any real budget.
+        if [ $(( (t1 - t0) / 1000000 + 50 )) -ge $(( APT_GUARD_TIMEOUT * 1000 )) ]; then
+            attempt_timed_out=1
+        fi
+    fi
+    return "$rc"
 }
 
 # Killing apt mid-transaction can leave dpkg needing a `--configure -a` before
@@ -114,6 +140,9 @@ recover_dpkg() {
 
 rc=0
 attempt=1
+# Sticky: set by any attempt the watchdog ended, and what the final disposition
+# and exit code are derived from.
+timed_out=0
 while [ "$attempt" -le "$APT_GUARD_ATTEMPTS" ]; do
     echo "── apt-guard [$LABEL] attempt $attempt/$APT_GUARD_ATTEMPTS (bound ${APT_GUARD_TIMEOUT}s): $*"
     rc=0
@@ -124,11 +153,12 @@ while [ "$attempt" -le "$APT_GUARD_ATTEMPTS" ]; do
         exit 0
     fi
 
-    # 124 is `timeout`'s "the command outlived its budget". Distinguished in
-    # the log because it means the MIRROR, not the package set — the two need
-    # different responses from whoever reads the failure.
-    if [ "$rc" -eq 124 ]; then
-        echo "::warning::apt-guard [$LABEL] attempt $attempt exceeded ${APT_GUARD_TIMEOUT}s (mirror slow or wedged)"
+    # A timeout means the MIRROR; any other failure means the package set. The
+    # two need different responses from whoever reads the log, so they are
+    # distinguished on the watchdog flag rather than on the raw exit code.
+    if [ "$attempt_timed_out" -eq 1 ]; then
+        timed_out=1
+        echo "::warning::apt-guard [$LABEL] attempt $attempt exceeded ${APT_GUARD_TIMEOUT}s (mirror slow or wedged; raw exit $rc)"
     else
         echo "::warning::apt-guard [$LABEL] attempt $attempt failed with exit $rc"
     fi
@@ -145,9 +175,12 @@ done
 # Attribution: the whole point of the issue is that this failure currently
 # reads as "the build timed out". Name apt, the label, and the budget, so the
 # log line that survives says what actually broke.
-if [ "$rc" -eq 124 ]; then
+if [ "$timed_out" -eq 1 ]; then
     echo "::error::apt-guard [$LABEL] FAILED — all $APT_GUARD_ATTEMPTS attempts exceeded ${APT_GUARD_TIMEOUT}s. This is a wedged or degraded apt mirror, not a build failure."
-else
-    echo "::error::apt-guard [$LABEL] FAILED — all $APT_GUARD_ATTEMPTS attempts failed; last exit $rc."
+    # NORMALISED to 124, which is what the EXIT CODES block above promises. The
+    # raw code may be 137 when --kill-after escalated; a caller reading for "the
+    # mirror was wedged" must not have to know which signal ended it.
+    exit 124
 fi
+echo "::error::apt-guard [$LABEL] FAILED — all $APT_GUARD_ATTEMPTS attempts failed; last exit $rc."
 exit "$rc"

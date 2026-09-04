@@ -57,6 +57,8 @@ ROW = re.compile(r"^\|\s*`(?P<file>[\w.]+\.py)`\s*\|(?P<source>[^|]*)\|")
 # Any `name.py` mentioned anywhere in the README — the enumeration check is
 # about being NAMED, which the support-module prose does outside the table.
 MENTION = re.compile(r"`([\w.]+\.py)`")
+# Markdown hides these entirely; so must the parser. See the strip in main().
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 TESTDEF = re.compile(r"^def (test_\w+)", re.M)
 
 # The Source-column tokens the Membership table may use. Anything else is fatal:
@@ -87,7 +89,16 @@ def main():
               f"cannot be checked without it.")
         return 2
 
-    text = readme.read_text(encoding="utf-8")
+    raw = readme.read_text(encoding="utf-8")
+
+    # ⚠️ STRIP HTML COMMENTS BEFORE PARSING ANYTHING.
+    # Markdown renders `<!-- ... -->` as nothing, so a commented-out row is
+    # INVISIBLE in the README while still being a line this file would otherwise
+    # read. A review demonstrated the consequence: appending a commented
+    # duplicate row re-dispositioned an `as-is` twin to `diverges`, and a
+    # genuinely divergent file then passed the gate with "contract holds".
+    # The allowlist must be what a human reviewing the README actually sees.
+    text = HTML_COMMENT.sub("", raw)
     mentioned = set(MENTION.findall(text))
 
     # Disposition per Membership row. `as-is` is the claim of byte-faithfulness;
@@ -117,7 +128,17 @@ def main():
                   f"unrecognised disposition would fall through to 'exempt from byte "
                   f"identity', silently disabling the check for that file.")
             return 2
-        dispositions[m.group("file")] = token
+        fname = m.group("file")
+        # ⚠️ A SECOND ROW FOR THE SAME FILE USED TO SILENTLY OVERWRITE THE FIRST,
+        # which made "add another row" a way to re-disposition a file rather than
+        # a contradiction. Two rows disagreeing about one file is not a contract.
+        if fname in dispositions and dispositions[fname] != token:
+            print(f"::error::the README gives `{fname}` MORE THAN ONE Membership row with "
+                  f"different dispositions (`{dispositions[fname]}` and `{token}`). A second "
+                  f"row silently overriding the first is not a contract — keep exactly one "
+                  f"row per file.")
+            return 2
+        dispositions[fname] = token
     as_is = {f for f, t in dispositions.items() if t == "as-is"}
 
     wheel_files = sorted(p for p in wheel.glob("*.py"))

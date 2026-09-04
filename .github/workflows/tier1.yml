@@ -2149,6 +2149,22 @@ jobs:
       - name: Regression pin — wheel/in-tree test parity (#298)
         run: bash ci/test-wheel-parity.sh
 
+      # The CALLER-side invariants for #300 and #213 — the half neither
+      # mechanism's own harness can see.
+      #
+      # ci/test-apt-guard.sh tests the WRAPPER; a bare `sudo apt-get install`
+      # added to any workflow leaves every one of its cells green while "every
+      # apt-backed install is bounded" quietly becomes false. And every fuzz
+      # replay lives under `if(FIXPP_BUILD_FUZZ)`, so flipping that flag OFF does
+      # not trip the zero-registration guard — it stops the guard being evaluated
+      # at all, returning the lane to replaying zero seeds with every script gate
+      # still green. A guard cannot guard its own enabling flag.
+      #
+      # Both invariants were true when written and pinned by nothing; a hostile
+      # review named that as the defect. Synthetic copies only, no build.
+      - name: Regression pin — CI lane policy (#300 callers, #213 fuzz lane)
+        run: bash ci/test-ci-lane-policy.sh
+
       # #209 — the bench gate's own harness. 61 cells over synthetic
       # Google-Benchmark JSON: every hard cell of tools/bench_compare.py and
       # ci/run-bench-suite.sh is proven RED for its own named reason, and the

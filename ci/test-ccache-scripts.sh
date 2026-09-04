@@ -1417,6 +1417,38 @@ want_status 1 "floor-callers/mutant-dangling-step-ref"
 want_out 'can NEVER fire' "floor-callers/mutant-dangling-step-ref"
 ok "MUTANT dangling-step-ref — an expression pointing at no producer step is caught (a non-empty string that resolves to empty)"
 
+# Direction 3b — A HARDCODED LITERAL DISPOSITION. Found by a hostile review of
+# this PR, with a working defeat: replacing argument 2 with the literal `"false"`
+# and dropping the floor was accepted as "consistent". A literal is not a
+# measurement — `false` reports a MISS on every run whatever the cache did, so
+# the lane is permanently exempt from the floor it is supposed to carry.
+mutate_wf tier3-libcxx.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="\"${{ steps.ccache_restore.outputs.hit }}\" \\\n            \"${{ steps.build.outcome }}\" \\\n            70"
+assert old in s, "anchor missing"
+new="\"false\" \\\n            \"${{ steps.build.outcome }}\""
+p.write_text(s.replace(old,new,1),encoding="utf-8")'
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/mutant-literal-disposition"
+want_out 'LITERAL' "floor-callers/mutant-literal-disposition"
+ok "MUTANT literal-disposition — a hardcoded true/false is refused, not read as a measurement"
+
+# Direction 3c — A CONDITIONAL PRODUCER. The same review added `if: false` to the
+# real restore step; the checker still called the site "traceable". A step that
+# may not run is not a producer: a skipped step's outputs.hit is the EMPTY
+# STRING, so the floor — gated on restore == 'true' — silently stops evaluating.
+mutate_wf tier3-libcxx.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="        id: ccache_restore\n"
+assert s.count(old)==1, "anchor missing"
+p.write_text(s.replace(old, old+"        if: false\n",1),encoding="utf-8")'
+run_floorchk "$WFSAND"
+want_status 1 "floor-callers/mutant-conditional-producer"
+want_out 'may not run is not a producer' "floor-callers/mutant-conditional-producer"
+ok "MUTANT conditional-producer — a restore step carrying an if: is refused as a disposition source"
+
 # Direction 4 — THE EMPTY SCAN. If the call sites move or the walk breaks,
 # "0 violations over 0 sites" must not read as a pass. This repo's single most
 # recurring defect is an instrument that reports clean because it could not

@@ -43,12 +43,23 @@ argument 2 must be one of
 
   * an empty literal                       -> the lane has no disposition, and
                                               must therefore pass no floor; or
-  * `${{ steps.<id>.outputs.hit }}` where <id> names a step IN THE SAME JOB
-    whose `run:` invokes ci/restore-ccache.sh -> a real disposition; or
-  * the literal 'true' / 'false'           -> an explicit disposition.
+  * `${{ steps.<id>.outputs.hit }}` where <id> names a step IN THE SAME JOB that
+    invokes ci/restore-ccache.sh AND carries no `if:` -> a real disposition.
 
 Anything else is refused rather than guessed at, because a disposition this
-check cannot trace is one nobody can rely on.
+check cannot trace is one nobody can rely on. Two refusals are worth naming,
+because a hostile review defeated an earlier version through each:
+
+  * A LITERAL `true` / `false` is refused. It is not a measurement: `false`
+    exempts the lane from its floor on every run whatever the cache did, and
+    `true` asserts a hit nobody observed. Hardcoding `false` and dropping the
+    floor was accepted as "consistent" before this.
+  * A CONDITIONAL producer is refused. A restore step carrying an `if:` may be
+    skipped, and a skipped step's `outputs.hit` is the empty string — so the
+    floor stops evaluating. `if: false` on the real tier-3 restore step was
+    accepted as "traceable" before this. Whether a given expression can be false
+    is exactly the static evaluation this file declines to attempt, and guessing
+    wrong fails toward clean.
 
 Stated as a rule rather than as a list of lanes deliberately. A count or a lane
 roster here would rot the moment a lane is added, and would rot SILENTLY —
@@ -137,24 +148,48 @@ def split_args(text):
 
 
 def restore_step_ids(job):
-    """Step ids in this job whose `run:` invokes ci/restore-ccache.sh."""
-    ids = set()
+    """Step ids in this job that UNCONDITIONALLY produce a restore disposition.
+
+    ⚠️ CONDITIONAL PRODUCERS ARE NOT PRODUCERS. A step carrying an `if:` may not
+    run, and a skipped step's `outputs.hit` is the EMPTY STRING — so the floor,
+    gated on `restore == 'true'`, silently stops evaluating. A hostile review
+    demonstrated it: adding `if: false` to the real tier-3 restore step left this
+    check reporting "all consistent" while the floor could never fire again.
+
+    An `if:` here is therefore refused rather than reasoned about. Deciding
+    whether some particular expression can be false is exactly the static
+    evaluation this file declines to attempt elsewhere, and guessing wrong fails
+    toward clean.
+    """
+    ids, conditional = set(), {}
     for step in job.get("steps") or []:
         if not isinstance(step, dict):
             continue
         sid, run = step.get("id"), step.get("run") or ""
         if sid and RESTORE_SCRIPT in run:
-            ids.add(sid)
-    return ids
+            if "if" in step:
+                conditional[sid] = str(step.get("if"))
+            else:
+                ids.add(sid)
+    return ids, conditional
 
 
-def classify(restore_arg, providers):
+def classify(restore_arg, providers, conditional):
     """-> (can_supply, reason_if_untraceable)."""
     tok = restore_arg.strip()
     if tok == "":
         return False, None
     if tok in ("true", "false"):
-        return tok == "true", None
+        # ⚠️ A LITERAL IS NOT A MEASUREMENT. `"false"` at a call site reports a
+        # cache MISS on every run whatever the cache did, which permanently
+        # exempts the lane from its floor; `"true"` asserts a HIT nobody
+        # observed. A review defeated the previous version by hardcoding
+        # `"false"` and dropping the floor — the checker called it consistent.
+        return None, (f"argument 2 is the LITERAL `{tok}`. A hardcoded disposition is "
+                      f"not a measurement: `false` exempts the lane from its floor on "
+                      f"every run regardless of what the cache did, and `true` asserts "
+                      f"a hit nobody observed. It must come from a restore step's "
+                      f"`outputs.hit`")
     m = STEP_HIT.match(tok)
     if not m:
         return None, (f"argument 2 is `{restore_arg}`, which is neither an empty "
@@ -163,6 +198,12 @@ def classify(restore_arg, providers):
                       f"this check cannot trace to its producer is one nobody can "
                       f"rely on")
     sid = m.group("id")
+    if sid in conditional:
+        return None, (f"argument 2 references step id `{sid}`, which invokes "
+                      f"{RESTORE_SCRIPT} but carries `if: {conditional[sid]}`. A step that "
+                      f"may not run is not a producer: when it is skipped its "
+                      f"`outputs.hit` is the EMPTY STRING, so the floor — gated on "
+                      f"`restore == 'true'` — silently stops evaluating")
     if sid not in providers:
         return None, (f"argument 2 references step id `{sid}`, but no step in this "
                       f"job has that id AND invokes {RESTORE_SCRIPT}. The expression "
@@ -190,7 +231,7 @@ def main():
         for job_name, job in (doc.get("jobs") or {}).items():
             if not isinstance(job, dict):
                 continue
-            providers = restore_step_ids(job)
+            providers, conditional = restore_step_ids(job)
             for step in job.get("steps") or []:
                 if not isinstance(step, dict):
                     continue
@@ -204,7 +245,7 @@ def main():
                 preset = args[0] if args else "?"
                 restore = args[1] if len(args) > 1 else ""
                 floor = args[3] if len(args) > 3 else ""
-                can_supply, untraceable = classify(restore, providers)
+                can_supply, untraceable = classify(restore, providers, conditional)
 
                 where = f"{path.name}:{job_name}"
                 sites.append((where, preset, can_supply, floor))
