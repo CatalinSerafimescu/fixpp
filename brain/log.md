@@ -6,6 +6,25 @@ status: stable
 
 # Log
 
+- **2026-09-04 — #289 batch 9, review rounds.** `components/test.md` gains `ci/pump-get-sweep.sh`
+  and, more usefully, the script's own three-round history: every fix for a false-clean introduced
+  the next one, which `failure-classes.md` class 1 now carries as a condition. Also recorded there
+  because it is a distinct trap: a limitation can be *invisible rather than absent* — that script's
+  scope disclosure shipped as literal `\n` escapes on one 613-character line, so the honest caveat
+  nobody could read was worth nothing.
+
+- **2026-09-04 — #289 batch 9: the census gains a THIRD blind spot, and it is the one widening
+  cannot reach.** `components/test.md` records it: when the pump is indirected through a helper
+  (`f.drain();` between the `co_spawn` and the `get()`) there is no `ioc.run_for` for the census to
+  anchor on, so no lookahead width finds it. Found by a forced-miss arm that HUNG rather than going
+  RED. The durable lesson is about the detector, not the defect: the first one written matched a bare
+  `run()` but excluded a preceding `.`, so `f.drain()` was invisible and it reported zero for the very
+  file that hung — `failure-classes.md` class 1 already says an instrument fails toward clean, and
+  this adds the specific remedy, which is to start the sweep from the `get()` rather than from the
+  pump so no unanticipated helper shape can hide. Also recorded: a pin row can sit in DEAD CODE (a
+  migrated site in an uncalled fixture helper drops a row and can never fire), so a non-firing arm is
+  a question about reachability before it is evidence of a broken arm.
+
 - **2026-09-04 — #289 batch 8.** `components/test.md` gains the bounded-pump section: why the window is
   PRESERVED, the fixture-dependent teardown shape, the census's two blind spots, and — new — that **a
   state assertion after a helper call is not a masking barrier**, because the miss branch's own drain

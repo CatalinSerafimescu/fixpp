@@ -59,6 +59,16 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
@@ -211,12 +221,24 @@ struct StrandFixture {
     // Open session to Active via acceptor path.
     void open_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        run();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "StrandFixture::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "StrandFixture::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value());
 
         auto logon = make_logon_frame();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        run();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "StrandFixture::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "StrandFixture::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value());
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
@@ -246,7 +268,13 @@ TEST(ApplicationStrand, NoConcurrentCallbacksForOneSession) {
     for (std::uint32_t seq = 2; seq <= 5; ++seq) {
         auto frame = make_app_frame(seq);
         auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(frame), asio::use_future);
-        f.run(100);
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 100ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                f.ioc, *f.clock, "NoConcurrentCallbacksForOneSession/inbound");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "NoConcurrentCallbacksForOneSession/inbound";
+            return;
+        }
         (void)fut.get();
     }
 
@@ -279,13 +307,23 @@ TEST(ApplicationStrand, DrainBeforeDestroy) {
     // Open to Active.
     {
         auto fut = asio::co_spawn(f.ioc, sess->open(), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "DrainBeforeDestroy/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DrainBeforeDestroy/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value());
     }
     {
         auto logon = make_logon_frame();
         auto fut = asio::co_spawn(f.ioc, sess->on_inbound_frame(logon), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "DrainBeforeDestroy/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DrainBeforeDestroy/logon";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value());
         ASSERT_EQ(sess->state(), fixpp::session::fsm_state::Active);
     }
@@ -294,7 +332,12 @@ TEST(ApplicationStrand, DrainBeforeDestroy) {
     {
         auto frame = make_app_frame(2);
         auto fut = asio::co_spawn(f.ioc, sess->on_inbound_frame(frame), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "DrainBeforeDestroy/frame");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DrainBeforeDestroy/frame";
+            return;
+        }
         (void)fut.get();
     }
     EXPECT_GE(app->from_app_count.load(), 1) << "fromApp must have fired";
@@ -302,7 +345,12 @@ TEST(ApplicationStrand, DrainBeforeDestroy) {
     // Terminal-close the session. This drains the session strand before returning.
     {
         auto fut = asio::co_spawn(f.ioc, sess->close(close_mode::terminal), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "DrainBeforeDestroy/close");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DrainBeforeDestroy/close";
+            return;
+        }
         (void)fut.get();
     }
 
@@ -363,13 +411,23 @@ TEST(ApplicationStrand, EngineSendKeepAliveNoUAF) {
     // Open to Active.
     {
         auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "EngineSendKeepAliveNoUAF/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendKeepAliveNoUAF/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value());
     }
     {
         auto logon = make_logon_frame();
         auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(logon), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "EngineSendKeepAliveNoUAF/inbound");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendKeepAliveNoUAF/inbound";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value());
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
@@ -449,8 +507,12 @@ TEST(ApplicationStrand, ReentrantSendNoDeadlock) {
     // Feed an app frame — fromApp fires and sets from_app_fired.
     auto frame = make_app_frame(2);
     auto inbound_fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(frame), asio::use_future);
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, inbound_fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "ReentrantSendNoDeadlock/inbound");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReentrantSendNoDeadlock/inbound";
+        return;
+    }
     (void)inbound_fut.get();
 
     ASSERT_TRUE(app->from_app_fired.load()) << "fromApp must have fired";
@@ -464,8 +526,12 @@ TEST(ApplicationStrand, ReentrantSendNoDeadlock) {
         f.ioc,
         sess.send(std::span<const std::byte>(payload.data(), payload.size())),
         asio::use_future);
-    f.ioc.run_for(300ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, send_fut, 300ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "ReentrantSendNoDeadlock/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReentrantSendNoDeadlock/send";
+        return;
+    }
     auto send_result = send_fut.get();
 
     EXPECT_TRUE(send_result.has_value())
@@ -494,7 +560,12 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
     // open() must succeed and no onCreate fires (no application).
     {
         auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "NullApplicationZeroDelta/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "NullApplicationZeroDelta/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() with null application must succeed";
     }
 
@@ -502,7 +573,12 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
     {
         auto logon = make_logon_frame();
         auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(logon), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "NullApplicationZeroDelta/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "NullApplicationZeroDelta/logon";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "Logon feed with null application must succeed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
             << "session must reach Active with null application";
@@ -512,7 +588,12 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
     {
         auto frame = make_app_frame(2);
         auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(frame), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "NullApplicationZeroDelta/frame");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "NullApplicationZeroDelta/frame";
+            return;
+        }
         (void)fut.get();
         EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
             << "session must stay Active after inbound app frame with null application";
@@ -525,7 +606,12 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
             f.ioc,
             sess.send(std::span<const std::byte>(payload.data(), payload.size())),
             asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "NullApplicationZeroDelta/send");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "NullApplicationZeroDelta/send";
+            return;
+        }
         auto result = fut.get();
         EXPECT_TRUE(result.has_value())
             << "send() with null application must succeed (no toApp veto); error = "
@@ -535,7 +621,12 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
     // close(terminal) → session tears down cleanly.
     {
         auto fut = asio::co_spawn(f.ioc, sess.close(close_mode::terminal), asio::use_future);
-        f.run(300);
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "NullApplicationZeroDelta/close");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "NullApplicationZeroDelta/close";
+            return;
+        }
         (void)fut.get();
     }
     EXPECT_NE(sess.state(), fixpp::session::fsm_state::Active)

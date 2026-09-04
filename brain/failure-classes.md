@@ -47,6 +47,13 @@ prints `0` for a whole syntax.
   from SYNTHETIC fixtures assert a property of the instrument.** Prefer synthetic. A real-file anchor
   fails when the tree legitimately changes, and a later reader cannot distinguish a rotted anchor from
   a broken instrument.
+- ⚠️ **A FIX for a false-clean is itself an instrument change, and routinely introduces the NEXT
+  false-clean.** Measured: one detector took three rounds, each remedy creating the next hole —
+  anchoring on one physical line, then swallowing a region whose parens were unbalanced *inside a
+  string literal*, then leaking guard state across functions because the previous fix narrowed a
+  window instead of removing the assumption. **Re-run every earlier control after each fix, and add
+  the new mode as a control before believing the fix.** A remedy that only closes the reported case
+  is class 2 wearing an instrument's clothes.
 - ⚠️ **Ask what the instrument does when it finds NOTHING — and require that to be an error.** An
   extractor that runs to EOF, a query that returns empty, a matcher that never fires: if the
   no-result path exits 0 and yields a value, the value is wrong and confident. **Fail closed**, then

@@ -73,6 +73,28 @@
 # against this census. Prove the widened scan non-vacuous first: run it over a
 # tree that still contains a known far `.get()` and confirm it reports it.
 #
+# A THIRD blind spot, and WIDENING THE LOOKAHEAD DOES NOT REACH IT: the window is
+# not lexically present at all, because the pump is indirected through a HELPER.
+#
+#     auto fut = asio::co_spawn(f.ioc, sess.send(payload), asio::use_future);
+#     f.drain();                  // <- the window, behind a member call
+#     auto result = fut.get();    // <- unconditional
+#
+# There is no `ioc.run_for` for this scanner to anchor on, so no lookahead width
+# finds it; blind spot (b)'s widening recipe reports nothing here and that zero
+# means only that the anchor is absent. A site of this shape wedges rather than
+# failing, so it costs a lane rather than an assertion (#337 is the reference
+# instance).
+#
+# ⚠️ DO NOT DETECT THIS BY RECOGNISING THE HELPER -- a detector that matches helper
+# SHAPES can only find the shapes its author thought of. Start from the thing that
+# actually blocks instead: every `.get()` on a co_spawn future, asking whether a
+# guard precedes it and NAMES that future. `ci/pump-get-sweep.sh` implements it,
+# with a control per known evasion; add a control the day a new one is found.
+#
+# Its size across the tree is NOT recorded here, deliberately: it is a property of
+# a moving tree, and that sweep re-derives it in seconds.
+#
 # ── EXACT SET, NOT A COUNT ────────────────────────────────────────────────────
 # Comparison is by exact set equality against ci/expected-pump-sites.txt, in
 # BOTH directions. A count alone is satisfied by one site removed plus one

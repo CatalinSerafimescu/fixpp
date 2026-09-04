@@ -9,6 +9,7 @@ refs:
   - tools/check_alloc.py
   - tests/support/pump_until_ready.hpp
   - ci/pump-census.sh
+  - ci/pump-get-sweep.sh
 codegraph_entry: [mock_transport, Clock, system_clock_source]
 constitution: ["§VII", "§VII.4", "§VIII.5"]
 ---
@@ -125,11 +126,40 @@ bash ci/pump-census.sh        # exit 0 iff the tree matches ci/expected-pump-sit
 bash ci/test-pump-census.sh   # the census's own assertions
 ```
 
-⚠️ **The census has two blind spots and neither is visible in the pin**: a site whose `.get()` sits
-beyond the lookahead was never *in* the pin and cannot leave it, and a site you deliberately preserve
-de-censuses itself when a neighbour's migration shifts its `.get()` past that lookahead. **An empty
-pin would be a statement about the census, not about the tree.** The registry of blind spots lives in
+⚠️ **The census has THREE blind spots and none is visible in the pin.** A site you deliberately
+preserve de-censuses itself when a neighbour's migration shifts its `.get()` past the lookahead; a
+site whose `.get()` was always beyond it was never *in* the pin and cannot leave it; and — the one
+that widening cannot reach — **the window may not be lexically present at all**, because the pump is
+indirected through a helper (`f.drain();` between the `co_spawn` and the `get()`). There is no
+`ioc.run_for` to anchor on, so no lookahead width finds it.
+
+**An empty pin would be a statement about the census, not about the tree.** The registry lives in
 `ci/pump-census.sh`'s header — add to it, do not renumber it.
+
+⭐ **The sweep that answers "does this file still have an unguarded `get()`?" must start from the
+`get()`, not from the pump** — `ci/pump-get-sweep.sh`. A detector that recognises helper SHAPES can
+only find the shapes its author thought of, and the cost of a miss is a wedged lane rather than a
+failed assertion. Anchor on the thing every hazard must reach, and require the guard to NAME the
+future it guards.
+
+⚠️⚠️ **THAT SCRIPT'S OWN HISTORY IS THE WARNING: each fix for a false-clean introduced the NEXT
+one.** Round 1 anchored on a single physical line, so a split declaration was invisible. The fix
+spliced statements — and counted parens over raw text, so an unbalanced `(` inside a *string
+literal* swallowed a whole test body, while a `continue` after the declaration skipped that region's
+own `get()`. The fix for the foreign-guard mode narrowed it in RADIUS (a lookback window → the whole
+file) rather than eliminating it, so guard state leaked across tests. **Three rounds, three
+false-cleans, each created by the previous remedy** — the exact shape `failure-classes.md` class 2
+names, arriving in an instrument rather than in prose. Every mode now ships as a control; add one the
+day a new evasion is found, and do not trust a clean file as proof.
+
+⚠️ **An undisclosed limitation is how this recurs — and a disclosure can be invisible rather than
+absent.** That script's scope-limitation paragraph was once written with literal `\n` escapes
+instead of newlines: a single 613-character line nothing would ever read, including through
+`--help`. State limitations, and then *look at the rendered file*.
+
+⚠️ **A pin row can sit in DEAD CODE.** The census is lexical and has no notion of reachability, so a
+migrated site in an uncalled fixture helper drops a pin row while being unable to fire in any arm.
+Read a non-firing RED arm as a question about reachability before assuming the arm is broken.
 
 ## ⚠️ The catalogue's `test` rows are not a coverage measure
 

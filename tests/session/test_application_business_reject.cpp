@@ -40,6 +40,16 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
@@ -161,22 +171,36 @@ struct BusinessRejectFixture {
 
     void open_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "BusinessRejectFixture::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "BusinessRejectFixture::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value());
 
         auto logon = make_logon_frame();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "BusinessRejectFixture::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "BusinessRejectFixture::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value());
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
 
     void feed(Session& s, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "BusinessRejectFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "BusinessRejectFixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 };
