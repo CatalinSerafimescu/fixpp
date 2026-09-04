@@ -1378,9 +1378,16 @@ target_include_directories(application_inbound_019_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 add_test(NAME application_inbound_019 COMMAND application_inbound_019_test)
+# TIMEOUT is explicit here (#289 batch 9): these four are registered with a bare
+# add_test(), NOT via add_threading_test(), so they never inherited that macro's
+# uniform `TIMEOUT 120` and ran UNBOUNDED. That is not theoretical -- a forced-miss
+# arm on this batch wedged application_outbound_019 in futex_do_wait at 0.0% CPU,
+# and the same class already cost this repo an 86-minute UBSan lane wedge (#337).
+# A missing timeout turns a hang into a lane outage instead of a verdict.
 set_tests_properties(application_inbound_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
-  LABELS "019;us1;inbound;application")
+  LABELS "019;us1;inbound;application"
+  TIMEOUT 120)
 
 # ── 019-app-callbacks T009 — BusinessMessageReject(35=j) tests ───────────────
 # MANDATORY named test (Gate A RC#3): fromApp reject → BusinessMessageReject(35=j)
@@ -1400,9 +1407,16 @@ target_include_directories(application_business_reject_019_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 add_test(NAME application_business_reject_019 COMMAND application_business_reject_019_test)
+# TIMEOUT is explicit here (#289 batch 9): these four are registered with a bare
+# add_test(), NOT via add_threading_test(), so they never inherited that macro's
+# uniform `TIMEOUT 120` and ran UNBOUNDED. That is not theoretical -- a forced-miss
+# arm on this batch wedged application_outbound_019 in futex_do_wait at 0.0% CPU,
+# and the same class already cost this repo an 86-minute UBSan lane wedge (#337).
+# A missing timeout turns a hang into a lane outage instead of a verdict.
 set_tests_properties(application_business_reject_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
-  LABELS "019;us1;business_reject;application")
+  LABELS "019;us1;business_reject;application"
+  TIMEOUT 120)
 
 # ── 019-app-callbacks T012 — outbound origination + interception tests ───────
 # US2: Engine::send crosses wire after toApp; toApp veto drops transmit; toAdmin
@@ -1420,9 +1434,16 @@ target_include_directories(application_outbound_019_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 add_test(NAME application_outbound_019 COMMAND application_outbound_019_test)
+# TIMEOUT is explicit here (#289 batch 9): these four are registered with a bare
+# add_test(), NOT via add_threading_test(), so they never inherited that macro's
+# uniform `TIMEOUT 120` and ran UNBOUNDED. That is not theoretical -- a forced-miss
+# arm on this batch wedged application_outbound_019 in futex_do_wait at 0.0% CPU,
+# and the same class already cost this repo an 86-minute UBSan lane wedge (#337).
+# A missing timeout turns a hang into a lane outage instead of a verdict.
 set_tests_properties(application_outbound_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
-  LABELS "019;us2;outbound;application")
+  LABELS "019;us2;outbound;application"
+  TIMEOUT 120)
 
 # ── 019-app-callbacks T015 — lifecycle notifications tests ───────────────────
 # US3: onCreate/onLogon/onLogout exactly-once, in order, on exec_; three onLogout
@@ -1463,9 +1484,16 @@ target_include_directories(application_strand_019_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 add_test(NAME application_strand_019 COMMAND application_strand_019_test)
+# TIMEOUT is explicit here (#289 batch 9): these four are registered with a bare
+# add_test(), NOT via add_threading_test(), so they never inherited that macro's
+# uniform `TIMEOUT 120` and ran UNBOUNDED. That is not theoretical -- a forced-miss
+# arm on this batch wedged application_outbound_019 in futex_do_wait at 0.0% CPU,
+# and the same class already cost this repo an 86-minute UBSan lane wedge (#337).
+# A missing timeout turns a hang into a lane outage instead of a verdict.
 set_tests_properties(application_strand_019 PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
-  LABELS "019;phase6;strand;drain;application")
+  LABELS "019;phase6;strand;drain;application"
+  TIMEOUT 120)
 
 # ── 019-app-callbacks T018 — throw-from-callback disposal at every site ───────
 # FR-011; 7 cells: fromApp/fromAdmin/toApp/toAdmin/onCreate/onLogon/onLogout.

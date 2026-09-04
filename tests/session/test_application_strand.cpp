@@ -63,15 +63,12 @@
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
-// The `run_for(W); restart(); get()` sites below call `run_window_then_ready` with a
-// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
-// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+// The bounded-pump sites below call `run_window_then_ready` with a miss-branch drain
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289
+// names is the UNCONDITIONAL `get()`, not the fixed window.
 //
-// The rationale and the teardown-shape rule -- why the drain runs on the miss branch
-// and not in a fixture destructor -- are documented AT the primitive. Read it there.
-// That text is deliberately NOT copied into this file: each earlier per-file copy
-// acquired clauses that are false at its own sites (#324's FILE-SPECIFIC ADDENDA), a
-// cost paid once per copy and avoided entirely by pointing.
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
@@ -272,9 +269,10 @@ TEST(ApplicationStrand, NoConcurrentCallbacksForOneSession) {
         auto frame = make_app_frame(seq);
         auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 100ms)) {
-            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
-                                                            "NoConcurrentCallbacks/inbound");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "NoConcurrentCallbacks/inbound";
+            fixpp::test_support::cancel_and_drain_or_report(
+                f.ioc, *f.clock, "NoConcurrentCallbacksForOneSession/inbound");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "NoConcurrentCallbacksForOneSession/inbound";
             return;
         }
         (void)fut.get();
@@ -415,8 +413,8 @@ TEST(ApplicationStrand, EngineSendKeepAliveNoUAF) {
         auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
-                                                            "EngineSendKeepAlive/open");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendKeepAlive/open";
+                                                            "EngineSendKeepAliveNoUAF/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendKeepAliveNoUAF/open";
             return;
         }
         ASSERT_TRUE(fut.get().has_value());
@@ -426,8 +424,8 @@ TEST(ApplicationStrand, EngineSendKeepAliveNoUAF) {
         auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
-                                                            "EngineSendKeepAlive/inbound");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendKeepAlive/inbound";
+                                                            "EngineSendKeepAliveNoUAF/inbound");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendKeepAliveNoUAF/inbound";
             return;
         }
         ASSERT_TRUE(fut.get().has_value());

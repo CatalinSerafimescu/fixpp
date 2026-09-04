@@ -54,15 +54,12 @@
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
-// The `run_for(W); restart(); get()` sites below call `run_window_then_ready` with a
-// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
-// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+// The bounded-pump sites below call `run_window_then_ready` with a miss-branch drain
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289
+// names is the UNCONDITIONAL `get()`, not the fixed window.
 //
-// The rationale and the teardown-shape rule -- why the drain runs on the miss branch
-// and not in a fixture destructor -- are documented AT the primitive. Read it there.
-// That text is deliberately NOT copied into this file: each earlier per-file copy
-// acquired clauses that are false at its own sites (#324's FILE-SPECIFIC ADDENDA), a
-// cost paid once per copy and avoided entirely by pointing.
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
@@ -246,12 +243,6 @@ struct OutboundFixture {
         ASSERT_TRUE(fut2.get().has_value()) << "Logon feed failed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
-
-    // Run the engine machinery for a short period so posted work completes.
-    void drain(int ms = 200) {
-        ioc.run_for(std::chrono::milliseconds{ms});
-        ioc.restart();
-    }
 };
 
 // ── Test 1: Engine::send crosses the wire after toApp fires (AC1; FR-006) ─────
@@ -358,8 +349,9 @@ TEST(ApplicationOutbound, ToAppOtherErrorAbortsWithThatError) {
     auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
-                                                        "ToAppOtherErrorAborts/send");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ToAppOtherErrorAborts/send";
+                                                        "ToAppOtherErrorAbortsWithThatError/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ToAppOtherErrorAbortsWithThatError/send";
         return;
     }
     auto result = fut.get();
@@ -427,9 +419,10 @@ TEST(ApplicationOutbound, SendOnNotEstablishedReturnsStateError) {
     // Open but do NOT feed peer Logon → stays in NotConnected/LogonSent.
     auto fut_open = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut_open, 200ms)) {
-        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
-                                                        "SendOnNotEstablished/open");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SendOnNotEstablished/open";
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "SendOnNotEstablishedReturnsStateError/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "SendOnNotEstablishedReturnsStateError/open";
         return;
     }
     ASSERT_TRUE(fut_open.get().has_value());
@@ -440,9 +433,10 @@ TEST(ApplicationOutbound, SendOnNotEstablishedReturnsStateError) {
     auto payload = make_app_payload();
     auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
-        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
-                                                        "SendOnNotEstablished/send");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SendOnNotEstablished/send";
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "SendOnNotEstablishedReturnsStateError/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "SendOnNotEstablishedReturnsStateError/send";
         return;
     }
     auto result = fut.get();
@@ -491,8 +485,10 @@ TEST(ApplicationOutbound, EnginesSendWithUnknownIdReturnsInvalidArgument) {
         engine.send(unknown_id, std::span<const std::byte>(payload)),
         asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms)) {
-        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "EngineSendUnknownId/send");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendUnknownId/send";
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "EnginesSendWithUnknownIdReturnsInvalidArgument/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "EnginesSendWithUnknownIdReturnsInvalidArgument/send";
         return;
     }
     auto result = fut.get();
@@ -508,8 +504,10 @@ TEST(ApplicationOutbound, EnginesSendWithUnknownIdReturnsInvalidArgument) {
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.restart();
     if (!fixpp::test_support::run_window_then_ready(ioc, stop_fut, 300ms)) {
-        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "EngineSendUnknownId/stop");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendUnknownId/stop";
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "EnginesSendWithUnknownIdReturnsInvalidArgument/stop");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "EnginesSendWithUnknownIdReturnsInvalidArgument/stop";
         return;
     }
     stop_fut.get();
@@ -562,9 +560,10 @@ TEST(ApplicationOutbound, EnginesSendOnRegisteredButNotEstablishedSession) {
         engine.send(id, std::span<const std::byte>(payload)),
         asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms)) {
-        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
-                                                        "EngineSendNotEstablished/send");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendNotEstablished/send";
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "EnginesSendOnRegisteredButNotEstablishedSession/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "EnginesSendOnRegisteredButNotEstablishedSession/send";
         return;
     }
     auto result = fut.get();
@@ -576,9 +575,10 @@ TEST(ApplicationOutbound, EnginesSendOnRegisteredButNotEstablishedSession) {
     auto stop_fut2 = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     ioc.restart();
     if (!fixpp::test_support::run_window_then_ready(ioc, stop_fut2, 300ms)) {
-        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
-                                                        "EngineSendNotEstablished/stop");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "EngineSendNotEstablished/stop";
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "EnginesSendOnRegisteredButNotEstablishedSession/stop");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "EnginesSendOnRegisteredButNotEstablishedSession/stop";
         return;
     }
     stop_fut2.get();
@@ -638,9 +638,10 @@ TEST(ApplicationOutbound, ReentrantSendFromCallbackDoesNotDeadlock) {
     auto payload = make_app_payload();
     auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
-        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
-                                                        "ReentrantSendFromCallback/send");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReentrantSendFromCallback/send";
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "ReentrantSendFromCallbackDoesNotDeadlock/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ReentrantSendFromCallbackDoesNotDeadlock/send";
         return;
     }
     auto result = fut.get();

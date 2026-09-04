@@ -80,15 +80,12 @@
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
-// The `run_for(W); restart(); get()` sites below call `run_window_then_ready` with a
-// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
-// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+// The bounded-pump sites below call `run_window_then_ready` with a miss-branch drain
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289
+// names is the UNCONDITIONAL `get()`, not the fixed window.
 //
-// The rationale and the teardown-shape rule -- why the drain runs on the miss branch
-// and not in a fixture destructor -- are documented AT the primitive. Read it there.
-// That text is deliberately NOT copied into this file: each earlier per-file copy
-// acquired clauses that are false at its own sites (#324's FILE-SPECIFIC ADDENDA), a
-// cost paid once per copy and avoided entirely by pointing.
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -340,8 +337,10 @@ TEST(SessionTableViewReuse, AdoptedSnapshotDrivesGroupBoundaries) {
     {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "AdoptedSnapshot/open");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "AdoptedSnapshot/open";
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "AdoptedSnapshotDrivesGroupBoundaries/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AdoptedSnapshotDrivesGroupBoundaries/open";
             return;
         }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
@@ -352,8 +351,10 @@ TEST(SessionTableViewReuse, AdoptedSnapshotDrivesGroupBoundaries) {
         auto logon = fixpp_test_support::make_frame("FIX.4.4", logon_body);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "AdoptedSnapshot/logon");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "AdoptedSnapshot/logon";
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "AdoptedSnapshotDrivesGroupBoundaries/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AdoptedSnapshotDrivesGroupBoundaries/logon";
             return;
         }
         ASSERT_TRUE(fut2.get().has_value());
@@ -365,8 +366,10 @@ TEST(SessionTableViewReuse, AdoptedSnapshotDrivesGroupBoundaries) {
     {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "AdoptedSnapshot/feed");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "AdoptedSnapshot/feed";
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "AdoptedSnapshotDrivesGroupBoundaries/feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AdoptedSnapshotDrivesGroupBoundaries/feed";
             return;
         }
         (void)fut.get();
