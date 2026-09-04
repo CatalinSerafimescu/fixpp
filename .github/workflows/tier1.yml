@@ -2193,7 +2193,18 @@ jobs:
       #
       # Needs cmake + ctest (preinstalled on ubuntu-24.04) and REFUSES to run
       # without them rather than skipping: a skipped seam check is a silent pass.
-      # ~40 s, most of it `cmake -E sleep`.
+      #
+      # ⚠️ THE COST CONDITION, not a number — a figure written here would go
+      # stale silently and nothing would ever re-run it. It runs the driver
+      # TWICE (once per platform branch), so its wall time is dominated by
+      # 2 x (2 serial + 1 parallel) ctest passes over a 12-test synthetic
+      # project plus 8 machine-witness calls. Both are deliberately shrunk —
+      # 0.4 s sleeps, and PARALLELISM_WITNESS_{ITERS,REPEATS} set by the harness
+      # — because this job runs on EVERY push. Re-derive before assuming
+      # anything about it: `time ci/test-parallelism-aba-seam.sh`. If that grows
+      # past roughly a minute, shrink the sleeps rather than the cell count:
+      # TWELVE tests is what makes `--parallel 4` unambiguously distinguishable
+      # from 1 in the in-flight oracle, which is the assertion S2 exists for.
       - name: Regression pin — A-B-A driver/verdict seam (#267)
         run: bash ci/test-parallelism-aba-seam.sh
 

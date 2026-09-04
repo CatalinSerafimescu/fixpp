@@ -52,10 +52,11 @@ cat > "$WORK/CMakeLists.txt" <<'CMAKE'
 cmake_minimum_required(VERSION 3.20)
 project(aba_seam NONE)
 enable_testing()
-# 12 x 1 s: long enough that --parallel 4 is unambiguously visible in the
-# max-in-flight oracle, short enough to run before every campaign.
+# 12 x 0.4 s. TWELVE is the load-bearing number, not the duration: the
+# max-in-flight oracle needs enough concurrent tests that 4 is unambiguously
+# distinguishable from 1. The sleep only has to exceed process startup.
 foreach(i RANGE 1 12)
-  add_test(NAME seam_t${i} COMMAND ${CMAKE_COMMAND} -E sleep 1)
+  add_test(NAME seam_t${i} COMMAND ${CMAKE_COMMAND} -E sleep 0.4)
 endforeach()
 CMAKE
 
@@ -71,6 +72,13 @@ cat > "$WORK/CMakePresets.json" <<'PRESETS'
  "configurePresets": [{"name": "seam", "binaryDir": "build/seam"}],
  "testPresets": [{"name": "seam", "configurePreset": "seam", "execution": {"jobs": 4}}]}
 PRESETS
+
+# See ci/run-parallelism-aba.sh for why shrinking the witness is sound HERE and
+# not in a campaign: this file checks the plumbing, and the calibration's
+# magnitude is irrelevant to that. The verdict discloses the weakening on the
+# page regardless, so it can never be mistaken for a full observation.
+export PARALLELISM_WITNESS_ITERS=200000
+export PARALLELISM_WITNESS_REPEATS=2
 
 cd "$WORK" || exit 2
 cmake --preset seam >/dev/null 2>&1 || { echo "::error::seam project failed to configure"; exit 2; }

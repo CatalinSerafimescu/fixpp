@@ -58,6 +58,8 @@ ap.add_argument("--witnesses", type=int, default=4)
 ap.add_argument("--witness-status", default="ok")
 ap.add_argument("--status", default="0,0,0")
 ap.add_argument("--preset", default="linux-clang-demo")
+ap.add_argument("--witness-iters", default="3000000")
+ap.add_argument("--witness-repeats", default="5")
 ap.add_argument("--subset", default="")
 ap.add_argument("--drop-pass", type=int, default=0)
 ap.add_argument("--no-start", type=int, default=0)   # pass index whose Start lines vanish
@@ -115,7 +117,7 @@ for i in range(1, 4):
 
 for w in range(a.witnesses):
     (d / f"witness{w}.env").write_text(
-        f"label=w{w}\nprocs=4\niters=3000000\n"
+        f"label=w{w}\nprocs=4\niters={a.witness_iters}\nrepeats={a.witness_repeats}\n"
         f"calib_1proc_s={split(a.calib)[w]}\n"
         f"calib_nproc_s={float(split(a.calib)[w]) * 1.9:.3f}\n"
         f"steal_ticks={'' if a.witness_status == 'no-procfs' else split(a.steal)[w]}\n"
@@ -309,6 +311,16 @@ cell "T21 tests failing ONLY under --parallel is a DEFECT" 1 \
 cell "T22 tests failing in a SERIAL pass is an INSTRUMENT FAILURE" 2 \
   "Fix the lane, then measure it" --status 0,0,8
 
+# ── T28: A WEAKENED WITNESS MUST NOT PASS AS A FULL ONE ──────────────────────
+#
+# ci/run-parallelism-aba.sh honours PARALLELISM_WITNESS_{ITERS,REPEATS} so the
+# seam self-test can run 8 witness calls cheaply — sound there, because that file
+# checks the plumbing and the calibration's magnitude is irrelevant to it. Set on
+# a campaign the same knobs would quietly make the drift check less sensitive
+# than the page claims. So it is disclosed rather than trusted.
+cell "T28 a witness run below the shipped defaults is disclosed" 0 \
+  "machine witness ran WEAKENED" --witness-iters 200000 --witness-repeats 2
+
 # ── T20: THE WINDOWS SHAPE ───────────────────────────────────────────────────
 #
 # `windows-msvc-asan` is the matrix critical path, has no measurement of any
@@ -325,7 +337,7 @@ cell "T20 a witness with no /proc is usable, not absent" 0 \
 # A sweep must assert how many cells ran: a `cell` invocation lost to an editing
 # slip removes a gate silently, and the tally below would still read "N passed,
 # 0 failed" for a smaller N.
-MUTANTS_DECLARED=29
+MUTANTS_DECLARED=30
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$MUTANTS_DECLARED" ]; then

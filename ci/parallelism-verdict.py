@@ -518,6 +518,22 @@ def main() -> int:
                     out.append(f"**Machine witness:** steal delta {delta} ticks ✅")
         except (ValueError, KeyError):
             pass
+        # A witness run with fewer iterations or repeats than the shipped
+        # defaults is a WEAKER observation, and must not pass itself off as a
+        # full one — the knobs exist for the seam harness, where the absolute
+        # figure is irrelevant, and they would silently degrade a campaign.
+        DEFAULT_ITERS, DEFAULT_REPEATS = 3_000_000, 5
+        try:
+            got_i = min(int(w.get("iters", DEFAULT_ITERS)) for w in wit_ok)
+            got_r = min(int(w.get("repeats", DEFAULT_REPEATS)) for w in wit_ok)
+            if got_i < DEFAULT_ITERS or got_r < DEFAULT_REPEATS:
+                out.append(f"> ⚠️ **The machine witness ran WEAKENED** (`iters={got_i}` / "
+                           f"`repeats={got_r}` against defaults {DEFAULT_ITERS} / "
+                           f"{DEFAULT_REPEATS}). Those knobs exist for the seam self-test, "
+                           f"where the calibration's magnitude is irrelevant. On a campaign "
+                           f"they make the drift check less sensitive than it reports.")
+        except (ValueError, KeyError):
+            pass
         try:
             first = float(wit_ok[0]["calib_1proc_s"])
             last = float(wit_ok[-1]["calib_1proc_s"])

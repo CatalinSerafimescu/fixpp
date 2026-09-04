@@ -183,7 +183,11 @@ def main() -> int:
                     help="timings per arm; the BEST is reported (see time_one)")
     args = ap.parse_args()
 
-    fields: dict[str, object] = {"label": args.label, "procs": args.procs, "iters": args.iters}
+    # `repeats` is recorded alongside `iters` so the verdict can tell a full
+    # observation from a weakened one — a report that does not say how it was
+    # taken cannot be judged.
+    fields: dict[str, object] = {"label": args.label, "procs": args.procs,
+                                 "iters": args.iters, "repeats": args.repeats}
     status = "ok"
 
     try:

@@ -99,9 +99,26 @@ SAN_PATTERN='WARNING: ThreadSanitizer:|ERROR: (Address|Leak|Memory)Sanitizer:|ru
 # a campaign mid-lane. But it is ANNOUNCED: a silent `|| true` would leave the
 # diagnosis inferable only from the verdict's "0 usable machine witness(es)"
 # three suite runs later.
+# ⚠️ THE TWO KNOBS BELOW ARE FOR ci/test-parallelism-aba-seam.sh, NOT FOR A
+# CAMPAIGN, and they are safe there for a specific reason: the seam check tests
+# the PLUMBING — that the driver writes witness files the verdict can read — and
+# the calibration's absolute value is never used as an absolute by anything.
+# Shrinking it changes nothing the seam asserts, and turns 8 witness calls from
+# ~29 s into a rounding error on a job that runs on every push.
+#
+# ⚠️ Setting them in a real campaign WOULD degrade the observation, so it is not
+# left to trust: machine-witness.py records `iters` and `repeats` in every
+# report, and ci/parallelism-verdict.py discloses on the page when they are
+# below the shipped defaults. A weakened witness cannot pass itself off as a
+# full one.
+WITNESS_ARGS=()
+[ -n "${PARALLELISM_WITNESS_ITERS:-}" ]   && WITNESS_ARGS+=(--iters "$PARALLELISM_WITNESS_ITERS")
+[ -n "${PARALLELISM_WITNESS_REPEATS:-}" ] && WITNESS_ARGS+=(--repeats "$PARALLELISM_WITNESS_REPEATS")
+
 witness() {
   "$PY" "$HERE/machine-witness.py" --out "$OUT/witness$1.env" --label "$2" \
     --procs "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
+    ${WITNESS_ARGS+"${WITNESS_ARGS[@]}"} \
     || echo "::warning::#267 machine witness $1 ($2) failed to run; the sample will VOID for want of an observation of the machine."
 }
 
