@@ -57,6 +57,65 @@
 
 #include "engine_loopback_harness.hpp"
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────
+//
+// ⚠️ THIS FILE'S ONE CENSUS SITE ADOPTS `pump_until_ready`, NOT
+// `run_window_then_ready`, BECAUSE IT IS ALREADY THAT SHAPE. It is a hand-rolled
+// bounded poll loop -- `while (!ready && now < deadline) { run_for(20ms); restart(); }`
+// -- with its own readiness assertion, i.e. `pump_until_ready` spelled out. Adopting
+// the primitive is a NORMALISATION onto the shared budget loop and its shared report
+// text, NOT a hazard fix: an `ASSERT_EQ(wait_for(0ms), ready)` already stood between
+// the loop and the `get()`. The census flags it because the census is LEXICAL and
+// cannot see an assertion. Say which it is; do not let the pin count imply otherwise.
+// It reports with `kPumpBudgetMiss` (a budget was granted and exhausted) rather than
+// `kWindowMiss` (a preserved window closed).
+//
+// ⚠️ CONSEQUENCE FOR VERIFICATION: THE SEAM REACHES THIS SITE, because this call passes
+// a label. `ci/pump-red-arm.sh` still cannot rewrite it -- that driver mutates
+// `run_window_then_ready` calls specifically -- so the seam is the only driver here, and
+// `ci/red-arms/batch13-labels.txt` carries the arm.
+// ⚠️ IT WAS NOT ALWAYS SO, AND THE REASON IT CHANGED IS WORTH MORE THAN THE FACT.
+// `pump_until_ready` took no site label until batch 13; this site was forced BY HAND
+// instead, and that recipe FAILS TOWARD GREEN -- `pump_until` evaluates `ready()` before
+// it pumps, so zeroing the budget returns TRUE wherever the future is already ready at
+// entry and the run passes, announcing nothing. The mechanism and its measurement live at
+// `pump_until` in tests/support/pump_until_ready.hpp. A verification path whose failure
+// mode is a clean pass is the defect class #289 exists to remove, so the primitive grew
+// the parameter rather than the recipe growing a warning.
+//
+// ⚠️ THE OTHER UNGUARDED `.get()`s IN THIS FILE ARE A DIFFERENT SHAPE AND ARE
+// DELIBERATELY NOT MIGRATED. They are `ioc.run(); stop_fut.get();` -- an UNBOUNDED
+// run, not a bounded window -- which is outside the population `ci/pump-census.sh`
+// scans and outside what this primitive replaces. Bounding them is a real question
+// and a separate one; derive them with `bash ci/pump-get-sweep.sh` rather than from
+// a count written here.
+//
+// The drain is the CLOCKED one. This test installs a REAL `system_clock_source` as
+// `clock` precisely so `run_liveness_loop` parks in `sleep_until`, and `cancel_sleeps()`
+// releases that park DETERMINISTICALLY instead of leaving it to race a budget boundary.
+//
+// ⚠️ NOT "no amount of pumping ends it", which is what this said. That is a property of a
+// MOCK clock, whose sleeps no wall-clock pumping can advance. THIS site is the one place
+// the phrase sits above a REAL clock: `system_clock_source::sleep_until` is an
+// `asio::steady_timer` (include/fixpp/core/system_clock_source.hpp), this test sets
+// `acc.heartbeat_interval = 5s`, and the drain's `kQuiesceBudget` is ALSO 5 s -- so the
+// pump and the sleep expire at the same boundary. A race, not an impossibility.
+// The flavour choice is unchanged and still right; only the stated reason was wrong.
+//
+// ⚠️ THE PHRASE'S OTHER HOMES ARE ALL CORRECT, so do not "fix" them to match this:
+// `test_business_messages_roundtrip.cpp`, `test_session_invariant_counter_witness.cpp`
+// and the primitive's own survivor-case list all say it of a MOCK clock, where it holds.
+// Derive that rather than trusting this list, and check the CLOCK at each hit:
+//   git grep -n 'no amount of pumping\|released only by `cancel_sleeps' -- tests/
+// Re-derive rather than trusting either number:
+//   grep -n heartbeat_interval tests/session/engine_acceptor_test.cpp
+//   grep -n kQuiesceBudget tests/support/pump_until_ready.hpp
+// [[feedback_a_byte_identical_copy_propagates_a_claim_false_at_the_new_site]]
+//
+// `*clock` is the test body's own local; `eng_cfg` was `std::move`d into the engine and
+// must not be read here.
 
 // src/ path for asio_listener.hpp (internal header needed for the TLS client fixture)
 #include "transport/loopback_tls_fixture.hpp"
@@ -807,14 +866,22 @@ TEST(EngineAcceptorTest, StopDrainsParkedLivenessLoopNoUaf) {
     // Bounded: don't wait on the detached client's 5s timer, and FAIL (not hang) if a
     // drain regression wedges stop().
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    const auto stop_deadline = std::chrono::steady_clock::now() + 10s;
-    while (stop_fut.wait_for(0ms) != std::future_status::ready &&
-           std::chrono::steady_clock::now() < stop_deadline) {
-        ioc.run_for(20ms);
-        ioc.restart();
+    // A miss here means Engine::stop() did not complete within the 10 s budget -- a
+    // wedged teardown drain. The report text is deliberately just the stem plus the
+    // label, so both #289 drivers match one shape.
+    // The explicit 20 ms slice is the `run_for(20ms)` of the loop this replaces, kept
+    // for the same reason the window is preserved everywhere else in #289: the
+    // migration changes WHO decides the wait is over, not how long it waits.
+    // It is the only explicit slice in this batch; every other call takes the 1 ms
+    // default.
+    if (!fixpp::test_support::pump_until_ready(ioc, stop_fut, 10s, 20ms,
+                                               "StopDrainsParkedLivenessLoopNoUaf/stop")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "StopDrainsParkedLivenessLoopNoUaf/stop");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                      << "StopDrainsParkedLivenessLoopNoUaf/stop";
+        return;
     }
-    ASSERT_EQ(stop_fut.wait_for(0ms), std::future_status::ready)
-        << "Engine::stop() did not complete within 10s — a teardown drain wedged.";
     stop_fut.get();
 
     const std::size_t inflight = clock->inflight_count();

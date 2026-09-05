@@ -74,8 +74,58 @@
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
-#include "support/wait_until.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+#include "support/wait_until.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────
+//
+// The migrated sites in this file use `run_window_then_ready` plus a miss-branch drain
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289 names
+// is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// ⚠️ FOUR OF THE SIX MIGRATED SITES CARRY NO CENSUS ROW AND NEVER DID -- they are
+// census BLIND SPOT (c): the window was behind `f.drain()`, a member call, so there is
+// no `ioc.run_for` for a lexical scanner to anchor on and no lookahead width finds them.
+// They were NOT found by reading either. They were found by FORCING a neighbour: the
+// seam arm for `open_to_active/logon` read `RED*` -- reported, THEN HUNG -- and the
+// wedge was the next `f.drain(); fut.get();` in the same test, which is precisely the
+// #289 hazard (a missed window plus an unconditional `get()` is a deadlock, not a
+// failure). Migrating a file's PINNED sites and stopping there leaves that trap armed.
+// Derive this population with `bash ci/pump-get-sweep.sh`, which is get-anchored and so
+// sees an indirected window; the pin cannot.
+//
+// ⚠️ THE LABELS SAY `BusinessRoundtrip::`, NOT `OutboundFixture::`, AND THAT IS
+// DELIBERATE. `test_application_outbound.cpp` already ships a fixture of the same
+// name with a helper of the same name, so the obvious label would have been a
+// DUPLICATE -- and `FIXPP_FORCE_WINDOW_MISS` matches a label exactly, so forcing it
+// would fire at both sites and the arm could not say which one reported. The label
+// namespace is flat and global; derive collisions with
+// `python3 .specify/decisions/289-data/new-site-labels.py`, which reports them.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// ⚠️ SCOPE: THIS FILE ALSO RUNS `ioc` FROM WORKER THREADS, AND THOSE SITES ARE NOT
+// MIGRATED -- correctly. `SendFromInsideFromApp_NoDeadlockNoUAF` builds its own
+// io_context, launches t1/t2 into `ioc.run()` and waits via `wait_until_observed`,
+// because `restart()` while a worker is inside `run()` is asio UB (the BIO_ctrl SEGV
+// this file's own comment records). `run_window_then_ready` pumps with
+// `run_for`/`restart`, so it MUST NOT be introduced there. `open_to_active` and
+// `drain()` are called only from the three single-threaded tests above that test,
+// never from inside a worker window -- re-derive that (grep the call sites against
+// the thread launches) rather than trusting this sentence if the file grows.
+//
+// The drain is the CLOCKED one: `OutboundFixture` installs a `mock_clock` and hands
+// it to `engine_cfg.clock`, so a waiter parked on `sleep_until` is released only by
+// `cancel_sleeps()`, which no amount of pumping can do. That this fixture sets
+// `heartbeat_interval = 0s` (so no liveness loop is armed today) makes the clocked
+// drain no WEAKER, and the flavour survives a config change; see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 // Live TLS headers — only needed for INV-7.
 #include <asio/ip/tcp.hpp>
@@ -274,22 +324,38 @@ struct OutboundFixture {
     // Open session and advance to Active (acceptor role).
     void open_to_active(fixpp::session::Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "BusinessRoundtrip::open_to_active/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "BusinessRoundtrip::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "BusinessRoundtrip::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut2, 200ms, "BusinessRoundtrip::open_to_active/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "BusinessRoundtrip::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "BusinessRoundtrip::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon feed failed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
 
-    void drain(int ms = 200) {
-        ioc.run_for(std::chrono::milliseconds{ms});
-        ioc.restart();
-    }
+    // ⚠️ `drain(int ms)` -- a bare `ioc.run_for(ms); ioc.restart();` behind a member call
+    // -- WAS HERE AND IS DELETED, not left unused. It had exactly four callers, every one
+    // of them `f.drain(); auto r = fut.get();`, and hiding the window behind a member call
+    // is what made those four sites invisible to `ci/pump-census.sh` (blind spot (c)): a
+    // lexical scanner has no `ioc.run_for` to anchor on, at any lookahead width. All four
+    // now spell `run_window_then_ready` with a verdict, so the helper is dead -- and a
+    // spare, verdict-free pump left in a fixture is how the next author re-arms the trap.
+    // If a window is needed again, call the primitive with a site label.
 };
 
 // ── INV-1: Wire frame field order + digit-only BodyLength + valid checksum ────
@@ -328,7 +394,13 @@ TEST(BusinessMessagesRoundtrip,
 
     auto fut =
         asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    f.drain();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms,
+                                                    "BusinessRoundtrip/send_nos")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "BusinessRoundtrip/send_nos");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "BusinessRoundtrip/send_nos";
+        return;
+    }
     auto result = fut.get();
     ASSERT_TRUE(result.has_value())
         << "send() must succeed; error=" << static_cast<int>(result.error());
@@ -457,7 +529,13 @@ TEST(BusinessMessagesRoundtrip, OpaquePayload_Malformed_RejectedNoSeqnumConsumed
 
         auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(malformed)),
                                   asio::use_future);
-        f.drain();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms,
+                                                        "BusinessRoundtrip/send_malformed")) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "BusinessRoundtrip/send_malformed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "BusinessRoundtrip/send_malformed";
+            return;
+        }
         auto result = fut.get();
 
         EXPECT_FALSE(result.has_value()) << "malformed payload must be rejected";
@@ -558,7 +636,13 @@ TEST(BusinessMessagesRoundtrip, OpaquePayload_Malformed_RejectedNoSeqnumConsumed
 
     auto fut_good = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(good_payload)),
                                    asio::use_future);
-    f.drain();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut_good, 200ms,
+                                                    "BusinessRoundtrip/send_good")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "BusinessRoundtrip/send_good");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "BusinessRoundtrip/send_good";
+        return;
+    }
     auto good_result = fut_good.get();
     ASSERT_TRUE(good_result.has_value())
         << "good send after malformed attempts must succeed; error="
@@ -634,7 +718,13 @@ TEST(BusinessMessagesRoundtrip, InboundReject_EmitsBusinessMessageReject_Session
                                               "44=100.00\x01");
 
     auto fut_inbound = asio::co_spawn(f.ioc, sess.on_inbound_frame(inbound_nos), asio::use_future);
-    f.drain(400);
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut_inbound, 400ms,
+                                                    "BusinessRoundtrip/feed_inbound")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "BusinessRoundtrip/feed_inbound");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "BusinessRoundtrip/feed_inbound";
+        return;
+    }
     auto inbound_result = fut_inbound.get();
     (void)inbound_result;
 

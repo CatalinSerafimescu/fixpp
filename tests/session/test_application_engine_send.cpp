@@ -60,6 +60,34 @@
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// ⚠️ THE MISS BRANCH TAKES THE CLOCKED DRAIN, AND `*engine.clock()` IS THE ONLY
+// SPELLING THAT REACHES THE CLOCK AT THESE SITES. `engine` here is a
+// `fixpp::session::Engine`, so the ACCESSOR exists; the `EngineConfig` that carried
+// the clock was `std::move`d into the engine at construction, so `ecfg.clock` is a
+// moved-from `shared_ptr` by the time any teardown site runs. Reading it would be a
+// null dereference INSIDE A FAILURE HANDLER.
+//   ⚠️ NON-NULLNESS IS ESTABLISHED LOCALLY, NOT BY THE ACCESSOR'S DOCUMENTATION.
+//   `engine.hpp` says the clock is "never null post-construction"; that claim is
+//   #289's standing known-false comment and is NOT what is relied on here. Each of
+//   the three tests below assigns `ecfg.clock = make_mock_clock(ioc)` in its own body
+//   before constructing its engine -- re-read the assignment, not this sentence, if a
+//   test is ever restructured.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
@@ -314,8 +342,14 @@ TEST(ApplicationEngineSend, SendFromForeignThreadCrossesWire) {
     // Teardown.
     {
         auto sf = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-        ioc.run_for(3s);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, sf, 3s,
+                                                        "SendFromForeignThreadCrossesWire/stop")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *engine.clock(), "SendFromForeignThreadCrossesWire/stop");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "SendFromForeignThreadCrossesWire/stop";
+            return;
+        }
         sf.get();
     }
     EXPECT_TRUE(engine.stopped());
@@ -394,8 +428,14 @@ TEST(ApplicationEngineSend, ReentrantSendFromToAppNoDeadlock) {
     // Teardown.
     {
         auto sf = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-        ioc.run_for(3s);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, sf, 3s,
+                                                        "ReentrantSendFromToAppNoDeadlock/stop")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *engine.clock(), "ReentrantSendFromToAppNoDeadlock/stop");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ReentrantSendFromToAppNoDeadlock/stop";
+            return;
+        }
         sf.get();
     }
     EXPECT_TRUE(engine.stopped());
@@ -476,8 +516,14 @@ TEST(ApplicationEngineSend, ReentrantSendFromFromAppNoDeadlock) {
     // Teardown.
     {
         auto sf = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-        ioc.run_for(3s);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, sf, 3s, "ReentrantSendFromFromAppNoDeadlock/stop")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *engine.clock(), "ReentrantSendFromFromAppNoDeadlock/stop");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ReentrantSendFromFromAppNoDeadlock/stop";
+            return;
+        }
         sf.get();
     }
     EXPECT_TRUE(engine.stopped());

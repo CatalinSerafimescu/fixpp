@@ -6,12 +6,17 @@
 # blind spot batch 11's uniqueness recipe had (121 of ~248).
 # Recipe: .specify/decisions/289-data/ (see the PR record).
 #
-# ⚠️ ONE MIGRATED SITE IS DELIBERATELY ABSENT AND IS NEITHER DRIVER'S TO FORCE:
-#   engine_clock_gate:stop_engine — it adopts `pump_until_ready`, which carries no
-#   site parameter (so the seam cannot reach it) and is not a `run_window_then_ready`
-#   call (so ci/pump-red-arm.sh cannot rewrite it). It was mutated BY HAND, and the
-#   output is in the PR record. Said here so an "N of N RED" summary over the list
-#   below is not read as covering the batch.
+# ⚠️ ONE MIGRATED SITE IS DELIBERATELY ABSENT, AND IT IS NOT FORCEABLE AS IT STANDS:
+#   engine_clock_gate:stop_engine — it adopts `pump_until_ready` and PASSES NO LABEL, so
+#   no env var can select it; and it is not a `run_window_then_ready` call, so
+#   ci/pump-red-arm.sh cannot rewrite it. It was mutated BY HAND, and the output is in
+#   the PR record. Said here so an "N of N RED" summary over the list below is not read
+#   as covering the batch.
+#   ⚠️ THE PARENTHETICAL THAT USED TO STAND HERE -- "`pump_until_ready` carries no site
+#   parameter, so the seam cannot reach it" -- WAS TRUE FOR THIS BATCH AND IS NOW FALSE
+#   OF THE PRIMITIVE. Batch 13 gave both pump primitives the same trailing `site`
+#   parameter, so the shape is reachable; this CALL still hands it no identity. Adding
+#   one is all that is needed, and it is a batch-14 candidate, not a limitation.
 AbsentIdentityMtlsFailsClosed/logon-ack
 AbsentIdentityMtlsFailsClosed/open
 Active_InitiateLogout/close

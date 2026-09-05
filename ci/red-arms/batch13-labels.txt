@@ -1,0 +1,127 @@
+# ci/red-arms/batch13-labels.txt -- the seam-forceable sites of #289 batch 13.
+#
+# Feed to:  bash ci/pump-seam-arm.sh linux-clang-debug ci/red-arms/batch13-labels.txt
+#
+# One label per line. Every line here is a site that PASSES its label to ONE OF THE TWO
+# pump primitives -- `run_window_then_ready` or `pump_until_ready` -- which is what
+# `FIXPP_FORCE_WINDOW_MISS` matches on. (This line named only the first until batch 13
+# extended the seam; three labels below have always been the second kind.)
+#
+# ⚠️ EVERY MIGRATED SITE OF THIS BATCH IS HERE -- but the labels below reach the seam
+# through TWO different primitives, and a reader who assumes one will mis-read the
+# occurrence control. `run_window_then_ready` (a preserved WINDOW) is the batch's usual
+# shape; three sites adopt `pump_until_ready` (a bounded BUDGET loop) because at each the
+# wait already was a hand-rolled budget loop. Both now take a site label and both honour
+# `FIXPP_FORCE_WINDOW_MISS`; what differs is the text the miss branch then reports, which
+# is why `ci/pump-seam-arm.sh` matches TWO tails. A driver matching only `kWindowMiss`
+# reads all three as SILENT.
+#
+# ⚠️ THE BUDGET SITES WERE FORCED BY HAND BEFORE THE SEAM REACHED THEM, AND THAT RECIPE
+# FAILED TOWARD GREEN -- which is why the seam was extended rather than the recipe
+# written down more carefully. Zeroing the budget alone leaves a site whose future is
+# already ready at entry returning TRUE, reporting `[ OK ]`, announcing nothing. The
+# mechanism is `pump_until`'s ready-first evaluation and it is recorded at the primitive
+# (tests/support/pump_until_ready.hpp, above `pump_until`), not restated here.
+# The hand-mutation results are kept as the STRONGER witness -- a textual mutation proves
+# the shipped source's miss branch, an env var proves the branch the seam selects -- as
+# PER-SITE COMMENT ROWS in `ci/red-arms/batch13-spotcheck.tsv`, under the heading naming
+# these three. Do not delete that record now that the seam works. (Read it before citing
+# it: this pointer, and two others, once promised a record that file did not contain.)
+#
+#   G2EnablementWitness/send_nos            tests/session/test_019_g2_enablement_witness.cpp
+#   G2EnablementWitness/send_er             tests/session/test_019_g2_enablement_witness.cpp
+#   StopDrainsParkedLivenessLoopNoUaf/stop  tests/session/engine_acceptor_test.cpp
+#
+# ⚠️ FURTHER BUDGET SITES IN THIS TREE ARE NOW *REACHABLE* AND ARE NOT LABELLED --
+# reachable is not adopted. They predate this batch and were left alone because labelling
+# them would widen a batch, not because the seam cannot see them. Labelling them is a
+# batch-14 candidate.
+#
+# ⚠️ NO COUNT AND NO FILE LIST HERE, because the first draft of this paragraph carried
+# both and BOTH WERE FALSE against the very command printed beneath them -- which was
+# written down and not run. Enumerate, then resolve each by hand:
+#   git grep -n 'kPumpBudgetMiss' -- tests/ ':!tests/support/*'
+#
+# ⚠️ THE OBVIOUS TIGHTER SPELLING IS WRONG, and this is the second defect in this same
+# paragraph. `kPumpBudgetMiss <<` looks more precise and SILENTLY MISSES WHOLE FILES:
+# clang-format wraps the `<<` to the next line wherever the label is long, so the tight
+# form finds 24 hits and the loose one 43, and the two files it cannot see are
+# `tc_logout_test.cpp` -- and `engine_acceptor_test.cpp`, WHICH IS A SITE OF THIS VERY
+# BATCH. An enumeration command that cannot see the change it ships with is not a
+# derivation. Re-derive both numbers rather than trusting these:
+#   git grep -c 'kPumpBudgetMiss <<' -- tests/ | awk -F: '{s+=$2} END{print s}'
+#   git grep -c 'kPumpBudgetMiss'    -- tests/ ':!tests/support/*' | awk -F: '{s+=$2} END{print s}'
+#
+# ⚠️ The loose command OVER-counts in the other direction: it finds every budget-miss
+# mention, and a site is seam-forceable only if its `pump_until*` CALL also passes the same
+# literal. Read the call, not the report. `python3 .specify/decisions/289-data/
+# new-site-labels.py` is the mechanised form of that distinction for a change's own
+# labels; across the whole tree it is a hand resolution.
+#
+# ⚠️ RE-DERIVE THE SPLIT rather than trusting the three names above:
+#   python3 .specify/decisions/289-data/new-site-labels.py
+# prints every new label, the expected occurrence count per primitive, and the
+# per-file label-collision report. Every label in THIS FILE reads 3x -- site argument,
+# drain, ADD_FAILURE.
+#
+# ⚠️ THAT IS A STATEMENT ABOUT THIS BATCH, NOT ABOUT THE TREE. An earlier revision said
+# "the 2x budget shape is gone", which is false: `test_engine_clock_gate.cpp:146` still
+# calls `pump_until_ready(ioc, fut, 5s)` with no site argument and so still spells its
+# label twice. The script CANNOT refute that sentence either -- its occurrence control
+# iterates `set(now) - set(head)`, so a pre-existing 2x label is outside its population
+# and its clean line is not evidence about the tree. Check the tree, not the script:
+#   git grep -n 'pump_until_ready(' -- tests/ | grep -v '"'
+#
+# ⚠️ A LABEL STEM IS NOT REQUIRED TO PREFIX A GTEST NAME, and some of these do not.
+# `ci/pump-seam-arm.sh` guesses `--gtest_filter=*.<stem-before-the-slash>*` to narrow the
+# run; where the stem is not a prefix of any test name the guess selects nothing and the
+# arm falls back to an unfiltered run -- correct, just slower, which is what the fallback
+# is for.
+#
+# ⚠️ NO SPLIT IS QUOTED HERE, because the one that was became false inside its own file.
+# It read "13 of 24 non-`::` labels" while the file holds 27 such labels -- the three
+# budget labels were appended after the measurement, and they move the split in BOTH
+# directions: `StopDrainsParkedLivenessLoopNoUaf` HITS the guess (the gtest name is
+# `EngineAcceptorTest.StopDrainsParkedLivenessLoopNoUaf`), while both `G2EnablementWitness`
+# stems name a gtest SUITE rather than a test, so `*.G2EnablementWitness*` matches nothing
+# and both take the fallback. The paragraph told the reader to re-derive and then quoted
+# figures anyway; the figures are what should have gone.
+#
+# ⚠️ STILL NOT worth renaming labels to fix. The measured saving when this was last run was
+# ~0.13 s, and a rename invalidates every already-run arm (labels are baked into the
+# binaries and matched by `strings`). That is a judgement about ORDERS OF MAGNITUDE, which
+# is why it survives the count being wrong. Re-derive the split if you need it:
+#   grep -vE '^\s*(#|$)' ci/red-arms/batch13-labels.txt | grep -vc '::'   # population
+# then run each label's guess through `--gtest_list_tests` against the binary carrying it.
+BusinessRoundtrip/feed_inbound
+BusinessRoundtrip/send_good
+BusinessRoundtrip/send_malformed
+BusinessRoundtrip/send_nos
+BusinessRoundtrip::open_to_active/logon
+BusinessRoundtrip::open_to_active/open
+InvariantCounterWitnessTest::feed
+InvariantCounterWitnessTest::run_open
+PlainAcceptorAndInitiatorCompleteLogon/stop
+PlainAcceptorAndInitiatorCompleteLogonLogout/stop
+PlaintextReconnectSkipsHandshake/attempt
+ReentrantSendFromFromAppNoDeadlock/stop
+ReentrantSendFromToAppNoDeadlock/stop
+RefreshOnLogon::Fixture::feed
+ResetLatch/open
+ResetLatch/peer_logon_no_reset
+ResetLatch/peer_logon_with_reset
+ResetLatch/reconnect
+SendFromForeignThreadCrossesWire/stop
+SessionTerminalCloseDeliversCloseNotifyToPeer/close
+W1_StoreAboveLive/reconnect
+W2_StoreWinsDown/reconnect
+W3_KnobOff_NoReread/reconnect
+W4_NonPersistentStore/reconnect
+W5a_KnobOff/reconnect
+W5a_KnobOn/reconnect
+W7_StoreReadFailure/reconnect
+W8_NoHeap/hydrate_measured
+W8_NoHeap/hydrate_warm
+G2EnablementWitness/send_nos
+G2EnablementWitness/send_er
+StopDrainsParkedLivenessLoopNoUaf/stop

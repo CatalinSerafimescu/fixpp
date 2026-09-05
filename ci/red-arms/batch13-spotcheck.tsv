@@ -1,0 +1,94 @@
+# ci/red-arms/batch13-spotcheck.tsv -- TEXTUAL spot-checks for #289 batch 13.
+#
+# The seam (ci/pump-seam-arm.sh, ci/red-arms/batch13-labels.txt) covers this batch
+# broadly; these arms mutate the SOURCE instead, one per RECIPE shape actually used,
+# so the block as WRITTEN AT THAT SITE is what compiles and reports. The seam proves
+# the primitive's forced path; only textual mutation proves the site's own miss block.
+#
+#   row 1  expected_t<void> fixture helper  -> std::unexpected(kWindowMissSentinel)
+#   row 2  void helper, CALLER TEMPORARY    -> drain_or_report, then return;
+#   row 3  TEST body, fixture has NO Clock  -> drain_or_report
+#   row 4  TEST body, verdict in a NAMED    -> cancel_and_drain_or_report(*engine.clock())
+#          bool captured BEFORE a cancel
+#   row 5  void helper, fixture HAS a Clock -> cancel_and_drain_or_report(*clock)
+#   row 6  TEST body over a live TLS        -> cancel_and_drain_or_report(*h->engine->clock())
+#          loopback harness
+#   row 7  body of a LAMBDA, window that was -> cancel_and_drain_or_report(*f.clock)
+#          INDIRECTED behind a member call
+#
+# ⚠️ ROW 7's SITE IS REACHED REPEATEDLY WITHIN ONE TEST INVOCATION, which is its
+# distinguishing property and the reason it earns a slot. `assert_malformed` is a lambda
+# invoked many times across the suite, so the recipe's `return` ends ONE invocation and
+# the run carries on to the next -- which reports again. Forcing this label therefore
+# yields one report per invocation and a failing test, not one report and a silent tail.
+# ⚠️ DO NOT WRITE THE NUMBER HERE. An earlier revision of this line said "six" while the
+# seam arm for the same label was printing "forced 13 reported 13" in the same session --
+# a count asserted with the refutation already on screen. Derive it if you need it
+# (`grep -c 'assert_malformed(' <source>`); the arm's own forced/reported pair is the
+# check that matters, and it is self-consistent whatever the count is.
+#   Rows 2 and 5 are also void callees whose `return` ends only the helper -- so "the only
+#   arm whose return does not leave the test" was false too, and is not what row 7 is for.
+# It is also a census BLIND SPOT (c) site (its window was behind `f.drain()`), which is
+# the class this batch found by forcing a neighbour rather than by reading.
+#
+# ⚠️ ROW 4 IS THE ONLY ARM THAT WITNESSES THE SPLICE AGAINST A CALL IN AN INITIALISER --
+# an ARM, not a site. `test_session_plaintext_roundtrip.cpp` has TWO sites of that shape
+# and this arm covers one of them; an earlier revision of this line claimed every other
+# migrated site in the batch spells the call inside `if (!...)`, which is false about its
+# own sibling twelve lines away. The shape exists because the verdict must be read AFTER
+# `watchdog.cancel()`, and the drain must run after the cancel too (the drain's budget
+# reaches that test's watchdog deadline). `force_site` rewrites the
+# call to `((void)run_window_then_ready(...), false)`, which is an EXPRESSION -- so it
+# has to be valid in an initialiser as well as in a condition, and only this row shows
+# that it is.
+#
+# ⚠️ ROWS 4, 5 AND 6 DIFFER IN HOW THE CLOCK IS SPELLED, WHICH IS NOT COSMETIC.
+# `*clock` (a fixture member or test local), `*engine.clock()` (the accessor, after the
+# EngineConfig was moved into the engine) and `*h->engine->clock()` (through a harness
+# pointer) are three different expressions, and the null-dereference-inside-a-failure-
+# handler that #289 has already shipped once came from picking the wrong one. Each arm
+# runs the drain it names, so a wrong spelling faults instead of passing quietly.
+#
+# ⚠️ NO ARM IN THIS FILE WITNESSES THE ZEROING HALF OF THE SPLICE -- unchanged from
+# batch 12, and the witness is still elsewhere:
+# `PumpWindowMiss.FeedMissDrainsWhileCallerTemporaryAlive`
+# (tests/session/test_next_expected_msgseqnum.cpp) passes ZERO for both durations and
+# is proven RED by deleting the drain. Read that test, not this file, for that half.
+#
+# ⚠️ THREE OF THIS BATCH'S SITES ARE NOT IN *THIS* DRIVER. They adopt `pump_until_ready`,
+# which is not a `run_window_then_ready` call, so this driver cannot rewrite them. They
+# ARE in the seam driver: batch 13 gave both pump primitives a trailing `site` parameter
+# and all three pass one, so `ci/red-arms/batch13-labels.txt` carries their arms.
+# ⚠️ THE HAND-MUTATION RESULTS FOR THOSE THREE ARE RECORDED BELOW, PER SITE, and are the
+# stronger witness of the two: a textual mutation exercises the shipped source's own miss
+# branch, where the seam exercises the branch the seam selects.
+#
+# ⚠️ THEY ARE COMMENT ROWS, NOT ARMS, and that is the point of writing them out. An earlier
+# revision of this line said the results were "kept in this file" while the file held only
+# this paragraph and seven arm rows, none of them a budget site -- so three separate
+# pointers (here, `batch13-labels.txt`, and the PR record) all resolved to nothing, and one
+# of the three sites had no recorded outcome at all. A pointer to a record that does not
+# exist is worse than no pointer: it stops the next reader looking.
+#
+#   HAND MUTATION (budget -> 0), before the seam reached this primitive:
+#     G2EnablementWitness/send_nos            PASSED -- `[ RUN ]`/`[ OK ]`, announced nothing
+#     G2EnablementWitness/send_er             PASSED -- same
+#     StopDrainsParkedLivenessLoopNoUaf/stop  REPORTED -- budget edit alone sufficed
+#   HAND MUTATION (budget -> 0 AND the preceding predicate loop starved, `now()+3s`->`now()`):
+#     G2EnablementWitness/send_nos            REPORTED
+#     G2EnablementWitness/send_er             REPORTED
+#   That two-of-three split is the whole argument for extending the seam: the obvious
+#   one-edit recipe fails toward `[ OK ]`. The mechanism is at `pump_until` in
+#   tests/support/pump_until_ready.hpp; do not restate it here.
+#
+#   SEAM (current, and the shipped evidence -- see ci/red-arms/batch13-labels.txt):
+#     all three RED, announced and reported, no drain residual.
+#
+# columns: source <TAB> unique-code-anchor <TAB> expected label <TAB> cmake target [<TAB> ctest regex]
+tests/session/test_session_invariant_counter_witness.cpp	fixpp::core::expected_t<void> run_open(	InvariantCounterWitnessTest::run_open	session_pure_tests
+tests/session/test_refresh_on_logon.cpp	void feed(const std::vector<std::byte>& frame) {	RefreshOnLogon::Fixture::feed	session_refresh_on_logon
+tests/session/test_refresh_on_logon.cpp	W2_StoreWinsDown_RED) {	W2_StoreWinsDown/reconnect	session_refresh_on_logon
+tests/session/test_session_plaintext_roundtrip.cpp	PlainAcceptorAndInitiatorCompleteLogon) {	PlainAcceptorAndInitiatorCompleteLogon/stop	session_plaintext_roundtrip_test	^session_plaintext_roundtrip$
+tests/session/test_business_messages_roundtrip.cpp	void open_to_active(fixpp::session::Session& sess) {	BusinessRoundtrip::open_to_active/open	business_messages_roundtrip_test	^business_messages_roundtrip$
+tests/session/engine_readpump_test.cpp	SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348) {	SessionTerminalCloseDeliversCloseNotifyToPeer/close	engine_readpump_test	^engine_readpump$
+tests/session/test_business_messages_roundtrip.cpp	auto assert_malformed = [&](const std::vector<std::byte>& malformed, const char* label) {	BusinessRoundtrip/send_malformed	business_messages_roundtrip_test	^business_messages_roundtrip$

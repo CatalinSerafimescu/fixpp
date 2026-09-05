@@ -68,10 +68,34 @@ inline constexpr auto kPumpSlice = std::chrono::milliseconds{1};
 // A work_guard keeps `ioc` alive across slices; the trailing restart() leaves
 // it runnable for the next phase (a stopped context makes the next run_for a
 // silent no-op).
+// Forced-miss seam, DECLARED here and DEFINED next to its full rationale below (search
+// `FIXPP_FORCE_WINDOW_MISS`). Both primitives in this header route through it, so the
+// rationale is written once; read it there before changing either call.
+//
+// ⚠️ THE MANUAL ALTERNATIVE FOR *THIS* PRIMITIVE FAILS TOWARD GREEN, which is why the
+// seam reaches it at all. `pump_until` evaluates `ready()` BEFORE its first `run_for`,
+// so zeroing the BUDGET does not force a miss at a site whose predicate already holds
+// at entry -- the loop is skipped, `done` is true, and the arm reports `[ OK ]` rather
+// than announcing anything. Forcing such a site by hand needs TWO coordinated edits
+// (starve the predicate as well as the budget) and getting only the obvious one reads
+// as a pass. MEASURED on the two `test_019_g2_enablement_witness.cpp` sites, which
+// passed under a budget-only mutation.
+inline bool forced_miss_here(const char* site);
+
 template <class Ready>
 [[nodiscard]] bool pump_until(asio::io_context& ioc, Ready ready,
                               std::chrono::steady_clock::duration budget = kPumpBudget,
-                              std::chrono::steady_clock::duration slice = kPumpSlice) {
+                              std::chrono::steady_clock::duration slice = kPumpSlice,
+                              const char* site = nullptr) {
+    // Returns WITHOUT PUMPING but WITH `ioc.restart()`, exactly as the window seam does
+    // and for the same reasons -- see (a) and (b) at `run_window_then_ready`, and the
+    // paragraph there on why the restart is not a violation of (b). The restart matters
+    // more here than there: a `pump_until` miss branch may pump for something else
+    // before it drains, and on a stopped io_context that pump is a silent no-op.
+    if (forced_miss_here(site)) {
+        ioc.restart();
+        return false;
+    }
     auto wg = asio::make_work_guard(ioc);
     const auto deadline = std::chrono::steady_clock::now() + budget;
     auto now = std::chrono::steady_clock::now();
@@ -117,10 +141,27 @@ template <class Ready>
 template <class Fut>
 [[nodiscard]] bool pump_until_ready(asio::io_context& ioc, Fut& fut,
                                     std::chrono::steady_clock::duration budget = kPumpBudget,
-                                    std::chrono::steady_clock::duration slice = kPumpSlice) {
+                                    std::chrono::steady_clock::duration slice = kPumpSlice,
+                                    const char* site = nullptr) {
     return pump_until(
         ioc, [&fut] { return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready; },
-        budget, slice);
+        budget, slice, site);
+}
+
+// Site-labelled call taking the DEFAULT slice, mirroring `run_window_then_ready`'s
+// four-argument form. Without it a site that wants only a label has to spell the slice it
+// was already defaulting to, which reads as a deliberate slice choice and is not one.
+//
+// ⚠️ SAME SIGNATURE HAZARD AS THE WINDOW FORM, and it is a hazard of the SIGNATURE rather
+// than a live defect: a bare `0` is a NULL POINTER CONSTANT, so the standard conversion to
+// `const char*` beats the user-defined conversion to `duration` and
+// `pump_until_ready(ioc, fut, b, 0)` would silently mean `site = nullptr`, not `slice = 0`.
+// Derive whether any caller does that rather than trusting a count here:
+//   git grep -n 'pump_until_ready(' -- tests/ | grep -E ', *0 *[,)]'
+template <class Fut>
+[[nodiscard]] bool pump_until_ready(asio::io_context& ioc, Fut& fut,
+                                    std::chrono::steady_clock::duration budget, const char* site) {
+    return pump_until_ready(ioc, fut, budget, kPumpSlice, site);
 }
 
 // Failure text for a `pump_until*` that ran out of budget. Stream the site name
@@ -412,10 +453,13 @@ template <class Pump>
 //     window opened there is no suspended frame, the drain resumes nothing, and no forcing
 //     mode can change that. `LO_InboundLogout_Confirm/close` is such a site, and
 //     `ci/red-arms/batch12-spotcheck.tsv` records it as the batch's measured exception.
-//   IT DOES NOT exercise the primitive's own pumping path: a forced call never touches the
-//     io_context. Nothing in this tree depends on that, because both drains call
-//     `ioc.restart()` themselves before pumping -- but a NEW miss branch that relied on
-//     this function having restarted would pass here and fail for real. Do not write one.
+//   IT DOES NOT exercise the primitive's own pumping path: a forced call dispatches
+//     nothing. It DOES call `ioc.restart()` before returning, which is the one thing a
+//     genuine miss leaves behind that a bare early return would not -- so a miss branch
+//     that pumps before it drains behaves the same under forcing as for real. An earlier
+//     revision of this line said "a forced call never touches the io_context" and paired
+//     it with "nothing in this tree depends on that"; the second half was a survey, and
+//     the first stopped being true when the restart was added for the budget primitive.
 //   IT DOES NOT judge the drain FLAVOUR, and NEITHER DRIVER'S FORCING MODE CHANGES THAT.
 //     Which drain a site needs is a quiescence question the ANNOUNCEMENT cannot see. The
 //     textual driver can catch a wrong flavour, because `ci/pump-red-arm.sh` fails an arm
@@ -453,6 +497,26 @@ template <class Pump>
 //     BOTH clock flavours, it is (ii). No #289 batch-12 site reaches (ii) -- the three
 //     clock-free files use a `MinimalTransportFactory` with no parking transport -- so this
 //     is written to be found rather than rediscovered.
+//     ⚠️ BATCH 13 REACHED (ii), so the sentence above is a record of batch 12 and not a
+//     standing property. `test_019_g2_enablement_witness.cpp`'s two send sites park on a
+//     live loopback-TLS transport, and the single-`Transport*` overload does not fit
+//     there: the engine owns two sessions plus a listener, and the parameter takes one.
+//     What those sites do instead is the remaining answer -- close the transport first,
+//     which at engine level spells `engine.stop()` -- bounded, verdict ignored, drain
+//     after. That sequence is currently spelled out at both sites rather than factored
+//     into a helper here, deliberately: two call sites in one file is a coincidence, and
+//     a helper would also collapse them onto one gtest file:line.
+//     ⚠️ GRADUATION CONDITION, so this is a decision and not an oversight: promote
+//     "stop the engine, then drain" to a primitive next to `cancel_and_drain_or_report`
+//     when a SECOND FILE needs it. Enumerate the candidates, then RESOLVE EACH BY HAND --
+//     this is not a count, and a grep cannot decide it:
+//       git grep -n -B6 'engine.stop(), asio::use_future' -- tests/ ':!tests/support/*'
+//     ⚠️ THE DISCRIMINATOR, because the common shape out-numbers this one and a loose
+//     grep reports both: in the ORDINARY shape `engine.stop()` IS the awaited future and
+//     the drain is its own miss branch -- that is most of this tree and is NOT this case.
+//     This case is `engine.stop()` spawned as a REMEDY *inside* the miss branch of some
+//     OTHER await, to close a transport the drain cannot. Look at what the enclosing
+//     `if (!...)` is guarding, not at the two lines being adjacent.
 // Use the seam for breadth and textual mutation to spot-check recipe correctness.
 // Do not retire `ci/pump-red-arm.sh`.
 //
@@ -494,7 +558,27 @@ inline const char* forced_window_miss_site() {
 
 // Announced on stderr when the seam fires. Distinct from `kWindowMiss` on purpose:
 // this says "the miss was FORCED here", the other says "the wait missed".
+//
+// ⚠️ ONE announce line covers BOTH primitives, so "window" in this text is narrower than
+// what it announces -- a forced `pump_until` miss says "window miss" too. The wording is
+// kept because every driver greps this literal and the env var is spelled the same way;
+// re-pointing a grep anchor for accuracy of adjective is how a plausible twin gets born.
+// What distinguishes the two is the REPORT the site then emits (`kWindowMiss` vs
+// `kPumpBudgetMiss`), which is what a driver must match against.
 inline constexpr const char* kWindowMissForced = "#289 FORCED window miss at site: ";
+
+// The seam's whole firing decision, shared by both primitives. Declared above `pump_until`.
+inline bool forced_miss_here(const char* site) {
+    if (site == nullptr) return false;
+    const char* forced = forced_window_miss_site();
+    if (forced == nullptr || std::strcmp(forced, site) != 0) return false;
+    // Announce BEFORE returning, so the line is emitted even if what follows hangs
+    // -- a hang is exactly the blind-spot-(c) outcome a driver must be able to tell
+    // apart from "the label matched nothing".
+    std::fprintf(stderr, "%s%s\n", kWindowMissForced, site);
+    std::fflush(stderr);
+    return true;
+}
 
 template <class Fut>
 [[nodiscard]] bool run_window_then_ready(asio::io_context& ioc, Fut& fut,
@@ -541,17 +625,25 @@ template <class Fut>
     //       HYPOTHETICAL: both drains call `ioc.restart()` themselves before pumping.
     //       Traded a real witness for a hypothetical one; reverted.
     //
-    // The io_context is therefore left untouched, deliberately, per (b) and its last sentence.
-    if (site != nullptr) {
-        if (const char* forced = forced_window_miss_site();
-            forced != nullptr && std::strcmp(forced, site) == 0) {
-            // Announce BEFORE returning, so the line is emitted even if what follows hangs
-            // -- a hang is exactly the blind-spot-(c) outcome a driver must be able to tell
-            // apart from "the label matched nothing".
-            std::fprintf(stderr, "%s%s\n", kWindowMissForced, site);
-            std::fflush(stderr);
-            return false;
-        }
+    // The io_context is therefore left UNDISPATCHED, deliberately, per (b) and its last
+    // sentence -- but not untouched: the forced path calls `ioc.restart()`, which is what a
+    // GENUINE miss leaves behind (both exits below restart before returning). `restart()`
+    // only clears the stopped flag; it runs no handler, so (b) is preserved exactly.
+    //
+    // ⚠️ WHY IT IS THERE AT ALL, since an earlier revision of this comment said "left
+    // untouched" and meant it. A miss branch is not required to drain FIRST: it may pump
+    // for something else before it drains -- `test_019_g2_enablement_witness.cpp` spawns
+    // `engine.stop()` and pumps that future, because its awaited op is parked on a live
+    // transport the drain alone cannot release. On a STOPPED io_context that pump is a
+    // silent no-op, so a forced arm would exercise a WEAKER miss branch than a genuine miss
+    // does, and the difference would show up as a drain residual attributed to the site.
+    // Restarting removes the question rather than making it a per-site condition to check.
+    // (At those two sites the preceding loop happens to restart already, so this is not a
+    // live defect there -- it is a property of that loop, not of the seam, which is exactly
+    // why the seam should not depend on it.)
+    if (forced_miss_here(site)) {
+        ioc.restart();
+        return false;
     }
     const auto ready = [&fut] {
         return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready;

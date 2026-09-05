@@ -62,6 +62,26 @@
 #include <fixpp/transport/test/mock_transport.hpp>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────
+//
+// This file's one census site uses `run_window_then_ready` plus a miss-branch drain
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289
+// names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// The drain is the CLOCKED one because the config below sets a NON-ZERO
+// `heartbeat_interval` against a `mock_clock`: reaching Active co_spawns a liveness
+// loop that parks on `sleep_until`, and only `cancel_sleeps()` releases it. `*clock`
+// is the test body's own local, declared above the site.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -148,8 +168,14 @@ TEST(PlaintextReconnectTest, PlaintextReconnectSkipsHandshakeAndLeavesPeerIdNull
     fsm.set_reconnect_endpoint(fixpp::transport::Endpoint{"127.0.0.1", 12345});
 
     auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-    ioc.run_for(500ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                    "PlaintextReconnectSkipsHandshake/attempt")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "PlaintextReconnectSkipsHandshake/attempt");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "PlaintextReconnectSkipsHandshake/attempt";
+        return;
+    }
     auto r = fut.get();
 
     // (a) A transport was minted (the FSM reached make()).

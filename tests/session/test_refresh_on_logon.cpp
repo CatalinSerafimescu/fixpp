@@ -67,6 +67,46 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────
+//
+// The migrated sites in this file use `run_window_then_ready` plus a miss-branch
+// drain (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard
+// #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// ⚠️ THE MISS BRANCH TAKES `drain_or_report`, AND NOT MERELY BECAUSE NO `Clock&` IS
+// IN SCOPE. `Fixture::eng` is a `fixpp::core::EngineConfig`, whose `clock` is a DATA
+// MEMBER, and NOTHING in this file ever assigns it. So
+// `cancel_and_drain_or_report(ioc, *fix.eng.clock, ...)` compiles and then
+// dereferences a null `shared_ptr` ON THE MISS PATH -- a fault inside a failure
+// handler, which is the one place it is least likely to be diagnosed correctly.
+// `drain_or_report` is required here, not just permitted.
+//   ⚠️ `make_acceptor_notconnected` SETS `heartbeat_interval = 30s`, WHICH LOOKS LIKE
+//   THE CLOCKED DRAIN'S TRIGGER AND IS NOT. A liveness loop parks in `sleep_until`
+//   only against a real Clock; with a null one that arm returns immediately, so there
+//   is no waiter for `cancel_sleeps()` to release. Derive the drain from whether a
+//   Clock is ASSIGNED, never from the heartbeat config.
+//
+// ⚠️ `Fixture::feed` DRAINS IN THE CALLEE ON PURPOSE. Its `frame` parameter binds a
+// caller expression-temporary, and a drain is what RESUMES the suspended frame, so
+// only code running BEFORE `feed` returns can do it safely. No guard the callee
+// declares reaches the caller's temporary (reason 3 at the primitive).
+//
+// ⚠️ ONE MIGRATED SITE IN THIS FILE CARRIES NO CENSUS ROW AND NEVER DID:
+// `W1_StoreAboveLive_RED`'s vehicle check sits eight lines below its window, past the
+// census's six-line lookahead (blind spot (b), documented in ci/pump-census.sh). It is
+// the same shape as its six siblings, so leaving it would have left the one copy of a
+// migrated pattern without the guard -- migrating it changes no pin row in either
+// direction. Do not read the pin delta as this file's site count.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 #include "support/extract_tag.hpp"
 
 using namespace std::chrono_literals;
@@ -346,8 +386,12 @@ struct Fixture {
 
     void feed(const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, session->on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "RefreshOnLogon::Fixture::feed")) {
+            fixpp::test_support::drain_or_report(ioc, "RefreshOnLogon::Fixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "RefreshOnLogon::Fixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 };
@@ -591,8 +635,12 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
 
     auto reconnect_fut = asio::co_spawn(
         fix.ioc, fix.session->drive_reconnect(), asio::use_future);
-    fix.ioc.run_for(3s);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, reconnect_fut, 3s,
+                                                    "W1_StoreAboveLive/reconnect")) {
+        fixpp::test_support::drain_or_report(fix.ioc, "W1_StoreAboveLive/reconnect");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W1_StoreAboveLive/reconnect";
+        return;
+    }
 
     // CRITICAL VEHICLE CHECK: drive_reconnect() must succeed (reach emit_initiator_logon_).
     // If this fails, the mock transport path broke before ensure_hydrated_ ran — the RED
@@ -697,8 +745,12 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
 
     auto reconnect_fut = asio::co_spawn(
         fix.ioc, fix.session->drive_reconnect(), asio::use_future);
-    fix.ioc.run_for(3s);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, reconnect_fut, 3s,
+                                                    "W2_StoreWinsDown/reconnect")) {
+        fixpp::test_support::drain_or_report(fix.ioc, "W2_StoreWinsDown/reconnect");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W2_StoreWinsDown/reconnect";
+        return;
+    }
 
     // CRITICAL VEHICLE CHECK: drive_reconnect() must succeed (same as W1).
     {
@@ -799,8 +851,12 @@ TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
     // Drive 2nd logon via drive_reconnect() with mock transport.
     auto reconnect_fut = asio::co_spawn(
         fix.ioc, fix.session->drive_reconnect(), asio::use_future);
-    fix.ioc.run_for(3s);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, reconnect_fut, 3s,
+                                                    "W3_KnobOff_NoReread/reconnect")) {
+        fixpp::test_support::drain_or_report(fix.ioc, "W3_KnobOff_NoReread/reconnect");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W3_KnobOff_NoReread/reconnect";
+        return;
+    }
 
     // Vehicle check: drive_reconnect must succeed (reaches emit_initiator_logon_).
     {
@@ -895,8 +951,12 @@ TEST(RefreshOnLogon, W4_NonPersistentStore_NoReread) {
     // Drive 2nd logon via drive_reconnect() with mock transport.
     auto reconnect_fut = asio::co_spawn(
         fix.ioc, fix.session->drive_reconnect(), asio::use_future);
-    fix.ioc.run_for(3s);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, reconnect_fut, 3s,
+                                                    "W4_NonPersistentStore/reconnect")) {
+        fixpp::test_support::drain_or_report(fix.ioc, "W4_NonPersistentStore/reconnect");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W4_NonPersistentStore/reconnect";
+        return;
+    }
 
     // Vehicle check.
     {
@@ -985,8 +1045,12 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
     // Drive 2nd logon (knob-ON, strict).
     auto reconnect_fut_on = asio::co_spawn(
         fix_on.ioc, fix_on.session->drive_reconnect(), asio::use_future);
-    fix_on.ioc.run_for(3s);
-    fix_on.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix_on.ioc, reconnect_fut_on, 3s,
+                                                    "W5a_KnobOn/reconnect")) {
+        fixpp::test_support::drain_or_report(fix_on.ioc, "W5a_KnobOn/reconnect");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W5a_KnobOn/reconnect";
+        return;
+    }
     {
         auto rr = reconnect_fut_on.get();
         ASSERT_TRUE(rr.has_value())
@@ -1024,8 +1088,12 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
 
     auto reconnect_fut_off = asio::co_spawn(
         fix_off.ioc, fix_off.session->drive_reconnect(), asio::use_future);
-    fix_off.ioc.run_for(3s);
-    fix_off.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix_off.ioc, reconnect_fut_off, 3s,
+                                                    "W5a_KnobOff/reconnect")) {
+        fixpp::test_support::drain_or_report(fix_off.ioc, "W5a_KnobOff/reconnect");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W5a_KnobOff/reconnect";
+        return;
+    }
     {
         auto rr = reconnect_fut_off.get();
         ASSERT_TRUE(rr.has_value())
@@ -1306,8 +1374,12 @@ TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
     // drive_reconnect() propagates the error.
     auto reconnect_fut = asio::co_spawn(
         fix.ioc, fix.session->drive_reconnect(), asio::use_future);
-    fix.ioc.run_for(3s);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, reconnect_fut, 3s,
+                                                    "W7_StoreReadFailure/reconnect")) {
+        fixpp::test_support::drain_or_report(fix.ioc, "W7_StoreReadFailure/reconnect");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W7_StoreReadFailure/reconnect";
+        return;
+    }
 
     // (a) drive_reconnect() must return an error (not success).
     {
@@ -1396,8 +1468,12 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
                 static_cast<fixpp::session::seqnum_t>(5),
                 static_cast<fixpp::session::seqnum_t>(7)),
             asio::use_future);
-        fix.ioc.run_for(500ms);
-        fix.ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(fix.ioc, warm_fut, 500ms,
+                                                        "W8_NoHeap/hydrate_warm")) {
+            fixpp::test_support::drain_or_report(fix.ioc, "W8_NoHeap/hydrate_warm");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W8_NoHeap/hydrate_warm";
+            return;
+        }
         (void)warm_fut.get();
     }
 
@@ -1410,8 +1486,12 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
             static_cast<fixpp::session::seqnum_t>(5),
             static_cast<fixpp::session::seqnum_t>(7)),
         asio::use_future);
-    fix.ioc.run_for(500ms);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, measured_fut, 500ms,
+                                                    "W8_NoHeap/hydrate_measured")) {
+        fixpp::test_support::drain_or_report(fix.ioc, "W8_NoHeap/hydrate_measured");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W8_NoHeap/hydrate_measured";
+        return;
+    }
     (void)measured_fut.get();
 
     const long heap_allocs = alloc_guard_count ? alloc_guard_count() : 0L;
@@ -1492,8 +1572,11 @@ TEST(ResetLatchLifecycle, StaleLatchOverwrittenOnReconnect_ByPeerRequestTrue) {
     // → latch=true. Logon(141=Y, 34=1) emitted; outbound→2.
     {
         auto fut = asio::co_spawn(ioc, session->open(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms, "ResetLatch/open")) {
+            fixpp::test_support::drain_or_report(ioc, "ResetLatch/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ResetLatch/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "T005: open() must succeed";
     }
     ASSERT_EQ(session->state(), fixpp::session::fsm_state::LogonSent)
@@ -1504,8 +1587,12 @@ TEST(ResetLatchLifecycle, StaleLatchOverwrittenOnReconnect_ByPeerRequestTrue) {
     {
         auto logon_no_reset = make_logon("FIX.4.4", 1, "SRV", "CLI");
         auto fut = asio::co_spawn(ioc, session->on_inbound_frame(logon_no_reset), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "ResetLatch/peer_logon_no_reset")) {
+            fixpp::test_support::drain_or_report(ioc, "ResetLatch/peer_logon_no_reset");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ResetLatch/peer_logon_no_reset";
+            return;
+        }
         (void)fut.get();
     }
     ASSERT_EQ(session->state(), fixpp::session::fsm_state::Active)
@@ -1518,8 +1605,11 @@ TEST(ResetLatchLifecycle, StaleLatchOverwrittenOnReconnect_ByPeerRequestTrue) {
     // Buggy conditional-set: latch stays TRUE from connection-1.
     {
         auto fut = asio::co_spawn(ioc, session->drive_reconnect(), asio::use_future);
-        ioc.run_for(2s);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 2s, "ResetLatch/reconnect")) {
+            fixpp::test_support::drain_or_report(ioc, "ResetLatch/reconnect");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ResetLatch/reconnect";
+            return;
+        }
         auto rr = fut.get();
         ASSERT_TRUE(rr.has_value())
             << "T005 vehicle: drive_reconnect() must succeed (mock transport). "
@@ -1535,8 +1625,12 @@ TEST(ResetLatchLifecycle, StaleLatchOverwrittenOnReconnect_ByPeerRequestTrue) {
     {
         auto logon_with_reset = make_logon_reset("FIX.4.4", 2, "SRV", "CLI");
         auto fut = asio::co_spawn(ioc, session->on_inbound_frame(logon_with_reset), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "ResetLatch/peer_logon_with_reset")) {
+            fixpp::test_support::drain_or_report(ioc, "ResetLatch/peer_logon_with_reset");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ResetLatch/peer_logon_with_reset";
+            return;
+        }
         (void)fut.get();
     }
     ASSERT_EQ(session->state(), fixpp::session::fsm_state::Active)
