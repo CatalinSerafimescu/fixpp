@@ -195,12 +195,36 @@ print(f"{d["ran"]} {d["real_s"]} {d["sum_s"]}")' "$LOG")"
 # ⚠️ The awk figures must be NON-EMPTY first. Two empty strings compare equal,
 # so a broken awk would agree with a broken parser and this cell would pass
 # having compared nothing.
+#
+# ⚠️ AND THE COMPARISON IS NUMERIC, NOT TEXTUAL. It was a string compare, and it
+# went red on main for a ctest total of `4.90`: awk's gsub preserves the log's
+# trailing zero, Python's float() drops it, so `4.90` != `4.9` as text while the
+# two parsers agreed perfectly on the VALUE. It passed locally only because the
+# runs happened to produce timings without a trailing zero — a cell whose verdict
+# depended on the decimal representation of a wall time. What this cell exists to
+# check is that the two parsers read the same NUMBERS out of one log; comparing
+# their formatting is a different and worthless question.
 if [ -z "$awk_ran" ] || [ -z "$awk_real" ] || [ -z "$awk_sum" ]; then
   bad "S4 the shipped awk read NOTHING from a real log (ran='$awk_ran' real='$awk_real' sum='$awk_sum') — the comparison would have been vacuous"
-elif [ "$py" = "$awk_ran $awk_real $awk_sum" ]; then
-  ok "S4 both parsers agree on the same real log ($py)"
 else
-  bad "S4 parsers DISAGREE — awk: '$awk_ran $awk_real $awk_sum'  verdict: '$py'"
+  # shellcheck disable=SC2086  # $py is three fields and MUST word-split into
+  # three argv entries; quoting it would pass one string and the compare would
+  # silently become "1 vs 3 values".
+  s4_verdict="$(python3 -c '
+import sys
+awk = sys.argv[1:4]
+py  = sys.argv[4:7]
+try:
+    a = [float(x) for x in awk]
+    b = [float(x) for x in py]
+except ValueError as exc:
+    print(f"UNPARSABLE {exc}"); raise SystemExit(0)
+print("AGREE" if a == b else f"DISAGREE awk={awk} verdict={py}")' \
+    "$awk_ran" "$awk_real" "$awk_sum" $py)"
+  case "$s4_verdict" in
+    AGREE) ok "S4 both parsers agree on the same real log (ran=$awk_ran real=$awk_real sum=$awk_sum)" ;;
+    *)     bad "S4 $s4_verdict" ;;
+  esac
 fi
 
 # ── S6: SAN_PATTERN must equal the shipped CI gate's ─────────────────────────

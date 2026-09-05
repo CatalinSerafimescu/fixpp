@@ -46,7 +46,12 @@
 # mode was wall clock barely moving while AGGREGATE runner time rose 44 %. A
 # lane that finishes sooner while spending more runner-minutes may be worth it
 # on the matrix critical path and is clearly not worth it elsewhere.
-name: Parallelism measurement (#267)
+# ⚠️ QUOTED. An unquoted `#` after a space starts a YAML comment, so this
+# reached GitHub as `Parallelism measurement (` — the trap tier1.yml already
+# carries a warning about on one of its step names, and `tools/check_workflows.py`
+# has an [R3] rule for it. Both were in front of me and it still shipped; the
+# checker is what caught it, on main, which is the argument for the checker.
+name: "Parallelism measurement (#267)"
 
 on:
   workflow_dispatch:
