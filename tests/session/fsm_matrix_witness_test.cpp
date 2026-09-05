@@ -86,6 +86,21 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -239,22 +254,37 @@ protected:
 
     fixpp::core::expected_t<void> open_sync(Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "FsmMatrixWitness::open_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "FsmMatrixWitness::open_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "FsmMatrixWitness::open_sync";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 
     fixpp::core::expected_t<void> feed_sync(Session& s, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "FsmMatrixWitness::feed_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "FsmMatrixWitness::feed_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "FsmMatrixWitness::feed_sync";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 
     fixpp::core::expected_t<void> close_sync(Session& s, close_mode mode) {
         auto fut = asio::co_spawn(ioc, s.close(mode), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "FsmMatrixWitness::close_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "FsmMatrixWitness::close_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "FsmMatrixWitness::close_sync";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 
@@ -292,11 +322,22 @@ protected:
     // Finalize the in-flight graceful close (advance clock to trigger 2s timeout).
     void finish_graceful_close() {
         clock->advance(std::chrono::seconds{3});
-        ioc.run_for(200ms);
-        ioc.restart();
-        if (close_fut_.valid()) {
-            (void)close_fut_.get();
+        // The `valid()` guard is PRESERVED, and so is the pump on its false arm: the
+        // original pumped unconditionally and only the `get()` was conditional.
+        if (!close_fut_.valid()) {
+            ioc.run_for(200ms);
+            ioc.restart();
+            return;
         }
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, close_fut_, 200ms, "FsmMatrixWitness::finish_graceful_close")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "FsmMatrixWitness::finish_graceful_close");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "FsmMatrixWitness::finish_graceful_close";
+            return;
+        }
+        (void)close_fut_.get();
     }
 };
 
@@ -955,8 +996,12 @@ TEST_F(FsmMatrixWitness, Active_InitiateLogout_TransitionsToLogoutSentThenDiscon
     clock->advance(std::chrono::seconds{3});
 
     // Let the timeout fire and close() complete.
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms,
+                                                    "Active_InitiateLogout/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Active_InitiateLogout/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Active_InitiateLogout/close";
+        return;
+    }
 
     // Collect close() result (expected: session_logout_timeout, but we don't assert the error).
     (void)close_fut.get();
@@ -1038,8 +1083,13 @@ TEST_F(FsmMatrixWitness, LO_InboundLogout_Confirm_TransitionsToDisconnected) {
     // collect the close future.
     if (close_fut_.valid()) {
         clock->advance(std::chrono::seconds{3});  // wake any remaining sleepers
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, close_fut_, 200ms,
+                                                        "LO_InboundLogout_Confirm/close")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "LO_InboundLogout_Confirm/close");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LO_InboundLogout_Confirm/close";
+            return;
+        }
         (void)close_fut_.get();
     }
 }

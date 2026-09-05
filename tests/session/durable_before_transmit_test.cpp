@@ -48,6 +48,21 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -72,8 +87,14 @@ protected:
 
     fixpp::core::expected_t<void> open_sync(Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "DurableBeforeTransmitTest::open_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "DurableBeforeTransmitTest::open_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "DurableBeforeTransmitTest::open_sync";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 };
@@ -139,8 +160,13 @@ TEST_F(DurableBeforeTransmitTest, InboundStoreBeforeFromAdminDispatch) {
 
     // Feed the inbound Logon.
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_frame), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                    "InboundStoreBeforeFromAdminDispatch")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "InboundStoreBeforeFromAdminDispatch");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "InboundStoreBeforeFromAdminDispatch";
+        return;
+    }
     auto r = fut.get();
     EXPECT_TRUE(r.has_value()) << "on_inbound_frame should succeed for valid Logon";
 
@@ -293,8 +319,14 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
         }
 
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut2, 200ms, "OutboundStoreBeforeTransportSend/logon-ack")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "OutboundStoreBeforeTransportSend/logon-ack");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "OutboundStoreBeforeTransportSend/logon-ack";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack inbound failed";
         ASSERT_EQ(sess.state(), fsm_state::Active);
     }
@@ -307,8 +339,13 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
     ioc.run_for(100ms);
     ioc.restart();
     clock->advance(std::chrono::seconds{3});
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms,
+                                                    "OutboundStoreBeforeTransportSend")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "OutboundStoreBeforeTransportSend");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "OutboundStoreBeforeTransportSend";
+        return;
+    }
     (void)close_fut.get();
 
     // I-3 outbound contract: every transport_send entry MUST be IMMEDIATELY

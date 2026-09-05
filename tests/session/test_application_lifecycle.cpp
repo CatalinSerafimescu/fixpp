@@ -51,6 +51,25 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// ⚠️ THE FIXTURE IS A BLOCK-LOCAL OBJECT IN A PLAIN `TEST`, NOT A `TEST_F` BASE, so
+// the clock is reached as `*f.clock`. A bare `*clock` would resolve to `::clock` from
+// <ctime>.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
@@ -326,8 +345,14 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_GracefulClose) {
 
     // Advance clock past the 2 s graceful-close timeout to unblock.
     f.clock->advance(std::chrono::seconds{3});
-    f.ioc.run_for(200ms);
-    f.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, close_fut, 200ms,
+                                                    "OnLogoutFiresOnce_GracefulClose/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "OnLogoutFiresOnce_GracefulClose/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "OnLogoutFiresOnce_GracefulClose/close";
+        return;
+    }
 
     (void)close_fut.get();
 

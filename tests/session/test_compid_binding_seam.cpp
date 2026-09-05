@@ -44,6 +44,33 @@
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// ⚠️ THE MISS BRANCH TAKES `drain_or_report`, AND NOT MERELY BECAUSE NO `Clock&` IS
+// IN SCOPE. The fixture's `engine` is a `fixpp::core::EngineConfig`, whose `clock` is a
+// DATA MEMBER (`include/fixpp/core/engine_config.hpp`) and is never assigned anywhere in
+// this file. So `cancel_and_drain_or_report(ioc, *engine.clock, ...)` compiles and then
+// dereferences a null `shared_ptr` ON THE MISS PATH -- a fault inside a failure handler,
+// which is the one place it is least likely to be diagnosed correctly. `drain_or_report`
+// is required here, not just permitted.
+// (`Engine::clock()` -- the accessor, not this member -- belongs to
+// `fixpp::session::Engine`, a type this file never names. Writing `engine.clock()` here
+// would be a compile error, which is the SAFE failure; the member spelling is the silent
+// one, and is why this is worth a comment at all.)
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -163,9 +190,19 @@ TEST_F(CompIdBindingNoIdentityTest, AbsentIdentityMtlsFailsClosed) {
 
     {
         auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(open_fut.wait_for(0s), std::future_status::ready);
+        // Replaces an explicit `wait_for(0s) == ready` assertion. ⚠️ NOT the same predicate
+        // at the same point -- that wording was here and was wrong. The assertion fired the
+        // instant the window returned; the primitive re-checks after ONE MORE `kPumpSlice`
+        // grace pump and a second `restart()`, so a future that becomes ready just after the
+        // window now passes where the assertion failed. That boundary grace is deliberate and
+        // is what every migrated site gets. Normalisation, not a hazard fix.
+        if (!fixpp::test_support::run_window_then_ready(ioc, open_fut, 500ms,
+                                                        "AbsentIdentityMtlsFailsClosed/open")) {
+            fixpp::test_support::drain_or_report(ioc, "AbsentIdentityMtlsFailsClosed/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AbsentIdentityMtlsFailsClosed/open";
+            return;
+        }
         auto open_r = open_fut.get();
         ASSERT_TRUE(open_r.has_value())
             << "Session::open() failed: " << static_cast<int>(open_r.error());
@@ -178,9 +215,13 @@ TEST_F(CompIdBindingNoIdentityTest, AbsentIdentityMtlsFailsClosed) {
     {
         auto feed_fut = asio::co_spawn(
             ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, feed_fut, 500ms, "AbsentIdentityMtlsFailsClosed/logon-ack")) {
+            fixpp::test_support::drain_or_report(ioc, "AbsentIdentityMtlsFailsClosed/logon-ack");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AbsentIdentityMtlsFailsClosed/logon-ack";
+            return;
+        }
         (void)feed_fut.get();
     }
 
@@ -217,9 +258,13 @@ TEST_F(CompIdBindingNoIdentityTest, NonMtlsAbsentIdentityPermissiveSkip) {
 
     {
         auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(open_fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, open_fut, 500ms, "NonMtlsAbsentIdentityPermissiveSkip/open")) {
+            fixpp::test_support::drain_or_report(ioc, "NonMtlsAbsentIdentityPermissiveSkip/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "NonMtlsAbsentIdentityPermissiveSkip/open";
+            return;
+        }
         auto open_r = open_fut.get();
         ASSERT_TRUE(open_r.has_value())
             << "Session::open() failed: " << static_cast<int>(open_r.error());
@@ -232,9 +277,14 @@ TEST_F(CompIdBindingNoIdentityTest, NonMtlsAbsentIdentityPermissiveSkip) {
     {
         auto feed_fut = asio::co_spawn(
             ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, feed_fut, 500ms, "NonMtlsAbsentIdentityPermissiveSkip/logon-ack")) {
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "NonMtlsAbsentIdentityPermissiveSkip/logon-ack");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "NonMtlsAbsentIdentityPermissiveSkip/logon-ack";
+            return;
+        }
         (void)feed_fut.get();
     }
 

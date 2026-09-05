@@ -74,3 +74,62 @@ status: stable
   the collision check's FALSE-POSITIVE arm is the load-bearing one because that check rejects a
   dictionary.
 
+
+- **2026-09-04 (later still) — the #289 pump gains a RUNTIME forcing seam; failure class 1 gains the
+  FALLBACK sub-lesson.** Batch 11 (82 sites / 39 files) could not have been verified under the
+  textual driver: that driver rebuilds once per arm, and one arm per site is the method rather than
+  overhead, so an 82-site batch is 82 rebuilds. `run_window_then_ready` now takes an optional site
+  label and honours `FIXPP_FORCE_WINDOW_MISS`, making forcing a runtime decision — one build, N runs.
+  Recorded in `components/test.md` with the two things that make it safe: it is a **weaker** witness
+  (so the textual driver is NOT retired), and its silence is ambiguous, so forcing **announces
+  itself** and an unannounced run is `NO-SUCH-SITE` rather than a pass.
+  ⚠️ **SUPERSEDED IN BATCH 12 (#289):** this entry originally read *"it exercises the primitive's
+  forced path, not the site's own miss block"*. That was false when written — forcing always ran the
+  caller's miss branch — and the seam has since changed besides. What forcing does and does not
+  exercise is stated ONCE, at `run_window_then_ready` in `tests/support/pump_until_ready.hpp`.
+
+  Class 1 gains: **a classifier's fallback is a claim, and a fallback set to the common case fails
+  toward the easy answer.** `classify-289.py`'s enclosing-function walk returned `("TEST", "<none>")`
+  when it exhausted — TEST-body being the shape with the simplest migration recipe — so three rows in
+  a libFuzzer harness that links no gtest were being offered for a migration whose miss branch is
+  `ADD_FAILURE()`. A correct row and a fallback row printed identically. This is the no-result path
+  wearing a value, and it is why the unresolved case now has its own bucket outside every recipe.
+
+- **2026-09-05 — batch 11's ARM PHASE found three defects in the INSTRUMENTS; the SITE defects were
+  caught earlier, by the compiler.** ⚠️ An earlier wording of this entry said the batch found "none
+  in the 82 migrated sites", which is false as written and contradicted by its own sibling commit
+  (*"SIX REAL DEFECTS, ONE CLASS"*): six sites had a clock expression derived per FILE where C++
+  scope is per SITE, and `*clock` bound to `::clock` from `<ctime>`. Those were found at BUILD time
+  and fixed before any arm ran. The true statement is narrower and still worth keeping: **once the
+  tree compiled, forcing all 82 miss branches found defects only in the drivers.** (1) `ci/pump-red-arm.sh` could report a false `SILENT` — `pipefail` plus
+  `grep -q` in a pipeline exits 141 *when the pattern matches*, size-dependently, so it had shipped
+  in batch 10 and passed on small arms. Recorded as a new bullet under failure class 1, because the
+  tell is a CONTRADICTION (the matcher says "not found" while the diagnostic prints the text) rather
+  than an error. (2) A timeout discarded the output, collapsing "reported then wedged" into
+  "inconclusive"; the driver now reads the partial output and surfaces the wedge count on the summary
+  line. (3) The arm timeout was a round 180 s where the competing quantity is `kQuiesceBudget` x the
+  forced count — measured 48 for one label — so it manufactured three false timeouts.
+
+  All three wedges turned out to be the SAME thing and it is worth keeping: forcing a miss wedged the
+  run at an **unmigrated** `run_for(); … get()` later in the same test. That is #289's hazard shown
+  live, and it is evidence for the remaining migration rather than against the migrated sites.
+
+- ⭐ **A FORCING MECHANISM CANNOT MANUFACTURE THE STATE IT IS MEANT TO PRESERVE. Every claim about
+  what forcing exercises is CONDITIONAL on the site's state at entry** (#289 batch 12). Three
+  separate claims about `FIXPP_FORCE_WINDOW_MISS` — *it gives the drain something to quiesce*, *the
+  drain is what resumes the frame*, *it reproduces a real miss's state* — were each written
+  unconditionally, and each was false at the same site for the same reason: a future that was
+  ALREADY READY before its window opened has no suspended frame for any forcing mode to preserve.
+  The site was known and documented as the batch's exception in a sibling file at the time, so the
+  two artifacts disagreed. ⚠️ **The unconditional form was written FIRST all three times**, twice
+  by the author and once by the reviewer, which is why this is a class and not an oversight: the
+  conditional reads like a hedge on a claim that feels structural, and it is not — it is the claim.
+
+- ⭐ **"I DID NOT FIND X" AND "THERE IS NO X" ARE DIFFERENT CLAIMS, AND THE SECOND NEEDS A COMMAND
+  ATTACHED** (#289 batch 12; ⚠️ **a REPEAT of batch 11's own lesson**, where a reviewer's "I did not
+  find X" was twice restated as "there is no X" and the X was then found). Three times in batch 12 I
+  told a reviewer that a phrase or a claim existed nowhere, without grepping in the same breath, and
+  each time it was in the tree — once in the file whose whole subject was that claim. It is adjacent
+  to *instruments fail toward clean* but distinct and needs its own name: **there, a tool ran and was
+  broken; here no tool ran at all.** An absence is the one claim that cannot be checked by reading,
+  because reading is what produced it. Attach the grep or do not make the claim.

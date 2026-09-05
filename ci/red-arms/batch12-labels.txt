@@ -1,0 +1,48 @@
+# ci/red-arms/batch12-labels.txt — the site labels #289 batch 12 adds.
+#
+# Derived as a SET DIFFERENCE (labels in the tree minus labels at the batch point),
+# not by scanning the diff: a line-scoped diff scan saw 17 of 35 here, because
+# clang-format wraps the literal onto the line after the anchor. That is the same
+# blind spot batch 11's uniqueness recipe had (121 of ~248).
+# Recipe: .specify/decisions/289-data/ (see the PR record).
+#
+# ⚠️ ONE MIGRATED SITE IS DELIBERATELY ABSENT AND IS NEITHER DRIVER'S TO FORCE:
+#   engine_clock_gate:stop_engine — it adopts `pump_until_ready`, which carries no
+#   site parameter (so the seam cannot reach it) and is not a `run_window_then_ready`
+#   call (so ci/pump-red-arm.sh cannot rewrite it). It was mutated BY HAND, and the
+#   output is in the PR record. Said here so an "N of N RED" summary over the list
+#   below is not read as covering the batch.
+AbsentIdentityMtlsFailsClosed/logon-ack
+AbsentIdentityMtlsFailsClosed/open
+Active_InitiateLogout/close
+AllocationFixture::open_to_active/logon
+AllocationFixture::open_to_active/open
+AuthFailConsumesAttemptsAndTerminatesAtCap/attempt
+AuthFailConsumesAttemptsAndTerminatesAtCap/open
+CloseWithHolderDoesNotTerminate/close
+FsmMatrixWitness::finish_graceful_close
+InboundLogonWhileLogoutSent/close
+InboundLogonWhileLogoutSent/logon
+InitiatorOpen_TransportThrowsOnLogonEmit/open
+LO_InboundLogout_Confirm/close
+LiveIdentityDrivesAuthorization/logon-ack
+LiveIdentityDrivesAuthorization/open
+LogoutGracefulCancelMidSleep/close
+NonMtlsAbsentIdentityPermissiveSkip/logon-ack
+NonMtlsAbsentIdentityPermissiveSkip/open
+OnLogoutFiresOnce_GracefulClose/close
+OutboundStoreBeforeTransportSend/logon-ack
+PersistentStore_FailsClosed_AnyErrorClass/logon-ack
+PersistentStore_FailsClosed_AnyErrorClass/open
+PersistentStore_FailsClosed_OutOfSet/logon-ack
+PersistentStore_FailsClosed_OutOfSet/open
+PostureTest::feed_sync
+ReconnectLoopMintsFreshTransport/attempt
+ResetOnLifecycleTest::graceful_close_sync
+SendInvalidStateTest::send_sync
+ToAppStoreBlockValuedError/logon-ack
+ToAppStoreBlockValuedError/open
+XmlNonFixPassthrough::open_to_active/logon
+XmlNonFixPassthrough::open_to_active/open
+session_reject:RejectFixture::open_to_active/logon
+session_reject:RejectFixture::open_to_active/open

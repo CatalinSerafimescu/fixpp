@@ -54,6 +54,31 @@ prints `0` for a whole syntax.
   window instead of removing the assumption. **Re-run every earlier control after each fix, and add
   the new mode as a control before believing the fix.** A remedy that only closes the reported case
   is class 2 wearing an instrument's clothes.
+- ⚠️ **A CLASSIFIER'S FALLBACK IS A CLAIM, AND A FALLBACK SET TO THE COMMON CASE FAILS TOWARD THE
+  EASY ANSWER.** This is the no-result path wearing a value: the search does not return "empty", it
+  returns *the answer most rows have*, so a row the instrument could not classify is indistinguishable
+  in the output from one it classified correctly. Measured in `classify-289.py`: the walk that finds a
+  census site's enclosing function returned `("TEST", "<none>")` on exhaustion, and TEST-body is
+  exactly the shape whose migration recipe is the simplest — so three rows inside an
+  `extern "C" int LLVMFuzzerTestOneInput` harness that links no gtest were offered for a migration
+  whose miss branch is `ADD_FAILURE()`. **Two independent causes** put them there (a signature regex
+  that `extern "C"` defeats, and a lookahead the function sits beyond), and neither was visible,
+  because a correct row and a fallback row printed identically. Give the unresolved case its **own**
+  value, outside every recipe bucket, so a consumer filtering on the recipes drops it instead of
+  migrating it — and add a control that fails if the fallback is reverted, since a control asserting
+  the common case would have passed the whole time it was wrong.
+
+- ⚠️ **A SHELL PIPELINE CAN TURN A SUCCESSFUL MATCH INTO A FAILURE, AND IT DOES SO ONLY ON LARGE
+  INPUTS.** Under `set -o pipefail`, `printf '%s' "$out" | grep -q PATTERN` exits **141** when the
+  pattern MATCHES: `grep -q` stops at the first hit and closes the pipe, `printf` takes SIGPIPE, and
+  pipefail propagates it. Measured in `ci/pump-red-arm.sh`, where the `else` branch reads *"NO
+  REPORT — the miss branch did not announce itself"*: three correctly-migrated sites were reported
+  SILENT. **It is size-dependent**, so it had shipped a batch earlier and passed every time — with
+  little output `printf` finishes before `grep` exits. A fixture-sized self-test cannot see it.
+  Use a herestring (`grep -q PATTERN <<<"$out"`). ⚠️ **The tell is a contradiction, not an error**:
+  the matcher says "not found" while the surrounding diagnostic prints the very text it wanted —
+  chase that rather than re-reading the pattern.
+
 - ⚠️ **Ask what the instrument does when it finds NOTHING — and require that to be an error.** An
   extractor that runs to EOF, a query that returns empty, a matcher that never fires: if the
   no-result path exits 0 and yields a value, the value is wrong and confident. **Fail closed**, then

@@ -1,0 +1,21 @@
+# ci/red-arms/batch11-spotcheck.tsv -- TEXTUAL spot-checks for #289 batch 11.
+#
+# The seam (ci/pump-seam-arm.sh) covers all 82 sites but is a WEAKER witness. ⚠️ THE
+# SENTENCE THAT USED TO STAND HERE -- *"it exercises the primitive's forced path, not the
+# site's own miss block"* -- WAS FALSE, and this file was the last place it survived after
+# the others were fixed (#289 batch 12). What forcing does and does not exercise is stated
+# ONCE, at `run_window_then_ready` in tests/support/pump_until_ready.hpp. Read it there.
+# These three arms mutate the source, one per RECIPE shape, so the block as written at that
+# site is what compiles and reports:
+#   expected_t<void> helper -> std::unexpected(kWindowMissSentinel)
+#   void helper             -> return;
+#   TEST body               -> return;
+#
+# NOTE force_site() truncates the call at its third argument, so it DROPS the site
+# label. That is fine and is itself worth witnessing: the label is defaulted, the call
+# still compiles, and the ADD_FAILURE that carries the label is what the driver matches.
+#
+# columns: source <TAB> unique-code-anchor <TAB> expected label <TAB> cmake target
+tests/session/admin_builder_distinct_now_test.cpp	expected_t<void> open_sync(Session& s) {	AdminDistinctNowTest::open_sync	session_pure_tests
+tests/session/session_reject_test.cpp	void feed(	session_reject:RejectFixture::feed	session_pure_tests
+tests/session/durable_before_transmit_test.cpp	InboundStoreBeforeFromAdminDispatch	InboundStoreBeforeFromAdminDispatch	session_pure_tests

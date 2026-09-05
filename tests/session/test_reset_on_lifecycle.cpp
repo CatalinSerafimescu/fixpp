@@ -60,7 +60,28 @@
 #include "session/support/frame_field_extract.hpp"   // via -I tests/
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 #include "support/store_double.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// ⚠️ THE `run_ioc()` CALLERS IN THIS FIXTURE ARE STILL UNGUARDED AND ARE CENSUS-
+// INVISIBLE. `run_ioc()` hides `ioc.run_for(200ms); ioc.restart();` behind one call,
+// and the census scan is lexical (`.run_for(` on the line), so those sites carry no
+// pin row and are not in this batch. Same hazard; enumerate them with a per-file
+// `run_for` excess count rather than from any list written here.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
@@ -253,10 +274,22 @@ protected:
     // graceful-close (Logout) timeout so teardown completes.
     void graceful_close_sync(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
+        // Partial drive: let close() emit Logout and register its 2 s sleep. NOT the
+        // guarded window -- no `get()` follows it. The census names THIS line because
+        // its 6-line lookahead reaches the `get()` below; the migration guards that get.
         ioc.run_for(50ms);
         ioc.restart();
         clock->advance(std::chrono::seconds{3});
-        run_ioc();
+        // Inlined from `run_ioc()`, which is `run_for(200ms); restart();` -- the same
+        // window, now with the readiness check the primitive adds before the get.
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut, 200ms, "ResetOnLifecycleTest::graceful_close_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "ResetOnLifecycleTest::graceful_close_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ResetOnLifecycleTest::graceful_close_sync";
+            return;
+        }
         (void)fut.get();
     }
 

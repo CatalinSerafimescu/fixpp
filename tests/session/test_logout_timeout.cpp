@@ -68,6 +68,21 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -168,16 +183,25 @@ protected:
 
     fixpp::core::expected_t<void> run_open(fixpp::session::Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run_for(100ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms,
+                                                        "LogoutTimeoutTest::run_open")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "LogoutTimeoutTest::run_open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LogoutTimeoutTest::run_open";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 
     fixpp::core::expected_t<void> feed(fixpp::session::Session& s,
                                        std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(100ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms,
+                                                        "LogoutTimeoutTest::feed")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "LogoutTimeoutTest::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LogoutTimeoutTest::feed";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 
@@ -235,8 +259,13 @@ TEST_F(LogoutTimeoutTest, DriveLogoutStub_EmitsNoLogoutFrame) {
 
     // Call drive_logout directly — stub should co_return {} immediately.
     auto fut = asio::co_spawn(ioc, fsm.drive_logout(200ms), asio::use_future);
-    ioc.run_for(100ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms,
+                                                    "DriveLogoutStub_EmitsNoLogoutFrame")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "DriveLogoutStub_EmitsNoLogoutFrame");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DriveLogoutStub_EmitsNoLogoutFrame";
+        return;
+    }
     auto result = fut.get();
 
     // Stub returns {} (success) without doing anything.

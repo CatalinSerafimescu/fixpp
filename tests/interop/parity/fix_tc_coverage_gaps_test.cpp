@@ -28,6 +28,21 @@
 // [const §XV.9]: tests-only. spec_ref [FIX-SL §4.5 / §4.8 / FIX-TC 2b/2t/15].
 
 #include "parity_support.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 namespace fixpp::interop::parity {
 namespace {
@@ -259,7 +274,18 @@ TEST_F(FixTcCoverageGaps, InboundLogonWhileLogoutSent_Drained_StaysLogoutSent) {
     {
         auto logon = make_logon("FIX.4.2", inbound_before, "TW", "ISLD");
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(100ms);
+        // ⚠️ The substituted primitive RESTARTS after its window; the bare `run_for`
+        // this replaced did not. Whether that is inert is a question about what runs
+        // AFTER this window -- probe `ioc.stopped()` around it, do not trust a
+        // recorded answer.
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms,
+                                                        "InboundLogonWhileLogoutSent/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "InboundLogonWhileLogoutSent/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "InboundLogonWhileLogoutSent/logon";
+            return;
+        }
         (void)fut.get();
     }
 
@@ -273,7 +299,14 @@ TEST_F(FixTcCoverageGaps, InboundLogonWhileLogoutSent_Drained_StaysLogoutSent) {
 
     // Drain the parked close() coroutine cleanly: let the 2 s logout timeout fire.
     clock->advance(std::chrono::seconds{3});
-    ioc.run_for(200ms);
+    // Same added restart as above; re-derive its effect the same way.
+    if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms,
+                                                    "InboundLogonWhileLogoutSent/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "InboundLogonWhileLogoutSent/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "InboundLogonWhileLogoutSent/close";
+        return;
+    }
     (void)close_fut.get();
 }
 

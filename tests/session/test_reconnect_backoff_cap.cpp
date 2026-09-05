@@ -66,6 +66,21 @@
 
 // minimal_dictionary for session open
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -147,8 +162,13 @@ protected:
                                          std::chrono::seconds{30}, 2000ms);
 
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(2s);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 2s,
+                                                        "ReconnectBackoffCapTest::run_drive")) {
+            fixpp::test_support::drain_or_report(ioc, "ReconnectBackoffCapTest::run_drive");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ReconnectBackoffCapTest::run_drive";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 };
@@ -345,9 +365,23 @@ TEST_F(AuthFailReconnectCapTest, AuthFailConsumesAttemptsAndTerminatesAtCap) {
     // Open the session (LogonSent).
     {
         auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(open_fut.wait_for(0s), std::future_status::ready);
+        // Replaces an explicit `wait_for(0s) == ready` assertion. ⚠️ NOT the same predicate
+        // at the same point -- that wording was here and was wrong. The assertion fired the
+        // instant the window returned; the primitive re-checks after ONE MORE `kPumpSlice`
+        // grace pump and a second `restart()`, so a future that becomes ready just after the
+        // window now passes where the assertion failed. That boundary grace is deliberate and
+        // is what every migrated site gets. Normalisation, not a hazard fix.
+        // The fixture's `engine` is an `EngineConfig` whose `clock` DATA MEMBER is never
+        // assigned in this file, so `*engine.clock` would compile and deref null on the
+        // miss path. The clock-free drain is REQUIRED here, not just permitted.
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, open_fut, 500ms, "AuthFailConsumesAttemptsAndTerminatesAtCap/open")) {
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "AuthFailConsumesAttemptsAndTerminatesAtCap/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AuthFailConsumesAttemptsAndTerminatesAtCap/open";
+            return;
+        }
         auto open_r = open_fut.get();
         ASSERT_TRUE(open_r.has_value())
             << "Session::open() failed: " << static_cast<int>(open_r.error());
@@ -364,10 +398,15 @@ TEST_F(AuthFailReconnectCapTest, AuthFailConsumesAttemptsAndTerminatesAtCap) {
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
 
     auto fut = asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
-    ioc.run_for(2s);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, fut, 2s, "AuthFailConsumesAttemptsAndTerminatesAtCap/attempt")) {
+        fixpp::test_support::drain_or_report(ioc,
+                                             "AuthFailConsumesAttemptsAndTerminatesAtCap/attempt");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "AuthFailConsumesAttemptsAndTerminatesAtCap/attempt";
+        return;
+    }
 
-    ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
     auto result = fut.get();
 
     // GREEN after T014: auth-fail on EACH attempt → N make() calls at cap.
