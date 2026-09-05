@@ -233,14 +233,14 @@ run_pass() {
 # real change in coverage", NAMING ONLY SECTION ORDER AS THE THING BEING
 # NORMALISED.  That claim was FALSE and it shipped: the digest was taken over the
 # raw report, which carries per-line and per-function EXECUTION COUNTS, and those
-# move run-to-run.  Measured on #267 campaign run 33951801400,
-# `linux-clang-coverage`: the two SERIAL passes covered an identical set of 9042
-# lines and still produced different digests, on 871 `DA:` records differing in
-# count alone.  The gate voided its own baseline — it would have voided EVERY
-# coverage sample of the campaign, in a way that reads as a suite defect.
+# move run-to-run — so the gate voided its own serial baseline on passes that had
+# covered the same code, which reads as a suite defect rather than an instrument
+# fault.
 #
-# What is normalised, and the scope limit that buys, lives in the awk.  Do not
-# re-state it here: two copies of a rule is how one of them goes stale.
+# What is normalised, the scope limit that buys, and the recipe for re-deriving
+# any of it live in ci/lcov-coverage-key.awk.  Not re-stated here: two copies of
+# a rule is how one of them goes stale, and the figures that used to sit in this
+# paragraph were a third copy of numbers from an artifact no longer in reach.
 coverage_digest() {
   local idx="$1"
   local prof="$BUILD/profiles-pass${idx}"
@@ -283,52 +283,27 @@ coverage_digest() {
     return 0
   fi
 
-  # ⚠️ THE DIGEST IS TAKEN OVER ci/lcov-coverage-key.awk's OUTPUT, NOT OVER THE
-  # RAW REPORT — hashing the raw report voided every sample for a reason that
-  # has nothing to do with `--parallel`. That file carries the whole rationale,
-  # the measurement behind it, and the scope limit it buys (line and function
-  # coverage only; branch data is excluded because it is nondeterministic at
-  # FIXED concurrency in this suite). Read it before changing this line.
+  # ⚠️ THE WHOLE DIGEST IS ONE CALL, DELIBERATELY — see ci/lcov-coverage-digest.sh
+  # for what it computes and why it validates rather than trusts. Assembling it
+  # here is what let a hostile review construct a mutation that restored the
+  # original raw-report defect with every seam cell still green: the cells could
+  # only test the awk, never this function's use of it. There is nothing left
+  # here to diverge from what the cells exercise.
   #
-  # Sorting stays here rather than in the awk: `llvm-cov export` emits
-  # per-object sections in an order that follows the object list and the
-  # filesystem, neither of which is a coverage fact.
-  #
-  # The keyed stream is materialised rather than piped straight into sha256sum
-  # so `branch_records_in_digest` below can be COUNTED from the very bytes that
-  # were hashed. It was a hardcoded `0` first, which is a claim about the awk
-  # rather than an observation of it — and a claim in a second file is how one
-  # of the two goes stale.
-  local keyed="$BUILD/coverage-pass${idx}.key"
-  awk -f "$HERE/lcov-coverage-key.awk" "$info" | LC_ALL=C sort > "$keyed"
-  local sha
-  sha="$(sha256sum < "$keyed" | cut -d' ' -f1)"
-  # ⚠️ COUNTED WITH awk, NOT `grep -c`. `grep -c` prints `0` AND exits 1 when
-  # nothing matches, so the `|| echo 0` these lines used to carry appended a
-  # SECOND zero — `lines_covered=0\n0`, which the verdict's env parser would read
-  # as a malformed sample rather than as "none". It never fired because the
-  # `-s "$info"` guard above makes an empty report unreachable here, but
-  # `branches_covered` CAN legitimately be zero (a build with branch coverage
-  # off), which would have made it reachable for the first time.
-  #
-  # Branch data is OUTSIDE the digest (see the awk), but the report's branch
-  # counts are recorded anyway — a future branch-stability measurement needs a
-  # starting point. ⚠️ `branches_covered` NEXT TO A DIGEST INVITES THE WRONG
-  # INFERENCE: a reader who sees it has no way to tell it was not compared.
-  # `branch_records_in_digest` is counted from the hashed bytes themselves to
-  # say so, which also means it cannot lie if the awk's exclusion is ever
-  # dropped — it would simply stop reading 0.
+  # It exits non-zero rather than emitting a digest it cannot stand behind, and
+  # that status is CHECKED: this script runs under `set -uo pipefail` and not
+  # `set -e`, so an unchecked failure would fall through to a `status=ok` sample.
+  local cov
+  if ! cov="$("$HERE/lcov-coverage-digest.sh" "$info")"; then
+    printf 'status=digest-failed\nprofraw_count=%s\n' "$n" \
+      > "$OUT/pass${idx}.coverage.env"
+    echo "::warning::#267 item 4: pass ${idx} produced a report but no usable coverage digest."
+    cp "$info" "$OUT/pass${idx}.lcov"
+    return 0
+  fi
   {
-    printf 'status=ok\nprofraw_count=%s\nsorted_info_sha256=%s\n' "$n" "$sha"
-    printf 'branch_records_in_digest=%s\n' \
-      "$(awk '/BRDA:/ { n++ } END { print n + 0 }' "$keyed")"
-    awk '
-      /^DA:/   { split(substr($0, 4), a, ","); lt++; if (a[2] + 0 > 0) lc++ }
-      /^BRDA:/ { split(substr($0, 6), b, ","); bt++
-                 if (b[4] != "-" && b[4] + 0 > 0) bc++ }
-      END      { printf "lines_covered=%d\nlines_total=%d\n", lc + 0, lt + 0
-                 printf "branches_covered=%d\nbranches_total=%d\n", bc + 0, bt + 0 }
-    ' "$info"
+    printf 'status=ok\nprofraw_count=%s\n' "$n"
+    printf '%s\n' "$cov"
   } > "$OUT/pass${idx}.coverage.env"
   cp "$info" "$OUT/pass${idx}.lcov"
 }

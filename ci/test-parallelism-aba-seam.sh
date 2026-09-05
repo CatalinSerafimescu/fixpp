@@ -279,13 +279,34 @@ fi
 # right. The grep survives in a narrower role below — that the driver actually
 # INVOKES this file — because a cell testing an awk the driver has stopped
 # calling is the failure the old guard was built for.
-canon() { awk -f "$HERE/lcov-coverage-key.awk" | LC_ALL=C sort | sha256sum | cut -d' ' -f1; }
+# ⚠️ `canon` RUNS THE SHIPPED DIGEST, NOT A REPRODUCTION OF IT. It used to run
+# the key awk and hash the result here, with a grep asserting the driver still
+# mentioned that awk. A hostile review produced the mutation that beats that
+# arrangement — leave the awk call in place, hash `$info` instead of the keyed
+# output — which restores the original defect while the grep, all of S9's arms,
+# S10 and the execution tally stay green. A grep proves a call EXISTS, never
+# that its RESULT is used. The digest now lives behind one entry point that both
+# sides run, so a driver-only divergence is not expressible.
+canon() {
+  local f; f="$(mktemp)"; cat > "$f"
+  "$HERE/lcov-coverage-digest.sh" "$f" | sed -n 's/^sorted_info_sha256=//p'
+  rm -f "$f"
+}
+# The remaining grep is narrower and still worth keeping: it asserts the DRIVER
+# reaches the same entry point. If it stops, these cells are exercising code
+# nothing runs.
+#
+# ⚠️ MATCHES THE INVOCATION FORM, AND ACCEPTS ONE OR MORE. A bare
+# `lcov-coverage-digest.sh` also matched the driver's COMMENT about it, so the
+# `-ne 1` test below reddened at 2 the moment the file was mentioned in prose —
+# a cell failing on documentation. Counting call sites exactly would break again
+# the day a second legitimate call appears; presence is the property meant.
 # shellcheck disable=SC2016  # `$HERE` is the driver's, not this shell's — it must stay literal
-recipe="$(grep -c 'awk -f "$HERE/lcov-coverage-key.awk"' "$HERE/run-parallelism-aba.sh")"
+recipe="$(grep -c '"\$HERE/lcov-coverage-digest.sh"' "$HERE/run-parallelism-aba.sh")"
 A="$(printf 'SF:a.cc\nDA:1,1\nend_of_record\nSF:b.cc\nDA:2,0\nend_of_record\n' | canon)"
 B="$(printf 'SF:a.cc\nDA:2,0\nend_of_record\nSF:b.cc\nDA:1,1\nend_of_record\n' | canon)"
 C="$(printf 'SF:b.cc\nDA:2,0\nend_of_record\nSF:a.cc\nDA:1,1\nend_of_record\n' | canon)"
-if [ "${recipe:-0}" -ne 1 ]; then
+if [ "${recipe:-0}" -lt 1 ]; then
   bad "S7 the driver's canonicalisation recipe was not found (${recipe:-0} matches) — this cell is testing a copy, not the shipped code"
 elif [ "$A" = "$B" ]; then
   bad "S7 coverage MIGRATING BETWEEN FILES produced an identical digest ($A)"
@@ -383,11 +404,12 @@ fi
 #
 # The defect S9 exists for shipped and voided a real sample. The digest was
 # taken over the raw lcov, which carries per-line and per-function EXECUTION
-# COUNTS; those move run-to-run for any timing-dependent loop. On #267 campaign
-# run 33951801400, `linux-clang-coverage`'s two SERIAL passes covered an
-# IDENTICAL set of 9042 lines and still disagreed, on 871 `DA:` records
-# differing in count alone — so item 4 voided its own baseline, and would have
-# done so on every coverage sample of the campaign.
+# COUNTS; those move run-to-run for any timing-dependent loop, so two SERIAL
+# passes that had covered exactly the same code disagreed and item 4 voided its
+# own baseline. The condition and the re-derivation recipe are in
+# ci/lcov-coverage-key.awk; the figures are deliberately not copied to a third
+# file, and "it would have voided EVERY sample" was an overgeneralisation from
+# one observed pair.
 #
 # ⚠️ BOTH ARMS OR NEITHER. A normalisation that maps everything to the same
 # value collides on the counts AND on a real coverage change, and reports clean
@@ -409,17 +431,23 @@ fi
 
 # ── S10: THE BRANCH-DATA EXCLUSION IS A DECLARED SCOPE LIMIT ────────────────
 #
-# ci/lcov-coverage-key.awk drops `BRDA:`/`BRH:`/`BRF:` because branch coverage is
-# nondeterministic in this suite at FIXED concurrency: on the two serial passes
-# above — same binary, same machine, same j=1 — line and function coverage
-# agreed exactly while 16 of 8458 branches flipped their taken-bit. Including
-# them leaves the baseline unable to agree with itself.
+# ci/lcov-coverage-key.awk drops `BRDA:`/`BRH:`/`BRF:` because branch coverage in
+# this suite has been observed to move between passes at FIXED concurrency while
+# line and function coverage did not. Including it leaves the baseline unable to
+# agree with itself. The condition, and how to re-derive it on any sample, are in
+# the awk; the numbers are not repeated here or there.
 #
 # That is a real limit: a widening that changed ONLY branch coverage is invisible
 # to item 4. This cell exists so the limit is a TESTED property rather than a
 # paragraph — if someone re-includes branch data to "improve" the digest, the
-# false void comes back and this cell is where they are told why. It also pins
-# the disclosure, so a sample cannot silently stop declaring the exclusion.
+# false void comes back and this cell is where they are told why.
+#
+# ⚠️ WHAT THIS CELL DOES NOT DO. It says nothing about `branch_records_in_digest`
+# being emitted: it compares two digests, and deleting that key from the driver
+# leaves it green. The claim that it "pins the disclosure" was here and was
+# false. Nothing asserts the disclosure is present — an accepted gap, recorded
+# rather than papered over, and tolerable only because the key is COUNTED from
+# the hashed bytes, so it can be absent but cannot be wrong.
 # ⚠️ ONE ARM, NOT TWO. This cell shipped with a second arm that grepped the
 # driver's source for the literal `branch_records_in_digest=0` — which is the
 # byte-identity-between-two-copies pattern S7's own rewrite above removes, added

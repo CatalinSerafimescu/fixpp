@@ -15,22 +15,34 @@
 #
 # EXECUTION COUNTS ARE NOT A COVERAGE FACT. `DA:<line>,<count>` and
 # `FNDA:<count>,<name>` carry how many times a line or function ran, which moves
-# run-to-run for any timing- or iteration-dependent loop. Hashing them makes the
-# digest report a difference on every run. Measured on #267 campaign run
-# 33951801400, `linux-clang-coverage`: the two SERIAL passes had an IDENTICAL
-# covered-line set (9042 lines, zero differences) and **871 `DA:` records
-# differing in count alone** — enough to void the sample. Both are reduced here
+# run-to-run for any timing- or iteration-dependent loop. Hashing them made the
+# digest report a difference on every run: it voided its own serial baseline on
+# a pair of passes that had covered exactly the same code, which reads as a
+# suite defect rather than as the instrument fault it was. Both are reduced here
 # to a covered/not bit.
 #
 # ⚠️ BRANCH RECORDS (`BRDA:`/`BRH:`/`BRF:`) ARE EXCLUDED, AND THAT IS A REAL
 # SCOPE LIMIT, NOT A DETAIL. This key covers LINE and FUNCTION coverage only.
-# The reason is measured, not assumed: on the same two serial passes — same
-# binary, same concurrency, same machine — line coverage and function coverage
-# agreed exactly while **16 of 8458 branches flipped their taken-bit**. Branch
-# coverage is nondeterministic in this suite at FIXED concurrency, so including
-# it leaves the baseline unable to agree with itself and item 4 can never
-# conclude anything in either direction. Excluding it is what makes the
-# remaining comparison mean something.
+# The reason is a measured CONDITION: branch coverage has been observed to move
+# between two passes at FIXED concurrency — same binary, same machine, same
+# `j=1` — while line and function coverage did not. Including it therefore
+# leaves the baseline unable to agree with itself, and item 4 can never conclude
+# anything in either direction.
+#
+# ⚠️ THE COUNTS THAT WERE HERE ARE DELETED ON PURPOSE. They were results read
+# off one uploaded artifact that is not in this tree, copied into three separate
+# files — unverifiable where they sat, and rotting from the moment they were
+# written. "It voided every sample" also does not follow from one observed pair.
+# Re-derive on any sample instead; this recipe cannot go stale:
+#
+#   # do the two SERIAL passes agree on WHAT is covered, and differ on counts?
+#   for p in 1 3; do awk '/^SF:/{sf=$0} /^DA:/{split(substr($0,4),a,",");
+#     if (a[2]+0>0) print sf"|"a[1]}' pass$p.lcov | sort -u > /tmp/cov$p; done
+#   diff /tmp/cov1 /tmp/cov3            # empty  => the covered SET agrees
+#   diff <(grep ^DA: pass1.lcov) <(grep ^DA: pass3.lcov) | grep -c '^<'
+#   # and for the branch axis, the same two passes:
+#   for p in 1 3; do grep ^BRDA: pass$p.lcov | sort > /tmp/br$p; done
+#   diff /tmp/br1 /tmp/br3 | grep -c '^<'
 #
 # The consequence, stated so nobody has to rediscover it: **a widening that
 # changed only branch coverage would not be caught by item 4.** If that ever

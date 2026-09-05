@@ -690,8 +690,10 @@ def main() -> int:
                 "parallel pass against.")
         elif par_shas != ser_shas:
             defects.append(
-                "MERGED COVERAGE CHANGED UNDER PARALLELISM: the two serial passes agree "
-                "byte-for-byte on a sorted lcov `.info`, and the parallel pass does not. "
+                "MERGED COVERAGE CHANGED UNDER PARALLELISM: the two serial passes agree on "
+                "the normalised LINE and FUNCTION coverage key (`ci/lcov-coverage-key.awk` — "
+                "execution counts reduced to covered/not, branch records excluded), and the "
+                "parallel pass does not. "
                 "#267 acceptance item 4 asks exactly this question and the answer is no. "
                 "`%p` in LLVM_PROFILE_FILE was expected to give each process its own "
                 "profraw; that expectation is now measured false for this configuration.")

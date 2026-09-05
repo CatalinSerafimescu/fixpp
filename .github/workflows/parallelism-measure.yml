@@ -124,9 +124,13 @@ jobs:
           # name all three and passed; the second named two and died before it
           # printed anything, with `::error::no lanes given` never even reached.
           #
-          # ⚠️ IT WAS ALSO INVISIBLE LOCALLY: this repo's dev shell is zsh, whose
-          # `set -e` does not fire here, and CI runs bash. Re-test shell changes
-          # with an explicit `bash -c`, not in the interactive shell.
+          # ⚠️ IT WAS INVISIBLE LOCALLY, AND THE REASON FIRST WRITTEN HERE WAS
+          # WRONG. This said the dev shell is zsh "whose `set -e` does not fire
+          # here". It does: run the old shape under `set -euo pipefail` in zsh
+          # and in bash and BOTH abort identically. The actual mistake was
+          # testing `to_json` without the strict flags the step sets — the shell
+          # was never the variable. Re-test a step's shape under ITS OPTIONS,
+          # not merely under its interpreter.
           #
           # Python does the splitting, stripping, de-duplicating and sorting in
           # one place that cannot fail on empty input. `sorted(set(...))` is
@@ -218,6 +222,12 @@ jobs:
       CCACHE_COMPILERCHECK: content
       CCACHE_COMPRESSLEVEL: "5"
       CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
+      # ⚠️ The tier lanes set this at WORKFLOW level, where every job in
+      # them inherits it. This job is in a different workflow, so it has
+      # to say so itself — and a job-level-only comparison could not see
+      # the difference, which is why it went missing here in the first
+      # place. ci/assert-ci-lane-policy.py now compares EFFECTIVE env.
+      CONAN_HOME: ~/.conan2
     strategy:
       fail-fast: false
       matrix:
@@ -401,6 +411,12 @@ jobs:
       CCACHE_MAXSIZE: 2G
       CCACHE_COMPRESSLEVEL: "5"
       CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
+      # ⚠️ The tier lanes set this at WORKFLOW level, where every job in
+      # them inherits it. This job is in a different workflow, so it has
+      # to say so itself — and a job-level-only comparison could not see
+      # the difference, which is why it went missing here in the first
+      # place. ci/assert-ci-lane-policy.py now compares EFFECTIVE env.
+      CONAN_HOME: ~/.conan2
     strategy:
       fail-fast: false
       matrix:
@@ -715,11 +731,16 @@ jobs:
           SUBSET: ${{ inputs.subset }}
         run: |
           # ⚠️ `cygpath -u`, MATCHING tier2's IDIOM FOR ITS BASH STEPS. On Windows
-          # $GITHUB_WORKSPACE is a Windows path, and bash reads its BACKSLASHES as
-          # ESCAPES — the driver would write its sample to a mangled
-          # path and the upload below would then find nothing, reporting a missing
-          # artifact rather than a path bug. tier2 already converts $RUNNER_TEMP this
-          # way for exactly this reason.
+          # $GITHUB_WORKSPACE is a Windows path (`D:\a\fixpp\fixpp`), and the
+          # POSIX tools this step hands it to — the driver, ctest, the artifact
+          # path below — expect a POSIX one. tier2 already converts $RUNNER_TEMP
+          # this way.
+          #
+          # ⚠️ The reason first written here was WRONG: it said bash "reads its
+          # BACKSLASHES as ESCAPES". It does not — a quoted expansion
+          # (`"$GITHUB_WORKSPACE"`) preserves backslashes literally, in both
+          # bash and zsh. The conversion is still right, but for the boring
+          # reason above, not a shell-quoting hazard that does not exist.
           WS="$(cygpath -u "$GITHUB_WORKSPACE")"
           case "$PRESET" in
             windows-msvc-release) ARGS="" ;;

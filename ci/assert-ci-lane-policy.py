@@ -251,10 +251,22 @@ def check_campaign_job_env(root, violations):
         return False
 
     try:
-        mine = yaml.safe_load(campaign.read_text(encoding="utf-8"))["jobs"]
+        campaign_doc = yaml.safe_load(campaign.read_text(encoding="utf-8"))
+        mine = campaign_doc["jobs"]
     except (yaml.YAMLError, KeyError, TypeError) as exc:
         violations.append(f"CAMPAIGN JOB ENV UNREADABLE: {CAMPAIGN_WORKFLOW} ({exc!r}).")
         return True
+
+    # ⚠️ EFFECTIVE env — workflow-level merged with job-level, on BOTH sides.
+    # Comparing only the `jobs.<id>.env` mappings missed an entire tier of the
+    # thing being compared: tier1.yml and tier3-libcxx.yml define `CONAN_HOME`
+    # at WORKFLOW level, which every job in them inherits and which a job-level
+    # comparison cannot see. The check reported that the campaign jobs "carry
+    # their source tier job's env" while that variable was absent from them.
+    def effective_env(doc, job_id):
+        merged = dict(doc.get("env") or {})
+        merged.update((doc.get("jobs") or {}).get(job_id, {}).get("env") or {})
+        return merged
 
     checked = 0
     for job, (src_file, src_job) in CAMPAIGN_JOB_SOURCES.items():
@@ -266,12 +278,13 @@ def check_campaign_job_env(root, violations):
                 f"the lane it describes. A renamed job must not silently stop this check.")
             continue
         try:
-            src = yaml.safe_load(src_path.read_text(encoding="utf-8"))["jobs"][src_job]
+            src_doc = yaml.safe_load(src_path.read_text(encoding="utf-8"))
+            src_doc["jobs"][src_job]          # presence check; env read below
         except (yaml.YAMLError, KeyError, TypeError) as exc:
             violations.append(f"CAMPAIGN JOB ENV UNCHECKABLE: {src_file}:{src_job} ({exc!r}).")
             continue
-        want = src.get("env") or {}
-        got = mine[job].get("env") or {}
+        want = effective_env(src_doc, src_job)
+        got = effective_env(campaign_doc, job)
         checked += 1
         absent = sorted(set(want) - set(got))
         if absent:
@@ -286,7 +299,14 @@ def check_campaign_job_env(root, violations):
                   f"{', '.join(differing)} — disclosed, not failed (a measurement job may "
                   f"legitimately use its own cache paths). Check each is deliberate.")
     if checked:
-        print(f"  campaign job env: {checked} job(s) carry their source tier job's env")
+        # ⚠️ SAY WHAT WAS CHECKED, NOT WHAT ONE WISHES HAD BEEN. This read
+        # "N job(s) carry their source tier job's env", which is stronger than
+        # the test: only KEY PRESENCE is enforced, differing VALUES are disclosed
+        # and allowed, and step-level env, `runs-on`, container and default-shell
+        # settings are outside the comparison entirely.
+        print(f"  campaign job env: {checked} job(s) define every env KEY their source tier "
+              f"lane defines (workflow+job level, both sides). Values are disclosed above when "
+              f"they differ, not enforced; step-level env and non-env job config are out of scope.")
     return True
 
 
