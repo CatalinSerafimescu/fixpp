@@ -320,8 +320,29 @@ TEST(ReadFirstFrameBounded, B2) {
 // pre-fix (via site B on the first read) and the delivered design (via F1 after
 // the clamped second read) reject this input with the same error — recorded so
 // this does not overclaim a second RED.
+// ⚠️ THE DEADLINE HERE IS A TERMINATION BOUND, NOT A COMPETITOR — 5 s, NOT 50 ms.
+// This cell asserts that the BUDGET decision fires. The deadline exists only so
+// a `room == 0` mutant fails instead of hanging (see B4). At 50 ms
+// the two raced, and on `windows-msvc-asan` under `ctest --parallel 4` the
+// deadline won: campaign run 33977674899 measured this cell at 735 ms against
+// 6 ms unloaded — 122x — and it reported `transport: handshake timeout` with
+// all three mechanism pins failing. That is a VACUOUS run, not a product
+// defect: the budget decision never happened, so nothing about it was tested.
+//
+// 5 s is derived from the competing quantity rather than taken as a round
+// number: the loaded wall time actually measured was 735 ms, so this is ~7x
+// the observed worst case, while staying 360x inside the 1800 s ctest timeout
+// the driver passes. The mutant still terminates, just in 5 s instead of 50 ms.
+//
+// ⚠️ Raising it does NOT weaken any assertion, because no assertion in this
+// cell reads the deadline. Do not "restore" 50 ms to make the mutant fail
+// faster — that reintroduces the race.
 TEST(ReadFirstFrameBounded, B5) {
     constexpr std::size_t kMaxBytes = 4096;
+    // ⚠️ B5 did NOT fail in that run; it has B4's shape and margin and was
+    // simply luckier. Fixing only the cell that happened to go red would leave
+    // the same defect in its sibling.
+    constexpr auto kDeadline = std::chrono::seconds{5};
 
     // A well-formed header whose declared BodyLength (200000) far exceeds what is
     // sent, so parse_frame classifies it partial — "no complete frame ever"
@@ -341,7 +362,7 @@ TEST(ReadFirstFrameBounded, B5) {
     std::vector<std::byte> buf;
 
     auto fut = asio::co_spawn(
-        ioc, read_first_frame_bounded(mt, buf, std::chrono::milliseconds{50}, kMaxBytes),
+        ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
         asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
@@ -513,9 +534,26 @@ TEST(ReadFirstFrameBounded, T1) {
 // plainly "[w]hether B4 *also kills* this column is not claimed here", and
 // none is claimed here either; the termination proof lives in the verify
 // record, not as an added mutant-kill column.
+// ⚠️ THE DEADLINE HERE IS A TERMINATION BOUND, NOT A COMPETITOR — 5 s, NOT 50 ms.
+// This cell asserts that the BUDGET decision fires. The deadline exists only so
+// a `room == 0` mutant fails instead of hanging (see B4's derivation). At 50 ms
+// the two raced, and on `windows-msvc-asan` under `ctest --parallel 4` the
+// deadline won: campaign run 33977674899 measured this cell at 735 ms against
+// 6 ms unloaded — 122x — and it reported `transport: handshake timeout` with
+// all three mechanism pins failing. That is a VACUOUS run, not a product
+// defect: the budget decision never happened, so nothing about it was tested.
+//
+// 5 s is derived from the competing quantity rather than taken as a round
+// number: the loaded wall time actually measured was 735 ms, so this is ~7x
+// the observed worst case, while staying 360x inside the 1800 s ctest timeout
+// the driver passes. The mutant still terminates, just in 5 s instead of 50 ms.
+//
+// ⚠️ Raising it does NOT weaken any assertion, because no assertion in this
+// cell reads the deadline. Do not "restore" 50 ms to make the mutant fail
+// faster — that reintroduces the race.
 TEST(ReadFirstFrameBounded, B4) {
     constexpr std::size_t kMaxBytes = 4096;
-    constexpr auto kDeadline = std::chrono::milliseconds{50};
+    constexpr auto kDeadline = std::chrono::seconds{5};
 
     std::string never_completes = std::string("8=FIX.4.2\x01") + "9=200000\x01";
     ASSERT_LT(never_completes.size(), kMaxBytes + 1);
@@ -542,7 +580,12 @@ TEST(ReadFirstFrameBounded, B4) {
         EXPECT_EQ(result.error(), error::wire_frame_too_large)
             << "B4 (SC-003): expected wire_frame_too_large (FR-003/FR-014's protective intent), "
                "got "
-            << describe(result);
+            << describe(result)
+            << ". ⚠️ If that reads `transport: handshake timeout`, this run is VACUOUS rather "
+               "than a product failure: the deadline beat the budget decision, so the mechanism "
+               "under test never ran and the two pins below will also fail for the same single "
+               "reason. The deadline is a termination bound and must not compete — see the "
+               "derivation above this cell before touching any assertion.";
     }
     EXPECT_EQ(mt.async_reads_observed(), 2u)
         << "B4 (SC-003) [mechanism pin]: expected exactly two reads (4096 then the room-clamped 1) "
@@ -761,9 +804,16 @@ TEST(ReadFirstFrameBounded, T2a) {
 // merely carrying the bytes forward. It is kept far below the budget so the
 // step-5 budget check cannot fire first — this cell must exercise the FRAMER
 // arm specifically, not the budget arm that B1-B4 already cover.
+// ⚠️ 5 s, NOT 50 ms — the deadline is a termination bound, not a competitor.
+// This cell asserts the FRAMER arm fires. B4's sibling defect applies verbatim:
+// a real `steady_timer` deadline racing a one-read mock is decided by machine
+// load, and on `windows-msvc-asan` under `--parallel 4` that race is lost (B4
+// measured 122x its unloaded time in campaign run 33977674899). This cell did
+// not go red there, but it has the same shape and a smaller margin of work, so
+// it was luck rather than design. No assertion here reads the deadline.
 TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
     constexpr std::size_t kMaxBytes = 4096;
-    constexpr auto kDeadline = std::chrono::milliseconds{50};
+    constexpr auto kDeadline = std::chrono::seconds{5};
 
     std::string const junk =
         "NOT-A-FIX-FRAME\x01"
