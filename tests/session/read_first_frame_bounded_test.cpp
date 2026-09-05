@@ -560,8 +560,10 @@ TEST(ReadFirstFrameBounded, T1) {
 // CANNOT be driven by mock_clock. Threading a `Clock&` through it would let
 // these three cells fire the deadline deterministically and delete the race
 // rather than shrink it. That is a production-code change, outside this
-// branch's scope, and it is recorded here rather than left for someone to
-// rediscover from a future flake.
+// branch's scope, and it is FILED — issue #377 — rather than left for someone
+// to rediscover from a future flake. ⚠️ Any such port must keep `await_deadline`
+// ARM-ONCE (it is documented as forbidden from calling `expires_after`); B6 is
+// the cell that kills the per-iteration re-arm mutant.
 TEST(ReadFirstFrameBounded, B4) {
     constexpr std::size_t kMaxBytes = 4096;
     constexpr auto kDeadline = std::chrono::seconds{5};
