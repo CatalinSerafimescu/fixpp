@@ -268,6 +268,20 @@ def check_campaign_job_env(root, violations):
         merged.update((doc.get("jobs") or {}).get(job_id, {}).get("env") or {})
         return merged
 
+    # ⚠️ AN ADDED MEASUREMENT JOB WOULD NEVER BE CHECKED WITHOUT THIS. The loop
+    # below iterates CAMPAIGN_JOB_SOURCES, not the workflow, so a renamed job
+    # trips the UNCHECKABLE violation (loud, correct) while a FOURTH lane is
+    # simply absent from the iteration and passes in silence — the repo's starred
+    # shape: an assertion that proves nothing was LOST and cannot see something
+    # ADDED. `plan` is excluded because it is the matrix builder, not a lane.
+    unmapped = sorted(set(mine) - {"plan"} - set(CAMPAIGN_JOB_SOURCES))
+    if unmapped:
+        violations.append(
+            f"CAMPAIGN JOB(S) WITH NO SOURCE LANE: {', '.join(unmapped)}. Every measurement job "
+            f"must name the tier job whose environment it reproduces, or its environment is "
+            f"unchecked — add it to CAMPAIGN_JOB_SOURCES. A job this check does not know about "
+            f"is not a job this check passes.")
+
     checked = 0
     for job, (src_file, src_job) in CAMPAIGN_JOB_SOURCES.items():
         src_path = wf_dir / src_file
@@ -404,8 +418,14 @@ def main():
         return 2
     # A check that could not run must not be reported as one that passed.
     if not campaign_judged:
-        print("::error::the campaign-trigger invariant could not be evaluated (see the warning "
-              "above). Refusing to report `all invariants hold` over a check that did not run.")
+        # ⚠️ Names the FLAG, not one of its inputs. Two checks feed
+        # `campaign_judged` (trigger and job-env); this said "the
+        # campaign-trigger invariant", so a PyYAML-absent run — where it is the
+        # job-env check that stands down — pointed the operator at a check that
+        # had run fine.
+        print("::error::a campaign invariant could not be evaluated (see the warning above): "
+              "the trigger check, the job-env check, or both. Refusing to report "
+              "`all invariants hold` over a check that did not run.")
         return 2
 
     # ⚠️ AN EMPTY SCAN IS AN INSTRUMENT FAILURE, NOT A PASS. If the workflows move

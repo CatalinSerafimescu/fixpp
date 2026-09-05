@@ -600,7 +600,11 @@ jobs:
     env:
       CONAN_HOME: C:\Users\runneradmin\.conan2
       SCCACHE_DIR: C:\sccache
-      SCCACHE_IDLE_TIMEOUT: 0
+      # ⚠️ QUOTED, matching tier2.yml. Inert today (the env check compares via
+      # `str()`), but this slot is one edit from `no`, which YAML parses as the
+      # boolean False — diverging from the lane while the check only PRINTS the
+      # difference rather than failing it.
+      SCCACHE_IDLE_TIMEOUT: "0"
       SCCACHE_CACHE_SIZE: 8G
     strategy:
       fail-fast: false

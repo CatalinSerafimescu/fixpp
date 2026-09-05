@@ -349,12 +349,18 @@ def main() -> int:
     # OUTPUT. Every table and disposition here carries ⚠️/✅/⛔/🔴, so on the
     # Windows lanes `print(text)` raised UnicodeEncodeError and the step died
     # with a traceback INSTEAD OF A VERDICT — exit 1, which reads as "the
-    # measurement failed" rather than "the reporter could not speak". Measured
-    # on a real Windows checkout, not inferred; it would have hit every Windows
-    # verdict step.
+    # measurement failed" rather than "the reporter could not speak". It is
+    # reachable from every Windows verdict step, and from any console whose
+    # encoding cannot represent the glyphs this table is built from.
     #
-    # `errors="replace"` rather than a hard utf-8: a console that genuinely
-    # cannot render a glyph should show a placeholder, never lose the verdict.
+    # ⚠️ `errors="replace"` IS BELT-AND-BRACES, AND THE REASON FIRST WRITTEN HERE
+    # WAS WRONG. It said a console that "cannot render a glyph should show a
+    # placeholder" — but `errors=` governs ENCODING, not rendering: with
+    # `encoding="utf-8"` every code point encodes successfully (bar lone
+    # surrogates), so this handler can essentially never fire, and whether a
+    # terminal draws the glyph or a box is a font and codepage matter it does not
+    # touch. Kept because it costs nothing and covers the surrogate case; not
+    # kept for the reason it used to claim.
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
