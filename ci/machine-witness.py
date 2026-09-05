@@ -261,7 +261,17 @@ def main() -> int:
             fh.write(f"{key}={value}\n")
     os.replace(tmp, args.out)
 
-    if status != "ok":
+    # ⚠️ `no-procfs` IS NOT AN INCOMPLETE WITNESS — it is the NORMAL state on the
+    # Windows lanes, where the calibrations run fine and only the steal counter
+    # is unavailable. Warning "cannot be shown to have run on an unchanging
+    # machine" there overstated it on every single Windows pass, which is how a
+    # warning becomes one nobody reads. The verdict already treats a no-procfs
+    # witness as usable and discloses the missing half itself.
+    if status == "no-procfs":
+        print(f"::notice::#267 machine witness: no /proc on this platform, so the steal "
+              f"counter is unavailable. The calibrations ran; the verdict discloses which "
+              f"half is missing.", file=sys.stderr)
+    elif status != "ok":
         print(f"::warning::#267 machine witness incomplete (status={status}). The A-B-A "
               f"sample it brackets cannot be shown to have run on an unchanging machine.",
               file=sys.stderr)

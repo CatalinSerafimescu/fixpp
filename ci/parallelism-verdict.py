@@ -345,6 +345,22 @@ class Pass:
 
 
 def main() -> int:
+    # ⚠️ WINDOWS CONSOLES DEFAULT TO cp1252, WHICH CANNOT ENCODE THIS FILE'S
+    # OUTPUT. Every table and disposition here carries ⚠️/✅/⛔/🔴, so on the
+    # Windows lanes `print(text)` raised UnicodeEncodeError and the step died
+    # with a traceback INSTEAD OF A VERDICT — exit 1, which reads as "the
+    # measurement failed" rather than "the reporter could not speak". Measured
+    # on a real Windows checkout, not inferred; it would have hit every Windows
+    # verdict step.
+    #
+    # `errors="replace"` rather than a hard utf-8: a console that genuinely
+    # cannot render a glyph should show a placeholder, never lose the verdict.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass  # not a reconfigurable stream; the text is still written below
+
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("run_dir")
     ap.add_argument("--tolerance-pct", type=float, default=DEFAULT_TOLERANCE_PCT,
