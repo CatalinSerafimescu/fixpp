@@ -2162,8 +2162,67 @@ jobs:
       #
       # Both invariants were true when written and pinned by nothing; a hostile
       # review named that as the defect. Synthetic copies only, no build.
-      - name: Regression pin — CI lane policy (#300 callers, #213 fuzz lane)
-        run: bash ci/test-ci-lane-policy.sh
+      # ⚠️ INSTALLS ITS OWN PyYAML, and that line is not decoration. The checker
+      # now EXITS 2 rather than warning when PyYAML is missing — a `::warning::`
+      # does not fail a job, so the old behaviour printed "all invariants hold"
+      # over a tree whose campaign workflow could have been push:-triggered.
+      # Making it fail closed is only safe if the dependency is this step's own:
+      # PyYAML reached this job as a SIDE EFFECT of an unrelated earlier pin
+      # (#251's, which pip-installs it), so reordering or retiring that step
+      # would have reddened this one for a reason naming neither. Same idiom as
+      # the two steps that already do it; `pip install` is a no-op when present.
+      - name: Regression pin — CI lane policy (#300 callers, #213 fuzz lane, #267 campaign trigger)
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
+          bash ci/test-ci-lane-policy.sh
+
+      # #267 — the A-B-A parallelism verdict's own gates, over a SYNTHETIC
+      # sample: every way the verdict can reject one is proven to fire, and each
+      # cell requires its NAMED diagnostic, not merely a non-zero exit. The
+      # harness asserts its OWN cell count against a declared constant and
+      # refuses to report a result on a mismatch, so a cell lost to an editing
+      # slip cannot pass as a smaller green run. That is why no number is
+      # written here: the count re-derives itself, and a copy of it would not. It exists because `ci/ctest-parallelism-probe.md` records three
+      # `execution.jobs` conclusions that were published and then WITHDRAWN —
+      # this is the question the repo has already got wrong three times, by
+      # reading numbers no checker had been proven able to reject.
+      #
+      # ⚠️ The cell worth knowing about is T4. If `--parallel N` ever stops
+      # taking effect, all three passes run identically, the two serial passes
+      # agree PERFECTLY, and the apparatus reports a clean sample saying "no
+      # gain on this lane" having tested one configuration three times. The
+      # A-vs-A' agreement check is a forced-MISS arm and cannot catch it; the
+      # in-flight oracle T4 pins is the other half.
+      #
+      # Buildless and hermetic — python3 + coreutils, no compiler, no network.
+      # Its cost grows with the cell count; re-derive rather than assume:
+      # `time ci/test-parallelism-verdict.sh`.
+      - name: Regression pin — parallelism verdict gates (#267)
+        run: bash ci/test-parallelism-verdict.sh
+
+      # #267 — the seam the harness above CANNOT see. That one varies the
+      # CONTENT of a sample the verdict is known to parse; this one runs the
+      # REAL driver against a 12-test synthetic ctest project and feeds its REAL
+      # output to the REAL verdict. A field renamed on one side of that seam
+      # leaves every one of those cells green and returns "0 of 3 passes" from every actual
+      # campaign — at a cost of three suite runs on a runner to find out.
+      #
+      # Needs cmake + ctest (preinstalled on ubuntu-24.04) and REFUSES to run
+      # without them rather than skipping: a skipped seam check is a silent pass.
+      #
+      # ⚠️ THE COST CONDITION, not a number — a figure written here would go
+      # stale silently and nothing would ever re-run it. It runs the driver
+      # TWICE (once per platform branch), so its wall time is dominated by
+      # 2 x (2 serial + 1 parallel) ctest passes over a 12-test synthetic
+      # project plus 8 machine-witness calls. Both are deliberately shrunk —
+      # 0.4 s sleeps, and PARALLELISM_WITNESS_{ITERS,REPEATS} set by the harness
+      # — because this job runs on EVERY push. Re-derive before assuming
+      # anything about it: `time ci/test-parallelism-aba-seam.sh`. If that grows
+      # past roughly a minute, shrink the sleeps rather than the cell count:
+      # TWELVE tests is what makes `--parallel 4` unambiguously distinguishable
+      # from 1 in the in-flight oracle, which is the assertion S2 exists for.
+      - name: Regression pin — A-B-A driver/verdict seam (#267)
+        run: bash ci/test-parallelism-aba-seam.sh
 
       # #209 — the bench gate's own harness. 61 cells over synthetic
       # Google-Benchmark JSON: every hard cell of tools/bench_compare.py and

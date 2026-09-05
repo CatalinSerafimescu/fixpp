@@ -18,7 +18,16 @@ silently — so each is turned into a check.
      install is bounded" claim quietly becomes false. That is the same
      dead-call-site shape #299 exists to prevent, one layer out.
 
-  2. #213 — the fuzz corpora are actually replayed somewhere.
+  2. #267 — the parallelism campaign stays on `workflow_dispatch`.
+     `.github/workflows/parallelism-measure.yml` runs each named lane's suite
+     THREE times, and on the slowest lane a single pass is most of an hour. One
+     `push:` or `pull_request:` key added to its trigger block — by a copy-paste
+     from another workflow, or by someone "making it run automatically" —
+     multiplies the repo's CI bill without anything going red to say so. It is
+     the one workflow here whose cost makes its TRIGGER a correctness property,
+     and "we all know not to" is not a mechanism.
+
+  3. #213 — the fuzz corpora are actually replayed somewhere.
      The corpus replays and their zero-registration FATAL_ERROR all live under
      `if(FIXPP_BUILD_FUZZ)`. Flipping the asan preset's value ON -> OFF does not
      trip any of them: the targets, the registrations and the guard simply stop
@@ -49,8 +58,15 @@ APT_UPDATE = re.compile(r"\bsudo apt-get update\b")
 LLVM_SH = re.compile(r"\bsudo /tmp/llvm\.sh \d+ all\b")
 GUARD = "ci/apt-guard.sh"
 
+# The measurement campaign, and the only trigger its cost permits.
+CAMPAIGN_WORKFLOW = "parallelism-measure.yml"
+CAMPAIGN_TRIGGERS = {"workflow_dispatch"}
+
 # The lane that must build and replay the fuzz corpora, and the flag that does it.
 FUZZ_PRESET = "linux-clang-asan"
+# Set when the matrix-membership half actually ran; read by main()'s summary so
+# a skipped half is never reported as a passing one.
+MATRIX_CHECKED = False
 FUZZ_FLAG = "FIXPP_BUILD_FUZZ"
 
 
@@ -125,7 +141,145 @@ def check_fuzz_lane(root, violations):
         except ImportError:
             print("::warning::PyYAML unavailable — skipped the matrix-membership half "
                   "of the fuzz-lane check. The preset-value half still ran.")
+        else:
+            global MATRIX_CHECKED
+            MATRIX_CHECKED = True
     return 1
+
+
+SCCACHE_PIN = re.compile(r"^\s*ver=(?P<ver>v[\d.]+)\s*$|^\s*sha256=(?P<sha>[0-9a-f]{64})\s*$",
+                         re.M)
+
+
+def sccache_pin(path):
+    """The (version, digest) an `Install sccache` step pins, or None."""
+    if not path.is_file():
+        return None
+    found = {}
+    for m in SCCACHE_PIN.finditer(path.read_text(encoding="utf-8")):
+        for key in ("ver", "sha"):
+            if m.group(key):
+                found.setdefault(key, m.group(key))
+    return (found["ver"], found["sha"]) if len(found) == 2 else None
+
+
+def check_sccache_pins(root, violations):
+    """The sccache version+digest must agree wherever it is pinned.
+
+    `parallelism-measure.yml` duplicates tier2.yml's `Install sccache` step —
+    the repo has no composite actions, so the three tier workflows already
+    duplicate their setup between themselves and this follows that convention.
+    What does NOT follow is leaving a pinned SHA-256 in two files with nothing
+    asserting they agree: a bump applied to one and not the other is silent, and
+    the stale copy is whichever file the bumper was not looking at.
+
+    Returns the number of pinning sites found.  ZERO IS A FAILURE, not a pass —
+    if the step is renamed or the pin's shape changes, "0 sites, 0 mismatches"
+    is indistinguishable from agreement.
+    """
+    wf = root / ".github" / "workflows"
+    pins = {name: sccache_pin(wf / name)
+            for name in ("tier2.yml", CAMPAIGN_WORKFLOW)
+            if (wf / name).is_file()}
+    pins = {k: v for k, v in pins.items() if v is not None}
+    if len(pins) < 2:
+        # One site is legitimate (the campaign may be retired); zero, or a site
+        # whose pin no longer parses, is the check losing its subject.
+        print(f"  sccache pin: {len(pins)} site(s) found "
+              f"({', '.join(sorted(pins)) or 'none'}) — nothing to cross-check.")
+        return len(pins)
+    values = set(pins.values())
+    if len(values) > 1:
+        violations.append(
+            "SCCACHE PIN DISAGREEMENT: " +
+            "; ".join(f"{k} pins {v[0]} / {v[1][:12]}..." for k, v in sorted(pins.items())) +
+            ". These are copies of one pinned download. A bump applied to one file and not the "
+            "other is silent — the build still succeeds, on a different sccache than the lane "
+            "it is supposed to mirror. Re-derive the digest by hand (download and hash out of "
+            "band; the .sha256 sidecar from the same mutable release pins nothing) and update "
+            "both.")
+    else:
+        ver, sha = values.pop()
+        print(f"  sccache pin: {ver} / {sha[:12]}... agrees across {len(pins)} sites")
+    return len(pins)
+
+
+def check_campaign_trigger(root, violations):
+    """The A-B-A campaign must stay dispatch-only.
+
+    Absence is NOT a violation: the campaign is explicitly a one-off and retiring
+    it is a legitimate thing to do.  It IS disclosed, because a check that
+    quietly reports clean over a subject that is not there is the failure mode
+    every other file in this directory exists to remove.
+
+    Returns True when a verdict was actually reached, False when the check could
+    not run.  ⚠️ THE CALLER MUST CONSUME THIS. An earlier version returned a
+    value nobody looked at, and with PyYAML unavailable the function warned and
+    returned while `main()` printed **"ci lane policy: all invariants hold"** and
+    exited 0 — over a tree whose campaign workflow was `push:`-triggered. A
+    `::warning::` does not fail a job.
+
+    That was not live only by step ordering: PyYAML reached this job from an
+    UNRELATED earlier step in tier1.yml, so a reorder would have stood this
+    invariant down silently.  The step now installs its own.
+
+    ⚠️ `tools/check_workflows.py` is this repo's OTHER workflow-policy checker
+    and independently solves the same bare-`on:`-is-`True` YAML trap (its
+    `doc.get(True) or doc.get("on")`).  It takes the same line on missing
+    PyYAML — refuse rather than warn.  They are deliberately NOT merged: that
+    one runs only in `brain-freshness.yml`, this one in tier 1's
+    `ci-script-pins`, so relocating either would weaken enforcement.
+    """
+    path = root / ".github" / "workflows" / CAMPAIGN_WORKFLOW
+    if not path.is_file():
+        print(f"  campaign trigger: {CAMPAIGN_WORKFLOW} is not present — check stood down "
+              f"(retiring the campaign is legitimate; this is a disclosure, not a pass).")
+        return True
+    try:
+        import yaml
+    except ImportError:
+        print("::warning::PyYAML unavailable — the campaign-trigger check did NOT run. "
+              "Do not read this run as evidence that the campaign is still dispatch-only.")
+        return False
+
+    # ⚠️ A PARSE ERROR IS A VIOLATION, NOT A CRASH. Caught because a mutant
+    # found it: the T8 cell of ci/test-ci-lane-policy.sh produced a workflow
+    # whose YAML did not parse, and this function raised a traceback out of
+    # `main()` instead of dispositioning it. An unparsable trigger block is
+    # precisely the state where "it is dispatch-only" cannot be asserted, so it
+    # has to fail closed and say why.
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        violations.append(
+            f"CAMPAIGN TRIGGER UNREADABLE: {CAMPAIGN_WORKFLOW} does not parse as YAML "
+            f"({exc.__class__.__name__}), so this check cannot say what triggers it — and "
+            f"a workflow that does not parse does not run at all. Refusing to report it "
+            f"dispatch-only.")
+        return True
+    # ⚠️ YAML 1.1 resolves a bare `on:` key to the BOOLEAN True, not the string
+    # "on".  A check that looked up doc["on"] would find nothing, conclude there
+    # were no triggers, and pass — silently, on every future version of the file.
+    block = doc.get("on", doc.get(True))
+    if block is None:
+        violations.append(
+            f"CAMPAIGN TRIGGER UNREADABLE: {CAMPAIGN_WORKFLOW} has no parsable `on:` block, so "
+            f"this check cannot say what triggers it. Refusing to report it dispatch-only.")
+        return True
+
+    triggers = set(block) if isinstance(block, (dict, list)) else {str(block)}
+    extra = sorted(triggers - CAMPAIGN_TRIGGERS)
+    if extra:
+        violations.append(
+            f"CAMPAIGN IS NO LONGER DISPATCH-ONLY: {CAMPAIGN_WORKFLOW} triggers on "
+            f"{', '.join(extra)} as well as workflow_dispatch. That workflow runs each named "
+            f"lane's suite THREE times — on the slowest lane a single pass is most of an "
+            f"hour — so an automatic trigger multiplies the CI bill with nothing going red "
+            f"to say so. "
+            f"It is a one-off campaign, not a standing job.")
+    else:
+        print(f"  campaign trigger: {CAMPAIGN_WORKFLOW} is {'/'.join(sorted(triggers))} only")
+    return True
 
 
 def main():
@@ -137,7 +291,14 @@ def main():
     violations = []
     apt_seen = check_apt_callers(root, violations)
     fuzz_seen = check_fuzz_lane(root, violations)
+    campaign_judged = check_campaign_trigger(root, violations)
+    check_sccache_pins(root, violations)
     if apt_seen is None or fuzz_seen is None:
+        return 2
+    # A check that could not run must not be reported as one that passed.
+    if not campaign_judged:
+        print("::error::the campaign-trigger invariant could not be evaluated (see the warning "
+              "above). Refusing to report `all invariants hold` over a check that did not run.")
         return 2
 
     # ⚠️ AN EMPTY SCAN IS AN INSTRUMENT FAILURE, NOT A PASS. If the workflows move
@@ -151,7 +312,12 @@ def main():
         return 2
 
     print(f"  apt-backed install sites scanned: {apt_seen} (all must use {GUARD})")
-    print(f"  fuzz lane: {FUZZ_PRESET} {FUZZ_FLAG}=ON, in the tier1 linux matrix")
+    # ⚠️ The matrix-membership half is skipped when PyYAML is unavailable, so
+    # this line must not assert it unconditionally — that would be a positive
+    # result printed for a check that did not run.
+    print(f"  fuzz lane: {FUZZ_PRESET} {FUZZ_FLAG}=ON"
+          + (", in the tier1 linux matrix" if MATRIX_CHECKED else
+             " (matrix membership NOT checked — PyYAML unavailable)"))
 
     if violations:
         for v in violations:
