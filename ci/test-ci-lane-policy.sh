@@ -239,6 +239,86 @@ else
   ok "T11 PyYAML absent fails closed instead of reporting the all-clear"
 fi
 
+# ── T12: a campaign job missing its production lane's job-level env ──────────
+#
+# ⚠️ NOT HYPOTHETICAL — THIS EXACT OMISSION SHIPPED AND COST A DISPATCH. The
+# campaign's `windows` job copied every STEP of tier2's faithfully and none of
+# its job-level `env:`; `ci/restore-sccache.sh` then refused with "SCCACHE_DIR
+# must be set (the workflow sets it job-wide)", 20 minutes into a build, on the
+# lane the campaign most needs. Production fidelity is not only about the step
+# list, and "I copied it carefully" is precisely the claim that failed.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import re, sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+new, n = re.subn(r"^      SCCACHE_DIR: .*\n", "", s, count=1, flags=re.M)
+assert n == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(new, encoding="utf-8")
+MUT
+expect "T12 a campaign job missing its lane's job-level env is caught" 1 "MISSING JOB-LEVEL ENV"
+
+# ── T13: the source job renamed out from under the check ─────────────────────
+#
+# A check whose subject disappears must not report clean. Renaming the tier job
+# the campaign mirrors would otherwise leave the comparison silently unmade.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import re, sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+new, n = re.subn(r"^  windows:$", "  windows_renamed:", s, count=1, flags=re.M)
+assert n == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(new, encoding="utf-8")
+MUT
+expect "T13 a renamed source job stops the check loudly, not silently" 1 "UNCHECKABLE"
+
+# ── T14: the plan job's lane parser, EXTRACTED FROM THE WORKFLOW ─────────────
+#
+# ⚠️ THE EMPTY-LIST CASE KILLED A REAL DISPATCH. `to_json` used to end
+# `| grep -v '^$' | python3 ...`, and grep exits 1 when its input is empty —
+# which under the step's `set -euo pipefail` aborted the whole plan job the
+# moment any lane list was left blank. That is the NORMAL way to dispatch: a
+# campaign usually names one or two platforms, not three. The first dispatch
+# named all three and passed; the second named two and died.
+#
+# ⚠️ AND IT WAS INVISIBLE LOCALLY — this repo's dev shell is zsh, whose `set -e`
+# does not fire on that assignment; CI runs bash. So this cell runs the function
+# under an explicit `bash -c`, not in whatever shell the harness was invoked
+# from, and the function is EXTRACTED FROM THE WORKFLOW rather than retyped: a
+# copy here would drift from the thing that actually runs.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" "$WORK/tojson.sh" <<'EXTRACT'
+import re, sys, pathlib
+src = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+m = re.search(r"^          to_json\(\) \{\n.*?^          \}", src, re.M | re.S)
+assert m, "EXTRACTION FAILED — to_json not found; re-point this cell, do not delete it"
+body = "".join(l[10:] for l in m.group(0).splitlines(keepends=True))
+assert "python3" in body, "extracted a to_json that does not look like the real one"
+pathlib.Path(sys.argv[2]).write_text("set -euo pipefail\n" + body + "\n")
+EXTRACT
+# ⚠️ BARE ASSIGNMENTS, matching the workflow's `L="$(to_json "$LINUX")"`. The first
+# version of this cell put the calls inside `printf` ARGUMENTS, where bash
+# DISCARDS a command substitution's exit status — so `set -e` never fired and
+# the cell stayed green with the bug deliberately re-introduced. A test whose
+# SHAPE differs from production's cannot see production's defect; proving the
+# cell reddens is what caught that.
+t14_out="$(bash -c 'set -euo pipefail
+  . "'"$WORK"'/tojson.sh"
+  e="$(to_json "")"
+  s1="$(to_json "linux-clang-asan")"
+  d="$(to_json "a,a,b")"
+  w="$(to_json " b , a ")"
+  echo "empty=$e single=$s1 dup=$d ws=$w"
+' 2>&1)"; t14_rc=$?
+if [ "$t14_rc" -ne 0 ]; then
+  printf '%s\n' "$t14_out" | sed 's/^/  | /'
+  bad "T14 the shipped to_json ABORTS under bash (exit $t14_rc) — a blank lane list kills the plan job"
+elif [ "$t14_out" != 'empty=[] single=["linux-clang-asan"] dup=["a", "b"] ws=["a", "b"]' ]; then
+  printf '%s\n' "$t14_out" | sed 's/^/  | /'
+  bad "T14 the shipped to_json produced unexpected output"
+else
+  ok "T14 the shipped to_json handles empty/single/duplicate/whitespace lane lists under bash"
+fi
+
 # ── T6: THE EMPTY SCAN ───────────────────────────────────────────────────────
 #
 # If the workflows move or the patterns break, "0 violations over 0 sites" must
@@ -255,7 +335,7 @@ expect "T6 an empty scan is an instrument failure, not a pass" 2 "ZERO apt-backe
 # below would still read "N passed, 0 failed" for a smaller N. Both sibling
 # harnesses in this directory assert their count; this one did not, and four
 # cells were added to it before anyone noticed.
-CELLS_DECLARED=13
+CELLS_DECLARED=16
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

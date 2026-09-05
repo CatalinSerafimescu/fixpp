@@ -62,6 +62,15 @@ GUARD = "ci/apt-guard.sh"
 CAMPAIGN_WORKFLOW = "parallelism-measure.yml"
 CAMPAIGN_TRIGGERS = {"workflow_dispatch"}
 
+# Each campaign job mirrors a production tier job. A measurement of a
+# differently-configured tree is a measurement of a suite that does not ship, so
+# the job-level env has to track its source — see check_campaign_job_env.
+CAMPAIGN_JOB_SOURCES = {
+    "linux": ("tier1.yml", "linux"),
+    "libcxx": ("tier3-libcxx.yml", "libcxx"),
+    "windows": ("tier2.yml", "windows"),
+}
+
 # The lane that must build and replay the fuzz corpora, and the flag that does it.
 FUZZ_PRESET = "linux-clang-asan"
 # Set when the matrix-membership half actually ran; read by main()'s summary so
@@ -204,6 +213,83 @@ def check_sccache_pins(root, violations):
     return len(pins)
 
 
+def check_campaign_job_env(root, violations):
+    """Each campaign job must carry at least its source tier job's job-level env.
+
+    ⚠️ WRITTEN BECAUSE THE OMISSION SHIPPED AND COST A DISPATCH. The campaign's
+    `windows` job copied every STEP of tier2's faithfully and none of its
+    job-level `env:`, so `ci/restore-sccache.sh` refused with "SCCACHE_DIR must
+    be set (the workflow sets it job-wide)" — 20 minutes into a build, on the
+    lane the campaign most needs. Production fidelity is not only about the step
+    list, and "I copied it carefully" is the claim that failed.
+
+    KEYS are the violation; differing VALUES are only disclosed. A measurement
+    job legitimately differs in some values (its own cache directory, say), but
+    a key present in production and absent here is the environment the shipping
+    lane builds under simply not being applied.
+
+    ⚠️ `env` ONLY — `permissions` IS DELIBERATELY NOT COMPARED, and extending
+    this to it would redden a correct tree. The tier jobs take
+    `packages: write` because they SAVE caches; the campaign restores and never
+    saves, so it takes `packages: read` at workflow level. That narrowing is a
+    STRONGER guarantee than the `save: false` inputs it backs up — a flag can be
+    flipped by an edit, a missing token scope cannot — so the difference is the
+    design, not drift.
+
+    Returns True when a verdict was reached, False when it could not be — the
+    caller must consume it, for the same reason as the trigger check.
+    """
+    wf_dir = root / ".github" / "workflows"
+    campaign = wf_dir / CAMPAIGN_WORKFLOW
+    if not campaign.is_file():
+        print(f"  campaign job env: {CAMPAIGN_WORKFLOW} is not present — check stood down.")
+        return True
+    try:
+        import yaml
+    except ImportError:
+        print("::warning::PyYAML unavailable — the campaign job-env check did NOT run.")
+        return False
+
+    try:
+        mine = yaml.safe_load(campaign.read_text(encoding="utf-8"))["jobs"]
+    except (yaml.YAMLError, KeyError, TypeError) as exc:
+        violations.append(f"CAMPAIGN JOB ENV UNREADABLE: {CAMPAIGN_WORKFLOW} ({exc!r}).")
+        return True
+
+    checked = 0
+    for job, (src_file, src_job) in CAMPAIGN_JOB_SOURCES.items():
+        src_path = wf_dir / src_file
+        if job not in mine or not src_path.is_file():
+            violations.append(
+                f"CAMPAIGN JOB ENV UNCHECKABLE: `{job}` or its source {src_file}:{src_job} is "
+                f"missing, so the environment the measurement runs under cannot be compared with "
+                f"the lane it describes. A renamed job must not silently stop this check.")
+            continue
+        try:
+            src = yaml.safe_load(src_path.read_text(encoding="utf-8"))["jobs"][src_job]
+        except (yaml.YAMLError, KeyError, TypeError) as exc:
+            violations.append(f"CAMPAIGN JOB ENV UNCHECKABLE: {src_file}:{src_job} ({exc!r}).")
+            continue
+        want = src.get("env") or {}
+        got = mine[job].get("env") or {}
+        checked += 1
+        absent = sorted(set(want) - set(got))
+        if absent:
+            violations.append(
+                f"CAMPAIGN JOB `{job}` IS MISSING JOB-LEVEL ENV its production lane sets: "
+                f"{', '.join(absent)} (from {src_file}:{src_job}). The measurement would run under "
+                f"a different environment than the lane it claims to describe — and at least one of "
+                f"these is load-bearing: ci/restore-sccache.sh REFUSES without SCCACHE_DIR.")
+        differing = sorted(k for k in set(want) & set(got) if str(want[k]) != str(got[k]))
+        if differing:
+            print(f"  campaign job env: `{job}` differs in value from {src_file}:{src_job} for "
+                  f"{', '.join(differing)} — disclosed, not failed (a measurement job may "
+                  f"legitimately use its own cache paths). Check each is deliberate.")
+    if checked:
+        print(f"  campaign job env: {checked} job(s) carry their source tier job's env")
+    return True
+
+
 def check_campaign_trigger(root, violations):
     """The A-B-A campaign must stay dispatch-only.
 
@@ -292,6 +378,7 @@ def main():
     apt_seen = check_apt_callers(root, violations)
     fuzz_seen = check_fuzz_lane(root, violations)
     campaign_judged = check_campaign_trigger(root, violations)
+    campaign_judged = check_campaign_job_env(root, violations) and campaign_judged
     check_sccache_pins(root, violations)
     if apt_seen is None or fuzz_seen is None:
         return 2

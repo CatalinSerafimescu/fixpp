@@ -75,6 +75,15 @@ on:
         description: "Max disagreement between the two serial passes before the sample voids"
         default: "5"
 
+# ⚠️ `packages: read`, WHERE THE TIER WORKFLOWS TAKE `write` — deliberate, and
+# load-bearing. Those jobs save their compiler and Conan caches; this one only
+# restores, because an entry written by a job configured for MEASUREMENT must
+# never be served to a production lane. The `save: false` inputs below say so,
+# but a flag can be flipped by an edit and a missing token scope cannot: this
+# makes the guarantee structural rather than declared.
+#
+# ci/assert-ci-lane-policy.py compares each job's `env` against its source tier
+# job and deliberately does NOT compare `permissions`, for this reason.
 permissions:
   contents: read
   packages: read
@@ -107,14 +116,28 @@ jobs:
           WINDOWS: ${{ inputs.windows_lanes }}
         run: |
           set -euo pipefail
-          # `sorted(set(...))`: a duplicated lane produces two identical matrix
-          # entries, two jobs, and two uploads of the same artifact name — which
-          # actions/upload-artifact rejects, so the second job loses its sample
-          # AFTER paying hours of runner time, on the `if: always()` upload this
-          # workflow's own comment calls load-bearing.
+          # ⚠️ NO `grep` IN THIS PIPELINE, AND THAT IS THE WHOLE POINT.
+          #
+          # It used to end `| grep -v '^$' | python3 ...`, and **grep exits 1
+          # when its input is empty**. Under this step's `set -euo pipefail`
+          # that aborted the entire plan job the moment ANY lane list was left
+          # blank — which is the normal way to dispatch, since a campaign
+          # usually names one or two platforms. The first dispatch happened to
+          # name all three and passed; the second named two and died before it
+          # printed anything, with `::error::no lanes given` never even reached.
+          #
+          # ⚠️ IT WAS ALSO INVISIBLE LOCALLY: this repo's dev shell is zsh, whose
+          # `set -e` does not fire here, and CI runs bash. Re-test shell changes
+          # with an explicit `bash -c`, not in the interactive shell.
+          #
+          # Python does the splitting, stripping, de-duplicating and sorting in
+          # one place that cannot fail on empty input. `sorted(set(...))` is
+          # load-bearing too: a duplicated lane produces two identical matrix
+          # entries and two uploads of one artifact name, which
+          # actions/upload-artifact rejects — losing the second job's sample
+          # AFTER it has paid hours of runner time.
           to_json() {
-            printf '%s' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-              | grep -v '^$' | python3 -c 'import json,sys; print(json.dumps(sorted({l.rstrip("\n") for l in sys.stdin})))'
+            printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sorted({p.strip() for p in sys.stdin.read().split(",") if p.strip()})))'
           }
           L="$(to_json "$LINUX")"; C="$(to_json "$LIBCXX")"; W="$(to_json "$WINDOWS")"
           echo "linux=$L"   >> "$GITHUB_OUTPUT"
@@ -550,6 +573,21 @@ jobs:
     if: needs.plan.outputs.windows != '[]'
     runs-on: windows-2022
     timeout-minutes: 360
+    # ⚠️ COPIED FROM tier2.yml's `windows` JOB, and the omission of this block is
+    # what broke the first campaign dispatch: `ci/restore-sccache.sh` refuses
+    # with "SCCACHE_DIR must be set (the workflow sets it job-wide)". The STEPS
+    # were copied faithfully and the job-level env was not — a whole shape of
+    # production fidelity that lives outside the step list. Same reason the
+    # steps must track tier2: a measurement of a differently-configured tree is
+    # a measurement of a suite that does not ship.
+    #
+    # ci/assert-ci-lane-policy.py now asserts each measurement job carries at
+    # least its source tier job's env, so this cannot recur silently.
+    env:
+      CONAN_HOME: C:\Users\runneradmin\.conan2
+      SCCACHE_DIR: C:\sccache
+      SCCACHE_IDLE_TIMEOUT: 0
+      SCCACHE_CACHE_SIZE: 8G
     strategy:
       fail-fast: false
       matrix:
@@ -678,6 +716,13 @@ jobs:
           JOBS: ${{ inputs.jobs }}
           SUBSET: ${{ inputs.subset }}
         run: |
+          # ⚠️ `cygpath -u`, MATCHING tier2's IDIOM FOR ITS BASH STEPS. On Windows
+          # $GITHUB_WORKSPACE is a Windows path, and bash reads its BACKSLASHES as
+          # ESCAPES — the driver would write its sample to a mangled
+          # path and the upload below would then find nothing, reporting a missing
+          # artifact rather than a path bug. tier2 already converts $RUNNER_TEMP this
+          # way for exactly this reason.
+          WS="$(cygpath -u "$GITHUB_WORKSPACE")"
           case "$PRESET" in
             windows-msvc-release) ARGS="" ;;
             *)                    ARGS="-LE packaging" ;;
@@ -685,7 +730,7 @@ jobs:
           ci/run-parallelism-aba.sh \
             --preset "$PRESET" \
             --jobs "$JOBS" \
-            --out "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --out "$WS/aba-$PRESET" \
             --ctest-args "$ARGS" \
             --subset "$SUBSET" \
             --no-peak
@@ -705,5 +750,5 @@ jobs:
           PRESET: ${{ matrix.preset }}
           TOLERANCE: ${{ inputs.tolerance_pct }}
         run: |
-          python ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-$PRESET" \
+          python ci/parallelism-verdict.py "$(cygpath -u "$GITHUB_WORKSPACE")/aba-$PRESET" \
             --tolerance-pct "$TOLERANCE"
