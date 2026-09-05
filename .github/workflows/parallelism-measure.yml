@@ -353,6 +353,18 @@ jobs:
           SUBSET: ${{ inputs.subset }}
         run: |
           set -uo pipefail
+          # ⚠️ `$RUNNER_TEMP`, NOT `$GITHUB_WORKSPACE`. The sample used to be written
+          # into the checkout, where it showed up as an untracked directory and
+          # made `git status --porcelain` non-empty — which fails
+          # `fixpp::dict::codegen-build-graph-check`'s source-tree-cleanliness
+          # assertion in EVERY pass of EVERY lane. Five lanes reported `ctest
+          # exit 8` three times each for that reason alone, and the verdict
+          # correctly refused all of them as non-comparable.
+          #
+          # ⚠️ THE SUBSET SMOKE COULD NOT HAVE CAUGHT IT: `-R session_.*` filters
+          # that test out. A filter that makes a pre-flight cheap also decides
+          # what the pre-flight is blind to — the campaign's own measurement
+          # output was the thing dirtying the tree it measures.
           # The lane's OWN filter, not a convenient one. `linux-gcc-release` is
           # the only Tier-1 lane that runs the packaging tier, and the five
           # filtered lanes exclude it — measuring them with the wrong filter
@@ -366,7 +378,7 @@ jobs:
           ci/run-parallelism-aba.sh \
             --preset "$PRESET" \
             --jobs "$JOBS" \
-            --out "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --out "$RUNNER_TEMP/aba-$PRESET" \
             --ctest-args "$ARGS" \
             --subset "$SUBSET" \
             $COV
@@ -380,7 +392,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: aba-${{ matrix.preset }}
-          path: aba-${{ matrix.preset }}
+          path: ${{ runner.temp }}/aba-${{ matrix.preset }}
           if-no-files-found: error
 
       - name: Verdict
@@ -389,7 +401,7 @@ jobs:
           PRESET: ${{ matrix.preset }}
           TOLERANCE: ${{ inputs.tolerance_pct }}
         run: |
-          python3 ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-$PRESET" \
+          python3 ci/parallelism-verdict.py "$RUNNER_TEMP/aba-$PRESET" \
             --tolerance-pct "$TOLERANCE"
 
   # ── Tier-3 libc++ lanes ─────────────────────────────────────────────────────
@@ -546,7 +558,7 @@ jobs:
           ci/run-parallelism-aba.sh \
             --preset "$PRESET" \
             --jobs "$JOBS" \
-            --out "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --out "$RUNNER_TEMP/aba-$PRESET" \
             --subset "$SUBSET"
 
       - name: Upload the raw sample
@@ -554,7 +566,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: aba-${{ matrix.preset }}
-          path: aba-${{ matrix.preset }}
+          path: ${{ runner.temp }}/aba-${{ matrix.preset }}
           if-no-files-found: error
 
       - name: Verdict
@@ -563,7 +575,7 @@ jobs:
           PRESET: ${{ matrix.preset }}
           TOLERANCE: ${{ inputs.tolerance_pct }}
         run: |
-          python3 ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-$PRESET" \
+          python3 ci/parallelism-verdict.py "$RUNNER_TEMP/aba-$PRESET" \
             --tolerance-pct "$TOLERANCE"
 
   # ── Tier-2 MSVC lanes ───────────────────────────────────────────────────────
@@ -746,6 +758,7 @@ jobs:
           # bash and zsh. The conversion is still right, but for the boring
           # reason above, not a shell-quoting hazard that does not exist.
           WS="$(cygpath -u "$GITHUB_WORKSPACE")"
+          RT="$(cygpath -u "$RUNNER_TEMP")"
           case "$PRESET" in
             windows-msvc-release) ARGS="" ;;
             *)                    ARGS="-LE packaging" ;;
@@ -753,7 +766,7 @@ jobs:
           ci/run-parallelism-aba.sh \
             --preset "$PRESET" \
             --jobs "$JOBS" \
-            --out "$WS/aba-$PRESET" \
+            --out "$RT/aba-$PRESET" \
             --ctest-args "$ARGS" \
             --subset "$SUBSET" \
             --no-peak
@@ -763,7 +776,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: aba-${{ matrix.preset }}
-          path: aba-${{ matrix.preset }}
+          path: ${{ runner.temp }}/aba-${{ matrix.preset }}
           if-no-files-found: error
 
       - name: Verdict
@@ -773,5 +786,5 @@ jobs:
           PRESET: ${{ matrix.preset }}
           TOLERANCE: ${{ inputs.tolerance_pct }}
         run: |
-          python ci/parallelism-verdict.py "$(cygpath -u "$GITHUB_WORKSPACE")/aba-$PRESET" \
+          python ci/parallelism-verdict.py "$(cygpath -u "$RUNNER_TEMP")/aba-$PRESET" \
             --tolerance-pct "$TOLERANCE"

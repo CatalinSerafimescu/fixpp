@@ -463,7 +463,48 @@ else
   ok "S10 branch data is excluded from the digest"
 fi
 
-SEAM_DECLARED=12
+# ── S11: THE SAMPLE MAY NOT BE WRITTEN INTO THE SOURCE TREE ─────────────────
+#
+# The campaign wrote its sample to `$GITHUB_WORKSPACE/aba-<preset>`, i.e. into
+# the checkout. `git status --porcelain` then reported an untracked directory
+# and `fixpp::dict::codegen-build-graph-check`'s cleanliness assertion failed —
+# in every pass of every lane, so five lanes each returned `ctest exit 8` three
+# times and the verdict refused all of them as non-comparable. The measurement
+# was dirtying the tree it measures.
+#
+# ⚠️ THE SUBSET SMOKE COULD NOT HAVE CAUGHT THIS. `-R session_.*` filters that
+# test out, so the cheap pre-flight was blind to it by construction — the filter
+# that makes a smoke affordable also chooses what it cannot see. Only a
+# full-suite dispatch reaches the check, which is why this cell exists at all.
+#
+# Both directions, because a guard that refuses everything is as useless as one
+# that refuses nothing.
+# ⚠️ OUTPUT IS CAPTURED, THEN MATCHED — NOT PIPED INTO `grep -q`. This file runs
+# under `set -o pipefail`, where `grep -q` exits the PIPELINE 141 on a MATCH:
+# it closes the pipe as soon as it is satisfied, the writer takes SIGPIPE, and
+# pipefail reports the first non-zero status. The first version of this cell did
+# exactly that and reported the guard ABSENT while the guard was working — a
+# false red, which is the same class as the false greens this file hunts, only
+# louder.
+in_tree="$(cd "$HERE/.." && pwd)/aba-s11-probe"
+s11_in="$(bash "$HERE/run-parallelism-aba.sh" --preset seam --jobs 4 --out "$in_tree" 2>&1 || true)"
+rm -rf "$in_tree"
+out_tree="$(mktemp -d)"
+s11_out="$(bash "$HERE/run-parallelism-aba.sh" --preset seam --jobs 4 --out "$out_tree/run" 2>&1 || true)"
+rm -rf "$out_tree"
+case "$s11_in" in
+  *"is inside the source tree"*)
+    case "$s11_out" in
+      *"is inside the source tree"*)
+        bad "S11 the guard ALSO refuses an out-of-tree --out — it refuses everything" ;;
+      *)
+        ok "S11 an in-tree --out is refused and an out-of-tree one is not" ;;
+    esac ;;
+  *)
+    bad "S11 an --out INSIDE the source tree was accepted — the sample would dirty the tree and fail codegen-build-graph-check in every pass" ;;
+esac
+
+SEAM_DECLARED=13
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$SEAM_DECLARED" ]; then
