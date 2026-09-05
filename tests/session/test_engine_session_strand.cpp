@@ -1058,10 +1058,42 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
         }
     }};
 
-    // Let the accept loop start and write listener_endpoints_.
-    // 30ms is sufficient: the accept loop runs immediately when t1/t2 pick up work.
-    ioc.run_for(std::chrono::milliseconds{30});
-    ioc.restart();
+    // The reader must be OBSERVED spinning before the accept loop races it.
+    //
+    // ⚠️ TWO DEFECTS HERE, NOT ONE. This was:
+    //
+    //     ioc.run_for(std::chrono::milliseconds{30});
+    //     ioc.restart();
+    //
+    // (a) `restart()` WHILE t1 AND t2 ARE INSIDE `ioc.run()` is exactly what
+    //     `wait_pred`'s contract 800 lines above forbids — "MUST NOT be called
+    //     while other threads are in ioc.run() — restart() is UB then", the
+    //     reason V-11 and V-13 do not use it. The `run_for` was redundant on top
+    //     of that: t1/t2 already pump this ioc, and the pending `async_accept`
+    //     is the work that keeps them in `run()`, so the main thread was a third
+    //     worker for 30 ms and then reset a flag it did not own.
+    // (b) The 30 ms was a guess about when `t_reader` gets scheduled — the same
+    //     defect fixed in V-11 and V-13, and the shortest guess of the three.
+    //     `EXPECT_GT(reader_iterations, 0)` at the end is the vacuity guard.
+    //
+    // Both close the same way: observe, drive nothing.
+    //
+    // ⚠️ THE 30 ms HAD TWO JOBS AND BOTH MUST BE REPLACED. It let `t_reader`
+    // start (the vacuity half) AND let the accept loop WRITE
+    // `listener_endpoints_` (race window (a) — the comment above says so in as
+    // many words). Waiting only for the reader would leave stop() free to run
+    // before the accept-loop write, silently costing window (a) while every
+    // assertion still passed. A bound acceptor has a nonzero port, so both
+    // halves are observable and neither is a guess.
+    const bool armed = wait_until_observed(
+        [&] {
+            return reader_iterations.load(std::memory_order_relaxed) > 0 &&
+                   engine->acceptor_bound_endpoint(acc_id).port != 0;
+        },
+        5000ms);
+    EXPECT_TRUE(armed)
+        << "V-8: within 5s the reader had not iterated, or the acceptor had not "
+           "bound — the race windows were not established, so this run tests nothing";
 
     // Stop the engine.  stop() will clear listener_endpoints_ and registry_ while
     // t_reader is spinning.  This is the second window where the race fires (in
@@ -1069,9 +1101,12 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     {
         auto stop_fut = asio::co_spawn(
             ioc.get_executor(), engine->stop(), asio::use_future);
-        bool done = wait_pred(ioc,
-            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
-            12000ms);
+        // ⚠️ wait_until_observed, NOT wait_pred — t1 and t2 are inside
+        // `ioc.run()` here, and wait_pred drives `run_for()/restart()`, which
+        // its own contract forbids in exactly that state. V-11 and V-13 already
+        // use the sleep-poll form for this reason; V-8 did not.
+        bool done = wait_until_observed(
+            [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 12000ms);
 
         // Signal the reader to stop AFTER stop() completes (or times out).
         reader_stop.store(true, std::memory_order_relaxed);
@@ -2096,6 +2131,16 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
     {
         auto stop_fut = asio::co_spawn(
             ioc.get_executor(), engine->stop(), asio::use_future);
+        // ⚠️ wait_pred IS CORRECT HERE, AND IT IS LOAD-BEARING — do not "fix" it
+        // to wait_until_observed the way V-8 needed. t1/t2/t3 are constructed
+        // ABOVE `engine->start()`, deliberately (it narrows the start/stop
+        // window this test exists for), so they call `ioc.run()` on an ioc with
+        // no work yet and RETURN IMMEDIATELY. They are unjoined but no longer
+        // own the ioc, so `run_for()/restart()` here is legal — and it is the
+        // only thing driving stop() to completion. Swapping in the sleep-poll
+        // form leaves stop() never running and the Engine destructor asserts
+        // `Engine destroyed without calling co_await stop() first`. Measured:
+        // that is exactly what happened when this was changed.
         bool done = wait_pred(ioc,
             [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
             10000ms);
