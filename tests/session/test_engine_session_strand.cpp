@@ -1101,9 +1101,35 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     //   - No HB edge between t_reader and the engine threads (no mutex/atomic/sync).
     //   → TSan: DATA RACE on listener_endpoints_ or registry_.
     //
-    // IMPORTANT: there is deliberately NO shared synchronisation object between
-    // this reader thread and the engine executor threads.  Any sync object would
-    // create a happens-before edge and suppress the race TSan must report.
+    // ⚠️ THERE IS AN EDGE, AND IT IS TOTAL — the sentence below is kept for its
+    // INTENT but is false as written, measured rather than reasoned. The arming
+    // wait added to this test reads the reader's iteration counter from the main
+    // thread, and although that counter is `memory_order_relaxed`, TSAN TREATS IT
+    // AS AN ACQUIRE: in a probe of the historical RED shape, a reader that stops
+    // reading before the arming wait is reported 40/40 with no wait, 1/40 with
+    // this relaxed counter, and 0/40 with a genuine release/acquire pair. So
+    // composed with the `co_spawn` of `stop()`, every reader access made BEFORE
+    // arming is ordered ahead of everything the engine does afterwards.
+    //
+    // ⚠️ WHAT KEEPS THE WITNESS ALIVE IS THAT THE READER SPINS PAST THE WAIT.
+    // `reader_stop` is set only after `stop()` COMPLETES, so thousands of
+    // post-arming reads stay unordered and TSan reports on those — timing-matched
+    // against the fixed sleep this replaced, detection is unchanged (39/40 vs
+    // 40/40). That is now a load-bearing property of this test and it was written
+    // nowhere: STOPPING THE READER AT THE ARMING WAIT, OR SHORTENING THE WINDOW
+    // BETWEEN IT AND `stop()`, SILENTLY TURNS THE WITNESS INTO A NO-OP — and
+    // `EXPECT_GT(<counter>, 0)` would still pass, because it guards vacuity of
+    // the READER, not of TSan.
+    //
+    // ⚠️ The two-condition predicate is load-bearing for DETECTION too, not only
+    // for the race window: with a reader-only condition the wait returns in ~1 ms
+    // and detection falls to 30/40; requiring the acceptor's publish as well
+    // restores the overlap and takes it back to 40/40.
+    //
+    // IMPORTANT: no shared synchronisation object is deliberately introduced
+    // between this reader thread and the engine executor threads — any such
+    // object would create a happens-before edge and suppress the race TSan must
+    // report. Read that as the design intent it is, qualified by the edge above.
     std::atomic<bool> reader_stop{false};
     std::atomic<int>  reader_iterations{0};
     std::thread t_reader{[&engine, &acc_id, &reader_stop, &reader_iterations]() {
@@ -1765,9 +1791,34 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     // arming edge cannot reach backwards to order. The mutation must be made in
     // the reader path; mutating the test cannot reproduce the condition.
     //
-    // NO shared sync object between t_reader and the engine threads (only relaxed
-    // reader_stop at exit — set AFTER stop() completes, so during stop() there
-    // is zero HB between the two sides).
+    // ⚠️ THERE IS AN EDGE, AND IT IS TOTAL — the sentence below is kept for its
+    // INTENT but is false as written, measured rather than reasoned. The arming
+    // wait added to this test reads the reader's iteration counter from the main
+    // thread, and although that counter is `memory_order_relaxed`, TSAN TREATS IT
+    // AS AN ACQUIRE: in a probe of the historical RED shape, a reader that stops
+    // reading before the arming wait is reported 40/40 with no wait, 1/40 with
+    // this relaxed counter, and 0/40 with a genuine release/acquire pair. So
+    // composed with the `co_spawn` of `stop()`, every reader access made BEFORE
+    // arming is ordered ahead of everything the engine does afterwards.
+    //
+    // ⚠️ WHAT KEEPS THE WITNESS ALIVE IS THAT THE READER SPINS PAST THE WAIT.
+    // `reader_stop` is set only after `stop()` COMPLETES, so thousands of
+    // post-arming reads stay unordered and TSan reports on those — timing-matched
+    // against the fixed sleep this replaced, detection is unchanged (39/40 vs
+    // 40/40). That is now a load-bearing property of this test and it was written
+    // nowhere: STOPPING THE READER AT THE ARMING WAIT, OR SHORTENING THE WINDOW
+    // BETWEEN IT AND `stop()`, SILENTLY TURNS THE WITNESS INTO A NO-OP — and
+    // `EXPECT_GT(<counter>, 0)` would still pass, because it guards vacuity of
+    // the READER, not of TSan.
+    //
+    // ⚠️ The two-condition predicate is load-bearing for DETECTION too, not only
+    // for the race window: with a reader-only condition the wait returns in ~1 ms
+    // and detection falls to 30/40; requiring the acceptor's publish as well
+    // restores the overlap and takes it back to 40/40.
+    //
+    // NO shared sync object DELIBERATELY INTRODUCED between t_reader and the
+    // engine threads: none is created by this test's own code beyond the arming
+    // wait described above.
     //
     // V-11 RED SIGNAL (pre-T026):
     //   TSan fires DATA RACE on listener_endpoints_ or registry_ → halt_on_error=1
