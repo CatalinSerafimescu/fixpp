@@ -297,6 +297,29 @@ static bool wait_pred(asio::io_context& ioc, auto pred,
 // thread inside five seconds will produce a spurious failure — deliberately, in
 // preference to a spurious pass. Where a writer can expose a real event to wait
 // on, wait on that instead of widening the number.
+//
+// ⚠️ THE "NON-FATAL BECAUSE THREADS ARE JOINABLE" RULE THAT V-8, V-11, V-13 AND
+// V-14 STATE IS TRUE FILE-WIDE, BUT THE FILE DOES NOT YET OBEY IT EVERYWHERE.
+// Read those comments as describing their own sites, not as a survey.
+// `ASSERT_*`, `FAIL()` and `GTEST_SKIP()` all expand to `return`, so any of them
+// reached while a `std::thread` is joinable is `std::terminate` — and a work
+// guard makes it worse, parking the workers inside `run()` instead of letting
+// them drain.
+//
+// Known remaining sites, named by assertion because line numbers rot: V-16's
+// `seam_hit`, `late_send_done` and `late_send_res.has_value()` assertions all
+// sit between its work guard and its joins. They are PRE-EXISTING and are
+// deliberately not changed here — unlike the V-14 site, which this branch's own
+// work guard aggravated and which it therefore fixed. They need a real
+// restructure rather than a move, because the code between them depends on them
+// (`late_send_fut.get()` would block if its wait had failed), and that does not
+// belong in a branch about CI measurement wiring.
+//
+// ⚠️ Re-derive the set rather than trusting this list — it is a survey, and a
+// survey presented as a property re-arms itself for the next reader. Two other
+// sites were reported to me as belonging to it (V-9(a)'s `FAIL` and V-12b's
+// `GTEST_SKIP`) and both are in fact SAFE: each joins immediately before the
+// fatal exit.
 using fixpp::test_support::wait_until_observed;
 
 // Wait for both sessions to reach fsm_state::Active via lookup + state() check.
@@ -2185,7 +2208,40 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
     // start() spawns loops for all registered sessions.
     // Pre-fix: outstanding_counter_ assigned AFTER loop → concurrent stop() sees null.
     // Post-fix: assigned BEFORE loop → stop() always finds a valid counter.
-    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
+    //
+    // ⚠️ THIS WAS AN `ASSERT_TRUE`, AND THE WORK GUARD ABOVE MADE THAT WORSE.
+    // A fatal assertion returns from the test body with t1/t2/t3 joinable, which
+    // is `std::terminate` — the rule this file states three times. Before the
+    // guard those threads would at least have drained out of `run()` on their
+    // own; with it they are parked in `run()` for good, so the process dies
+    // holding three live threads instead of finishing and then dying.
+    //
+    // ⚠️ MOVING `wg` BELOW THE THREADS DOES NOT FIX IT, and would reintroduce
+    // the defect the guard exists for: between the threads starting and the
+    // guard being constructed the ioc is empty again, which is precisely the
+    // window that made ~49 % of loaded runs call `restart()` on a live `run()`.
+    // `~std::thread` also terminates on a JOINABLE thread whether or not it has
+    // finished, so draining is not the property that saves us — joining is.
+    // The guard stays first; the exit path joins.
+    // ⚠️ AND IT MUST STOP THE ENGINE, NOT ONLY THE THREADS. Forcing this branch
+    // showed the joins were not enough: `~Engine` asserts `stopped_`, so a
+    // failure path that tears down the ioc and returns still aborts the process
+    // — a different crash in place of the first, which is not a fix. The other
+    // early-exit sites in this test use `stop_engine_sync`, but that drives the
+    // ioc via `wait_pred` and cannot be used here for the same reason the wait
+    // below cannot: the workers own it. Stopping through them instead.
+    if (!engine->start().has_value()) {
+        ADD_FAILURE() << "engine.start() failed";
+        auto sf = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
+        (void)wait_until_observed(
+            [&]{ return sf.wait_for(0ms) == std::future_status::ready; }, 10000ms);
+        wg.reset();
+        ioc.stop();
+        t1.join();
+        t2.join();
+        t3.join();
+        return;
+    }
 
     // Immediately call stop() — exercises the start/stop concurrent window.
     {
