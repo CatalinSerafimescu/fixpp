@@ -225,12 +225,22 @@ run_pass() {
   echo "── pass ${idx} done: ctest exit ${rc}, sanitizer reports ${san} ──"
 }
 
-# #267 acceptance item 4.  The comparison the verdict makes needs a digest that
-# is stable under everything EXCEPT a real change in coverage, so the lcov
-# records are SORTED before hashing: `llvm-cov export` emits per-object sections
-# whose order follows the object list and the filesystem, neither of which is a
-# coverage fact.  Hashing the raw file would report a difference on every run and
-# the check would be discarded as noisy — the usual way a real gate dies.
+# #267 acceptance item 4.  The comparison the verdict makes needs a digest whose
+# only inputs are coverage facts, so the report is put through
+# ci/lcov-coverage-key.awk before it is sorted and hashed.
+#
+# ⚠️ THIS COMMENT USED TO CLAIM THE DIGEST WAS "stable under everything EXCEPT a
+# real change in coverage", NAMING ONLY SECTION ORDER AS THE THING BEING
+# NORMALISED.  That claim was FALSE and it shipped: the digest was taken over the
+# raw report, which carries per-line and per-function EXECUTION COUNTS, and those
+# move run-to-run.  Measured on #267 campaign run 33951801400,
+# `linux-clang-coverage`: the two SERIAL passes covered an identical set of 9042
+# lines and still produced different digests, on 871 `DA:` records differing in
+# count alone.  The gate voided its own baseline — it would have voided EVERY
+# coverage sample of the campaign, in a way that reads as a suite defect.
+#
+# What is normalised, and the scope limit that buys, lives in the awk.  Do not
+# re-state it here: two copies of a rule is how one of them goes stale.
 coverage_digest() {
   local idx="$1"
   local prof="$BUILD/profiles-pass${idx}"
@@ -273,24 +283,40 @@ coverage_digest() {
     return 0
   fi
 
-  # ⚠️ EVERY LINE IS KEYED BY ITS `SF:` RECORD BEFORE SORTING. A plain
-  # `sort "$info"` discards the record association, and a hostile review showed
-  # two genuinely different reports hashing IDENTICALLY under it: move `DA:1,1`
-  # from a.cc to b.cc and `DA:2,0` the other way, and the sorted line multiset is
-  # unchanged. Coverage could migrate between files while all three digests
-  # "agree" — which is the one thing item 4 exists to detect.
+  # ⚠️ THE DIGEST IS TAKEN OVER ci/lcov-coverage-key.awk's OUTPUT, NOT OVER THE
+  # RAW REPORT — hashing the raw report voided every sample for a reason that
+  # has nothing to do with `--parallel`. That file carries the whole rationale,
+  # the measurement behind it, and the scope limit it buys (line and function
+  # coverage only; branch data is excluded because it is nondeterministic at
+  # FIXED concurrency in this suite). Read it before changing this line.
   #
-  # Sorting is still needed: `llvm-cov export` emits per-object sections in an
-  # order that follows the object list and the filesystem, neither of which is a
-  # coverage fact, and hashing that raw would report a difference on every run
-  # until the check was discarded as noisy.
+  # Sorting stays here rather than in the awk: `llvm-cov export` emits
+  # per-object sections in an order that follows the object list and the
+  # filesystem, neither of which is a coverage fact.
   local sha
-  sha="$(awk '/^SF:/ { sf = $0 } { print sf "\001" $0 }' "$info" \
+  sha="$(awk -f "$HERE/lcov-coverage-key.awk" "$info" \
          | LC_ALL=C sort | sha256sum | cut -d' ' -f1)"
+  # ⚠️ COUNTED WITH awk, NOT `grep -c`. `grep -c` prints `0` AND exits 1 when
+  # nothing matches, so the `|| echo 0` these lines used to carry appended a
+  # SECOND zero — `lines_covered=0\n0`, which the verdict's env parser would read
+  # as a malformed sample rather than as "none". It never fired because the
+  # `-s "$info"` guard above makes an empty report unreachable here, but
+  # `branches_covered` CAN legitimately be zero (a build with branch coverage
+  # off), which would have made it reachable for the first time.
+  #
+  # Branch data is OUTSIDE the digest (see the awk). It is recorded anyway, so
+  # the exclusion is disclosed by the sample itself rather than only by a
+  # comment, and so a future branch-stability measurement has a starting point.
   {
     printf 'status=ok\nprofraw_count=%s\nsorted_info_sha256=%s\n' "$n" "$sha"
-    printf 'lines_covered=%s\n' "$(grep -c '^DA:[0-9]*,[1-9]' "$info" 2>/dev/null || echo 0)"
-    printf 'lines_total=%s\n' "$(grep -c '^DA:' "$info" 2>/dev/null || echo 0)"
+    printf 'branch_records_in_digest=0\n'
+    awk '
+      /^DA:/   { split(substr($0, 4), a, ","); lt++; if (a[2] + 0 > 0) lc++ }
+      /^BRDA:/ { split(substr($0, 6), b, ","); bt++
+                 if (b[4] != "-" && b[4] + 0 > 0) bc++ }
+      END      { printf "lines_covered=%d\nlines_total=%d\n", lc + 0, lt + 0
+                 printf "branches_covered=%d\nbranches_total=%d\n", bc + 0, bt + 0 }
+    ' "$info"
   } > "$OUT/pass${idx}.coverage.env"
   cp "$info" "$OUT/pass${idx}.lcov"
 }

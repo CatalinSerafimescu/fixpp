@@ -272,11 +272,16 @@ fi
 #    filesystem, neither of which is a coverage fact; hashing raw would report a
 #    difference on every run until the check was discarded as noisy.
 #
-# The recipe is extracted from the driver rather than retyped, so a change there
-# that this cell does not see is impossible.
-canon() { awk '/^SF:/ { sf = $0 } { print sf "\001" $0 }' | LC_ALL=C sort | sha256sum | cut -d' ' -f1; }
-# shellcheck disable=SC2016  # `$0` is awk's, not the shell's — it must stay literal
-recipe="$(grep -c 'print sf "\\001" \$0' "$HERE/run-parallelism-aba.sh")"
+# ⚠️ THE RECIPE IS NOT RETYPED HERE — the cell runs ci/lcov-coverage-key.awk,
+# the same file the driver runs. It used to be a hand-copied one-liner guarded
+# by a grep asserting the driver still contained the identical text, which is a
+# byte-identity check on two copies: it proves they agree, never that either is
+# right. The grep survives in a narrower role below — that the driver actually
+# INVOKES this file — because a cell testing an awk the driver has stopped
+# calling is the failure the old guard was built for.
+canon() { awk -f "$HERE/lcov-coverage-key.awk" | LC_ALL=C sort | sha256sum | cut -d' ' -f1; }
+# shellcheck disable=SC2016  # `$HERE` is the driver's, not this shell's — it must stay literal
+recipe="$(grep -c 'awk -f "$HERE/lcov-coverage-key.awk"' "$HERE/run-parallelism-aba.sh")"
 A="$(printf 'SF:a.cc\nDA:1,1\nend_of_record\nSF:b.cc\nDA:2,0\nend_of_record\n' | canon)"
 B="$(printf 'SF:a.cc\nDA:2,0\nend_of_record\nSF:b.cc\nDA:1,1\nend_of_record\n' | canon)"
 C="$(printf 'SF:b.cc\nDA:2,0\nend_of_record\nSF:a.cc\nDA:1,1\nend_of_record\n' | canon)"
@@ -374,7 +379,59 @@ print(len(d["anomalies"]), d["max_inflight"])' "$WORK/decoy/log.txt")"
   fi
 fi
 
-SEAM_DECLARED=10
+# ── S9: EXECUTION COUNTS MUST COLLIDE, COVERED/UNCOVERED MUST NOT ───────────
+#
+# The defect S9 exists for shipped and voided a real sample. The digest was
+# taken over the raw lcov, which carries per-line and per-function EXECUTION
+# COUNTS; those move run-to-run for any timing-dependent loop. On #267 campaign
+# run 33951801400, `linux-clang-coverage`'s two SERIAL passes covered an
+# IDENTICAL set of 9042 lines and still disagreed, on 871 `DA:` records
+# differing in count alone — so item 4 voided its own baseline, and would have
+# done so on every coverage sample of the campaign.
+#
+# ⚠️ BOTH ARMS OR NEITHER. A normalisation that maps everything to the same
+# value collides on the counts AND on a real coverage change, and reports clean
+# forever — strictly worse than the over-voiding it replaced, because an
+# over-voiding gate is loud. The second arm is what forbids that.
+cov_a="$(printf 'SF:a.cc\nDA:1,1\nDA:2,7\nFNDA:3,f\nend_of_record\n'   | canon)"
+cov_b="$(printf 'SF:a.cc\nDA:1,9\nDA:2,4000\nFNDA:1,f\nend_of_record\n' | canon)"
+cov_c="$(printf 'SF:a.cc\nDA:1,1\nDA:2,0\nFNDA:3,f\nend_of_record\n'    | canon)"
+cov_d="$(printf 'SF:a.cc\nDA:1,1\nDA:2,7\nFNDA:0,f\nend_of_record\n'    | canon)"
+if [ "$cov_a" != "$cov_b" ]; then
+  bad "S9 two reports differing ONLY in execution counts produced different digests ($cov_a vs $cov_b) — every coverage sample would void"
+elif [ "$cov_a" = "$cov_c" ]; then
+  bad "S9 a line going COVERED -> UNCOVERED did not change the digest ($cov_a) — the normalisation is inert"
+elif [ "$cov_a" = "$cov_d" ]; then
+  bad "S9 a function going COVERED -> UNCOVERED did not change the digest ($cov_a) — the normalisation is inert"
+else
+  ok "S9 the digest ignores execution counts and still sees covered -> uncovered"
+fi
+
+# ── S10: THE BRANCH-DATA EXCLUSION IS A DECLARED SCOPE LIMIT ────────────────
+#
+# ci/lcov-coverage-key.awk drops `BRDA:`/`BRH:`/`BRF:` because branch coverage is
+# nondeterministic in this suite at FIXED concurrency: on the two serial passes
+# above — same binary, same machine, same j=1 — line and function coverage
+# agreed exactly while 16 of 8458 branches flipped their taken-bit. Including
+# them leaves the baseline unable to agree with itself.
+#
+# That is a real limit: a widening that changed ONLY branch coverage is invisible
+# to item 4. This cell exists so the limit is a TESTED property rather than a
+# paragraph — if someone re-includes branch data to "improve" the digest, the
+# false void comes back and this cell is where they are told why. It also pins
+# the disclosure, so a sample cannot silently stop declaring the exclusion.
+br_a="$(printf 'SF:a.cc\nDA:1,1\nBRDA:1,0,0,5\nBRH:1\nBRF:1\nend_of_record\n' | canon)"
+br_b="$(printf 'SF:a.cc\nDA:1,1\nBRDA:1,0,0,0\nBRH:0\nBRF:1\nend_of_record\n' | canon)"
+br_decl="$(grep -c 'branch_records_in_digest=0' "$HERE/run-parallelism-aba.sh")"
+if [ "$br_a" != "$br_b" ]; then
+  bad "S10 a flipped BRANCH taken-bit changed the digest — branch data is back in the key and the baseline will void against itself"
+elif [ "${br_decl:-0}" -lt 1 ]; then
+  bad "S10 the driver no longer records branch_records_in_digest=0 — the exclusion is undisclosed"
+else
+  ok "S10 branch data is excluded from the digest and the sample declares it"
+fi
+
+SEAM_DECLARED=12
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$SEAM_DECLARED" ]; then
