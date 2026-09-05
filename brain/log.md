@@ -74,3 +74,39 @@ status: stable
   the collision check's FALSE-POSITIVE arm is the load-bearing one because that check rejects a
   dictionary.
 
+
+- **2026-09-04 (later still) — the #289 pump gains a RUNTIME forcing seam; failure class 1 gains the
+  FALLBACK sub-lesson.** Batch 11 (82 sites / 39 files) could not have been verified under the
+  textual driver: that driver rebuilds once per arm, and one arm per site is the method rather than
+  overhead, so an 82-site batch is 82 rebuilds. `run_window_then_ready` now takes an optional site
+  label and honours `FIXPP_FORCE_WINDOW_MISS`, making forcing a runtime decision — one build, N runs.
+  Recorded in `components/test.md` with the two things that make it safe: it is a **weaker** witness
+  (it exercises the primitive's forced path, not the site's own miss block, so the textual driver is
+  NOT retired), and its silence is ambiguous, so forcing **announces itself** and an unannounced run
+  is `NO-SUCH-SITE` rather than a pass.
+
+  Class 1 gains: **a classifier's fallback is a claim, and a fallback set to the common case fails
+  toward the easy answer.** `classify-289.py`'s enclosing-function walk returned `("TEST", "<none>")`
+  when it exhausted — TEST-body being the shape with the simplest migration recipe — so three rows in
+  a libFuzzer harness that links no gtest were being offered for a migration whose miss branch is
+  `ADD_FAILURE()`. A correct row and a fallback row printed identically. This is the no-result path
+  wearing a value, and it is why the unresolved case now has its own bucket outside every recipe.
+
+- **2026-09-05 — batch 11's ARM PHASE found three defects in the INSTRUMENTS; the SITE defects were
+  caught earlier, by the compiler.** ⚠️ An earlier wording of this entry said the batch found "none
+  in the 82 migrated sites", which is false as written and contradicted by its own sibling commit
+  (*"SIX REAL DEFECTS, ONE CLASS"*): six sites had a clock expression derived per FILE where C++
+  scope is per SITE, and `*clock` bound to `::clock` from `<ctime>`. Those were found at BUILD time
+  and fixed before any arm ran. The true statement is narrower and still worth keeping: **once the
+  tree compiled, forcing all 82 miss branches found defects only in the drivers.** (1) `ci/pump-red-arm.sh` could report a false `SILENT` — `pipefail` plus
+  `grep -q` in a pipeline exits 141 *when the pattern matches*, size-dependently, so it had shipped
+  in batch 10 and passed on small arms. Recorded as a new bullet under failure class 1, because the
+  tell is a CONTRADICTION (the matcher says "not found" while the diagnostic prints the text) rather
+  than an error. (2) A timeout discarded the output, collapsing "reported then wedged" into
+  "inconclusive"; the driver now reads the partial output and surfaces the wedge count on the summary
+  line. (3) The arm timeout was a round 180 s where the competing quantity is `kQuiesceBudget` x the
+  forced count — measured 48 for one label — so it manufactured three false timeouts.
+
+  All three wedges turned out to be the SAME thing and it is worth keeping: forcing a miss wedged the
+  run at an **unmigrated** `run_for(); … get()` later in the same test. That is #289's hazard shown
+  live, and it is evidence for the remaining migration rather than against the migrated sites.

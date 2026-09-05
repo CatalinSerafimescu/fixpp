@@ -23,15 +23,6 @@
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstdio>
-#include <fstream>
-#include <iterator>
-#include <memory>
-#include <memory_resource>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
@@ -42,8 +33,31 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fstream>
+#include <iterator>
+#include <memory>
+#include <memory_resource>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 namespace fixpp::session::test {
 namespace {
@@ -190,8 +204,12 @@ struct Fixture {
 
     void feed(Session& s, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(std::chrono::milliseconds{200});
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
+                                                        "XmlNonFixPassthrough::feed")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "XmlNonFixPassthrough::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "XmlNonFixPassthrough::feed";
+            return;
+        }
         (void)fut.get();
     }
 

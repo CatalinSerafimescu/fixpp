@@ -1,0 +1,119 @@
+# ci/red-arms/batch11-labels.txt -- the 82 site labels migrated by #289 batch 11.
+#
+# Consumed by ci/pump-seam-arm.sh, which forces each through the runtime seam
+# (FIXPP_FORCE_WINDOW_MISS) rather than by rewriting source per site.
+#
+# One label per line. These are the labels PASSED TO `run_window_then_ready`, which
+# is a strict subset of the labels appearing in `ADD_FAILURE()` across the tree:
+# sites migrated before the seam existed pass none and are NOT forceable this way.
+#
+# ⚠️ A LABEL MUST BE UNIQUE ACROSS THE WHOLE TREE, NOT JUST WITHIN A BATCH -- and it must
+# not be a SUBSTRING of another label either, because the driver locates a label by
+# substring match on `strings`. Batch 11 checked uniqueness within its own 82 and shipped
+# `Fixture::feed`, which already existed at three older sites and is a suffix of twelve
+# others; it matched 22 unrelated binaries.
+#
+# ⚠️⚠️ THE RECIPE FIRST PUBLISHED HERE SAW HALF THE TREE, AND IT WAS THE RECIPE USED TO
+# "VERIFY" THIS BATCH'S LABELS. It was single-line:
+#
+#   git grep -ho 'kWindowMiss << "[^"]*"' -- tests/ | sed 's/.*<< "//; s/"$//' | sort -u
+#
+# clang-format wraps roughly half the call sites, putting the label on the NEXT line:
+#
+#   ADD_FAILURE() << fixpp::test_support::kWindowMiss
+#                 << "AdminEmitMixedPathTest::open_sync";
+#
+# so it found 121 labels where the tree has ~248. The batch's conclusion (no duplicate, one
+# benign substring) happened to survive re-checking with a complete extractor -- that was
+# luck, not method. Use the two-line form, which sees both shapes:
+#
+#   git grep -h -A1 kWindowMiss -- tests/ ':!tests/support/pump_until_ready.hpp' \
+#     | grep -oE '"[^"]{3,}"' | tr -d '"' | sort -u
+#
+# then require each new label to appear once in that list and to be a substring of nothing
+# else in it. ⚠️ It OVER-approximates slightly (it will pick up a neighbouring string
+# literal), and that is the SAFE direction for a uniqueness check: an extra candidate costs
+# one needless look, a missing one hides a real collision. A bare `Fixture::` prefix is the
+# trap -- several fixtures are literally named `Fixture`, so qualify by what the file is about.
+AdminDistinctNowTest::close_sync
+AdminDistinctNowTest::feed_sync
+AdminDistinctNowTest::open_sync
+AdminEmitBMRCoverageTest::feed_sync
+AdminEmitBMRCoverageTest::open_sync
+AdminEmitMixedPathTest::close_sync
+AdminEmitMixedPathTest::feed_sync
+AdminEmitMixedPathTest::open_sync
+AdminEmitNoAppCoverageTest::feed_sync
+AdminEmitNoAppCoverageTest::open_sync
+AdminEmitToAdminCoverageTest::feed_sync
+AdminEmitToAdminCoverageTest::open_sync
+AdversarialSessionTest::feed
+AdversarialSessionTest::open_session
+AllocationFixture::feed
+CellD_Direct_TestReqIdMismatchDetected
+CellD_Strand_TestReqIdMismatchDetected
+CfgLifetimeSafetyTest::open_sync
+CompidBindingDefaultDenyTest::feed
+CompidBindingDefaultDenyTest::run_open
+CompidBindingSymmetricTest::feed
+CompidBindingSymmetricTest::run_open
+CompidPrincipalExtractionSessionTest::feed
+CompidPrincipalExtractionSessionTest::run_open
+DrainCalledByClose/1
+DrainCalledByClose/2
+DrainCalledByClose/3
+DriveLogoutStub_EmitsNoLogoutFrame
+DurableBeforeTransmitTest::open_sync
+EnumValidationLogonTest::feed_sync
+EnumValidationLogonTest::open_sync
+XmlNonFixPassthrough::feed
+FsmMatrixWitness::close_sync
+FsmMatrixWitness::feed_sync
+FsmMatrixWitness::open_sync
+FsmTransitionMatrixTest::close_sync
+FsmTransitionMatrixTest::feed_sync
+FsmTransitionMatrixTest::open_sync
+HbTrTest::feed_sync
+HbTrTest::open_sync
+InboundSequenceResetTest::feed
+InboundSequenceResetTest::run_open
+InboundStoreBeforeFromAdminDispatch
+LogonHandshakeTest::feed_sync
+LogonHandshakeTest::open_sync
+LogonObservabilityTest::feed_sync
+LogonObservabilityTest::open_sync
+LogoutTimeoutTest::feed
+LogoutTimeoutTest::run_open
+MaxMsgSizeTest::feed_sync
+MaxMsgSizeTest::open_sync
+MtlsFailClosedTest::feed
+MtlsFailClosedTest::run_open
+OutboundStoreBeforeTransportSend
+PersistentStore_FailsClosed_AnyErrorClass
+PersistentStore_FailsClosed_OutOfSet
+PostureTest::open_sync
+ProvenanceFixture::feed
+Qfj626Fixture::feed
+Qfj626Fixture::run_open
+ReconnectBackoffCapTest::run_drive
+ReconnectHappyPathTest::feed
+ReconnectHappyPathTest::run_open
+RecoveryAdminSpanGapfillTest::feed
+RecoveryAdminSpanGapfillTest::run_open
+RecoveryGapfillNearCapacityTest::feed
+RecoveryGapfillNearCapacityTest::run_open
+RecoveryStoreHorizonTest::feed
+RecoveryStoreHorizonTest::run_open
+session_reject:RejectFixture::feed
+ReloadCredentialsTest::run_open
+ResetSeqnumPolicyMatrixTest::feed
+ResetSeqnumPolicyMatrixTest::run_open
+SendInDisconnected_ReturnsInvalidStateForSend
+SendInvalidStateTest::feed_sync
+SendInvalidStateTest::open_sync
+SeqnumGapFatalTest::feed_sync
+SeqnumGapFatalTest::open_sync
+SessionRecoveryAllocGuardTest::feed
+SessionRecoveryAllocGuardTest::run_open
+ToAppStoreBlockValuedError
+run_coro_result

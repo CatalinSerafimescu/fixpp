@@ -63,6 +63,8 @@ preset="${1:?usage: pump-red-arm.sh <preset> <arms-file>}"
 arms_file="${2:?usage: pump-red-arm.sh <preset> <arms-file>}"
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root" || exit 2
+# Shared with ci/pump-seam-arm.sh so the two non-vacuity guards cannot drift apart.
+. "$repo_root/ci/pump-arm-common.sh"
 
 # Observation timeout. DERIVED, not picked: the primitives grant a bounded pump
 # budget (`kPumpBudget` 10s) and a drain quiescence budget (`kQuiesceBudget` 5s),
@@ -88,11 +90,7 @@ pass=0; declare -a NOTES=()
 # verification step that cannot fail because it never ran. This repo's most recurring
 # defect is exactly that shape.
 n_arms=$(awk -F'\t' '!/^#/ && NF' "$arms_file" | wc -l)
-if [ "$n_arms" -eq 0 ]; then
-    printf 'pump-red-arm: %s contains no arms -- refusing to report success on an empty population\n' \
-        "$arms_file" >&2
-    exit 2
-fi
+assert_nonempty_population "$n_arms" "$arms_file" pump-red-arm arms
 
 # ⚠️ VALIDATE THE ARMS FILE ONCE, UP FRONT. An earlier revision let the execution loop and
 # the cleanup sweep disagree about what a row is: the loop skipped only blanks and `#`,
@@ -267,7 +265,17 @@ while IFS=$'\t' read -r file anchor label target regex; do
         echo "    ~~ INCONCLUSIVE: timed out after ${TIMEOUT_S}s -- the pump this arm zeroed is"
         echo "       probably NOT the one the test waits on (indirected pump)."
         NOTES+=("HUNG $label")
-    elif printf '%s' "$out" | grep -qF "$TAIL$label"; then
+    # ⚠️ HERESTRING, NOT A PIPELINE -- AND THIS WAS A REAL FALSE "SILENT".
+    # `set -o pipefail` is on. `grep -q` exits at the FIRST match and closes the pipe, so
+    # `printf` dies with SIGPIPE (141) and pipefail makes the PIPELINE non-zero even though
+    # the match succeeded. The bug is SIZE-DEPENDENT: with little output printf finishes
+    # before grep exits and the pipeline reads 0, which is why batch 10's small arms never
+    # saw it. Against a 438-test binary it fired every time, and it fails toward the WRONG
+    # VERDICT -- three correctly-reporting sites were called SILENT, i.e. "the miss branch
+    # did not announce itself", which would have sent someone to fix migrations that were
+    # already right. Reproduce: `set -o pipefail; printf '%s' "$big" | grep -qF x` -> 141.
+    # [[feedback_every_broken_instrument_in_this_repo_fails_toward_clean]]
+    elif grep -qF "$TAIL$label" <<<"$out"; then
         echo "    RED as required: reported '${TAIL}${label}'"
         pass=$((pass+1))
     else
@@ -316,12 +324,10 @@ hung=$(printf '%s\n' "${NOTES[@]-}" | grep -c '^HUNG ' || true)
 # satisfied the non-vacuity guard, ran nothing, and exited 0 -- defeating that guard on its
 # own terms. Patching `read` closes this instance; counting what actually executed closes the
 # class, which is the repo's standing rule for verification sweeps.
+# OUTCOME-derived on purpose: an arm that ran but recorded no verdict is caught here and
+# would not be by a loop counter. See assert_ran_count's comment.
 ran=$(( pass + ${#NOTES[@]} ))
-if [ "$ran" -ne "$n_arms" ]; then
-    echo "pump-red-arm: parsed ${n_arms} arm(s) but EXECUTED ${ran} -- refusing to report" >&2
-    echo "  (a row with no trailing newline is the usual cause: the parsers disagree)" >&2
-    exit 3
-fi
+assert_ran_count "$ran" "$n_arms" pump-red-arm "arm(s)"
 echo "arms: ${pass} RED-as-required, $(( ${#NOTES[@]} - hung )) FAILED, ${hung} INCONCLUSIVE"
 if (( ${#NOTES[@]} )); then printf '  - %s\n' "${NOTES[@]}"; fi
 [ "${#NOTES[@]}" -eq 0 ]

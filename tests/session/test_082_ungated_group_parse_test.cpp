@@ -54,20 +54,12 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <memory>
-#include <memory_resource>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/dict/dictionary.hpp>
@@ -78,9 +70,30 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/view.hpp>
+#include <memory>
+#include <memory_resource>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
-#include "support/app_message_read_scaffold.hpp"     // fixpp_test_support::make_frame
+#include "support/app_message_read_scaffold.hpp"  // fixpp_test_support::make_frame
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 namespace fixpp::session::test082 {
 namespace {
@@ -208,8 +221,12 @@ struct AllocationFixture {
 
     void feed(Session& sess, std::span<std::byte const> frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(std::chrono::milliseconds{200});
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
+                                                        "AllocationFixture::feed")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "AllocationFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "AllocationFixture::feed";
+            return;
+        }
         (void)fut.get();
     }
 
