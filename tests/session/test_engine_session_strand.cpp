@@ -1277,10 +1277,31 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
 
     ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
-    // Let the accept loop get established (listener bind, waiting on async_accept).
-    // 50ms is sufficient to reach async_accept on a local loopback ioc.
-    ioc.run_for(std::chrono::milliseconds{50});
-    ioc.restart();
+    // Let the accept loop get established (listener bind, waiting on async_accept),
+    // and OBSERVE that it did.
+    //
+    // ⚠️ THIS WAS `run_for(50ms); restart();` WITH THE COMMENT "50ms is sufficient
+    // to reach async_accept on a local loopback ioc" — the same timing assumption
+    // fixed in V-8, V-11 and V-13, and the WORST of the four, because it had no
+    // guard at all. V-12's assertions are `acc_session == nullptr` and
+    // `engine->stopped()`, and BOTH are satisfied by "the accept loop never ran":
+    // a missed window here is a silent green, not a red. A bound acceptor has a
+    // nonzero port, so the condition is observable.
+    //
+    // ⚠️ `wait_pred`, NOT `wait_until_observed` — and that is not an inconsistency
+    // with V-8/V-11. This test has NO worker threads: the main thread is the only
+    // one driving, so it must pump (`run_for`/`restart`), and doing so is legal
+    // precisely because nothing else is inside `ioc.run()`. Swapping in the
+    // sleep-poll form here would wait for an event that nothing is running to
+    // produce.
+    const bool acceptor_bound = wait_pred(
+        ioc,
+        [&]{ return engine->acceptor_bound_endpoint(acc_id).port != 0; },
+        5000ms);
+    EXPECT_TRUE(acceptor_bound)
+        << "V-12: the accept loop did not reach a bound listener within 5s, so "
+           "stop() below would be called against a loop that never started — "
+           "which this test's own assertions cannot distinguish from a pass";
 
     // Call stop() with the accept loop parked in async_accept (no peer connected).
     // The accept loop will receive a total-cancel (stop() emits total), exit the
@@ -1733,8 +1754,16 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     // after stop() completes). So iterations from BEFORE the arming wait
     // succeeded may be ordered ahead of the clear; the thousands after it are
     // not, and the accept-loop write cannot be retroactively ordered at all.
-    // The witness is expected to survive — see the residual recorded with this
-    // branch, which also carries the arm that would PROVE it.
+    // ⚠️ THE WITNESS IS PROVEN TO SURVIVE — MEASURED, not argued. Restore the
+    // pre-D-SNAP reader shape (make `acceptor_bound_endpoint` and `lookup` read
+    // `listener_endpoints_` / `registry_` directly instead of through
+    // `reader_snapshot_.load(acquire)`), rebuild the tsan preset, and run V-8
+    // and V-11: both abort, TSAN exit 66, one data race each. Crucially the
+    // report names the READER THREAD, not this wait — for V-8 the racing read is
+    // inside `t_reader` with the write in `run_accept_loop`'s
+    // `listener_endpoints_[id]`, i.e. race window (a), which is the window an
+    // arming edge cannot reach backwards to order. The mutation must be made in
+    // the reader path; mutating the test cannot reproduce the condition.
     //
     // NO shared sync object between t_reader and the engine threads (only relaxed
     // reader_stop at exit — set AFTER stop() completes, so during stop() there
@@ -2560,27 +2589,45 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
     auto stop_fut = asio::co_spawn(
         ioc.get_executor(), engine->stop(), asio::use_future);
 
-    // wait_until_observed: no restart() while t1/t2/t3 are in ioc.run().
+    // ⚠️ NON-FATAL, AND NESTED RATHER THAN SEQUENTIAL. These three checks used to
+    // be `ASSERT_*`, which return from the test body — and t1/t2/t3 are joinable
+    // here with a work guard held, so each was a `std::terminate` that parks
+    // three threads inside `ioc.run()` instead of reporting a failure. That is
+    // the rule V-8/V-11/V-13/V-14 state, applied to the sites that did not obey
+    // it.
+    //
+    // They cannot simply move below the joins the way `stop_done` does: the work
+    // between them DEPENDS on them. `late_send_fut.get()` blocks forever if its
+    // wait timed out, so the nesting is load-bearing, not cosmetic — each step
+    // runs only if the one it needs succeeded, and teardown below always runs.
     bool seam_hit = wait_until_observed(
         [&]{ return post_drain_reached.load(std::memory_order_acquire); },
         12000ms);
-    ASSERT_TRUE(seam_hit) << "V-16: stop() did not reach the post-send-drain seam";
+    EXPECT_TRUE(seam_hit) << "V-16: stop() did not reach the post-send-drain seam";
 
-    const std::array<std::byte, 4> dummy{};
-    auto late_send_fut = asio::co_spawn(
-        ioc.get_executor(), engine->send(ini_id, std::span<const std::byte>{dummy}),
-        asio::use_future);
+    if (seam_hit) {
+        const std::array<std::byte, 4> dummy{};
+        auto late_send_fut = asio::co_spawn(
+            ioc.get_executor(), engine->send(ini_id, std::span<const std::byte>{dummy}),
+            asio::use_future);
 
-    bool late_send_done = wait_until_observed(
-        [&]{ return late_send_fut.wait_for(0ms) == std::future_status::ready; },
-        5000ms);
-    ASSERT_TRUE(late_send_done) << "V-16: late send did not complete within 5s";
+        bool late_send_done = wait_until_observed(
+            [&]{ return late_send_fut.wait_for(0ms) == std::future_status::ready; },
+            5000ms);
+        EXPECT_TRUE(late_send_done) << "V-16: late send did not complete within 5s";
 
-    auto late_send_res = late_send_fut.get();
-    ASSERT_FALSE(late_send_res.has_value())
-        << "V-16: late send must fast-fail after stop() drained send_counter_";
-    EXPECT_EQ(late_send_res.error(), fixpp::core::error::session_invalid_state_for_send)
-        << "V-16: late send must fail at the admission gate, not by half-cleared registry";
+        if (late_send_done) {
+            auto late_send_res = late_send_fut.get();
+            EXPECT_FALSE(late_send_res.has_value())
+                << "V-16: late send must fast-fail after stop() drained send_counter_";
+            if (!late_send_res.has_value()) {
+                EXPECT_EQ(late_send_res.error(),
+                          fixpp::core::error::session_invalid_state_for_send)
+                    << "V-16: late send must fail at the admission gate, not by "
+                       "half-cleared registry";
+            }
+        }
+    }
 
     post_drain_release.store(true, std::memory_order_release);
 
