@@ -225,12 +225,22 @@ run_pass() {
   echo "── pass ${idx} done: ctest exit ${rc}, sanitizer reports ${san} ──"
 }
 
-# #267 acceptance item 4.  The comparison the verdict makes needs a digest that
-# is stable under everything EXCEPT a real change in coverage, so the lcov
-# records are SORTED before hashing: `llvm-cov export` emits per-object sections
-# whose order follows the object list and the filesystem, neither of which is a
-# coverage fact.  Hashing the raw file would report a difference on every run and
-# the check would be discarded as noisy — the usual way a real gate dies.
+# #267 acceptance item 4.  The comparison the verdict makes needs a digest whose
+# only inputs are coverage facts, so the report is put through
+# ci/lcov-coverage-key.awk before it is sorted and hashed.
+#
+# ⚠️ THIS COMMENT USED TO CLAIM THE DIGEST WAS "stable under everything EXCEPT a
+# real change in coverage", NAMING ONLY SECTION ORDER AS THE THING BEING
+# NORMALISED.  That claim was FALSE and it shipped: the digest was taken over the
+# raw report, which carries per-line and per-function EXECUTION COUNTS, and those
+# move run-to-run — so the gate voided its own serial baseline on passes that had
+# covered the same code, which reads as a suite defect rather than an instrument
+# fault.
+#
+# What is normalised, the scope limit that buys, and the recipe for re-deriving
+# any of it live in ci/lcov-coverage-key.awk.  Not re-stated here: two copies of
+# a rule is how one of them goes stale, and the figures that used to sit in this
+# paragraph were a third copy of numbers from an artifact no longer in reach.
 coverage_digest() {
   local idx="$1"
   local prof="$BUILD/profiles-pass${idx}"
@@ -273,24 +283,27 @@ coverage_digest() {
     return 0
   fi
 
-  # ⚠️ EVERY LINE IS KEYED BY ITS `SF:` RECORD BEFORE SORTING. A plain
-  # `sort "$info"` discards the record association, and a hostile review showed
-  # two genuinely different reports hashing IDENTICALLY under it: move `DA:1,1`
-  # from a.cc to b.cc and `DA:2,0` the other way, and the sorted line multiset is
-  # unchanged. Coverage could migrate between files while all three digests
-  # "agree" — which is the one thing item 4 exists to detect.
+  # ⚠️ THE WHOLE DIGEST IS ONE CALL, DELIBERATELY — see ci/lcov-coverage-digest.sh
+  # for what it computes and why it validates rather than trusts. Assembling it
+  # here is what let a hostile review construct a mutation that restored the
+  # original raw-report defect with every seam cell still green: the cells could
+  # only test the awk, never this function's use of it. There is nothing left
+  # here to diverge from what the cells exercise.
   #
-  # Sorting is still needed: `llvm-cov export` emits per-object sections in an
-  # order that follows the object list and the filesystem, neither of which is a
-  # coverage fact, and hashing that raw would report a difference on every run
-  # until the check was discarded as noisy.
-  local sha
-  sha="$(awk '/^SF:/ { sf = $0 } { print sf "\001" $0 }' "$info" \
-         | LC_ALL=C sort | sha256sum | cut -d' ' -f1)"
+  # It exits non-zero rather than emitting a digest it cannot stand behind, and
+  # that status is CHECKED: this script runs under `set -uo pipefail` and not
+  # `set -e`, so an unchecked failure would fall through to a `status=ok` sample.
+  local cov
+  if ! cov="$("$HERE/lcov-coverage-digest.sh" "$info")"; then
+    printf 'status=digest-failed\nprofraw_count=%s\n' "$n" \
+      > "$OUT/pass${idx}.coverage.env"
+    echo "::warning::#267 item 4: pass ${idx} produced a report but no usable coverage digest."
+    cp "$info" "$OUT/pass${idx}.lcov"
+    return 0
+  fi
   {
-    printf 'status=ok\nprofraw_count=%s\nsorted_info_sha256=%s\n' "$n" "$sha"
-    printf 'lines_covered=%s\n' "$(grep -c '^DA:[0-9]*,[1-9]' "$info" 2>/dev/null || echo 0)"
-    printf 'lines_total=%s\n' "$(grep -c '^DA:' "$info" 2>/dev/null || echo 0)"
+    printf 'status=ok\nprofraw_count=%s\n' "$n"
+    printf '%s\n' "$cov"
   } > "$OUT/pass${idx}.coverage.env"
   cp "$info" "$OUT/pass${idx}.lcov"
 }

@@ -62,6 +62,15 @@ GUARD = "ci/apt-guard.sh"
 CAMPAIGN_WORKFLOW = "parallelism-measure.yml"
 CAMPAIGN_TRIGGERS = {"workflow_dispatch"}
 
+# Each campaign job mirrors a production tier job. A measurement of a
+# differently-configured tree is a measurement of a suite that does not ship, so
+# the job-level env has to track its source — see check_campaign_job_env.
+CAMPAIGN_JOB_SOURCES = {
+    "linux": ("tier1.yml", "linux"),
+    "libcxx": ("tier3-libcxx.yml", "libcxx"),
+    "windows": ("tier2.yml", "windows"),
+}
+
 # The lane that must build and replay the fuzz corpora, and the flag that does it.
 FUZZ_PRESET = "linux-clang-asan"
 # Set when the matrix-membership half actually ran; read by main()'s summary so
@@ -204,6 +213,117 @@ def check_sccache_pins(root, violations):
     return len(pins)
 
 
+def check_campaign_job_env(root, violations):
+    """Each campaign job must carry at least its source tier job's job-level env.
+
+    ⚠️ WRITTEN BECAUSE THE OMISSION SHIPPED AND COST A DISPATCH. The campaign's
+    `windows` job copied every STEP of tier2's faithfully and none of its
+    job-level `env:`, so `ci/restore-sccache.sh` refused with "SCCACHE_DIR must
+    be set (the workflow sets it job-wide)" — 20 minutes into a build, on the
+    lane the campaign most needs. Production fidelity is not only about the step
+    list, and "I copied it carefully" is the claim that failed.
+
+    KEYS are the violation; differing VALUES are only disclosed. A measurement
+    job legitimately differs in some values (its own cache directory, say), but
+    a key present in production and absent here is the environment the shipping
+    lane builds under simply not being applied.
+
+    ⚠️ `env` ONLY — `permissions` IS DELIBERATELY NOT COMPARED, and extending
+    this to it would redden a correct tree. The tier jobs take
+    `packages: write` because they SAVE caches; the campaign restores and never
+    saves, so it takes `packages: read` at workflow level. That narrowing is a
+    STRONGER guarantee than the `save: false` inputs it backs up — a flag can be
+    flipped by an edit, a missing token scope cannot — so the difference is the
+    design, not drift.
+
+    Returns True when a verdict was reached, False when it could not be — the
+    caller must consume it, for the same reason as the trigger check.
+    """
+    wf_dir = root / ".github" / "workflows"
+    campaign = wf_dir / CAMPAIGN_WORKFLOW
+    if not campaign.is_file():
+        print(f"  campaign job env: {CAMPAIGN_WORKFLOW} is not present — check stood down.")
+        return True
+    try:
+        import yaml
+    except ImportError:
+        print("::warning::PyYAML unavailable — the campaign job-env check did NOT run.")
+        return False
+
+    try:
+        campaign_doc = yaml.safe_load(campaign.read_text(encoding="utf-8"))
+        mine = campaign_doc["jobs"]
+    except (yaml.YAMLError, KeyError, TypeError) as exc:
+        violations.append(f"CAMPAIGN JOB ENV UNREADABLE: {CAMPAIGN_WORKFLOW} ({exc!r}).")
+        return True
+
+    # ⚠️ EFFECTIVE env — workflow-level merged with job-level, on BOTH sides.
+    # Comparing only the `jobs.<id>.env` mappings missed an entire tier of the
+    # thing being compared: tier1.yml and tier3-libcxx.yml define `CONAN_HOME`
+    # at WORKFLOW level, which every job in them inherits and which a job-level
+    # comparison cannot see. The check reported that the campaign jobs "carry
+    # their source tier job's env" while that variable was absent from them.
+    def effective_env(doc, job_id):
+        merged = dict(doc.get("env") or {})
+        merged.update((doc.get("jobs") or {}).get(job_id, {}).get("env") or {})
+        return merged
+
+    # ⚠️ AN ADDED MEASUREMENT JOB WOULD NEVER BE CHECKED WITHOUT THIS. The loop
+    # below iterates CAMPAIGN_JOB_SOURCES, not the workflow, so a renamed job
+    # trips the UNCHECKABLE violation (loud, correct) while a FOURTH lane is
+    # simply absent from the iteration and passes in silence — the repo's starred
+    # shape: an assertion that proves nothing was LOST and cannot see something
+    # ADDED. `plan` is excluded because it is the matrix builder, not a lane.
+    unmapped = sorted(set(mine) - {"plan"} - set(CAMPAIGN_JOB_SOURCES))
+    if unmapped:
+        violations.append(
+            f"CAMPAIGN JOB(S) WITH NO SOURCE LANE: {', '.join(unmapped)}. Every measurement job "
+            f"must name the tier job whose environment it reproduces, or its environment is "
+            f"unchecked — add it to CAMPAIGN_JOB_SOURCES. A job this check does not know about "
+            f"is not a job this check passes.")
+
+    checked = 0
+    for job, (src_file, src_job) in CAMPAIGN_JOB_SOURCES.items():
+        src_path = wf_dir / src_file
+        if job not in mine or not src_path.is_file():
+            violations.append(
+                f"CAMPAIGN JOB ENV UNCHECKABLE: `{job}` or its source {src_file}:{src_job} is "
+                f"missing, so the environment the measurement runs under cannot be compared with "
+                f"the lane it describes. A renamed job must not silently stop this check.")
+            continue
+        try:
+            src_doc = yaml.safe_load(src_path.read_text(encoding="utf-8"))
+            src_doc["jobs"][src_job]          # presence check; env read below
+        except (yaml.YAMLError, KeyError, TypeError) as exc:
+            violations.append(f"CAMPAIGN JOB ENV UNCHECKABLE: {src_file}:{src_job} ({exc!r}).")
+            continue
+        want = effective_env(src_doc, src_job)
+        got = effective_env(campaign_doc, job)
+        checked += 1
+        absent = sorted(set(want) - set(got))
+        if absent:
+            violations.append(
+                f"CAMPAIGN JOB `{job}` IS MISSING JOB-LEVEL ENV its production lane sets: "
+                f"{', '.join(absent)} (from {src_file}:{src_job}). The measurement would run under "
+                f"a different environment than the lane it claims to describe — and at least one of "
+                f"these is load-bearing: ci/restore-sccache.sh REFUSES without SCCACHE_DIR.")
+        differing = sorted(k for k in set(want) & set(got) if str(want[k]) != str(got[k]))
+        if differing:
+            print(f"  campaign job env: `{job}` differs in value from {src_file}:{src_job} for "
+                  f"{', '.join(differing)} — disclosed, not failed (a measurement job may "
+                  f"legitimately use its own cache paths). Check each is deliberate.")
+    if checked:
+        # ⚠️ SAY WHAT WAS CHECKED, NOT WHAT ONE WISHES HAD BEEN. This read
+        # "N job(s) carry their source tier job's env", which is stronger than
+        # the test: only KEY PRESENCE is enforced, differing VALUES are disclosed
+        # and allowed, and step-level env, `runs-on`, container and default-shell
+        # settings are outside the comparison entirely.
+        print(f"  campaign job env: {checked} job(s) define every env KEY their source tier "
+              f"lane defines (workflow+job level, both sides). Values are disclosed above when "
+              f"they differ, not enforced; step-level env and non-env job config are out of scope.")
+    return True
+
+
 def check_campaign_trigger(root, violations):
     """The A-B-A campaign must stay dispatch-only.
 
@@ -292,13 +412,20 @@ def main():
     apt_seen = check_apt_callers(root, violations)
     fuzz_seen = check_fuzz_lane(root, violations)
     campaign_judged = check_campaign_trigger(root, violations)
+    campaign_judged = check_campaign_job_env(root, violations) and campaign_judged
     check_sccache_pins(root, violations)
     if apt_seen is None or fuzz_seen is None:
         return 2
     # A check that could not run must not be reported as one that passed.
     if not campaign_judged:
-        print("::error::the campaign-trigger invariant could not be evaluated (see the warning "
-              "above). Refusing to report `all invariants hold` over a check that did not run.")
+        # ⚠️ Names the FLAG, not one of its inputs. Two checks feed
+        # `campaign_judged` (trigger and job-env); this said "the
+        # campaign-trigger invariant", so a PyYAML-absent run — where it is the
+        # job-env check that stands down — pointed the operator at a check that
+        # had run fine.
+        print("::error::a campaign invariant could not be evaluated (see the warning above): "
+              "the trigger check, the job-env check, or both. Refusing to report "
+              "`all invariants hold` over a check that did not run.")
         return 2
 
     # ⚠️ AN EMPTY SCAN IS AN INSTRUMENT FAILURE, NOT A PASS. If the workflows move

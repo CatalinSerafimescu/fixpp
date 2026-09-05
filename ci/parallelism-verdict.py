@@ -345,6 +345,28 @@ class Pass:
 
 
 def main() -> int:
+    # ⚠️ WINDOWS CONSOLES DEFAULT TO cp1252, WHICH CANNOT ENCODE THIS FILE'S
+    # OUTPUT. Every table and disposition here carries ⚠️/✅/⛔/🔴, so on the
+    # Windows lanes `print(text)` raised UnicodeEncodeError and the step died
+    # with a traceback INSTEAD OF A VERDICT — exit 1, which reads as "the
+    # measurement failed" rather than "the reporter could not speak". It is
+    # reachable from every Windows verdict step, and from any console whose
+    # encoding cannot represent the glyphs this table is built from.
+    #
+    # ⚠️ `errors="replace"` IS BELT-AND-BRACES, AND THE REASON FIRST WRITTEN HERE
+    # WAS WRONG. It said a console that "cannot render a glyph should show a
+    # placeholder" — but `errors=` governs ENCODING, not rendering: with
+    # `encoding="utf-8"` every code point encodes successfully (bar lone
+    # surrogates), so this handler can essentially never fire, and whether a
+    # terminal draws the glyph or a box is a font and codepage matter it does not
+    # touch. Kept because it costs nothing and covers the surrogate case; not
+    # kept for the reason it used to claim.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass  # not a reconfigurable stream; the text is still written below
+
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("run_dir")
     ap.add_argument("--tolerance-pct", type=float, default=DEFAULT_TOLERANCE_PCT,
@@ -674,8 +696,10 @@ def main() -> int:
                 "parallel pass against.")
         elif par_shas != ser_shas:
             defects.append(
-                "MERGED COVERAGE CHANGED UNDER PARALLELISM: the two serial passes agree "
-                "byte-for-byte on a sorted lcov `.info`, and the parallel pass does not. "
+                "MERGED COVERAGE CHANGED UNDER PARALLELISM: the two serial passes agree on "
+                "the normalised LINE and FUNCTION coverage key (`ci/lcov-coverage-key.awk` — "
+                "execution counts reduced to covered/not, branch records excluded), and the "
+                "parallel pass does not. "
                 "#267 acceptance item 4 asks exactly this question and the answer is no. "
                 "`%p` in LLVM_PROFILE_FILE was expected to give each process its own "
                 "profraw; that expectation is now measured false for this configuration.")

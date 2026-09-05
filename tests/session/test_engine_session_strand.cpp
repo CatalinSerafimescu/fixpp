@@ -282,6 +282,64 @@ static bool wait_pred(asio::io_context& ioc, auto pred,
 // Sleep-poll wait, for use once worker threads are already inside ioc.run():
 // calling restart() from the main thread while workers are in run() is asio UB
 // (SEGFAULT under gcc-release).
+//
+// ⚠️ ON THE ARMING BUDGETS THIS FILE PASSES IT (the 5000 ms in V-8, V-11 and
+// V-13). They are NOT derived from anything, and calling them "an observation
+// instead of a guess" would be half true at best. What changed versus the fixed
+// sleeps they replaced is the FAILURE MODE, and that is the whole benefit:
+//
+//   a fixed sleep that is too short passes SILENTLY, having tested nothing;
+//   a budget that is too short FAILS LOUDLY, naming what was not observed.
+//
+// So read 5 s as a fail-loud watchdog: well over any plausible thread-start
+// latency, and a runner that cannot schedule a thread inside five seconds will
+// produce a spurious failure — deliberately, in preference to a spurious pass.
+// Where a writer can expose a real event to wait on, wait on that instead of
+// widening the number.
+//
+// ⚠️ AND THEY SUM. This paragraph first said 5 s was "chosen well under ctest's
+// per-test timeout", which is a statement about a unit that does not exist
+// here: `tests/session/CMakeLists.txt` registers ONE ctest test for the whole
+// binary, so a single `TIMEOUT 120` covers all of its cases. The budgets
+// therefore compose against a shared ceiling rather than each being bounded by
+// it — three simultaneous arming misses add 15 s to a run whose tests already
+// carry 8-12 s stop budgets. Affordable today; it is the number to re-check
+// before adding another arming wait, and the error direction of the sentence it
+// replaces was the reassuring one.
+//
+// ⚠️ THE "NON-FATAL BECAUSE THREADS ARE JOINABLE" RULE THAT V-8, V-11, V-13 AND
+// V-14 STATE IS TRUE FILE-WIDE, BUT THE FILE DOES NOT YET OBEY IT EVERYWHERE.
+// Read those comments as describing their own sites, not as a survey.
+// `ASSERT_*`, `FAIL()` and `GTEST_SKIP()` all expand to `return`, so any of them
+// reached while a `std::thread` is joinable is `std::terminate` — and a work
+// guard makes it worse, parking the workers inside `run()` instead of letting
+// them drain.
+//
+// Known remaining sites, named by assertion because line numbers rot: V-16's
+// `seam_hit`, `late_send_done` and `late_send_res.has_value()` assertions all
+// sit between its work guard and its joins. They are PRE-EXISTING and are
+// deliberately not changed here — unlike the V-14 site, which this branch's own
+// work guard aggravated and which it therefore fixed. They need a real
+// restructure rather than a move, because the code between them depends on them
+// (`late_send_fut.get()` would block if its wait had failed), and that does not
+// belong in a branch about CI measurement wiring.
+//
+// ⚠️ AND THE POPULATION THAT WAS SWEPT WAS DEFINED BY THE SYMPTOM, NOT THE
+// DEFECT. "Exactly three vacuity guards in this file" is true of
+// `EXPECT_GT`-on-a-counter guards, which is how the sweep was run — but the
+// defect is the TIMING ASSUMPTION, and a site that makes one WITHOUT a guard is
+// strictly worse off, because a missed window there is a silent green rather
+// than a red. Two such sites exist and are deliberately unchanged: V-12's
+// `run_for(50ms); restart();` before `async_accept` (its assertions —
+// `acc_session == nullptr`, `engine->stopped()` — are all satisfied by "the
+// accept loop never ran"), and V-17's `sleep_for(300ms)`. Fixing them is not
+// this branch's scope; believing the class is closed would be the error.
+//
+// ⚠️ Re-derive the set rather than trusting this list — it is a survey, and a
+// survey presented as a property re-arms itself for the next reader. Two other
+// sites were reported to me as belonging to it (V-9(a)'s `FAIL` and V-12b's
+// `GTEST_SKIP`) and both are in fact SAFE: each joins immediately before the
+// fatal exit.
 using fixpp::test_support::wait_until_observed;
 
 // Wait for both sessions to reach fsm_state::Active via lookup + state() check.
@@ -967,7 +1025,10 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
 //   3. Start a SEPARATE reader thread (t_reader) that spins calling
 //      acceptor_bound_endpoint() and lookup() in a tight loop for the entire
 //      start→stop window.  No sync object between reader and the engine threads.
-//   4. Call stop() from the main thread (via wait_pred driving ioc).
+//   4. Call stop() from the main thread and wait for it via
+//      wait_until_observed — t1/t2 drive the ioc, so the main thread must
+//      NOT drive it (see wait_pred's contract). This said "via wait_pred
+//      driving ioc" and described a mechanism this test no longer uses.
 //   5. Join t_reader after stop() completes.
 //
 // Widen the overlap window:
@@ -976,7 +1037,8 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
 //
 // GREEN expected: post-T026 (D-SNAP snapshot readers installed).
 //
-// Anti-hang: 15s hard budget; engine always stop()'d before test exit; reader
+// Anti-hang: 17s worst case (5s arming + 12s stop); engine always stop()'d
+// before test exit; reader
 //   thread holds a stop flag set under engine teardown.
 //
 // No live peer needed: the listener binds before any peer connects; the write
@@ -1039,9 +1101,35 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     //   - No HB edge between t_reader and the engine threads (no mutex/atomic/sync).
     //   → TSan: DATA RACE on listener_endpoints_ or registry_.
     //
-    // IMPORTANT: there is deliberately NO shared synchronisation object between
-    // this reader thread and the engine executor threads.  Any sync object would
-    // create a happens-before edge and suppress the race TSan must report.
+    // ⚠️ THERE IS AN EDGE, AND IT IS TOTAL — the sentence below is kept for its
+    // INTENT but is false as written, measured rather than reasoned. The arming
+    // wait added to this test reads the reader's iteration counter from the main
+    // thread, and although that counter is `memory_order_relaxed`, TSAN TREATS IT
+    // AS AN ACQUIRE: in a probe of the historical RED shape, a reader that stops
+    // reading before the arming wait is reported 40/40 with no wait, 1/40 with
+    // this relaxed counter, and 0/40 with a genuine release/acquire pair. So
+    // composed with the `co_spawn` of `stop()`, every reader access made BEFORE
+    // arming is ordered ahead of everything the engine does afterwards.
+    //
+    // ⚠️ WHAT KEEPS THE WITNESS ALIVE IS THAT THE READER SPINS PAST THE WAIT.
+    // `reader_stop` is set only after `stop()` COMPLETES, so thousands of
+    // post-arming reads stay unordered and TSan reports on those — timing-matched
+    // against the fixed sleep this replaced, detection is unchanged (39/40 vs
+    // 40/40). That is now a load-bearing property of this test and it was written
+    // nowhere: STOPPING THE READER AT THE ARMING WAIT, OR SHORTENING THE WINDOW
+    // BETWEEN IT AND `stop()`, SILENTLY TURNS THE WITNESS INTO A NO-OP — and
+    // `EXPECT_GT(<counter>, 0)` would still pass, because it guards vacuity of
+    // the READER, not of TSan.
+    //
+    // ⚠️ The two-condition predicate is load-bearing for DETECTION too, not only
+    // for the race window: with a reader-only condition the wait returns in ~1 ms
+    // and detection falls to 30/40; requiring the acceptor's publish as well
+    // restores the overlap and takes it back to 40/40.
+    //
+    // IMPORTANT: no shared synchronisation object is deliberately introduced
+    // between this reader thread and the engine executor threads — any such
+    // object would create a happens-before edge and suppress the race TSan must
+    // report. Read that as the design intent it is, qualified by the edge above.
     std::atomic<bool> reader_stop{false};
     std::atomic<int>  reader_iterations{0};
     std::thread t_reader{[&engine, &acc_id, &reader_stop, &reader_iterations]() {
@@ -1058,10 +1146,52 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
         }
     }};
 
-    // Let the accept loop start and write listener_endpoints_.
-    // 30ms is sufficient: the accept loop runs immediately when t1/t2 pick up work.
-    ioc.run_for(std::chrono::milliseconds{30});
-    ioc.restart();
+    // The reader must be OBSERVED spinning before the accept loop races it.
+    //
+    // ⚠️ TWO DEFECTS HERE, NOT ONE. This was:
+    //
+    //     ioc.run_for(std::chrono::milliseconds{30});
+    //     ioc.restart();
+    //
+    // (a) `restart()` WHILE t1 AND t2 ARE INSIDE `ioc.run()` is exactly what
+    //     `wait_pred`'s contract 800 lines above forbids — "MUST NOT be called
+    //     while other threads are in ioc.run() — restart() is UB then", the
+    //     reason V-11 and V-13 do not use it. The `run_for` was redundant on top
+    //     of that: t1/t2 already pump this ioc, and the pending `async_accept`
+    //     is the work that keeps them in `run()`, so the main thread was a third
+    //     worker for 30 ms and then reset a flag it did not own.
+    // (b) The 30 ms was a guess about when `t_reader` gets scheduled — the same
+    //     defect fixed in V-11 and V-13, and the shortest guess of the three.
+    //     `EXPECT_GT(reader_iterations, 0)` at the end is the vacuity guard.
+    //
+    // Both close the same way: observe, drive nothing.
+    //
+    // ⚠️ THE 30 ms HAD TWO JOBS AND BOTH MUST BE REPLACED. It let `t_reader`
+    // start (the vacuity half) AND let the accept loop WRITE
+    // `listener_endpoints_` (race window (a) — the comment above says so in as
+    // many words). Waiting only for the reader would leave stop() free to run
+    // before the accept-loop write, silently costing window (a) while every
+    // assertion still passed. A bound acceptor has a nonzero port, so both
+    // halves are observable rather than assumed.
+    //
+    // ⚠️ WHAT THIS DOES AND DOES NOT ESTABLISH. Seeing both conditions true
+    // proves both events HAPPENED before stop() was submitted; it does not
+    // order them against each other, so it does not prove the reader overlapped
+    // the initial listener-map WRITE — the accept loop may have bound before
+    // t_reader was ever scheduled. The clear-vs-reader window IS established,
+    // because the reader keeps spinning until after stop() completes. An
+    // earlier version of this comment claimed both windows; that was more than
+    // the code can see. Proving the write window needs a seam in the accept
+    // path, which this change is not.
+    const bool armed = wait_until_observed(
+        [&] {
+            return reader_iterations.load(std::memory_order_relaxed) > 0 &&
+                   engine->acceptor_bound_endpoint(acc_id).port != 0;
+        },
+        5000ms);
+    EXPECT_TRUE(armed)
+        << "V-8: within 5s the reader had not iterated, or the acceptor had not "
+           "bound — the race windows were not established, so this run tests nothing";
 
     // Stop the engine.  stop() will clear listener_endpoints_ and registry_ while
     // t_reader is spinning.  This is the second window where the race fires (in
@@ -1069,9 +1199,12 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     {
         auto stop_fut = asio::co_spawn(
             ioc.get_executor(), engine->stop(), asio::use_future);
-        bool done = wait_pred(ioc,
-            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
-            12000ms);
+        // ⚠️ wait_until_observed, NOT wait_pred — t1 and t2 are inside
+        // `ioc.run()` here, and wait_pred drives `run_for()/restart()`, which
+        // its own contract forbids in exactly that state. V-11 and V-13 already
+        // use the sleep-poll form for this reason; V-8 did not.
+        bool done = wait_until_observed(
+            [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 12000ms);
 
         // Signal the reader to stop AFTER stop() completes (or times out).
         reader_stop.store(true, std::memory_order_relaxed);
@@ -1170,10 +1303,31 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
 
     ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
-    // Let the accept loop get established (listener bind, waiting on async_accept).
-    // 50ms is sufficient to reach async_accept on a local loopback ioc.
-    ioc.run_for(std::chrono::milliseconds{50});
-    ioc.restart();
+    // Let the accept loop get established (listener bind, waiting on async_accept),
+    // and OBSERVE that it did.
+    //
+    // ⚠️ THIS WAS `run_for(50ms); restart();` WITH THE COMMENT "50ms is sufficient
+    // to reach async_accept on a local loopback ioc" — the same timing assumption
+    // fixed in V-8, V-11 and V-13, and the WORST of the four, because it had no
+    // guard at all. V-12's assertions are `acc_session == nullptr` and
+    // `engine->stopped()`, and BOTH are satisfied by "the accept loop never ran":
+    // a missed window here is a silent green, not a red. A bound acceptor has a
+    // nonzero port, so the condition is observable.
+    //
+    // ⚠️ `wait_pred`, NOT `wait_until_observed` — and that is not an inconsistency
+    // with V-8/V-11. This test has NO worker threads: the main thread is the only
+    // one driving, so it must pump (`run_for`/`restart`), and doing so is legal
+    // precisely because nothing else is inside `ioc.run()`. Swapping in the
+    // sleep-poll form here would wait for an event that nothing is running to
+    // produce.
+    const bool acceptor_bound = wait_pred(
+        ioc,
+        [&]{ return engine->acceptor_bound_endpoint(acc_id).port != 0; },
+        5000ms);
+    EXPECT_TRUE(acceptor_bound)
+        << "V-12: the accept loop did not reach a bound listener within 5s, so "
+           "stop() below would be called against a loop that never started — "
+           "which this test's own assertions cannot distinguish from a pass";
 
     // Call stop() with the accept loop parked in async_accept (no peer connected).
     // The accept loop will receive a total-cancel (stop() emits total), exit the
@@ -1618,9 +1772,53 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     // Race window 2 (clear): stop() clears listener_endpoints_ and registry_
     //   (engine.cpp ~:1128-1130) while t_reader reads them.  TSan: CLEAR vs READ.
     //
-    // NO shared sync object between t_reader and the engine threads (only relaxed
-    // reader_stop at exit — set AFTER stop() completes, so during stop() there
-    // is zero HB between the two sides).
+    // ⚠️ THE ENUMERATION BELOW IS NO LONGER COMPLETE, and the arming wait added
+    // to this test is why. The main thread now reads `reader_iters` mid-window,
+    // and also calls `engine->acceptor_bound_endpoint()` — a second cross-side
+    // access. Those create reader -> main -> engine, but never engine -> main ->
+    // reader (main writes nothing the reader reads until `reader_stop`, set
+    // after stop() completes). So iterations from BEFORE the arming wait
+    // succeeded may be ordered ahead of the clear; the thousands after it are
+    // not, and the accept-loop write cannot be retroactively ordered at all.
+    // ⚠️ THE WITNESS IS PROVEN TO SURVIVE — MEASURED, not argued. Restore the
+    // pre-D-SNAP reader shape (make `acceptor_bound_endpoint` and `lookup` read
+    // `listener_endpoints_` / `registry_` directly instead of through
+    // `reader_snapshot_.load(acquire)`), rebuild the tsan preset, and run V-8
+    // and V-11: both abort, TSAN exit 66, one data race each. Crucially the
+    // report names the READER THREAD, not this wait — for V-8 the racing read is
+    // inside `t_reader` with the write in `run_accept_loop`'s
+    // `listener_endpoints_[id]`, i.e. race window (a), which is the window an
+    // arming edge cannot reach backwards to order. The mutation must be made in
+    // the reader path; mutating the test cannot reproduce the condition.
+    //
+    // ⚠️ THERE IS AN EDGE, AND IT IS TOTAL — the sentence below is kept for its
+    // INTENT but is false as written, measured rather than reasoned. The arming
+    // wait added to this test reads the reader's iteration counter from the main
+    // thread, and although that counter is `memory_order_relaxed`, TSAN TREATS IT
+    // AS AN ACQUIRE: in a probe of the historical RED shape, a reader that stops
+    // reading before the arming wait is reported 40/40 with no wait, 1/40 with
+    // this relaxed counter, and 0/40 with a genuine release/acquire pair. So
+    // composed with the `co_spawn` of `stop()`, every reader access made BEFORE
+    // arming is ordered ahead of everything the engine does afterwards.
+    //
+    // ⚠️ WHAT KEEPS THE WITNESS ALIVE IS THAT THE READER SPINS PAST THE WAIT.
+    // `reader_stop` is set only after `stop()` COMPLETES, so thousands of
+    // post-arming reads stay unordered and TSan reports on those — timing-matched
+    // against the fixed sleep this replaced, detection is unchanged (39/40 vs
+    // 40/40). That is now a load-bearing property of this test and it was written
+    // nowhere: STOPPING THE READER AT THE ARMING WAIT, OR SHORTENING THE WINDOW
+    // BETWEEN IT AND `stop()`, SILENTLY TURNS THE WITNESS INTO A NO-OP — and
+    // `EXPECT_GT(<counter>, 0)` would still pass, because it guards vacuity of
+    // the READER, not of TSan.
+    //
+    // ⚠️ The two-condition predicate is load-bearing for DETECTION too, not only
+    // for the race window: with a reader-only condition the wait returns in ~1 ms
+    // and detection falls to 30/40; requiring the acceptor's publish as well
+    // restores the overlap and takes it back to 40/40.
+    //
+    // NO shared sync object DELIBERATELY INTRODUCED between t_reader and the
+    // engine threads: none is created by this test's own code beyond the arming
+    // wait described above.
     //
     // V-11 RED SIGNAL (pre-T026):
     //   TSan fires DATA RACE on listener_endpoints_ or registry_ → halt_on_error=1
@@ -1650,11 +1848,49 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
         }
     }};
 
-    // Let the accept loop start and write listener_endpoints_ (race window 1).
-    // 30ms matches V-8's window — sufficient for the accept loop to run on t1/t2.
-    // sleep_for instead of ioc.run_for()+restart(): restart() while t1/t2 are in
-    // ioc.run() is asio UB (SEGFAULT under gcc-release).
-    std::this_thread::sleep_for(std::chrono::milliseconds{30});
+    // The reader must be OBSERVED spinning before the accept loop races it.
+    //
+    // ⚠️ SAME DEFECT AS V-13 BELOW, and found the same way — by auditing the
+    // file rather than the one site CI happened to hit. This was
+    // `sleep_for(30ms)`, a guess about when `t_reader` gets scheduled, and a
+    // SHORTER guess than the 50 ms that already failed: under `--parallel 4` on
+    // windows-msvc-asan the reader can still be unscheduled when the window
+    // closes, `reader_iters` stays 0, and both race windows this test exists to
+    // cover go unexercised. `EXPECT_GT(reader_iters, 0)` below is the vacuity
+    // guard that would report it — correctly, and it must stay.
+    //
+    // ⚠️ BOTH JOBS THE SLEEP WAS DOING, as in V-8. Its own comment above called
+    // the accept-loop write "race window 1", so a wait on the reader alone
+    // would let stop() run before the acceptor had bound and quietly cost that
+    // window while every assertion still passed. A bound acceptor has a nonzero
+    // port, so both are observable.
+    //
+    // ⚠️ AND ONLY WHAT IS OBSERVABLE IS CLAIMED. An earlier version of this
+    // comment said the reader is "demonstrably spinning before the accept loop
+    // writes listener_endpoints_". That was FALSE: these are two independent
+    // observations, and seeing both have happened orders neither against the
+    // other — the acceptor may well have bound first. What this does establish
+    // is that the reader is spinning and the acceptor is bound BEFORE stop() is
+    // submitted, so the clear-vs-reader window is real; the write-vs-reader
+    // window is made likely, not guaranteed. Proving that one needs a seam
+    // inside the accept path, which is not what this change is.
+    //
+    // Non-fatal for the same reason as V-13: an ASSERT_* here returns with t1,
+    // t2 and t_reader still joinable, which is std::terminate rather than a test
+    // failure. Falling through lets the existing stop()/join block tear down.
+    //
+    // Still not ioc.run_for()+restart(): restart() while t1/t2 are in ioc.run()
+    // is asio UB (SEGFAULT under gcc-release).
+    const bool reader_running = wait_until_observed(
+        [&] {
+            return reader_iters.load(std::memory_order_relaxed) > 0
+                && engine->acceptor_bound_endpoint(acc_id).port != 0;
+        },
+        5000ms);
+    EXPECT_TRUE(reader_running)
+        << "V-11 Part 1: within 5s the reader had not iterated, or the acceptor "
+           "had not bound — the race windows were not established, so this run "
+           "tests nothing";
 
     // Call stop(): triggers the registry_.clear() + listener_endpoints_.clear() (race window 2).
     {
@@ -1845,7 +2081,8 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
 //   5. Post-fix: all fsm_state_ reads are on the session strand → GREEN.
 //
 // Thread count: 3 engine threads + 3 sender threads = 6 total.
-// Anti-hang: 10s stop budget; senders stop on sender_stop flag.
+// Anti-hang: 15s worst case (5s arming + 10s stop); senders stop on
+// sender_stop flag.
 //
 // [contracts C-0/C-1; gate-b/r1 #1; research D6/R7; session.hpp:556/560]
 
@@ -1930,10 +2167,47 @@ TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
     std::thread ts2{sender_fn};
     std::thread ts3{sender_fn};
 
-    // Allow senders to overlap with the Active state before triggering stop().
-    // sleep_for instead of ioc.run_for()+restart(): restart() while workers are
-    // in ioc.run() is asio UB that manifests as SEGFAULT under gcc-release.
-    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    // Senders must be OBSERVED running before stop(), not assumed to be.
+    //
+    // ⚠️ This was `sleep_for(50ms)`, and the 50 ms was a guess about thread
+    // startup.  Under `ctest --parallel 4` on a 4-vCPU Windows/ASAN runner
+    // (~28 runnable threads on 4 cores) all three senders can still be
+    // unscheduled when the window closes: they then read `sender_stop == true`
+    // at the loop top and exit without ever entering the body, `send_iters`
+    // stays 0, and the send-vs-FSM-transition race this test exists to
+    // exercise NEVER HAPPENS.  Measured: #267 campaign run 33951801400,
+    // `windows-msvc-asan` pass 2 — green in both serial passes either side.
+    //
+    // The `EXPECT_GT(send_iters, 0)` at the end is the vacuity guard that
+    // caught it, and it must stay: relaxing it would let a test that tested
+    // nothing report green.  The defect is the TIMING ASSUMPTION, so the fix
+    // is to replace the guess with an observation — the same `wait_until.hpp`
+    // idiom this file already uses for every other wait.  Waiting for the
+    // first completed iteration is strictly stronger than the sleep was: the
+    // sender is demonstrably looping when stop() fires, on any machine.
+    //
+    // ⚠️ ONE sender, not three, and the distinction is the one this whole fix is
+    // about. `send_iters` is shared by ts1/ts2/ts3, so `> 0` is satisfied by a
+    // single thread — under the contention described above, ts2 and ts3 can
+    // still be unstarted when stop() fires. This said "the senders ... on any
+    // machine", which is a stronger claim than one shared counter can carry. The
+    // guard is still worth what it is worth: it distinguishes "no sender ran at
+    // all", which is the vacuous run, from "the race window was open". Note also
+    // that the counter increments even when the 200 ms future wait TIMED OUT, so
+    // an iteration proves the thread is looping, not that a send reached the
+    // engine.
+    //
+    // Still not ioc.run_for()+restart(): restart() while workers are in
+    // ioc.run() is asio UB that manifests as SEGFAULT under gcc-release.
+    // ⚠️ NON-FATAL on purpose.  An ASSERT_* here returns from the test body
+    // with ts1..ts3 and t1..t3 still joinable, which is std::terminate, not a
+    // test failure.  Reporting and falling through lets the existing
+    // stop()/join block below tear down exactly as it does on the green path.
+    const bool senders_running =
+        wait_until_observed([&] { return send_iters.load(std::memory_order_relaxed) > 0; }, 5000ms);
+    EXPECT_TRUE(senders_running)
+        << "V-13: sender threads did not iterate within 5s — the race window "
+           "was never established, so this run tests nothing";
 
     // stop() drives the session-strand FSM to Disconnected while senders loop.
     // Under TSan pre-fix: DATA RACE on fsm_state_ → process abort.
@@ -2036,6 +2310,21 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
 
     // Drive the ioc on 3 threads so spawned loops begin executing immediately —
     // this narrows the window between co_spawn and the old post-loop assignment.
+    //
+    // ⚠️ THE WORK GUARD IS WHAT MAKES THAT SENTENCE TRUE. Without it these
+    // threads call `ioc.run()` on an io_context with nothing queued yet — start()
+    // has not been called — so `run()` may return at once and the "3 threads
+    // driving the ioc" the comment promises can be three threads that already
+    // exited. Whether they do is a race with the main thread, decided by the
+    // scheduler.
+    //
+    // That race was load-bearing in the worst way: it decided whether the
+    // `wait_pred` below was legal. `wait_pred` calls `restart()`, which asio
+    // forbids while any `run()` is unfinished, so on the runs where a worker was
+    // still inside `run()` this test was UB. Holding the ioc open makes the
+    // workers unambiguously live, which is both what the test says it wants and
+    // what makes the sleep-poll wait below correct.
+    auto wg = asio::make_work_guard(ioc);
     std::thread t1{[&ioc]{ ioc.run(); }};
     std::thread t2{[&ioc]{ ioc.run(); }};
     std::thread t3{[&ioc]{ ioc.run(); }};
@@ -2043,13 +2332,60 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
     // start() spawns loops for all registered sessions.
     // Pre-fix: outstanding_counter_ assigned AFTER loop → concurrent stop() sees null.
     // Post-fix: assigned BEFORE loop → stop() always finds a valid counter.
-    ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
+    //
+    // ⚠️ THIS WAS AN `ASSERT_TRUE`, AND THE WORK GUARD ABOVE MADE THAT WORSE.
+    // A fatal assertion returns from the test body with t1/t2/t3 joinable, which
+    // is `std::terminate` — the rule this file states three times. Before the
+    // guard those threads would at least have drained out of `run()` on their
+    // own; with it they are parked in `run()` for good, so the process dies
+    // holding three live threads instead of finishing and then dying.
+    //
+    // ⚠️ MOVING `wg` BELOW THE THREADS DOES NOT FIX IT, and would reintroduce
+    // the defect the guard exists for: between the threads starting and the
+    // guard being constructed the ioc is empty again, which is precisely the
+    // window that made ~49 % of loaded runs call `restart()` on a live `run()`.
+    // `~std::thread` also terminates on a JOINABLE thread whether or not it has
+    // finished, so draining is not the property that saves us — joining is.
+    // The guard stays first; the exit path joins.
+    // ⚠️ AND IT MUST STOP THE ENGINE, NOT ONLY THE THREADS. Forcing this branch
+    // showed the joins were not enough: `~Engine` asserts `stopped_`, so a
+    // failure path that tears down the ioc and returns still aborts the process
+    // — a different crash in place of the first, which is not a fix. The other
+    // early-exit sites in this test use `stop_engine_sync`, but that drives the
+    // ioc via `wait_pred` and cannot be used here for the same reason the wait
+    // below cannot: the workers own it. Stopping through them instead.
+    if (!engine->start().has_value()) {
+        ADD_FAILURE() << "engine.start() failed";
+        auto sf = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
+        (void)wait_until_observed(
+            [&]{ return sf.wait_for(0ms) == std::future_status::ready; }, 10000ms);
+        wg.reset();
+        ioc.stop();
+        t1.join();
+        t2.join();
+        t3.join();
+        return;
+    }
 
     // Immediately call stop() — exercises the start/stop concurrent window.
     {
         auto stop_fut = asio::co_spawn(
             ioc.get_executor(), engine->stop(), asio::use_future);
-        bool done = wait_pred(ioc,
+        // ⚠️ wait_until_observed, NOT wait_pred — the work guard above keeps
+        // t1/t2/t3 inside `ioc.run()`, and `wait_pred` drives
+        // `run_for()/restart()`, which its own contract forbids in exactly that
+        // state. The workers drive stop() to completion; the main thread only
+        // watches.
+        //
+        // ⚠️ THE JUSTIFICATION THAT WAS HERE WAS FALSE, and it is worth keeping
+        // the correction rather than the conclusion. It argued wait_pred was
+        // safe because the threads are constructed ABOVE `engine->start()` and
+        // so "call ioc.run() with no work queued and RETURN IMMEDIATELY".
+        // Construction order implies no such thing: a worker can reach `run()`
+        // after start() has queued work and still be inside it when `restart()`
+        // is called. The fix was not to re-word the claim but to remove the
+        // race it depended on — hence the work guard.
+        bool done = wait_until_observed(
             [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
             10000ms);
 
@@ -2304,27 +2640,45 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
     auto stop_fut = asio::co_spawn(
         ioc.get_executor(), engine->stop(), asio::use_future);
 
-    // wait_until_observed: no restart() while t1/t2/t3 are in ioc.run().
+    // ⚠️ NON-FATAL, AND NESTED RATHER THAN SEQUENTIAL. These three checks used to
+    // be `ASSERT_*`, which return from the test body — and t1/t2/t3 are joinable
+    // here with a work guard held, so each was a `std::terminate` that parks
+    // three threads inside `ioc.run()` instead of reporting a failure. That is
+    // the rule V-8/V-11/V-13/V-14 state, applied to the sites that did not obey
+    // it.
+    //
+    // They cannot simply move below the joins the way `stop_done` does: the work
+    // between them DEPENDS on them. `late_send_fut.get()` blocks forever if its
+    // wait timed out, so the nesting is load-bearing, not cosmetic — each step
+    // runs only if the one it needs succeeded, and teardown below always runs.
     bool seam_hit = wait_until_observed(
         [&]{ return post_drain_reached.load(std::memory_order_acquire); },
         12000ms);
-    ASSERT_TRUE(seam_hit) << "V-16: stop() did not reach the post-send-drain seam";
+    EXPECT_TRUE(seam_hit) << "V-16: stop() did not reach the post-send-drain seam";
 
-    const std::array<std::byte, 4> dummy{};
-    auto late_send_fut = asio::co_spawn(
-        ioc.get_executor(), engine->send(ini_id, std::span<const std::byte>{dummy}),
-        asio::use_future);
+    if (seam_hit) {
+        const std::array<std::byte, 4> dummy{};
+        auto late_send_fut = asio::co_spawn(
+            ioc.get_executor(), engine->send(ini_id, std::span<const std::byte>{dummy}),
+            asio::use_future);
 
-    bool late_send_done = wait_until_observed(
-        [&]{ return late_send_fut.wait_for(0ms) == std::future_status::ready; },
-        5000ms);
-    ASSERT_TRUE(late_send_done) << "V-16: late send did not complete within 5s";
+        bool late_send_done = wait_until_observed(
+            [&]{ return late_send_fut.wait_for(0ms) == std::future_status::ready; },
+            5000ms);
+        EXPECT_TRUE(late_send_done) << "V-16: late send did not complete within 5s";
 
-    auto late_send_res = late_send_fut.get();
-    ASSERT_FALSE(late_send_res.has_value())
-        << "V-16: late send must fast-fail after stop() drained send_counter_";
-    EXPECT_EQ(late_send_res.error(), fixpp::core::error::session_invalid_state_for_send)
-        << "V-16: late send must fail at the admission gate, not by half-cleared registry";
+        if (late_send_done) {
+            auto late_send_res = late_send_fut.get();
+            EXPECT_FALSE(late_send_res.has_value())
+                << "V-16: late send must fast-fail after stop() drained send_counter_";
+            if (!late_send_res.has_value()) {
+                EXPECT_EQ(late_send_res.error(),
+                          fixpp::core::error::session_invalid_state_for_send)
+                    << "V-16: late send must fail at the admission gate, not by "
+                       "half-cleared registry";
+            }
+        }
+    }
 
     post_drain_release.store(true, std::memory_order_release);
 
@@ -2431,6 +2785,13 @@ TEST(EngineSessionStrand, V17_OrphanEntryStopEmit_NoUAF) {
 
     // Sanity: the session never published (lookup stays null) — confirms we are
     // exercising the orphan path, not a live session (witness-quality guard).
+    // ⚠️ IT CONFIRMS NO SUCH THING. `lookup(ini_id) == nullptr` holds
+    // identically whether the connect loop exhausted its retries or never ran
+    // at all, so this cannot separate the orphan path from a missed window —
+    // the same timing-assumption shape as V-8/V-11/V-13, minus a guard that
+    // could report it. Left as-is deliberately (pre-existing, and outside a
+    // branch about CI measurement wiring); the label is corrected so it does
+    // not read as a witness it is not.
     EXPECT_EQ(engine->lookup(ini_id), nullptr)
         << "V-17: orphan precondition — initiator must never have published a session";
 
