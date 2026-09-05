@@ -293,9 +293,16 @@ coverage_digest() {
   # Sorting stays here rather than in the awk: `llvm-cov export` emits
   # per-object sections in an order that follows the object list and the
   # filesystem, neither of which is a coverage fact.
+  #
+  # The keyed stream is materialised rather than piped straight into sha256sum
+  # so `branch_records_in_digest` below can be COUNTED from the very bytes that
+  # were hashed. It was a hardcoded `0` first, which is a claim about the awk
+  # rather than an observation of it — and a claim in a second file is how one
+  # of the two goes stale.
+  local keyed="$BUILD/coverage-pass${idx}.key"
+  awk -f "$HERE/lcov-coverage-key.awk" "$info" | LC_ALL=C sort > "$keyed"
   local sha
-  sha="$(awk -f "$HERE/lcov-coverage-key.awk" "$info" \
-         | LC_ALL=C sort | sha256sum | cut -d' ' -f1)"
+  sha="$(sha256sum < "$keyed" | cut -d' ' -f1)"
   # ⚠️ COUNTED WITH awk, NOT `grep -c`. `grep -c` prints `0` AND exits 1 when
   # nothing matches, so the `|| echo 0` these lines used to carry appended a
   # SECOND zero — `lines_covered=0\n0`, which the verdict's env parser would read
@@ -304,12 +311,17 @@ coverage_digest() {
   # `branches_covered` CAN legitimately be zero (a build with branch coverage
   # off), which would have made it reachable for the first time.
   #
-  # Branch data is OUTSIDE the digest (see the awk). It is recorded anyway, so
-  # the exclusion is disclosed by the sample itself rather than only by a
-  # comment, and so a future branch-stability measurement has a starting point.
+  # Branch data is OUTSIDE the digest (see the awk), but the report's branch
+  # counts are recorded anyway — a future branch-stability measurement needs a
+  # starting point. ⚠️ `branches_covered` NEXT TO A DIGEST INVITES THE WRONG
+  # INFERENCE: a reader who sees it has no way to tell it was not compared.
+  # `branch_records_in_digest` is counted from the hashed bytes themselves to
+  # say so, which also means it cannot lie if the awk's exclusion is ever
+  # dropped — it would simply stop reading 0.
   {
     printf 'status=ok\nprofraw_count=%s\nsorted_info_sha256=%s\n' "$n" "$sha"
-    printf 'branch_records_in_digest=0\n'
+    printf 'branch_records_in_digest=%s\n' \
+      "$(awk '/BRDA:/ { n++ } END { print n + 0 }' "$keyed")"
     awk '
       /^DA:/   { split(substr($0, 4), a, ","); lt++; if (a[2] + 0 > 0) lc++ }
       /^BRDA:/ { split(substr($0, 6), b, ","); bt++

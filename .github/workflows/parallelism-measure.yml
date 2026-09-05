@@ -75,15 +75,13 @@ on:
         description: "Max disagreement between the two serial passes before the sample voids"
         default: "5"
 
-# ⚠️ `packages: read`, WHERE THE TIER WORKFLOWS TAKE `write` — deliberate, and
-# load-bearing. Those jobs save their compiler and Conan caches; this one only
-# restores, because an entry written by a job configured for MEASUREMENT must
-# never be served to a production lane. The `save: false` inputs below say so,
-# but a flag can be flipped by an edit and a missing token scope cannot: this
-# makes the guarantee structural rather than declared.
+# ⚠️ `packages: read`, WHERE THE TIER WORKFLOWS TAKE `write` — deliberate, not
+# drift. Those jobs SAVE their compiler and Conan caches; this one only restores.
 #
-# ci/assert-ci-lane-policy.py compares each job's `env` against its source tier
-# job and deliberately does NOT compare `permissions`, for this reason.
+# Why that narrowing is load-bearing, and why the env check next door does not
+# extend to it, is written once in `check_campaign_job_env`'s docstring in
+# ci/assert-ci-lane-policy.py — the function someone would edit if they tried.
+# Not restated here: two copies of a rule is how one of them goes stale.
 permissions:
   contents: read
   packages: read

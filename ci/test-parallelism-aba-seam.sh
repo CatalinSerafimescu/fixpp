@@ -420,15 +420,19 @@ fi
 # paragraph — if someone re-includes branch data to "improve" the digest, the
 # false void comes back and this cell is where they are told why. It also pins
 # the disclosure, so a sample cannot silently stop declaring the exclusion.
+# ⚠️ ONE ARM, NOT TWO. This cell shipped with a second arm that grepped the
+# driver's source for the literal `branch_records_in_digest=0` — which is the
+# byte-identity-between-two-copies pattern S7's own rewrite above removes, added
+# back in the same change that removed it. It also checked nothing arm 1 does
+# not: deleting the exclusion rule from the awk reddens arm 1 on its own
+# (verified). The driver now COUNTS that key from the hashed bytes instead of
+# asserting it, so there is no literal left to spell-check.
 br_a="$(printf 'SF:a.cc\nDA:1,1\nBRDA:1,0,0,5\nBRH:1\nBRF:1\nend_of_record\n' | canon)"
 br_b="$(printf 'SF:a.cc\nDA:1,1\nBRDA:1,0,0,0\nBRH:0\nBRF:1\nend_of_record\n' | canon)"
-br_decl="$(grep -c 'branch_records_in_digest=0' "$HERE/run-parallelism-aba.sh")"
 if [ "$br_a" != "$br_b" ]; then
   bad "S10 a flipped BRANCH taken-bit changed the digest — branch data is back in the key and the baseline will void against itself"
-elif [ "${br_decl:-0}" -lt 1 ]; then
-  bad "S10 the driver no longer records branch_records_in_digest=0 — the exclusion is undisclosed"
 else
-  ok "S10 branch data is excluded from the digest and the sample declares it"
+  ok "S10 branch data is excluded from the digest"
 fi
 
 SEAM_DECLARED=12
