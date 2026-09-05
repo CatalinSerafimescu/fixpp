@@ -63,7 +63,7 @@ on:
         description: "Tier-3 libc++ presets, comma-separated (blank = none)"
         default: ""
       windows_lanes:
-        description: "Tier-2 MSVC presets, comma-separated (blank = none). No peak-RSS reading is possible on Windows."
+        description: "Tier-2 MSVC presets, comma-separated (blank = none). Peak RSS IS measured here now — job object + per-process WorkingSetSize, the same quantity as the Linux sum."
         default: ""
       jobs:
         description: "--parallel level for the middle pass"
