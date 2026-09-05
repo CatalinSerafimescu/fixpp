@@ -75,6 +75,13 @@ on:
         description: "Max disagreement between the two serial passes before the sample voids"
         default: "5"
 
+# ⚠️ `packages: read`, WHERE THE TIER WORKFLOWS TAKE `write` — deliberate, not
+# drift. Those jobs SAVE their compiler and Conan caches; this one only restores.
+#
+# Why that narrowing is load-bearing, and why the env check next door does not
+# extend to it, is written once in `check_campaign_job_env`'s docstring in
+# ci/assert-ci-lane-policy.py — the function someone would edit if they tried.
+# Not restated here: two copies of a rule is how one of them goes stale.
 permissions:
   contents: read
   packages: read
@@ -107,14 +114,32 @@ jobs:
           WINDOWS: ${{ inputs.windows_lanes }}
         run: |
           set -euo pipefail
-          # `sorted(set(...))`: a duplicated lane produces two identical matrix
-          # entries, two jobs, and two uploads of the same artifact name — which
-          # actions/upload-artifact rejects, so the second job loses its sample
-          # AFTER paying hours of runner time, on the `if: always()` upload this
-          # workflow's own comment calls load-bearing.
+          # ⚠️ NO `grep` IN THIS PIPELINE, AND THAT IS THE WHOLE POINT.
+          #
+          # It used to end `| grep -v '^$' | python3 ...`, and **grep exits 1
+          # when its input is empty**. Under this step's `set -euo pipefail`
+          # that aborted the entire plan job the moment ANY lane list was left
+          # blank — which is the normal way to dispatch, since a campaign
+          # usually names one or two platforms. The first dispatch happened to
+          # name all three and passed; the second named two and died before it
+          # printed anything, with `::error::no lanes given` never even reached.
+          #
+          # ⚠️ IT WAS INVISIBLE LOCALLY, AND THE REASON FIRST WRITTEN HERE WAS
+          # WRONG. This said the dev shell is zsh "whose `set -e` does not fire
+          # here". It does: run the old shape under `set -euo pipefail` in zsh
+          # and in bash and BOTH abort identically. The actual mistake was
+          # testing `to_json` without the strict flags the step sets — the shell
+          # was never the variable. Re-test a step's shape under ITS OPTIONS,
+          # not merely under its interpreter.
+          #
+          # Python does the splitting, stripping, de-duplicating and sorting in
+          # one place that cannot fail on empty input. `sorted(set(...))` is
+          # load-bearing too: a duplicated lane produces two identical matrix
+          # entries and two uploads of one artifact name, which
+          # actions/upload-artifact rejects — losing the second job's sample
+          # AFTER it has paid hours of runner time.
           to_json() {
-            printf '%s' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-              | grep -v '^$' | python3 -c 'import json,sys; print(json.dumps(sorted({l.rstrip("\n") for l in sys.stdin})))'
+            printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sorted({p.strip() for p in sys.stdin.read().split(",") if p.strip()})))'
           }
           L="$(to_json "$LINUX")"; C="$(to_json "$LIBCXX")"; W="$(to_json "$WINDOWS")"
           echo "linux=$L"   >> "$GITHUB_OUTPUT"
@@ -197,6 +222,12 @@ jobs:
       CCACHE_COMPILERCHECK: content
       CCACHE_COMPRESSLEVEL: "5"
       CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
+      # ⚠️ The tier lanes set this at WORKFLOW level, where every job in
+      # them inherits it. This job is in a different workflow, so it has
+      # to say so itself — and a job-level-only comparison could not see
+      # the difference, which is why it went missing here in the first
+      # place. ci/assert-ci-lane-policy.py now compares EFFECTIVE env.
+      CONAN_HOME: ~/.conan2
     strategy:
       fail-fast: false
       matrix:
@@ -380,6 +411,12 @@ jobs:
       CCACHE_MAXSIZE: 2G
       CCACHE_COMPRESSLEVEL: "5"
       CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
+      # ⚠️ The tier lanes set this at WORKFLOW level, where every job in
+      # them inherits it. This job is in a different workflow, so it has
+      # to say so itself — and a job-level-only comparison could not see
+      # the difference, which is why it went missing here in the first
+      # place. ci/assert-ci-lane-policy.py now compares EFFECTIVE env.
+      CONAN_HOME: ~/.conan2
     strategy:
       fail-fast: false
       matrix:
@@ -550,6 +587,25 @@ jobs:
     if: needs.plan.outputs.windows != '[]'
     runs-on: windows-2022
     timeout-minutes: 360
+    # ⚠️ COPIED FROM tier2.yml's `windows` JOB, and the omission of this block is
+    # what broke the first campaign dispatch: `ci/restore-sccache.sh` refuses
+    # with "SCCACHE_DIR must be set (the workflow sets it job-wide)". The STEPS
+    # were copied faithfully and the job-level env was not — a whole shape of
+    # production fidelity that lives outside the step list. Same reason the
+    # steps must track tier2: a measurement of a differently-configured tree is
+    # a measurement of a suite that does not ship.
+    #
+    # ci/assert-ci-lane-policy.py now asserts each measurement job carries at
+    # least its source tier job's env, so this cannot recur silently.
+    env:
+      CONAN_HOME: C:\Users\runneradmin\.conan2
+      SCCACHE_DIR: C:\sccache
+      # ⚠️ QUOTED, matching tier2.yml. Inert today (the env check compares via
+      # `str()`), but this slot is one edit from `no`, which YAML parses as the
+      # boolean False — diverging from the lane while the check only PRINTS the
+      # difference rather than failing it.
+      SCCACHE_IDLE_TIMEOUT: "0"
+      SCCACHE_CACHE_SIZE: 8G
     strategy:
       fail-fast: false
       matrix:
@@ -678,6 +734,18 @@ jobs:
           JOBS: ${{ inputs.jobs }}
           SUBSET: ${{ inputs.subset }}
         run: |
+          # ⚠️ `cygpath -u`, MATCHING tier2's IDIOM FOR ITS BASH STEPS. On Windows
+          # $GITHUB_WORKSPACE is a Windows path (`D:\a\fixpp\fixpp`), and the
+          # POSIX tools this step hands it to — the driver, ctest, the artifact
+          # path below — expect a POSIX one. tier2 already converts $RUNNER_TEMP
+          # this way.
+          #
+          # ⚠️ The reason first written here was WRONG: it said bash "reads its
+          # BACKSLASHES as ESCAPES". It does not — a quoted expansion
+          # (`"$GITHUB_WORKSPACE"`) preserves backslashes literally, in both
+          # bash and zsh. The conversion is still right, but for the boring
+          # reason above, not a shell-quoting hazard that does not exist.
+          WS="$(cygpath -u "$GITHUB_WORKSPACE")"
           case "$PRESET" in
             windows-msvc-release) ARGS="" ;;
             *)                    ARGS="-LE packaging" ;;
@@ -685,7 +753,7 @@ jobs:
           ci/run-parallelism-aba.sh \
             --preset "$PRESET" \
             --jobs "$JOBS" \
-            --out "$GITHUB_WORKSPACE/aba-$PRESET" \
+            --out "$WS/aba-$PRESET" \
             --ctest-args "$ARGS" \
             --subset "$SUBSET" \
             --no-peak
@@ -705,5 +773,5 @@ jobs:
           PRESET: ${{ matrix.preset }}
           TOLERANCE: ${{ inputs.tolerance_pct }}
         run: |
-          python ci/parallelism-verdict.py "$GITHUB_WORKSPACE/aba-$PRESET" \
+          python ci/parallelism-verdict.py "$(cygpath -u "$GITHUB_WORKSPACE")/aba-$PRESET" \
             --tolerance-pct "$TOLERANCE"
