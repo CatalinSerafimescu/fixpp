@@ -580,19 +580,24 @@ jobs:
 
   # ── Tier-2 MSVC lanes ───────────────────────────────────────────────────────
   #
-  # ⚠️ NO PEAK-RSS READING IS POSSIBLE HERE, AND THAT IS STATED RATHER THAN
-  # WORKED AROUND. `ci/measure-peak-rss.py` samples `/proc/*/statm`; Windows has
-  # no /proc, so #267 acceptance item 1 CANNOT be discharged for these lanes with
-  # this apparatus. The driver writes `status=no-procfs-platform` and the verdict
-  # renders NOT MEASURED, so the gap is on the page instead of showing as a blank
-  # cell or, worse, a zero. Everything else transfers: wall clock, the executed
-  # count, the achieved parallel level, sanitizer reports, and the calibration
-  # half of the machine witness.
+  # ⚠️ THESE LANES USED TO PASS `--no-peak`, AND THE GAP THAT LEFT WAS THE POINT
+  # OF CLOSING IT. `ci/measure-peak-rss.py` read `/proc/*/statm`, Windows has no
+  # /proc, so #267 acceptance item 1 was undischargeable on the ONE lane where it
+  # mattered most: `windows-msvc-asan` is the whole matrix's critical path AND an
+  # ASan lane, and the Linux ASan lanes rose +45 % and +53 % peak RSS from j=1 to
+  # j=4. A widening merged here without a memory figure would be merged on the
+  # axis most likely to bite, held to a lower standard than every other lane.
   #
-  # `windows-msvc-asan` is the matrix critical path and has never been measured
-  # at all, so a wall-clock-only reading is a large improvement on nothing — but
-  # a widening merged on it would be merged without the memory figure the other
-  # lanes are held to. Say so in the PR that proposes one.
+  # The instrument now has a Windows path — membership by JOB OBJECT, size by
+  # per-process `WorkingSetSize`, i.e. the SAME quantity as the Linux sum, so the
+  # two are comparable by construction. See the header of
+  # `ci/measure-peak-rss.py`, and `--self-test` for the arms that pin it.
+  #
+  # `--no-peak` and the driver's `status=no-procfs-platform` disposition REMAIN,
+  # and are still exercised by cell S5 of ci/test-parallelism-aba-seam.sh: they
+  # are the honest fallback for a platform with neither mechanism, and the
+  # verdict's NOT MEASURED rendering is what keeps a gap on the page instead of
+  # showing as a blank cell or, worse, a zero.
   windows:
     name: "aba ${{ matrix.preset }}"
     needs: plan
@@ -768,8 +773,7 @@ jobs:
             --jobs "$JOBS" \
             --out "$RT/aba-$PRESET" \
             --ctest-args "$ARGS" \
-            --subset "$SUBSET" \
-            --no-peak
+            --subset "$SUBSET"
 
       - name: Upload the raw sample
         if: always()
