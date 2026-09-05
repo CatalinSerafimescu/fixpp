@@ -192,6 +192,11 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms)
     // enqueue() after a real interval. This is measured directly rather than
     // inferred from a duration, and it is the VACUITY GUARD: if the slot had
     // come free, `producer_done` would already be true and this reads false.
+    // ⚠️ THE ORDER BELOW IS THE ASSERTION. The verdict is captured BEFORE the
+    // release, because the release is the teardown that would make it true:
+    // once the drain returns from emit() the slot frees and the producer
+    // finishes, so a `producer_done` read taken after it says nothing. Moving
+    // the release above the capture leaves a test that passes unconditionally.
     constexpr auto kObserveBlocked = std::chrono::milliseconds{40};
     std::this_thread::sleep_for(kObserveBlocked);
     bool const still_blocked = !producer_done.load(std::memory_order_acquire);

@@ -682,6 +682,66 @@ def main() -> int:
             f"A measurement that could not be taken must not read as one that came out fine.")
         cov = {}
 
+    # ── DID THE PARALLEL PASS COLLECT EVERY PROFILE? ─────────────────────────
+    #
+    # ⚠️ THIS IS A SEPARATE QUESTION FROM THE DIGEST, AND IT SURVIVES A VOID
+    # THAT KILLS THE DIGEST COMPARISON. `%p` in LLVM_PROFILE_FILE gives each
+    # PROCESS its own .profraw; the failure it does not cover is two processes
+    # sharing a name, which under `ctest --parallel` would silently drop one
+    # test's profile and lower the merged coverage.
+    #
+    # That loss is INVISIBLE to every other check here. It does not change
+    # `lines_total`, it leaves `status=ok`, it keeps `profraw_count` positive —
+    # and the coverage it removes reads as exactly the same run-to-run digest
+    # wobble that the serial-disagreement void above already dismisses. So a
+    # clobber would be filed as "this suite is nondeterministic" and never
+    # looked at again.
+    #
+    # Comparing the COUNT catches it, and does so on samples where the digests
+    # are useless: in run 33977674899 all three passes reported 367 with three
+    # DIFFERENT digests, which is real evidence that j=4 lost nothing even
+    # though item 4 itself could not be discharged.
+    #
+    # Only a SHORTFALL in the parallel pass is a defect. A higher count is
+    # disclosed, not accused: more processes is not the failure mode, and a
+    # gate that fires in both directions on a number that is merely expected to
+    # be stable would void honest samples.
+    if ser and par:
+        def profraw(pas):
+            try:
+                return int(pas.cov.get("profraw_count", 0)) if pas.cov else 0
+            except ValueError:
+                return 0
+
+        ser_counts = [profraw(p) for p in ser if cov_usable(p)]
+        par_counts = [profraw(p) for p in par if cov_usable(p)]
+        if ser_counts and par_counts:
+            ser_min, par_got = min(ser_counts), min(par_counts)
+            if par_got < ser_min:
+                defects.append(
+                    f"PROFILES WERE LOST UNDER PARALLELISM: the parallel pass wrote "
+                    f"{par_got} .profraw files where the serial pass(es) wrote {ser_min}. "
+                    f"`%p` in LLVM_PROFILE_FILE names a profile per PROCESS, so a shortfall "
+                    f"means two test processes shared a name and one overwrote the other — "
+                    f"the merged coverage for this run is missing whatever those "
+                    f"{ser_min - par_got} profile(s) held. This is NOT the digest "
+                    f"nondeterminism reported elsewhere: that moves coverage in both "
+                    f"directions, this only ever removes it.")
+            elif par_got != ser_min or len(set(ser_counts)) > 1:
+                out.append(
+                    f"> ⚠️ **profraw counts differ across passes** (serial "
+                    f"{sorted(set(ser_counts))}, parallel {sorted(set(par_counts))}) without a "
+                    f"shortfall in the parallel pass. Not read as profile loss — only a parallel "
+                    f"SHORTFALL is that — but the count was expected to be stable, so it is on "
+                    f"the page.")
+                out.append("")
+            else:
+                out.append(
+                    f"> **Every pass collected {ser_min} `.profraw` files**, so `--parallel` lost "
+                    f"no profile to a name collision. This is independent of the digest "
+                    f"comparison below and stays true on a sample whose digests disagree.")
+                out.append("")
+
     if len(cov) == 3 and ser and par:
         ser_shas = {cov[p.index] for p in ser if p.index in cov}
         par_shas = {cov[p.index] for p in par if p.index in cov}

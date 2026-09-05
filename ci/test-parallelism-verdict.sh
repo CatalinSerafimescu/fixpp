@@ -52,6 +52,7 @@ ap.add_argument("--peak", default="700000000,930000000,700000000")
 ap.add_argument("--peak-status", default="ok,ok,ok")
 ap.add_argument("--cov", default="")              # 3 tags; empty = no coverage files
 ap.add_argument("--cov-status", default="")       # write coverage.env with NO digest
+ap.add_argument("--cov-profraw", default="")      # 3 per-pass .profraw counts
 ap.add_argument("--steal", default="100,100,100,100")
 ap.add_argument("--calib", default="2.70,2.72,2.74,2.76")
 ap.add_argument("--witnesses", type=int, default=4)
@@ -154,8 +155,9 @@ for i in range(1, 4):
     elif a.cov:
         tag = split(a.cov)[k]
         sha = hashlib.sha256(tag.encode()).hexdigest()
+        nraw = split(a.cov_profraw)[k] if a.cov_profraw else "42"
         (d / f"pass{i}.coverage.env").write_text(
-            f"status=ok\nprofraw_count=42\nsorted_info_sha256={sha}\n"
+            f"status=ok\nprofraw_count={nraw}\nsorted_info_sha256={sha}\n"
             f"lines_covered=1000\nlines_total=1200\n")
 
 for w in range(a.witnesses):
@@ -304,6 +306,33 @@ cell "T11 coverage differing only under parallelism is a DEFECT" 1 \
 # baseline there is nothing to compare the parallel pass against.
 cell "T12 coverage differing between the two SERIAL passes VOIDs, and is not blamed on parallelism" 3 \
   "DIFFERENT MERGED COVERAGE" --cov one,two,three
+
+# ── T55/T56/T57: did the PARALLEL pass collect every profile? ────────────────
+#
+# `%p` names a .profraw per PROCESS. The failure it does not cover is two test
+# processes sharing a name under `ctest --parallel`, which drops one test's
+# profile. That loss is invisible to every other check: lines_total is
+# unchanged, status stays ok, profraw_count stays positive, and the coverage it
+# removes reads as the same run-to-run digest wobble T12 already voids on — so
+# a real clobber would be filed as "the suite is nondeterministic" and never
+# looked at again.
+#
+# ⚠️ THE COUNT COMPARISON IS THE ONLY ONE OF THESE THAT SURVIVES T12'S VOID.
+# In campaign run 33977674899 all three passes reported 367 profraw with three
+# DIFFERENT digests — so this answers "did j=4 lose anything" on precisely the
+# sample where item 4 itself could not be discharged.
+cell "T55 a SHORTFALL of profraw in the parallel pass is a DEFECT" 1 \
+  "PROFILES WERE LOST UNDER PARALLELISM" --cov same,same,same --cov-profraw 367,340,367
+# Equal counts must NOT accuse, and must say so positively — a guard that only
+# ever speaks when it fires leaves "silent" meaning both "fine" and "never ran".
+cell "T56 equal profraw counts report collection as complete, not silence" 0 \
+  "Every pass collected 367" --cov same,same,same --cov-profraw 367,367,367
+# Only a parallel SHORTFALL is profile loss. A HIGHER parallel count is
+# disclosed, not accused: more processes is not the failure mode, and a gate
+# firing in both directions on a merely-expected-stable number voids honest
+# samples.
+cell "T57 a HIGHER parallel profraw count is disclosed, not called a defect" 0 \
+  "profraw counts differ across passes" --cov same,same,same --cov-profraw 367,371,367
 
 # ── T29: COVERAGE ATTEMPTED BUT NOT COMPARED IS NOT "FINE" ───────────────────
 #
@@ -549,7 +578,7 @@ cell "T20 a witness with no /proc is usable, not absent" 0 \
 # A sweep must assert how many cells ran: a `cell` invocation lost to an editing
 # slip removes a gate silently, and the tally below would still read "N passed,
 # 0 failed" for a smaller N.
-MUTANTS_DECLARED=54
+MUTANTS_DECLARED=57
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$MUTANTS_DECLARED" ]; then

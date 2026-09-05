@@ -593,10 +593,13 @@ jobs:
   # two are comparable by construction. See the header of
   # `ci/measure-peak-rss.py`, and `--self-test` for the arms that pin it.
   #
-  # `--no-peak` and the driver's `status=no-procfs-platform` disposition REMAIN,
-  # and are still exercised by cell S5 of ci/test-parallelism-aba-seam.sh: they
-  # are the honest fallback for a platform with neither mechanism, and the
-  # verdict's NOT MEASURED rendering is what keeps a gap on the page instead of
+  # `--no-peak` and the driver's `status=no-procfs-platform` disposition are
+  # RETAINED WITH NO REMAINING CALLER. Say it that way rather than "still
+  # exercised by S5": cell S5 of ci/test-parallelism-aba-seam.sh drives the
+  # driver FLAG directly, which is coverage of the flag, not evidence that any
+  # lane uses it. They are kept as the honest fallback for a platform with
+  # neither mechanism, and because the verdict's NOT MEASURED rendering — shared
+  # with every other non-`ok` status — is what keeps a gap on the page instead of
   # showing as a blank cell or, worse, a zero.
   windows:
     name: "aba ${{ matrix.preset }}"
