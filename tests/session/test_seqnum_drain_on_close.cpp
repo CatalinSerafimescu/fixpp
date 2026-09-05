@@ -341,8 +341,17 @@ TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
 
     // Run: H acquires → parks → drain waits → H resumes → unlocks → drain
     // completes → close finishes.
-    ioc.run_for(500ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, close_future, 500ms,
+                                                    "CloseWithHolderDoesNotTerminate/close")) {
+        // `ctx.clock`, not a bare `clock`: this is a plain `TEST` over a block-local
+        // fixture object, so no member `clock` is in scope and `*clock` would bind
+        // `::clock` from <ctime>.
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *ctx.clock,
+                                                        "CloseWithHolderDoesNotTerminate/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "CloseWithHolderDoesNotTerminate/close";
+        return;
+    }
 
     EXPECT_TRUE(holder_acquired.load(std::memory_order_acquire))
         << "H coroutine never acquired the lock — test may be inconclusive";

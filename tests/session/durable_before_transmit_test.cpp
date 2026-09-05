@@ -319,8 +319,14 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
         }
 
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut2, 200ms, "OutboundStoreBeforeTransportSend/logon-ack")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "OutboundStoreBeforeTransportSend/logon-ack");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "OutboundStoreBeforeTransportSend/logon-ack";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack inbound failed";
         ASSERT_EQ(sess.state(), fsm_state::Active);
     }

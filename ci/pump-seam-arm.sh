@@ -5,16 +5,19 @@
 # rebuilding ONCE PER SITE. This one exports FIXPP_FORCE_WINDOW_MISS=<label> and
 # runs the already-built binary, so a whole batch costs one build and N runs.
 #
-# ⚠️ IT IS A STRICTLY WEAKER WITNESS AND DOES NOT REPLACE THE TEXTUAL DRIVER.
-# It exercises the PRIMITIVE's forced path under a site's label. It cannot see a
-# site whose own miss block has the wrong drain flavour or a missing `return`,
-# because the block it runs is the same one at every site. Use this for breadth
-# and ci/pump-red-arm.sh to spot-check recipe correctness.
+# ⚠️ IT IS A WEAKER WITNESS AND DOES NOT REPLACE THE TEXTUAL DRIVER. Use this for
+# breadth and ci/pump-red-arm.sh to spot-check recipe correctness.
+#
+# ⚠️ DO NOT RESTATE HERE WHAT FORCING DOES AND DOES NOT EXERCISE. That statement
+# belongs with the seam, at `run_window_then_ready` in
+# tests/support/pump_until_ready.hpp, and it has been WRONG IN BOTH DIRECTIONS in
+# the past -- a copy of it here is a third place to keep true and the one nobody
+# updates. Read it there.
 #
 # ⚠️ SILENCE HAS TWO CAUSES AND ONE OF THEM FAILS TOWARD CLEAN. A run with no
 # `kWindowMiss` report can mean the miss branch did not report, or that the label
 # matched nothing at all — a typo, a site that passes no label, or a site the run
-# never reached. So the primitive ANNOUNCES on stderr before zeroing the window
+# never reached. So the primitive ANNOUNCES on stderr before it pumps
 # (`kWindowMissForced`), and this script requires that line. No announcement is
 # reported as NO-SUCH-SITE, never as a pass.
 #
@@ -156,8 +159,12 @@ run_label() {                      # $1 = label
             #       `run_for(); get()` later in the same test, which is exactly the #289
             #       hazard -- a missed window plus an unconditional get() is a wedge. That
             #       is evidence FOR the remaining migration, not against this site.
-            #   never reported     -> genuinely inconclusive; the arm zeroed a window the
-            #       test never waited on (census blind spot (c)).
+            #   never reported     -> genuinely inconclusive, in one of two ways the
+            #       printout keeps apart by the ANNOUNCE count: announced-then-hung means
+            #       the site's own miss block wedged before reporting, usually a drain
+            #       that does not quiesce; never-announced means the label did not fire in
+            #       this binary at all, so the wedge belongs to something else entirely
+            #       (census blind spot (c)).
             # An earlier revision collapsed both into INCONCLUSIVE and cost a manual
             # per-test bisect to separate them.
             local t_ann t_rep
@@ -173,9 +180,12 @@ run_label() {                      # $1 = label
 look for an UNMIGRATED run_for/get after this site")
                 red=$((red + 1)); wedged=$((wedged + 1)); return 0
             fi
-            printf '    ~~   INCONCLUSIVE: %s timed out in %s with NO report\n' "$label" "$(basename "$b")"
-            printf '         the arm may have zeroed a window the test never waited on\n'
-            printf '         (census blind spot (c)) -- that is a finding, not a slow box.\n'
+            printf '    ~~   INCONCLUSIVE: %s timed out in %s with NO report (announced %s)\n' \
+                "$label" "$(basename "$b")" "$t_ann"
+            printf '         announced>0 -> the miss block wedged before reporting (a drain that\n'
+            printf '           does not quiesce); announced=0 -> the label never fired here, so\n'
+            printf '           the wedge is not this arm (census blind spot (c)).\n'
+            printf '         Either way it is a finding, not a slow box.\n'
             # ⚠️ DO NOT RETURN -- a timeout in ONE binary must not decide the LABEL's verdict.
             # Binaries are found by SUBSTRING on `strings`, so a shorter label can pull in a
             # binary that merely CONTAINS it inside a longer one (`RejectFixture::feed` is a

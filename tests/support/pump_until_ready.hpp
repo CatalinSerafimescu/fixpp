@@ -360,9 +360,14 @@ template <class Pump>
 // its own doc comment — the caller must consult the bool BEFORE `fut.get()`. `[[nodiscard]]`
 // puts a compiler DIAGNOSTIC on ignoring it, rather than leaving it to a
 // reviewer or a lexical checker. Note that is a WARNING, not an error: this
-// repo does not build tests under a blanket `-Werror` (the one targeted use is
-// `-Werror=deprecated-declarations` at tests/session/CMakeLists.txt:2312), so
-// do not describe it as compiler-ENFORCED.
+// repo does not build tests under a blanket `-Werror`, so do not describe it as
+// compiler-ENFORCED. ⚠️ Re-derive that rather than trusting it -- this sentence used
+// to name a LINE NUMBER for its one supporting example, which had moved, and to say
+// "the one targeted use" when there are two (`-Werror=deprecated-declarations`, on
+// WILL_FAIL probe targets in tests/session/ and tests/tls/). `grep -rn Werror` over
+// the build files is the derivation; note also that `FIXPP_WERROR` and
+// `fixpp_maybe_werror` in cmake/Helpers.cmake have ZERO call sites, so the blanket
+// form is absent because the plumbing is dead, not because it was decided against.
 //
 // The grace slice is not a "CI tolerance" and must not be grown into one.
 // `run_one_until` tests `now < abs_time` BEFORE dispatching (see `pump_until`'s
@@ -390,19 +395,73 @@ template <class Pump>
 // every later site on it (PR #316 forced fifteen and covered seven). At batch-11
 // scale that is one full rebuild per site. Here it is one build and N runs.
 //
-// ⚠️ IT IS A STRICTLY WEAKER WITNESS THAN TEXTUAL MUTATION, AND DOES NOT REPLACE IT.
-// This seam proves *the primitive's forced path reports under that site's label*. It
-// does NOT prove the site's own miss block is correct: a site whose drain has the
-// wrong flavour, or whose `return` is missing, is invisible to it because the block
-// it exercises is the same one at every site. Use the seam for breadth and textual
-// mutation to spot-check recipe correctness. Do not retire `ci/pump-red-arm.sh`.
+// ⚠️ IT IS A WEAKER WITNESS THAN TEXTUAL MUTATION, AND DOES NOT REPLACE IT. State the
+// difference precisely -- this paragraph has been wrong in BOTH directions, once
+// overstating the seam and once understating it, so re-derive it from the code below
+// rather than trusting the sentence:
+//   IT DOES exercise the SITE'S OWN miss block -- forcing returns false, so the caller's
+//     `if (!run_window_then_ready(...))` body always runs, drain and report included.
+//   ⚠️ EVERYTHING BELOW IS CONDITIONAL ON THE SITE'S STATE AT ENTRY, because FORCING
+//     PRESERVES WHATEVER STATE EXISTS -- IT CANNOT MANUFACTURE ONE. Three separate claims
+//     here have been written unconditionally and been false at the same site for the same
+//     reason; state the condition or do not state the claim.
+//   IT DOES reproduce a real miss's STATE *WHERE THE FUTURE WAS NOT YET READY WHEN THE
+//     WINDOW OPENED*: forcing does not dispatch, so the frame is still suspended when the
+//     miss branch runs and the DRAIN is what resumes it -- which is the lifetime obligation
+//     (see (b) at the definition below). Where the future was ALREADY READY before the
+//     window opened there is no suspended frame, the drain resumes nothing, and no forcing
+//     mode can change that. `LO_InboundLogout_Confirm/close` is such a site, and
+//     `ci/red-arms/batch12-spotcheck.tsv` records it as the batch's measured exception.
+//   IT DOES NOT exercise the primitive's own pumping path: a forced call never touches the
+//     io_context. Nothing in this tree depends on that, because both drains call
+//     `ioc.restart()` themselves before pumping -- but a NEW miss branch that relied on
+//     this function having restarted would pass here and fail for real. Do not write one.
+//   IT DOES NOT judge the drain FLAVOUR, and NEITHER DRIVER'S FORCING MODE CHANGES THAT.
+//     Which drain a site needs is a quiescence question the ANNOUNCEMENT cannot see. The
+//     textual driver can catch a wrong flavour, because `ci/pump-red-arm.sh` fails an arm
+//     whose drain reports a residual -- but that power comes from the FLAVOUR alone.
+//     ⚠️ REASON, not a case list, because a case list invites a hunt for a case it missed:
+//     BOTH drains are strictly LONGER pumps than the window they follow (`drain_or_report`
+//     is `restart(); run_for(5s); poll_one()`; the clocked one is a 5 s sliced loop). So
+//     zeroing DEFERS work into the drain rather than withholding it, and the residual
+//     verdict reads the FIXED POINT -- what is still outstanding once pumping stops --
+//     which both a zeroed and an unzeroed arm reach. An earlier revision of this line said
+//     the residual check "has power only because forcing does not dispatch; the two are
+//     coupled". False: the only thing surviving either pump is a mock-clock waiter, and a
+//     real window cannot release one either. The zeroing and this check are independent.
+//
+//     ⚠️ WHEN THE FLAVOUR IS LIVE, since half this tree's sites could use either drain and
+//     nothing said so. `cancel_and_drain_or_report` earns its `cancel_sleeps()` iff a
+//     MOCK-CLOCK WAITER can be registered by the time the drain runs. In this tree that is
+//     AMBIENT work, not the awaited frame: `run_liveness_loop` is co-spawned on the first
+//     transition to Active and parks on a `heartbeat_interval` deadline. So the flavour
+//     matters where the fixture sets a NON-ZERO `heartbeat_interval` AND the site is
+//     reached at or after Active; where the fixture sets 0 there is no liveness loop and
+//     the two drains are behaviourally identical. Derive it from the fixture's config, not
+//     from what the awaited coroutine happens to be blocked on -- that question is the
+//     wrong one and answering it suggests, falsely, that the clocked drain is decorative.
+//
+//     ⚠️ AND THE FLAVOUR IS NOT ALWAYS THE ANSWER, because a mock-clock waiter is only ONE
+//     of the two things a pump cannot release. Pumping alone reaches everything EXCEPT
+//     (i) a mock-clock waiter, released only by `cancel_sleeps()` -- the flavour; and
+//     (ii) an op that never completes on its own, e.g. a coroutine parked in
+//     `async_write`/`async_read_some` on a LIVE TRANSPORT, which no amount of pumping and
+//     no `cancel_sleeps()` will end. For (ii) the answer is the transport-aware drain
+//     (`cancel_and_drain_or_report` with a transport, or `quiesce_on_exit` with `.transport`
+//     set), NOT a different clock argument. `ci/pump-red-arm.sh` says "Check the drain
+//     FLAVOUR at this site" on a residual, which points at (i) only; if a residual survives
+//     BOTH clock flavours, it is (ii). No #289 batch-12 site reaches (ii) -- the three
+//     clock-free files use a `MinimalTransportFactory` with no parking transport -- so this
+//     is written to be found rather than rediscovered.
+// Use the seam for breadth and textual mutation to spot-check recipe correctness.
+// Do not retire `ci/pump-red-arm.sh`.
 //
 // ⚠️ SILENCE IS AMBIGUOUS, WHICH IS WHY FORCING ANNOUNCES ITSELF. A run that produces
 // no `kWindowMiss` report can mean the seam fired and the miss branch failed to
 // report, or that the label matched NOTHING (a typo, a site that passes no label, or
 // a site the run never reached) -- the same empty output from opposite causes, with
 // the second failing toward clean. So a firing seam writes `kWindowMissForced` +
-// the label to stderr BEFORE zeroing the window. A driver MUST require that line and
+// the label to stderr BEFORE returning. A driver MUST require that line and
 // treat its absence as "no such site", never as a silent pass.
 // [[feedback_every_broken_instrument_in_this_repo_fails_toward_clean]]
 //
@@ -434,7 +493,7 @@ inline const char* forced_window_miss_site() {
 }
 
 // Announced on stderr when the seam fires. Distinct from `kWindowMiss` on purpose:
-// this says "the window was zeroed HERE", the other says "the wait missed".
+// this says "the miss was FORCED here", the other says "the wait missed".
 inline constexpr const char* kWindowMissForced = "#289 FORCED window miss at site: ";
 
 template <class Fut>
@@ -442,19 +501,56 @@ template <class Fut>
                                          std::chrono::steady_clock::duration window,
                                          std::chrono::steady_clock::duration grace = kPumpSlice,
                                          const char* site = nullptr) {
+    // ⚠️ FORCING RETURNS WITHOUT DISPATCHING. It does not shrink the window and it does not
+    // run it. Both halves of that are load-bearing and each fixes a different defect, so do
+    // not "simplify" either away:
+    //
+    //   (a) RETURN FALSE rather than shrink the durations. Shrinking is NOT sufficient: the
+    //       checks below are `run_for(window); if (ready()) return true;`, so a site whose
+    //       future is ALREADY READY when its window opens returns true however small the
+    //       window is. The seam would then ANNOUNCE while the site's miss branch never ran
+    //       -- which `ci/pump-seam-arm.sh` reports as SILENT, i.e. "the miss branch did not
+    //       report", reading as a defect in correctly-migrated code. MEASURED, not reasoned:
+    //       a confirming Logout can complete a `close()` before its pump ever opens.
+    //       Zeroing only the window, leaving `grace` live, was an earlier and weaker fix for
+    //       this same defect; zeroing BOTH was the next one, and it is still not enough.
+    //
+    //   (b) DO NOT DISPATCH, so the drain faces a LIVE SUSPENDED FRAME. `run_one_until`
+    //       tests `now < abs_time` BEFORE dispatching (see `pump_until`'s comment above), so
+    //       a genuine miss leaves the awaited coroutine suspended -- and RESUMING a suspended
+    //       frame is what a miss-branch drain does and where its LIFETIME obligation bites
+    //       (#301's caller-temporary `feed`, #313/#316's miss-branch drains). A forced call
+    //       that ran the real window would COMPLETE the frame first AT ANY SITE WHOSE FRAME
+    //       THE WINDOW CAN COMPLETE, so the drain would resume nothing and that obligation
+    //       would go unexercised. ⚠️ That qualifier is not decoration: at a site whose frame
+    //       is held by a MOCK-CLOCK sleep the window completes nothing either, so running it
+    //       would lose nothing there. What makes the qualifier bite in THIS batch is a
+    //       measurement, not a property -- every site's awaited frame is held by queued work
+    //       rather than a live clock sleep. Re-measure it for a new batch.
+    //       ⚠️ WITNESSED, and not by a #289 arm: `PumpWindowMiss.FeedMissDrainsWhileCaller-
+    //       TemporaryAlive` (tests/session/test_next_expected_msgseqnum.cpp) passes ZERO for
+    //       BOTH durations and its comment records why -- a zero window alone does not miss,
+    //       because the boundary grace dispatches the queued work and the future becomes
+    //       ready. That is this property, checked in and proven RED.
+    //       ⚠️ AND NOTE WHAT (b) DOES *NOT* BUY, because an earlier revision of this comment
+    //       claimed it: it does not improve the odds of catching a wrong drain FLAVOUR. That
+    //       needs a CLOCK-BOUND frame, and a real window does not advance a mock clock, so
+    //       such a frame stays suspended whether the window ran or not.
+    //       An intermediate revision DID run the window, to close a blind spot ("a miss
+    //       branch that depends on the restarts having happened"), and that blind spot is
+    //       HYPOTHETICAL: both drains call `ioc.restart()` themselves before pumping.
+    //       Traded a real witness for a hypothetical one; reverted.
+    //
+    // The io_context is therefore left untouched, deliberately, per (b) and its last sentence.
     if (site != nullptr) {
         if (const char* forced = forced_window_miss_site();
             forced != nullptr && std::strcmp(forced, site) == 0) {
-            // Announce BEFORE zeroing, so the line is emitted even if what follows
-            // hangs -- a hang is exactly the blind-spot-(c) outcome a driver must be
-            // able to tell apart from "the label matched nothing".
+            // Announce BEFORE returning, so the line is emitted even if what follows hangs
+            // -- a hang is exactly the blind-spot-(c) outcome a driver must be able to tell
+            // apart from "the label matched nothing".
             std::fprintf(stderr, "%s%s\n", kWindowMissForced, site);
             std::fflush(stderr);
-            // BOTH, never just the window: `grace` defaults to a live `kPumpSlice`,
-            // and zeroing only the window leaves that slice to satisfy the future --
-            // a vacuous arm that reads as "the miss branch is unreachable".
-            window = std::chrono::steady_clock::duration::zero();
-            grace = std::chrono::steady_clock::duration::zero();
+            return false;
         }
     }
     const auto ready = [&fut] {

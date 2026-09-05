@@ -365,9 +365,23 @@ TEST_F(AuthFailReconnectCapTest, AuthFailConsumesAttemptsAndTerminatesAtCap) {
     // Open the session (LogonSent).
     {
         auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(open_fut.wait_for(0s), std::future_status::ready);
+        // Replaces an explicit `wait_for(0s) == ready` assertion. ⚠️ NOT the same predicate
+        // at the same point -- that wording was here and was wrong. The assertion fired the
+        // instant the window returned; the primitive re-checks after ONE MORE `kPumpSlice`
+        // grace pump and a second `restart()`, so a future that becomes ready just after the
+        // window now passes where the assertion failed. That boundary grace is deliberate and
+        // is what every migrated site gets. Normalisation, not a hazard fix.
+        // The fixture's `engine` is an `EngineConfig` whose `clock` DATA MEMBER is never
+        // assigned in this file, so `*engine.clock` would compile and deref null on the
+        // miss path. The clock-free drain is REQUIRED here, not just permitted.
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, open_fut, 500ms, "AuthFailConsumesAttemptsAndTerminatesAtCap/open")) {
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "AuthFailConsumesAttemptsAndTerminatesAtCap/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AuthFailConsumesAttemptsAndTerminatesAtCap/open";
+            return;
+        }
         auto open_r = open_fut.get();
         ASSERT_TRUE(open_r.has_value())
             << "Session::open() failed: " << static_cast<int>(open_r.error());
@@ -384,10 +398,15 @@ TEST_F(AuthFailReconnectCapTest, AuthFailConsumesAttemptsAndTerminatesAtCap) {
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
 
     auto fut = asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
-    ioc.run_for(2s);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, fut, 2s, "AuthFailConsumesAttemptsAndTerminatesAtCap/attempt")) {
+        fixpp::test_support::drain_or_report(ioc,
+                                             "AuthFailConsumesAttemptsAndTerminatesAtCap/attempt");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "AuthFailConsumesAttemptsAndTerminatesAtCap/attempt";
+        return;
+    }
 
-    ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
     auto result = fut.get();
 
     // GREEN after T014: auth-fail on EACH attempt → N make() calls at cap.

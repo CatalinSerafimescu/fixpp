@@ -164,21 +164,32 @@ migrated site in an uncalled fixture helper drops a pin row while being unable t
 Read a non-firing RED arm as a question about reachability before assuming the arm is broken.
 
 ⭐ **A migrated site's miss branch is DEAD CODE under normal execution, so "the tests still pass" is
-evidence about the HIT path only** — `ci/pump-red-arm.sh` forces each site's window to miss and
-requires it to report. Two properties are load-bearing and neither is obvious:
+evidence about the HIT path only** — `ci/pump-red-arm.sh` forces each site's miss and requires
+it to report. Two properties are load-bearing and neither is obvious:
 
 - **One arm per rebuild.** PR #316 forced fifteen at once and covered **seven**: the first miss on a
   code path returns, and every later site on that path is never reached. Two sites in one helper, or
   one helper a driver calls twice, mask each other exactly this way. The rebuild cost per arm is the
   method, not overhead to optimise away.
-- **Zero BOTH durations.** `run_window_then_ready(ioc, fut, window, grace)` defaults `grace` to
-  `kPumpSlice`, so zeroing only the window leaves a live grace slice that usually still satisfies the
-  future — a vacuous arm that passes without entering the branch it claims to test.
+- **An arm zeroes BOTH durations *and* forces the verdict, and neither alone is sufficient.**
+  `((void)run_window_then_ready(ioc, fut, 0ms, 0ms), false)`. The wrapper is what works at a site
+  whose future is ALREADY READY when its window opens; the zeroing is what stops the call
+  dispatching, which is what leaves the awaited coroutine SUSPENDED so the miss branch's drain has
+  a live SUSPENDED frame to resume **wherever one exists at entry** — which is where a
+  miss-branch drain's LIFETIME obligation
+  bites (#301/#313/#316), and is witnessed by `PumpWindowMiss.FeedMissDrainsWhileCaller-
+  TemporaryAlive`, which zeroes both durations for exactly this reason. ⚠️ It does *not* help
+  catch a wrong drain FLAVOUR — that needs a clock-bound frame, which a real window cannot
+  complete either, so both forms see it equally. An earlier revision of this bullet said otherwise.
+  **Do not restate the rule here beyond that sentence**; it lives at `run_window_then_ready`'s
+  definition, and two superseded versions of it (*"zero the window"*, then *"zero both"*, then
+  *"force the verdict, leave the durations"*) each survived in this bullet until someone read the
+  header instead.
 
 ⚠️ **A TIMEOUT IS A DIFFERENT FINDING FROM A SILENT ARM, and collapsing them loses the interesting
 one.** A forced miss HANGS rather than reports when the site's pump is INDIRECTED through a helper
-(census blind spot (c)) — the arm zeroed a window the test never waited on. The driver reports that
-as `INCONCLUSIVE` and names it, which is the same question the dead-code note above asks: a
+(census blind spot (c)) — the call the arm forced is not the one the test waits on. The driver
+reports that as `INCONCLUSIVE` and names it, which is the same question the dead-code note above asks: a
 non-firing arm is a claim about REACHABILITY before it is a claim about the branch.
 
 ⚠️ **The driver is an instrument, so its REDs mean nothing until it is shown able to report non-RED.**
@@ -194,17 +205,16 @@ verifiable at all; "one arm per rebuild" above remains the rule for the TEXTUAL 
 masking reason behind it is unchanged — the seam does not fix masking, it makes forcing one site at a
 time cheap enough to do everywhere.
 
-⚠️ **It is a STRICTLY WEAKER witness, and the difference is not a detail.** The seam exercises *the
-primitive's forced path* under a site's label. The block it runs is the same block at every site, so
-it CANNOT see a site whose own miss branch has the wrong drain flavour, a missing `return`, or a
-sentinel a caller can confuse with a real value. Only textual mutation witnesses the recipe as
-written at that site. Use the seam for breadth and `ci/pump-red-arm.sh` to spot-check correctness;
-**keep both**.
+⚠️ **It is a WEAKER witness, and the difference is not a detail.** Use the seam for breadth and
+`ci/pump-red-arm.sh` to spot-check correctness; **keep both**. ⚠️ **The precise difference is stated
+at `run_window_then_ready` in `tests/support/pump_until_ready.hpp` and is deliberately NOT copied
+here.** It has been wrong in both directions already — once overstating the seam, once understating
+it — and a third copy is a third thing to keep true and the one nobody updates.
 
 ⚠️ **THE SEAM'S SILENCE HAS TWO CAUSES AND ONE FAILS TOWARD CLEAN.** No report can mean the miss
 branch did not report, or that the label matched nothing at all — a typo, a site that passes no
 label, or a site the run never reached. Identical empty output, opposite meanings. So the primitive
-ANNOUNCES on stderr *before* zeroing the window, and the driver requires that line: no announcement
+ANNOUNCES on stderr *before it pumps*, and the driver requires that line: no announcement
 is `NO-SUCH-SITE`, never a pass. The driver carries a negative-control arm forcing a label no site
 carries, to prove that verdict is reachable.
 

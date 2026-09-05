@@ -49,6 +49,20 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// This file's one census site is NOT the `run_window_then_ready` shape the rest of
+// #289 migrates. It is a hand-rolled bounded poll loop, which is what
+// `pump_until_ready` already is -- so it adopts THAT primitive, and reports with
+// `kPumpBudgetMiss` (a budget was granted and exhausted) rather than `kWindowMiss`
+// (a preserved window closed). See `stop_engine` below.
+//
+// ⚠️ CONSEQUENCE FOR VERIFICATION: NEITHER #289 DRIVER CAN FORCE THIS SITE.
+// `pump_until_ready` carries no site label, so `FIXPP_FORCE_WINDOW_MISS` cannot reach
+// it; and it is not a `run_window_then_ready` call, so `ci/pump-red-arm.sh` cannot
+// rewrite it either. Forcing it means editing the budget by hand.
 
 using namespace std::chrono_literals;
 
@@ -86,17 +100,45 @@ static fixpp::session::SessionId register_dummy_session(fixpp::session::Engine& 
 }
 
 // Stop the engine and drain the ioc within a hard bound.
+//
+// (#289) The hand-rolled 5 s / 10 ms poll loop this replaces is `pump_until_ready` in
+// SHAPE -- bounded budget, slice, poll for ready -- and the reason the site was in the
+// census is a difference in OUTCOME: on exhaustion the old loop fell through SILENTLY,
+// so a `stop()` that never completed left the test green with no verdict at all. The
+// `if (ready) get()` guard made the hang unobservable rather than fixing it. The BUDGET
+// IS UNCHANGED at 5 s, so the only new outcome is a report; no timing margin moves.
+//
+// ⚠️ "IS `pump_until_ready`" WOULD BE TOO STRONG -- three things differ, and one of them
+// binds the CALLER rather than this helper:
+//   - slice 10 ms -> `kPumpSlice` 1 ms, and `pump_until` holds a work guard across slices
+//     (the old loop held none), so a slice no longer returns early when work runs out;
+//   - the old loop restarted a stopped `ioc` BEFORE EACH SLICE; `pump_until` restarts ONCE
+//     after the loop, relying on that work guard to keep the context runnable during it;
+//   - ⚠️ therefore `pump_until_ready` DOES NOT RESTART AT ENTRY. Called with an already-
+//     STOPPED `ioc`, every `run_for` is a silent no-op and the pump burns its whole budget
+//     before reporting a miss. Both callers below restart-if-stopped immediately before
+//     calling, so this is inert TODAY -- but that is a property of the callers, not of this
+//     helper. A new caller must do the same. Check it; do not inherit this sentence.
+//
+// ⚠️ THE DRAIN IS `drain_or_report`, AND NOT BECAUSE NO CLOCK IS REACHABLE. One is:
+// `Engine::clock()` returns `const shared_ptr<Clock>&`. But `NullClock_ReturnsClockNotSet_
+// NotOperational` below constructs an `Engine` whose `EngineConfig::clock` IS null -- that
+// is the cell it exists to witness -- and then calls this helper, so
+// `cancel_and_drain_or_report(ioc, *engine.clock(), ...)` would dereference a null
+// `shared_ptr` ON THE MISS PATH. A fault inside a failure handler is the one place it is
+// least likely to be diagnosed correctly.
+// (Also note `engine.hpp`'s comment on `clock()` -- *"Never null post-construction"* -- does
+// not hold for that Engine: construction accepts a null clock and `start()` is what rejects
+// it. Pre-existing; reported, not changed here.)
+// A bare `*clock` would separately bind `::clock` from <ctime>.
 static void stop_engine(fixpp::session::Engine& engine, asio::io_context& ioc) {
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    const auto deadline = std::chrono::steady_clock::now() + 5s;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (ioc.stopped()) ioc.restart();
-        ioc.run_for(std::chrono::milliseconds{10});
-        if (fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready) break;
+    if (!fixpp::test_support::pump_until_ready(ioc, fut, 5s)) {
+        fixpp::test_support::drain_or_report(ioc, "engine_clock_gate:stop_engine");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "engine_clock_gate:stop_engine";
+        return;
     }
-    if (fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready) {
-        fut.get();  // propagate any stop() exception
-    }
+    fut.get();  // propagate any stop() exception
 }
 
 }  // namespace

@@ -28,8 +28,11 @@
 # claiming otherwise misrepresents two different classifiers as one.
 #
 # ── KNOWN LEXICAL FALSE POSITIVE ─────────────────────────────────────────────
-# tests/session/test_application_lifecycle.cpp:213 —
+# tests/session/test_application_lifecycle.cpp, the one-line `run_ioc()` helper —
 #   void run_ioc() { ioc.run_for(300ms); ioc.restart(); }
+# ⚠️ NAMED, NOT CITED BY LINE. This comment used to say `:213` and #289 batch 12 moved the
+# helper to :232 by inserting a header block above it -- the pin row was updated and the
+# prose was not. Find it by its text; the pin (below) is the line-numbered record.
 # is a complete one-line function; the matching `fut.get()` six lines later is
 # in a DIFFERENT function entirely. It is kept in the pin (the pin is a set of
 # LEXICAL candidates, not a hand-verified semantic set) but is named here so

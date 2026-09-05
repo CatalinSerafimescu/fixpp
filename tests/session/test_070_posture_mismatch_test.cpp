@@ -234,8 +234,12 @@ protected:
 
     void feed_sync(fixpp::session::Session& s, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(std::chrono::milliseconds{200});
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
+                                                        "PostureTest::feed_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "PostureTest::feed_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "PostureTest::feed_sync";
+            return;
+        }
         (void)fut.get();  // refusal is a "successful" processing that ends Disconnected
     }
 

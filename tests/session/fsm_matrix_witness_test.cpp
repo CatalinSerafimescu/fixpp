@@ -322,11 +322,22 @@ protected:
     // Finalize the in-flight graceful close (advance clock to trigger 2s timeout).
     void finish_graceful_close() {
         clock->advance(std::chrono::seconds{3});
-        ioc.run_for(200ms);
-        ioc.restart();
-        if (close_fut_.valid()) {
-            (void)close_fut_.get();
+        // The `valid()` guard is PRESERVED, and so is the pump on its false arm: the
+        // original pumped unconditionally and only the `get()` was conditional.
+        if (!close_fut_.valid()) {
+            ioc.run_for(200ms);
+            ioc.restart();
+            return;
         }
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, close_fut_, 200ms, "FsmMatrixWitness::finish_graceful_close")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "FsmMatrixWitness::finish_graceful_close");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "FsmMatrixWitness::finish_graceful_close";
+            return;
+        }
+        (void)close_fut_.get();
     }
 };
 
@@ -985,8 +996,12 @@ TEST_F(FsmMatrixWitness, Active_InitiateLogout_TransitionsToLogoutSentThenDiscon
     clock->advance(std::chrono::seconds{3});
 
     // Let the timeout fire and close() complete.
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms,
+                                                    "Active_InitiateLogout/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Active_InitiateLogout/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Active_InitiateLogout/close";
+        return;
+    }
 
     // Collect close() result (expected: session_logout_timeout, but we don't assert the error).
     (void)close_fut.get();
@@ -1068,8 +1083,13 @@ TEST_F(FsmMatrixWitness, LO_InboundLogout_Confirm_TransitionsToDisconnected) {
     // collect the close future.
     if (close_fut_.valid()) {
         clock->advance(std::chrono::seconds{3});  // wake any remaining sleepers
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, close_fut_, 200ms,
+                                                        "LO_InboundLogout_Confirm/close")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "LO_InboundLogout_Confirm/close");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LO_InboundLogout_Confirm/close";
+            return;
+        }
         (void)close_fut_.get();
     }
 }

@@ -179,14 +179,26 @@ struct RejectFixture {
     // Open and drive to Active (initiator path).
     void open_to_active(Session& sess, std::string_view begin_string = "FIX.4.2") {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut, 200ms, "session_reject:RejectFixture::open_to_active/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "session_reject:RejectFixture::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "session_reject:RejectFixture::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_logon_frame(begin_string, 1, "TW", "ISLD", 30);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut2, 200ms, "session_reject:RejectFixture::open_to_active/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "session_reject:RejectFixture::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "session_reject:RejectFixture::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
         ASSERT_EQ(sess.state(), fsm_state::Active);
     }

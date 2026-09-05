@@ -1,0 +1,66 @@
+# ci/red-arms/batch12-spotcheck.tsv -- TEXTUAL spot-checks for #289 batch 12.
+#
+# The seam (ci/pump-seam-arm.sh) covers this batch broadly; these arms mutate the
+# SOURCE instead, one per RECIPE shape actually used in the batch, so the block as
+# written at that site is what compiles and reports:
+#   row 1  expected_t<void> helper                     -> std::unexpected(kWindowMissSentinel)
+#   row 2  void helper                                  -> return;
+#   row 3  TEST_F body, fixture has NO clock            -> drain_or_report
+#   row 4  plain TEST over a BLOCK-LOCAL fixture object -> *f.clock
+#
+# ⚠️ ROW 4's `TEST` vs ROW 3's `TEST_F` IS THE DISTINCTION, NOT A DETAIL, and it is why
+# row 4 earns a slot. In a plain `TEST` a bare `*clock` binds `::clock` from <ctime>; in a
+# `TEST_F` the fixture member shadows it. That failure is LOUD at compile time, so what
+# row 4 buys is the RUNTIME half -- that the drain the site actually calls is reached and
+# reports. (Calling row 3 a "TEST body" blurred exactly this axis, and the rationale was
+# briefly written out twice, 16 lines apart, in a file whose whole point is that a claim
+# with two homes drifts. One home, here.)
+#
+# ⚠️ ROW 5 IS NOT A RECIPE SHAPE -- it is the DISCRIMINATING arm for the driver change in
+# this same PR. `LO_InboundLogout_Confirm/close` is already ready when its window opens.
+# RE-DERIVE THAT, do not trust it: force the site under a WRAP-ONLY splice (drop the
+# zeroing from force_site) and require SILENT -- the call returns true, so the miss branch
+# never runs. Under the shipped splice the same arm must read RED. An arm does two things --
+# zeroes both durations AND wraps the call as `((void)..., false)` -- and row 5 is the only
+# place in this file that witnesses the WRAPPER half:
+#   drop the WRAPPER (zero only, the pre-batch-12 splice) -> SILENT against correct code.
+#     That is the defect batch 12 fixes.
+#   ⚠️ DROPPING THE ZEROING IS NOT OBSERVABLE AT ROW 5, and an earlier revision of this
+#     header printed it here as a control. At this site the coroutine is complete BEFORE the
+#     window opens, so THE DRAIN RESUMES NOTHING FROM THIS SITE either way -- which is what
+#     makes the zeroing unobservable here. ⚠️ NOT "the drain has nothing to quiesce": that
+#     is false here, and an earlier revision of this line said it. This fixture's
+#     `make_initiator_cfg` defaults `heartbeat_interval` to 30 s and the test reaches Active,
+#     so a `run_liveness_loop` sleeper IS live when the drain runs and the FLAVOUR still
+#     matters at row 5. Ambient clock-bound work is unaffected by the zeroing; only the
+#     awaited frame is.
+#
+# ⚠️ NO ARM IN THIS FILE WITNESSES THE ZEROING HALF. What the zeroing buys is a LIVE
+# SUSPENDED FRAME for the drain to resume, and the witness for that is already checked in
+# elsewhere: `PumpWindowMiss.FeedMissDrainsWhileCallerTemporaryAlive`
+# (tests/session/test_next_expected_msgseqnum.cpp) passes ZERO for both durations, and its
+# comment records why -- a zero window alone does not miss, because the boundary grace
+# dispatches the queued work and the future becomes ready. It is proven RED by deleting the
+# drain. Read that test, not this file, for the zeroing half.
+# ⚠️ A CONTROL THAT SEEDS A WRONG DRAIN FLAVOUR CANNOT DISCRIMINATE HERE, and an earlier
+# revision of this header described one as if it had been run. Flavour discrimination needs
+# a CLOCK-BOUND frame; a real 200 ms window does not advance a mock clock, so such a frame
+# stays suspended whether the arm zeroed or not. Both forms see a wrong flavour equally.
+#
+# ⚠️ ONE SITE IN THIS BATCH IS IN NEITHER DRIVER. `engine_clock_gate:stop_engine`
+# adopts `pump_until_ready`, which has no site label and no seam; this driver forces
+# `run_window_then_ready` calls specifically. It is mutated BY HAND: set the 5 s budget to
+# zero, rebuild, run. The run MUST print `kPumpBudgetMiss` followed by
+# `engine_clock_gate:stop_engine` and fail both `EngineClockGate` tests. If it does not,
+# the finding is NOT "the miss branch is silent" -- `pump_until` at a zero budget returns
+# `ready()` without pumping, so a report requires the future to be unready at entry, which
+# holds only because `co_spawn` POSTS the first resumption and nothing pumps `ioc` between
+# the spawn and the call. No report means something pumped in between: a different finding. Named here and in ci/red-arms/batch12-labels.txt so a reader
+# counting arms against sites does not read the shortfall as an omission.
+#
+# columns: source <TAB> unique-code-anchor <TAB> expected label <TAB> cmake target [<TAB> ctest regex]
+tests/session/session_send_invalid_state_test.cpp	expected_t<void> send_sync(	SendInvalidStateTest::send_sync	session_pure_tests
+tests/session/test_070_posture_mismatch_test.cpp	void feed_sync(	PostureTest::feed_sync	session_pure_tests
+tests/session/test_compid_binding_seam.cpp	AbsentIdentityMtlsFailsClosed) {	AbsentIdentityMtlsFailsClosed/open	compid_binding_seam
+tests/session/test_application_lifecycle.cpp	OnLogoutFiresOnce_GracefulClose) {	OnLogoutFiresOnce_GracefulClose/close	application_lifecycle_019_test	^application_lifecycle_019$
+tests/session/fsm_matrix_witness_test.cpp	LO_InboundLogout_Confirm_TransitionsToDisconnected) {	LO_InboundLogout_Confirm/close	session_pure_tests
