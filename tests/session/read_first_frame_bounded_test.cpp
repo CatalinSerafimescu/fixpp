@@ -325,9 +325,17 @@ TEST(ReadFirstFrameBounded, B2) {
 // a `room == 0` mutant fails instead of hanging (see B4). At 50 ms
 // the two raced, and on `windows-msvc-asan` under `ctest --parallel 4` the
 // deadline won: campaign run 33977674899 measured this cell at 735 ms against
-// 6 ms unloaded — 122x — and it reported `transport: handshake timeout` with
-// all three mechanism pins failing. That is a VACUOUS run, not a product
-// defect: the budget decision never happened, so nothing about it was tested.
+// 6 ms unloaded — 122x — and it reported `transport: handshake timeout`. That
+// is a VACUOUS run, not a product defect: the budget decision never happened,
+// so nothing about it was tested.
+//
+// ⚠️ WHICH PINS FAIL DEPENDS ON *WHERE* THE DEADLINE LANDS, AND THE OBSERVED
+// RUN FAILED ONLY TWO OF THE THREE. On Windows it was the error and
+// `buf.size()`; `async_reads_observed() == 2` PASSED, because both reads had
+// been ISSUED and the deadline won before the loop reached the budget decision
+// at its foot. Force the deadline earlier — small enough that read 2 is never
+// issued — and the read-count pin fails too. Two failures and three are the
+// SAME defect at different points; neither count is a signature.
 //
 // 5 s is derived from the competing quantity rather than taken as a round
 // number: the loaded wall time actually measured was 735 ms, so this is ~7x
@@ -539,9 +547,17 @@ TEST(ReadFirstFrameBounded, T1) {
 // a `room == 0` mutant fails instead of hanging (see B4's derivation). At 50 ms
 // the two raced, and on `windows-msvc-asan` under `ctest --parallel 4` the
 // deadline won: campaign run 33977674899 measured this cell at 735 ms against
-// 6 ms unloaded — 122x — and it reported `transport: handshake timeout` with
-// all three mechanism pins failing. That is a VACUOUS run, not a product
-// defect: the budget decision never happened, so nothing about it was tested.
+// 6 ms unloaded — 122x — and it reported `transport: handshake timeout`. That
+// is a VACUOUS run, not a product defect: the budget decision never happened,
+// so nothing about it was tested.
+//
+// ⚠️ WHICH PINS FAIL DEPENDS ON *WHERE* THE DEADLINE LANDS, AND THE OBSERVED
+// RUN FAILED ONLY TWO OF THE THREE. On Windows it was the error and
+// `buf.size()`; `async_reads_observed() == 2` PASSED, because both reads had
+// been ISSUED and the deadline won before the loop reached the budget decision
+// at its foot. Force the deadline earlier — small enough that read 2 is never
+// issued — and the read-count pin fails too. Two failures and three are the
+// SAME defect at different points; neither count is a signature.
 //
 // 5 s is derived from the competing quantity rather than taken as a round
 // number: the loaded wall time actually measured was 735 ms, so this is ~7x
@@ -583,9 +599,10 @@ TEST(ReadFirstFrameBounded, B4) {
             << describe(result)
             << ". ⚠️ If that reads `transport: handshake timeout`, this run is VACUOUS rather "
                "than a product failure: the deadline beat the budget decision, so the mechanism "
-               "under test never ran and the two pins below will also fail for the same single "
-               "reason. The deadline is a termination bound and must not compete — see the "
-               "derivation above this cell before touching any assertion.";
+               "under test never ran. Expect the `buf.size()` pin below to fail with it; the "
+               "read-count pin fails only if the deadline landed early enough that the second "
+               "read was never issued. The deadline is a termination bound and must not compete "
+               "— see the derivation above this cell before touching any assertion.";
     }
     EXPECT_EQ(mt.async_reads_observed(), 2u)
         << "B4 (SC-003) [mechanism pin]: expected exactly two reads (4096 then the room-clamped 1) "
