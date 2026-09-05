@@ -1650,11 +1650,32 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
         }
     }};
 
-    // Let the accept loop start and write listener_endpoints_ (race window 1).
-    // 30ms matches V-8's window — sufficient for the accept loop to run on t1/t2.
-    // sleep_for instead of ioc.run_for()+restart(): restart() while t1/t2 are in
-    // ioc.run() is asio UB (SEGFAULT under gcc-release).
-    std::this_thread::sleep_for(std::chrono::milliseconds{30});
+    // The reader must be OBSERVED spinning before the accept loop races it.
+    //
+    // ⚠️ SAME DEFECT AS V-13 BELOW, and found the same way — by auditing the
+    // file rather than the one site CI happened to hit. This was
+    // `sleep_for(30ms)`, a guess about when `t_reader` gets scheduled, and a
+    // SHORTER guess than the 50 ms that already failed: under `--parallel 4` on
+    // windows-msvc-asan the reader can still be unscheduled when the window
+    // closes, `reader_iters` stays 0, and both race windows this test exists to
+    // cover go unexercised. `EXPECT_GT(reader_iters, 0)` below is the vacuity
+    // guard that would report it — correctly, and it must stay.
+    //
+    // Waiting for the first completed iteration is strictly stronger than the
+    // sleep: the reader is demonstrably spinning before the accept loop writes
+    // `listener_endpoints_`, on any machine.
+    //
+    // Non-fatal for the same reason as V-13: an ASSERT_* here returns with t1,
+    // t2 and t_reader still joinable, which is std::terminate rather than a test
+    // failure. Falling through lets the existing stop()/join block tear down.
+    //
+    // Still not ioc.run_for()+restart(): restart() while t1/t2 are in ioc.run()
+    // is asio UB (SEGFAULT under gcc-release).
+    const bool reader_running = wait_until_observed(
+        [&] { return reader_iters.load(std::memory_order_relaxed) > 0; }, 5000ms);
+    EXPECT_TRUE(reader_running)
+        << "V-11 Part 1: reader thread did not iterate within 5s — neither race "
+           "window was established, so this run tests nothing";
 
     // Call stop(): triggers the registry_.clear() + listener_endpoints_.clear() (race window 2).
     {
