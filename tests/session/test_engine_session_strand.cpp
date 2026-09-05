@@ -1930,10 +1930,36 @@ TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
     std::thread ts2{sender_fn};
     std::thread ts3{sender_fn};
 
-    // Allow senders to overlap with the Active state before triggering stop().
-    // sleep_for instead of ioc.run_for()+restart(): restart() while workers are
-    // in ioc.run() is asio UB that manifests as SEGFAULT under gcc-release.
-    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    // Senders must be OBSERVED running before stop(), not assumed to be.
+    //
+    // ⚠️ This was `sleep_for(50ms)`, and the 50 ms was a guess about thread
+    // startup.  Under `ctest --parallel 4` on a 4-vCPU Windows/ASAN runner
+    // (~28 runnable threads on 4 cores) all three senders can still be
+    // unscheduled when the window closes: they then read `sender_stop == true`
+    // at the loop top and exit without ever entering the body, `send_iters`
+    // stays 0, and the send-vs-FSM-transition race this test exists to
+    // exercise NEVER HAPPENS.  Measured: #267 campaign run 33951801400,
+    // `windows-msvc-asan` pass 2 — green in both serial passes either side.
+    //
+    // The `EXPECT_GT(send_iters, 0)` at the end is the vacuity guard that
+    // caught it, and it must stay: relaxing it would let a test that tested
+    // nothing report green.  The defect is the TIMING ASSUMPTION, so the fix
+    // is to replace the guess with an observation — the same `wait_until.hpp`
+    // idiom this file already uses for every other wait.  Waiting for the
+    // first completed iteration is strictly stronger than the sleep was: the
+    // senders are demonstrably looping when stop() fires, on any machine.
+    //
+    // Still not ioc.run_for()+restart(): restart() while workers are in
+    // ioc.run() is asio UB that manifests as SEGFAULT under gcc-release.
+    // ⚠️ NON-FATAL on purpose.  An ASSERT_* here returns from the test body
+    // with ts1..ts3 and t1..t3 still joinable, which is std::terminate, not a
+    // test failure.  Reporting and falling through lets the existing
+    // stop()/join block below tear down exactly as it does on the green path.
+    const bool senders_running =
+        wait_until_observed([&] { return send_iters.load(std::memory_order_relaxed) > 0; }, 5000ms);
+    EXPECT_TRUE(senders_running)
+        << "V-13: sender threads did not iterate within 5s — the race window "
+           "was never established, so this run tests nothing";
 
     // stop() drives the session-strand FSM to Disconnected while senders loop.
     // Under TSan pre-fix: DATA RACE on fsm_state_ → process abort.
