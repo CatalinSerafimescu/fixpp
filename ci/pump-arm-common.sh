@@ -19,6 +19,16 @@
 # one home for the *reason* is the whole return on this extraction — the comparison itself
 # is trivial and always was.
 
+# ⚠️ A THIRD GUARD OF THIS FAMILY LIVES IN `ci/pump-red-arm.sh` AND IS NOT HERE, on
+# purpose: the arms-file NO-SUCH-TEST check, which refuses a row whose `ctest -R` regex
+# selects zero tests. Same failure direction as both guards above — `ctest` with no match
+# exits 0, so the arm reports "the miss branch was silent" against correct code — but it
+# is not shared, because only that driver has an arms file with a ctest regex in it. Its
+# rationale, including the measurement showing a cmake target, its executable and its
+# registered ctest name are three independent strings here, is written at the check.
+# Read it before adding a fourth guard anywhere: the question to ask of each is not
+# "does it pass" but "what does it print when the thing it watches is absent".
+
 # Refuse to proceed on an empty population.
 #
 # Without this, a comment-only or empty input file builds nothing, runs nothing, prints a

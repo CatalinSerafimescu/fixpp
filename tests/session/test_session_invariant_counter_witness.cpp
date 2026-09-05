@@ -61,6 +61,31 @@
 #include "loopback_tls_session_harness.hpp"
 #include "support/identity_injecting_transport.hpp"
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────
+//
+// The two fixture helpers below use `run_window_then_ready` plus a miss-branch
+// drain (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard
+// #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Both helpers return `fixpp::core::expected_t<void>`, so the miss branch cannot
+// `return;`. It returns `std::unexpected(kWindowMissSentinel)` -- the convention and
+// the precondition it rests on are documented at the constant in the primitive, not
+// restated here.
+//
+// The drain is the CLOCKED one: `SetUp` installs a `mock_clock` as the fixture's
+// `clock` member and hands the same pointer to `engine.clock`, so a liveness loop
+// parked on `sleep_until` is released only by `cancel_sleeps()`, which a pump cannot
+// do. `*clock` is the fixture member, non-null for any test that ran `SetUp`.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -130,16 +155,28 @@ protected:
 
     fixpp::core::expected_t<void> run_open(fixpp::session::Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run_for(100ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms,
+                                                        "InvariantCounterWitnessTest::run_open")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "InvariantCounterWitnessTest::run_open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "InvariantCounterWitnessTest::run_open";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 
     fixpp::core::expected_t<void> feed(fixpp::session::Session& s,
                                        std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(100ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms,
+                                                        "InvariantCounterWitnessTest::feed")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "InvariantCounterWitnessTest::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "InvariantCounterWitnessTest::feed";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 };

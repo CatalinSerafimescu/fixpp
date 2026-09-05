@@ -76,6 +76,55 @@ set -uo pipefail
 
 preset="${1:?usage: pump-red-arm.sh <preset> <arms-file>}"
 arms_file="${2:?usage: pump-red-arm.sh <preset> <arms-file>}"
+
+# ⚠️ SELF-TEST, because ci/pump-arm-common.sh states the rule this guard was exempt from:
+# "A GUARD THAT HAS NEVER BEEN SEEN TO FIRE IS NOT A GUARD. Both arms are required."
+# The arms-file validator above shipped in batch 13 with neither arm, and that exemption is
+# exactly how its first draft reached review with a fails-toward-clean hole in it (an empty
+# `n_` made `[ "" -eq 0 ]` a bash error, so every row passed silently).
+#
+# Runs with PUMP_RED_ARM_VALIDATE_ONLY so no arm builds or mutates anything.
+#   bash ci/pump-red-arm.sh <preset> --self-test
+if [ "$arms_file" = "--self-test" ]; then
+    ok=0; bad=0
+    st_dir=$(mktemp -d); trap 'rm -rf "$st_dir"' EXIT
+    real=$(cd "build/$preset" 2>/dev/null && ctest -N 2>/dev/null \
+             | sed -n 's/^ *Test *#[0-9]*: *//p' | head -1)
+    [ -n "$real" ] || { echo "pump-red-arm self-test: build/$preset registers no tests" >&2; exit 2; }
+    run_st() { PUMP_RED_ARM_VALIDATE_ONLY=1 bash "$0" "$preset" "$1" >"$st_dir/o" 2>&1; echo $?; }
+    chk() { # <desc> <want-rc> <file> <must-contain-or-empty>
+        local rc; rc=$(run_st "$3")
+        if [ "$rc" = "$2" ] && { [ -z "$4" ] || grep -qF "$4" "$st_dir/o"; }; then
+            printf '  ok    %-56s rc=%s\n' "$1" "$rc"; ok=$((ok+1))
+        else
+            printf '  !!BAD %-56s rc=%s (want %s)\n' "$1" "$rc" "$2"; sed 's/^/        /' "$st_dir/o"; bad=$((bad+1))
+        fi
+    }
+    # FIRE: a regex that selects nothing must abort BEFORE any build.
+    printf 'tests/x.cpp\tanchor\tL_FIRE\ttgt\t^__no_such_ctest__$\n' > "$st_dir/fire.tsv"
+    chk "a non-matching ctest regex FIRES" 2 "$st_dir/fire.tsv" "selects ZERO tests"
+    # FIRE: the same row with NO TRAILING NEWLINE must still be seen (`read` skips it without
+    # the `|| [ -n "$f_" ]` guard, while the awk check above sees it -- two parsers, one file).
+    printf 'tests/x.cpp\tanchor\tL_NOEOL\ttgt\t^__no_such_ctest__$' > "$st_dir/noeol.tsv"
+    chk "an UNTERMINATED final row is still validated" 2 "$st_dir/noeol.tsv" "L_NOEOL"
+    # QUIET: a row naming a really-registered test must pass validation.
+    printf 'tests/x.cpp\tanchor\tL_QUIET\ttgt\t^%s$\n' "$real" > "$st_dir/quiet.tsv"
+    chk "a registered ctest name is QUIET" 0 "$st_dir/quiet.tsv" "validated"
+    # FIRE: a build dir with no tests must say so, and NOT blame the arms file.
+    mkdir -p "$st_dir/empty/build/$preset"
+    ( cd "$st_dir/empty" && git init -q . 2>/dev/null
+      PUMP_RED_ARM_VALIDATE_ONLY=1 bash "$OLDPWD/$0" "$preset" "$OLDPWD/$st_dir/quiet.tsv" ) \
+        >"$st_dir/o" 2>&1; e_rc=$?
+    if [ "$e_rc" = 2 ] && grep -q "registers NO tests at all" "$st_dir/o"; then
+        printf '  ok    %-56s rc=%s\n' "an EMPTY build dir is not blamed on the arms file" "$e_rc"; ok=$((ok+1))
+    else
+        printf '  !!BAD %-56s rc=%s\n' "an EMPTY build dir is not blamed on the arms file" "$e_rc"
+        sed 's/^/        /' "$st_dir/o"; bad=$((bad+1))
+    fi
+    echo "pump-red-arm self-test: $ok ok, $bad bad"
+    [ "$bad" -eq 0 ]
+    exit $?
+fi
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root" || exit 2
 # Shared with ci/pump-seam-arm.sh so the two non-vacuity guards cannot drift apart.
@@ -123,6 +172,99 @@ if [ -n "$bad" ]; then
     printf '%s\n' "$bad" >&2
     exit 2
 fi
+
+# ⚠️ A REGEX THAT SELECTS ZERO TESTS MUST NOT BE READ AS "the miss branch was silent",
+# AND UNTIL BATCH 13 IT WAS. `ctest -R <no match>` prints "No tests were found" and exits
+# 0, so the arm's output carries no report and the SILENT branch fires -- A WRONG VERDICT
+# AGAINST CORRECT CODE, the same failure direction as the SIGPIPE bug further down. It
+# cost 4 of 7 arms in batch 13, every one of which had already gone RED under the seam
+# driver; the contradiction between two drivers is what exposed it, not reading.
+#
+# ⚠️ THE DEFAULT `^<target>$` IS THE TRAP, NOT A TYPO -- but not for the reason an earlier
+# revision of this comment gave, and the correction matters because that reason was the
+# only stated justification for keeping column 5 manual.
+#
+# WHAT IS TRUE, and it is what makes the default wrong: a cmake TARGET and a registered
+# ctest NAME are different strings for 8 of the 10 files this batch touches. Example:
+# source `test_019_g2_enablement_witness.cpp` -> target `g2_enablement_witness_019_test`
+# -> ctest name `g2_enablement_witness_019`. Derive it, do not trust the ratio:
+#   ctest --show-only=json-v1 | jq -r '.tests[]|[.name,(.command[0]|split("/")|last)]|@tsv'
+#
+# ⚠️ WHAT IS FALSE, twice over, and was written here as "MEASURED": that the target and the
+# EXECUTABLE are also independent, and that matching `basename(command[0])` against the
+# target "resolves NOTHING". This tree sets no `OUTPUT_NAME` anywhere
+# (`grep -rn OUTPUT_NAME tests/ cmake/ CMakeLists.txt` is empty), so target == executable
+# basename for every one of those 10 files, and that join resolves ALL of them. The
+# derivation the comment called impossible is the one that works. It would map
+# target -> ctest name mechanically and could replace column 5; it is not done here only
+# because that is a change of shape, not because it cannot be done.
+# ⚠️ A third error in the same sentence: it called the SOURCE STEM a "target". The author
+# then typed that stem into `cmake --build --target` and got `ninja: error: unknown
+# target`. A comment warning about confusable namespaces had the namespaces confused.
+# The two that matter -- target and ctest name -- share no derivation rule,
+# and matching `basename(command[0])` from `ctest --show-only=json-v1` against the target
+# name resolves NOTHING for 7 of the 9 targets this batch touches. So column 5 stays
+# explicit; what changes is that a wrong value is now caught HERE.
+#
+# ⚠️ CHECKED UP FRONT, FOR EVERY ROW, BEFORE THE FIRST MUTATION -- not per-arm inside the
+# loop. Per-arm, a bad row in position 6 is only reported after five rebuild-and-run
+# cycles have already spent their time, and the run has already left the tree mutated
+# once. An unforced tree is the cheaper state to bail from.
+#
+# ⚠️ WHAT THIS DOES *NOT* CATCH, stated because "the arms file is validated" would
+# overclaim it: a regex selecting the WRONG test still selects something and passes here.
+# It bounds the class where the selection is EMPTY, which is the one that reads as clean.
+#
+# ⚠️ AND THE GUARD ITSELF MUST NOT FAIL TOWARD CLEAN, which the first draft did. It read
+# `n_=$(cd "build/$preset" && ctest ... | grep -c ...)` and tested `[ "$n_" -eq 0 ]`. When
+# the build directory does not exist the `cd` fails, the substitution yields the EMPTY
+# STRING, and `[ "" -eq 0 ]` is a bash *error* that evaluates non-zero -- so every row
+# silently passed the check that exists to stop rows passing silently. The build dir is
+# now asserted once, and a non-numeric count is a hard failure rather than a false pass.
+[ -d "build/$preset" ] || {
+    printf 'pump-red-arm: build/%s does not exist -- configure and build it first\n' "$preset" >&2
+    exit 2
+}
+# ⚠️ SEPARATE "this build knows no tests at all" FROM "this ROW names a test that does not
+# exist", because the second message is a WRONG CAUSE for the first and sends the reader to
+# edit a correct arms file. An unbuilt-but-configured tree selects zero for EVERY row.
+all_tests=$(cd "build/$preset" && ctest -N 2>/dev/null | grep -c '^ *Test *#')
+if [ "${all_tests:-0}" -eq 0 ]; then
+    printf 'pump-red-arm: build/%s registers NO tests at all -- build it first.\n' "$preset" >&2
+    printf '  (Not an arms-file defect: every row would select zero here.)\n' >&2
+    exit 2
+fi
+nosuch=""
+# ⚠️ `|| [ -n "$f_" ]` IS LOAD-BEARING. `read` returns non-zero on a final line with NO
+# TRAILING NEWLINE, so without it the last row is never validated -- while the `awk` check
+# 40 lines above DOES see it. That is the exact two-parsers-one-file defect the comment on
+# that check describes, and the one `assert_ran_count` in ci/pump-arm-common.sh exists to
+# close; reintroducing it one block below would defer the catch until after every build,
+# defeating this guard's whole reason to run up front.
+while IFS=$'\t' read -r f_ a_ l_ tgt_ rx_ || [ -n "$f_" ]; do
+    case "$f_" in ''|\#*) continue ;; esac
+    rx_="${rx_:-^$tgt_$}"
+    n_=$(cd "build/$preset" && ctest -N -R "$rx_" 2>/dev/null | grep -c '^ *Test *#')
+    case "$n_" in
+        ''|*[!0-9]*)
+            printf 'pump-red-arm: could not count tests for %s (got %s) -- refusing to guess\n' \
+                   "$l_" "${n_:-<empty>}" >&2
+            exit 2 ;;
+        0) nosuch+="    $l_ -- \`ctest -R '$rx_'\` selects ZERO tests"$'\n' ;;
+    esac
+done < "$arms_file"
+if [ -n "$nosuch" ]; then
+    printf 'pump-red-arm: %s has row(s) whose ctest regex matches nothing:\n' "$arms_file" >&2
+    printf '%s' "$nosuch" >&2
+    printf '  This is an ARMS-FILE defect, not a site defect. Put the registered ctest name\n' >&2
+    printf '  in column 5 -- list them with `ctest -N` in build/%s.\n' "$preset" >&2
+    exit 2
+fi
+
+# Validation ends here. `PUMP_RED_ARM_VALIDATE_ONLY=1` stops before the first mutation so
+# the guards above can be exercised WITHOUT a build -- which is what makes the self-test
+# below cheap enough to have both arms. It is a test seam, not a mode for normal use.
+[ -n "${PUMP_RED_ARM_VALIDATE_ONLY:-}" ] && { echo "pump-red-arm: arms file validated"; exit 0; }
 
 # ⚠️ RESTORE FROM A BYTE COPY, NEVER `git checkout -- <file>`. The sources this
 # script forces are normally MODIFIED IN THE WORKING TREE -- the migration being
@@ -323,6 +465,8 @@ while IFS=$'\t' read -r file anchor label target regex; do
     # verdict on an empty run.
     regex="${regex:-^$target$}"
     printf '\n=== ARM %s\n    label: %s\n' "$file" "$label"
+    # Every row's regex was proven to select at least one test up front, before any
+    # mutation -- see the hoisted check above. Nothing re-checks it here.
     snapshot "$file"
     if ! force_site "$file" "$anchor"; then
         echo "    !! FORCE FAILED"; NOTES+=("FORCE-FAILED $label")

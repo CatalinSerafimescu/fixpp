@@ -56,6 +56,56 @@
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────
+//
+// ⚠️ THIS FILE'S TWO CENSUS SITES ADOPT `pump_until_ready`, NOT
+// `run_window_then_ready`, AND THE REASON IS THE SHAPE OF THE WAIT, NOT A
+// PREFERENCE. Each site drives a HAND-ROLLED bounded loop whose predicate is the
+// application callback count, NOT the send's own future; the `get()` that follows is
+// therefore unconditional against a future nothing waited on. Wrapping it in
+// `run_window_then_ready` would be wrong twice over: that primitive pumps for the
+// whole window BEFORE testing readiness, so a window wide enough to be safe would be
+// paid in full on every passing run HERE. ⚠️ That is a property of THIS SITE, not of
+// `run_window_then_ready`: `run_for` returns early once the context runs out of work, and
+// the primitive's own doc says so ("no work guard ... the window costs what it costs
+// today"). It holds here because a live loopback-TLS engine always has outstanding work --
+// the listener's accept, each session's read pump, the detached liveness loop -- so the
+// context never empties and the window always runs to its end.
+// `pump_until_ready` tests readiness FIRST and
+// returns immediately when the loop above already satisfied it, so the happy path
+// costs nothing and a lost wake FAILS at the budget instead of hanging.
+// It reports with `kPumpBudgetMiss` (a budget was granted and exhausted) rather than
+// `kWindowMiss` (a preserved window closed).
+//
+// ⚠️ CONSEQUENCE FOR VERIFICATION: THE SEAM REACHES BOTH SITES, because both calls pass
+// a label; `ci/pump-red-arm.sh` still cannot rewrite them, so the seam is the only driver
+// and `ci/red-arms/batch13-labels.txt` carries both arms.
+//
+// ⚠️ THESE TWO SITES ARE WHY THE SEAM WAS EXTENDED TO THIS PRIMITIVE AT ALL, and the
+// measurement below is that argument -- keep it. Before the extension they were mutated
+// BY HAND, and the obvious hand recipe PRODUCES A CLEAN PASS THAT READS EXACTLY LIKE A
+// BROKEN MISS BRANCH. `pump_until` evaluates `ready()`
+// BEFORE it pumps, so a zero budget still returns TRUE at a site whose future is already
+// ready at entry -- which is the normal state here, because the loop above has just
+// finished driving the send. Measured: budget 0s alone left this test PASSING, with
+// `[ RUN ]`/`[ OK ]` in the output, so it was not a skip.
+//   The forcing mutation must ALSO starve the loop above (`now() + 3s` -> `now()`), which
+//   is what makes the future unready and puts the site in the state the guard exists for.
+//   Force ONE site at a time: the miss branch returns, so a mutation applied to both
+//   covers only the first.
+// This is the same asymmetry that settled `run_window_then_ready`'s seam on "announce,
+// do not dispatch, RETURN FALSE" rather than on shrinking durations -- shrinking cannot
+// force a wait that already completed. It applies to budget sites too.
+//
+// The drain is the CLOCKED one, spelled `*engine.clock()`. `engine` is a
+// `fixpp::session::Engine`, so the ACCESSOR exists; the `EngineConfig` that carried
+// the clock was `std::move`d into it at construction, so the config's own `clock`
+// member is a moved-from `shared_ptr` by the time a miss branch could read it.
+// Non-nullness rests on the assignment in this test body -- `ecfg.clock` is set two
+// statements above the engine's construction -- and NOT on the accessor's
+// "never null post-construction" comment, which is #289's standing known-false one.
 
 using namespace std::chrono_literals;
 using fixpp::core::expected_t;
@@ -264,6 +314,49 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
             ioc.restart();
         }
 
+        // The loop above waits on the APPLICATION callback, not on `send_fut`; this
+        // is what makes the `get()` conditional. Ready-first, so a passing run pays
+        // nothing here.
+        if (!fixpp::test_support::pump_until_ready(ioc, send_fut, 3s,
+                                                   "G2EnablementWitness/send_nos")) {
+            // ⚠️ STOP THE ENGINE BEFORE DRAINING. THIS IS SURVIVOR CASE (ii) AT THE
+            // PRIMITIVE, AND BATCH 12 RECORDED THAT NO #289 SITE REACHED IT -- THIS IS THE
+            // FIRST THAT DOES.
+            //
+            // WHAT WAS MEASURED, stated separately from what it is attributed to, because
+            // the two were run together in one sentence and only the first is established:
+            // with this `engine.stop()` deleted and the drain left alone, a forced miss at
+            // this site emits `kDrainResidual`. That was first seen under a HAND mutation
+            // and re-measured under the SEAM while adding the driver's residual check --
+            // delete the stop, rebuild `g2_enablement_witness_019_test`, force both g2
+            // labels, and the sweep reports `RED=1 ... RESIDUAL=1 of 2`, this site demoted
+            // and its sibling still clean. So the drain alone does NOT quiesce here.
+            //
+            // WHAT IS NOT ESTABLISHED: which outstanding work is responsible. A live engine
+            // holds several things at once -- the listener's accept, each session's read
+            // pump, a detached `run_liveness_loop` -- and the awaited send may or may not
+            // still be parked in `async_write` depending on how far the loop above got.
+            // `kDrainResidual`'s text names the transport case, but that text is a general
+            // HINT printed on every residual, not a diagnosis of this one. An earlier
+            // revision of this comment read the hint as the finding.
+            // It does not matter for the fix: `engine.stop()` retires all of them, which is
+            // why the remedy is right whichever it was. It matters for anyone reasoning
+            // FROM this comment, which is why the distinction is written down.
+            // `drain_or_report`'s comment lists three answers; the single-`Transport*`
+            // overload is not one of them here, because the engine owns two sessions plus a
+            // listener and that parameter takes one. The remaining answer is "close the
+            // transport yourself first", and at engine level that spells `engine.stop()` --
+            // the same call this test's own teardown block already makes.
+            // Bounded, and its verdict DELIBERATELY ignored: the drain that follows is what
+            // reports whatever `stop()` failed to release, so swallowing a stop() miss here
+            // cannot hide a residual.
+            auto quiesce_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+            (void)fixpp::test_support::pump_until_ready(ioc, quiesce_fut, 5s);
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *engine.clock(),
+                                                            "G2EnablementWitness/send_nos");
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "G2EnablementWitness/send_nos";
+            return;
+        }
         auto result = send_fut.get();
         ASSERT_TRUE(result.has_value())
             << "engine.send(NOS) failed: error="
@@ -290,6 +383,21 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
             ioc.restart();
         }
 
+        // The loop above waits on the APPLICATION callback, not on `send_fut`; this
+        // is what makes the `get()` conditional. Ready-first, so a passing run pays
+        // nothing here.
+        if (!fixpp::test_support::pump_until_ready(ioc, send_fut, 3s,
+                                                   "G2EnablementWitness/send_er")) {
+            // Same shape as the NOS site above, for the same measured reason (survivor
+            // case (ii): a send parked on a live TLS transport). The reasoning is written
+            // once, there -- not copied, so it cannot drift into being false at one site.
+            auto quiesce_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+            (void)fixpp::test_support::pump_until_ready(ioc, quiesce_fut, 5s);
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *engine.clock(),
+                                                            "G2EnablementWitness/send_er");
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "G2EnablementWitness/send_er";
+            return;
+        }
         auto result = send_fut.get();
         ASSERT_TRUE(result.has_value())
             << "engine.send(ER) failed: error="

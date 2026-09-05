@@ -55,6 +55,34 @@
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────
+//
+// Both census sites in this file use `run_window_then_ready` plus a miss-branch drain
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289
+// names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// ⚠️ BOTH ARE NORMALISATIONS, NOT HAZARD FIXES. An
+// `ASSERT_TRUE(stop_fut.wait_for(0s) == ready)` already stood between the window and
+// the `get()` at each. What the migration buys is the shared report text and the
+// FORCING SEAM. The census flags them because it is LEXICAL and cannot see an
+// assertion standing between the two lines it matches.
+//
+// ⚠️ THE VERDICT IS CAPTURED BEFORE `watchdog.cancel()`, AND THE ORDER IS
+// LOAD-BEARING IN BOTH DIRECTIONS. The window must stay INSIDE the armed watchdog --
+// that is what the original `run_for(2s)` comment says it is for -- so the pump
+// happens first. But the miss-branch DRAIN must run AFTER the cancel: it pumps for up
+// to 5 s, which is at or past this test's 5 s (and the next one's 6 s) watchdog
+// deadline, so draining with the timer still armed would let a REAL `steady_timer`
+// set `watchdog_fired` during failure handling and report a second, spurious defect.
+// [[feedback_a_pump_budget_above_a_real_fallback_timer_turns_a_hang_into_a_false_pass]]
+//
+// The drain is the CLOCKED one, spelled `*engine.clock()`: each test installs a real
+// `system_clock_source` into its `EngineConfig` and `std::move`s that config into the
+// engine, so the accessor is the only live spelling. Non-nullness rests on the
+// assignment two statements above each engine's construction, not on the accessor's
+// "never null post-construction" comment, which is #289's standing known-false one.
 
 // SecurityProfile::kind::insecure_plain_tcp — [[deprecated]] friction fires at
 // every unsuppressed selection site (T019/T020). This test file legitimately
@@ -331,11 +359,20 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
     // session-start — still well within the external test timeout. We check
     // stop_fut before assertions.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run_for(2s);
-    // Cancel watchdog after cleanup so it doesn't fire during assertions.
+    const bool stopped_in_window = fixpp::test_support::run_window_then_ready(
+        ioc, stop_fut, 2s, "PlainAcceptorAndInitiatorCompleteLogon/stop");
+    // Cancel watchdog after cleanup so it doesn't fire during assertions — and, on the
+    // miss branch, before the drain, whose budget reaches the watchdog's deadline.
     watchdog.cancel();
-    ASSERT_TRUE(stop_fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready)
-        << "engine.stop() did not complete within 3s — potential wedge in session teardown";
+    if (!stopped_in_window) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *engine.clock(), "PlainAcceptorAndInitiatorCompleteLogon/stop");
+        // A miss means engine.stop() did not complete within 2 s -- a potential wedge in
+        // session teardown. Report text is the stem plus the label, nothing else.
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "PlainAcceptorAndInitiatorCompleteLogon/stop";
+        return;
+    }
     stop_fut.get();
 
     // Assert no watchdog fired during establish or cleanup.
@@ -454,10 +491,16 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
 
     // Stop cleanly.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run_for(2s);
+    const bool stopped_in_window = fixpp::test_support::run_window_then_ready(
+        ioc, stop_fut, 2s, "PlainAcceptorAndInitiatorCompleteLogonLogout/stop");
     watchdog.cancel();
-    ASSERT_TRUE(stop_fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready)
-        << "engine.stop() did not complete within 2s — potential wedge in session teardown";
+    if (!stopped_in_window) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *engine.clock(), "PlainAcceptorAndInitiatorCompleteLogonLogout/stop");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "PlainAcceptorAndInitiatorCompleteLogonLogout/stop";
+        return;
+    }
     stop_fut.get();
 
     ASSERT_FALSE(watchdog_fired.load())

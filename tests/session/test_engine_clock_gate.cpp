@@ -59,10 +59,20 @@
 // `kPumpBudgetMiss` (a budget was granted and exhausted) rather than `kWindowMiss`
 // (a preserved window closed). See `stop_engine` below.
 //
-// ⚠️ CONSEQUENCE FOR VERIFICATION: NEITHER #289 DRIVER CAN FORCE THIS SITE.
-// `pump_until_ready` carries no site label, so `FIXPP_FORCE_WINDOW_MISS` cannot reach
-// it; and it is not a `run_window_then_ready` call, so `ci/pump-red-arm.sh` cannot
-// rewrite it either. Forcing it means editing the budget by hand.
+// ⚠️ CONSEQUENCE FOR VERIFICATION: THIS SITE PASSES NO LABEL, SO NEITHER #289 DRIVER
+// CAN FORCE IT -- but read that as an ADOPTION GAP, not a property of the shape. Batch 13
+// gave `pump_until`/`pump_until_ready` the same trailing `site` parameter
+// `run_window_then_ready` has, so the seam reaches this primitive now; what it cannot do
+// is force a call that hands it no identity. An earlier revision of this comment said
+// `pump_until_ready` "carries no site label", which was true when written and is not now.
+// Derive the state rather than trusting either sentence:
+//   grep -n 'pump_until_ready(' tests/session/test_engine_clock_gate.cpp
+// A call whose argument list ends at the budget/slice is unforceable; one ending in a
+// string literal is in the seam's population and belongs in a batch's labels file.
+// Forcing it as it stands means editing the budget by hand -- and ⚠️ zeroing the budget
+// alone is NOT sufficient in general, because `pump_until` evaluates `ready()` before it
+// pumps; the mechanism and its measurement are at `pump_until` in
+// tests/support/pump_until_ready.hpp.
 
 using namespace std::chrono_literals;
 

@@ -75,6 +75,37 @@
 
 #include "engine_loopback_harness.hpp"
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────
+//
+// This file's one census site uses `run_window_then_ready` plus a miss-branch drain
+// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289
+// names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// ⚠️ THIS SITE IS A NORMALISATION, NOT A HAZARD FIX, and saying so is the point.
+// An `ASSERT_EQ(close_fut.wait_for(0s), ready)` already stood between the window and
+// the `get()`. What the migration buys is the shared report text and the FORCING
+// SEAM, not a removed deadlock. The census flags it because the census is LEXICAL and
+// cannot see an assertion standing between the two lines it matches.
+//
+// The site label passed to `run_window_then_ready` is that seam: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// ⚠️ THE OTHER UNGUARDED `.get()`s IN THIS FILE ARE A DIFFERENT SHAPE AND ARE
+// DELIBERATELY NOT MIGRATED. They are `ioc.run(); stop_fut.get();` -- an UNBOUNDED
+// run, not a bounded window -- which is outside the population `ci/pump-census.sh`
+// scans and outside what this primitive replaces. Bounding them is a real question
+// and a separate one; derive them with `bash ci/pump-get-sweep.sh` rather than from
+// a count written here.
+//
+// The drain is the CLOCKED one, spelled `*h->engine->clock()`. `build_harness` above
+// installs a real `system_clock_source` into the `EngineConfig` and `std::move`s that
+// config into the engine, so the accessor is the only live spelling; non-nullness
+// rests on that assignment, not on the accessor's "never null post-construction"
+// comment, which is #289's standing known-false one.
 #include "transport/loopback_tls_fixture.hpp"
 
 using namespace std::chrono_literals;
@@ -691,10 +722,16 @@ TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348)
     // at session.cpp's post-root-cancel site rather than Engine::stop()'s.
     auto close_fut =
         asio::co_spawn(ioc, acc->close(fixpp::session::close_mode::terminal), asio::use_future);
-    ioc.run_for(4s);
-    ioc.restart();
-    ASSERT_EQ(close_fut.wait_for(0s), std::future_status::ready)
-        << "Session::close(terminal) did not complete within 4s";
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, close_fut, 4s, "SessionTerminalCloseDeliversCloseNotifyToPeer/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *h->engine->clock(), "SessionTerminalCloseDeliversCloseNotifyToPeer/close");
+        // The 4 s window is the one the ASSERT this replaces named; the report text is
+        // deliberately just the stem plus the label, so the drivers match one shape.
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "SessionTerminalCloseDeliversCloseNotifyToPeer/close";
+        return;
+    }
     (void)close_fut.get();
 
     expect_clean_peer_eof(hc, "Session::close(terminal)'s post-root-cancel transport close");

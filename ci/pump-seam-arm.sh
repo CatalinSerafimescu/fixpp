@@ -82,14 +82,44 @@ bindir="build/$preset/bin"
 TIMEOUT_S="${PUMP_SEAM_ARM_TIMEOUT:-600}"
 
 ANNOUNCE='#289 FORCED window miss at site: '
-# Match the kWindowMiss TAIL plus the label, never the bare label: the drain's
+# Match a miss-report TAIL plus the label, never the bare label: the drain's
 # residual report streams the same label and would count as a miss report.
+#
+# TWO tails, because the seam now fires at BOTH primitives and they report different
+# text -- `kWindowMiss` for `run_window_then_ready`, `kPumpBudgetMiss` for `pump_until*`.
+# A driver matching only the first would read every budget site as SILENT, which is this
+# script's fails-toward-clean verdict rather than an error.
+#
+# Two `-F` patterns rather than one regex alternation because both tails contain a `.`
+# that a regex would match as any character, and `grep -F` removes the question entirely.
+# ⚠️ An earlier revision justified this with "`rg` returns 0 matches for any `|`
+# alternation". That is a claim about a DIFFERENT tool -- this line calls `grep` -- and it
+# does not hold here now either (measured: `rg` 14.1.1, an alternation, exit 0, matches
+# printed). A borrowed caveat is not a reason.
 REPORT_TAIL='grace slice. Site: '
+REPORT_TAIL2='bounded-pump budget. Site: '
+# `kDrainResidual` from tests/support/pump_until_ready.hpp -- the SAME string
+# `ci/pump-red-arm.sh` matches. Mirrored here deliberately rather than left to that driver.
+#
+# ⚠️ WHY IT HAS TO BE IN *THIS* DRIVER TOO, which it was not until batch 13 and which was a
+# coverage gap that batch INTRODUCED. Before it, every seam-forceable site was also
+# rewritable by `ci/pump-red-arm.sh`, so a drain that failed to quiesce was caught there and
+# this driver's blindness cost nothing. Batch 13 added three `pump_until_ready` sites that
+# the textual driver CANNOT rewrite -- it mutates `run_window_then_ready` calls -- so the
+# seam became their ONLY driver. And a residual is exactly what one of them measured: the
+# `engine.stop()`-then-drain remedy at `G2EnablementWitness/send_nos` exists because forcing
+# it emitted this string. Without the check, a regression of that remedy reports plain RED
+# (the miss branch still announces and still reports) and says nothing about the condition
+# the remedy was written to remove.
+# ⚠️ Requiring a residual's ABSENCE cannot manufacture a false finding -- a residual is real
+# output -- and it is matched WITH the label, because an arm may run a whole binary and
+# another test's residual is not this arm's verdict.
+RESIDUAL='#289: the io_context did not run out of work within the teardown drain'
 
 mapfile -t LABELS < <(grep -vE '^\s*(#|$)' "$labels_file" || true)
 assert_nonempty_population "${#LABELS[@]}" "$labels_file" pump-seam-arm labels
 
-red=0; silent=0; nosite=0; inconclusive=0; ran=0; wedged=0
+red=0; silent=0; nosite=0; inconclusive=0; ran=0; wedged=0; residual=0
 declare -a NOTES=()
 
 # ── Index label -> binaries with ONE `strings` pass per binary ───────────────
@@ -126,7 +156,7 @@ run_label() {                      # $1 = label
         NOTES+=("$label: absent from every binary")
         nosite=$((nosite + 1)); return 1
     fi
-    ann=0; rep=0; timed_out=0
+    ann=0; rep=0; timed_out=0; resid=''
     for b in "${bins[@]}"; do
         # A forced binary EXITS NON-ZERO by construction (its tests fail), so the
         # exit status must be captured, not tested by `if` -- `$?` after an `if`
@@ -139,9 +169,17 @@ run_label() {                      # $1 = label
         # a WRONG verdict dressed as a finding. So a filtered run that sees no announcement is
         # retried unfiltered, and only then believed. The fast path stays fast; the slow path
         # is only paid where the guess was wrong.
+        # ⚠️ STRIP THE `/phase` SUFFIX BEFORE GUESSING, AND LEAVE THE STEM OPEN-ENDED.
+        # A TEST-body label is `<case-stem>/<phase>`, and a `/` appears in a gtest name
+        # only for a PARAMETERISED test -- so `*.Stem/phase` matched nothing and every
+        # such arm took the unfiltered fallback. The trailing `*` is the second half and
+        # is not optional: a label is a READABLE stem, not the gtest name, so
+        # `W2_StoreWinsDown` must still reach `RefreshOnLogon.W2_StoreWinsDown_RED`, and
+        # `gtest_filter` has no implicit trailing wildcard. Over-matching costs a few
+        # extra tests in one binary; under-matching costs the whole fallback run.
         case "$label" in
             *::*) filt="${label%%::*}.*" ;;
-            *)    filt="*.$label" ;;          # a TEST-body label is the CASE name
+            *)    filt="*.${label%%/*}*" ;;   # a TEST-body label is <case-stem>/<phase>
         esac
         rc=0
         out=$(FIXPP_FORCE_WINDOW_MISS="$label" timeout "$TIMEOUT_S" "$b" \
@@ -169,7 +207,7 @@ run_label() {                      # $1 = label
             # per-test bisect to separate them.
             local t_ann t_rep
             t_ann=$(grep -cF "$ANNOUNCE$label" <<<"$out" || true)
-            t_rep=$(grep -cF "$REPORT_TAIL$label" <<<"$out" || true)
+            t_rep=$(grep -cF -e "$REPORT_TAIL$label" -e "$REPORT_TAIL2$label" <<<"$out" || true)
             if [ "$t_ann" -gt 0 ] && [ "$t_rep" -gt 0 ]; then
                 printf '    RED* %-46s forced %2d  reported %2d  THEN HUNG in %s\n' \
                     "$label" "$t_ann" "$t_rep" "$(basename "$b")"
@@ -198,7 +236,11 @@ look for an UNMIGRATED run_for/get after this site")
             continue
         fi
         ann=$((ann + $(grep -cF "$ANNOUNCE$label" <<<"$out" || true)))
-        rep=$((rep + $(grep -cF "$REPORT_TAIL$label" <<<"$out" || true)))
+        rep=$((rep + $(grep -cF -e "$REPORT_TAIL$label" -e "$REPORT_TAIL2$label" <<<"$out" || true)))
+        # Two herestrings, not a pipeline: `set -o pipefail` plus a pipeline into `grep` is
+        # the SIGPIPE trap this repo has already paid for once.
+        resid_all=$(grep -F "$RESIDUAL" <<<"$out" || true)
+        resid="$resid$(grep -F "Site: $label" <<<"$resid_all" || true)"
     done
     if [ "$ann" -eq 0 ]; then
         if [ "$timed_out" -gt 0 ]; then
@@ -214,6 +256,21 @@ look for an UNMIGRATED run_for/get after this site")
         printf '    !!   SILENT: %s forced %dx but its miss branch reported nothing\n' "$label" "$ann"
         NOTES+=("$label: forced but silent")
         silent=$((silent + 1)); return 1
+    fi
+    # ⚠️ PROVEN TO FIRE, and not by reading. This check is not in the `--self-test` below
+    # because exercising it needs a SOURCE MUTATION and a rebuild, which that cheap
+    # no-build self-test cannot do. It was proven by a paired control instead: delete the
+    # `engine.stop()`-then-drain remedy at `G2EnablementWitness/send_nos` ONLY, rebuild
+    # target `g2_enablement_witness_019_test`, and run both g2 labels. Expected and
+    # measured: `RED=1 ... RESIDUAL=1 of 2` -- the mutated site demoted, its untouched
+    # sibling still RED. Re-derive it that way; the recipe is the evidence, the numbers rot.
+    if [ -n "$resid" ]; then
+        printf '    !!   RED, BUT THE DRAIN LEFT A RESIDUAL: %s reported AND did not quiesce.\n' "$label"
+        echo   "         Check the drain FLAVOUR at this site, and whether it needs the"
+        echo   "         transport closed first (survivor case (ii) at the primitive)."
+        printf '%s\n' "$resid" | head -3
+        NOTES+=("$label: RESIDUAL")
+        residual=$((residual + 1)); return 1
     fi
     if [ "$timed_out" -gt 0 ]; then
         # RED, but a candidate binary wedged on the way. Count it: the summary line is the
@@ -292,15 +349,28 @@ fi
 # means a label that falls out of `run_label` through some path that records nothing makes
 # the totals disagree, which is the whole point. Same reasoning as ci/pump-red-arm.sh's
 # `pass + ${#NOTES[@]}`. [[feedback_a_verification_sweep_must_assert_an_execution_count]]
-ran=$(( red + silent + nosite + inconclusive ))
+#
+# ⚠️ EVERY TERMINAL VERDICT MUST APPEAR IN THIS SUM. Adding a category and forgetting it
+# here does not under-report that category -- it makes the ASSERTION fire and the whole run
+# refuse to report, which is loud but blames the wrong thing ("a row with no trailing
+# newline is the usual cause"). MEASURED, not hypothetical: `residual` was added in batch 13
+# and omitted here, and the first mutant that produced one turned a correct RESIDUAL verdict
+# into "parsed 2 label(s) but EXECUTED 1". Failing loudly for the wrong reason is still a
+# wrong diagnosis; the sum is the list of ways `run_label` can end, and it has to be
+# complete. Derive it from the function, not from memory:
+#   grep -n 'return [01]$' ci/pump-seam-arm.sh
+ran=$(( red + silent + nosite + inconclusive + residual ))
 assert_ran_count "$ran" "${#LABELS[@]}" pump-seam-arm "label(s)"
 
 echo
 # ⚠️ THE WEDGE COUNT IS ON THE SUMMARY LINE ON PURPOSE. A RED* arm PASSES -- the branch it
 # tests reported -- so without this the only trace of a wedged run is a note, and a summary
 # that reads "RED=N of N" with a hidden wedge is the fails-toward-clean shape.
+# ⚠️ EVERY NON-RED CATEGORY IS ON THIS LINE, because the summary is the only place a
+# reader looks. A counter that exists but is not printed is the fails-toward-clean shape --
+# "RED=N of N" would be true while an arm was demoted for a residual.
 echo "=== summary: RED=$red (of which $wedged reported THEN WEDGED) SILENT=$silent" \
-     "NO-SUCH-SITE=$nosite INCONCLUSIVE=$inconclusive of ${#LABELS[@]}"
+     "RESIDUAL=$residual NO-SUCH-SITE=$nosite INCONCLUSIVE=$inconclusive of ${#LABELS[@]}"
 if [ "${#NOTES[@]}" -gt 0 ]; then
     printf '  note: %s\n' "${NOTES[@]}"
 fi

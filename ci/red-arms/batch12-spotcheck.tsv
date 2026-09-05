@@ -48,8 +48,10 @@
 # stays suspended whether the arm zeroed or not. Both forms see a wrong flavour equally.
 #
 # ⚠️ ONE SITE IN THIS BATCH IS IN NEITHER DRIVER. `engine_clock_gate:stop_engine`
-# adopts `pump_until_ready`, which has no site label and no seam; this driver forces
-# `run_window_then_ready` calls specifically. It is mutated BY HAND: set the 5 s budget to
+# adopts `pump_until_ready` and passes NO label, so the seam has nothing to match on;
+# this driver forces `run_window_then_ready` calls specifically. (The clause that used to
+# read "which has no site label and no seam" described the PRIMITIVE and stopped being
+# true in batch 13, which gave it one. The site, not the shape, is what lacks a label.) It is mutated BY HAND: set the 5 s budget to
 # zero, rebuild, run. The run MUST print `kPumpBudgetMiss` followed by
 # `engine_clock_gate:stop_engine` and fail both `EngineClockGate` tests. If it does not,
 # the finding is NOT "the miss branch is silent" -- `pump_until` at a zero budget returns
