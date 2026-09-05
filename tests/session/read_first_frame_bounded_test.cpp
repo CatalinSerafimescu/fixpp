@@ -320,36 +320,15 @@ TEST(ReadFirstFrameBounded, B2) {
 // pre-fix (via site B on the first read) and the delivered design (via F1 after
 // the clamped second read) reject this input with the same error — recorded so
 // this does not overclaim a second RED.
-// ⚠️ THE DEADLINE HERE IS A TERMINATION BOUND, NOT A COMPETITOR — 5 s, NOT 50 ms.
-// This cell asserts that the BUDGET decision fires. The deadline exists only so
-// a `room == 0` mutant fails instead of hanging (see B4). At 50 ms
-// the two raced, and on `windows-msvc-asan` under `ctest --parallel 4` the
-// deadline won: campaign run 33977674899 measured this cell at 735 ms against
-// 6 ms unloaded — 122x — and it reported `transport: handshake timeout`. That
-// is a VACUOUS run, not a product defect: the budget decision never happened,
-// so nothing about it was tested.
-//
-// ⚠️ WHICH PINS FAIL DEPENDS ON *WHERE* THE DEADLINE LANDS, AND THE OBSERVED
-// RUN FAILED ONLY TWO OF THE THREE. On Windows it was the error and
-// `buf.size()`; `async_reads_observed() == 2` PASSED, because both reads had
-// been ISSUED and the deadline won before the loop reached the budget decision
-// at its foot. Force the deadline earlier — small enough that read 2 is never
-// issued — and the read-count pin fails too. Two failures and three are the
-// SAME defect at different points; neither count is a signature.
-//
-// 5 s is derived from the competing quantity rather than taken as a round
-// number: the loaded wall time actually measured was 735 ms, so this is ~7x
-// the observed worst case, while staying 360x inside the 1800 s ctest timeout
-// the driver passes. The mutant still terminates, just in 5 s instead of 50 ms.
-//
-// ⚠️ Raising it does NOT weaken any assertion, because no assertion in this
-// cell reads the deadline. Do not "restore" 50 ms to make the mutant fail
-// faster — that reintroduces the race.
+// ⚠️ 5 s, NOT 50 ms — a termination bound, not a competitor. B4's derivation
+// below applies verbatim: a real `steady_timer` deadline racing mock reads is
+// decided by machine load, and this cell asserts the BUDGET decision, so the
+// deadline must not be able to win. B5 did NOT go red in campaign run
+// 33977674899; it has B4's shape and margin and was simply luckier, which is
+// why it is raised too. Read B4 for the numbers and the derivation — they are
+// stated once, there, so a re-measurement corrects one copy.
 TEST(ReadFirstFrameBounded, B5) {
     constexpr std::size_t kMaxBytes = 4096;
-    // ⚠️ B5 did NOT fail in that run; it has B4's shape and margin and was
-    // simply luckier. Fixing only the cell that happened to go red would leave
-    // the same defect in its sibling.
     constexpr auto kDeadline = std::chrono::seconds{5};
 
     // A well-formed header whose declared BodyLength (200000) far exceeds what is
@@ -544,7 +523,7 @@ TEST(ReadFirstFrameBounded, T1) {
 // record, not as an added mutant-kill column.
 // ⚠️ THE DEADLINE HERE IS A TERMINATION BOUND, NOT A COMPETITOR — 5 s, NOT 50 ms.
 // This cell asserts that the BUDGET decision fires. The deadline exists only so
-// a `room == 0` mutant fails instead of hanging (see B4's derivation). At 50 ms
+// a `room == 0` mutant fails instead of hanging (see the `room == 0` note in this cell). At 50 ms
 // the two raced, and on `windows-msvc-asan` under `ctest --parallel 4` the
 // deadline won: campaign run 33977674899 measured this cell at 735 ms against
 // 6 ms unloaded — 122x — and it reported `transport: handshake timeout`. That
@@ -567,6 +546,22 @@ TEST(ReadFirstFrameBounded, T1) {
 // ⚠️ Raising it does NOT weaken any assertion, because no assertion in this
 // cell reads the deadline. Do not "restore" 50 ms to make the mutant fail
 // faster — that reintroduces the race.
+//
+// ⚠️ THIS IS AN INTERIM FIX, AND THE ROOT CAUSE IS NAMED SO IT IS NOT MISTAKEN
+// FOR THE FINAL WORD. 5 s is still a wall-clock GUESS — 7x an observed 735 ms,
+// not a proof — so a slow enough runner reproduces the same vacuous run, just
+// rarely. The real fix is to stop depending on wall time: this repo already has
+// the seam (`fixpp::core::Clock`, include/fixpp/core/clock.hpp — virtual
+// `sleep_until` / `cancel_sleeps`, with a deterministic
+// `fixpp::core::test::mock_clock`), and `src/session/session.cpp` uses it for
+// every comparable deadline race. `read_first_frame_bounded` is the outlier: it
+// builds its own `asio::steady_timer` and calls `expires_after` directly
+// (src/session/read_first_frame_bounded.hpp), takes no `Clock&`, and therefore
+// CANNOT be driven by mock_clock. Threading a `Clock&` through it would let
+// these three cells fire the deadline deterministically and delete the race
+// rather than shrink it. That is a production-code change, outside this
+// branch's scope, and it is recorded here rather than left for someone to
+// rediscover from a future flake.
 TEST(ReadFirstFrameBounded, B4) {
     constexpr std::size_t kMaxBytes = 4096;
     constexpr auto kDeadline = std::chrono::seconds{5};

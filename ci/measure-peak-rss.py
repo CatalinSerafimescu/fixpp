@@ -235,6 +235,7 @@ class WindowsJobTracker:
         self.denied = 0
         self.self_pid = os.getpid()
         self._capacity = 256
+        self._idlist_types: dict[int, type] = {}
 
         k32 = ctypes.WinDLL("kernel32", use_last_error=True)
         psapi = ctypes.WinDLL("psapi", use_last_error=True)
@@ -295,13 +296,23 @@ class WindowsJobTracker:
 
         for _ in range(4):
             n = self._capacity
+            # ⚠️ CACHED BY CAPACITY, not rebuilt per call. This runs once per
+            # SAMPLE — ~11 000 times over a 46-minute ctest run — and defining a
+            # ctypes.Structure subclass costs ~50x instantiating one, for a type
+            # that is identical every time (the capacity only moves on the rare
+            # retry). Small in absolute terms, but this is the file whose header
+            # says the sampler must not contaminate the number it exists to
+            # support, so it does not get to spend it on nothing.
+            IdList = self._idlist_types.get(n)
+            if IdList is None:
+                class IdList(ctypes.Structure):  # noqa: F811
+                    _fields_ = [
+                        ("NumberOfAssignedProcesses", wintypes.DWORD),
+                        ("NumberOfProcessIdsInList", wintypes.DWORD),
+                        ("ProcessIdList", ctypes.c_size_t * n),
+                    ]
 
-            class IdList(ctypes.Structure):
-                _fields_ = [
-                    ("NumberOfAssignedProcesses", wintypes.DWORD),
-                    ("NumberOfProcessIdsInList", wintypes.DWORD),
-                    ("ProcessIdList", ctypes.c_size_t * n),
-                ]
+                self._idlist_types[n] = IdList
 
             buf = IdList()
             ret = wintypes.DWORD(0)
@@ -524,7 +535,10 @@ def _self_test_leaf(mib: int, hold_s: float) -> int:
     sys.stdout.write("leaf ready\n")
     sys.stdout.flush()
     time.sleep(hold_s)
-    return len(buf) and 0
+    # `buf` is held to here by ordinary scoping — the pages must still be
+    # resident when the sampler looks, which is the whole point of this process.
+    del buf
+    return 0
 
 
 def _self_test_tree(children: int, mib: int, hold_s: float) -> int:
@@ -614,10 +628,14 @@ def main() -> int:
     parser.add_argument("--log", help="tee the command's combined output here")
     parser.add_argument("--label", default="", help="free-text tag (e.g. the preset)")
     parser.add_argument("--interval-ms", type=int, default=250)
-    parser.add_argument("--self-test", action="store_true",
-                        help="measure a tree of known size and check the reading")
-    parser.add_argument("--self-test-tree", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--self-test-leaf", action="store_true", help=argparse.SUPPRESS)
+    # One EXCLUSIVE choice, not three independent booleans: dispatched by an
+    # if-chain they would let `--self-test --self-test-leaf` through, with the
+    # ordering silently picking a winner. argparse rejects it instead.
+    role = parser.add_mutually_exclusive_group()
+    role.add_argument("--self-test", action="store_true",
+                      help="measure a tree of known size and check the reading")
+    role.add_argument("--self-test-tree", action="store_true", help=argparse.SUPPRESS)
+    role.add_argument("--self-test-leaf", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--children", type=int, default=4)
     parser.add_argument("--mib", type=int, default=64)
     parser.add_argument("--hold-s", type=float, default=6.0)
@@ -724,20 +742,33 @@ def main() -> int:
     else:
         disposition = "ok"
 
+    # Every numeric field is BLANK rather than 0 when no sampler ran: a zero
+    # here is a legitimate reading elsewhere (`status=zero-peak`), so the two
+    # must not render alike. Written as one branch rather than a guard per
+    # field so a field added to one side is visibly missing from the other.
+    if sampler is None:
+        measured: dict[str, object] = {
+            "samples": 0, "peak_bytes": "", "peak_max_single_bytes": "",
+            "peak_procs": "", "peak_at_s": "", "elapsed_s": "", "sampler_error": "",
+        }
+    else:
+        measured = {
+            "samples": sampler.samples,
+            "peak_bytes": sampler.peak,
+            "peak_max_single_bytes": sampler.peak_largest,
+            "peak_procs": sampler.peak_procs,
+            "peak_at_s": f"{sampler.peak_at:.1f}",
+            "elapsed_s": f"{time.monotonic() - sampler.started_at:.1f}",
+            "sampler_error": "" if sampler.error is None else repr(sampler.error),
+        }
+
     write_out(
         args.out,
         {
             **base,
             "status": disposition,
             "cmd_status": status,
-            "samples": sampler.samples if sampler else 0,
-            "peak_bytes": sampler.peak if sampler else "",
-            "peak_max_single_bytes": sampler.peak_largest if sampler else "",
-            "peak_procs": sampler.peak_procs if sampler else "",
-            "peak_at_s": f"{sampler.peak_at:.1f}" if sampler else "",
-            "elapsed_s": f"{time.monotonic() - sampler.started_at:.1f}" if sampler else "",
-            "sampler_error": "" if not sampler or sampler.error is None
-                             else repr(sampler.error),
+            **measured,
             "denied_procs": tracker.denied if tracker else 0,
             "job_error": job_error,
         },

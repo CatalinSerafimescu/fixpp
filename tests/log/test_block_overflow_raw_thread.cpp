@@ -53,6 +53,8 @@
 #include <thread>
 #include <vector>
 
+#include "../support/wait_until.hpp"
+
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
@@ -88,13 +90,8 @@ public:
             // yield-loop would burn a core of a 4-vCPU runner for the whole
             // observation window — on the very lane whose wall time is the
             // measurement.
-            auto const deadline = std::chrono::steady_clock::now() + release_cap;
-            while (!release_first_emit.load(std::memory_order_acquire)) {
-                if (std::chrono::steady_clock::now() >= deadline) {
-                    release_timed_out.store(true, std::memory_order_release);
-                    break;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds{1});
+            if (!fixpp::test_support::wait_for_flag(release_first_emit, release_cap)) {
+                release_timed_out.store(true, std::memory_order_release);
             }
         }
         captured.push_back(rec);
@@ -176,15 +173,9 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms)
     // capped: this is thread creation, and the drain is parked until we release
     // it, so nothing is racing this wait — that is the whole point of the
     // redesign described in the header.
-    {
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
-        while (!producer_at_the_door.load(std::memory_order_acquire)
-               && std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds{1});
-        }
-    }
-    ASSERT_TRUE(producer_at_the_door.load(std::memory_order_acquire))
-        << "Producer thread did not reach its enqueue within 5 seconds";
+    ASSERT_TRUE(fixpp::test_support::wait_for_flag(producer_at_the_door, std::chrono::seconds{5}))
+        << fixpp::test_support::kWaitBudgetMiss
+        << "BlockModeRawThreadBlocks10ms — the producer thread did not reach its enqueue";
 
     // ── The observation this test exists to make ─────────────────────────────
     // The ring is still full (the drain is parked in emit() and has not
