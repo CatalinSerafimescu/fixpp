@@ -358,8 +358,13 @@ TEST_F(AdversarialSessionTest, LogoutGracefulCancelMidSleep) {
     // Cancel all sleeps → sleep_until resumes with system_error(operation_aborted),
     // which the Logout coroutine's catch block absorbs (session.cpp:1187).
     clock->cancel_sleeps();
-    ioc.run_for(100ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 100ms,
+                                                    "LogoutGracefulCancelMidSleep/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "LogoutGracefulCancelMidSleep/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LogoutGracefulCancelMidSleep/close";
+        return;
+    }
 
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
     (void)close_fut.get();

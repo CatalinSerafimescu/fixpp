@@ -5,8 +5,9 @@
 # miss branch is dead code under normal execution: the window is preserved, so
 # it never misses. "The tests still pass" is therefore evidence about the HIT
 # path only, and says nothing about whether the miss branch reports, drains, or
-# even compiles into something reachable. The only way to learn that is to make
-# the window miss on purpose and watch for the report.
+# even compiles into something reachable. The only way to learn that is to force
+# the miss VERDICT on purpose and watch for the report -- see the ⚠️ block below;
+# forcing does NOT shrink the window, and this sentence said that it did.
 #
 # ⚠️ ONE ARM AT A TIME IS NOT PEDANTRY -- IT IS THE WHOLE METHOD. PR #316 forced
 # all fifteen of its arms in one build and covered SEVEN, because the first miss
@@ -15,10 +16,24 @@
 # exactly this way. This script rebuilds and re-runs per arm for that reason;
 # the cost is the point.
 #
-# ⚠️ ZERO BOTH DURATIONS. `run_window_then_ready(ioc, fut, window, grace)`
-# defaults `grace` to `kPumpSlice`, so zeroing only the window leaves a live
-# grace slice that will usually still satisfy the future -- a vacuous arm that
-# passes without ever taking the branch it claims to test.
+# ⚠️ AN ARM DOES BOTH: IT ZEROES BOTH DURATIONS *AND* FORCES THE VERDICT. Neither
+# alone is sufficient and they fix different defects, so do not drop either:
+#   - `((void)run_window_then_ready(<args>), false)` forces the verdict. Without it
+#     a site whose future is ALREADY READY when its window opens returns true
+#     however small the window is, the miss branch never runs, and this script
+#     calls that SILENT -- a WRONG VERDICT against correct code.
+#   - zeroing `window` and `grace` stops the call DISPATCHING, so the drain faces a
+#     LIVE SUSPENDED FRAME. Without it the real window completes the coroutine at
+#     every site that normally completes in-window, and the drain's LIFETIME
+#     obligation -- resuming a frame whose inputs may already be dead (#301, #313,
+#     #316) -- goes unexercised. Witnessed by `PumpWindowMiss.FeedMissDrainsWhile-
+#     CallerTemporaryAlive`, which passes zero for BOTH durations for this reason.
+#     Zeroing only the window leaves `grace = kPumpSlice` live and is not enough.
+#     ⚠️ It does NOT improve the odds of catching a wrong drain FLAVOUR: that needs a
+#     clock-bound frame, and a real window does not advance a mock clock, so such a
+#     frame stays suspended either way. An earlier revision of this block said it did.
+# The seam obeys the same rule by returning without dispatching; see the ⚠️ block at
+# `run_window_then_ready`'s definition in `tests/support/pump_until_ready.hpp`.
 #
 # ⚠️ MATCH ON THE MESSAGE TAIL, NOT THE BARE LABEL. The drain's residual report
 # streams the SAME site label, so grepping the label alone cannot tell a
@@ -28,8 +43,8 @@
 #
 # A HANG IS NOT A FAILURE TO REPORT -- it is a different finding, and this script
 # keeps them apart. A forced miss can hang instead of reporting when the site's
-# pump is INDIRECTED through a helper (census blind spot (c)): the run window this
-# script zeroed is not the one the test actually waits on. That is worth knowing
+# pump is INDIRECTED through a helper (census blind spot (c)): the call this
+# script forced is not the one the test actually waits on. That is worth knowing
 # per-arm rather than being averaged into a pass/fail, so a timeout is reported
 # as INCONCLUSIVE and named.
 #
@@ -82,6 +97,11 @@ TIMEOUT_S="${PUMP_RED_ARM_TIMEOUT:-180}"
 # next reader to measure. Modest and finishing beats fast and killed.
 JOBS="${PUMP_RED_ARM_JOBS:-4}"
 TAIL='grace slice. Site: '
+# `kDrainResidual` from tests/support/pump_until_ready.hpp. The forced branch runs the site's
+# DRAIN as well as its report, and a drain that does not quiesce emits this immediately before
+# the window-miss report -- on the SAME output line as `Site: <label>`, since neither constant
+# contains a newline. Matching only $TAIL folded that into a pass and threw it away.
+RESIDUAL='#289: the io_context did not run out of work within the teardown drain'
 
 pass=0; declare -a NOTES=()
 
@@ -169,7 +189,7 @@ trap 'restore_all; rm -rf "$backup_dir"' EXIT
 # ⚠️ `exit` FROM THE HANDLER SKIPS THE CLEANUP REBUILD, and restoring sources is only half
 # the invariant. The EXIT trap restores every snapshot, but the "rebuild this run's targets"
 # loop lives in the main body and never runs -- so an interrupted run leaves CORRECT sources
-# beside a binary built from zeroed-window text. That is exactly the state this repo already
+# beside a binary built from FORCED text. That is exactly the state this repo already
 # lost 1h39m to: a later reader measures the forced binary and reports a defect that does not
 # exist. Sources are safe, so the remedy is to say so loudly rather than to start a build
 # while the user is trying to stop us.
@@ -185,8 +205,9 @@ trap 'echo; echo "pump-red-arm: interrupted"; warn_stale_binaries; exit 130' INT
 trap 'echo; echo "pump-red-arm: terminated"; warn_stale_binaries; exit 143' TERM
 
 force_site() {
-    # Rewrite the run_window_then_ready call that follows $2 in file $1 so both
-    # its window and its grace are zero.
+    # Rewrite the run_window_then_ready call that follows $2 in file $1 into
+    # `((void)<the call, with window and grace zeroed>, false)` -- see the ⚠️ block
+    # at the top for why BOTH halves are needed.
     #
     # ⚠️ SEARCHES A BLANKED COPY, SPLICES THE ORIGINAL. #289's migrated files quote
     # `run_window_then_ready(` inside their explanatory comments, so a raw-text search can
@@ -213,7 +234,12 @@ assert len(code) == len(src), "lexer broke the offset-preserving contract"
 if code.count(anchor) != 1:
     sys.exit(f"anchor not unique in code (raw={src.count(anchor)}, code={code.count(anchor)}): {anchor!r}")
 i = code.index(anchor)
-m = re.compile(r"run_window_then_ready\s*\(").search(code, i)
+# ⚠️ THE NAMESPACE QUALIFIER IS PART OF THE EXPRESSION AND MUST BE INSIDE THE WRAPPER.
+# Every migrated site spells `fixpp::test_support::run_window_then_ready(...)`, and
+# inserting `((void)` at the bare function name would emit
+# `fixpp::test_support::((void)run_window_then_ready(...), false)` -- a compile error, i.e.
+# a BUILD-FAILED arm rather than a wrong verdict, but an arm lost all the same.
+m = re.compile(r"(?:[A-Za-z_]\w*\s*::\s*)*run_window_then_ready\s*\(").search(code, i)
 if not m:
     sys.exit(f"no run_window_then_ready after anchor in {path}")
 
@@ -237,8 +263,55 @@ else:
 if len(commas) < 2:
     sys.exit(f"expected >=3 args to run_window_then_ready in {path}, found {len(commas) + 1}")
 
+# ⚠️ TWO EDITS, ONE WRITE, IN THIS ORDER. The durations are replaced first (stopping the
+# call from dispatching, which is what keeps the awaited coroutine suspended for the
+# drain), then the whole call is wrapped (forcing the verdict, which is what works at a
+# site that is already ready). Splicing right-to-left keeps every offset valid: `k` and
+# `commas[1]` index the ORIGINAL string, so the wrapper's tail must be appended after the
+# argument rewrite rather than computed against a shifted buffer.
+#
+# The zeroed call keeps args 1-2 and DROPS anything after `grace`, including the site
+# label. That is deliberate and harmless: the label is a defaulted parameter, and what this
+# driver matches is the `ADD_FAILURE` at the site, not the seam's announcement.
+#
+# `(void)` discards the [[nodiscard]] result; the comma operator then yields false, so the
+# caller's `if (!...)` miss branch always runs.
 zero = " std::chrono::milliseconds{0}"
-open(path, "w", encoding="utf-8").write(src[:commas[1]] + f",{zero},{zero}" + src[k:])
+forced_call = src[m.start() : commas[1]] + f",{zero},{zero}" + src[k]
+spliced = "((void)" + forced_call + ", false)"
+
+# ⚠️ ASSERT THIS DRIVER'S OWN CONTRACT, because nothing else in the tree does. An arm must
+# produce BOTH halves -- zeroed durations AND the wrapper -- and each fixes a different
+# defect (see the ⚠️ block at the top of this script). `FeedMissDrainsWhileCallerTemporary-
+# Alive` pins the zero-duration property AT THE PRIMITIVE, inside its own test body; it
+# never goes through this driver. So a future "simplification" of this function back to
+# wrap-only, or to zero-only, would pass every check in the repo, and the only symptom
+# would be a batch of arms that quietly stopped exercising what they claim to.
+#
+# ⚠️ CHECKED ON THE BYTES ABOUT TO BE WRITTEN, NOT ON A VARIABLE. Two earlier forms of this
+# check were both self-confirming, one level apart:
+#   (1) a grep over the rewritten FILE -- satisfied by any pre-existing occurrence elsewhere
+#       in the source, including this script's own prose quoted in a comment;
+#   (2) asserting on `spliced` itself -- but `spliced` is built as `"((void)" + ... +
+#       ", false)"` on the line above, so `startswith`/`endswith` were TAUTOLOGIES. They
+#       fire when someone edits the line that BUILDS the string, which is the simplification
+#       scenario this exists for, but NOT when someone edits the `write()` call to emit
+#       `forced_call` instead. That mutant passed all three assertions.
+# The contract is a property of the OUTPUT, so the assertion reads the output slice. And the
+# duration check is scoped to the exact inserted span rather than counted over the whole
+# region: counting would also see a caller's own ` std::chrono::milliseconds{0}` argument and
+# fire spuriously -- exact in both directions is what the paragraph above promises.
+out = src[: m.start()] + spliced + src[k + 1 :]
+region = out[m.start() : m.start() + len(spliced)]
+durations = f",{zero},{zero}"
+at = len("((void)") + (commas[1] - m.start())
+assert region.startswith("((void)"), "wrapper half missing from the written bytes"
+assert region.endswith(", false)"), "forced verdict missing from the written bytes"
+assert region[at : at + len(durations)] == durations, (
+    f"zeroed durations missing from the written bytes: {region[at : at + len(durations)]!r}"
+)
+
+open(path, "w", encoding="utf-8").write(out)
 PYFORCE
 }
 
@@ -262,7 +335,7 @@ while IFS=$'\t' read -r file anchor label target regex; do
     out=$(cd "build/$preset" && timeout "$TIMEOUT_S" ctest -R "$regex" --output-on-failure 2>&1)
     rc=$?
     if [ "$rc" -eq 124 ]; then
-        echo "    ~~ INCONCLUSIVE: timed out after ${TIMEOUT_S}s -- the pump this arm zeroed is"
+        echo "    ~~ INCONCLUSIVE: timed out after ${TIMEOUT_S}s -- the call this arm forced is"
         echo "       probably NOT the one the test waits on (indirected pump)."
         NOTES+=("HUNG $label")
     # ⚠️ HERESTRING, NOT A PIPELINE -- AND THIS WAS A REAL FALSE "SILENT".
@@ -276,8 +349,34 @@ while IFS=$'\t' read -r file anchor label target regex; do
     # already right. Reproduce: `set -o pipefail; printf '%s' "$big" | grep -qF x` -> 141.
     # [[feedback_every_broken_instrument_in_this_repo_fails_toward_clean]]
     elif grep -qF "$TAIL$label" <<<"$out"; then
-        echo "    RED as required: reported '${TAIL}${label}'"
-        pass=$((pass+1))
+        # ⚠️ THE WINDOW-MISS REPORT IS NOT THE WHOLE VERDICT, and taking it as one made this
+        # script unable to see the defect it exists to spot-check. Its own header says the
+        # textual driver is what witnesses RECIPE correctness; the recipe includes the drain
+        # FLAVOUR, and a `drain_or_report` where the site needed `cancel_and_drain_or_report`
+        # leaves the context with work and emits $RESIDUAL -- after which the site still
+        # reports the window miss, so the tail matched and the arm read clean.
+        # A residual is real output, so requiring its ABSENCE cannot manufacture a false
+        # finding; and it is matched WITH the label, because an arm may run a whole binary
+        # and another test's residual is not this arm's verdict.
+        # ⚠️ THIS CHECK IS NOT COUPLED TO THE ZEROING, though an earlier revision of this
+        # comment said it was. A residual needs a frame the drain cannot quiesce, which in
+        # this tree means one blocked on a MOCK-CLOCK sleep -- and a real window does not
+        # advance a mock clock, so such a frame is still blocked either way. The check works
+        # under both forms; it is the zeroing's LIFETIME argument (see the top) that needs
+        # non-dispatch, not this.
+        # ⚠️ Two herestrings, not a pipeline: `set -o pipefail` plus a pipeline into `grep`
+        # is the SIGPIPE trap documented in the branch above.
+        resid_lines=$(grep -F "$RESIDUAL" <<<"$out" || true)
+        resid=$(grep -F "Site: $label" <<<"$resid_lines" || true)
+        if [ -n "$resid" ]; then
+            echo "    !! RED, BUT THE DRAIN LEFT A RESIDUAL -- the miss branch reported AND"
+            echo "       the drain did not quiesce. Check the drain FLAVOUR at this site."
+            printf '%s\n' "$resid" | head -3
+            NOTES+=("RESIDUAL $label")
+        else
+            echo "    RED as required: reported '${TAIL}${label}'"
+            pass=$((pass+1))
+        fi
     else
         echo "    !! NO REPORT -- the miss branch did not announce itself"
         printf '%s\n' "$out" | grep -iE "window|Site:|FAILED|Passed" | head -12

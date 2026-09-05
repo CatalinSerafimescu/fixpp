@@ -256,16 +256,28 @@ TEST_P(StoreFailReconcileOutOfSetTest, PersistentStore_FailsClosed_ForOutOfSetEr
     Session sess(engine, cfg);
 
     auto open_r = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, open_r, 200ms,
+                                                    "PersistentStore_FailsClosed_OutOfSet/open")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "PersistentStore_FailsClosed_OutOfSet/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "PersistentStore_FailsClosed_OutOfSet/open";
+        return;
+    }
     ASSERT_TRUE(open_r.get().has_value()) << "open() must succeed";
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
     auto peer_logon = make_logon("FIX.4.2", 1, "ACCEPTR", "INITR");
     auto logon_r = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>(peer_logon)),
                                   asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, logon_r, 200ms, "PersistentStore_FailsClosed_OutOfSet/logon-ack")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "PersistentStore_FailsClosed_OutOfSet/logon-ack");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "PersistentStore_FailsClosed_OutOfSet/logon-ack";
+        return;
+    }
     ASSERT_TRUE(logon_r.get().has_value()) << "peer Logon-ack must be accepted";
     ASSERT_EQ(sess.state(), fsm_state::Active);
 

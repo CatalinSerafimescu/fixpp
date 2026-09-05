@@ -163,8 +163,13 @@ protected:
         std::array<std::byte, 4> payload{};
         auto fut =
             asio::co_spawn(ioc, s.send(std::span<const std::byte>(payload)), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "SendInvalidStateTest::send_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "SendInvalidStateTest::send_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "SendInvalidStateTest::send_sync";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 

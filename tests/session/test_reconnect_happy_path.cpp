@@ -389,8 +389,14 @@ TEST_F(ReconnectHappyPathTest, ReconnectLoopMintsFreshTransport) {
     // (FR-001 / FR-002). The Phase 2 stub returns {} without calling make() →
     // make_call_count stays 0 after the call → EXPECT_GE(1) FAILS RED.
     auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                    "ReconnectLoopMintsFreshTransport/attempt")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "ReconnectLoopMintsFreshTransport/attempt");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ReconnectLoopMintsFreshTransport/attempt";
+        return;
+    }
 
     // Consume the result (ignore error variant — stub returns success).
     (void)fut.get();

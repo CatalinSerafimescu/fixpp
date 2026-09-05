@@ -48,13 +48,19 @@ assert_nonempty_population() {
 # exits 0 — defeating that guard on its own terms. Patching the reader closes the
 # instance; counting what actually executed closes the class.
 #
-# ⚠️ THE CALLER DERIVES `ran`, AND THE TWO DRIVERS DERIVE IT DIFFERENTLY ON PURPOSE.
-# ci/pump-seam-arm.sh increments a counter at the top of its loop (direct).
-# ci/pump-red-arm.sh derives it from OUTCOMES (`pass + ${#NOTES[@]}`), which additionally
-# catches an arm that ran but recorded no verdict at all. Neither is a simplification of
-# the other, so the derivation stays at the call site and only the assertion is shared.
+# ⚠️ THE CALLER DERIVES `ran`, AND BOTH DRIVERS DERIVE IT THE SAME WAY.
+# (This line used to read "THE TWO DRIVERS DERIVE IT DIFFERENTLY ON PURPOSE" and was left
+# standing above a body that says the opposite -- the header was not updated with it.)
+# BOTH derive it from OUTCOMES -- `pump-red-arm.sh` as `pass + ${#NOTES[@]}`,
+# `pump-seam-arm.sh` as `red + silent + nosite + inconclusive` -- because that is what
+# catches an arm that RAN but recorded no verdict at all. ⚠️ A top-of-loop counter makes
+# this assertion an IDENTITY that cannot fail; `pump-seam-arm.sh` used one and its own
+# comment records why it stopped. Only the assertion is shared, and the derivation stays
+# at each call site because the outcome VARIABLES differ, not because the method does.
 #
-#   $1 ran       how many items actually executed
+#   $1 ran       how many items RECORDED A VERDICT -- not "executed", which is what this
+#               line used to say. An item that ran and recorded nothing is exactly what
+#               the assertion exists to catch, so the old wording denied its purpose.
 #   $2 expected  how many the caller parsed
 #   $3 tool      the calling script's name, for the message
 #   $4 noun      what the items are ("arm(s)", "label(s)")

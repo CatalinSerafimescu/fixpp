@@ -200,8 +200,14 @@ struct AllocationFixture {
 
     void open_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(std::chrono::milliseconds{200});
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
+                                                        "AllocationFixture::open_to_active/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "AllocationFixture::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AllocationFixture::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         std::string body = "35=A\x01"
@@ -213,8 +219,15 @@ struct AllocationFixture {
                             "108=30\x01";
         auto logon = fixpp_test_support::make_frame(begin_string, body);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(std::chrono::milliseconds{200});
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut2, std::chrono::milliseconds{200},
+                "AllocationFixture::open_to_active/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "AllocationFixture::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AllocationFixture::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon feed failed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }

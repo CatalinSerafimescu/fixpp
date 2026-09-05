@@ -35,6 +35,25 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// ⚠️ THE MOCK CLOCK HERE IS A LOCAL IN `SetUp`, NOT A FIXTURE MEMBER. The drain
+// therefore binds `*engine.clock` -- the `shared_ptr<Clock>` that owns it. Writing
+// the bare `*clock` would resolve to `::clock` from <ctime> (a `clock_t()` function).
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -93,8 +112,14 @@ TEST_F(InitiatorTransportThrowTest,
     Session sess(engine, cfg);
 
     auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, fut, 200ms, "InitiatorOpen_TransportThrowsOnLogonEmit/open")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *engine.clock, "InitiatorOpen_TransportThrowsOnLogonEmit/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "InitiatorOpen_TransportThrowsOnLogonEmit/open";
+        return;
+    }
     auto result = fut.get();
 
     // (a) FR-009 / SC-007: transport throw during Logon emit must surface as

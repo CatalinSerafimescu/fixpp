@@ -191,13 +191,27 @@ struct Fixture {
 
     void open_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(std::chrono::milliseconds{200});
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut, std::chrono::milliseconds{200},
+                "XmlNonFixPassthrough::open_to_active/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "XmlNonFixPassthrough::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "XmlNonFixPassthrough::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value());
         auto logon = make_logon_frame();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(std::chrono::milliseconds{200});
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut2, std::chrono::milliseconds{200},
+                "XmlNonFixPassthrough::open_to_active/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "XmlNonFixPassthrough::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "XmlNonFixPassthrough::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value());
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
