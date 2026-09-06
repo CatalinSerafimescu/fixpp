@@ -131,6 +131,18 @@ if [ "$arms_file" = "--self-test" ]; then
         printf '  !!BAD %-56s rc=%s\n' "an EMPTY build dir is not blamed on the arms file" "$e_rc"
         sed 's/^/        /' "$st_dir/o"; bad=$((bad+1))
     fi
+    # QUIET: a SIX-field row (explicit exec stem) must validate exactly like a five-field
+    # one. ⚠️ THIS IS THE ARM FOR THE TWO-PARSERS DEFECT, not a formality: the validation
+    # loop reads the row with `read -r`, which packs every leftover field into the LAST
+    # name. Before the sixth name was added there, this row's regex arrived as
+    # "^<test>$<TAB><stem>", selected zero tests, and the run aborted BLAMING THE ARMS
+    # FILE -- a wrong verdict against a correct row. Deleting `xs_` from that `read` line
+    # turns this arm rc=0 -> rc=2, which is how it was proven to fire.
+    printf 'tests/x.cpp\tanchor\tL_SIX\ttgt\t^%s$\tSomeGtestName\n' "$real" > "$st_dir/six.tsv"
+    chk "a SIX-field row (explicit exec stem) is QUIET" 0 "$st_dir/six.tsv" "validated"
+    # FIRE: seven fields is malformed -- the upper bound moved 5 -> 6, it did not vanish.
+    printf 'tests/x.cpp\tanchor\tL_SEVEN\ttgt\t^%s$\tStem\textra\n' "$real" > "$st_dir/seven.tsv"
+    chk "a SEVEN-field row is malformed" 2 "$st_dir/seven.tsv" "malformed row"
     echo "pump-red-arm self-test: $ok ok, $bad bad"
     [ "$bad" -eq 0 ]
     exit $?
