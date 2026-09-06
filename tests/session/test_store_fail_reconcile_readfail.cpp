@@ -279,10 +279,19 @@ protected:
         bool read_fired = false;
     };
 
-    // ⚠️ EVERY MISS BRANCH BELOW POISONS `send_r`, and that is not defensive style.
-    // A default-constructed `expected_t<void>` HAS a value, so an early return that left
-    // the field alone would report SUCCESS to every caller of `drive()`. Stated here once
-    // because the three sites answer it identically; the sites carry a pointer.
+    // ⚠️ EVERY MISS BRANCH BELOW POISONS `send_r`, AND IT IS UNOBSERVABLE TODAY. Both
+    // halves matter, and the first draft of this comment claimed only the first.
+    //
+    // WHY IT IS THERE: a default-constructed `expected_t<void>` HAS a value, so an early
+    // return that left the field alone hands back a struct that says SUCCESS.
+    //
+    // ⚠️ WHY NO TEST CAN SEE THAT TODAY, measured rather than assumed: every caller runs
+    // `ASSERT_TRUE(d.store_fired)` BEFORE it reads `send_r`, and `store_fired` is false on
+    // every miss branch -- so `ASSERT_` returns from the test body first and `send_r` is
+    // never read. Forcing this site with and without the poison produces IDENTICAL output.
+    // It is kept because it costs one line and the ordering above is a property of
+    // today's two callers, not of `drive()`; it is NOT kept because anything proves it.
+    // Do not write that an arm demonstrates this poison -- no arm here can.
     Driven drive(std::shared_ptr<ReconcileFaultStoreFactory> factory) {
         fixpp::session::SessionConfig cfg;
         cfg.role = session_role::initiator;

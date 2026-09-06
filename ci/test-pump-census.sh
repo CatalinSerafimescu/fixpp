@@ -138,10 +138,12 @@ assert_decoy_alone_yields_zero_sites() {
 # Proves the script resolves the repo root from its OWN location, not from
 # the caller's cwd, and that the production pin the script ships with is
 # exactly what the live tree produces. This is ONE falsifiable property, not
-# three: pump-census.sh's own internal diff already refuses a nonempty/
-# mismatched result before ever exiting 0 (see its `[ -s "$actual" ]` and
-# `diff -u "$expected" "$actual"` gates), so "nonempty" and "count matches
-# the pin" are IMPLIED by "exit status 0" here, not independently falsifiable
+# three: pump-census.sh's own internal diff already refuses a mismatched result
+# before ever exiting 0 (see its `diff -u "$pin" "$actual"` gate), so "the reading
+# matches the pin" is IMPLIED by "exit status 0" here, not independently falsifiable
+# ⚠️ THE `[ -s "$actual" ]` GATE THIS USED TO CITE NO LONGER EXISTS -- #289 batch 15
+# removed it, because a zero-row reading became legitimate. "Nonempty" is therefore
+# no longer implied by exit 0 and is no longer claimed here
 # — a prior revision counted them as three separate assertions that could
 # never fail for their own reason (gate-b/r1 finding #1).
 #

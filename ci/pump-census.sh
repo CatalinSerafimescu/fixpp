@@ -16,16 +16,19 @@
 # to report zero for a population it was never built to see is worse than an
 # explicit scope limitation.
 #
-# ── WHY THIS DOES NOT MATCH THE ISSUE'S "340 / 85" ───────────────────────────
-# #289 states 340 sites / 85 files. This script's *.cpp-only reading is 341/83;
-# subtracting the one known false positive below gives 340/83. The SITE count
-# reconciles; the FILE count does not — the issue's two figures came from
-# different sweeps and were never a matched pair. Including *.hpp (in scope by
-# design — headers carry real sites the issue's own .cpp-only sweep missed:
-# tests/interop/parity/parity_support.hpp and
-# tests/session/support/group_dispatch_fixture.hpp) takes the reading to
-# 346/85. Do not describe 346 as reconciling with 340; it does not, and
-# claiming otherwise misrepresents two different classifiers as one.
+# ── WHY THIS NEVER MATCHED THE ISSUE'S "340 / 85" ────────────────────────────
+# #289 states 340 sites / 85 files. This scanner never reproduced that pair, and the
+# reason is durable even though the numbers are not: the issue's two figures came from
+# DIFFERENT sweeps and were never a matched pair, so no single classifier can reconcile
+# both. Headers are in scope here by design (they carry real sites the issue's .cpp-only
+# sweep missed), which moves the file count again.
+#
+# ⚠️ THE READINGS THAT USED TO BE WRITTEN HERE ARE DELETED, NOT UPDATED. This section
+# carried "341/83" and "346/85" in the present tense; by #289 batch 15 the true reading
+# was 0/0 and the sentence had been false for several batches, because nothing ever
+# re-runs a comment. It also pointed at "the one known false positive below", a paragraph
+# the same batch replaced -- so the cross-reference dangled too. Re-derive if you need a
+# number:  bash ci/pump-census.sh
 #
 # ── KNOWN LEXICAL FALSE POSITIVES: NONE, BECAUSE THE POPULATION IS EMPTY ─────
 # This section used to name one -- a one-line `void run_ioc() { ioc.run_for(...);
@@ -179,19 +182,15 @@ if ! python3 - "$scan_root" >"$actual" <<'PY'
 from pathlib import Path
 import re
 import sys
+import tempfile
 
 root = Path(sys.argv[1]).resolve()
 tests = root / "tests"
 
-files = sorted(
-    list(tests.rglob("*.cpp")) +
-    list(tests.rglob("*.hpp"))
-)
-
-if not files:
-    raise SystemExit(
-        f"pump-census: error: no .cpp/.hpp files found under {tests}"
-    )
+def discover(scan_root):
+    """Every scannable file under <scan_root>/tests. Headers are in scope by design."""
+    t = scan_root / "tests"
+    return sorted(list(t.rglob("*.cpp")) + list(t.rglob("*.hpp")))
 
 run_re = re.compile(r"\.run_for\s*\(")
 get_re = re.compile(
@@ -310,16 +309,28 @@ def scan(source):
 # The far-`get()` negative is NOT a defect being tolerated -- it is blind spot
 # (b) from this file's header, pinned as a PROPERTY so that widening the
 # lookahead is a deliberate act that breaks this control and must be re-argued.
-# ⚠️ THAT ONLY WORKS IF THE `get()` SITS AT EXACTLY `window + 7`, THE FIRST LINE
-# OUTSIDE THE WINDOW, and the first draft of this fixture put it at +9 -- so a
-# widening to 7 or 8 would have left the control GREEN while the comment above
-# claimed otherwise. It is +7 now: count the lines before changing them, because
-# the slack is invisible and the claim is not.
+# ⚠️ BOTH BOUNDS ARE PINNED, AND THE FIRST DRAFT PINNED NEITHER. The window is six
+# lines, so the fixture must straddle it exactly:
+#   positive()  `.get()` at `window + 6` -- the LAST line INSIDE. NARROWING the
+#               lookahead (6 -> 5 or less) stops matching it and the control fires.
+#   far_get()   `.get()` at `window + 7` -- the FIRST line OUTSIDE. WIDENING the
+#               lookahead (6 -> 7 or more) starts matching it and the control fires.
+# The first draft put the far one at +9 (a widening to 7 or 8 stayed green) and the
+# positive one at +2 (EVERY narrowing from 6 down to 3 stayed green -- measured: a
+# 6 -> 2 mutant left this control green while a real unguarded site at window+3 went
+# unreported, exit 0, zero rows). The second of those was found by a reviewer AFTER
+# the first had been fixed two lines above, which is the whole lesson: fixing the
+# bound you were told about does not fix the bound you were not.
+# Count the lines before changing them; the slack is invisible and the claim is not.
 CONTROL = """\
 void positive() {
     auto fut = asio::co_spawn(ioc, c(), asio::use_future);
     ioc.run_for(200ms);
     ioc.restart();
+    int p1 = 0;
+    int p2 = 0;
+    int p3 = 0;
+    int p4 = 0;
     (void)fut.get();
 }
 void migrated() {
@@ -343,28 +354,69 @@ void far_get() {
     (void)fut.get();
 }
 """
-# Line 3 is `ioc.run_for` in positive(); nothing else may match.
-control_hits = scan(CONTROL)
-if control_hits != [3]:
+def census(scan_root):
+    """Discover, read and scan a tree -- the WHOLE pipeline, so a control can cover it."""
+    found = discover(scan_root)
+    if not found:
+        raise SystemExit(
+            f"pump-census: error: no .cpp/.hpp files found under {scan_root / 'tests'}"
+        )
+    out = []
+    for path in found:
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise SystemExit(f"pump-census: error: cannot read {path}: {exc}")
+        rel = path.relative_to(scan_root).as_posix()
+        for line_no in scan(source):
+            out.append(f"{rel}:{line_no}")
+    return sorted(set(out))
+
+
+# ⚠️ THE CONTROL IS SEEDED ON THE REAL FILESYSTEM, NOT SCANNED AS A STRING, and that
+# is not ceremony. The first version called `scan(CONTROL)` on an in-memory literal, so
+# discovery, `rglob`, `read_text`, the `.hpp` extension set and the `relative_to` mapping
+# were ALL OUTSIDE the control -- and the pin it licenses now has zero rows, so it can no
+# longer diff-detect a scanner that silently stops finding files either. MEASURED: a
+# mutant dropping `tests/session` (the directory holding nearly every migrated site) from
+# the walk exited 0 against the real tree AND against a tree carrying a live unguarded
+# site. Running the control through `census()` puts every one of those steps inside it.
+with tempfile.TemporaryDirectory() as _td:
+    _ctl = Path(_td)
+    (_ctl / "tests" / "nested").mkdir(parents=True)
+    (_ctl / "tests" / "nested" / "ctl.cpp").write_text(CONTROL, encoding="utf-8")
+    # A .hpp too: headers are in scope BY DESIGN (see this file's header), and nothing
+    # else here would notice the extension set being narrowed to *.cpp.
+    (_ctl / "tests" / "ctl_hdr.hpp").write_text(CONTROL, encoding="utf-8")
+    control_hits = census(_ctl)
+
+expected_control = ["tests/ctl_hdr.hpp:3", "tests/nested/ctl.cpp:3"]
+if control_hits != expected_control:
     raise SystemExit(
         "pump-census: error: seeded-positive control FAILED "
-        f"(expected [3], got {control_hits}); the scanner cannot be trusted to "
-        "report either a zero or a non-zero, so no reading is admissible"
+        f"(expected {expected_control}, got {control_hits}); the scanner cannot be "
+        "trusted to report either a zero or a non-zero, so no reading is admissible"
     )
 
-sites = []
+# ⚠️ AND A SECOND ARM, because the control above proves the pipeline works on a tree the
+# control BUILT -- it cannot prove the same pipeline reaches every part of the REAL tree.
+# That is the exact hole the `tests/session` mutant walked through. This asserts a
+# STRUCTURAL property rather than a count (a count would rot): every immediate
+# subdirectory of `tests/` that holds a scannable file ON DISK must contribute at least
+# one file to what the walk actually discovered.
+_discovered = discover(root)
+_seen_dirs = {p.relative_to(root / "tests").parts[0] for p in _discovered
+              if p.relative_to(root / "tests").parts}
+_on_disk = {d.name for d in (root / "tests").iterdir()
+            if d.is_dir() and any(d.rglob("*.cpp")) or d.is_dir() and any(d.rglob("*.hpp"))}
+_missed = sorted(_on_disk - _seen_dirs)
+if _missed:
+    raise SystemExit(
+        "pump-census: error: the walk skipped tests/ subdirectories that hold scannable "
+        f"files: {_missed}; a reading that cannot see them is not a clean tree"
+    )
 
-for path in files:
-    try:
-        source = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise SystemExit(
-            f"pump-census: error: cannot read {path}: {exc}"
-        )
-
-    rel = path.relative_to(root).as_posix()
-    for line_no in scan(source):
-        sites.append(f"{rel}:{line_no}")
+sites = census(root)
 
 for site in sorted(set(sites)):
     print(site)

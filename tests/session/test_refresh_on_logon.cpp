@@ -466,7 +466,13 @@ static ReconnectInitiatorFixture make_reconnect_initiator(
         // trusting this line, the callers are the thing that moves:
         //   git grep -n -A2 'make_reconnect_initiator(\|make_acceptor_notconnected(' \
         //     -- tests/session/test_refresh_on_logon.cpp
-        // The state EXPECT below fails too, so the test does not pass quietly.
+        // ⚠️ WHAT STOPS A QUIET PASS IS THE `ADD_FAILURE` ABOVE, AND ONLY THAT. An
+        // earlier draft of this line added "the state EXPECT below fails too" -- false,
+        // and falsifiable by reading three lines further: this `return` leaves the
+        // function, so that EXPECT never runs. Every caller does re-assert
+        // `ASSERT_NE(result.store, nullptr)` on its next line, and `store` IS left null
+        // here, so a caller does get a second chance to fail -- but that is the caller's
+        // assertion, not one "below".
         return result;
     }
     (void)open_fut.get();

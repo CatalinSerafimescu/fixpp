@@ -16,9 +16,11 @@
 #                                   decltype(fut.get())` because two returns of
 #                                   DIFFERENT types do not deduce
 #   drive_to_active/open            a bool channel that already existed
-#   ReconcileFixture::drive/send    a struct FIELD poisoned -- a default-constructed
-#                                   `expected_t<void>` HAS a value, so the arm proves
-#                                   the poison, not just the early return
+#   ReconcileFixture::drive/send    a struct FIELD poisoned. ⚠️ THE ARM PROVES THE EARLY
+#                                   RETURN, NOT THE POISON -- every caller asserts on
+#                                   `store_fired` before reading `send_r`, so forcing this
+#                                   site with and without the poison gives IDENTICAL
+#                                   output. An earlier line here claimed the opposite.
 #   make_reconnect_initiator/open   returns the fixture VALID; callers deref it
 #                                   unconditionally, so null would be a crash
 #   open_to_active/open             the settled void recipe, unchanged; the control
