@@ -218,3 +218,29 @@ All in `tests/session/test_fixt_logon_establishment.cpp`.
   ⚠️ **The residual is a DIFFERENT statement and is LIVE: see L-361-2** — abandoning bounds the
   operation and its caller, not draining the io_context. *(Found by review during PR #362,
   pre-existing there; resolved in the #360/#361 batch.)*
+
+<!-- L-085-1 — closed: RESOLVED 2026-09-06 by #220 (dict-free group() declines) -->
+- **L-085-1 — RESOLVED 2026-09-06 by fixpp#220. The dict-free per-instance cap that produced this
+  false positive no longer exists, because the branch it lived on no longer exists:
+  `OffsetTable::group()` is now a dictionary-only operation and reports every group ABSENT on a
+  dict-free table (see **B-220-1** / **L-220-1** in the live file).** The fix is deliberately NOT the
+  narrower one this row anticipated. Repairing only the cap would have left the **extent** wrong, and
+  the extent was the larger half: `group_slices_status()` derives its slice boundary from
+  `group()`'s `entry_count()`, so the same rest-of-message over-extent reached `group_slices()` and
+  the typed `group_view<GroupT>` — not merely the cap. That is the identical shape L-063-2 records as
+  having shipped on the production dispatch path until 066 (`Session::parse_and_dispatch_` built its
+  `Parser` with the dictionary-free default constructor), which is why the "test/utility callers
+  only" premise this row relied on was not load-bearing enough to keep waiving.
+  **Provenance that decided it:** the rest-of-message rule was never a design — it is the surviving
+  fragment of the pre-`55b13459` first-instance-member-set heuristic, whose *"no end-of-message
+  fallback, no 32-tag ceiling"* removal from the dict-aware path was a **P1** at PR #68 gate round 3.
+  It survived only where there is no membership oracle. `[2b §4.7]` defines the boundary as the
+  dictionary's first-field-of-group rule per `[FIX50SP2 §3]`, so dict-free the boundary is undefined
+  and both reference engines decline rather than guess. *(#220; the `[2b §4.7]` D-I' deviation in
+  `.specify/decisions/004-wire-codec-completeness.md` is RETIRED by the same change, not re-waived.)*
+
+  <details><summary>Original row as it stood before resolution (085 T018 / FR-003a / SC-010)</summary>
+
+  **L-085-1 — the dict-free per-instance cap measures the group's last instance as running to END-OF-MESSAGE, so top-level fields following the group count toward it. UNREACHABLE UNDER DEFAULT CONFIGURATION; reachable only under a caller-tightened cap. Preserved, not repaired — tracked as fixpp#220.** On the dict-free path (`OffsetTable::group()`'s `else` branch — no `opaque_dict_`/`group_member_fn_`, i.e. `OffsetTable(frame, mr)` / `OffsetTable(frame, mr, Config)`, test/utility callers only) there is no membership oracle, so the group extent degrades to rest-of-message: `group_end = entries_.size()`. The per-instance cap loop's final boundary therefore falls at `entries_.size()`, and any **top-level, non-group** fields appearing after the group's last instance are counted into that instance's `inst_count`. Where the cap then trips, the resulting `wire_group_too_large` is a **false positive** — the group's real last instance is smaller than measured. **Reachability, stated precisely — this row deliberately neither overstates nor understates it:** under **default `Config` the branch is arithmetically unreachable.** `default_max_offset_entries` and `default_max_group_entries_per_instance` are **both 4096** (`include/fixpp/wire/offset_table.hpp:27-28`), and `build()` clamps the table at the former (`src/wire/offset_table.cpp:326`, `entries_.size() >= cfg_.max_offset_entries` → `err_offset_table_full`), so the measured segment can never exceed `4095` and can never exceed a cap of `4096`. It becomes reachable **only** where a caller explicitly sets `max_group_entries_per_instance < max_offset_entries - 1`. It is **not** a defect on the default path, and it is **not** reachable at all from the dictionary path (which bounds the extent by real membership) — that includes every production wire caller, since no production caller constructs an `OffsetTable` dict-free. **Why preserved rather than repaired:** 085's mandate is a semantics-preserving relocation (FR-001a/FR-003 — the moved lines are byte-identical modulo indentation), so changing the boundary rule while moving it was explicitly out of scope; repairing it needs a rest-of-message terminator rule the dict-free path does not currently have. The looseness is **pre-existing on `main`**, not introduced by 085 — the same loop computed the same `inst_count` before the move, on the same path. *(085 T018 / FR-003a / SC-010; contract `specs/085-fold-flat-cap-loop/contracts/group_cap_accounting.md` C-3 "Recorded looseness"; `research.md` R-2; filed 2026-08-03 as **fixpp#220**.)*
+
+  </details>

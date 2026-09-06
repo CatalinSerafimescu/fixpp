@@ -440,8 +440,18 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
         // to its source. Bind dict-backed ONLY when the source itself is
         // dict-backed (is_dict_backed()) — else stay dict-free (data-model.md
         // degenerate case; binding a non-null-but-empty dict would instead flip
-        // OffsetTable::group() to a fail-closed empty-membership walk, NOT the
-        // dict-free positional fallback the source actually used).
+        // OffsetTable::group() to a fail-closed empty-membership walk).
+        //
+        // 220: the clause that used to end that sentence — "NOT the dict-free
+        // positional fallback the source actually used" — is deleted, not
+        // reworded, because there is no longer a positional fallback to
+        // contrast with. A dict-free source does not read groups positionally;
+        // group() declines outright, so `fixpp_msg_get_group` reports
+        // TYPE_MISMATCH (B-220-1). The conditional itself is UNCHANGED and
+        // still correct, for the reasons that do not concern groups (field
+        // classification, unknown_fields), and clone/source fidelity is
+        // preserved in the stronger sense that both now decline identically
+        // rather than both guessing identically.
         fixpp::wire::frame_view fv =
             maybe_fv.value_or(fixpp::wire::frame_view_access::make(owned_frame.get(), frame_len, 0, frame_len));
         std::unique_ptr<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>> clone_view;

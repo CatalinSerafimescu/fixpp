@@ -6,6 +6,53 @@ status: stable
 
 # Log
 
+- **2026-09-06 — #220, and why a "documented degradation" was neither.** `failure-classes.md` gains
+  **class 9: a correctness fix leaves the OLD rule standing on the path that lacked the
+  information.** `OffsetTable::group()` bounded a repeating group by rest-of-message whenever no
+  dictionary was threaded. Read cold, that looks like a design choice — the public header called it
+  a "deliberate, scoped degradation" and `004-wire-codec-completeness.md` carried a `[2b §4.7]`
+  waiver for it. `git log` says otherwise: it is the leftover half of a first-instance member-set
+  heuristic that PR #68 removed from the dict-aware path **as a P1** at gate round 3, whose commit
+  message is explicit — *"no end-of-message fallback, no 32-tag ceiling."* It survived exactly where
+  membership was unavailable, and acquired the appearance of design when someone waived it.
+
+  Two things worth carrying beyond the fix. **A waiver's premise is a fact about the call graph.**
+  This one read "no production wire caller uses the dict-free construction path — test/utility
+  surfaces only", and it had already been false in shipped code: L-063-2's 066 amendment records
+  `Session::parse_and_dispatch_` building its `Parser` with the dictionary-free default constructor,
+  so every inbound-dispatched message took the waived path for months. `Parser<Mode>::Parser() =
+  default` is still public API. **And the reported symptom was the smaller half** — #220 was filed
+  as a DoS-cap false positive, but the same over-extent fed `group_slices_status()` and so the typed
+  `group_view<GroupT>`; the splitter even carried a comment asserting the opposite
+  (*"trailing top-level fields are never included in the last instance slice"*), true only on the
+  dictionary path and unconditionally stated, which is plausibly why the second half went unnoticed.
+
+  Resolved by **declining**, not by a better guess: `[2b §4.7]` defines the boundary as the
+  dictionary's first-field-of-group rule per `[FIX50SP2 §3]`, so dict-free it is undefined rather
+  than hard. Confirmed against both reference engines before choosing — QuickFIX C++ returns from
+  `Message::setGroup` when `DataDictionary::getGroup` fails and forms no `Group`; QuickFIX/J guards
+  all three `parseGroup` call sites on a non-null dictionary and, run without one, flattens the
+  members as ordinary fields. That last one is a MEASUREMENT, not a reading — a harness built against
+  `quickfixj-base` 3.0.1 showed one instance parsing clean with `getGroups(453).size == 0` and a
+  two-instance frame tripping the duplicate-tag guard, identically for `validate=true` and `false`.
+  ⚠️ It is not checkable from this repo: the engines are vendored in the PARENT repo under
+  `reference-engines/{quickfix-cpp,quickfixj,fix8}`, so re-derive there, not here. `brain/components/wire.md` gains the boundary and its rejected alternatives, so the next
+  "just split on the delimiter" proposal meets the P1 that already killed it.
+
+  **Second lesson, from the review rather than the fix — class 1 gains "a green suite is evidence
+  about the EXECUTABLE you ran".** The change broke nine test cells that parsed dict-free and then
+  asserted a NON-EMPTY typed group; they had been reading the removed defect as their baseline. Six
+  were found by building beyond the wire suite. The last three were found by a reviewer running
+  `wire_codegen_tests` — a binary I had never built, while repeatedly reporting "wire_pure_tests
+  257/257" as though it covered `tests/wire`. It does not: that directory fans out into **ten**
+  executables. One of the three was the conformance witness named by catalogue row **W-007**
+  (OFFICIAL, nested repeating groups), so an OFFICIAL row's evidence was red while every suite I had
+  run was green. Worth separating the two halves: the *code* fix was found by provenance and settled
+  against two reference engines; the *blast radius* was found only by running, and the grep-shaped
+  sweep that predicted five of the nine missed a sixth outright — its helper carried none of the
+  words the sweep looked for. The durable correction is procedural: derive the target list from
+  `ninja -t targets`, never from the directory name, and state which binaries a green covers.
+
 - **2026-09-04 — #289 batch 10, the shared surfaces.** `failure-classes.md` gains **class 8:
   consolidating N copies dissolves the population an audit asserts over.** Hoisting
   `kWindowMissSentinel` out of three test files emptied the byte-identity population

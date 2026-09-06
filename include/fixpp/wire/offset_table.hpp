@@ -159,13 +159,25 @@ public:
     //   group rule; cap = default_max_group_entries_per_instance).
     //
     // Dict-FREE construction (OffsetTable(frame, mr) / OffsetTable(frame, mr,
-    //   Config) — test/utility callers only; no production wire caller uses
-    //   this path):
-    //   When no dict predicate is threaded, the single-instance group extent
-    //   degrades to rest-of-message (group_end = entries_.size()). This is a
-    //   deliberate, scoped degradation documented as a [2b §4.7] deviation —
-    //   see .specify/decisions/004-wire-codec-completeness.md §4.7 deviation
-    //   note. The dict-aware path is fully §4.7-conformant.
+    //   Config), or any construction with a null group-membership predicate):
+    //   group() DECLINES. It returns wire_required_field_missing for every
+    //   no_tag — the same absent result the dict-aware path returns for a tag
+    //   the dictionary does not know to be a group — so group_slices() yields
+    //   an empty span and the C-ABI reports TYPE_MISMATCH (E-2 / CA-010-read).
+    //   A repeating group is not a wire-recognisable structure: [2b §4.7]
+    //   defines its boundary as the dictionary's first-field-of-group rule per
+    //   [FIX50SP2 §3], so without a dictionary the boundary is UNDEFINED, not
+    //   merely unavailable. Callers that need groups must construct through a
+    //   dictionary (Parser{dict}).
+    //
+    //   This REPLACED a rest-of-message degradation (group_end =
+    //   entries_.size()) that was carried as a [2b §4.7] deviation (D-I',
+    //   .specify/decisions/004-wire-codec-completeness.md). That deviation is
+    //   RETIRED, not re-waived: declining is conformant, because §4.7 says
+    //   nothing about a path with no dictionary to consult. See fixpp#220 —
+    //   the degradation absorbed trailing top-level fields into the last
+    //   instance, which reached group_slices() and the typed group_view<GroupT>
+    //   as a wrong extent, and let a tightened Config reject a valid frame.
     class group_index {
     public:
         group_index() = default;
