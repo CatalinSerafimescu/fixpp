@@ -32,8 +32,11 @@ status: stable
   than hard. Confirmed against both reference engines before choosing — QuickFIX C++ returns from
   `Message::setGroup` when `DataDictionary::getGroup` fails and forms no `Group`; QuickFIX/J guards
   all three `parseGroup` call sites on a non-null dictionary and, run without one, flattens the
-  members as ordinary fields (measured, not read: a two-instance group then trips its duplicate-tag
-  guard). `brain/components/wire.md` gains the boundary and its rejected alternatives, so the next
+  members as ordinary fields. That last one is a MEASUREMENT, not a reading — a harness built against
+  `quickfixj-base` 3.0.1 showed one instance parsing clean with `getGroups(453).size == 0` and a
+  two-instance frame tripping the duplicate-tag guard, identically for `validate=true` and `false`.
+  ⚠️ It is not checkable from this repo: the engines are vendored in the PARENT repo under
+  `reference-engines/{quickfix-cpp,quickfixj,fix8}`, so re-derive there, not here. `brain/components/wire.md` gains the boundary and its rejected alternatives, so the next
   "just split on the delimiter" proposal meets the P1 that already killed it.
 
   **Second lesson, from the review rather than the fix — class 1 gains "a green suite is evidence

@@ -2742,10 +2742,16 @@ Evidence: issues #346, #348, #349; new issue #351.
   `no_tag`, including one that is a real group count field on the wire. Consequently
   `group_slices(no_tag)` yields an **empty span**, and the C-ABI thunk reports
   `FIXPP_ERR_TYPE_MISMATCH` — the documented E-2 / CA-010-read result, the same answer the
-  dict-aware path gives for a tag the dictionary does not know to be a group. **Nothing else
-  changes:** scalar reads, `find()`, `entries()`, `unknown_fields()` and the whole Iter-mode surface
-  are unaffected, and the dictionary-backed path (`Parser{dict}` — every production caller) is
-  byte-for-byte unchanged in behaviour.
+  dict-aware path gives for a tag the dictionary does not know to be a group. **What else changes, stated
+  rather than waved past:** scalar reads, `find()`, `entries()`, `unknown_fields()` and the whole
+  Iter-mode surface are unaffected, and the dictionary-backed path (`Parser{dict}` — every production
+  caller) is byte-for-byte unchanged in behaviour. **One further dict-free change is NOT nothing:**
+  `group_slices_reserve_bound()` now returns `0` for a dict-free table instead of `entries_.size()`,
+  because such a table can no longer append a slice. That lowers arena consumption (the old bound
+  reserved up to `4096 * sizeof(group_slice)` for slices that cannot exist) and, as a consequence,
+  makes the dict-free `alloc_failed` degrade in `group_slices_status()` unreachable — there is no
+  longer an allocation on that path to fail. The `bad_alloc` degrade is still covered, on the
+  dict-aware path, by `OffsetTableErrorPath.GroupSlicesBadAllocDegradeCoversLines231to232`.
   **Why this is the conformant answer rather than a capability regression:** `[2b §4.7]` defines a
   repeating group's boundary as the dictionary's first-field-of-group rule per `[FIX50SP2 §3]`, so
   with no dictionary the boundary is **undefined**, not merely unavailable — there is no sound
