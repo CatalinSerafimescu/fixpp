@@ -66,7 +66,22 @@
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 #include "transport/loopback_tls_fixture.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -263,9 +278,14 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
     // open() will fail (no real server), but that sets up internal state.
     {
         auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(open_fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, open_fut, 500ms, "MockHandshakeIdentityDrivesAuthorization/open")) {
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "MockHandshakeIdentityDrivesAuthorization/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "MockHandshakeIdentityDrivesAuthorization/open";
+            return;
+        }
         (void)open_fut.get();
     }
 
@@ -276,10 +296,14 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
     reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);
 
     auto drive_fut = asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
-    ioc.run_for(2s);
-    ioc.restart();
-
-    ASSERT_EQ(drive_fut.wait_for(0s), std::future_status::ready);
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, drive_fut, 2s, "MockHandshakeIdentityDrivesAuthorization/reconnect")) {
+        fixpp::test_support::drain_or_report(ioc,
+                                             "MockHandshakeIdentityDrivesAuthorization/reconnect");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "MockHandshakeIdentityDrivesAuthorization/reconnect";
+        return;
+    }
     auto drive_r = drive_fut.get();
 
     // The mock always connects+handshakes successfully.
@@ -298,9 +322,14 @@ TEST_F(LiveIdentityBindingTest, MockHandshakeIdentityDrivesAuthorization) {
     {
         auto feed_fut = asio::co_spawn(
             ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, feed_fut, 500ms, "MockHandshakeIdentityDrivesAuthorization/logon-ack")) {
+            fixpp::test_support::drain_or_report(
+                ioc, "MockHandshakeIdentityDrivesAuthorization/logon-ack");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "MockHandshakeIdentityDrivesAuthorization/logon-ack";
+            return;
+        }
         (void)feed_fut.get();
     }
 
@@ -422,9 +451,14 @@ TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {
     // Open (may succeed or fail; we only need internal state set up).
     {
         auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(open_fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, open_fut, 500ms, "LiveTlsCertCnDrivesAuthorizationDecision/open")) {
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "LiveTlsCertCnDrivesAuthorizationDecision/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LiveTlsCertCnDrivesAuthorizationDecision/open";
+            return;
+        }
         (void)open_fut.get();
     }
 
@@ -452,11 +486,14 @@ TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {
         },
         asio::detached);
 
-    ioc.run_for(5s);
-    ioc.restart();
-
-    ASSERT_EQ(client_fut.wait_for(0s), std::future_status::ready)
-        << "drive_reconnect_attempt did not complete within 5s.";
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, client_fut, 5s, "LiveTlsCertCnDrivesAuthorizationDecision/reconnect")) {
+        fixpp::test_support::drain_or_report(ioc,
+                                             "LiveTlsCertCnDrivesAuthorizationDecision/reconnect");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "LiveTlsCertCnDrivesAuthorizationDecision/reconnect";
+        return;
+    }
     auto drive_r = client_fut.get();
     ASSERT_TRUE(drive_r.has_value())
         << "drive_reconnect_attempt failed: " << static_cast<int>(drive_r.error());
@@ -469,9 +506,14 @@ TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {
     {
         auto feed_fut = asio::co_spawn(
             ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
-        ioc.run_for(1s);
-        ioc.restart();
-        ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, feed_fut, 1s, "LiveTlsCertCnDrivesAuthorizationDecision/logon-ack")) {
+            fixpp::test_support::drain_or_report(
+                ioc, "LiveTlsCertCnDrivesAuthorizationDecision/logon-ack");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LiveTlsCertCnDrivesAuthorizationDecision/logon-ack";
+            return;
+        }
         (void)feed_fut.get();
     }
 

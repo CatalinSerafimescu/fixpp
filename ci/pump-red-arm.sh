@@ -152,7 +152,7 @@ TAIL='grace slice. Site: '
 # contains a newline. Matching only $TAIL folded that into a pass and threw it away.
 RESIDUAL='#289: the io_context did not run out of work within the teardown drain'
 
-pass=0; declare -a NOTES=()
+pass=0; wedged=0; declare -a NOTES=()
 
 # ⚠️ AN EMPTY ARM POPULATION IS NOT A PASS. Without this, a comment-only or empty TSV
 # builds nothing, runs nothing, prints "0 RED-as-required, 0 FAILED" and exits 0 -- a
@@ -335,6 +335,17 @@ trap 'restore_all; rm -rf "$backup_dir"' EXIT
 # lost 1h39m to: a later reader measures the forced binary and reports a defect that does not
 # exist. Sources are safe, so the remedy is to say so loudly rather than to start a build
 # while the user is trying to stop us.
+#
+# ⚠️ AND NEITHER THAT WARNING NOR THE CLEANUP REBUILD PROTECTS A CONCURRENT READER. Both
+# guard the NEXT run; there is no lock. While an arm is between its build and its restore,
+# ANY other process measuring `build/<preset>` sees a forced binary with correct sources
+# beside it -- a plausible red, in 0 ms, with nothing on screen to say why. Observed during
+# #289 batch 14: a reviewer running `ctest -R '^session_pure_tests$' -V` mid-arm got a
+# `***Failed` carrying this batch's own miss report and came within one check of filing it.
+# The tell was the 0 ms; the check was `pgrep -af pump-red-arm` plus comparing the binary's
+# mtime against the source's. On a shared box, do that before believing a red you did not
+# start. Stated rather than fixed: a lockfile would have to be honoured by every reader,
+# including ones that predate it, so it would buy less than the habit does.
 warn_stale_binaries() {
     local t
     echo "pump-red-arm: sources restored, but the cleanup rebuild did NOT run." >&2
@@ -476,11 +487,65 @@ while IFS=$'\t' read -r file anchor label target regex; do
         echo "    !! BUILD FAILED (see /tmp/red_build.log)"; tail -15 /tmp/red_build.log
         NOTES+=("BUILD-FAILED $label"); restore "$file"; continue
     fi
-    out=$(cd "build/$preset" && timeout "$TIMEOUT_S" ctest -R "$regex" --output-on-failure 2>&1)
+    # ⚠️ `-V`, NOT `--output-on-failure`, AND THE DIFFERENCE IS A WRONG VERDICT. A gtest
+    # `GTEST_SKIP()` test PASSES at the ctest level, and `--output-on-failure` prints nothing
+    # for a passing test -- so a skipped arm produced no `$TAIL$label`, fell through to the
+    # else, and was reported SILENT ("the miss branch did not announce itself") against
+    # correct code, with a diagnostic dump that printed "100% tests passed" underneath it.
+    # `ci/pump-seam-arm.sh` calls the same situation NO-SUCH-SITE, which is accurate; the
+    # STRONGER witness was the wrong one. Measured on `live_identity_binding` with
+    # FIXPP_TLS_FIXTURE_DIR pointed at a nonexistent dir: `--output-on-failure` yields 0
+    # occurrences of `SKIPPED`, `-V` yields 3.
+    # ⚠️ The header used to tell the reader to "check the arm's ctest output for SKIPPED" --
+    # a check that could not fire, inside the paragraph written to catch this failure.
+    # [[feedback_every_broken_instrument_in_this_repo_fails_toward_clean]]
+    # ⚠️ TWO CONDITIONS THAT MAKE `-V` SAFE, NEITHER OF WHICH BELONGS TO THIS DRIVER.
+    # `-V` prints every test's stdout, including tests that PASS -- and this repo has tests
+    # whose whole job is to make the drain and miss reports fire while passing
+    # (tests/session/test_quiesce_on_exit_residual.cpp, compiled into session_pure_tests,
+    # the largest binary any arm here runs). They do not pollute the match because
+    # `EXPECT_NONFATAL_FAILURE` installs a reporter that CONSUMES the failure before it
+    # reaches stdout. Measured on that binary under `-V`: the report tail appears once (the
+    # arm's own) and kDrainResidual zero times, while the three witness suites do run.
+    #   (a) That safety is the WRAPPER's, not this driver's. A future witness that reports
+    #       outside `EXPECT_NONFATAL_FAILURE` -- or writes to stderr the way the seam's
+    #       `kWindowMissForced` announcement does -- WILL land in this output, and the label
+    #       narrowing is then the only defence left.
+    #   (b) `grep -F "$TAIL$label"` is a SUBSTRING test, so a label that is a strict PREFIX
+    #       of another label in the same binary false-matches and reads RED on a site it
+    #       never exercised. `new-site-labels.py` surveys this (it checks equality AND
+    #       prefix containment); at the time of writing it reports pairs that exist tree-wide
+    #       among older bare-stem labels, none of them in one binary with their longer twin.
+    #       Re-derive before adding a label that extends an existing one.
+    out=$(cd "build/$preset" && timeout "$TIMEOUT_S" ctest -R "$regex" -V 2>&1)
     rc=$?
     if [ "$rc" -eq 124 ]; then
-        echo "    ~~ INCONCLUSIVE: timed out after ${TIMEOUT_S}s -- the call this arm forced is"
-        echo "       probably NOT the one the test waits on (indirected pump)."
+        # ⚠️ A TIMEOUT IS THREE OUTCOMES, NOT ONE, AND COLLAPSING THEM FAILS TOWARD A WRONG
+        # VERDICT AGAINST CORRECT CODE. This branch used to print ONE unconditional cause
+        # ("the call this arm forced is probably NOT the one the test waits on") and add a
+        # failing NOTE. But `$out` holds the partial output, and it decides which case this
+        # is -- `ci/pump-seam-arm.sh` has split it three ways since batch 11, whose header
+        # records that collapsing them "cost a manual per-test bisect to separate them".
+        # The two drivers gave the SAME run OPPOSITE verdicts: a site that reported
+        # correctly and then met an unrelated UNMIGRATED `run_for(); ... get()` later in the
+        # same test read RED under the seam and INCONCLUSIVE-with-a-wrong-cause here, and
+        # only here did it flip the exit status. Latent, not live, when this was written --
+        # batch 14 ran 6 arms with 0 timeouts -- but the failure direction is the same one
+        # the SIGPIPE note below documents.
+        # [[feedback_the_nth_copy_lacks_the_witnesses_its_siblings_have]]
+        t_rep=$(grep -cF "$TAIL$label" <<<"$out" || true)
+        if [ "$t_rep" -gt 0 ]; then
+            echo "    RED* $label -- reported ($t_rep), THEN the run wedged."
+            echo "       The miss branch did its job; the wedge is LATER in the run. Look for"
+            echo "       an UNMIGRATED run_for/get after this site in the same test."
+            echo "       last test started: $(grep -E '^\[ RUN' <<<"$out" | tail -1 | sed 's/^\[ RUN *\] *//')"
+            pass=$((pass+1)); wedged=$((wedged+1))
+            restore "$file"; continue
+        fi
+        echo "    ~~ INCONCLUSIVE: timed out after ${TIMEOUT_S}s with NO report for this label."
+        echo "       Either the miss block wedged BEFORE reporting (a drain that does not"
+        echo "       quiesce), or the call this arm forced is not the one the test waits on"
+        echo "       (indirected pump). Either way it is a finding, not a slow box."
         NOTES+=("HUNG $label")
     # ⚠️ HERESTRING, NOT A PIPELINE -- AND THIS WAS A REAL FALSE "SILENT".
     # `set -o pipefail` is on. `grep -q` exits at the FIRST match and closes the pipe, so
@@ -514,17 +579,68 @@ while IFS=$'\t' read -r file anchor label target regex; do
         resid=$(grep -F "Site: $label" <<<"$resid_lines" || true)
         if [ -n "$resid" ]; then
             echo "    !! RED, BUT THE DRAIN LEFT A RESIDUAL -- the miss branch reported AND"
-            echo "       the drain did not quiesce. Check the drain FLAVOUR at this site."
+            echo "       the drain did not quiesce. What to ask, in order, is written ONCE at"
+            echo "       the primitive: see WHAT A RESIDUAL VERDICT MEANS in"
+            echo "       tests/support/pump_until_ready.hpp. Do not paraphrase it here."
             printf '%s\n' "$resid" | head -3
             NOTES+=("RESIDUAL $label")
         else
             echo "    RED as required: reported '${TAIL}${label}'"
             pass=$((pass+1))
         fi
-    else
-        echo "    !! NO REPORT -- the miss branch did not announce itself"
-        printf '%s\n' "$out" | grep -iE "window|Site:|FAILED|Passed" | head -12
-        NOTES+=("SILENT $label")
+    elif true; then
+        # ⚠️ ASK WHETHER THE ARM'S OWN TEST RAN. A binary-wide `grep '[  SKIPPED ]'` was the
+        # first version of this branch and it MIS-DIAGNOSES A REAL DEFECT: an arm runs a
+        # whole binary, so an unrelated test skipping makes a genuinely SILENT site read
+        # SKIPPED. Reachable in this tree, measured: `ctest -R '^credentials_rotated_emit$'`
+        # runs six tests, of which only `LiveTlsRotationEmitRealFingerprint` can skip, while
+        # spotcheck rows 1-2 arm two that cannot. On a box with no readable TLS fixtures a
+        # broken row-1 site would have been reported as a missing fixture -- sending the
+        # reader to install certs instead of to the migration. The exit code stayed non-zero,
+        # so this was a wrong DIAGNOSIS rather than a false green; that is the same direction
+        # as the SIGPIPE defect below, which "would have sent someone to fix migrations that
+        # were already right".
+        #
+        # The positive form is also strictly stronger than a skip test: requiring the arm's
+        # own test to have STARTED catches "the ctest regex selected the wrong test", which
+        # the up-front validator explicitly does not cover -- a regex selecting the WRONG
+        # test still selects something and passes there.
+        # [[feedback_a_verification_sweep_must_assert_an_execution_count]]
+        #
+        # The stem is the label text before the first `/`. It is matched by CONTAINMENT, not
+        # equality: a label is a READABLE stem and need not be the gtest name (see
+        # ci/pump-seam-arm.sh's filter comment -- `W2_StoreWinsDown` lives in
+        # `RefreshOnLogon.W2_StoreWinsDown_RED`). Where the stem matches NOTHING the arm is
+        # INCONCLUSIVE, not SILENT: this driver then cannot say whether the site ran at all,
+        # and guessing would be the failure this branch exists to remove.
+        stem="${label%%/*}"
+        started=$(grep -F '[ RUN' <<<"$out" | grep -cF "$stem" || true)
+        skipped_here=$(grep -F '[  SKIPPED ]' <<<"$out" | grep -cF "$stem" || true)
+        # ⚠️ ORDER: SKIPPED IS TESTED FIRST, because gtest prints `[ RUN ]` BEFORE the body
+        # runs, so a test that reaches `GTEST_SKIP()` HAS a RUN line. An earlier form of this
+        # branch asked "did it start?" first and reported a skipped arm as SILENT -- the very
+        # mis-diagnosis it was written to remove, inverted. Caught by its own control, which
+        # is the only reason it is not in this file: forcing an arm with
+        # FIXPP_TLS_FIXTURE_DIR=/nonexistent-dir must print SKIPPED, not "the arm's test RAN".
+        if [ "$skipped_here" -gt 0 ]; then
+            echo "    ~~ SKIPPED -- this arm's own test did not execute, so it witnesses"
+            echo "       NOTHING. Usually a missing/unreadable fixture. NOT a finding about"
+            echo "       the site."
+            printf '%s\n' "$out" | grep -F '[  SKIPPED ]' | grep -F "$stem" | sed 's/^/         /' | head -3
+            NOTES+=("SKIPPED $label")
+        elif [ "$started" -eq 0 ]; then
+            echo "    ~~ INCONCLUSIVE: no '[ RUN ]' line matched the label stem '$stem', so"
+            echo "       this driver cannot say whether the armed site ran. Either the ctest"
+            echo "       regex selected the wrong test, or the label stem is not part of the"
+            echo "       gtest name. Resolve by hand; do NOT read it as SILENT."
+            printf '%s\n' "$out" | grep -F '[ RUN' | sed 's/^/         /' | head -5
+            NOTES+=("HUNG $label")
+        else
+            echo "    !! NO REPORT -- the arm's test RAN ($started) and the miss branch did"
+            echo "       not announce itself. This IS a finding about the site."
+            printf '%s\n' "$out" | grep -iE "window|Site:|FAILED|Passed" | head -8
+            NOTES+=("SILENT $label")
+        fi
     fi
     restore "$file"
 done < "$arms_file"
@@ -561,6 +677,7 @@ echo
 # lockstep with it at four sites; a sixth arm category added to one and forgotten in the
 # other would have silently changed the exit code. Derive the split from the tags instead.
 hung=$(printf '%s\n' "${NOTES[@]-}" | grep -c '^HUNG ' || true)
+skipped=$(printf '%s\n' "${NOTES[@]-}" | grep -c '^SKIPPED ' || true)
 # ⚠️ ASSERT AN EXECUTION COUNT. Three parsers read this file -- two `awk`s and the `read`
 # loop -- and they disagree on a row with NO TRAILING NEWLINE: `awk` counts it, `read` returns
 # non-zero so the loop body never runs. A 1-arm file without a final newline therefore
@@ -571,6 +688,10 @@ hung=$(printf '%s\n' "${NOTES[@]-}" | grep -c '^HUNG ' || true)
 # would not be by a loop counter. See assert_ran_count's comment.
 ran=$(( pass + ${#NOTES[@]} ))
 assert_ran_count "$ran" "$n_arms" pump-red-arm "arm(s)"
-echo "arms: ${pass} RED-as-required, $(( ${#NOTES[@]} - hung )) FAILED, ${hung} INCONCLUSIVE"
+# ⚠️ `wedged` AND `skipped` ARE ON THIS LINE ON PURPOSE. A summary reading "N
+# RED-as-required, 0 FAILED" while an arm wedged, or while an arm never ran, is the
+# fails-toward-clean shape -- which is why ci/pump-seam-arm.sh prints its own `wedged`.
+echo "arms: ${pass} RED-as-required (of which ${wedged} reported THEN WEDGED), \
+$(( ${#NOTES[@]} - hung - skipped )) FAILED, ${hung} INCONCLUSIVE, ${skipped} SKIPPED"
 if (( ${#NOTES[@]} )); then printf '  - %s\n' "${NOTES[@]}"; fi
 [ "${#NOTES[@]}" -eq 0 ]

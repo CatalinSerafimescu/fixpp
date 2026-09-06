@@ -96,6 +96,15 @@ ANNOUNCE='#289 FORCED window miss at site: '
 # alternation". That is a claim about a DIFFERENT tool -- this line calls `grep` -- and it
 # does not hold here now either (measured: `rg` 14.1.1, an alternation, exit 0, matches
 # printed). A borrowed caveat is not a reason.
+# ⚠️ MATCHING BOTH TAILS IS ALSO THIS DRIVER'S BLIND SPOT, and it runs the opposite way
+# from every other asymmetry recorded here. Accepting either constant means a site that
+# calls `run_window_then_ready` but reports `kPumpBudgetMiss` -- a plausible copy-paste
+# between the two recipes -- reads RED here and SILENT under `ci/pump-red-arm.sh`, which
+# matches only the window tail. There the TEXTUAL driver is right and this one fails toward
+# clean. Not fixed, because narrowing the match by primitive needs the label->primitive map
+# this driver deliberately does not keep (it locates labels by `strings` over binaries).
+# The check that closes it is `new-site-labels.py`'s occurrence control plus reading the
+# call; #289 batch 14 resolved all 31 of its sites that way and found no mismatch.
 REPORT_TAIL='grace slice. Site: '
 REPORT_TAIL2='bounded-pump budget. Site: '
 # `kDrainResidual` from tests/support/pump_until_ready.hpp -- the SAME string
@@ -266,8 +275,8 @@ look for an UNMIGRATED run_for/get after this site")
     # sibling still RED. Re-derive it that way; the recipe is the evidence, the numbers rot.
     if [ -n "$resid" ]; then
         printf '    !!   RED, BUT THE DRAIN LEFT A RESIDUAL: %s reported AND did not quiesce.\n' "$label"
-        echo   "         Check the drain FLAVOUR at this site, and whether it needs the"
-        echo   "         transport closed first (survivor case (ii) at the primitive)."
+        echo   "         What to ask, in order, is written ONCE at the primitive: see"
+        echo   "         WHAT A RESIDUAL VERDICT MEANS in tests/support/pump_until_ready.hpp."
         printf '%s\n' "$resid" | head -3
         NOTES+=("$label: RESIDUAL")
         residual=$((residual + 1)); return 1

@@ -74,9 +74,24 @@
 // Pulls heavy concrete headers — safe here (tests/ only).
 #include "loopback_tls_session_harness.hpp"
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 
 // For direct LoopbackTlsFixture use (bypassing the harness Session for Cell B).
 #include "transport/loopback_tls_fixture.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -287,10 +302,14 @@ TEST_F(ReconnectLiveHappyPathTest, ConnectAndHandshakeCalledOnSuccessfulAttempt)
     fixpp::session::ReconnectFsm fsm(factory.get(), make_fast_policy(3), 30s, 2000ms);
 
     auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-    ioc.run_for(500ms);
-    ioc.restart();
-
-    ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, fut, 500ms, "ConnectAndHandshakeCalledOnSuccessfulAttempt/attempt")) {
+        fixpp::test_support::drain_or_report(
+            ioc, "ConnectAndHandshakeCalledOnSuccessfulAttempt/attempt");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ConnectAndHandshakeCalledOnSuccessfulAttempt/attempt";
+        return;
+    }
     (void)fut.get();
 
     EXPECT_GE(factory->connect_count.load(), 1)
@@ -409,11 +428,13 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
     // ── Open session → LogonSent ────────────────────────────────────────────
     {
         auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
-        ioc.run_for(1s);
-        ioc.restart();
-
-        ASSERT_EQ(open_fut.wait_for(0s), std::future_status::ready)
-            << "Session::open() did not complete.";
+        if (!fixpp::test_support::run_window_then_ready(ioc, open_fut, 1s,
+                                                        "LiveTlsReconnectReachesActive/open")) {
+            fixpp::test_support::drain_or_report(ioc, "LiveTlsReconnectReachesActive/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LiveTlsReconnectReachesActive/open";
+            return;
+        }
         auto open_r = open_fut.get();
         ASSERT_TRUE(open_r.has_value())
             << "Session::open() failed: " << static_cast<int>(open_r.error());
@@ -461,13 +482,15 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
         asio::detached);
 
     // Run both coroutines. 5s is ample for a loopback TLS handshake.
-    ioc.run_for(5s);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, client_fut, 5s,
+                                                    "LiveTlsReconnectReachesActive/reconnect")) {
+        fixpp::test_support::drain_or_report(ioc, "LiveTlsReconnectReachesActive/reconnect");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "LiveTlsReconnectReachesActive/reconnect";
+        return;
+    }
 
     // ── Assert drive_reconnect_attempt succeeded ────────────────────────────
-    ASSERT_EQ(client_fut.wait_for(0s), std::future_status::ready)
-        << "drive_reconnect_attempt() did not complete within 5s.";
-
     auto drive_r = client_fut.get();
     ASSERT_TRUE(drive_r.has_value())
         << "drive_reconnect_attempt() failed with error: " << static_cast<int>(drive_r.error());
@@ -492,11 +515,13 @@ TEST_F(ReconnectLiveHappyPathTest, LiveTlsReconnectReachesActive) {
         auto feed_fut = asio::co_spawn(
             ioc, session.on_inbound_frame(std::span<const std::byte>{logon_ack}), asio::use_future);
 
-        ioc.run_for(1s);
-        ioc.restart();
-
-        ASSERT_EQ(feed_fut.wait_for(0s), std::future_status::ready)
-            << "on_inbound_frame(Logon-ack) did not complete.";
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, feed_fut, 1s, "LiveTlsReconnectReachesActive/logon-ack")) {
+            fixpp::test_support::drain_or_report(ioc, "LiveTlsReconnectReachesActive/logon-ack");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LiveTlsReconnectReachesActive/logon-ack";
+            return;
+        }
         (void)feed_fut.get();
     }
 
