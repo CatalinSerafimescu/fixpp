@@ -1457,32 +1457,7 @@ def main() -> int:
         os.path.realpath(os.path.join(e.get("directory", "."), e["file"])) for e in entries
     )
 
-    # ── #363: the population's blind spot, checked rather than documented ──
-    # Only meaningful when the prefilter is active; --all-files has no blind spot
-    # to screen for. A hit is a REFUSAL, not a warning: the sweep's own output
-    # would otherwise be a clean report over a population known to be short.
     repo_root = os.environ.get("FIXPP_REPO_ROOT", os.getcwd())
-    if not args.all_files:
-        try:
-            header_hits = screen_headers(repo_root)
-        except RuntimeError as exc:
-            print(f"ERROR: {exc}")
-            print("The header screen could not run. That is NOT a clean result — it is "
-                  "the same fail-toward-clean this check exists to remove.")
-            return 1
-        if header_hits:
-            print("ERROR: a header carries the named-closure co_spawn shape, and the "
-                  "compile-database prefilter cannot see it (#363).")
-            for rel, lines in sorted(header_hits.items()):
-                print(f"  {rel}: lines {', '.join(str(n) for n in lines)}")
-            print("\nThe prefilter admits a TU only if its MAIN FILE text contains the "
-                  "literal token, so a header reachable only from TUs without it is "
-                  "outside the population — and reconcile_co_spawn_census.py consumes "
-                  "this same population, so the cross-check cannot see the hole either."
-                  "\nRe-run with --all-files (parses every TU; slower) to include it.")
-            return 1
-        print(f"header screen (#363): {len(population)} TUs in the population; no header "
-              f"carries the named-closure shape outside it.")
 
     best: dict[tuple[str, int, int], dict] = {}
     errors: list[tuple[str, str]] = []
@@ -1537,6 +1512,104 @@ def main() -> int:
         with open(args.json_out, "w", encoding="utf-8") as fh:
             json.dump({"sites": all_sites, "errors": errors, "files": population}, fh, indent=2)
         print(f"\nwrote {args.json_out}")
+
+    # ── #363: the population's blind spot, CHECKED — after the sweep, against
+    # what the walker actually saw ──────────────────────────────────────────────
+    #
+    # ⚠️ THIS RAN BEFORE THE SWEEP AND REFUSED ON THE WRONG CONDITION. The blind
+    # spot is a conjunction — a header carries the shape AND is unreachable from
+    # the population — and the first version tested only the first conjunct. That
+    # is not a nitpick: the walker records sites IN-REPO, NOT IN-TU (see the
+    # in_tu note in SiteWalker), precisely so header sites are reported. So a
+    # header included by an ADMITTED TU is already parsed and already in the
+    # report, and refusing on it would have failed CI with the explanation "the
+    # prefilter cannot see it" — FALSE for exactly that header — and the only
+    # remedy offered was a 20-minute --all-files run to disprove a hole that was
+    # never there.
+    #
+    # ⚠️ AND THE ARM THAT WAS SUPPOSED TO PROVE THIS GATE WORKS DEMONSTRATED THE
+    # FALSE REFUSAL INSTEAD. The seeded header was tests/session/_fixtures_/
+    # test_double_fsm.hpp, which 21 token-carrying .cpp files include — i.e. the
+    # most thoroughly ADMITTED header available. It went red for the wrong
+    # reason, and a forced-RED arm that fires for the wrong reason certifies
+    # nothing. Proving a guard CAN fire is not proving it fires ON ITS CONDITION.
+    #
+    # THE ARM THAT DOES DISCRIMINATE seeds BOTH sides in one run and requires the
+    # gate to separate them. Against --filter test_fifo_across_cycles:
+    #
+    #   seed in include/fixpp/core/sync/async_mutex.hpp   (the TU INCLUDES it)
+    #   seed in tests/session/_fixtures_/test_double_fsm.hpp (it does NOT)
+    #
+    #   result: named-closure sites 10 -> 11  (the walker picked up the covered
+    #           seed), and the refusal named test_double_fsm.hpp ONLY.
+    #   control (both seeds reverted): 10 sites, no refusal.
+    #
+    # The site-count moving is the part that matters: it proves the covered seed
+    # was genuinely parsed, so its ABSENCE from the refusal is a discrimination
+    # rather than a miss. Re-derive with that pair; a single-sided seed cannot
+    # tell this gate from the one it replaced.
+    #
+    # So the screen NOMINATES and the walker CONFIRMS: a hit is a finding only
+    # where the sweep reported no site in that header. That also demotes the
+    # regex from an authority to a candidate generator — it may over-approximate
+    # loudly without costing a false CI failure, and it stops being a second
+    # definition of "what is a site" competing with the AST walker's.
+    #
+    # ⚠️ THE CONDITION IS AN APPROXIMATION AND THE MESSAGE SAYS SO RATHER THAN
+    # PRETENDING OTHERWISE. "the sweep reported no SITE in this header" is a
+    # proxy for "this header was never PARSED"; the walker does not report the
+    # set of files it parsed, only the sites it found. The two diverge one way:
+    # a header that IS parsed but yields no site (because the screen
+    # over-matched) refuses spuriously. That is loud, and disposition (b) below
+    # names it. They do NOT diverge the other way — an unparsed header can never
+    # produce a site — so a real blind spot is never missed HERE.
+    #
+    # ⚠️ RESIDUAL, and it is the one this whole check cannot close: if the SCREEN
+    # itself misses the shape in an unreachable header, there is no refusal and
+    # no coverage, silently. The screen is a regex over blanked text and has
+    # already been wrong three times (raw text, forwarding wrappers, template
+    # argument lists) — every one of them found by review, not by this gate. Only
+    # `--all-files` actually closes it. Treat a green here as "no NOMINATED
+    # candidate is uncovered", never as "no uncovered site exists".
+    if not args.all_files:
+        try:
+            header_hits = screen_headers(repo_root)
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            print("The header screen could not run. That is NOT a clean result — it is "
+                  "the same fail-toward-clean this check exists to remove.")
+            return 1
+        # Files in which the sweep REPORTED A SITE — see the approximation note.
+        seen_headers = {s["file"] for s in all_sites}
+        unseen = {
+            rel: lines
+            for rel, lines in header_hits.items()
+            if os.path.realpath(os.path.join(repo_root, rel)) not in seen_headers
+        }
+        if unseen:
+            print("ERROR: a header carries the named-closure co_spawn shape and the sweep "
+                  "reported NO site in it (#363).")
+            for rel, lines in sorted(unseen.items()):
+                print(f"  {rel}: lines {', '.join(str(n) for n in lines)}")
+            print("\nTwo things produce this, and this check does not claim to tell them "
+                  "apart:\n"
+                  "  (a) the header is OUTSIDE the population. The prefilter admits a TU "
+                  "only if its MAIN FILE text contains the literal token, so a header "
+                  "reachable only from TUs without it is never parsed — and "
+                  "reconcile_co_spawn_census.py consumes this same population, so the "
+                  "cross-check cannot see the hole either. This is the #363 blind spot.\n"
+                  "  (b) the screen OVER-MATCHED. It is a regex over blanked text, not an "
+                  "AST walk; it nominates candidates and is deliberately loud.\n"
+                  "Re-run with --all-files to distinguish: under (a) the site appears in "
+                  "the report, under (b) it does not.")
+            return 1
+        covered = len(header_hits)
+        print(f"header screen (#363): {len(population)} TUs parsed; "
+              f"{covered} screened header hit(s), all confirmed by the walker."
+              if covered else
+              f"header screen (#363): {len(population)} TUs parsed; no header carries the "
+              f"named-closure shape outside what the sweep saw.")
+
 
     # Fails closed: a sweep that parsed nothing, or found no site, reports the
     # same "0 FLAG" a clean tree does.

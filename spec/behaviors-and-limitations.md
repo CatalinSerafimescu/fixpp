@@ -2630,3 +2630,20 @@ Evidence: issues #346, #348, #349; new issue #351.
   `async_resolve` await), so it does not cover that window either. An outbound transport that is not
   yet published is also unreachable from `stop()`'s socket-closing path. **Status: follow-up
   (#361).** *(Found by review during PR #362, pre-existing; not introduced there.)*
+
+  ⚠️ **It is NOT unbounded, and the operator action is a deployment one.** The wait is bounded by
+  the **host's resolver policy**, which fixpp does not control: glibc's `timeout` (default 5 s) x
+  `attempts` (default 2) x each `nameserver` x the A/AAAA pair. Measured 2026-09-06 with a
+  bind-mounted `/etc/resolv.conf` in a private mount namespace — 1 blackholed nameserver at
+  defaults **20.0 s**, 3 blackholed nameservers **56.0 s**, a working resolver **62 ms**, and
+  1 blackholed nameserver with `options timeout:1 attempts:1` **2.0 s**. So a host whose
+  `resolv.conf` lists several unreachable nameservers at glibc defaults can hold `Engine::stop()`
+  for the better part of a minute, and **lowering `timeout`/`attempts` in `resolv.conf` is
+  currently the only lever that shortens it.**
+
+  ⚠️ **No in-library timeout can fix this, and the obvious one is worse than nothing.** asio's
+  `background_getaddrinfo` tests its cancellation token **once, before** the blocking call, so
+  `resolver.cancel()` only wins the window before the lookup starts; an in-flight `getaddrinfo`
+  runs to completion regardless. Joining the resolve against a timer with `operator||` would still
+  wait for it *and* add an arm, since the group retires only when both arms retire. The bound
+  above is therefore a property of the deployment, not a value fixpp can offer as a knob.
