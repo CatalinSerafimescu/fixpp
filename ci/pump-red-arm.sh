@@ -514,7 +514,9 @@ while IFS=$'\t' read -r file anchor label target regex; do
         resid=$(grep -F "Site: $label" <<<"$resid_lines" || true)
         if [ -n "$resid" ]; then
             echo "    !! RED, BUT THE DRAIN LEFT A RESIDUAL -- the miss branch reported AND"
-            echo "       the drain did not quiesce. Check the drain FLAVOUR at this site."
+            echo "       the drain did not quiesce. Check the drain FLAVOUR at this site, and"
+            echo "       whether it needs the owner of the live op CLOSED first (survivor"
+            echo "       case (ii) at the primitive) -- a flavour change cannot fix that one."
             printf '%s\n' "$resid" | head -3
             NOTES+=("RESIDUAL $label")
         else
