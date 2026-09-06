@@ -431,12 +431,27 @@ cell "T19 an inflated summed test time is called out on a VALID sample" 0 \
 # acceptance.
 cell "T23 a count that disagrees with the lane's pinned basis VOIDs the sample" 3 \
   "NOT THE LANE'S PRODUCTION WORKLOAD" --preset linux-clang-asan --ran 300,300,300
+# ⚠️ 368 TRACKS `ci/expected-eligible-tests.txt` AND MOVES WITH IT. This is a
+# deliberate coupling, not a leak: the cell asserts that a MATCHING count is
+# confirmed, so it has to state a number the pin actually holds. When a pin is
+# re-recorded, this line is re-recorded in the same commit — that file's header
+# says a mismatch is the designed prompt, and this is the same prompt one level
+# up. It fired exactly that way when `linux-clang-asan` went 362 -> 368.
 cell "T24 a count matching the pinned basis is confirmed on the page" 0 \
-  "matching \`ci/expected-eligible-tests.txt\`" --preset linux-clang-asan --ran 362,362,362
-# A preset with no pin line must NOT void — the Windows lanes have never had one,
-# and inventing an expectation for them would void every Windows sample.
+  "matching \`ci/expected-eligible-tests.txt\`" --preset linux-clang-asan --ran 368,368,368
+# A preset with no pin line must NOT void — inventing an expectation for an
+# unpinned lane would void every sample it ever took.
+#
+# ⚠️ THIS CELL NEEDS A PRESET THAT IS GENUINELY UNPINNED, and the one it used
+# stopped being so. It was `windows-msvc-asan`, which had never had a line;
+# #267 gave the Windows lanes their first pins, and this cell silently stopped
+# testing the no-pin path — it would have started asserting the PINNED path
+# under a name that says otherwise. `linux-gcc-debug` is now the only preset in
+# CMakePresets.json with no pin (it has no CI lane either), which is exactly the
+# property required. If it ever gains one, THIS CELL GOING RED IS CORRECT: pick
+# another unpinned preset, or add one, rather than weakening the assertion.
 cell "T25 a preset with no pinned basis is disclosed, not voided" 0 \
-  "could not be checked against the lane's production basis" --preset windows-msvc-asan
+  "could not be checked against the lane's production basis" --preset linux-gcc-debug
 
 # ── T21/T22: a pass that did not complete its suite ──────────────────────────
 #
