@@ -34,6 +34,15 @@
 #          one in the file's second test. (This descriptor named the FIRST test and
 #          called it the second; the arm was corrected to match the descriptor's intent
 #          rather than the descriptor softened to match the arm.)
+#   row 7  the ONE site whose drain differs -- `cancel_and_drain_or_report` with the clock
+#          AND the transport. It was very nearly not armed at all, and the reason is worth
+#          more than the row: this file's header used to say the arms need not partition on
+#          recipe "because every site is one recipe", so the single recipe-divergent site
+#          was excluded by a premise that is false about precisely that site. It also has
+#          the batch's weakest SEAM arm (its future is already ready when the window opens,
+#          so forcing resumes no frame suspended there) -- which is exactly why it needs the
+#          textual one: the textual driver zeroes both durations, so the drain meets a live
+#          suspended frame instead of an already-quiesced context.
 #
 # ⚠️ ROW 5 EXISTS BECAUSE AN INSTRUMENT WAS PROVEN BLIND, NOT BECAUSE THE SITE LOOKED ODD.
 # `ci/pump-get-sweep.sh` recognises `auto NAME = asio::co_spawn(...)`. Re-derive rather than
@@ -44,11 +53,24 @@
 # instrument that cannot see the file is not evidence, so that site's guarded/unguarded
 # status is hand-resolved and this row is its only mechanical arm.
 #
-# ⚠️ THE LIVE-TLS ARMS CAN SKIP THEMSELVES INTO A FALSE `SILENT`. Rows 4 and 5 sit in tests
-# that `GTEST_SKIP()` when `FIXPP_TLS_FIXTURE_DIR` names no readable cert. A skipped test
-# announces nothing, which this driver reports as "the miss branch did not announce itself"
-# -- the same output as a real defect. Before believing a SILENT on either, check the arm's
-# ctest output for `SKIPPED`.
+# ⚠️ AN ARM WHOSE TEST SKIPS ITSELF USED TO READ AS A FALSE `SILENT`, and the driver now
+# has a SKIPPED verdict for it -- see `ci/pump-red-arm.sh`. Two things this file got wrong
+# on the way there, both worth keeping because both are the same mistake at different sizes:
+#
+#   (1) THE MITIGATION COULD NOT RUN. This paragraph used to say "check the arm's ctest
+#       output for SKIPPED". A skipped gtest test PASSES at the ctest level and
+#       `--output-on-failure` prints nothing for a passing test, so that string appeared
+#       ZERO times. The driver now runs `-V`, where it appears.
+#   (2) THE POPULATION WAS A ROW LIST, then a WRONG CONDITION. "Rows 4 and 5" missed row 6
+#       and wrongly included row 5. The replacement -- "every row whose test resolves
+#       FIXPP_TLS_FIXTURE_DIR" -- is also wrong, because row 5's test tests the COMPILE-TIME
+#       macro (`std::string(FIXPP_TLS_FIXTURE_DIR).empty()`) and cannot skip at runtime on a
+#       configured build. Measured: with the env var pointed at a nonexistent dir, row 5's
+#       test runs to `[ OK ] ... (2013 ms)` while rows 4 and 6 skip.
+#
+# The condition that survives both corrections: a row is exposed iff its test resolves the
+# fixture directory AT RUNTIME and probes the leaf file. Resolve it by reading the test, not
+# by grepping for the macro name -- the two shapes both mention it and behave differently.
 #
 # Columns: file <TAB> anchor <TAB> label <TAB> cmake-target [<TAB> ctest regex]
 # The anchor must be unique in the file's CODE (comments are blanked before the search);
@@ -60,3 +82,4 @@ tests/session/test_live_outbound_serialized.cpp	TEST(LiveOutboundSerializedTest,
 tests/session/test_reconnect_live_happy_path.cpp	reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);	LiveTlsReconnectReachesActive/reconnect	reconnect_live_happy_path
 tests/transport/test_transport_factory_paths.cpp	TEST(TransportFactoryPaths, MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes) {	MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes/accept	transport_factory_paths
 tests/session/test_live_identity_binding.cpp	TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {	LiveTlsCertCnDrivesAuthorizationDecision/open	live_identity_binding
+tests/session/test_live_outbound_serialized.cpp	TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {	CloseCancelsBlockedPublicSend/close	session_pure_tests

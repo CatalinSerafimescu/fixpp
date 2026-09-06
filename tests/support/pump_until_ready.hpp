@@ -490,7 +490,14 @@ template <class Pump>
 //     (i) a mock-clock waiter, released only by `cancel_sleeps()` -- the flavour; and
 //     (ii) an op that never completes on its own, e.g. a coroutine parked in
 //     `async_write`/`async_read_some` on a LIVE TRANSPORT, which no amount of pumping and
-//     no `cancel_sleeps()` will end. For (ii) the answer is the transport-aware drain
+//     no `cancel_sleeps()` will end.
+//     ⚠️ THE REMEDY FOR (ii) IS "CLOSE WHATEVER MAKES THE PARKED OP FAIL", WHICH IS NOT
+//     ALWAYS THAT OP'S OWNER, and the list below reads as if it were. Batch 14's case (ii)
+//     closes a THIRD object: the parked op is a client TLS handshake whose transport the
+//     coroutine MOVED IN and the test cannot reach, so the site closes the ACCEPTOR and the
+//     peer's handshake fails for want of a server. Admit the indirect form when reading the
+//     list; "close the owner" is the common case, not the rule.
+//     For (ii) the usual answer is the transport-aware drain
 //     (`cancel_and_drain_or_report` with a transport, or `quiesce_on_exit` with `.transport`
 //     set), NOT a different clock argument. `ci/pump-red-arm.sh` says "Check the drain
 //     FLAVOUR at this site" on a residual, which points at (i) only; if a residual survives
@@ -515,7 +522,12 @@ template <class Pump>
 //     That is exactly the parameter a premature primitive would have to guess, and the
 //     note above already records the last guess failing: the single-`Transport*` overload
 //     did not fit batch 13's site. So the condition is restated as a CONDITION rather than
-//     a count: **graduate when a LEVER RECURS**, not when the file count reaches two.
+//     a count: **graduate when the SAME LEVER is needed in a SECOND FILE.**
+//     ⚠️ NOT "when a lever recurs" -- an earlier wording said that and it was ALREADY
+//     DISCHARGED on its own terms: `engine.stop()` appears three times in
+//     `test_019_g2_enablement_witness.cpp` alone, and the paragraph four lines above this
+//     one says two call sites in ONE file is a coincidence. Both halves are load-bearing:
+//     the same lever, in a different file.
 //
 //     ⚠️ WHICH SITES CAN REACH (ii) AT ALL has a sharper predicate than "is a live
 //     transport involved", and batch 14 measured it: of 31 forced sites across five files
@@ -526,11 +538,27 @@ template <class Pump>
 //     exchange. Where the TEST BODY is a required step -- factory-paths hands the accepted
 //     socket back through `.get()` and only then builds the server transport, so a miss
 //     returns before the server side exists -- the peer's handshake waits for someone who
-//     will never arrive. Only that second shape is (ii).
+//     will never arrive. In the FORCED state only that second shape reached (ii).
+//     ⚠️ THAT IS A MEASUREMENT, NOT A PROPERTY, and the difference decides whether you may
+//     skip a site. Forcing PRESERVES the state at entry, so nothing had dispatched and the
+//     whole exchange ran fresh inside the drain. Under a REAL miss the window already ran,
+//     so a self-contained peer may have ALREADY returned or errored -- leaving the client
+//     parked with nobody left to drive it, i.e. (ii), at a site this predicate excludes.
+//     The predicate says which sites reached (ii) under forcing; it does not bound which
+//     sites can reach it. [[feedback_a_survey_presented_as_a_property_re_arms_itself]]
 //     ⚠️ That measurement is bounded by how forcing works: it PRESERVES the state at entry,
 //     so it witnesses the drain against a HEALTHY exchange not yet dispatched, which is the
 //     opposite of the wedged exchange a real miss implies.
 //     [[feedback_a_forcing_mechanism_cannot_manufacture_the_state_it_preserves]]
+//
+//     ⚠️ WHAT A RESIDUAL VERDICT MEANS, WRITTEN ONCE HERE because both arm drivers used to
+//     paraphrase it and the two paraphrases drifted apart -- one told the reader to check
+//     the drain FLAVOUR only, which is survivor case (i) and cannot fix a case (ii) at all.
+//     Both now point here instead of restating. A residual means the miss branch reported
+//     AND the drain did not quiesce, so ask, in order: is a MOCK-CLOCK waiter outstanding
+//     (case (i) -- change the flavour), or is an op parked on something no pump ends
+//     (case (ii) -- close whatever makes it fail, per the paragraph above; a flavour change
+//     cannot fix that one). If a residual survives BOTH clock flavours, it is (ii).
 //
 //     ⚠️ GRADUATION CONDITION, so this is a decision and not an oversight: promote
 //     "stop the engine, then drain" to a primitive next to `cancel_and_drain_or_report`
