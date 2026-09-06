@@ -319,8 +319,13 @@ TEST(WireOffsetTable, DictFreeGroupDeclinesUnderDefaultConfig) {
     OffsetTable t{*fv, &arena};
     ASSERT_TRUE(t.build_status().has_value())
         << "the table itself builds fine — declining is about group(), not the scan";
-    EXPECT_GT(t.size(), 0U) << "anti-vacuity: 453 IS in the table; the absent result below "
-                               "must come from the dict-free guard, not an empty table";
+    // ANTI-VACUITY, and it has to name the tag: group() returns
+    // wire_required_field_missing from TWO sites — the dict-free guard, and
+    // `count_idx == entries_.size()` when no_tag is simply not in the frame.
+    // `t.size() > 0` cannot separate them; `find(453)` can.
+    ASSERT_TRUE(t.find(453).has_value())
+        << "anti-vacuity: 453 must BE in the table, or the absent result below could come from "
+           "the tag-not-found return rather than from the dict-free guard under test";
 
     auto g = t.group(453);
     ASSERT_FALSE(g.has_value());
@@ -343,6 +348,8 @@ TEST(WireOffsetTable, DictFreeGroupDeclinesUnderTightenedConfig) {
     OffsetTable::Config tight_cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 3};
     OffsetTable t{*fv, &arena, tight_cfg};
     ASSERT_TRUE(t.build_status().has_value());
+    ASSERT_TRUE(t.find(453).has_value())
+        << "anti-vacuity: see DictFreeGroupDeclinesUnderDefaultConfig";
 
     auto g = t.group(453);
     ASSERT_FALSE(g.has_value());
@@ -367,6 +374,8 @@ TEST(WireOffsetTable, DictFreeGroupDeclinesWhenMembershipFnMissing) {
     std::pmr::monotonic_buffer_resource arena;
     OffsetTable t{*fv, &arena, &dict, /*group_member_fn=*/nullptr};
     ASSERT_TRUE(t.build_status().has_value());
+    ASSERT_TRUE(t.find(453).has_value())
+        << "anti-vacuity: see DictFreeGroupDeclinesUnderDefaultConfig";
 
     auto g = t.group(453);
     ASSERT_FALSE(g.has_value());
@@ -386,6 +395,10 @@ TEST(WireOffsetTable, DictFreeGroupSlicesAreEmpty) {
     std::pmr::monotonic_buffer_resource arena;
     OffsetTable t{*fv, &arena};
     ASSERT_TRUE(t.build_status().has_value());
+
+    ASSERT_TRUE(t.find(453).has_value())
+        << "anti-vacuity: an empty span is also what an ABSENT tag yields, so 453 must be present "
+           "for the assertion below to be about the dict-free decline at all";
 
     EXPECT_TRUE(t.group_slices(453).empty())
         << "no group => no slices; the C-ABI thunk reports TYPE_MISMATCH from exactly this";

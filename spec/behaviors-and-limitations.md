@@ -2753,12 +2753,28 @@ Evidence: issues #346, #348, #349; new issue #351.
   returns from `Message::setGroup` when `DataDictionary::getGroup` fails and forms no `Group` at all;
   QuickFIX/J guards all three `parseGroup` call sites on a non-null dictionary and, with no
   dictionary, flattens the members as ordinary top-level fields.
-  **⚠️ This is a visible C-ABI behaviour change, and the only one.** A dict-free caller's
+  **⚠️ THE SURFACE THAT ACTUALLY CHANGED IS THE C++ TYPED ONE.** Stated first because an earlier
+  draft of this row led with the C-ABI and called it "the only" visible change, which inverted the
+  emphasis and was wrong as a universal claim. `MessageView::group<NoTag, GroupT>()` — the accessor
+  every 2c-generated message class uses, e.g. `NewOrderList::orders()` — resolves through
+  `group_slices()`, so on a dict-free view it now yields an **empty** `group_view<GroupT>` where it
+  previously yielded wire-split instances whose last one absorbed trailing top-level fields. That is
+  the change with real reach: **nine** test cells across `tests/wire`, `tests/codegen` and
+  `tests/capi` were asserting non-empty typed groups off a dict-free parse and had to be rethreaded
+  through a dictionary. If you consume fixpp from C++ and construct `Parser<access_mode::Index>{}`,
+  this is the row that concerns you.
+
+  **The C-ABI change, in proportion.** A dict-free caller's
   `fixpp_msg_get_group(msg, <group tag>, …)` went from `FIXPP_ERR_OK` **plus a cursor whose last
   nested instance absorbed trailing outer members** — a wrong value the caller could not distinguish
   from a real one — to `FIXPP_ERR_TYPE_MISMATCH`. `fixpp_group_get_nested_group` is unreachable in
   that state because there is no outer cursor to descend from. **No exported symbol, header, or enum
-  changes; the 1.5.0 C-ABI freeze holds.** This **supersedes 065's FR-008**, whose bar was "no
+  changes; the 1.5.0 C-ABI freeze holds.** ⚠️ **And no shipped C entry point can reach it:** an
+  inbound `fixpp_msg_t` is produced by `Session::parse_and_dispatch_`, which has been dict-backed
+  since 066, so a dict-free handle exists only where a test constructs one directly. Zero C-ABI
+  cells broke on this change; all nine that did were on the C++ typed path above. The C-ABI row is
+  recorded for completeness and for anyone embedding the view types directly — not because it is the
+  likely way to meet this. This **supersedes 065's FR-008**, whose bar was "no
   regression versus today's positional behaviour": 065 took the positional result as a floor because
   it was fixing the dict-aware path and would not touch the other one. #220 establishes that the
   positional result **was** the defect, so trading a silently wrong value for a defined refusal

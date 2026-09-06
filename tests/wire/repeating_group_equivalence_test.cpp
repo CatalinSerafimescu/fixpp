@@ -20,7 +20,6 @@
 
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
-
 #include "support/typed_group_table_views.hpp"
 
 namespace {
