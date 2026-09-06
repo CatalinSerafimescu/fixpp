@@ -310,9 +310,12 @@ TEST(LoadCredentialsCancellation, CancelledResultIsExpectedNotException) {
     // throw, `return;` never executes, and `threw_non_system` goes true -- so a #289
     // window miss is reported as `"cancellation must not throw arbitrary exceptions"`,
     // blaming the code under test. Reproduced by forcing this site's label with the flag
-    // set: the miss report and `test_load_credentials_cancellation.cpp:315: Failure`
-    // appear together, while the same forcing at a site NOT inside a try emits only the
-    // miss report. Found by the batch-17 hostile round, not by the condition written at
+    // set: the miss report and this cell's own
+    // `"cancellation must not throw arbitrary exceptions"` failure appear TOGETHER, while
+    // the same forcing at a site NOT inside a try emits only the miss report. (No line
+    // number here on purpose -- a line number is a claim about a file that keeps moving,
+    // and the gate that rejects one is this repo's, from #310. The quoted phrase is the
+    // durable anchor.) Found by the batch-17 hostile round, not by the condition at
     // the helper -- which said "a TEST body or a non-noexcept frame" and this site
     // satisfied.
     if (!fixpp::test_support::run_to_exhaustion_or_report(
