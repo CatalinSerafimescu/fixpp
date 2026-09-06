@@ -37,6 +37,14 @@ prints `0` for a whole syntax.
   no match. Assert how many files the sweep actually examined, and check whether any root is a link.
 - ⚠️ **A self-test written from the implementation certifies the implementation**, bug included. Build
   fixtures from the real artefact, verbatim.
+- ⚠️ **A GREEN SUITE IS EVIDENCE ABOUT THE EXECUTABLE YOU RAN, NOT ABOUT THE DIRECTORY IT IS NAMED
+  AFTER.** One source directory routinely fans out into several test binaries, and the one whose name
+  reads like the directory is rarely all of it. Reporting "`<dir>_tests` N/N" then reads as coverage
+  of the change's blast radius when it is coverage of a *subset chosen by a build file you did not
+  open* — and the cells outside it can be exactly the ones the change breaks, because nothing about
+  the failure distinguishes "not run" from "passed". **Derive the target list from the build system**
+  (`ninja -t targets`, the `add_executable` set) rather than from the directory name, and say which
+  binaries a green covers. In this repo one directory's cells sit in ten separate executables.
 - ⚠️ **A control set thorough about ONE of an instrument's configurations proves nothing about the
   others.** If the instrument is parameterised — two closing markers, two directories, two presets,
   two file classes — then "the controls pass" is a claim about whichever parameter the controls

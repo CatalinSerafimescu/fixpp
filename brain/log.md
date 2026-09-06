@@ -36,6 +36,20 @@ status: stable
   guard). `brain/components/wire.md` gains the boundary and its rejected alternatives, so the next
   "just split on the delimiter" proposal meets the P1 that already killed it.
 
+  **Second lesson, from the review rather than the fix — class 1 gains "a green suite is evidence
+  about the EXECUTABLE you ran".** The change broke nine test cells that parsed dict-free and then
+  asserted a NON-EMPTY typed group; they had been reading the removed defect as their baseline. Six
+  were found by building beyond the wire suite. The last three were found by a reviewer running
+  `wire_codegen_tests` — a binary I had never built, while repeatedly reporting "wire_pure_tests
+  257/257" as though it covered `tests/wire`. It does not: that directory fans out into **ten**
+  executables. One of the three was the conformance witness named by catalogue row **W-007**
+  (OFFICIAL, nested repeating groups), so an OFFICIAL row's evidence was red while every suite I had
+  run was green. Worth separating the two halves: the *code* fix was found by provenance and settled
+  against two reference engines; the *blast radius* was found only by running, and the grep-shaped
+  sweep that predicted five of the nine missed a sixth outright — its helper carried none of the
+  words the sweep looked for. The durable correction is procedural: derive the target list from
+  `ninja -t targets`, never from the directory name, and state which binaries a green covers.
+
 - **2026-09-04 — #289 batch 10, the shared surfaces.** `failure-classes.md` gains **class 8:
   consolidating N copies dissolves the population an audit asserts over.** Hoisting
   `kWindowMissSentinel` out of three test files emptied the byte-identity population
