@@ -197,6 +197,9 @@ get_re = re.compile(
     r"\b[A-Za-z_][A-Za-z_0-9]*\s*\.\s*get\s*\("
 )
 
+_RAW = re.compile(r'(?:u8|u|U|L)?R"([^\s()\\]{0,16})\(')
+
+
 def _is_digit_separator(src: str, i: int) -> bool:
     """Is `src[i]` (an apostrophe) a C++14 digit separator rather than a char literal?
 
@@ -239,10 +242,15 @@ def blank_non_code(source: str) -> str:
     while i < n:
         if state == "code":
             # Raw string literals, including u8R"...", uR, UR and LR.
-            raw = re.match(
-                r'(?:u8|u|U|L)?R"([^\s()\\]{0,16})\(',
-                source[i:]
-            )
+            # ⚠️ `.match(source, i)` -- NOT `re.match(pat, source[i:])`. The slice copies
+            # the whole remainder of the file at EVERY code character, which is O(n^2)
+            # bytes per file. Measured over the 656 files under tests/ (10.0 MB): one
+            # `blank_non_code` pass goes 13.3 s -> 4.1 s, and the two tier-1 gates that
+            # call it go 30.2 s -> 10.5 s and 13.2 s -> 4.6 s. Output is byte-identical
+            # over all 656 (the two forms can only differ under `^` or a lookbehind, and
+            # this pattern has neither). Hoisting `re.compile` alone buys nothing --
+            # Python already caches compiled patterns; the copy is the cost.
+            raw = _RAW.match(source, i)
             if raw:
                 token = raw.group(0)
                 delim = raw.group(1)

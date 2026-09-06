@@ -103,7 +103,7 @@ CALLS = ("run_window_then_ready(", "run_to_exhaustion_or_report(",
          "pump_until_ready(", "pump_until(")
 
 
-def _join_adjacent(lits, text):
+def _join_adjacent(lits, text, gap_view=None):
     """The label is the TRAILING RUN of adjacent string literals, concatenated.
 
     ⚠️ NOT `lits[-1]`, and this is a fix, not a refinement. C++ concatenates adjacent
@@ -121,6 +121,22 @@ def _join_adjacent(lits, text):
 
     Adjacency is "nothing but whitespace between them", which is what the C++ rule is.
     A literal separated by a comma is a different ARGUMENT and must not be joined.
+
+    ⚠️ THE GAP IS MEASURED ON A COMMENT-BLANKED VIEW, NOT ON THE RAW SOURCE. C++ joins
+    adjacent literals across a COMMENT too, and `lits` has already had comment-resident
+    literals filtered out -- so testing the raw gap re-opened exactly the false-clean
+    direction this function was written to close: two sites whose runtime label is
+    identically `Suite::Case/close_fut_a`, one of them wrapped with `// wrapped for width`
+    between the halves, harvested as `full` and `tail` and read as DISTINCT. Measured:
+    `4 seam sites (4 distinct)` with the comment, `4 (1 distinct)` without it. Found by
+    the batch-17 hostile round, one round after the fix that introduced the gap test.
+
+    ⚠️ AND ONE LIMITATION THAT IS DISCLOSED RATHER THAN FIXED: the harvested value is the
+    literal's SOURCE bytes, so `"a\tb"` and a literal tab inside quotes are one runtime
+    label and two harvested ones. Decoding escapes here would need the full C++ escape
+    grammar and would make the harvest disagree with `strings`-based drivers, which also
+    read source-shaped bytes out of the binary. The condition, not a count: a label
+    containing a backslash escape is outside what this gate can compare.
     """
     if not lits:
         return None
@@ -135,9 +151,10 @@ def _join_adjacent(lits, text):
         if start > 0 and text[start - 1] == "R":
             raise SystemExit("pump-label-uniqueness: error: raw-string site label at offset "
                              f"{start}. Spell the label as an ordinary string literal.")
+    view = gap_view if gap_view is not None else text
     out = [lits[-1][2]]
     for k in range(len(lits) - 1, 0, -1):
-        gap = text[lits[k - 1][1]:lits[k][0]]
+        gap = view[lits[k - 1][1]:lits[k][0]]
         if gap.strip():
             break
         out.insert(0, lits[k - 1][2])
@@ -191,7 +208,7 @@ def calls(text):
                     for lm in _STR.finditer(text, i, j)
                     if not is_comment[lm.start()]]
             line = blanked.count("\n", 0, m.start()) + 1
-            out.append((line, _join_adjacent(lits, text)))
+            out.append((line, _join_adjacent(lits, text, comment_blanked)))
     return sorted(out)
 
 
@@ -257,6 +274,17 @@ _SPLIT_LITERAL = '''
         return;
     }
 '''
+# ⚠️ C++ joins adjacent literals ACROSS A COMMENT, and the first version of the gap test
+# read the RAW source, so a comment between the halves broke the join and re-opened the
+# false-clean direction the join was written to close.
+_SPLIT_ACROSS_A_COMMENT = '''
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, fut, 200ms,
+            "Suite::Case/"  // wrapped for width
+            "close_fut_a")) {
+        return;
+    }
+'''
 _COMMA_SEPARATED_ARGS = '''
     if (!fixpp::test_support::pump_until(ioc, [&] { return done; }, 5s, 1ms, "K/settle")) {
         ADD_FAILURE() << "unrelated";
@@ -278,6 +306,7 @@ _CASES = [
     ("run_to_exhaustion_or_report reaches the same seam", _RUN_TO_EXHAUSTION, ["J/open"]),
     ("a SPLIT literal is ONE label", _SPLIT_LITERAL,
      ["Suite::LongCaseNameThatCrossesTheColumnLimit/close_fut_a"]),
+    ("a SPLIT literal joined ACROSS A COMMENT", _SPLIT_ACROSS_A_COMMENT, ["Suite::Case/close_fut_a"]),
     ("a comma-separated literal is a different argument", _COMMA_SEPARATED_ARGS, ["K/settle"]),
     ("a call quoted in a STRING is not a call", _LABEL_IN_A_STRING, ["H/open"]),
     # ⚠️ INSIDE the argument list, not on the line before it -- the earlier control put it

@@ -174,7 +174,11 @@ static expected_t<local_credentials> await_as_child_with_pending_cancel(
             co_return co_await src.load_credentials();
         },
         asio::bind_cancellation_slot(signal.slot(), asio::use_future));
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut,
+                                                          "await_as_child_with_pending_cancel")) {
+        return expected_t<local_credentials>{std::unexpect,
+                                             fixpp::test_support::kWindowMissSentinel};
+    }
     ioc.restart();
     return fut.get();
 }
@@ -300,11 +304,22 @@ TEST(LoadCredentialsCancellation, CancelledResultIsExpectedNotException) {
 
     bool threw_non_system = false;
     expected_t<local_credentials> result{std::unexpect, error::tls_load_cancelled};
+    // ⚠️ THE #289 GUARD IS OUTSIDE THE `try` DELIBERATELY, and moving it back in is a
+    // FALSE-ATTRIBUTION bug, not a style change. `ADD_FAILURE()` THROWS under
+    // `--gtest_throw_on_failure`; inside the try, the `catch (...)` below swallows that
+    // throw, `return;` never executes, and `threw_non_system` goes true -- so a #289
+    // window miss is reported as `"cancellation must not throw arbitrary exceptions"`,
+    // blaming the code under test. Reproduced by forcing this site's label with the flag
+    // set: the miss report and `test_load_credentials_cancellation.cpp:315: Failure`
+    // appear together, while the same forcing at a site NOT inside a try emits only the
+    // miss report. Found by the batch-17 hostile round, not by the condition written at
+    // the helper -- which said "a TEST body or a non-noexcept frame" and this site
+    // satisfied.
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "LoadCredentialsCancellation::CancelledResultIsExpectedNotException")) {
+        return;
+    }
     try {
-        if (!fixpp::test_support::run_to_exhaustion_or_report(
-                ioc, fut, "LoadCredentialsCancellation::CancelledResultIsExpectedNotException")) {
-            return;
-        }
         result = fut.get();
     } catch (const std::system_error&) {
         // asio::operation_aborted as a system_error is acceptable.

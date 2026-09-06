@@ -37,6 +37,14 @@
 # `kWindowMissSentinel`. The seam driver takes the unfiltered fallback for it, by
 # design -- a label with no `::` cannot name a suite.
 #
+# ⚠️ THE LAST FIVE LABELS WERE ADDED BY THE HOSTILE ROUND, NOT BY THE SWEEP. They are
+# live sites of this batch's exact class that `ci/pump-get-sweep.sh` CANNOT SEE: a long
+# lambda body pushes the declaration past its 12-line splice limit, the `auto NAME =
+# asio::co_spawn(` pattern then fails, and every later `.get()` on that future is
+# skipped. So the sweep's counts do not move when they are migrated -- they were never
+# in them. `await_as_child_with_pending_cancel` is the second label here with no `::`:
+# a file-local value-returning helper, so the seam driver takes the unfiltered fallback.
+#
 
 Backpressure::PartialWriteReturnsWriteShort
 Backpressure::SequentialWritesDrainAtStrandDepth1
@@ -160,6 +168,10 @@ SeamExecutorCompat::ContendedResumesOnAwaiterStrand/f1
 SeamExecutorCompat::ContendedResumesOnAwaiterStrand/f2
 SeamExecutorCompat::ResumesOnBoundExecutor
 SeamFifoFairness::DrainCycleReversesLIFO
+SeamGuardDestructiveMove::MoveAssignToEngagedUnlocksFirst
+SeamGuardDestructiveMove::MoveConstructFromEngagedDisengagesSource
+SeamGuardDestructiveMove::ReleaseDisengagesGuard
+SeamGuardDestructiveMove::SelfAssignmentIsNoOp
 SeamInFlightAcquirerCoverage::ConcurrentDrainWithInFlightAcquirers/fc
 SeamInFlightAcquirerCoverage::ConcurrentDrainWithInFlightAcquirers/fd1
 SeamInFlightAcquirerCoverage::ConcurrentDrainWithInFlightAcquirers/fd2
@@ -199,4 +211,5 @@ TraceCorrelation::ElogCarriesEngineTrace
 TraceCorrelation::ElogTimestampFromMockClock
 ValidationGateConfig::ValidateFalse_NullDict_Succeeds
 ValidationGateConfig::ValidateTrue_NullDict_FailsClosed
+await_as_child_with_pending_cancel
 spawn_and_run

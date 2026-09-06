@@ -940,10 +940,21 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // OVERSIGHT. `ADD_FAILURE()` THROWS under `--gtest_throw_on_failure`, and `drain_or_report`
 // below carries an unconditional no-throw contract because it is reached from destructor
 // BODIES, where an escaping throw meets an implicitly-noexcept frame and terminates. This
-// helper is safe without one only while every caller sits in a frame that may throw -- a
-// TEST body or a non-`noexcept` function. A caller in a destructor needs the guard
-// `drain_or_report` has. Stated as the CONDITION rather than as a count of today's callers,
-// which would rot the moment one is added.
+// helper is safe without one only while BOTH hold at the call site:
+//   (a) it sits in a frame that may throw -- a TEST body or a non-`noexcept` function; and
+//   (b) NO ENCLOSING `catch (...)` stands between it and the frame that should receive the
+//       throw.
+// ⚠️ (b) IS NOT A REFINEMENT OF (a); it is a second, independent condition, and the first
+// version of this comment had only (a). A site in
+// `tests/tls/test_load_credentials_cancellation.cpp` SATISFIED (a) and still failed: the
+// guard sat inside `try { … } catch (const std::system_error&) {…} catch (...) { flag = true; }`,
+// so under `--gtest_throw_on_failure` the ADD_FAILURE threw, the site's own `catch (...)`
+// swallowed it, `return;` never ran, and a #289 miss surfaced as
+// "cancellation must not throw arbitrary exceptions" -- blaming the code under test.
+// Found by the batch-17 hostile round, with a control at a non-`try` site in the same binary
+// under the same flag to make the attribution stick. A caller in a destructor needs the
+// guard `drain_or_report` has. Stated as the CONDITIONS rather than as a count of today's
+// callers, which would rot the moment one is added.
 //
 // ⚠️ WHAT THIS DOES **NOT** BUY, stated because it is the first thing a reader proposes: it
 // does not bound `run()` itself. If the context always has work -- a timer chain, a live
