@@ -74,7 +74,7 @@
 #include <utility>
 
 #include "support/alloc_guard_markers.hpp"
-#include "support/group73_table_view.hpp"
+#include "support/typed_group_table_views.hpp"
 
 // ── 063 T023: TU-local global operator-new counter ──────────────────────
 // Same shape as tests/dictionary/group_context_lookup_alloc_gate_test.cpp —

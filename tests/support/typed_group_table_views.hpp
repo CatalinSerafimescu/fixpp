@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// tests/support/group73_table_view.hpp
+// tests/support/typed_group_table_views.hpp
 //
-// 220 — shared membership for the codegen typed-group cells.
+// 220 — shared membership for the typed-group test cells.
 //
 // WHY THIS EXISTS. fixpp#220 made repeating-group identification a
 // dictionary-only operation: `OffsetTable::group()` declines when no
@@ -40,6 +40,29 @@ inline fixpp::dict::table_view& group73_table_view() {
             .add_group_member(73, 37)
             .add_group_member(73, 38)
             .add_group_member(73, 54);
+        return t;
+    }();
+    return tv;
+}
+
+// The `35=AB` frames in tests/wire/repeating_group_equivalence_test.cpp: two
+// TOP-LEVEL groups in one message — 555 (NoLegs, delimiter 600, member 608)
+// and 604 (delimiter 605). 604 is a nested group in real FIX; these frames use
+// it at top level, which is another reason the shipped dictionary is the wrong
+// oracle for them.
+inline fixpp::dict::table_view& legs_and_alt_table_view() {
+    static fixpp::dict::table_view tv = [] {
+        fixpp::dict::table_view t;
+        t.add_valid("AB", 35)
+            .add_valid("AB", 34)
+            .add_valid("AB", 555)
+            .add_valid("AB", 600)
+            .add_valid("AB", 608)
+            .add_valid("AB", 604)
+            .add_valid("AB", 605)
+            .set_group_first(555, 600)
+            .add_group_member(555, 608)
+            .set_group_first(604, 605);
         return t;
     }();
     return tv;

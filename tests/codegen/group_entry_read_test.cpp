@@ -32,7 +32,7 @@
 #include <utility>
 #include <vector>
 
-#include "support/group73_table_view.hpp"
+#include "support/typed_group_table_views.hpp"
 
 namespace {
 

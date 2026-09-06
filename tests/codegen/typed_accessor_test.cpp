@@ -25,7 +25,7 @@
 #include <utility>
 #include <vector>
 
-#include "support/group73_table_view.hpp"
+#include "support/typed_group_table_views.hpp"
 
 namespace {
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
