@@ -71,7 +71,10 @@
 #include <vector>
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
+#include <utility>
+
 #include "support/alloc_guard_markers.hpp"
+#include "support/group73_table_view.hpp"
 
 // ── 063 T023: TU-local global operator-new counter ──────────────────────
 // Same shape as tests/dictionary/group_context_lookup_alloc_gate_test.cpp —
@@ -173,8 +176,14 @@ std::vector<std::byte> make_frame(std::string_view body) {
 
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 
-// Parse a raw FIX frame into a MessageView using the production Framer
-// (dict-free — same as production session.cpp Parser<Index> pd_parser{}).
+// Parse a raw FIX frame into a MessageView using the production Framer.
+//
+// 220: DICT-AWARE. The old comment here said "dict-free — same as production
+// session.cpp Parser<Index> pd_parser{}", which was already stale (066
+// dict-backed the session's inbound parse) and is now also unusable: group()
+// is a dictionary-only operation, so a dict-free parse yields no typed group
+// and OneLevelScalarZeroAlloc's orders() would be empty. The shared table_view
+// is built ONCE in a function-local static, outside any alloc-gated region.
 MV parse_frame(std::vector<std::byte> const& buf, std::pmr::memory_resource* mr) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), mr};
     fixpp::wire::Framer fr{};
@@ -184,7 +193,14 @@ MV parse_frame(std::vector<std::byte> const& buf, std::pmr::memory_resource* mr)
         std::span<fixpp::wire::frame_view>{fvs, 1});
     EXPECT_TRUE(framed.has_value()) << "Framer::feed failed";
     EXPECT_FALSE(framed->empty()) << "Framer produced no frames";
-    return MV{(*framed)[0], mr};
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{
+        fixpp_test_support::group73_table_view()};
+    auto mv = parser.parse((*framed)[0], mr);
+    if (!mv.has_value()) {
+        ADD_FAILURE() << "dict-aware parse failed";
+        return MV{(*framed)[0], mr};
+    }
+    return std::move(*mv);
 }
 
 decimal_t parse_decimal(std::string_view sv, std::pmr::memory_resource* mr) {

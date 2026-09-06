@@ -57,6 +57,7 @@
 #include "support/context_group_member_fn.hpp"
 #include "support/failing_pmr_resource.hpp"
 #include "support/frame_view_factory.hpp"
+#include "support/wire_test_hooks.hpp"
 
 namespace {
 
@@ -220,6 +221,15 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
         ASSERT_FALSE(ok.group_slices(453).empty())
             << "control: with allocation succeeding, this frame MUST materialise one slice — "
                "if it does not, the failing arm below proves nothing about the bad_alloc catch";
+
+        // SECOND anti-vacuity guard, and a distinct one: `vector::reserve(n)` is
+        // a NO-OP when n <= capacity(), so a zero reserve bound would allocate
+        // nothing and the injection index below would land on some later call —
+        // silently retargeting the test away from the reserve it names. Assert
+        // the bound is non-zero rather than assuming the dictionary made it so.
+        ASSERT_GT(fixpp::wire::reserve_bound_access_for_testing::get(ok), 0U)
+            << "the dict-aware reserve bound must be non-zero, or reserve() allocates nothing "
+               "and this cell no longer exercises the allocation it is written around";
     }
 
     // Measure how many PMR allocations OffsetTable construction performs. This is

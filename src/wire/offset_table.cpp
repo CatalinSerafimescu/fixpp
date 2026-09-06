@@ -749,10 +749,31 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                 //
                 // C-8.4's fallback has exactly TWO cases and no third: no
                 // dictionary / no callback -> today's wire-derived
-                // `entries_[first].tag`, which is behaviour-preserving and is
-                // the CORRECT answer for a table with no dictionary; dictionary
-                // present -> the store's answer, with no wire fallback (a zero
-                // means "not a group", which callers already handle as absent).
+                // `entries_[first].tag`; dictionary present -> the store's
+                // answer, with no wire fallback (a zero means "not a group",
+                // which callers already handle as absent).
+                //
+                // ⚠️ 220 CHANGED WHICH OF C-8.4's TWO CASES CAN RUN, and this
+                // text used to justify the fallback as "behaviour-preserving,
+                // and the CORRECT answer for a table with no dictionary". That
+                // justification is now DEAD: a table with no dictionary cannot
+                // reach this line at all, because group() declines for it and
+                // this splitter only runs inside `if (gi)`. What survives is
+                // the OTHER disjunct of the same guard — dictionary present but
+                // `group_delim_fn_` null, which the dict-aware ctors still
+                // default (offset_table.hpp / parser.hpp) — and that case was
+                // never what the sentence above was written about. It is a
+                // wire-derived rule running on a rationale that belonged to a
+                // branch #220 removed: the same shape as #220 itself, one
+                // callback over. No production construction reaches it (every
+                // dict-aware site in src/ and include/ threads both callbacks;
+                // Parser sets them together or not at all), but the fuzz
+                // harness and several wire tests instantiate exactly that
+                // shape. Deliberately NOT fixed here — a dict-aware behaviour
+                // change does not belong in a dict-free-decline change. Tracked
+                // separately; if you are here to change it, decide between
+                // folding `group_delim_fn_ == nullptr` into group()'s decline
+                // and dropping the `= nullptr` ctor defaults.
                 // There is deliberately no "or the context did not resolve"
                 // branch: the splitter cannot observe that state, since
                 // `group_first_field` has already fallen through to the bare

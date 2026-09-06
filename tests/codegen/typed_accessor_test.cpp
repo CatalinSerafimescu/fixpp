@@ -22,7 +22,10 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
+
+#include "support/group73_table_view.hpp"
 
 namespace {
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
@@ -55,7 +58,17 @@ MV parse_frame_062(std::vector<std::byte> const& buf, std::pmr::memory_resource*
         std::span<fixpp::wire::frame_view>{fvs, 1});
     EXPECT_TRUE(framed.has_value()) << "Framer::feed failed";
     EXPECT_FALSE(framed->empty()) << "Framer produced no frames";
-    return MV{(*framed)[0], mr};
+    // 220: DICT-AWARE. group() is now a dictionary-only operation, so a
+    // dict-free parse yields no typed group and GeneratedEntryOperator-
+    // SubscriptInstantiates below would read orders().size() == 0.
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{
+        fixpp_test_support::group73_table_view()};
+    auto mv = parser.parse((*framed)[0], mr);
+    if (!mv.has_value()) {
+        ADD_FAILURE() << "dict-aware parse failed";
+        return MV{(*framed)[0], mr};
+    }
+    return std::move(*mv);
 }
 }  // namespace
 
