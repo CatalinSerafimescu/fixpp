@@ -191,3 +191,30 @@ All in `tests/session/test_fixt_logon_establishment.cpp`.
 
 <!-- L-050-4 — closed: DISCHARGED by 051 — the [1400,1499] session/app C-ABI error block shipped (error.h:165-179); translate() re-points ordinals 119/77/129/130/131 off UNKNOWN (error.cpp:131-134/218-223); B-051-3 explicitly discharges it. Verified by Codex 2026-07-08. -->
 **L-050-4 — the published `[2i §4.3]` session/app C-ABI error block is DEFERRED; the reachable `session_*`/`app_*` send/open arms map to `FIXPP_ERR_UNKNOWN`.** `[2i §4.3]` publishes no session/app code block, so re-pointing the 5 reachable arms (`session_invalid_argument` 119, `session_invalid_state_for_send` 77, `app_do_not_send` 129, `app_callback_threw` 130, `app_payload_malformed` 131) off `UNKNOWN` would require editing the signed-off `[2i]` (out of scope, contradicts the Gate-A LEAVE/CHK030). User decision 2026-06-24: DESCOPE. No new `error.h` codes / no `translate()` re-point / no `error_codes_v1.txt` append / no occupancy delta. The existing-published send arms (`wire_frame_too_large`→`WIRE_LIMIT_EXCEEDED`, `store_seqnum_overflow`→`STORE_RUNTIME`, `session_already_closed`→`THREAD_SESSION_LIFECYCLE`, cancellation→`CANCELLED`) are unchanged. **L-049-2 stays open.** FR-015/SC-005 deferred with this block. **Status: documented v1.0 behaviour; awaits a dedicated `[2i §4.3]` amendment.** *(050 spec FR-015/SC-005; data-model.)*
+
+<!-- L-361-1 — closed: resolved 2026-09-06 by #360/#361 (bounded, abandonable resolve) -->
+- **L-361-1 — Neither cancellation nor `connect_timeout` bounded the DNS resolution window, so
+  `Engine::stop()` could wait on a slow or blocked resolver — RESOLVED 2026-09-06 (#361).**
+  `async_connect`'s first suspension was `resolver.async_resolve`, and asio's `resolve_query_op`
+  obtains **no per-operation cancellation slot at all**; the `connect_timeout` timer was armed only
+  *after* resolution returned, and an unpublished outbound transport is unreachable from `stop()`'s
+  socket-closing path. **Status: resolved** — `src/transport/bounded_resolve.hpp` stops AWAITING the
+  resolve: the op is issued with a handler that owns the shared state, and the caller waits on a gate
+  timer the handler cancels, so a deadline or a `total` retires the frame and the resolve is
+  abandoned. Both transports now pass ONE absolute `now() + connect_timeout` deadline to the resolve
+  and to the connect timer.
+
+  MEASURED against a blackholed nameserver (private mount namespace, glibc defaults, control arm on a
+  working resolver), `connect_timeout = 2 s`, cancellation emitted at 300 ms:
+
+  | tree | arm | `async_connect` retired | error |
+  |---|---|---|---|
+  | before | deadline | 20,030 ms | `transport_resolve_failed` |
+  | before | cancel @300 ms | 20,030 ms | `transport_resolve_failed` |
+  | **after** | deadline | **2,000 ms** | `transport_connect_timeout` |
+  | **after** | cancel @300 ms | **~302 ms** | `transport_connect_cancelled` |
+  | after | control, working resolver | 43-87 ms over 3 runs | success |
+
+  ⚠️ **The residual is a DIFFERENT statement and is LIVE: see L-361-2** — abandoning bounds the
+  operation and its caller, not draining the io_context. *(Found by review during PR #362,
+  pre-existing there; resolved in the #360/#361 batch.)*

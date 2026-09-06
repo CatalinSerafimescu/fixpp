@@ -24,8 +24,10 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
+#include <chrono>
 #include <fixpp/core/error.hpp>
 
+#include "bounded_resolve.hpp"
 #include "inflight_flag_guard.hpp"
 
 // Disambiguate between the member and the free function asio::async_connect.
@@ -153,18 +155,27 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
     // for the mechanism and the re-derivation recipe.
 
-    // ── Resolve ───────────────────────────────────────────────────────────────
-    asio::ip::tcp::resolver resolver{exec_};
-    asio::error_code resolve_ec;
-    auto endpoints = co_await resolver.async_resolve(
-        ep.host, std::to_string(ep.port), asio::redirect_error(asio::use_awaitable, resolve_ec));
+    // ONE budget for the whole attempt, shared by the resolve below and the
+    // connect timer further down (#361) — the rationale is on resolve_bounded()
+    // in bounded_resolve.hpp, stated once because it is one decision.
+    const auto connect_deadline = std::chrono::steady_clock::now() + cfg_.connect_timeout;
 
-    if (resolve_ec) {
-        if (resolve_ec == asio::error::operation_aborted) {
-            co_return std::unexpected{E::transport_connect_cancelled};
-        }
-        co_return std::unexpected{E::transport_resolve_failed};
+    // ── Resolve ───────────────────────────────────────────────────────────────
+    // Abandonable: asio's resolver takes no cancellation slot, so awaiting it
+    // directly is what made stop() unbounded. bounded_resolve.hpp carries the
+    // mechanism, the falsified alternatives, and the measured limit of what
+    // abandoning buys.
+    //
+    // Engine::stop()'s `total` reaches the gate timer in there because the entry
+    // reset at the top of this function already accepts it — no second reset
+    // here, and deliberately no pre-resolve REAP either (#341's note on why that
+    // would be dead still applies).
+    auto resolved =
+        co_await detail::resolve_bounded(ep.host, std::to_string(ep.port), connect_deadline);
+    if (!resolved) {
+        co_return std::unexpected{resolved.error()};
     }
+    auto endpoints = std::move(*resolved);
 
     // Post-resolve cancellation reap.
     auto cs = co_await asio::this_coro::cancellation_state;
@@ -173,9 +184,10 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     }
 
     // #347: close() runs on this strand and can have executed while we were
-    // suspended in async_resolve -- which the RESOLVER never observes, because
-    // socket_.close() does not cancel it. FR-006 is unconditional, so re-test
-    // it here instead of proceeding to open a socket the owner already closed.
+    // suspended in the bounded resolve -- which the RESOLVER never observes,
+    // because socket_.close() cancels neither it nor the gate timer (#361 made
+    // the WAIT abandonable, not the op observable). FR-006 is unconditional, so
+    // re-test it here instead of opening a socket the owner already closed.
     if (state_ == state_t::closed) {
         co_return std::unexpected{E::transport_already_closed};
     }
@@ -183,7 +195,9 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // ── Connect with timeout ──────────────────────────────────────────────────
     // Arm a timer that cancels the socket on expiry (mirrors TLS transport).
     asio::steady_timer timer{exec_};
-    timer.expires_after(cfg_.connect_timeout);
+    // Shared deadline (#361), not a fresh connect_timeout — see the budget note
+    // at the top of this function.
+    timer.expires_at(connect_deadline);
     // Timer-epoch guard (D-4.1, FR-014): the handler captures a COPY of
     // timer_epochs_, never `this` — nothing here touches `this` until the
     // guard has passed, so a handler stranded by a destroy-with-no-drain
