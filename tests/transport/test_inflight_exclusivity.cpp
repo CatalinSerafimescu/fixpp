@@ -48,6 +48,7 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_errors.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -58,6 +59,22 @@
 // observable that makes the close_async idempotency guard mutation-killable.
 #include "transport/asio_tls_transport.hpp"
 #include "transport/loopback_tls_fixture.hpp"
+
+// Test-access class — `asio_tls_transport` declares
+// `friend class asio_tls_transport_test_access;` UNCONDITIONALLY, so reaching a
+// private member through it changes nothing inside the class definition. That is
+// the point: a `#ifdef FIXPP_TEST_HOOKS` setter would make the class a different
+// TOKEN SEQUENCE here than in fixpp_transport.a, which is an ODR violation even
+// though the layout is identical. Same shape as the local definitions in
+// tests/session/test_engine_session_strand.cpp and tests/perf/.
+namespace fixpp::transport {
+class asio_tls_transport_test_access {
+public:
+    static void set_close_fault_hook(asio_tls_transport& t, std::function<void()> hook) {
+        t.close_fault_hook_ = std::move(hook);
+    }
+};
+}  // namespace fixpp::transport
 
 namespace {
 
@@ -1404,10 +1421,11 @@ TEST(InflightExclusivity, CloseAsyncFaultAfterQuiesceStillClosesTheSocket) {
     ASSERT_NE(client_tls, nullptr) << "the seam lives on the concrete TLS transport";
 
     bool hook_fired = false;
-    client_tls->set_close_fault_hook([&hook_fired]() {
-        hook_fired = true;
-        throw std::runtime_error("#360 close_async fault seam");
-    });
+    fixpp::transport::asio_tls_transport_test_access::set_close_fault_hook(
+        *client_tls, [&hook_fired]() {
+            hook_fired = true;
+            throw std::runtime_error("#360 close_async fault seam");
+        });
 
     asio::co_spawn(
         ioc.get_executor(),

@@ -2631,7 +2631,15 @@ Evidence: issues #346, #348, #349; new issue #351.
   resolve — asio's `resolve_query_op` takes no cancellation slot, so the op cannot be aborted and is
   instead ABANDONED, its completion handler owning the resolver and the result storage. Callers see
   `transport_connect_timeout` when the deadline wins and `transport_connect_cancelled` when the
-  cancellation does; both leave the transport `fresh` and retryable. Measured against a blackholed
+  cancellation does; both leave the transport `fresh` and retryable. ⚠️ The cancelled case CHANGES
+  C-API CATEGORY for a caller that was previously seeing a resolve failure: 94
+  `FIXPP_ERR_TRANSPORT_LIFECYCLE` becomes 111 `FIXPP_ERR_CANCELLED`. The timeout case does not
+  (94 and 96 share `FIXPP_ERR_TRANSPORT_LIFECYCLE`), and the reconnect FSM branches only on
+  success/failure, so retry policy is unaffected either way.
+
+  ⚠️ **A `connect_timeout` shorter than the host's name-service bound now fails EVERY attempt in
+  resolution** — which is the honest report, but it is a new way to configure a session into never
+  connecting. See L-361-2 for what those abandoned lookups then do to each other. Measured against a blackholed
   nameserver with `connect_timeout = 2 s`: `async_connect` retires at 2,000 ms (was 20,030 ms), and
   at ~302 ms under a `total` emitted at 300 ms (was 20,030 ms); control arm on a working resolver,
   43-87 ms — that row varies with the network and is the one figure here not to read as a constant.
@@ -2640,13 +2648,15 @@ Evidence: issues #346, #348, #349; new issue #351.
 
 - **B-360-1 — `close_async()`'s `catch (...)` recovery path has a witness again, through a fault
   seam rather than a cancellation.** `asio_tls_transport::set_close_fault_hook()` (internal header;
-  `src/` is not an installed include root) makes the shutdown deadline's timer construction throw on
-  demand — one of the two throw sources that handler's own comment names as remaining after #358
-  removed the cancellation route. Witness:
-  `InflightExclusivity.CloseAsyncFaultAfterQuiesceStillClosesTheSocket`; RED arm, unchanged from
-  #348's: delete the `socket_.close(ec)` from the handler. ⚠️ The witness pins ONE entry state
-  (quiesce completed, socket open, `state_` already `closed`); a throw earlier in the `try` is still
-  unwitnessed. *(#360.)*
+  `src/` is not an installed include root) INJECTS an exception at the `async_shutdown` co_await —
+  the same point #348's cancellation used to throw at, chosen so the handler is re-entered with the
+  close deadline ARMED and its epoch un-retired, not merely with the socket open. It is reached
+  through the class's already-unconditional `asio_tls_transport_test_access` friend rather than
+  through a setter, so nothing inside the class definition differs between the test TU and the
+  library. Witness: `InflightExclusivity.CloseAsyncFaultAfterQuiesceStillClosesTheSocket`; RED arm,
+  unchanged from #348's: delete the `socket_.close(ec)` from the handler. ⚠️ It pins ONE entry
+  state; a throw earlier in the `try` (the quiesce loop) is still unwitnessed, and injecting at that
+  boundary is not evidence about asio's own allocation failing there. *(#360.)*
 
 ### Limitations
 
@@ -2681,6 +2691,24 @@ Evidence: issues #346, #348, #349; new issue #351.
   The honest statement is that **draining the io_context inherits whatever bound the host's
   name-service stack has, including none**; the DNS numbers are the one case measured, and they are
   what makes the deployment-side lever worth naming, not a guarantee.
+
+  ⚠️ **THE SHARPER HALF IS SERIALISATION, NOT DRAIN TIME.** asio's resolver pool defaults to ONE
+  work thread (`config(context).get("resolver", "threads", 0U)`, then `num_work_threads_ = 1`) and
+  is an `execution_context_service_base` — one pool per `io_context`, shared by every session on it,
+  draining blocking lookups SERIALLY. Before #361 a wedged `getaddrinfo` blocked its own caller, so
+  at most one lookup was outstanding per transport and the next reconnect attempt could not start
+  until the previous returned. Now the attempt retires at its deadline while the lookup keeps
+  running, so **retries stack behind it, and so does every other session's resolve on that
+  `io_context` — including for hosts that would answer instantly.**
+
+  fixpp bounds the stacking rather than the lookup: `bounded_resolve.hpp`'s
+  `kMaxAbandonedResolves` (4) makes `resolve_bounded` REFUSE with `transport_resolve_failed` once
+  that many abandoned lookups are still outstanding, instead of adding one more. That turns the
+  drain from unbounded into "at most 4 x the host's name-service bound", and a lookup queued behind
+  four wedged ones could not have completed inside any caller's budget anyway. The count is
+  process-wide while the pool is per-`io_context`, so it is conservative — it can refuse earlier
+  than strictly necessary, never later. ⚠️ **The lever that actually helps is not fixpp's**: asio's
+  `resolver`/`threads` config key is set at the application's `io_context` construction.
 
   ⚠️ **`resolver.cancel()` is still not a fix for this half either.** asio's
   `background_getaddrinfo` tests its cancellation token **once, before** the blocking call, so

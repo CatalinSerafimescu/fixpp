@@ -171,7 +171,7 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // here, and deliberately no pre-resolve REAP either (#341's note on why that
     // would be dead still applies).
     auto resolved =
-        co_await detail::resolve_bounded(exec_, ep.host, std::to_string(ep.port), connect_deadline);
+        co_await detail::resolve_bounded(ep.host, std::to_string(ep.port), connect_deadline);
     if (!resolved) {
         co_return std::unexpected{resolved.error()};
     }

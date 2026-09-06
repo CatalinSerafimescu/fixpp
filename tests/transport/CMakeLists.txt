@@ -93,6 +93,25 @@ add_test(NAME transport_compid_tls_identity_binding
 set_tests_properties(transport_compid_tls_identity_binding PROPERTIES
   LABELS "transport;012;us1;seam9;tls")
 
+# #361 — bounded_resolve.hpp's control flow, driven through resolve_bounded_with's
+# injectable initiation. See that file's header for what this is and is not
+# evidence for; the platform half is tools/probes/resolve_bound_probe.cpp.
+add_executable(transport_bounded_resolve
+  test_bounded_resolve.cpp)
+target_include_directories(transport_bounded_resolve PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"   # for "transport/bounded_resolve.hpp"
+)
+target_link_libraries(transport_bounded_resolve PRIVATE
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME transport_bounded_resolve
+         COMMAND transport_bounded_resolve)
+set_tests_properties(transport_bounded_resolve PROPERTIES
+  LABELS "transport;361;resolve"
+  TIMEOUT 120)
+
 # T017 — [2h §9 seam #15] in-flight exclusivity (Phase 3a + RC#E runtime cells).
 add_executable(transport_inflight_exclusivity
   test_inflight_exclusivity.cpp)
@@ -111,11 +130,6 @@ target_link_libraries(transport_inflight_exclusivity PRIVATE
 )
 target_compile_definitions(transport_inflight_exclusivity PRIVATE
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
-  # #360: arms asio_tls_transport::set_close_fault_hook(), which is a gated
-  # METHOD DECLARATION only — the member it writes is compiled unconditionally,
-  # so no data member differs between this TU and the library's. Same split as
-  # tests/capi/CMakeLists.txt's uses of this macro.
-  FIXPP_TEST_HOOKS
 )
 add_test(NAME transport_inflight_exclusivity
          COMMAND transport_inflight_exclusivity)

@@ -955,7 +955,7 @@ void asio_tls_transport::setup_ssl_ctx_() {
     // here, and deliberately no pre-resolve REAP either (#341's note on why that
     // would be dead still applies).
     auto resolved =
-        co_await detail::resolve_bounded(exec_, ep.host, std::to_string(ep.port), connect_deadline);
+        co_await detail::resolve_bounded(ep.host, std::to_string(ep.port), connect_deadline);
     if (!resolved) {
         co_return std::unexpected{resolved.error()};
     }
@@ -1753,17 +1753,6 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         // teardown would otherwise reach socket_.cancel() through a dangling
         // `this`. The epoch is retired below BEFORE cancel(), and again in the
         // destructor body.
-        // #360 fault seam. Null in production; a test sets it to throw so the
-        // catch(...) below has a witness again. Placed HERE, immediately before
-        // the deadline-timer construction, because timer construction is the
-        // first of the two throw sources this handler's own comment names as
-        // remaining — the seam stands in for one of them rather than for a
-        // shape nothing can produce. See set_close_fault_hook() in the header
-        // for why a cancellation cannot be used instead as of #358.
-        if (close_fault_hook_) {
-            close_fault_hook_();
-        }
-
         asio::steady_timer deadline{exec_};
         deadline.expires_at(close_deadline);
         const std::uint64_t close_epoch = ++timer_epochs_->close;
@@ -1774,6 +1763,22 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
             asio::error_code ignored;
             socket_.cancel(ignored);
         });
+
+        // #360 fault seam. Null in production; only a test can install it, through
+        // the unconditional asio_tls_transport_test_access friend — see the
+        // header for why there is no setter. It throws HERE, at the point
+        // ROUND 1's cancellation used to throw: the async_shutdown co_await's
+        // precheck, with the close deadline ARMED and its epoch NOT yet retired.
+        // That is why the site is here and not earlier — the state the catch has
+        // to be correct for includes a live timer handler holding `this`, and an
+        // earlier throw would not reproduce it.
+        //
+        // ⚠️ IT INJECTS an exception at that boundary; it does not make asio's
+        // own allocation for the shutdown op fail. The catch is what is
+        // witnessed, not allocation behaviour.
+        if (close_fault_hook_) {
+            close_fault_hook_();
+        }
 
         asio::error_code shutdown_ec;
         co_await ssl_stream_->async_shutdown(
@@ -1826,17 +1831,17 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         //
         // ROUND 3 (#360). The witness is BACK, and not by reverting the entry
         // reset — that reset is a hang fix (measured 11 wedges / 40) and
-        // reverting it re-opens #358. `close_fault_hook_` (header:
-        // set_close_fault_hook) makes the deadline-timer construction above
-        // throw on demand, which is one of the two sources this comment already
-        // named as remaining. Witness:
+        // reverting it re-opens #358. `close_fault_hook_` injects a throw at the
+        // async_shutdown co_await above — the SAME point round 1's cancellation
+        // threw at, so the handler is re-entered with the close deadline armed
+        // and its epoch un-retired, not merely with the socket open. Witness:
         //   InflightExclusivity.CloseAsyncFaultAfterQuiesceStillClosesTheSocket
         // RED ARM, unchanged from round 1: delete the socket_.close(ec) below.
         // Re-run it before trusting this paragraph — a witness cell that has
         // lost its power reads exactly like one that still has it, which is the
         // whole history recorded above.
         // ⚠️ It pins ONE entry state, not the handler in general — the scope is
-        // stated once, at set_close_fault_hook().
+        // stated once, at close_fault_hook_'s declaration in the header.
         asio::error_code ec;
         socket_.close(ec);
         co_return core::expected_t<void>{};

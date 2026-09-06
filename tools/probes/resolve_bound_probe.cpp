@@ -50,6 +50,7 @@
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/strand.hpp>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -91,16 +92,27 @@ int main(int argc, char** argv) {
         },
         asio::bind_cancellation_slot(sig.slot(), asio::detached));
 
-    if (arm == "cancel") {
-        std::thread([&] {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    // JOINED, not detached. A detached emitter captures `sig`, `strand` and `ioc`
+    // by reference and outlives them on the CONTROL arm, where ioc.run() returns
+    // in tens of ms: it then posts into a destroyed io_context. That survives
+    // only by winning a race with process exit, in a file whose own BUILD line
+    // prescribes -fsanitize=address. `armed` lets the join finish immediately
+    // once the run loop is done rather than waiting out the 300 ms.
+    std::atomic<bool> armed{arm == "cancel"};
+    std::thread emitter([&] {
+        for (int i = 0; i < 300 && armed.load(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (armed.exchange(false)) {
             asio::post(strand, [&sig] { sig.emit(asio::cancellation_type::total); });
-        }).detach();
-    }
+        }
+    });
 
     // No work guard on purpose: run() returns only when nothing is outstanding,
     // which is exactly what an abandoned resolve prevents.
     ioc.run();
+    armed.store(false);
+    emitter.join();
     std::printf("arm=%-8s connect retired: %6ld ms (err=%d)   ioc.run() returned: %6ld ms\n",
                 arm.c_str(), retired, code, ms(t0, clk::now()));
     return 0;
