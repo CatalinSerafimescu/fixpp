@@ -2710,6 +2710,19 @@ Evidence: issues #346, #348, #349; new issue #351.
   than strictly necessary, never later. ⚠️ **The lever that actually helps is not fixpp's**: asio's
   `resolver`/`threads` config key is set at the application's `io_context` construction.
 
+  ⚠️ **THAT "COULD NOT HAVE COMPLETED ANYWAY" IS CONDITIONAL ON THE ONE POOL THREAD, AND THE
+  APPLICATION CAN REMOVE THE CONDITION.** It holds because a fifth lookup cannot even START until
+  the four outstanding ones return — which, by definition of outstanding, they have not. Raise
+  asio's `resolver`/`threads` above 1 and the lookups drain in PARALLEL, at which point a refused
+  fifth resolve might have answered promptly and `kMaxAbandonedResolves` becomes a real
+  false-refusal: `transport_resolve_failed` for a host that is fine. The same shape is reachable at
+  `threads = 1` without a wedge at all — a SLOW-BUT-WORKING resolver plus a `connect_timeout`
+  shorter than it — except there the refusal is the honest answer rather than a false one, because
+  the serial queue really does put the fifth lookup past the budget. **A deployment that raises
+  `threads` should raise `kMaxAbandonedResolves` with it**; the constant is a compile-time
+  `inline constexpr` in `bounded_resolve.hpp`, not configuration, because no caller has asked for
+  the knob and the coupling is to a value fixpp cannot read back from asio.
+
   ⚠️ **`resolver.cancel()` is still not a fix for this half either.** asio's
   `background_getaddrinfo` tests its cancellation token **once, before** the blocking call, so
   `resolver.cancel()` only wins the window before the lookup starts; an in-flight `getaddrinfo` runs

@@ -95,6 +95,14 @@
 // backoff where it belongs. The cap also converts L-361-2's drain from
 // "unbounded" to "at most kMaxAbandonedResolves x the host's name-service bound".
 //
+// ⚠️ "COULD NOT HAVE COMPLETED ANYWAY" IS CONDITIONAL ON THE ONE POOL THREAD.
+// An application that raises asio's `resolver`/`threads` above 1 drains lookups
+// in PARALLEL, and then a refused fifth resolve might have answered promptly —
+// the cap becomes a false refusal rather than an honest one. It should be raised
+// alongside that key. Left a compile-time constant rather than configuration
+// because no caller has asked for the knob and the value it must track is one
+// fixpp cannot read back from asio.
+//
 // ⚠️ THE COUNT IS PROCESS-WIDE while the pool it protects is per-io_context, so
 // the cap is CONSERVATIVE: with two io_contexts it can refuse earlier than
 // strictly necessary, never later. It is also deliberately not a knob — the
@@ -149,9 +157,11 @@ inline std::atomic<int>& abandoned_resolve_backlog() noexcept {
     return count;
 }
 
-// See the cap rationale in this file's header comment. Four, not forty: the
-// worst-case drain is this many serialised name-service timeouts, and a fifth
-// concurrent WEDGED lookup is a state no caller's budget can survive anyway.
+// See the cap rationale in this file's header comment, including the condition
+// this number depends on. Four, not forty: the worst-case drain is this many
+// serialised name-service timeouts, and against asio's default ONE pool thread a
+// fifth concurrent wedged lookup cannot start until those four return, so no
+// caller's budget survives it.
 inline constexpr int kMaxAbandonedResolves = 4;
 
 // Shared state for one abandonable resolve. Owned jointly by the awaiting frame
