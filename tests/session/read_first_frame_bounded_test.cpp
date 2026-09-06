@@ -61,7 +61,6 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
-#include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
@@ -839,8 +838,8 @@ TEST(ReadFirstFrameBounded, B6) {
 // a wait the mock clock was supposed to govern. 2 s is 5x below that competing
 // 10 s and ~2000x above the delivered path's measured ~1 ms. Raising it toward
 // 10 s reintroduces the false pass; do not.
-constexpr auto kJoinWatchdog = std::chrono::seconds{2};
 TEST(ReadFirstFrameBounded, T2a) {
+    constexpr auto kJoinWatchdog = std::chrono::seconds{2};
     constexpr std::size_t kMaxBytes = 4096;
     // Inert under the frozen clock (it cannot fire); kept so the call reads like
     // every other cell's. The promptness discriminator is the join retiring, not

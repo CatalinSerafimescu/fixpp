@@ -21,8 +21,38 @@
 // Subsequent cycles reset expires_at + re-arm async_wait with ZERO global
 // heap allocation (steady state). Non-session callers (engine-scope,
 // no session_executor wrapper on the awaiter's executor) fall back to the
-// original per-call shared_ptr<steady_timer> from the global heap (acceptable
-// for non-hot-path engine-scope sleeps, e.g. close-timeout machinery).
+// original per-call shared_ptr<steady_timer> from the global heap.
+//
+// ⚠️ THAT ACCEPTANCE WAS WRITTEN FOR ONE-SHOT CALLERS ("acceptable for
+// non-hot-path engine-scope sleeps, e.g. close-timeout machinery") AND IT NOW
+// HAS A REPEATING ONE. #377 put read_first_frame_bounded's deadline on this
+// path, and it is an `operator||` arm inside the read loop, so it enters
+// sleep_until once PER ITERATION. The accept loop runs on
+// `asio::strand<any_io_executor>`, not a session_executor, and
+// target<session_executor>() is EXACT-TYPE — so it lands here, never in the
+// slot pool.
+//
+// Per call this branch costs a make_strand allocation, the make_shared<timer>,
+// an inflight-map node, and two acquisitions of `state::m` (insert + dereg).
+// A well-behaved peer completes the first frame in ONE iteration, so the normal
+// cost is per-connection and immaterial. The BOUND is the part worth knowing:
+// iterations are capped by kFirstFrameMaxBytes + 1 (4097) within the first-frame
+// deadline, so a peer dribbling one byte per segment reaches ~4k of each on a
+// single connection — and `state::m` is the SAME mutex every session's heartbeat
+// sleep_until takes, so an accept burst now contends with steady-state
+// heartbeats on it. Derived from those two constants, not witnessed.
+//
+// ⚠️ NOT COVERED BY tests/alloc_guard/test_clock_sleep_alloc_guard.cpp: every
+// cell there builds its executor with make_session_executor(), i.e. it drives
+// the SLOT-POOL branch only. The gate named for this function does not test the
+// branch described here, and cannot — this branch is ALLOWED to allocate. Do not
+// read its green as covering this path.
+//
+// If it becomes a problem the cheap lever is to cache ONE strand in `state` and
+// reuse it for every fallback timer (drops the make_strand and two of the four
+// lock acquisitions, for all non-session callers, at the cost of serialising
+// unrelated engine-scope timers). Deliberately not done: a shared-core change
+// with a blast radius past the caller that provoked it.
 // Both threading modes (per_session_strand / direct_executor) use the same
 // Session* keying axis (round 2 root cause #1 — D-8).
 //

@@ -181,6 +181,17 @@ import sys
 
 import clang.cindex as ci
 
+# ⚠️ THE FIRST CROSS-TOOL IMPORT IN tools/, and it is deliberate. The alternative
+# was a SECOND copy of a 54-line comment/literal blanker that must agree with the
+# first forever; a byte-identical copy propagates a claim that is false at the new
+# site the moment one of them is fixed. check_co_spawn_lambda is side-effect-free
+# at module scope (constants + `if __name__`), so importing it runs nothing.
+# sys.path[0] is tools/ when run as `python3 tools/<x>.py` (how CI invokes both),
+# but that is not guaranteed for any other entry point -- hence the explicit
+# insert rather than relying on it.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from check_co_spawn_lambda import splice, strip_noncode  # noqa: E402
+
 # ⚠️ A DRIVING CALL IS IDENTIFIED BY ITS OWNER, NEVER BY ITS NAME ALONE, and this
 # is the single easiest way to make this tool report a false clean. An earlier
 # version matched bare method NAMES, which meant `unique_ptr::get()` — one of the
@@ -1118,25 +1129,65 @@ def _load_libclang(libclang: str) -> str | None:
 # closure is frequently invoked WITH arguments, `make_waiter(1)`) -- measured 2
 # against an AST truth of 10. Balanced-paren scanning is what reproduces 10/5.
 FORWARDING_WRAPPERS = frozenset({"std::move", "move", "std::forward", "forward"})
-_IDENT_CALL = re.compile(r"^([A-Za-z_][A-Za-z0-9_:]*)\s*\(")
+_IDENT_HEAD = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_:]*)\s*")
 
 
-def _split_top_level(s: str) -> list[str]:
-    out: list[str] = []
+def _after_first_top_level_comma(s: str) -> str | None:
+    """Everything after `s`'s first depth-0 comma, or None if it has none.
+
+    ⚠️ DELIBERATELY DOES NOT SPLIT THE WHOLE LIST. The previous version split on
+    every top-level comma and looked at element [1], which silently LOST every
+    template-instantiated call: `co_spawn(ioc, make_thing<A,B>(), tok)` split
+    inside the template argument list and yielded `make_thing<A`. Returning the
+    remainder uncut lets _names_a_call() do its own balanced `<...>` scan, so the
+    comma inside `<>` never has to be recognised as such.
+    """
     depth = 0
-    cur: list[str] = []
-    for ch in s:
+    for i, ch in enumerate(s):
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
             depth -= 1
-        if ch == "," and depth == 0:
-            out.append("".join(cur))
-            cur = []
-        else:
-            cur.append(ch)
-    out.append("".join(cur))
-    return out
+        elif ch == "," and depth == 0:
+            return s[i + 1 :]
+    return None
+
+
+def _names_a_call(arg: str) -> str | None:
+    r"""The callee name if `arg` begins `ident(` or `ident<...>(`, else None.
+
+    ⚠️ THE `<...>` ARM IS NOT COSMETIC -- WITHOUT IT THE SCREEN FAILS TOWARD
+    CLEAN. A bare `^ident\s*\(` pattern misses EVERY templated closure call,
+    including the single-argument `make_thing<A>()`, because `<A>` sits between
+    the identifier and the paren. Measured before the fix: `make_thing<A>()`,
+    `make_thing<A,B>()` and `make_thing<A, B>(1)` all screened as NO HIT while
+    the non-template control screened as a hit. In a screen whose whole purpose
+    is to stop being silent, that is the defect it exists to prevent.
+    """
+    m = _IDENT_HEAD.match(arg)
+    if not m:
+        return None  # a lambda literal `[&]...`, a brace-init, anything unnamed
+    name, j = m.group(1), m.end()
+    if j < len(arg) and arg[j] == "<":
+        depth = 0
+        closed = False
+        while j < len(arg):
+            if arg[j] == "<":
+                depth += 1
+            elif arg[j] == ">":
+                depth -= 1
+                if depth == 0:
+                    j += 1
+                    closed = True
+                    break
+            j += 1
+        if not closed:
+            # An unbalanced `<` is a comparison, not a template list. Not a claim
+            # either way -- fall through and let the paren test decide.
+            return None
+        while j < len(arg) and arg[j].isspace():
+            j += 1
+    return name if j < len(arg) and arg[j] == "(" else None
 
 
 def screen_named_closure(text: str) -> list[int]:
@@ -1144,6 +1195,19 @@ def screen_named_closure(text: str) -> list[int]:
 
     Whole-file and balanced-paren, NOT line-based -- see the note above for the
     two ways a simpler pattern reports a false zero on this exact shape.
+
+    ⚠️ RUNS ON BLANKED CODE, NEVER ON RAW TEXT, and it used the raw text first.
+    A `co_spawn(ex, name(...), ...)` inside a `//` comment, a `/* */` block, or a
+    string literal screened IDENTICALLY to a real one -- measured, all four
+    returning [1]. Since a hit REFUSES the whole audit in a gating CI step, one
+    commented-out example added to any tracked header would have failed tier1
+    with "a header carries the named-closure co_spawn shape". The sibling scanner
+    check_co_spawn_lambda.scan_text() already blanks for exactly this reason on
+    its own balanced-paren walk; reuse it rather than re-deriving it.
+    splice() is not optional either: without it a backslash-newline inside a
+    `/* ... */` close leaves the stripper believing the comment never closes,
+    and it blanks the REST OF THE FILE into a clean result -- fail-toward-clean in the screen whose
+    whole job is to stop being silent.
 
     Deliberately over-approximates: any identifier-call in argument 2 counts,
     because a screen that guesses wrong should guess LOUD. The one enumerated
@@ -1154,23 +1218,34 @@ def screen_named_closure(text: str) -> list[int]:
     count identity on two files would have been mistaken for proof the screen
     does not over-match.
     """
+    spliced, line_of = splice(text)
+    code = strip_noncode(spliced)
+
+    def lineno(off: int) -> int:
+        # Map a blanked-text offset back to the ORIGINAL line, so a refusal names
+        # a line a human can open. splice() removed characters; a raw
+        # `text[:off].count()` would drift past every line continuation.
+        if off < len(line_of):
+            return line_of[off]
+        return line_of[-1] if line_of else 1
+
     hits: list[int] = []
-    for m in re.finditer(r"\bco_spawn\s*\(", text):
+    for m in re.finditer(r"\bco_spawn\s*\(", code):
         i, depth = m.end(), 1
-        while i < len(text) and depth:
-            if text[i] in "([{":
+        while i < len(code) and depth:
+            if code[i] in "([{":
                 depth += 1
-            elif text[i] in ")]}":
+            elif code[i] in ")]}":
                 depth -= 1
             i += 1
         if depth:
             continue  # unbalanced (macro, truncated file) -- not a claim either way
-        args = _split_top_level(text[m.end() : i - 1])
-        if len(args) < 2:
-            continue
-        ident = _IDENT_CALL.match(args[1].strip())
-        if ident and ident.group(1) not in FORWARDING_WRAPPERS:
-            hits.append(text[: m.start()].count("\n") + 1)
+        rest = _after_first_top_level_comma(code[m.end() : i - 1])
+        if rest is None:
+            continue  # fewer than two arguments -- not the shape
+        name = _names_a_call(rest)
+        if name is not None and name not in FORWARDING_WRAPPERS:
+            hits.append(lineno(m.start()))
     return hits
 
 
@@ -1256,6 +1331,40 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
         # An executor argument containing its own parens must not break the split.
         ("screen/executor-with-parens",
          "co_spawn(ioc.get_executor(), make_waiter(1), use_future);", 1),
+        # ── NON-CODE ARMS. Each of these screened as 1 -- identical to the
+        # control -- before strip_noncode() was applied. A hit REFUSES the audit
+        # in a gating CI step, so one commented-out example in a tracked header
+        # would have failed tier1. These are the arms that would catch the
+        # blanking being dropped again.
+        ("screen/comment-line", "// co_spawn(ioc, make_waiter(1), use_future);", 0),
+        ("screen/comment-block", "/* co_spawn(ioc, holder(), use_future); */", 0),
+        ("screen/string-literal", 'const char* s = "co_spawn(ioc, holder(), t)";', 0),
+        # splice(): a backslash-newline inside the comment close. Without splicing
+        # the stripper believes the comment never ends and blanks the rest of the
+        # file -- so the REAL call below it would vanish and the screen would
+        # report a clean 0. The control is the point of this arm.
+        ("screen/spliced-comment-close",
+         "/* co_spawn(ioc, holder(), t); *\\\n/\nco_spawn(ioc, make_waiter(1), use_future);", 1),
+        # Blanking must not eat real code that merely sits after a comment.
+        ("screen/code-after-comment",
+         "// co_spawn(ioc, holder(), t);\nco_spawn(ioc, make_waiter(1), use_future);", 1),
+        # ── TEMPLATE ARMS. Every one of these screened as NO HIT before
+        # _names_a_call() grew its balanced `<...>` scan -- silently, which in a
+        # screen built to be loud is the defect it exists to prevent. Note the
+        # single-argument case fails too: `<A>` sits between the identifier and
+        # the paren, so it is not only about the comma.
+        ("screen/template-one-arg", "co_spawn(ioc, make_thing<A>(), use_future);", 1),
+        ("screen/template-two-args", "co_spawn(ioc, make_thing<A,B>(), use_future);", 1),
+        ("screen/template-spaced-with-args",
+         "co_spawn(ioc, make_thing<A, B>(1), use_future);", 1),
+        ("screen/template-nested", "co_spawn(ioc, make_thing<A<B>>(), use_future);", 1),
+        # A templated forwarder is still a forwarder.
+        ("screen/template-forwarder", "co_spawn(ex, std::forward<C>(c), use_future);", 0),
+        # A bare `<` is a comparison, not a template list -- must not be read as
+        # an unterminated template and must not become a hit.
+        ("screen/comparison-not-template", "co_spawn(ioc, a < b, use_future);", 0),
+        # Fewer than two arguments is not the shape.
+        ("screen/single-argument", "co_spawn(ioc);", 0),
     ]
     for name, body, expected_n in synthetic:
         got = len(screen_named_closure(body))
@@ -1352,9 +1461,10 @@ def main() -> int:
     # Only meaningful when the prefilter is active; --all-files has no blind spot
     # to screen for. A hit is a REFUSAL, not a warning: the sweep's own output
     # would otherwise be a clean report over a population known to be short.
+    repo_root = os.environ.get("FIXPP_REPO_ROOT", os.getcwd())
     if not args.all_files:
         try:
-            header_hits = screen_headers(os.environ.get("FIXPP_REPO_ROOT", os.getcwd()))
+            header_hits = screen_headers(repo_root)
         except RuntimeError as exc:
             print(f"ERROR: {exc}")
             print("The header screen could not run. That is NOT a clean result — it is "
@@ -1376,7 +1486,6 @@ def main() -> int:
 
     best: dict[tuple[str, int, int], dict] = {}
     errors: list[tuple[str, str]] = []
-    repo_root = os.environ.get("FIXPP_REPO_ROOT", os.getcwd())
     jobs = [(e, extra, repo_root) for e in entries]
     done = 0
     with cf.ProcessPoolExecutor(

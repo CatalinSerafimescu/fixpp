@@ -22,6 +22,7 @@ namespace fixpp::session::detail {
 [[nodiscard]] inline asio::awaitable<fixpp::core::expected_t<std::size_t>>
 read_first_frame_bounded(fixpp::transport::Transport& transport,
                          std::vector<std::byte>&      buf,
+                         fixpp::core::Clock&          clock,      // #377
                          std::chrono::milliseconds    deadline,
                          std::size_t                  max_bytes);
 
@@ -113,7 +114,11 @@ SC-018's cell T6 pins. See research §D-2a.
 
 > **Further corrected at Gate A round 4 — even WITH FR-018 the exact value is not guaranteed, and
 > this contract was the last place still asserting it.** A `stop()`-induced `total` reaches **both**
-> arms of the join, and `await_deadline` ignores its `ec` and **completes normally** (research §D-2),
+> arms of the join, and `await_deadline` absorbs the cancellation and **completes normally**
+> (research §D-2; since #377 by a `catch` pair rather than `redirect_error`, because
+> `Clock::sleep_until` returns an awaitable and no `redirect_error` token applies to it — the
+> requirement that neither arm throws is unchanged, since `outcome.index()` is the sole
+> discriminator),
 > so both arms complete and the returned value is decided entirely by `order[0]`
 > (`asio/experimental/awaitable_operators.hpp:352-357` vs `:363-367`): index 0 ⇒
 > `transport_read_cancelled`, index 1 ⇒ `transport_handshake_timeout`. Research §D-6.10a establishes
@@ -157,7 +162,7 @@ returned the cancellation — and no caller or test observes the difference. Rec
 | I4 | `Engine::stop()`'s `total` aborts the call promptly, **on both transports** | **held before only in a weak sense, BROKEN by the round-1 fix, restored by FR-018.** Requires **two** things, not one: *(a)* the deadline arm resets its cancellation filter (research D-2), and *(b)* the TLS transport's read installs an **OUT map** so the `total` is forwarded as `terminal` and actually aborts the SSL read (research §D-2a / INV-L6 / FR-018). With (a) alone the call **never returns** under `stop()` on TLS, and `stop()`'s own deadline-less join (`src/session/engine.cpp:1273-1284`) hangs with it. Pre-fix the abort on TLS came 5 s late via the cancellation-immune deadline lambda, so *"promptly"* was already false there; with (b) it is true for the first time. FR-015 + **SC-018** pin it; cell **T6** is the only one that can. *(Corrected at Gate A round 2.)* |
 | I5 | The framer is fed only newly-read bytes, never the whole `buf` | unchanged (F-015-001, `read_first_frame_bounded.hpp:141-144,148-149`) |
 | I6 | `carry.capacity() >= max_bytes + 1` — the carry capacity is **derived from** I1b's bound, not an independent constant | **NEW** (P5 / FR-013). Violated by the pre-round-1 design (`engine.cpp:402` builds it at `max_bytes`), which made S4 and F1 undeliverable — see the F1/F2 note above. |
-| I7 | The deadline timer is armed once, before the loop, with an absolute expiry; the deadline arm never re-arms it | **NEW** (FR-017). Held pre-fix by the loop's shape; at risk from the join, which turns the deadline into a per-iteration `co_await`. |
+| I7 | The deadline is resolved once, before the loop, to an absolute instant; the deadline arm never moves it | **NEW** (FR-017), **and since #377 it is STRUCTURAL rather than a rule.** Held pre-fix by the loop's shape; put at risk by the join, which turns the deadline into a per-iteration `co_await`. It was then carried by a prohibition on `await_deadline` (*"MUST NOT call `expires_after`"*) — a rule the next editor had to read and honour. `await_deadline` now takes an absolute `fixpp::core::steady_time_point`, so re-sleeping to the same instant is idempotent and the arm **cannot** move the deadline. The mutant moved up one level, to the line computing `abs_deadline`; cell **B6** kills it there (measured post-port: `wire_frame_too_large`, `buf.size() == 201`). |
 
 ---
 

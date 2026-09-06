@@ -23,7 +23,6 @@
 #include <asio/awaitable.hpp>
 #include <asio/experimental/awaitable_operators.hpp>
 #include <asio/this_coro.hpp>
-#include <asio/use_awaitable.hpp>
 #include <chrono>
 #include <cstddef>
 #include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until; steady_time_point
