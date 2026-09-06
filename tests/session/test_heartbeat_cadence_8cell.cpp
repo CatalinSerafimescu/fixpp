@@ -169,13 +169,19 @@ struct HeartbeatCadenceFixture {
 
     bool drive_to_active(fixpp::session::Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run_for(50ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "drive_to_active/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "drive_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "drive_to_active/open";
+            return false;
+        }
         if (!fut.get().has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD", 5);
         auto f2 = asio::co_spawn(ioc, s.on_inbound_frame(logon), asio::use_future);
-        ioc.run_for(50ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, f2, 50ms, "drive_to_active/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "drive_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "drive_to_active/logon";
+            return false;
+        }
         f2.get();
         return s.state() == fixpp::session::fsm_state::Active;
     }

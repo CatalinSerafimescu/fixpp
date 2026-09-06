@@ -192,7 +192,12 @@ add_executable(fuzz_session_recovery_admin_parse
 target_link_libraries(fuzz_session_recovery_admin_parse PRIVATE
   fixpp_session
   fixpp_mock_clock
-  fixpp_core)
+  fixpp_core
+  # support/pump_until_ready.hpp includes <gtest/gtest.h> unconditionally. This TU
+  # uses only `run_window_then_ready`, which is gtest-FREE -- see the rationale at
+  # `fuzz_admin_parse/open` for why nothing here reports through gtest -- but the
+  # header still needs gtest's include path to compile.
+  GTest::gtest)
 target_compile_options(fuzz_session_recovery_admin_parse PRIVATE
   -fsanitize=fuzzer,address,undefined)
 target_link_options(fuzz_session_recovery_admin_parse PRIVATE

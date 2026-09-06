@@ -60,7 +60,7 @@ tmp="$(mktemp -d)" || setup_fail "mktemp -d failed"
 trap 'rm -rf "$tmp"' EXIT
 
 checks=0
-expected_checks=26
+expected_checks=28
 pass() { checks=$((checks + 1)); }
 
 run_capture() {
@@ -68,31 +68,39 @@ run_capture() {
     status=$?
 }
 
-# Runs $script against a tree that contains ONLY a decoy (no genuine
-# run_for/get() pair) and requires it to reach the "instrument produced zero
-# sites" liveness diagnostic — the pump-census.sh guard that refuses to read
-# an empty measurement as a clean tree (see the zero-match-tree case below).
-# This is the discriminating assertion for a single blanking class: if that
-# class's blanking is broken, the decoy is NOT blanked, the scanner finds a
-# real (spurious) site, the zero-sites branch is never reached, and this
-# fails for exactly that reason — independent of any other fixture or check.
+# Runs $script against a tree that contains ONLY a decoy (no genuine run_for/get()
+# pair) and requires it to read EXACTLY ZERO SITES.
 #
-# gate-b/r2 finding F5: the "was matched as a real site" check used to be
-# pinned against $baseline_pin ("tests/a.cpp:2"), a path this decoy tree
-# never contains. That is vacuous both ways: correct blanking -> zero sites
-# -> the liveness guard exits nonzero; broken blanking -> a spurious site at
-# some tests/decoy.cpp:N -> differs from tests/a.cpp:2 -> the plain diff
-# also exits nonzero. Nonzero either way, so the check could never redden
-# for its own stated reason — only the second (diagnostic) assertion below
-# ever caught a real regression.
+# ⚠️ THE REQUIRED OUTCOME INVERTED IN #289 BATCH 15, so read the arms below rather than
+# remembering this function. It used to require the run to FAIL with pump-census.sh's
+# "instrument produced zero sites" diagnostic -- a blanket refusal to read an empty
+# measurement as a clean tree. That refusal was correct for the whole life of the
+# migration and is now wrong: the direct population IS empty, so zero is the true answer,
+# and the guard was replaced by a seeded-positive control inside the scanner. A
+# decoy-only tree therefore now EXITS 0 against a zero-row pin.
 #
-# Fixed by pinning against $3, the EXACT site(s) this decoy would leak if
-# ITS OWN targeted blanking mutation were applied (measured by running the
-# real mutant against the real fixture — see the gate-b/r2 F4/F5 report).
-# Correct blanking -> zero sites -> liveness guard -> exit NONZERO (this
-# assertion passes). Broken blanking -> the leaked site(s) match $3 exactly
-# -> diff matches -> exit 0 (this assertion FAILS, discriminating for its
-# own named reason, independent of the second assertion below).
+# This is the discriminating assertion for a single blanking class, and it still is: if
+# that class's blanking is broken, the decoy is NOT blanked, the scanner finds a real
+# (spurious) site, that site diffs against the zero-row pin, and the run fails for exactly
+# that reason -- independent of any other fixture or check.
+#
+# It is also STRICTLY STRONGER than the form it replaced. The old one proved "the run
+# failed, and the reason was zero sites". This proves "the scanner emitted exactly zero
+# sites AND its seeded-positive control passed", because the control aborts the run before
+# any file is scanned -- so an exit 0 here is unreachable unless the scanner has been
+# demonstrated able to report non-zero.
+#
+# ── HISTORY THAT STILL APPLIES (gate-b/r2 finding F5) ────────────────────────
+# The "was matched as a real site" arm used to be pinned against $baseline_pin
+# ("tests/a.cpp:2"), a path this decoy tree never contains. That was vacuous BOTH ways:
+# correct blanking -> zero sites -> nonzero exit; broken blanking -> a spurious site at
+# some tests/decoy.cpp:N -> differs from tests/a.cpp:2 -> also nonzero. Nonzero either
+# way, so the arm could never redden for its own stated reason.
+#
+# Fixed by pinning that arm against $3, the EXACT site(s) this decoy would leak if ITS OWN
+# targeted blanking mutation were applied (measured by running the real mutant against the
+# real fixture). That fix is untouched by the inversion above: it governs the FIRST arm,
+# which still requires a nonzero exit against a leak pin.
 assert_decoy_alone_yields_zero_sites() {
     local label="$1" decoy_root="$2" leak_sites="$3"
     local leak_pin
@@ -106,8 +114,22 @@ assert_decoy_alone_yields_zero_sites() {
         fail "$label decoy (alone) was matched as a real site: $output"
     pass
 
-    run_capture bash "$script" --root "$decoy_root" --expected "$baseline_pin"
-    printf '%s\n' "$output" | grep -Fq 'instrument produced zero sites' ||
+    # ⚠️ THIS ARM'S ORACLE CHANGED IN #289 BATCH 15, AND NOT COSMETICALLY. It used to
+    # require the literal 'instrument produced zero sites' -- the census's blanket refusal
+    # to emit an empty reading. That refusal was correct for the whole life of the
+    # migration and is now wrong: the direct population IS empty, so zero is the true
+    # answer and the guard was replaced by a seeded-positive control INSIDE the scanner.
+    # Deleting the guard therefore deleted this arm's discriminating oracle, and the
+    # replacement must not be a weaker one.
+    #
+    # It is STRONGER than what it replaces. The old form proved only "the run failed, and
+    # the reason was zero sites". This proves "the scanner emitted EXACTLY zero sites AND
+    # its seeded-positive control passed" -- because the control aborts the run before any
+    # file is scanned, an exit 0 here is unreachable unless the scanner is demonstrably
+    # able to report non-zero. Blanking that breaks in the dangerous direction (a decoy
+    # matched) yields a row, diffs against the zero-row pin, and exits non-zero.
+    run_capture bash "$script" --root "$decoy_root" --expected "$zero_row_pin"
+    [ "$status" -eq 0 ] ||
         fail "$label decoy (alone) failed for the wrong reason (not blanked correctly): $output"
     pass
 }
@@ -116,10 +138,12 @@ assert_decoy_alone_yields_zero_sites() {
 # Proves the script resolves the repo root from its OWN location, not from
 # the caller's cwd, and that the production pin the script ships with is
 # exactly what the live tree produces. This is ONE falsifiable property, not
-# three: pump-census.sh's own internal diff already refuses a nonempty/
-# mismatched result before ever exiting 0 (see its `[ -s "$actual" ]` and
-# `diff -u "$expected" "$actual"` gates), so "nonempty" and "count matches
-# the pin" are IMPLIED by "exit status 0" here, not independently falsifiable
+# three: pump-census.sh's own internal diff already refuses a mismatched result
+# before ever exiting 0 (see its `diff -u "$pin" "$actual"` gate), so "the reading
+# matches the pin" is IMPLIED by "exit status 0" here, not independently falsifiable
+# ⚠️ THE `[ -s "$actual" ]` GATE THIS USED TO CITE NO LONGER EXISTS -- #289 batch 15
+# removed it, because a zero-row reading became legitimate. "Nonempty" is therefore
+# no longer implied by exit 0 and is no longer claimed here
 # — a prior revision counted them as three separate assertions that could
 # never fail for their own reason (gate-b/r1 finding #1).
 #
@@ -168,6 +192,14 @@ EOF
 baseline_pin="$tmp/baseline.pin"
 printf '%s\n' 'tests/a.cpp:2' >"$baseline_pin" ||
     setup_fail "baseline pin write failed: $baseline_pin"
+
+# A pin with ZERO SITE ROWS but a non-empty FILE. Both halves are load-bearing: the
+# census accepts zero rows (the production pin has none) and REJECTS a zero-byte file
+# (that is a truncation, not a clean tree), so a fixture pin must carry a header to be
+# a valid empty pin at all.
+zero_row_pin="$tmp/zero-row.pin"
+printf '%s\n' '# intentionally no site rows' >"$zero_row_pin" ||
+    setup_fail "zero-row pin write failed: $zero_row_pin"
 
 # ── 2-3: known-good fixture produces EXACTLY the expected path:line ─────────
 run_capture bash "$script" --root "$fixture" --expected "$baseline_pin"
@@ -373,9 +405,32 @@ run_capture bash "$script" --root "$zero" --expected "$baseline_pin"
     fail "zero-match tree passed"
 pass
 
-printf '%s\n' "$output" | grep -Fq \
-    'instrument produced zero sites' ||
-    fail "zero-match failure was not attributed to instrument liveness"
+printf '%s\n' "$output" | grep -Fq -- '-tests/a.cpp:2' ||
+    fail "zero-match failure was not attributed to the site that went missing: $output"
+pass
+
+# ── 17: a zero-match tree against a ZERO-ROW pin is now a legitimate PASS ────
+# The counterpart to 15-16, and the assertion that would have caught this batch's
+# own regression: emptiness is no longer a failure mode, it is a state the pin can
+# express. If a future change reinstates a blanket "zero sites is an error" guard,
+# 15-16 keep passing and only THIS goes red.
+run_capture bash "$script" --root "$zero" --expected "$zero_row_pin"
+[ "$status" -eq 0 ] ||
+    fail "a zero-match tree against a zero-row pin must PASS: $output"
+pass
+
+# ── 18: the seeded-positive control is LIVE -- break the scanner, it must fire ─
+# Without this, every assertion above that now rests on "exit 0 implies the control
+# passed" would rest on a control nobody proved could fail. Mutates a COPY; the
+# repo script is untouched.
+mutant="$tmp/mutant-census.sh"
+sed 's/run_re = re\.compile(r"\\.run_for\\s\*\\(")/run_re = re.compile(r"\\.NEVER_MATCHES\\s*\\(")/' \
+    "$script" >"$mutant" || setup_fail "mutant write failed"
+grep -Fq 'NEVER_MATCHES' "$mutant" ||
+    setup_fail "control-liveness mutation did not apply -- the arm would be vacuous"
+run_capture bash "$mutant" --root "$fixture" --expected "$baseline_pin"
+printf '%s\n' "$output" | grep -Fq 'seeded-positive control FAILED' ||
+    fail "a scanner that cannot match anything did not trip its own control: $output"
 pass
 
 # ── 17-18: missing/wrongly-rooted tests/ fails loudly, not silently-empty ───

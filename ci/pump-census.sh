@@ -16,27 +16,31 @@
 # to report zero for a population it was never built to see is worse than an
 # explicit scope limitation.
 #
-# ── WHY THIS DOES NOT MATCH THE ISSUE'S "340 / 85" ───────────────────────────
-# #289 states 340 sites / 85 files. This script's *.cpp-only reading is 341/83;
-# subtracting the one known false positive below gives 340/83. The SITE count
-# reconciles; the FILE count does not — the issue's two figures came from
-# different sweeps and were never a matched pair. Including *.hpp (in scope by
-# design — headers carry real sites the issue's own .cpp-only sweep missed:
-# tests/interop/parity/parity_support.hpp and
-# tests/session/support/group_dispatch_fixture.hpp) takes the reading to
-# 346/85. Do not describe 346 as reconciling with 340; it does not, and
-# claiming otherwise misrepresents two different classifiers as one.
+# ── WHY THIS NEVER MATCHED THE ISSUE'S "340 / 85" ────────────────────────────
+# #289 states 340 sites / 85 files. This scanner never reproduced that pair, and the
+# reason is durable even though the numbers are not: the issue's two figures came from
+# DIFFERENT sweeps and were never a matched pair, so no single classifier can reconcile
+# both. Headers are in scope here by design (they carry real sites the issue's .cpp-only
+# sweep missed), which moves the file count again.
 #
-# ── KNOWN LEXICAL FALSE POSITIVE ─────────────────────────────────────────────
-# tests/session/test_application_lifecycle.cpp, the one-line `run_ioc()` helper —
-#   void run_ioc() { ioc.run_for(300ms); ioc.restart(); }
-# ⚠️ NAMED, NOT CITED BY LINE. This comment used to say `:213` and #289 batch 12 moved the
-# helper to :232 by inserting a header block above it -- the pin row was updated and the
-# prose was not. Find it by its text; the pin (below) is the line-numbered record.
-# is a complete one-line function; the matching `fut.get()` six lines later is
-# in a DIFFERENT function entirely. It is kept in the pin (the pin is a set of
-# LEXICAL candidates, not a hand-verified semantic set) but is named here so
-# nobody rediscovers it as a surprise.
+# ⚠️ THE READINGS THAT USED TO BE WRITTEN HERE ARE DELETED, NOT UPDATED. This section
+# carried "341/83" and "346/85" in the present tense; by #289 batch 15 the true reading
+# was 0/0 and the sentence had been false for several batches, because nothing ever
+# re-runs a comment. It also pointed at "the one known false positive below", a paragraph
+# the same batch replaced -- so the cross-reference dangled too. Re-derive if you need a
+# number:  bash ci/pump-census.sh
+#
+# ── KNOWN LEXICAL FALSE POSITIVES: NONE, BECAUSE THE POPULATION IS EMPTY ─────
+# This section used to name one -- a one-line `void run_ioc() { ioc.run_for(...);
+# ioc.restart(); }` helper in tests/session/test_application_lifecycle.cpp, whose
+# matching `fut.get()` six lines later was in a DIFFERENT function. That helper was
+# deleted in #289 batch 15 (its six call sites each had a future in scope, so the
+# indirection inlined away), and with it the false positive.
+#
+# The paragraph is REPLACED rather than corrected because the interesting part was
+# never the site: it was that a one-line helper can manufacture a lexical match
+# across a function boundary. That remains true of this scanner and is why the
+# seeded-positive control below asserts an EXACT hit set rather than a count.
 #
 # ── PRESERVED SITES THIS PIN CANNOT SPEAK ABOUT ──────────────────────────────
 # A site that is deliberately NOT migrated can still LEAVE this census, because
@@ -142,16 +146,6 @@ done
     fail "tests directory not found under scan root: $scan_root"
 [ -f "$expected" ] ||
     fail "expected-site pin not found: $expected"
-[ -s "$expected" ] ||
-    fail "expected-site pin is empty: $expected"
-
-if grep -Evq '^tests/.+\.(cpp|hpp):[1-9][0-9]*$' "$expected"; then
-    fail "expected-site pin contains a blank or malformed row: $expected"
-fi
-
-if ! LC_ALL=C sort -u "$expected" | cmp -s - "$expected"; then
-    fail "expected-site pin must be sorted and contain no duplicates: $expected"
-fi
 
 command -v python3 >/dev/null ||
     fail "python3 is required"
@@ -160,23 +154,43 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 actual="$tmp/actual.txt"
 
+# The pin may carry `#` comments and may hold ZERO site rows. Both are new, and
+# both exist for the same reason: the direct population is now empty, so a pin
+# that could not express "empty" could not express the truth. A zero-byte file
+# would say it ambiguously -- indistinguishable from a truncation -- so the
+# emptiness is stated IN the file and the rows are compared after stripping.
+# ⚠️ THE RAW FILE MUST BE NON-EMPTY EVEN THOUGH ZERO ROWS ARE LEGAL. Those are
+# different claims and the first draft shipped only the second: it deleted the old
+# `[ -s "$expected" ]` guard outright, so truncating the pin to zero bytes read as a
+# clean tree -- the exact case the paragraph above says the design is against. A pin
+# with no sites still carries its header, so "no rows" and "no bytes" stay separable.
+[ -s "$expected" ] ||
+    fail "expected-site pin is EMPTY AS A FILE: $expected -- zero site rows are legal, but the file must still carry its header; a zero-byte file is a truncation, not a clean tree"
+
+pin="$tmp/expected.txt"
+sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$expected" >"$pin"
+
+if [ -s "$pin" ] && grep -Evq '^tests/.+\.(cpp|hpp):[1-9][0-9]*$' "$pin"; then
+    fail "expected-site pin contains a malformed row: $expected"
+fi
+
+if ! LC_ALL=C sort -u "$pin" | cmp -s - "$pin"; then
+    fail "expected-site pin must be sorted and contain no duplicates: $expected"
+fi
+
 if ! python3 - "$scan_root" >"$actual" <<'PY'
 from pathlib import Path
 import re
 import sys
+import tempfile
 
 root = Path(sys.argv[1]).resolve()
 tests = root / "tests"
 
-files = sorted(
-    list(tests.rglob("*.cpp")) +
-    list(tests.rglob("*.hpp"))
-)
-
-if not files:
-    raise SystemExit(
-        f"pump-census: error: no .cpp/.hpp files found under {tests}"
-    )
+def discover(scan_root):
+    """Every scannable file under <scan_root>/tests. Headers are in scope by design."""
+    t = scan_root / "tests"
+    return sorted(list(t.rglob("*.cpp")) + list(t.rglob("*.hpp")))
 
 run_re = re.compile(r"\.run_for\s*\(")
 get_re = re.compile(
@@ -267,32 +281,142 @@ def blank_non_code(source: str) -> str:
 
     return "".join(out)
 
-sites = []
-
-for path in files:
-    try:
-        source = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise SystemExit(
-            f"pump-census: error: cannot read {path}: {exc}"
-        )
-
+def scan(source):
+    """Return the 1-based line of every window whose `.get()` is within six lines."""
     lines = blank_non_code(source).splitlines()
-
+    hits = []
     for index, line in enumerate(lines):
         if not run_re.search(line):
             continue
-
         following = lines[index + 1:index + 7]
         if any(get_re.search(candidate) for candidate in following):
-            rel = path.relative_to(root).as_posix()
-            sites.append(f"{rel}:{index + 1}")
+            hits.append(index + 1)
+    return hits
 
-if not sites:
+
+# ── SEEDED-POSITIVE CONTROL ──────────────────────────────────────────────────
+# This scanner USED to treat a zero reading as proof it was broken, because for
+# the whole life of the #289 migration a zero could only mean that. That is no
+# longer true: the direct population it scans is now empty, so the blanket
+# refusal would reject the one correct answer and make the pin unmaintainable.
+#
+# A zero is admissible only from an instrument PROVEN able to report non-zero,
+# so the licence comes from a control rather than from trust. The fixture below
+# carries one site of each shape the scanner must separate; the assertion is
+# EXACT (`!=`), so a scanner that widened into matching the negatives fails here
+# too, not just one that stopped matching the positive.
+#
+# The far-`get()` negative is NOT a defect being tolerated -- it is blind spot
+# (b) from this file's header, pinned as a PROPERTY so that widening the
+# lookahead is a deliberate act that breaks this control and must be re-argued.
+# ⚠️ BOTH BOUNDS ARE PINNED, AND THE FIRST DRAFT PINNED NEITHER. The window is six
+# lines, so the fixture must straddle it exactly:
+#   positive()  `.get()` at `window + 6` -- the LAST line INSIDE. NARROWING the
+#               lookahead (6 -> 5 or less) stops matching it and the control fires.
+#   far_get()   `.get()` at `window + 7` -- the FIRST line OUTSIDE. WIDENING the
+#               lookahead (6 -> 7 or more) starts matching it and the control fires.
+# The first draft put the far one at +9 (a widening to 7 or 8 stayed green) and the
+# positive one at +2 (EVERY narrowing from 6 down to 3 stayed green -- measured: a
+# 6 -> 2 mutant left this control green while a real unguarded site at window+3 went
+# unreported, exit 0, zero rows). The second of those was found by a reviewer AFTER
+# the first had been fixed two lines above, which is the whole lesson: fixing the
+# bound you were told about does not fix the bound you were not.
+# Count the lines before changing them; the slack is invisible and the claim is not.
+CONTROL = """\
+void positive() {
+    auto fut = asio::co_spawn(ioc, c(), asio::use_future);
+    ioc.run_for(200ms);
+    ioc.restart();
+    int p1 = 0;
+    int p2 = 0;
+    int p3 = 0;
+    int p4 = 0;
+    (void)fut.get();
+}
+void migrated() {
+    auto fut = asio::co_spawn(ioc, c(), asio::use_future);
+    if (!run_window_then_ready(ioc, fut, 200ms, "x")) { return; }
+    (void)fut.get();
+}
+void commented_out() {
+    // ioc.run_for(200ms);
+    // ioc.restart();
+    // (void)fut.get();
+}
+void far_get() {
+    ioc.run_for(200ms);
+    ioc.restart();
+    int a = 0;
+    int b = 0;
+    int c2 = 0;
+    int d = 0;
+    int e = 0;
+    (void)fut.get();
+}
+"""
+def census(scan_root):
+    """Discover, read and scan a tree -- the WHOLE pipeline, so a control can cover it."""
+    found = discover(scan_root)
+    if not found:
+        raise SystemExit(
+            f"pump-census: error: no .cpp/.hpp files found under {scan_root / 'tests'}"
+        )
+    out = []
+    for path in found:
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise SystemExit(f"pump-census: error: cannot read {path}: {exc}")
+        rel = path.relative_to(scan_root).as_posix()
+        for line_no in scan(source):
+            out.append(f"{rel}:{line_no}")
+    return sorted(set(out))
+
+
+# ⚠️ THE CONTROL IS SEEDED ON THE REAL FILESYSTEM, NOT SCANNED AS A STRING, and that
+# is not ceremony. The first version called `scan(CONTROL)` on an in-memory literal, so
+# discovery, `rglob`, `read_text`, the `.hpp` extension set and the `relative_to` mapping
+# were ALL OUTSIDE the control -- and the pin it licenses now has zero rows, so it can no
+# longer diff-detect a scanner that silently stops finding files either. MEASURED: a
+# mutant dropping `tests/session` (the directory holding nearly every migrated site) from
+# the walk exited 0 against the real tree AND against a tree carrying a live unguarded
+# site. Running the control through `census()` puts every one of those steps inside it.
+with tempfile.TemporaryDirectory() as _td:
+    _ctl = Path(_td)
+    (_ctl / "tests" / "nested").mkdir(parents=True)
+    (_ctl / "tests" / "nested" / "ctl.cpp").write_text(CONTROL, encoding="utf-8")
+    # A .hpp too: headers are in scope BY DESIGN (see this file's header), and nothing
+    # else here would notice the extension set being narrowed to *.cpp.
+    (_ctl / "tests" / "ctl_hdr.hpp").write_text(CONTROL, encoding="utf-8")
+    control_hits = census(_ctl)
+
+expected_control = ["tests/ctl_hdr.hpp:3", "tests/nested/ctl.cpp:3"]
+if control_hits != expected_control:
     raise SystemExit(
-        "pump-census: error: instrument produced zero sites; "
-        "refusing to interpret an empty measurement as a clean tree"
+        "pump-census: error: seeded-positive control FAILED "
+        f"(expected {expected_control}, got {control_hits}); the scanner cannot be "
+        "trusted to report either a zero or a non-zero, so no reading is admissible"
     )
+
+# ⚠️ AND A SECOND ARM, because the control above proves the pipeline works on a tree the
+# control BUILT -- it cannot prove the same pipeline reaches every part of the REAL tree.
+# That is the exact hole the `tests/session` mutant walked through. This asserts a
+# STRUCTURAL property rather than a count (a count would rot): every immediate
+# subdirectory of `tests/` that holds a scannable file ON DISK must contribute at least
+# one file to what the walk actually discovered.
+_discovered = discover(root)
+_seen_dirs = {p.relative_to(root / "tests").parts[0] for p in _discovered
+              if p.relative_to(root / "tests").parts}
+_on_disk = {d.name for d in (root / "tests").iterdir()
+            if d.is_dir() and any(d.rglob("*.cpp")) or d.is_dir() and any(d.rglob("*.hpp"))}
+_missed = sorted(_on_disk - _seen_dirs)
+if _missed:
+    raise SystemExit(
+        "pump-census: error: the walk skipped tests/ subdirectories that hold scannable "
+        f"files: {_missed}; a reading that cannot see them is not a clean tree"
+    )
+
+sites = census(root)
 
 for site in sorted(set(sites)):
     print(site)
@@ -301,14 +425,17 @@ then
     fail "scanner failed"
 fi
 
-[ -s "$actual" ] ||
-    fail "scanner succeeded but emitted no sites"
+# NOTE: no `[ -s "$actual" ]` guard. An empty reading is now a legitimate
+# outcome -- the direct population is migrated out -- and the licence to believe
+# it comes from the seeded-positive control inside the scanner, not from the
+# emptiness of this file. Set equality against the pin still catches drift in
+# both directions.
 
 # Emit the authoritative current reading even on mismatch.
 cat "$actual"
 
-if ! diff -u "$expected" "$actual" >&2; then
-    expected_count="$(wc -l <"$expected" | tr -d '[:space:]')"
+if ! diff -u "$pin" "$actual" >&2; then
+    expected_count="$(wc -l <"$pin" | tr -d '[:space:]')"
     actual_count="$(wc -l <"$actual" | tr -d '[:space:]')"
     echo "pump-census: error: census differs from pin" >&2
     echo "pump-census: expected=$expected_count actual=$actual_count" >&2

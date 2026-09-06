@@ -14,7 +14,7 @@
 //
 // Harness shape mirrors test_persistent_seqnum_hydrate.cpp (029):
 //   FaultStore / FaultStoreFactory / OutboundCapture / Fixture
-//   make_initiator / make_reconnect_initiator helpers.
+//   make_reconnect_initiator helper.
 //
 // RED witness design:
 //   W1 and W2 use the drive_reconnect() path (the real "2nd-logon" vehicle):
@@ -396,41 +396,6 @@ struct Fixture {
     }
 };
 
-// ── make_initiator: basic initiator without reconnect factory ─────────────────
-//
-// Used by the SkeletonBuilds test. Mirrors 029's make_initiator.
-
-static std::unique_ptr<Fixture> make_initiator(
-    std::shared_ptr<MessageStoreFactory> store_factory,
-    bool refresh_on_logon = false) {
-    auto fix = std::make_unique<Fixture>();
-
-    fix->cfg.role = fixpp::session::session_role::initiator;
-    fix->cfg.sender_comp_id = "CLI";
-    fix->cfg.target_comp_id = "SRV";
-    fix->cfg.begin_string = "FIX.4.4";
-    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
-    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
-    fix->cfg.heartbeat_interval = std::chrono::seconds{0};
-    fix->cfg.executor_override = fix->ioc.get_executor();
-    fix->cfg.store_factory = std::move(store_factory);
-    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
-    fix->cfg.refresh_on_logon = refresh_on_logon;
-    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
-
-    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
-
-    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
-    fix->ioc.run_for(2s);
-    fix->ioc.restart();
-    (void)open_fut.get();
-
-    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
-        << "make_initiator: session must be LogonSent after open()";
-
-    return fix;
-}
-
 // ── make_reconnect_initiator: initiator with MockReconnectFactory ─────────────
 //
 // Builds an initiator session with:
@@ -488,8 +453,28 @@ static ReconnectInitiatorFixture make_reconnect_initiator(
     // open() — cold one-shot hydrate fires (hydrated_=false → store reads → hydrated_=true).
     // The Logon is emitted via transport_send_ (pre-live path at cold open).
     auto open_fut = asio::co_spawn(fix.ioc, fix.session->open(), asio::use_future);
-    fix.ioc.run_for(2s);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, open_fut, 2s,
+                                                    "make_reconnect_initiator/open")) {
+        // Clock-free drain: `Fixture` has no clock member, same as the sibling
+        // `Fixture::feed`. Whether that suffices is measured by the seam arm.
+        fixpp::test_support::drain_or_report(fix.ioc, "make_reconnect_initiator/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_reconnect_initiator/open";
+        // Return the fixture VALID, not null. The condition, which is what matters and
+        // does not rot: every caller dereferences `result.fix` WITHOUT checking it, so
+        // nulling would trade a hang for a null dereference. Verified for both this
+        // helper's callers and `make_acceptor_notconnected`'s -- re-derive rather than
+        // trusting this line, the callers are the thing that moves:
+        //   git grep -n -A2 'make_reconnect_initiator(\|make_acceptor_notconnected(' \
+        //     -- tests/session/test_refresh_on_logon.cpp
+        // ⚠️ WHAT STOPS A QUIET PASS IS THE `ADD_FAILURE` ABOVE, AND ONLY THAT. An
+        // earlier draft of this line added "the state EXPECT below fails too" -- false,
+        // and falsifiable by reading three lines further: this `return` leaves the
+        // function, so that EXPECT never runs. Every caller does re-assert
+        // `ASSERT_NE(result.store, nullptr)` on its next line, and `store` IS left null
+        // here, so a caller does get a second chance to fail -- but that is the caller's
+        // assertion, not one "below".
+        return result;
+    }
     (void)open_fut.get();
 
     EXPECT_EQ(fix.session->state(), fixpp::session::fsm_state::LogonSent)
@@ -543,8 +528,13 @@ static AcceptorFixture make_acceptor_notconnected(
     fix.session = std::make_unique<fixpp::session::Session>(fix.eng, fix.cfg);
 
     auto open_fut = asio::co_spawn(fix.ioc, fix.session->open(), asio::use_future);
-    fix.ioc.run_for(1s);
-    fix.ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(fix.ioc, open_fut, 1s,
+                                                    "make_acceptor_notconnected/open")) {
+        // Clock-free drain and valid-fixture return, both as at `make_reconnect_initiator/open`.
+        fixpp::test_support::drain_or_report(fix.ioc, "make_acceptor_notconnected/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_acceptor_notconnected/open";
+        return result;
+    }
     (void)open_fut.get();
 
     EXPECT_EQ(fix.session->state(), fixpp::session::fsm_state::NotConnected)

@@ -1,0 +1,71 @@
+# ci/red-arms/batch15-spotcheck.tsv -- TEXTUAL spot-checks for #289 batch 15.
+#
+# Feed to:  bash ci/pump-red-arm.sh linux-clang-debug ci/red-arms/batch15-spotcheck.tsv
+#
+# ⚠️ THESE ARMS PARTITION ON THE MISS BRANCH'S RETURN DISPOSITION, which is the axis
+# this batch actually varies. Batches 13/14 migrated sites in void test bodies, where
+# every miss branch does the same three things and one arm per enclosing CONTEXT was
+# the informative split. Every site here is inside a helper that RETURNS A VALUE, so
+# the question each site had to answer is "what does the miss branch return, and does
+# the caller notice?" -- and a wrong answer there is SILENT at the call site rather
+# than at the site itself. One arm per distinct answer:
+#
+#   run_sync                        free helper, explicit trailing return type; the
+#                                   sentinel converts implicitly
+#   MinimalSession::run_coro        member helper, `auto` return; needs `using R =
+#                                   decltype(fut.get())` because two returns of
+#                                   DIFFERENT types do not deduce
+#   drive_to_active/open            a bool channel that already existed
+#   ReconcileFixture::drive/send    a struct FIELD poisoned. ⚠️ THE ARM PROVES THE EARLY
+#                                   RETURN, NOT THE POISON -- every caller asserts on
+#                                   `store_fired` before reading `send_r`, so forcing this
+#                                   site with and without the poison gives IDENTICAL
+#                                   output. An earlier line here claimed the opposite.
+#   make_reconnect_initiator/open   returns the fixture VALID; callers deref it
+#                                   unconditionally, so null would be a crash
+#   open_to_active/open             the settled void recipe, unchanged; the control
+#                                   that this batch did not break the ordinary case
+#
+# ⚠️ COLUMN 6 (exec stem) IS LOAD-BEARING FOR NEARLY EVERY ROW HERE, and its absence
+# would have read as a defect. The driver asserts the arm's own test RAN by matching
+# the label's stem against `[ RUN ]` lines, which works only while a label names a
+# test. These labels name HELPERS with no single test to be named after, so without
+# column 6 every row would report INCONCLUSIVE for a reason about naming rather than
+# about the site. The column, and this consequence,
+# were added in this same change; see ci/pump-red-arm.sh's arms-file docs.
+#
+# ⚠️ NO `fuzz_admin_parse/*` ARM. Those three sites report NOTHING by design (see
+# ci/red-arms/batch15-labels.txt), so a textual arm on them would assert the absence
+# of a report and pass whether or not the site was mutated -- an arm that cannot go
+# RED. They are covered by the seam arm, where SILENT is the DOCUMENTED expectation.
+#
+# ⚠️ AN ANCHOR ON AN ENCLOSING FUNCTION FORCES THAT FUNCTION'S *FIRST* SITE, NOT THE
+# ONE YOU NAMED. Measured here, not hypothesised: the `ReconcileFixture::drive/send`
+# row first anchored on `Driven drive(...)`, the function signature. `drive()` holds
+# THREE migrated sites, so the driver forced the first (`/open`), whose miss branch
+# returned early and masked the other two -- and the run reported "NO REPORT ... This IS
+# a finding about the site" for `/send`, which is a WRONG VERDICT AGAINST CORRECT CODE
+# (the seam arm had already proven `/send` RED independently). The driver's own arms-file
+# contract says the anchor must be "on or just above the `run_window_then_ready(` call to
+# force"; a signature line satisfies "unique" and violates "just above". Anchor on the
+# `co_spawn` immediately above the call instead.
+# [[feedback_force_each_red_arm_individually_an_early_return_masks_later_sites]]
+#
+# Rows here still anchored on a signature are valid ONLY while the label names that
+# function's FIRST site. That is a condition, not a fact, so re-derive it rather than
+# trusting this sentence -- for each row, the first label after the anchor must equal
+# the row's own label:
+#   python3 - <<'EOF'
+#   import re
+#   for f,a,l in [...]:   # (file, anchor, label) from the rows below
+#       s=open(f).read(); i=s.index(a)
+#       print(l, re.search(r'run_window_then_ready\s*\([^;]*?"([^"]+)"', s[i:], re.S).group(1))
+#   EOF
+#
+# file <TAB> anchor <TAB> label <TAB> cmake target <TAB> ctest regex <TAB> exec stem
+tests/session/test_fixt_logon_establishment.cpp	auto run_sync(FixtSetup& s, Fn&& fn)	run_sync	session_fixt_logon_establishment	^session_fixt_logon_establishment$	FixtLogonEstablishment
+tests/session/test_seqnum_drain_on_close.cpp	auto run_coro(Coro&& c) {	MinimalSession::run_coro	session_pure_tests	^session_pure_tests$	SeqnumDrainOnClose
+tests/session/test_heartbeat_cadence_8cell.cpp	bool drive_to_active(fixpp::session::Session& s) {	drive_to_active/open	session_pure_tests	^session_pure_tests$	HeartbeatCadence8Cell
+tests/session/test_store_fail_reconcile_readfail.cpp	sess->send(std::span<const std::byte>(payload)), asio::use_future);	ReconcileFixture::drive/send	session_store_tests	^session_store_tests$	StoreFailReconcileReadFail
+tests/session/test_refresh_on_logon.cpp	static ReconnectInitiatorFixture make_reconnect_initiator(	make_reconnect_initiator/open	session_refresh_on_logon	^session_refresh_on_logon$	RefreshOnLogon
+tests/session/test_application_lifecycle.cpp	void open_to_active(Session& sess) {	open_to_active/open	application_lifecycle_019_test	^application_lifecycle_019$	ApplicationLifecycle

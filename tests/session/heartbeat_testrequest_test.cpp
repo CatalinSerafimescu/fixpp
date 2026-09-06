@@ -159,27 +159,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
 
 // ── FSM-fixture helpers (pattern from seqnum_gap_fatal_test.cpp) ──────────────
 
-// Drive `co_spawn(ioc, coro, use_future)` by running the ioc for up to 200ms,
-// then restarting it. The future is returned for the caller to `.get()`.
-// This is the established pattern for single-threaded coroutine tests.
-template <class R>
-static R run_coro(asio::io_context& ioc, asio::awaitable<fixpp::core::expected_t<R>> coro) {
-    auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
-    auto res = fut.get();
-    if (!res.has_value()) {
-        // Propagate by re-throwing to make test failures visible.
-        return R{};  // caller checks separately
-    }
-    if constexpr (std::is_same_v<R, void>) {
-        return;
-    } else {
-        return *res;
-    }
-}
-
-// Overload for awaitable<expected_t<void>>.
+// Drive `co_spawn(ioc, coro, use_future)` with a readiness-checked window (#289).
 static fixpp::core::expected_t<void> run_coro_result(
     asio::io_context& ioc, asio::awaitable<fixpp::core::expected_t<void>> coro) {
     auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);

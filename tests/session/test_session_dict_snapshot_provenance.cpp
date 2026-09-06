@@ -182,8 +182,14 @@ struct ProvenanceFixture {
     auto run_open(Session& sess) {
         transport.reset();
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        using R = decltype(fut.get());
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "ProvenanceFixture::run_open")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ProvenanceFixture::run_open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ProvenanceFixture::run_open";
+            return R{std::unexpected(fixpp::test_support::kWindowMissSentinel)};
+        }
         return fut.get();
     }
 

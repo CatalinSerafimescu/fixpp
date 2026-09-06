@@ -68,8 +68,18 @@
 #
 # arms-file: one arm per line, TAB-separated, '#' comments and blanks ignored
 #     <source-path> <TAB> <unique anchor substring> <TAB> <expected label>
-#     <TAB> <cmake target> [<TAB> <ctest -R regex>]
+#     <TAB> <cmake target> [<TAB> <ctest -R regex> [<TAB> <exec stem>]]
 # The regex defaults to `^<cmake target>$`; give it only when they differ.
+#
+# ⚠️ COLUMN 6 EXISTS BECAUSE A LABEL HAS TWO JOBS AND THEY CAN DIVERGE. The label is
+# matched EXACTLY by the forcing seam (`std::strcmp`), and its text before the first
+# `/` is ALSO used, by CONTAINMENT, to assert the arm's own test actually ran. Those
+# coincide only while labels are named after tests. #289 batch 15 migrated sites that
+# live in HELPERS shared by many tests -- `run_sync` has 31 callers -- so there is no
+# single test name to put in the label, and every such arm would report INCONCLUSIVE
+# for a reason that is about naming rather than about the site. Column 6 supplies the
+# gtest-name substring to assert instead; it defaults to the label's stem, so every
+# pre-existing arms file keeps its exact previous behaviour.
 # The anchor must occur EXACTLY ONCE in the source file and must be on or just
 # above the `run_window_then_ready(` call to force.
 set -uo pipefail
@@ -121,6 +131,18 @@ if [ "$arms_file" = "--self-test" ]; then
         printf '  !!BAD %-56s rc=%s\n' "an EMPTY build dir is not blamed on the arms file" "$e_rc"
         sed 's/^/        /' "$st_dir/o"; bad=$((bad+1))
     fi
+    # QUIET: a SIX-field row (explicit exec stem) must validate exactly like a five-field
+    # one. ⚠️ THIS IS THE ARM FOR THE TWO-PARSERS DEFECT, not a formality: the validation
+    # loop reads the row with `read -r`, which packs every leftover field into the LAST
+    # name. Before the sixth name was added there, this row's regex arrived as
+    # "^<test>$<TAB><stem>", selected zero tests, and the run aborted BLAMING THE ARMS
+    # FILE -- a wrong verdict against a correct row. Deleting the `_rest` sink from that `read`
+    # line turns this arm rc=0 -> rc=2, which is how it was proven to fire.
+    printf 'tests/x.cpp\tanchor\tL_SIX\ttgt\t^%s$\tSomeGtestName\n' "$real" > "$st_dir/six.tsv"
+    chk "a SIX-field row (explicit exec stem) is QUIET" 0 "$st_dir/six.tsv" "validated"
+    # FIRE: seven fields is malformed -- the upper bound moved 5 -> 6, it did not vanish.
+    printf 'tests/x.cpp\tanchor\tL_SEVEN\ttgt\t^%s$\tStem\textra\n' "$real" > "$st_dir/seven.tsv"
+    chk "a SEVEN-field row is malformed" 2 "$st_dir/seven.tsv" "malformed row"
     echo "pump-red-arm self-test: $ok ok, $bad bad"
     [ "$bad" -eq 0 ]
     exit $?
@@ -166,9 +188,9 @@ assert_nonempty_population "$n_arms" "$arms_file" pump-red-arm arms
 # while the sweep required `NF>=4`. A 3-field row therefore RAN with an empty target and an
 # empty regex -- `cmake --build --target ''` then `ctest -R ''`, which matches the WHOLE
 # SUITE -- and was then skipped by the cleanup. Two parsers, two acceptance rules, one file.
-bad=$(awk -F'\t' '!/^#/ && NF { if (NF < 4 || NF > 5) printf "    line %d: %d field(s)\n", NR, NF }' "$arms_file")
+bad=$(awk -F'\t' '!/^#/ && NF { if (NF < 4 || NF > 6) printf "    line %d: %d field(s)\n", NR, NF }' "$arms_file")
 if [ -n "$bad" ]; then
-    printf 'pump-red-arm: %s has malformed row(s) -- an arm needs 4 fields, or 5 with an explicit ctest regex\n' "$arms_file" >&2
+    printf 'pump-red-arm: %s has malformed row(s) -- an arm needs 4 fields, 5 with an explicit ctest regex, or 6 with an explicit exec stem\n' "$arms_file" >&2
     printf '%s\n' "$bad" >&2
     exit 2
 fi
@@ -201,10 +223,13 @@ fi
 # ⚠️ A third error in the same sentence: it called the SOURCE STEM a "target". The author
 # then typed that stem into `cmake --build --target` and got `ninja: error: unknown
 # target`. A comment warning about confusable namespaces had the namespaces confused.
-# The two that matter -- target and ctest name -- share no derivation rule,
-# and matching `basename(command[0])` from `ctest --show-only=json-v1` against the target
-# name resolves NOTHING for 7 of the 9 targets this batch touches. So column 5 stays
-# explicit; what changes is that a wrong value is now caught HERE.
+# ⚠️ AND A FOURTH: the sentence that used to stand HERE repeated the very claim the
+# paragraph above labels FALSE -- that the `basename(command[0])` join "resolves NOTHING".
+# It survived the correction because that correction was written above it instead of
+# replacing it, so the file asserted a thing and its negation eight lines apart. Found by
+# a #289 batch-15 reviewer, deleted rather than reworded: a claim about what a join
+# resolves is a RESULT, and the operative conclusion needs none of it.
+# So column 5 stays explicit; what changes is that a wrong value is now caught HERE.
 #
 # ⚠️ CHECKED UP FRONT, FOR EVERY ROW, BEFORE THE FIRST MUTATION -- not per-arm inside the
 # loop. Per-arm, a bad row in position 6 is only reported after five rebuild-and-run
@@ -241,7 +266,14 @@ nosuch=""
 # that check describes, and the one `assert_ran_count` in ci/pump-arm-common.sh exists to
 # close; reintroducing it one block below would defer the catch until after every build,
 # defeating this guard's whole reason to run up front.
-while IFS=$'\t' read -r f_ a_ l_ tgt_ rx_ || [ -n "$f_" ]; do
+# ⚠️ SIX NAMES, NOT FIVE. `read` puts every leftover field into the LAST name, so a
+# 5-name read over a 6-column row would hand this validator a regex of
+# "<regex><TAB><exec stem>" -- which selects nothing, and would abort the run blaming
+# the arms file. That is precisely the two-parsers-one-file defect the comment above
+# describes, so the sixth name is read here even though this loop never uses it. It is
+# named `_rest`, not after column 6: it is a SINK for everything past the regex, so the
+# guard keeps working if a seventh column is ever added.
+while IFS=$'\t' read -r f_ a_ l_ tgt_ rx_ _rest || [ -n "$f_" ]; do
     case "$f_" in ''|\#*) continue ;; esac
     rx_="${rx_:-^$tgt_$}"
     n_=$(cd "build/$preset" && ctest -N -R "$rx_" 2>/dev/null | grep -c '^ *Test *#')
@@ -468,7 +500,7 @@ open(path, "w", encoding="utf-8").write(out)
 PYFORCE
 }
 
-while IFS=$'\t' read -r file anchor label target regex; do
+while IFS=$'\t' read -r file anchor label target regex exec_stem; do
     case "$file" in ''|\#*) continue ;; esac
     # Column 5 is optional and defaults to the target's own exact-match regex. It used to be
     # mandatory and was mechanically `^`+target in every row -- two columns carrying one
@@ -613,7 +645,8 @@ while IFS=$'\t' read -r file anchor label target regex; do
         # `RefreshOnLogon.W2_StoreWinsDown_RED`). Where the stem matches NOTHING the arm is
         # INCONCLUSIVE, not SILENT: this driver then cannot say whether the site ran at all,
         # and guessing would be the failure this branch exists to remove.
-        stem="${label%%/*}"
+        # Column 6 wins where given; otherwise the label's stem, exactly as before.
+        stem="${exec_stem:-${label%%/*}}"
         started=$(grep -F '[ RUN' <<<"$out" | grep -cF "$stem" || true)
         skipped_here=$(grep -F '[  SKIPPED ]' <<<"$out" | grep -cF "$stem" || true)
         # ⚠️ ORDER: SKIPPED IS TESTED FIRST, because gtest prints `[ RUN ]` BEFORE the body
@@ -632,7 +665,9 @@ while IFS=$'\t' read -r file anchor label target regex; do
             echo "    ~~ INCONCLUSIVE: no '[ RUN ]' line matched the label stem '$stem', so"
             echo "       this driver cannot say whether the armed site ran. Either the ctest"
             echo "       regex selected the wrong test, or the label stem is not part of the"
-            echo "       gtest name. Resolve by hand; do NOT read it as SILENT."
+            echo "       gtest name. If the site lives in a helper shared by many tests, the"
+            echo "       label CANNOT name one test -- give column 6 (exec stem) instead of"
+            echo "       renaming the label. Resolve by hand; do NOT read it as SILENT."
             printf '%s\n' "$out" | grep -F '[ RUN' | sed 's/^/         /' | head -5
             NOTES+=("HUNG $label")
         else

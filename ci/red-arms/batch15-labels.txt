@@ -1,0 +1,67 @@
+# ci/red-arms/batch15-labels.txt -- the seam-forceable sites of #289 batch 15.
+#
+# Feed to:  bash ci/pump-seam-arm.sh linux-clang-debug ci/red-arms/batch15-labels.txt
+#
+# ⚠️ THIS BATCH IS NOT ONE RECIPE SHAPE. Batches 13 and 14 migrated sites that sat
+# in a void test body, where the settled recipe (`run_window_then_ready` + drain +
+# `ADD_FAILURE` + `return;`) drops straight in. Every site here sits in a helper
+# that RETURNS A VALUE, so each one also had to answer "what does the miss branch
+# return, and does the caller notice?" -- and the answers differ per helper. They
+# are enumerated at the sites, not here, because a list of dispositions in a second file
+# is a copy that rots.
+#
+# ⚠️ AND THE FIRST DRAFT OF THIS FILE BROKE THAT RULE IN THE SENTENCE THAT STATES IT --
+# it followed the words above with a four-bullet disposition list, which is exactly the
+# second copy the rule forbids. Deleted rather than corrected. Read the dispositions at
+# the sites; `ci/red-arms/batch15-spotcheck.tsv` carries the only other copy that earns
+# its place, because each of its rows maps 1:1 onto an arm the driver actually runs.
+#
+# ⚠️ SOME LABELS HERE ARE CONTAINED IN ANOTHER LABEL IN THE TREE -- e.g. `run_sync`
+# inside `run_sync_creds`, and `make_acceptor` inside `make_acceptor_notconnected/open`.
+# ⚠️ DO NOT READ THAT AS AN ENUMERATION, AND DO NOT COUNT IT FROM THE SURVEY: the survey
+# (`new-site-labels.py`) tests strict PREFIX, while the driver matches by SUBSTRING, so
+# the survey's answer is a SUBSET of what actually matters. Suffix containments exist too
+# and the prefix survey cannot see them (`open_to_active/open` is a suffix of
+# `BusinessRoundtrip::open_to_active/open`). An earlier draft of this paragraph said
+# "TWO LABELS", which was the survey's number reported as the driver's. This is SAFE AT
+# THE SEAM and NOT safe to
+# generalise from: `forced_miss_here` compares with `std::strcmp(...) != 0`, an
+# EXACT match, so forcing one never fires the other. The driver is the part that
+# matches by substring -- it locates labels with `strings | grep -oF` -- and it
+# already documents that a shorter label pulls in extra binaries. So the effect is
+# a wider binary set to run, not a mis-attributed verdict. Batch 14's copy of this
+# file recorded "0 pairs involving this batch"; that was true of THAT batch and is
+# not a property of the survey. Re-run it, do not inherit the sentence:
+#   .specify/decisions/289-data/new-site-labels.py
+#
+# ⚠️ THE THREE `fuzz_admin_parse/*` SITES DO NOT REPORT, BY DESIGN. They take their
+# miss branch and abandon the input with no `ADD_FAILURE` and no drain. A seam arm
+# will therefore see the ANNOUNCE line and NO report, which this driver classifies
+# as SILENT -- the classification that normally means "the miss branch did not
+# report", i.e. a defect. Here it is the intended behaviour, and the reason is
+# measured rather than argued: gtest's `ADD_FAILURE` fired from a libFuzzer TU
+# prints and the process still exits 0, so `ctest -L fuzz` (`-runs=0`, graded on
+# the exit code) would read a reported residual as a pass. The full argument, and
+# why `abort()` was rejected, is at the `fuzz_admin_parse/open` site.
+# DO NOT "fix" those three to report. Expect SILENT=3 and read it as PASS.
+
+MinimalSession::run_coro
+OnCreateFiresOnceBeforeLogon/open
+OnLogoutFiresOnce_CallbackThrew/close
+OnLogoutFiresOnce_TerminalClose/close
+ProvenanceFixture::run_open
+ReconcileFixture::drive/logon
+ReconcileFixture::drive/open
+ReconcileFixture::drive/send
+drive_to_active/logon
+drive_to_active/open
+feed/frame
+fuzz_admin_parse/feed
+fuzz_admin_parse/logon
+fuzz_admin_parse/open
+make_acceptor_notconnected/open
+make_reconnect_initiator/open
+open_to_active/logon
+open_to_active/open
+run_sync
+run_sync_creds
