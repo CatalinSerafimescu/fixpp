@@ -111,6 +111,47 @@ Every accept and every reconnect attempt mints a **new** `Transport`; the dead i
 first, so at most one is live per session. Disclosed as **`B-012-2`**. This is why the connect path
 and the reconnect path cannot drift apart — they share `drive_reconnect_attempt`.
 
+## Name resolution is ABANDONED, not cancelled (#361) — and that is the only construction available
+
+`connect_timeout` bounds `async_connect` as a whole, resolution included, and `Engine::stop()`'s
+`total` reaches a connect suspended in resolution. Both properties come from `resolve_bounded()`
+(`src/transport/bounded_resolve.hpp`), which awaits a **gate timer** rather than the resolve, and on
+expiry walks away from the lookup — leaving the completion handler owning the resolver and the
+result storage.
+
+⭐ **Why abandonment and not something less violent — every obvious alternative is FALSIFIED, and
+each was written down before it was checked:**
+
+| Rejected | Why it cannot work |
+|---|---|
+| `resolver.cancel()` | asio's `background_getaddrinfo` tests its cancellation token **once, before** the blocking call. It wins only the window before the lookup starts; an in-flight `getaddrinfo` runs to completion regardless. |
+| joining with a timer via `operator\|\|` | `\|\|` retires only when **both** arms retire. Racing an uncancellable op against a timer bounds nothing — the caller still waits for the op. |
+| handing the lookup to a thread fixpp detaches | Would bound the io_context drain too, but trades it for a detached thread per attempt and an exit-time hazard. Not taken; the drain is disclosed instead. |
+
+`resolve_query_op` takes **no cancellation slot** at all, which is the root fact under all three
+rows. Read asio's source before proposing a fourth option — every rejection above was a plausible
+design that a reading falsified.
+
+⚠️ **Bounding the operation does NOT bound the DRAIN, and the live limitation says so.** An abandoned
+`getaddrinfo` still holds asio work (`start_resolve_op` calls `scheduler_.work_started()`, and
+`resolver_thread_pool::shutdown()` **joins** its work threads), so `io_context::run()` returns only
+when the host's name-service stack gives up. That is `L-361-2`, with the measurements — do not
+re-derive them here, and do not read the DNS numbers as a general bound: `nsswitch.conf` may route
+`hosts:` to a backend `resolv.conf` does not govern.
+
+⭐ **The lesson worth more than the fix: this change REGRESSED the axis it was about, and review
+caught it, not the author.** asio's resolver pool defaults to **one** work thread and is an
+`execution_context_service_base` — one pool per `io_context`, shared by every session on it. Before
+the change a wedged lookup blocked its own caller, so at most one was outstanding per transport.
+After it, abandoned lookups **stack**, and a session pointed at a healthy host can fail in
+resolution because of an unrelated session. The drain was measured for *one* abandoned lookup and
+the result generalised without asking what a second one does.
+
+Bounded by `kMaxAbandonedResolves`. ⚠️ **Its justification is conditional on that one pool thread,
+and the application can remove the condition** by raising asio's `resolver`/`threads` key — at which
+point the cap refuses resolves that would have answered. The constant and `L-361-2` both state the
+condition rather than the conclusion; keep it that way if you touch either.
+
 ## `ReconnectPolicy` is a schedule array, not a formula
 
 It carries a vector of delays with the last entry as a plateau — **not** the
