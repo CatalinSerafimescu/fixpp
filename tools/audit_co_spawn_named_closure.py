@@ -1326,6 +1326,28 @@ def screen_named_closure(text: str) -> list[int]:
     return hits
 
 
+def includers_of(header_rel: str, build_dir: str, repo_root: str) -> list[dict]:
+    """Compile-database entries whose OWN TEXT `#include`s `header_rel`.
+
+    Direct includers only, matched on the include line rather than the bare
+    basename so a mention in a comment does not admit a TU. Transitive inclusion
+    is not resolved — a header reached only through another header is not found
+    here, and that is the residual the gate still refuses on.
+    """
+    base = os.path.basename(header_rel)
+    pat = re.compile(r'#\s*include\s*[<"][^">]*' + re.escape(base) + r'[">]')
+    out: list[dict] = []
+    for e in load_db(build_dir, only_with_cospawn=False):
+        f = os.path.realpath(os.path.join(e.get("directory", "."), e["file"]))
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                if pat.search(fh.read()):
+                    out.append(e)
+        except OSError:
+            continue  # unreadable TUs are already handled by load_db's own path
+    return out
+
+
 def screen_headers(repo_root: str) -> dict[str, list[int]]:
     """Every tracked header carrying the named-closure shape. Empty == none."""
     try:
@@ -1579,6 +1601,51 @@ def main() -> int:
     )
 
     repo_root = os.environ.get("FIXPP_REPO_ROOT", os.getcwd())
+
+    # ── #363: EXTEND the population to cover screened header hits ─────────────
+    # The blind spot is a header carrying the shape that no admitted TU pulls in.
+    # Refusing on it was the first design and it is the wrong end: the operator's
+    # only remedy was a ~20 min --all-files run. Instead, ADMIT the TUs that
+    # include such a header — the issue's own option (3) — so the walker gets to
+    # adjudicate the nominations instead of the run dying on them.
+    #
+    # This found a real instance on its first CI run:
+    # tests/session/support/group_dispatch_fixture.hpp carries three sites and
+    # ALL SIX of its includers have no `co_spawn` token of their own, so the
+    # prefilter admitted none of them. The sites are `sess.open()` /
+    # `sess.on_inbound_frame(...)` — member calls, the shape the screen itself
+    # was blind to until #363's own review round, which is why the hole read as
+    # empty for so long.
+    #
+    # The screen stays a NOMINATOR: everything it finds is handed to the walker,
+    # which decides. The post-sweep gate below then refuses only for a header
+    # that has no includer in the compile database at all.
+    if not args.all_files:
+        try:
+            pre_hits = screen_headers(repo_root)
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            print("The header screen could not run. That is NOT a clean result — it is "
+                  "the same fail-toward-clean this check exists to remove.")
+            return 1
+        have = {os.path.realpath(os.path.join(e.get("directory", "."), e["file"]))
+                for e in entries}
+        added = 0
+        for rel in sorted(pre_hits):
+            for e in includers_of(rel, args.build_dir, repo_root):
+                f = os.path.realpath(os.path.join(e.get("directory", "."), e["file"]))
+                if f not in have:
+                    have.add(f)
+                    entries.append(e)
+                    added += 1
+        if added:
+            print(f"header screen (#363): admitted {added} extra TU(s) so the walker can "
+                  f"adjudicate {sum(len(v) for v in pre_hits.values())} screened header "
+                  f"nomination(s) in {len(pre_hits)} header(s).")
+        population = sorted(
+            os.path.realpath(os.path.join(e.get("directory", "."), e["file"]))
+            for e in entries
+        )
 
     best: dict[tuple[str, int, int], dict] = {}
     parsed_files: set[str] = set()
