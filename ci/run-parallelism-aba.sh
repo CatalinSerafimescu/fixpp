@@ -91,6 +91,37 @@ if [ -z "$PRESET" ] || [ -z "$JOBS" ] || [ -z "$OUT" ]; then
 fi
 mkdir -p "$OUT"
 
+# ⚠️ THE SAMPLE MUST NOT LAND INSIDE THE SOURCE TREE, and this refuses rather
+# than trusting the caller. It did land there: the campaign workflow passed
+# `--out "$GITHUB_WORKSPACE/aba-$PRESET"`, the sample appeared as an untracked
+# directory, `git status --porcelain` went non-empty, and
+# `fixpp::dict::codegen-build-graph-check`'s cleanliness assertion failed in
+# EVERY pass of EVERY lane. Five lanes each reported `ctest exit 8` three times
+# for that reason alone — the measurement dirtied the tree it was measuring.
+#
+# The check lives HERE rather than in the workflow because the workflow is one
+# caller: a hand-run dispatch, a future job, or a local reproduction would each
+# have to remember. `git rev-parse` is skipped outside a work tree so the
+# driver still runs from a tarball.
+# ⚠️ RESOLVED FROM $OUT, NOT FROM THE CWD. A first version asked
+# `git rev-parse` in the current directory, which answers a different question:
+# a caller running from outside a checkout while writing INTO one was waved
+# through, and a caller running inside a checkout while writing to a temp dir
+# was interrogated for nothing. Cell S11 caught it by running from a temp
+# directory — the very case the cwd form gets wrong.
+_repo_root="$(git -C "$OUT" rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "$_repo_root" ]; then
+  _out_abs="$(cd "$OUT" && pwd)"
+  case "$_out_abs/" in
+    "$_repo_root"/*)
+      echo "::error::--out ($_out_abs) is inside the source tree ($_repo_root)." \
+           "The sample would show up in \`git status --porcelain\` and fail" \
+           "fixpp::dict::codegen-build-graph-check in every pass. Write it to" \
+           "\$RUNNER_TEMP (CI) or a directory outside the checkout."
+      exit 2 ;;
+  esac
+fi
+
 BUILD="$REPO/build/$PRESET"
 TMPDIR_CTEST="$BUILD/Testing/Temporary"
 

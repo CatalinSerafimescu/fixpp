@@ -220,6 +220,26 @@ jobs:
         with:
           python-version: "3.12"
 
+      # ⚠️ THIS IS THE ONLY WINDOWS ORACLE THE PEAK-RSS INSTRUMENT HAS. Its
+      # Windows path (job object + per-process WorkingSetSize) cannot be
+      # exercised on the Linux boxes where the rest of the CI tooling is tested,
+      # and the failure it must exclude is this repo's most recurring one — an
+      # instrument that reports a plausible number because it could not report
+      # anything else. A size band alone would NOT exclude it: one MSVC ASan
+      # test binary is hundreds of MiB, so a walk that enumerates only the root
+      # process still clears any band generous enough to be robust. The
+      # discriminator is the PROCESS COUNT over a tree of known size; see the
+      # self-test's own header for all five arms.
+      #
+      # Placed BEFORE the build, and on the asan leg only: it needs nothing but
+      # Python, it is the lane the instrument exists to decide (#267 — the
+      # matrix critical path, and the lane where memory cost concentrates), and
+      # failing here costs seconds instead of 85 minutes of Build.
+      - name: Peak-RSS instrument self-test (Windows path)
+        if: matrix.preset == 'windows-msvc-asan'
+        shell: bash
+        run: python ci/measure-peak-rss.py --self-test
+
       - name: Install Conan
         # pytest: the interop_cell_results_schema_check ctest runs `python -m pytest`
         # (tests/interop/CMakeLists.txt), absent from the Windows runner by default.

@@ -18,6 +18,21 @@
 # equality with a floor (`>= 340`): a floor inverts the safe direction and would
 # admit a run that silently lost twenty tests as acceptance evidence.
 #
+# ── TWO CELLS IN ci/test-parallelism-verdict.sh READ THIS FILE ───────────────
+#
+# Editing a line here can break them, and it has:
+#
+#   T24 states a count that MATCHES a pin, so it names a number this file holds.
+#       Re-record a pin, re-record T24 in the same commit.
+#   T25 needs a preset with NO pin at all. It used `windows-msvc-asan` until
+#       that lane got its first line below — at which point the cell silently
+#       stopped exercising the no-pin path. It now uses `linux-gcc-debug`, the
+#       only unpinned preset left; pinning that lane must move the cell, not
+#       weaken it.
+#
+# Named here because this is the file someone edits, and the coupling is
+# invisible from it otherwise.
+#
 # ── WHY IT IS PER-LANE, AND NOT ONE NUMBER ───────────────────────────────────
 #
 # The counts genuinely DIFFER per lane — some tests are registered only under
@@ -65,7 +80,21 @@
 # answer here.
 linux-clang-debug     363
 linux-clang-release   363
-linux-clang-asan      362
+# ⚠️ 362 -> 368, RE-RECORDED 2026-09-06 because the pin did its job and caught
+# the drift. Campaign run 33990959916 VOIDed this lane with "the passes ran [368]
+# tests against the pinned basis of 362" — correctly: a widening measured over a
+# workload that is not the lane's is not evidence for the lane.
+#
+# The lane genuinely grew, and only this one did: of the eleven Linux pins below
+# and above, ten still match production exactly. `linux-clang-asan` is the FUZZ
+# lane (`FIXPP_BUILD_FUZZ=ON`, ci/assert-ci-lane-policy.py), so registered fuzz
+# targets land here and nowhere else — which is why the drift is confined to it
+# rather than being a suite-wide count change.
+#
+# Provenance, per this file's own rule that a basis is read off CI and never a
+# workstation: Tier 1 run 33995191244, `push:main` at `9e03680d`, job
+# `linux-clang-asan` — "100% tests passed, 0 tests failed out of 368".
+linux-clang-asan      368
 linux-clang-ubsan     362
 linux-clang-tsan      362
 
@@ -102,3 +131,29 @@ linux-clang-libc++-tsan   357
 # `Peak memory` step: `ran: 369/-`).  369 rather than 362 because this lane runs
 # the packaging tier the five filtered lanes exclude.
 linux-clang-coverage  370
+
+# ── Tier 2, MSVC (`.github/workflows/tier2.yml`) — NEW 2026-09-06 ────────────
+#
+# These lanes had NO line here at all, for a structural reason that has just
+# stopped being true: `ci/measure-peak-rss.py` read `/proc`, so Windows produced
+# `status=no-procfs-platform` and there was no peak figure for a basis to
+# qualify. The Windows peak-RSS path (job object + per-process WorkingSetSize)
+# landed with #267, and `windows-msvc-asan` has now produced a VALID sample —
+# whose verdict nonetheless had to disclose "No line for `windows-msvc-asan` in
+# ci/expected-eligible-tests.txt, so the workload could not be checked against
+# the lane's production basis."
+#
+# That disclosure is the gap these three lines close. Without them a Windows
+# sample can never be more than "the passes agree with each other".
+#
+# ⚠️ The debug and release lanes are pinned even though nothing measures them
+# yet: the cost is one line each, and the alternative is that the NEXT Windows
+# dispatch rediscovers the same missing basis. `windows-msvc-release` is 360
+# rather than 351/352 because it is the only MSVC lane that runs the packaging
+# tier — the same reason `linux-clang-coverage` sits above the filtered lanes.
+#
+# Provenance: Tier 2 run 33995191253, `push:main` at `9e03680d` — the same
+# commit as the Tier 1 basis above, so all fourteen lines describe one tree.
+windows-msvc-debug    352
+windows-msvc-release  360
+windows-msvc-asan     351

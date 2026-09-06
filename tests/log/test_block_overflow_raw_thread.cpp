@@ -11,16 +11,35 @@
 //     record is eventually delivered to the sink.
 //
 // Test design:
-//   - Logger with capacity=1 ring + a PausingSink that holds the drain blocked
-//     inside emit() for 50 ms.
+//   - Logger with capacity=1 ring + a TimedBlockSink that holds the drain
+//     inside emit() until the TEST RELEASES IT — not for a fixed interval.
 //   - Main thread enqueues record #0 (fills the ring; drain picks it up and
-//     blocks in PausingSink::emit()).
+//     parks in TimedBlockSink::emit(), so read_sequence_ has NOT advanced).
 //   - A dedicated raw std::thread enqueues record #1 with block mode; it
-//     must block while record #0 is being "emitted" (drain hasn't advanced
-//     read_sequence_ yet — emit() returns AFTER the pause, then read advances).
-//   - We measure the actual block duration; it must be >= 10 ms.
-//   - After the sink's pause, the drain advances read_sequence_, the blocked
-//     producer acquires the slot, and record #1 is eventually delivered.
+//     must block, because the slot is still held.
+//   - The test OBSERVES that the producer is still inside enqueue() after a
+//     real interval, then releases the drain, joins, and measures.
+//
+// ⚠️ THE DRAIN USED TO BE HELD BY `sleep_for(50 ms)`, AND THAT MADE THE TEST'S
+// PRECONDITION A RACE AGAINST `std::thread` CREATION. The producer thread was
+// spawned only after the drain had already entered emit(), so the whole of
+// thread construction had to fit inside the sink's 50 ms window. When it did
+// not — measured on `windows-msvc-asan` under `ctest --parallel 4`, campaign
+// run 33977674899 — the drain finished sleeping, read_sequence_ advanced, the
+// slot came free, and the producer's enqueue returned WITHOUT EVER BLOCKING:
+// `actual block=0 ms` against a `>= 10` expectation.
+//
+// That was an honest red over a VACUOUS run: nothing about block mode had been
+// exercised, because the state the contract is about (a full ring) no longer
+// held by the time the producer arrived. Widening the window would only have
+// made the same race rarer and its failures more confusing.
+//
+// So the window is removed rather than widened. The sink parks until the test
+// says otherwise, which makes "the ring is full when the producer enqueues" a
+// STATE the test establishes rather than an interval it hopes to win, and the
+// block itself is OBSERVED (`producer still inside enqueue()`) rather than
+// inferred from a duration. Thread-creation latency is now irrelevant: the
+// drain cannot proceed while it is happening.
 //
 // Anchors:
 //   [2k §4.3] / contracts/log-core.md FR-004, TS-3
@@ -34,6 +53,8 @@
 #include <thread>
 #include <vector>
 
+#include "../support/wait_until.hpp"
+
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
@@ -41,23 +62,37 @@
 
 namespace {
 
-// A sink that blocks emit() for a configurable duration (simulates slow I/O).
-// Used to hold the drain thread inside emit() so the ring stays full.
+// A sink that parks emit() on the FIRST record until the test releases it
+// (simulates slow I/O). Used to hold the drain thread inside emit() so the ring
+// stays full for exactly as long as the test needs, with no interval to lose.
 class TimedBlockSink final : public fixpp::log::Sink {
 public:
-    // block_duration: how long emit() blocks for the FIRST record only.
-    std::chrono::milliseconds        block_duration{50};
     std::vector<fixpp::log::Record>  captured;
     std::atomic<int>                 emit_count{0};
     std::atomic<bool>                first_emit_started{false};
+    std::atomic<bool>                release_first_emit{false};
+
+    // ⚠️ A HANG GUARD, NOT PART OF THE MEASUREMENT. The test releases the drain
+    // explicitly; this bound only stops a defect elsewhere from parking the
+    // drain forever with no ctest timeout verdict to explain it. It is set far
+    // above any interval the test waits, so a run that reaches it has already
+    // failed for a different reason — `release_timed_out` says which.
+    std::chrono::seconds             release_cap{10};
+    std::atomic<bool>                release_timed_out{false};
 
     [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
 
     void emit(fixpp::log::Record const& rec) noexcept override {
         if (emit_count.fetch_add(1, std::memory_order_relaxed) == 0) {
             first_emit_started.store(true, std::memory_order_release);
-            // Block for block_duration on the first record.
-            std::this_thread::sleep_for(block_duration);
+            // Park until released. Sleeping rather than spinning: this runs on
+            // the drain thread while the test holds a producer blocked, and a
+            // yield-loop would burn a core of a 4-vCPU runner for the whole
+            // observation window — on the very lane whose wall time is the
+            // measurement.
+            if (!fixpp::test_support::wait_for_flag(release_first_emit, release_cap)) {
+                release_timed_out.store(true, std::memory_order_release);
+            }
         }
         captured.push_back(rec);
     }
@@ -72,9 +107,9 @@ public:
 
 TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms)
 {
-    // Arrange: capacity=1 ring + block mode + a 50 ms blocking first-emit sink.
+    // Arrange: capacity=1 ring + block mode + a first-emit sink that parks the
+    // drain until this test releases it.
     auto* sink_raw = new TimedBlockSink{};
-    sink_raw->block_duration = std::chrono::milliseconds{50};
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(sink_raw));
@@ -119,9 +154,11 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms)
     std::chrono::steady_clock::time_point enqueue_start;
     std::chrono::steady_clock::time_point enqueue_end;
     std::atomic<bool> producer_done{false};
+    std::atomic<bool> producer_at_the_door{false};
 
     std::thread producer([&]() {
         enqueue_start = std::chrono::steady_clock::now();
+        producer_at_the_door.store(true, std::memory_order_release);
         // This enqueue MUST block until the drain advances read_sequence_.
         logger->enqueue(fixpp::log::Level::info,
                         fixpp::log::cat::session,
@@ -132,6 +169,33 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms)
         producer_done.store(true, std::memory_order_release);
     });
 
+    // Wait until the producer is about to enqueue. Unbounded-in-principle but
+    // capped: this is thread creation, and the drain is parked until we release
+    // it, so nothing is racing this wait — that is the whole point of the
+    // redesign described in the header.
+    ASSERT_TRUE(fixpp::test_support::wait_for_flag(producer_at_the_door, std::chrono::seconds{5}))
+        << fixpp::test_support::kWaitBudgetMiss
+        << "BlockModeRawThreadBlocks10ms — the producer thread did not reach its enqueue";
+
+    // ── The observation this test exists to make ─────────────────────────────
+    // The ring is still full (the drain is parked in emit() and has not
+    // advanced read_sequence_), so a block-mode producer MUST still be inside
+    // enqueue() after a real interval. This is measured directly rather than
+    // inferred from a duration, and it is the VACUITY GUARD: if the slot had
+    // come free, `producer_done` would already be true and this reads false.
+    // ⚠️ THE ORDER BELOW IS THE ASSERTION. The verdict is captured BEFORE the
+    // release, because the release is the teardown that would make it true:
+    // once the drain returns from emit() the slot frees and the producer
+    // finishes, so a `producer_done` read taken after it says nothing. Moving
+    // the release above the capture leaves a test that passes unconditionally.
+    constexpr auto kObserveBlocked = std::chrono::milliseconds{40};
+    std::this_thread::sleep_for(kObserveBlocked);
+    bool const still_blocked = !producer_done.load(std::memory_order_acquire);
+
+    // Release the drain: emit() returns, read_sequence_ advances, the blocked
+    // producer acquires the slot.
+    sink_raw->release_first_emit.store(true, std::memory_order_release);
+
     // Wait for the producer thread to unblock and finish.
     producer.join();
 
@@ -140,13 +204,26 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms)
 
     // ── Assertions ─────────────────────────────────────────────────────────────
 
+    EXPECT_FALSE(sink_raw->release_timed_out.load(std::memory_order_acquire))
+        << "The sink's hang guard expired — the drain was never released, so "
+           "everything below describes a run that did not happen as designed";
+
+    // The contract, observed rather than timed: the producer was STILL inside
+    // enqueue() while the ring was full.
+    EXPECT_TRUE(still_blocked)
+        << "Producer returned from enqueue() while the ring was still full and "
+           "the drain was still parked in emit() — block mode did not block. "
+           "(If this fires together with a near-zero measured duration below, "
+           "the ring was not actually full; that is a broken FIXTURE, not a "
+           "broken contract.)";
+
     // The producer must have blocked for at least 10 ms.
     auto blocked_for = std::chrono::duration_cast<std::chrono::milliseconds>(
         enqueue_end - enqueue_start);
 
     EXPECT_GE(blocked_for.count(), 10)
         << "Producer thread must have blocked >= 10 ms while the ring was full "
-           "(block_duration=" << sink_raw->block_duration.count() << " ms, "
+           "(observation window=" << kObserveBlocked.count() << " ms, "
            "actual block=" << blocked_for.count() << " ms)";
 
     // Both records were eventually delivered (no drops in block mode).

@@ -601,8 +601,17 @@ mutant accumulate measure \
 
 # A sampler thread that dies leaves a peak covering an unstated fraction of the
 # run — a plausible number, which is worse than none.
+#
+# ⚠️ THE ANCHOR MOVED ONCE, AND THE HARNESS CAUGHT IT RATHER THAN PASSING.
+# `Sampler.run` used to call `read_proc_table()` inline; the Windows port made
+# the snapshot a platform-supplied callable, so the old anchor stopped matching
+# and this cell silently tested NOTHING — except that `mutant()`'s `cmp -s`
+# guard reports exactly that ("the mutation did NOT apply"), which is why this
+# was a red rather than a mutant quietly retiring itself. Keep that guard; a
+# mutation harness whose edits stop applying is the purest form of this repo's
+# recurring instrument-fails-toward-clean defect.
 mutant sampler-crash measure \
-  's|^                ppid, rss = read_proc_table()$|                raise RuntimeError("MUTANT")|' \
+  's|^                total, largest, count = self.snapshot()$|                raise RuntimeError("MUTANT")|' \
   "T1" "lets the sampler thread die and still reports the partial peak as a measurement"
 
 mutant swallow-status measure \
