@@ -770,10 +770,15 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                 // Parser sets them together or not at all), but the fuzz
                 // harness and several wire tests instantiate exactly that
                 // shape. Deliberately NOT fixed here — a dict-aware behaviour
-                // change does not belong in a dict-free-decline change. Tracked
-                // separately; if you are here to change it, decide between
-                // folding `group_delim_fn_ == nullptr` into group()'s decline
-                // and dropping the `= nullptr` ctor defaults.
+                // change does not belong in a dict-free-decline change.
+                //
+                // Tracked as fixpp#384, which also records what is NOT wrong
+                // here: this `delim` is membership-VALIDATED before use —
+                // group() proceeds only after group_member_fn_ confirms the
+                // wire's first tag after the count is a member of this group —
+                // so it is always a confirmed member, unlike #220's extent,
+                // which had no oracle at all. The open question is whether it
+                // is the RIGHT member, which is C-8.4's to answer.
                 // There is deliberately no "or the context did not resolve"
                 // branch: the splitter cannot observe that state, since
                 // `group_first_field` has already fallen through to the bare

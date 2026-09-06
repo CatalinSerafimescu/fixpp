@@ -2785,8 +2785,15 @@ Evidence: issues #346, #348, #349; new issue #351.
   `Config::max_offset_entries` (`build()`'s clamp), which is the real memory bound in any case. This
   is not a widened attack surface: no group is materialised on that path, so there is nothing per
   instance to bound.
-  **What this row does NOT claim:** it says nothing about `group_slices_status()`'s own instance
-  splitter, which remains flat and is `L-063-4` leg 1, descoped with evidence by 083 and untouched
-  here.
+  **What this row does NOT claim.** Two things, both untouched here and neither implied by the
+  above. (i) `group_slices_status()`'s own instance splitter remains flat — that is `L-063-4` leg 1,
+  descoped with evidence by 083. (ii) That splitter still resolves the instance delimiter from the
+  WIRE when `group_delim_fn_` is null, a shape the dict-aware constructors still permit by
+  defaulting that callback — filed as **fixpp#384**, because #220 removed the only case its stated
+  justification covered. It is a materially weaker concern than this row: that delimiter is
+  membership-VALIDATED before use (`group()` proceeds only once `group_member_fn_` confirms the
+  wire's first tag after the count is a member of the group), so it is always a confirmed member of
+  the right group — the open question is whether it is the right MEMBER, which is 083's C-8.4
+  contract question, not this one.
   *(#220; `tests/wire/offset_table_test.cpp` — `DictFreeGroupDeclines*`, `DictFreeGroupSlicesAreEmpty`,
   `TrailingFieldNotCountedIntoLastInstance`, `FR001_NoFlatInstanceWalkInGroup`.)*
