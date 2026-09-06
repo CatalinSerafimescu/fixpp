@@ -1321,8 +1321,24 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
 
     # ── screen arms (#363) -- no libclang needed; see screen_named_closure ──
     # The two in-tree oracles are files whose site count this tool ALREADY
-    # reports, so they pin the screen against the walker rather than against
-    # itself. The synthetic arms cover the shapes the oracles do not contain.
+    # reports, so they pin the screen against something external rather than
+    # against itself. The synthetic arms cover the shapes the oracles do not
+    # contain.
+    #
+    # ⚠️ THESE ARMS DO NOT PIN "THE SCREEN AND THE WALKER AGREE ABOUT WHAT A SITE
+    # IS", and an earlier version of the failure message claimed they did. The two
+    # disagree BY DESIGN and always have: the screen nominates any identifier call
+    # in argument two, so it reports `run_liveness_loop()`, `run_accept_loop()`,
+    # `asio::bind_executor(...)` — all of which the walker correctly REJECTS,
+    # since none is a lambda-typed variable (see SiteWalker._named_closure_arg,
+    # which names run_liveness_loop() as its example of what a crude grep
+    # over-counts). Neither oracle file contains a divergent shape, so an arm
+    # asserting agreement could not have failed for the reason it stated.
+    #
+    # Since the gate refuses only on UNPARSED files, that divergence costs
+    # nothing: the screen is a CANDIDATE GENERATOR and the walker is the
+    # authority. What these arms actually pin is narrower and still worth having —
+    # that the screen has not stopped seeing a shape it used to see.
     screen_arms: list[tuple[str, str, int]] = [
         ("screen/oracle-fifo-across-cycles", "tests/sync/test_fifo_across_cycles.cpp", 10),
         ("screen/oracle-asan-clean", "tests/sync/test_asan_clean.cpp", 5),
@@ -1339,9 +1355,10 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
             continue
         if got != expected_n:
             print(f"FAIL  {name}\n      expected {expected_n} screen hits, got {got}. "
-                  f"⚠️ Do NOT relax the expectation to match: these counts come from "
-                  f"the WALKER, so a divergence means the screen and the audit "
-                  f"disagree about what a site is.")
+                  f"⚠️ Do NOT relax the expectation to match — re-derive why the count "
+                  f"moved. These two files are pinned because their shapes are ones the "
+                  f"screen and the walker DO agree on, so a change here means the screen "
+                  f"stopped seeing a shape it used to see.")
             failed += 1
         else:
             passed += 1
@@ -1617,13 +1634,28 @@ def main() -> int:
     # the question it means. Over-approximation inside a PARSED file is now free,
     # which is what lets the screen stay deliberately loud.
     #
-    # ⚠️ RESIDUAL, and it is the one this whole check cannot close: if the SCREEN
-    # itself misses the shape in an unreachable header, there is no refusal and
-    # no coverage, silently. The screen is a regex over blanked text and has
-    # already been wrong three times (raw text, forwarding wrappers, template
-    # argument lists) — every one of them found by review, not by this gate. Only
-    # `--all-files` actually closes it. Treat a green here as "no NOMINATED
-    # candidate is uncovered", never as "no uncovered site exists".
+    # ⚠️ TWO RESIDUALS, AND A GREEN HERE MEANS LESS THAN IT LOOKS. Neither is
+    # closable without `--all-files`; both are stated so the green is read for
+    # what it is.
+    #
+    #   1. THE SCREEN CAN MISS THE SHAPE. It is a regex over blanked text and has
+    #      already been wrong FOUR times — raw text, forwarding wrappers,
+    #      template argument lists, parenthesised callees — every one found by a
+    #      reviewer, none by this gate's own arms. A miss in an unreachable header
+    #      is silent.
+    #
+    #   2. `files_seen` IS FILE-GRANULAR; THE HAZARD IS REGION-GRANULAR. `walk`
+    #      adds a file on ANY in-repo cursor, so the set proves ">= 1 cursor from
+    #      this file was walked" — NOT "the region holding this site was parsed".
+    #      The screen ignores the preprocessor (measured: a `co_spawn` inside
+    #      `#ifdef FIXPP_WIN ... #endif` is still nominated). So a header whose
+    #      site sits in a region compiled out of every admitted TU, but which
+    #      contributes any other cursor, lands in `parsed_files` and this gate
+    #      passes SILENTLY. Zero instances today; the shape is ordinary enough
+    #      that it will not stay that way by luck.
+    #
+    # Treat a green as "no NOMINATED candidate lies in a file the walker never
+    # touched" — never as "no uncovered site exists".
     if not args.all_files:
         try:
             header_hits = screen_headers(repo_root)
