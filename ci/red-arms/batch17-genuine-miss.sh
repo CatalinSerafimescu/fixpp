@@ -6,8 +6,9 @@
 # if it is not, 162 guards buy nothing. This script injects the defect a real edit would
 # make, at a real site, and runs BOTH shapes so the pair is the verdict:
 #
-#   ARM 1  BASE-SHAPED  (guard replaced by a bare `ioc.run();`)  -> WEDGES. exit 124.
-#   ARM 2  GUARDED      (this batch's shape)                     -> REPORTS `kRunMiss`.
+#   ARM 0  BASE-SHAPED, restart LEFT IN   -> PASSES fast. The attribution control.
+#   ARM 1  BASE-SHAPED, restart DELETED    -> WEDGES. exit 124.
+#   ARM 2  GUARDED,     restart DELETED    -> REPORTS `kRunMiss`, exit non-zero.
 #
 # ⚠️ RUNNING ONLY ARM 2 WOULD PROVE THE WRONG THING. "The guard reports" is not "the old
 # code was worse"; only arm 1 says the shape being replaced actually hangs. An earlier
@@ -30,6 +31,13 @@
 # Restores by `cp` from a copy taken at entry -- never `git checkout --`, which would wipe
 # uncommitted work in the same file.
 set -uo pipefail
+# ⚠️ THE FORCING SEAM MUST BE OFF, OR ARM 2 PASSES FOR THE WRONG REASON. With
+# FIXPP_FORCE_WINDOW_MISS set to this site's label -- which is exactly what
+# `ci/pump-seam-arm.sh` exports, so an operator running both in one shell can inherit it --
+# `run_to_exhaustion_or_report` takes the FORCED path and emits the same report tail and
+# label this script greps for. The arm would then be validating the seam rather than the
+# deleted `ioc.restart()`, and would say so in the words of a genuine miss.
+unset FIXPP_FORCE_WINDOW_MISS
 PRESET="${1:-linux-clang-debug}"
 TARGET="session_plaintext_factory_mismatch_test"
 BIN="build/$PRESET/bin/$TARGET"
@@ -74,16 +82,18 @@ while lines[gj].strip() != '}':
 # The restart that arms this pair: the last bare `ioc.restart();` ABOVE the guard.
 ri = max(k for k in range(gi) if lines[k].strip() == 'ioc.restart();')
 
-if mode == 'base':
+if mode.startswith('base'):
     lines[gi:gj + 1] = ['    ioc.run();']
-del lines[ri]
+if mode != 'base-clean':
+    del lines[ri]
 pathlib.Path(path).write_text('\n'.join(lines))
-print(f"  mutated ({mode}): deleted restart at line {ri+1}"
-      + (f", guard lines {gi+1}-{gj+1} -> ioc.run();" if mode == 'base' else ""))
+print(f"  mutated ({mode}): "
+      + ("restart LEFT IN" if mode == 'base-clean' else f"deleted restart at line {ri+1}")
+      + (f", guard lines {gi+1}-{gj+1} -> ioc.run();" if mode.startswith('base') else ""))
 PY
 }
 
-run_arm() {  # $1 = mode
+run_arm() {  # $1 = "base-clean" | "base" | "guarded"
     local mode="$1" before after rc out
     mutate "$mode" || return 1
     before=$(sha256sum "$BIN" | cut -d' ' -f1)
@@ -99,6 +109,23 @@ run_arm() {  # $1 = mode
 }
 
 fails=0
+
+# ⚠️ ARM 0 IS WHAT MAKES ARM 1 MEAN ANYTHING. Arm 1 accepts "timed out after entering the
+# test", which on its own cannot tell the injected defect from a hang somewhere earlier in
+# the same case -- acceptor setup, TLS, an unrelated pump. Arm 0 runs the SAME base shape
+# with the restart LEFT IN: if that passes quickly, the only difference between the two is
+# the deleted line, and arm 1's wedge is attributable to it.
+echo "ARM 0 -- BASE-SHAPED, restart LEFT IN: expect a fast PASS (attribution control)"
+if run_arm base-clean; then
+    if [ "$ARM_RC" -eq 0 ]; then
+        echo "  ok    passed with the restart in place -- arm 1's wedge is the deleted line."
+    else
+        echo "  !!BAD the unmutated base shape did not pass (exit=$ARM_RC); arm 1 would be"
+        echo "        unattributable." ; printf '%s\n' "$ARM_OUT" | tail -8; fails=$((fails+1))
+    fi
+else
+    fails=$((fails+1))
+fi
 
 echo "ARM 1 -- BASE-SHAPED (no guard, restart deleted): expect a WEDGE"
 if run_arm base; then
@@ -139,6 +166,6 @@ cmake --build "build/$PRESET" --target "$TARGET" -j 6 >/dev/null 2>&1 ||
     { echo "!! could not rebuild the restored tree" >&2; exit 1; }
 
 if [ "$fails" -ne 0 ]; then
-    echo "=== FAILED: $fails of 2 arms" >&2; exit 1
+    echo "=== FAILED: $fails of 3 arms" >&2; exit 1
 fi
 echo "=== PASS: base WEDGES, guarded REPORTS -- the guard converts a hang into a named failure"

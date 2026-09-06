@@ -49,8 +49,8 @@ def _is_digit_separator(src: str, i: int) -> bool:
     The standard puts a digit separator BETWEEN digits of a numeric literal, so the test
     is not "is it surrounded by alphanumerics" -- that misreads `u8'0'`, whose apostrophe
     is also preceded by a digit and followed by one. Walk back to the start of the token
-    instead and require it to BEGIN with a digit: `10'000` and `0x1F'FF` do, `u8'0'` does
-    not (its token starts `u`).
+    instead and require it to BEGIN with a digit, or with a `.` that a digit follows:
+    `10'000`, `0x1F'FF` and `.1'0` do, `u8'0'` does not (its token starts `u`).
     """
     if i == 0 or i + 1 >= len(src):
         return False
@@ -59,7 +59,14 @@ def _is_digit_separator(src: str, i: int) -> bool:
     j = i - 1
     while j >= 0 and (src[j].isalnum() or src[j] in "'."):
         j -= 1
-    return src[j + 1].isdigit()
+    k = j + 1
+    # A fractional-constant may OPEN with the dot: `.1'0` is a valid literal and
+    # `c++ -fsyntax-only` accepts it. Requiring the first character to be a digit
+    # rejected it and put the blanker back in the state this predicate exists to
+    # prevent. Found by the batch-17 review, not by the controls written with the fix.
+    if k < len(src) and src[k] == ".":
+        k += 1
+    return k < len(src) and src[k].isdigit()
 
 
 def blank_non_code(source: str) -> str:
@@ -207,6 +214,19 @@ if __name__ == "__main__":
         # `u8'0'` has a digit on BOTH sides of the apostrophe and is still a character
         # literal -- the case that rules out the cheap "surrounded by alphanumerics" test.
         ("u8 char literal",     f"auto c = u8'0';\n{CALL}(a);\n",                 True),
+        # A fractional-constant OPENS with the dot. `c++ -std=c++23 -fsyntax-only` accepts
+        # `double x = .1'0;`. The first version of `_is_digit_separator` required the token
+        # to begin with a DIGIT and so ate this one -- caught in review, not by these
+        # controls, which is why the case is checked in rather than described.
+        ("leading-dot separator", f"double x = .1'0;\n{CALL}(a);\n",                True),
+        # ⚠️ THE MEMBER NAME ENDS IN A DIGIT ON PURPOSE, so this control DISCRIMINATES the
+        # widening above. Two earlier drafts did not: `obj.f'x'` and `obj.f'"'` both fail
+        # the predicate's FIRST guard (the character after `'` is not alphanumeric), so the
+        # walk-back never runs and the case passes whatever the walk-back says. Here both
+        # neighbours ARE alphanumeric, so a rule loosened to "the token contains a digit"
+        # calls this a separator, and the CLOSING apostrophe then opens a literal that
+        # swallows the call below. Proven RED against exactly that mutant.
+        ("member ending in a digit", f"auto c = obj.f9'0';\n{CALL}(a);\n",           True),
         ("literal still hides", f'auto s = "x{CALL}(a)y";\nint x;\n',             False),
     ]
     ok = True

@@ -87,7 +87,7 @@ ANNOUNCE='#289 FORCED window miss at site: '
 #
 # ONE TAIL PER REPORT LITERAL, because the seam fires at every primitive and they report
 # different text -- `kWindowMiss` for `run_window_then_ready`, `kPumpBudgetMiss` for
-# `pump_until*`, `kRunMiss` for `run_to_exhaustion_then_ready`. A driver matching only some
+# `pump_until*`, `kRunMiss` for `run_to_exhaustion_or_report`. A driver matching only some
 # of them would read every site using the others as SILENT, which is this script's
 # fails-toward-clean verdict rather than an error.
 # ⚠️ The count is deliberately not written into this sentence: the set is the list of

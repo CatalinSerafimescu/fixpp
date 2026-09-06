@@ -14,8 +14,15 @@
 # report tails, so a site that called this primitive and reported `kWindowMiss` by
 # copy-paste would read RED here with nothing to contradict it. What closes that for
 # this batch is that no site spells its own miss branch -- the branch is INSIDE
-# `run_to_exhaustion_or_report` and there is exactly one of it. Re-derive:
-#   git grep -c 'run_to_exhaustion_or_report' -- tests/ include/ src/
+# `run_to_exhaustion_or_report`, so there is nowhere for a site to report the wrong tail
+# FROM. Re-derive by looking for a site that reports one itself; the result must be empty
+# apart from the header that defines them:
+#   git grep -n 'kRunMiss\|kWindowMiss\|kPumpBudgetMiss' -- tests/ \
+#       | grep -v 'support/pump_until_ready.hpp' | grep -F 'run_to_exhaustion_or_report'
+# ⚠️ AN EARLIER REVISION PRESCRIBED `git grep -c 'run_to_exhaustion_or_report'`, which
+# counts OCCURRENCES per file -- comments and the definition included -- and answers a
+# different question entirely. A recipe that does not check the sentence above it is worse
+# than no recipe, because it looks like evidence.
 #
 # ⚠️ EVERY LABEL IS `Suite::Case`, OPTIONALLY `/future`, AND THE SHAPE IS LOAD-BEARING
 # TWICE. `ci/pump-seam-arm.sh` derives a gtest filter from the text before `::`, so

@@ -124,6 +124,17 @@ def _join_adjacent(lits, text):
     """
     if not lits:
         return None
+    # ⚠️ A RAW-STRING LABEL IS HARVESTED WRONG, AND THIS REFUSES RATHER THAN GUESSES.
+    # `_STR` matches the `"(A/open)"` inside `R"(A/open)"`, so the harvest would return
+    # `(A/open)` while the runtime label is `A/open` -- and a duplicate between
+    # `R"(A/open)"` and `"A/open"` would then read as DISTINCT, which is the fails-toward-
+    # clean direction this gate exists to close. Nothing in the tree spells a label that
+    # way today; supporting it needs the delimiter grammar, and a wrong answer is worse
+    # than a refusal. Raised, not returned, so it cannot be mistaken for a label.
+    for start, _end, _val in lits:
+        if start > 0 and text[start - 1] == "R":
+            raise SystemExit("pump-label-uniqueness: error: raw-string site label at offset "
+                             f"{start}. Spell the label as an ordinary string literal.")
     out = [lits[-1][2]]
     for k in range(len(lits) - 1, 0, -1):
         gap = text[lits[k - 1][1]:lits[k][0]]
@@ -273,7 +284,20 @@ _CASES = [
     # before the call, outside the extent, and therefore never exercised the harvest.
     ("a literal COMMENTED OUT inside the arg list", _COMMENT_INSIDE_THE_ARGUMENT_LIST, ["I/open"]),
 ]
-bad = []
+# ⚠️ THE REFUSAL IS A CONTROL TOO. A guard that raises is worth exactly as much as a
+# guard that returns, and only running it says which one this is.
+_RAW_STRING_LABEL = '''
+    if (!run_window_then_ready(ioc, fut, 200ms, R"(RAW/open)")) { return; }
+'''
+try:
+    _got = [lab for _, lab in calls(_RAW_STRING_LABEL)]
+    print(f"  WRONG raw-string label was accepted as {_got} instead of refused")
+    _raw_ok = False
+except SystemExit as _e:
+    print(f"  ok    a RAW-STRING label is REFUSED, not guessed ({_e})")
+    _raw_ok = True
+
+bad = [] if _raw_ok else ["raw-string label was not refused"]
 for name, src, want in _CASES:
     got = [lab for _, lab in calls(src)]
     mark = "ok   " if got == want else "WRONG"

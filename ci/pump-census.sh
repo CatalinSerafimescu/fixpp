@@ -215,7 +215,14 @@ def _is_digit_separator(src: str, i: int) -> bool:
     j = i - 1
     while j >= 0 and (src[j].isalnum() or src[j] in "'."):
         j -= 1
-    return src[j + 1].isdigit()
+    k = j + 1
+    # A fractional-constant may OPEN with the dot: `.1'0` is a valid literal and
+    # `c++ -fsyntax-only` accepts it. Requiring the first character to be a digit
+    # rejected it and put the blanker back in the state this predicate exists to
+    # prevent. Found by the batch-17 review, not by the controls written with the fix.
+    if k < len(src) and src[k] == ".":
+        k += 1
+    return k < len(src) and src[k].isdigit()
 
 
 def blank_non_code(source: str) -> str:
