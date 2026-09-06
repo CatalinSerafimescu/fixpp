@@ -97,8 +97,12 @@
 // ⚠️ AND SEVERAL TESTS HERE ARM A `quiesce_on_exit` GUARD, which the block above does not
 // mention. Where one is in scope, a miss branch's `return` runs the guard too, so the
 // site drain is not the only teardown -- it is what attributes a residual to THIS site
-// (the guard reports `Site: quiesce_on_exit`). Derive which tests arm one; the set moves:
-//   grep -n 'quiesce_on_exit ' tests/session/test_live_outbound_serialized.cpp
+// (the guard reports `Site: quiesce_on_exit`). Derive which tests arm one; the set moves.
+// ⚠️ ENUMERATE, NEVER COUNT. A recipe written into the file it scans is part of that
+// file's text, so a `-c` over this file includes its own instructions. That holds for any
+// spelling, which is why no spelling is prescribed here: `-n`, then read the hits and drop
+// the ones that are comments.
+//   git grep -n 'quiesce_on_exit ' -- tests/session/test_live_outbound_serialized.cpp
 
 using namespace std::chrono_literals;
 

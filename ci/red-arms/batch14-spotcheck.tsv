@@ -7,9 +7,11 @@
 # what compiles and reports. The seam proves the primitive's forced path; only textual
 # mutation proves the site's own miss block.
 #
-# ⚠️ THIS BATCH HAS ONE RECIPE SHAPE, SO THE ARMS PARTITION ON ENCLOSING CONTEXT, NOT ON
-# RECIPE. Every site is `run_window_then_ready` + `drain_or_report` + `ADD_FAILURE` +
-# `return;`. An earlier draft of this line explained that with *"no fixture in the batch's
+# ⚠️ THE ARMS PARTITION ON ENCLOSING CONTEXT, NOT ON RECIPE, because the recipe barely
+# varies: every site is `run_window_then_ready` + <drain> + `ADD_FAILURE` + `return;`, and
+# the drain is `drain_or_report` at all but one (`CloseCancelsBlockedPublicSend/close`
+# passes the clock and the transport too -- see `ci/red-arms/batch14-labels.txt`).
+# An earlier draft of this line said the shape was uniform, and explained it with *"no fixture in the batch's
 # five files has a Clock"*, which is FALSE -- see the corrected paragraph in
 # `ci/red-arms/batch14-labels.txt`, which carries the whole account rather than a second
 # copy of it. The short form: two sites do have a real clock in scope and still take the

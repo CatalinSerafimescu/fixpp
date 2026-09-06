@@ -5,9 +5,13 @@
 # One label per line. Every line here is a site that passes its label to
 # `run_window_then_ready`, which is what `FIXPP_FORCE_WINDOW_MISS` matches on.
 #
-# ⚠️ THIS BATCH USES ONE RECIPE SHAPE: `run_window_then_ready` + `drain_or_report` +
-# `ADD_FAILURE` + `return;` at every site, which is why the file is short where batch
-# 13's was long.
+# ⚠️ ONE RECIPE SHAPE, TWO DRAINS. Every site is
+# `run_window_then_ready` + <drain> + `ADD_FAILURE` + `return;`, which is why this file is
+# short where batch 13's was long. The drain is `drain_or_report` at all but one site;
+# `CloseCancelsBlockedPublicSend/close` passes the clock and the transport as well, for the
+# reason given below. An earlier draft of this line said "one recipe shape" full stop; it
+# was true when written and the code moved under it in the same change. Prose written
+# before the last edit lands is prose that has not been checked against what shipped.
 #
 # ⚠️ THE FIRST DRAFT OF THIS PARAGRAPH JUSTIFIED THAT WITH A FALSE CLAIM -- *"every site
 # is in a file whose fixture has NO Clock, so there is none to pass to
@@ -21,9 +25,16 @@
 # ⚠️ NO COUNT IS WRITTEN HERE, and that is the second lesson of this paragraph rather than
 # a style choice: the draft that corrected the false claim put TWO COUNTS of its own in
 # ("four ... and six"), and both were wrong -- inside the paragraph whose whole subject is
-# a number quoted as if it had been measured. Derive them, do not read them:
-#   grep -c 'make_shared<fixpp::core::system_clock_source>' tests/session/test_live_outbound_serialized.cpp
-#   grep -c 'quiesce_on_exit ' tests/session/test_live_outbound_serialized.cpp
+# a number quoted as if it had been measured. The CONDITION is the whole argument and it
+# does not need a number; enumerate if you want the sites, and read the hits rather than
+# counting them:
+#   git grep -n 'make_shared<fixpp::core::system_clock_source>' -- tests/session/test_live_outbound_serialized.cpp
+#   git grep -n 'test_support::quiesce_on_exit ' -- tests/session/test_live_outbound_serialized.cpp
+# ⚠️ A THIRD COUNT DIED HERE TOO, which is why these are `-n`. The replacement recipe was
+# `grep -c 'quiesce_on_exit '`, published INSIDE the file it counts -- so it counted its own
+# instructions. Qualifying the pattern does not fix that and a fourth attempt claiming it
+# did was falsified too: a recipe written into the file it scans is part of that file's
+# text, whatever its spelling. Enumerate and drop the comment hits; do not count.
 #
 # ⚠️ TWO SITES HAVE A REAL CLOCK IN SCOPE AND THEY RESOLVE DIFFERENTLY, so the batch is
 # one recipe shape and not one call. `cancel_sleeps()` has power only where a clock-parked
@@ -58,8 +69,11 @@
 # `MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes/accept` leaves a residual under a
 # bare `drain_or_report`: the accept is still outstanding and the client coroutine is
 # parked on a live TLS transport it moved in. It closes the acceptor first. That is
-# per-site code and NOT a promotion to a primitive -- the graduation condition at
-# `tests/support/pump_until_ready.hpp` asks for a SECOND FILE, and one file is one file.
+# per-site code and NOT a promotion to a primitive: batch 13 closed an `Engine` and this
+# closes a bare `asio::ip::tcp::acceptor`, so the LEVER differs, and which object to close
+# is exactly the parameter a premature primitive would have to guess. The graduation
+# condition at `tests/support/pump_until_ready.hpp` is amended in this same change to say
+# so -- graduate when a LEVER RECURS, not at a file count. Read it there; this is a pointer.
 #
 # Textual arms -- the stronger witness -- are in `ci/red-arms/batch14-spotcheck.tsv`.
 # Run both. What forcing does, and why a silent arm is NO-SUCH-SITE rather than a pass,
