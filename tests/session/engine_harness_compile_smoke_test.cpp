@@ -19,6 +19,7 @@
 #include <asio/io_context.hpp>
 
 #include "engine_loopback_harness.hpp"
+#include "support/pump_until_ready.hpp"
 
 // ── EngineHarnessCompileSmoke ─────────────────────────────────────────────────
 //
@@ -55,7 +56,10 @@ TEST(EngineHarnessCompileSmoke, BuildSkipsWhenFixtureDirAbsent) {
     // assert(stopped()) in ~Engine()). Since we never called start(), we
     // need to manually stop it via co_await stop(). Use use_future + ioc.run().
     auto stop_future = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_future, "EngineHarnessCompileSmoke::BuildSkipsWhenFixtureDirAbsent")) {
+        return;
+    }
     EXPECT_NO_THROW(stop_future.get());
     EXPECT_TRUE(harness->engine().stopped());
 }

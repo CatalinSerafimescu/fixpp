@@ -197,6 +197,27 @@ get_re = re.compile(
     r"\b[A-Za-z_][A-Za-z_0-9]*\s*\.\s*get\s*\("
 )
 
+def _is_digit_separator(src: str, i: int) -> bool:
+    """Is `src[i]` (an apostrophe) a C++14 digit separator rather than a char literal?
+
+    ⚠️ SECOND COPY OF THE FIX, and it is here because a fix landing on ONE of two
+    identical shapes is this repo's recurring class. The other is `ci/cxx_blank.py`,
+    where the defect was measured: a single `10'000` opened a literal that ran to the
+    next apostrophe and blanked every intervening line, hiding two labelled seam calls
+    from a gate that then said "every site label is unique".
+    Walk back to the token start and require it to BEGIN with a digit -- `u8'0'` also
+    has a digit either side of its apostrophe and IS a character literal.
+    """
+    if i == 0 or i + 1 >= len(src):
+        return False
+    if not (src[i - 1].isalnum() and src[i + 1].isalnum()):
+        return False
+    j = i - 1
+    while j >= 0 and (src[j].isalnum() or src[j] in "'."):
+        j -= 1
+    return src[j + 1].isdigit()
+
+
 def blank_non_code(source: str) -> str:
     """Blank comments and literals while preserving every newline."""
     out = []
@@ -233,6 +254,9 @@ def blank_non_code(source: str) -> str:
                 out.extend((" ", " "))
                 i += 2
                 state = "block-comment"
+            elif source[i] == "'" and _is_digit_separator(source, i):
+                out.append(source[i])
+                i += 1
             elif source[i] in ('"', "'"):
                 quote = source[i]
                 out.append(" ")

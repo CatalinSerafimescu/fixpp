@@ -38,6 +38,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -113,7 +114,11 @@ TEST(SeamCancellationParseToFromApp, NotSignalledRunsHandlerExactlyOnce) {
         },
         asio::use_future);
 
-    ctx.run();  // slot never emitted → case 3
+    // slot never emitted → case 3
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ctx, fut, "SeamCancellationParseToFromApp::NotSignalledRunsHandlerExactlyOnce")) {
+        return;
+    }
 
     auto r = fut.get();
     EXPECT_EQ(calls.load(), 1);
@@ -132,7 +137,11 @@ TEST(SeamCancellationParseToFromApp, CloseGracefulPhase2FiresRootTotal) {
     Session sess{engine, cfg};
 
     auto opened = asio::co_spawn(ctx, sess.open(), asio::use_future);
-    ctx.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ctx, opened,
+            "SeamCancellationParseToFromApp::CloseGracefulPhase2FiresRootTotal/opened")) {
+        return;
+    }
     ASSERT_TRUE(opened.get().has_value());
     ctx.restart();
 
@@ -147,7 +156,11 @@ TEST(SeamCancellationParseToFromApp, CloseGracefulPhase2FiresRootTotal) {
     });
 
     auto closed = asio::co_spawn(ctx, sess.close(close_mode::graceful), asio::use_future);
-    ctx.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ctx, closed,
+            "SeamCancellationParseToFromApp::CloseGracefulPhase2FiresRootTotal/closed")) {
+        return;
+    }
 
     EXPECT_TRUE(closed.get().has_value());
     EXPECT_TRUE(root_total_fired.load());  // phase-2 propagation point

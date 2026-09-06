@@ -43,6 +43,25 @@ non-ASCII, and this repo's sources are full of non-ASCII comment glyphs.
 import re
 
 
+def _is_digit_separator(src: str, i: int) -> bool:
+    """Is `src[i]` (an apostrophe) a C++14 digit separator rather than a char literal?
+
+    The standard puts a digit separator BETWEEN digits of a numeric literal, so the test
+    is not "is it surrounded by alphanumerics" -- that misreads `u8'0'`, whose apostrophe
+    is also preceded by a digit and followed by one. Walk back to the start of the token
+    instead and require it to BEGIN with a digit: `10'000` and `0x1F'FF` do, `u8'0'` does
+    not (its token starts `u`).
+    """
+    if i == 0 or i + 1 >= len(src):
+        return False
+    if not (src[i - 1].isalnum() and src[i + 1].isalnum()):
+        return False
+    j = i - 1
+    while j >= 0 and (src[j].isalnum() or src[j] in "'."):
+        j -= 1
+    return src[j + 1].isdigit()
+
+
 def blank_non_code(source: str) -> str:
     """Blank comments and literals while preserving every newline."""
     out = []
@@ -79,6 +98,20 @@ def blank_non_code(source: str) -> str:
                 out.extend((" ", " "))
                 i += 2
                 state = "block-comment"
+            elif source[i] == "'" and _is_digit_separator(source, i):
+                # C++14 digit separator (`10'000`, `0x1F'FF`) -- NOT a character
+                # literal. Treated as one, it opens a literal that runs to the next
+                # apostrophe anywhere in the file and blanks every line between,
+                # code included. MEASURED, not hypothesised: one `10'000` in
+                # tests/session/read_first_frame_bounded_test.cpp hid TWO labelled
+                # seam calls from `ci/pump-label-uniqueness.sh`, which reported
+                # "every site label is unique" over a tree it could not fully read.
+                # ⚠️ THE DIRECTION IS FAILS-TOWARD-CLEAN FOR EVERY CALLER: the gate
+                # sees fewer sites, and `ci/pump-red-arm.sh` -- which REWRITES source
+                # at offsets taken from this lexer -- cannot find an anchor it has
+                # blanked. Neither reports anything.
+                out.append(source[i])
+                i += 1
             elif source[i] in ('"', "'"):
                 quote = source[i]
                 out.append(" ")
@@ -165,6 +198,16 @@ if __name__ == "__main__":
         ("CRLF line splice",    f"// hidden \\\r\n{CALL}(a);\n",                  False),
         ("raw string",          f'auto r = R"({CALL}(a))";\n',                    False),
         ("comment then code",   f"// note\n{CALL}(a);\n",                         True),
+        # ── digit separators. BOTH DIRECTIONS, because the fix is a narrowing and a
+        # narrowing that went too far would stop hiding real character literals --
+        # the failure this module exists to prevent.
+        ("digit separator",     f"int a = 10'000;\n{CALL}(a);\n",                 True),
+        ("hex digit separator", f"int a = 0x1F'FF;\n{CALL}(a);\n",                True),
+        ("char literal",        f"char c = '\\'';\n// {CALL}(a)\nint x;\n",       False),
+        # `u8'0'` has a digit on BOTH sides of the apostrophe and is still a character
+        # literal -- the case that rules out the cheap "surrounded by alphanumerics" test.
+        ("u8 char literal",     f"auto c = u8'0';\n{CALL}(a);\n",                 True),
+        ("literal still hides", f'auto s = "x{CALL}(a)y";\nint x;\n',             False),
     ]
     ok = True
     for name, src, want in CASES:

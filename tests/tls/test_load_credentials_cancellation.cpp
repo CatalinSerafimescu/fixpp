@@ -41,6 +41,8 @@
 #include <variant>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 // Path to the fixture directory (compiled-in via CMake definition
@@ -125,7 +127,10 @@ static expected_t<local_credentials> spawn_and_run(asio::io_context& ioc,
                                                    asio::cancellation_signal& signal) {
     auto fut = asio::co_spawn(ioc, cs.load_credentials(),
                               asio::bind_cancellation_slot(signal.slot(), asio::use_future));
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "spawn_and_run")) {
+        return expected_t<local_credentials>{std::unexpect,
+                                             fixpp::test_support::kWindowMissSentinel};
+    }
     ioc.restart();
     return fut.get();
 }
@@ -259,7 +264,10 @@ TEST(LoadCredentialsCancellation, Step4InFlightCancelFiresDeterministic) {
         gate.cancel();
     });
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "LoadCredentialsCancellation::Step4InFlightCancelFiresDeterministic")) {
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_FALSE(result.has_value()) << "in-flight cancellation must produce tls_load_cancelled";
@@ -293,7 +301,10 @@ TEST(LoadCredentialsCancellation, CancelledResultIsExpectedNotException) {
     bool threw_non_system = false;
     expected_t<local_credentials> result{std::unexpect, error::tls_load_cancelled};
     try {
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, fut, "LoadCredentialsCancellation::CancelledResultIsExpectedNotException")) {
+            return;
+        }
         result = fut.get();
     } catch (const std::system_error&) {
         // asio::operation_aborted as a system_error is acceptable.

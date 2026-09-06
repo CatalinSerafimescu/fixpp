@@ -25,6 +25,8 @@
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 using fixpp::sync::async_mutex;
@@ -72,7 +74,10 @@ TEST(SeamUnlockReaperSplice, ResidualFifoChainDrainedCorrectly) {
     for (int i = 0; i < N; ++i)
         futs.push_back(asio::co_spawn(ioc, make_waiter(), asio::use_future));
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SeamUnlockReaperSplice::ResidualFifoChainDrainedCorrectly")) {
+        return;
+    }
     fh.get();
     for (auto& f : futs) f.get();
 

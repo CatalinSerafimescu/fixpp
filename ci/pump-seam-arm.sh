@@ -85,10 +85,14 @@ ANNOUNCE='#289 FORCED window miss at site: '
 # Match a miss-report TAIL plus the label, never the bare label: the drain's
 # residual report streams the same label and would count as a miss report.
 #
-# TWO tails, because the seam now fires at BOTH primitives and they report different
-# text -- `kWindowMiss` for `run_window_then_ready`, `kPumpBudgetMiss` for `pump_until*`.
-# A driver matching only the first would read every budget site as SILENT, which is this
-# script's fails-toward-clean verdict rather than an error.
+# ONE TAIL PER REPORT LITERAL, because the seam fires at every primitive and they report
+# different text -- `kWindowMiss` for `run_window_then_ready`, `kPumpBudgetMiss` for
+# `pump_until*`, `kRunMiss` for `run_to_exhaustion_then_ready`. A driver matching only some
+# of them would read every site using the others as SILENT, which is this script's
+# fails-toward-clean verdict rather than an error.
+# ⚠️ The count is deliberately not written into this sentence: the set is the list of
+# `REPORT_TAIL*` assignments below, and a sentence saying "two" outlived the second
+# widening once already.
 #
 # Two `-F` patterns rather than one regex alternation because both tails contain a `.`
 # that a regex would match as any character, and `grep -F` removes the question entirely.
@@ -107,6 +111,7 @@ ANNOUNCE='#289 FORCED window miss at site: '
 # call; #289 batch 14 resolved all 31 of its sites that way and found no mismatch.
 REPORT_TAIL='grace slice. Site: '
 REPORT_TAIL2='bounded-pump budget. Site: '
+REPORT_TAIL3='would have blocked forever. Site: '
 # `kDrainResidual` from tests/support/pump_until_ready.hpp -- the SAME string
 # `ci/pump-red-arm.sh` matches. Mirrored here deliberately rather than left to that driver.
 #
@@ -216,7 +221,7 @@ run_label() {                      # $1 = label
             # per-test bisect to separate them.
             local t_ann t_rep
             t_ann=$(grep -cF "$ANNOUNCE$label" <<<"$out" || true)
-            t_rep=$(grep -cF -e "$REPORT_TAIL$label" -e "$REPORT_TAIL2$label" <<<"$out" || true)
+            t_rep=$(grep -cF -e "$REPORT_TAIL$label" -e "$REPORT_TAIL2$label" -e "$REPORT_TAIL3$label" <<<"$out" || true)
             if [ "$t_ann" -gt 0 ] && [ "$t_rep" -gt 0 ]; then
                 printf '    RED* %-46s forced %2d  reported %2d  THEN HUNG in %s\n' \
                     "$label" "$t_ann" "$t_rep" "$(basename "$b")"
@@ -245,7 +250,7 @@ look for an UNMIGRATED run_for/get after this site")
             continue
         fi
         ann=$((ann + $(grep -cF "$ANNOUNCE$label" <<<"$out" || true)))
-        rep=$((rep + $(grep -cF -e "$REPORT_TAIL$label" -e "$REPORT_TAIL2$label" <<<"$out" || true)))
+        rep=$((rep + $(grep -cF -e "$REPORT_TAIL$label" -e "$REPORT_TAIL2$label" -e "$REPORT_TAIL3$label" <<<"$out" || true)))
         # Two herestrings, not a pipeline: `set -o pipefail` plus a pipeline into `grep` is
         # the SIGPIPE trap this repo has already paid for once.
         resid_all=$(grep -F "$RESIDUAL" <<<"$out" || true)

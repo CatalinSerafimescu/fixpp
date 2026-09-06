@@ -36,6 +36,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -89,7 +90,10 @@ TEST(TraceContextAccessors, GetTraceContextReturnsInitialValue) {
 
     // Teardown.
     auto closed = asio::co_spawn(ctx, sess.close(close_mode::terminal), asio::use_future);
-    ctx.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ctx, closed, "TraceContextAccessors::GetTraceContextReturnsInitialValue")) {
+        return;
+    }
     (void)closed.get();
 }
 
@@ -183,7 +187,10 @@ TEST(TraceContextAccessors, EngineTraceContextReturnsSeededSnapshot) {
 
     // Teardown.
     auto stop_future = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_future, "TraceContextAccessors::EngineTraceContextReturnsSeededSnapshot")) {
+        return;
+    }
     stop_future.get();
 }
 

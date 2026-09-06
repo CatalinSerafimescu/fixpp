@@ -367,7 +367,10 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     if (!acc) {
         // stop cleanly then skip
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut, "EngineReadPumpTest::InOrderExactlyOnce/stop_fut1")) {
+            return;
+        }
         stop_fut.get();
         GTEST_SKIP() << "acceptor session not found — acceptance path not live";
     }
@@ -382,7 +385,10 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     auto st = acc->state();
     if (st == fsm_state::NotConnected || st == fsm_state::LogonSent) {
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut, "EngineReadPumpTest::InOrderExactlyOnce/stop_fut2")) {
+            return;
+        }
         stop_fut.get();
         GTEST_SKIP() << "session never reached established state (state=" << static_cast<int>(st)
                      << ") — Logon accept path not fully wired for this run";
@@ -396,7 +402,10 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     constexpr int expected = 2 + N;  // 4
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineReadPumpTest::InOrderExactlyOnce/stop_fut3")) {
+        return;
+    }
     stop_fut.get();
 
     EXPECT_EQ(next_inbound, expected)
@@ -465,7 +474,10 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     auto acc = h->engine->lookup(h->acc_id);
     if (!acc) {
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut, "EngineReadPumpTest::OverCapacityFrameClosesSession/stop_fut1")) {
+            return;
+        }
         stop_fut.get();
         GTEST_SKIP() << "acceptor session not found";
     }
@@ -474,7 +486,10 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     const auto next_inbound = static_cast<int>(acc->seqnum_mgr_test_access().next_inbound_unsafe());
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineReadPumpTest::OverCapacityFrameClosesSession/stop_fut2")) {
+        return;
+    }
     stop_fut.get();
 
     // STRENGTHENED GREEN assertion (T015): pump must have detected the oversized
@@ -540,7 +555,10 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
         // Session already freed — reached terminal state and was cleaned up.
         // This is the GREEN outcome: the pump drove the session through close().
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut, "EngineReadPumpTest::EofDisconnectsSession/stop_fut1")) {
+            return;
+        }
         stop_fut.get();
         SUCCEED() << "Session already freed (terminal state reached) — GREEN path.";
         return;
@@ -548,7 +566,10 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
 
     auto st = acc->state();
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineReadPumpTest::EofDisconnectsSession/stop_fut2")) {
+        return;
+    }
     stop_fut.get();
 
     // STRENGTHENED GREEN assertion (T015): pump must have detected the client EOF
@@ -677,7 +698,10 @@ TEST(EngineReadPumpTest, EngineStopDeliversCloseNotifyToPeer_Fixes348) {
            "whatever ended it, not the teardown";
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineReadPumpTest::EngineStopDeliversCloseNotifyToPeer_Fixes348")) {
+        return;
+    }
     stop_fut.get();
 
     expect_clean_peer_eof(hc, "Engine::stop()'s per-session transport close");
@@ -737,6 +761,10 @@ TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348)
     expect_clean_peer_eof(hc, "Session::close(terminal)'s post-root-cancel transport close");
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut,
+            "EngineReadPumpTest::SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348")) {
+        return;
+    }
     stop_fut.get();
 }

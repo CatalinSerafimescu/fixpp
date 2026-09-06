@@ -28,6 +28,8 @@
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session_config.hpp>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 using fixpp::core::error;
@@ -87,7 +89,10 @@ TEST(ValidationGateConfig, ValidateTrue_NullDict_FailsClosed) {
 
     // Clean up: stop() the never-started engine.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "ValidationGateConfig::ValidateTrue_NullDict_FailsClosed")) {
+        return;
+    }
     stop_fut.get();
 }
 
@@ -116,7 +121,10 @@ TEST(ValidationGateConfig, ValidateFalse_NullDict_Succeeds) {
            "cause register_session to fail (gate is flag-conditioned)";
 
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "ValidationGateConfig::ValidateFalse_NullDict_Succeeds")) {
+        return;
+    }
     stop_fut.get();
 }
 

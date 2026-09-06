@@ -120,7 +120,12 @@ from pathlib import Path
 root, sub, quiet = Path(sys.argv[1]), sys.argv[2], sys.argv[3] == "1"
 disposition = sys.argv[4] == "1"
 
-GUARD = re.compile(r"run_window_then_ready|pump_until_ready|pump_until\(|"
+# ⚠️ `run_to_exhaustion_or_report` is NOT reached by `run_window_then_ready` -- they
+# share the tail `then_ready` and nothing else, so a new spelling needs its own
+# alternative here and its own control below. Widening this without the control is how a
+# migration reads as unguarded and gets "migrated" a second time.
+GUARD = re.compile(r"run_window_then_ready|run_to_exhaustion_or_report|"
+                   r"pump_until_ready|pump_until\(|"
                    r"wait_for\([^)]*\)\s*[=!]=\s*std::future_status|"
                    r"std::future_status::ready")
 # A new function/TEST body resets what we know. Without this, a guarded `fut` in
@@ -328,6 +333,25 @@ GUARDED_OK = """
     }
     auto r = fut.get();
 """
+# The batch-17 spelling. Its own control because the regex alternative is its own: a
+# `run_window_then_ready` control cannot prove this one is credited.
+GUARDED_RUN_OK = """
+    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "X")) {
+        fixpp::test_support::drain_or_report(ioc, "X");
+        ADD_FAILURE() << fixpp::test_support::kRunMiss << "X";
+        return;
+    }
+    auto r = fut.get();
+"""
+# ... and the shape it replaces, so the pair straddles: an unguarded `ioc.run()` + get()
+# must still READ unguarded. Without this the widening above could credit any nearby
+# `run(`-ish token and the control above would still pass.
+RUN_UNBOUNDED_BAD = """
+    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    ioc.run();
+    auto r = fut.get();
+"""
 ASSERT_OK = """
     auto fut = asio::co_spawn(ioc, fsm.drive(), asio::use_future);
     ioc.run_for(500ms);
@@ -389,6 +413,8 @@ CONTROLS = [
     ("INDIRECT window (f.drain())      -> UNGUARDED", INDIRECT_BAD,      0, 1),
     ("indirect window, DOTLESS run()   -> UNGUARDED", DOTLESS_BAD,       0, 1),
     ("guarded by run_window_then_ready -> guarded",   GUARDED_OK,        1, 0),
+    ("guarded by run_to_exhaustion..   -> guarded",   GUARDED_RUN_OK,    1, 0),
+    ("bare ioc.run() then get()        -> UNGUARDED", RUN_UNBOUNDED_BAD, 0, 1),
     ("guarded by a wait_for assertion  -> guarded",   ASSERT_OK,         1, 0),
     ("`.get()` on a non-future         -> ignored",   NOT_A_FUTURE,      0, 0),
     ("idiom quoted in a COMMENT        -> ignored",   COMMENT_LOOKALIKE, 1, 0),

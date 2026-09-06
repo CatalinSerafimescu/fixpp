@@ -481,7 +481,10 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
 
     // Stop cleanly.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineAcceptorTest::OnListIdentityAdmitsToEstablished")) {
+        return;
+    }
     stop_fut.get();
 
     EXPECT_TRUE(established) << "SC-001: the acceptor session must reach Active (or LogonReceived) "
@@ -534,7 +537,10 @@ TEST(EngineAcceptorTest, FragmentedFirstLogonAdmitted) {
     std::string state_str = s ? std::to_string(static_cast<int>(s->state())) : "null";
 
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineAcceptorTest::FragmentedFirstLogonAdmitted")) {
+        return;
+    }
     stop_fut.get();
 
     EXPECT_TRUE(established)
@@ -585,7 +591,10 @@ TEST(EngineAcceptorTest, CoalescedFirstFrameSurplusDelivered) {
     int next_inbound = s ? static_cast<int>(s->seqnum_mgr_test_access().next_inbound_unsafe()) : -1;
 
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineAcceptorTest::CoalescedFirstFrameSurplusDelivered")) {
+        return;
+    }
     stop_fut.get();
 
     EXPECT_TRUE(established)
@@ -726,7 +735,10 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
 
     // Clean teardown.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineAcceptorTest::UnmatchedReversedCompIdRejectedNoSession")) {
+        return;
+    }
     stop_fut.get();
 }
 
@@ -750,7 +762,10 @@ TEST(EngineAcceptorTest, LookupNullBeforeStart) {
 
     // Stop without start (no loops to join).
     auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineAcceptorTest::LookupNullBeforeStart")) {
+        return;
+    }
     stop_fut.get();
 }
 

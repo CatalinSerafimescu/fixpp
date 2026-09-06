@@ -34,6 +34,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -96,7 +97,10 @@ TEST(SeamSessionLocalLifetime, SlotValidUntilCloseCompletesThenCleared) {
     EXPECT_TRUE(read_ok.load());  // slot valid mid-fromApp
 
     auto closed = asio::co_spawn(ctx, sess.close(close_mode::graceful), asio::use_future);
-    ctx.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ctx, closed, "SeamSessionLocalLifetime::SlotValidUntilCloseCompletesThenCleared")) {
+        return;
+    }
 
     EXPECT_TRUE(closed.get().has_value());
     EXPECT_TRUE(aborted.load());   // cancelled, never UB

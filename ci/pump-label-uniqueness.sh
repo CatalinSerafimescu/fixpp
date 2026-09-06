@@ -99,7 +99,8 @@ root = Path(sys.argv[1])
 _STR = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 # Every spelling that reaches `forced_miss_here` -- see the header. The list is the
 # gate's SCOPE, so widening it is a deliberate act with a control, not a tweak.
-CALLS = ("run_window_then_ready(", "pump_until_ready(", "pump_until(")
+CALLS = ("run_window_then_ready(", "run_to_exhaustion_or_report(",
+         "pump_until_ready(", "pump_until(")
 
 
 def calls(text):
@@ -187,6 +188,9 @@ _NESTED_PARENS = '''
 _PUMP_UNTIL_READY = '''
     if (!fixpp::test_support::pump_until_ready(ioc, fut, 5s, "F/open")) { return; }
 '''
+_RUN_TO_EXHAUSTION = '''
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "J/open")) { return; }
+'''
 _PUMP_UNTIL = '''
     if (!fixpp::test_support::pump_until(ioc, [&] { return done; }, 5s, 1ms, "G/settle")) { return; }
 '''
@@ -213,6 +217,7 @@ _CASES = [
     ("nested parens in an argument", _NESTED_PARENS, ["E/open"]),
     ("pump_until_ready reaches the same seam", _PUMP_UNTIL_READY, ["F/open"]),
     ("pump_until reaches the same seam", _PUMP_UNTIL, ["G/settle"]),
+    ("run_to_exhaustion_or_report reaches the same seam", _RUN_TO_EXHAUSTION, ["J/open"]),
     ("a call quoted in a STRING is not a call", _LABEL_IN_A_STRING, ["H/open"]),
     # ⚠️ INSIDE the argument list, not on the line before it -- the earlier control put it
     # before the call, outside the extent, and therefore never exercised the harvest.
