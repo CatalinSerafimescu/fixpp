@@ -695,8 +695,17 @@ std::string slurp(std::filesystem::path const& p) {
 // now a dictionary-only operation and has no second arm — so the pin's old
 // assertion ("exactly 1 occurrence at 8-space") pins a block that must no
 // longer exist. It is re-keyed rather than retired, because the property it
-// really guards is still live and is now STRONGER: the flat, wire-derived
-// instance walk must appear NOWHERE in group().
+// really guards is still live: 085's flat instance-walk block must not
+// reappear in group() at either indentation it has ever occupied.
+//
+// ⚠️ WHAT THIS PIN DOES *NOT* DO — stated, rather than left to be discovered.
+// It matches four EXACT strings. A flat wire-derived walk reintroduced with a
+// different variable name, an inverted `if (boundary)` shape, or a third
+// indentation would pass it. That is not a gap to close by adding needles:
+// each new needle is another coverage claim for the next rewrite to falsify,
+// which is exactly how 085's own version of this pin came to assert something
+// untrue. Treat it as a tripwire for the SPECIFIC block 085 moved and #220
+// deleted; re-derive by reading group() if you need the general property.
 //
 // Still a source-inspection assertion, for 085's original reason: behaviour
 // cannot see it. The dictionary path's cap is enforced by
@@ -744,7 +753,8 @@ TEST(WireOffsetTable, FR001_NoFlatInstanceWalkInGroup) {
         << "group_slices_status's positive boundary guard was not found at 20-space (found "
         << sibling_boundary_20space << ") — same vacuity risk as above.";
 
-    // ── The assertions proper: no flat cap walk anywhere in group(). ──
+    // ── The assertions proper: 085's flat cap block is at neither of the
+    //    indentations it has occupied. See the scope caveat in the header. ──
     // 4-space = function body (085's pre-move home); 8-space = the dict-free
     // else body (085's post-move home). #220 removed both.
     std::size_t const inst_start_4space =

@@ -238,12 +238,19 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     // fail the FIRST post-construction allocation — group_slices_.reserve — which
     // exercises the bad_alloc degrade path on every platform.
     //
-    // The reserve is still the first post-construction allocation on the
-    // dict-aware path: group_slices_reserve_bound()'s dictionary branch runs
+    // The reserve is still the first post-construction allocation on the path
+    // this cell drives: group_slices_reserve_bound()'s dictionary branch runs
     // stored_group_context(), parse_declared_count() and the membership
     // predicate, and all three are alloc-free (the predicate is documented so
     // in tests/support/context_group_member_fn.hpp — group_member_tags returns
     // a span).
+    //
+    // SCOPE, stated because "dict-aware" would overclaim: MEMBERSHIP is
+    // threaded here, the DELIMITER callback is not (it defaults to null), so
+    // group_slices_status() resolves the delimiter from the wire. That is
+    // deliberate — this cell is about the bad_alloc degrade, not about
+    // delimiter resolution — but it means the cell does not cover the
+    // fully-threaded splitter path, and should not be cited as if it did.
     std::size_t construction_calls = 0;
     {
         std::pmr::monotonic_buffer_resource probe_upstream;
