@@ -101,17 +101,20 @@ struct ConnectInfo;
 //       that must COMPLETE. Site: TLS close_async. Cancellation takes effect at
 //       NO suspension point there, which is the whole intent.
 //
-// ⚠️ AND A FOURTH CATEGORY THIS NOTE DOES NOT FIX: an awaited op that implements
+// ⚠️ AND A FOURTH CATEGORY NO RESET SHAPE REACHES: an awaited op that implements
 // NO per-operation cancellation at all. `resolver.async_resolve()` is one —
 // asio/detail/resolver_service.hpp schedules its resolve op WITHOUT taking an
-// associated cancellation slot. Both transports' async_connect suspend there
-// FIRST, and arm their connect_timeout timer only AFTERWARDS, so a stop() during
-// a slow or blocked DNS lookup is bounded by neither the cancellation nor
-// `connect_timeout`. No reset shape fixes that (#361).
+// associated cancellation slot. That category is still real; what changed in
+// #361 is that the transports no longer AWAIT such an op directly. Both
+// async_connects now go through `src/transport/bounded_resolve.hpp`, which waits
+// on a gate timer the completion handler cancels — so a deadline or a stop()
+// retires the frame and ABANDONS the resolve. Read that header before touching
+// either connect path; the falsified alternatives are enumerated there.
 //
-// ⚠️ AND THE OBVIOUS FIX DOES NOT WORK. This paragraph used to end "it needs a
-// timeout around the resolve itself". That is FALSE and is corrected here rather
-// than deleted, because it is the fix anyone reaching this point will reach for.
+// ⚠️ THE OBVIOUS FIX STILL DOES NOT WORK, which is why the fix above is shaped
+// the way it is. This paragraph used to end "it needs a timeout around the
+// resolve itself". That is FALSE and is kept here rather than deleted, because
+// it is the fix anyone reaching this point will reach for.
 // A timeout cannot abort a resolve that has already begun:
 //
 //   asio/detail/impl/socket_ops.ipp, background_getaddrinfo() —
@@ -148,12 +151,19 @@ struct ConnectInfo;
 // control arm is not optional, since a resolver that answers makes every number
 // here meaningless.
 //
-// The ONLY construction that bounds stop() is to stop AWAITING the resolve —
-// detach it and let the frame abandon it. ⚠️ That is not a small change and it
-// is not obviously safe: the abandoned op must keep the resolver, and therefore
-// the transport's executor, alive past the frame, and nothing holding a strand
-// may outlive its io_context — POSIX ignores a stranded work count on
-// ~io_context, but Windows spins forever on it. Deliberately NOT done; see #361.
+// The ONLY construction that bounds the CALLER is to stop AWAITING the resolve —
+// abandon it. DONE in #361 (`bounded_resolve.hpp`): the completion handler owns
+// the shared state, so the resolver and the result storage stay alive for it and
+// nothing dangles.
+//
+// ⚠️ THAT BOUNDS THE OPERATION, NOT THE DRAIN. `start_resolve_op` calls
+// `scheduler_.work_started()` and `resolver_thread_pool::shutdown()` JOINS its
+// work threads, so an abandoned resolve keeps `io_context::run()` from returning
+// and blocks `~io_context`. Both are unconditional in asio 1.38, independent of
+// the IOCP/reactor split — not a Linux-only property. Live limitation L-361-2;
+// re-derive both halves with `tools/probes/resolve_bound_probe.cpp`. The
+// resolv.conf figures above are still the right order of magnitude for the DRAIN,
+// which is what they were always measuring.
 //
 // So "raw vs composed" is the discriminator for shapes (a) and (b) ONLY, and this
 // list is not a taxonomy of every awaited op. ⚠️ Derive from the op you are

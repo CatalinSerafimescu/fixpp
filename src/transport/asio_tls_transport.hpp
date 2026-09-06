@@ -65,6 +65,7 @@
 #include <fixpp/transport/listener_events.hpp>  // 013 T039: ListenerEvents
 #include <fixpp/transport/tls_transport.hpp>    // TlsTransport + handshake_result
 #include <fixpp/transport/transport.hpp>        // Transport + ConnectInfo + Config
+#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -252,6 +253,40 @@ public:
         return timer_epochs_;
     }
 
+    // ── close_async fault seam (#360; internal-header-only) ─────────────────
+    //
+    // Makes the statement after close_async()'s state transition throw ON
+    // DEMAND, so the `catch (...)` recovery path has a witness again.
+    //
+    // WHY A SEAM AND NOT A CANCELLATION. #348's witness reached that handler by
+    // emitting a cancellation during the quiesce; #358 replaced close_async()'s
+    // entry reset with `disable_cancellation{}` to fix a measured hang, after
+    // which nothing is recorded, nothing throws, and the route is gone. The
+    // cell stayed GREEN while losing all of its power over the branch — the 2x2
+    // is at the `catch` itself. Reverting the entry reset is NOT the way back:
+    // it re-opens the #358 hang.
+    //
+    // SCOPE. The MEMBER is unconditional and the SETTER is FIXPP_TEST_HOOKS-gated
+    // — the repo's standing split for exactly this shape (`Engine`'s
+    // `test_hook_pre_publish_` / `set_pre_publish_hook`, and the dozen seams in
+    // `file_store`). Gating the member would ODR-mismatch, because the library is
+    // compiled without the macro and this header is included from both sides;
+    // gating only a method declaration cannot. The result is that no production
+    // build has any way to install the hook, and `grep FIXPP_TEST_HOOKS` finds
+    // this seam alongside every other. src/ is not an installed include root
+    // either, so SC-010/SC-017 hold twice over.
+    //
+    // ⚠️ WHAT THE WITNESS DOES AND DOES NOT COVER. The hook fires at ONE point:
+    // the first of the two remaining real throw sources on the mainline
+    // (deadline-timer construction), i.e. after the quiesce and before the
+    // shutdown. It therefore re-establishes exactly the ENTRY STATE the lost
+    // witness had — quiesce completed, socket still open, state_ already
+    // `closed` — and says nothing about a throw from anywhere else in the try.
+    // That is a like-for-like restoration, not broader coverage.
+#ifdef FIXPP_TEST_HOOKS
+    void set_close_fault_hook(std::function<void()> hook) { close_fault_hook_ = std::move(hook); }
+#endif  // FIXPP_TEST_HOOKS
+
     // ── Test-access friend ──────────────────────────────────────────────────
     //
     // Grants state_ visibility to integration tests that need to verify the
@@ -325,6 +360,13 @@ private:
     // already throwing ([arch §5.3] carve-out) and one already does a
     // make_shared (ssl_ctx_ above) inside the same trap_throw boundary.
     std::shared_ptr<timer_epoch_state> timer_epochs_{std::make_shared<timer_epoch_state>()};
+
+    // #360 fault seam — ALWAYS compiled in (so this .cpp, which never sees
+    // FIXPP_TEST_HOOKS, can always test it) and null in production, because only
+    // a FIXPP_TEST_HOOKS build has a setter to install it with.
+    // Not in *timer_epochs_: that block's admission rule is "must survive the
+    // transport's destruction", and this is read only from a live frame.
+    std::function<void()> close_fault_hook_{};
 
     // #346: read/write in-flight flags live in *timer_epochs_, managed by
     // detail::inflight_flag_guard — rationale in that header.

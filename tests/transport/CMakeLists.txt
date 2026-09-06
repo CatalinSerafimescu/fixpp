@@ -111,6 +111,11 @@ target_link_libraries(transport_inflight_exclusivity PRIVATE
 )
 target_compile_definitions(transport_inflight_exclusivity PRIVATE
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+  # #360: arms asio_tls_transport::set_close_fault_hook(), which is a gated
+  # METHOD DECLARATION only — the member it writes is compiled unconditionally,
+  # so no data member differs between this TU and the library's. Same split as
+  # tests/capi/CMakeLists.txt's uses of this macro.
+  FIXPP_TEST_HOOKS
 )
 add_test(NAME transport_inflight_exclusivity
          COMMAND transport_inflight_exclusivity)

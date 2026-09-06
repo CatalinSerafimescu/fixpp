@@ -64,6 +64,7 @@
 #include <system_error>
 #include <vector>
 
+#include "bounded_resolve.hpp"
 #include "inflight_flag_guard.hpp"
 
 // asio::async_connect is a free function in <asio/connect.hpp>.
@@ -938,18 +939,27 @@ void asio_tls_transport::setup_ssl_ctx_() {
     // dead. See the CANCELLATION TIMING note on Transport in transport.hpp
     // for the mechanism and the re-derivation recipe.
 
-    // ── Resolve ───────────────────────────────────────────────────────────────
-    asio::ip::tcp::resolver resolver{exec_};
-    asio::error_code resolve_ec;
-    auto endpoints = co_await resolver.async_resolve(
-        ep.host, std::to_string(ep.port), asio::redirect_error(asio::use_awaitable, resolve_ec));
+    // ONE budget for the whole attempt, shared by the resolve below and the
+    // connect timer further down (#361) — the rationale is on resolve_bounded()
+    // in bounded_resolve.hpp, stated once because it is one decision.
+    const auto connect_deadline = std::chrono::steady_clock::now() + cfg_.connect_timeout;
 
-    if (resolve_ec) {
-        if (resolve_ec == asio::error::operation_aborted) {
-            co_return std::unexpected{E::transport_connect_cancelled};
-        }
-        co_return std::unexpected{E::transport_resolve_failed};
+    // ── Resolve ───────────────────────────────────────────────────────────────
+    // Abandonable: asio's resolver takes no cancellation slot, so awaiting it
+    // directly is what made stop() unbounded. bounded_resolve.hpp carries the
+    // mechanism, the falsified alternatives, and the measured limit of what
+    // abandoning buys.
+    //
+    // Engine::stop()'s `total` reaches the gate timer in there because the entry
+    // reset at the top of this function already accepts it — no second reset
+    // here, and deliberately no pre-resolve REAP either (#341's note on why that
+    // would be dead still applies).
+    auto resolved =
+        co_await detail::resolve_bounded(exec_, ep.host, std::to_string(ep.port), connect_deadline);
+    if (!resolved) {
+        co_return std::unexpected{resolved.error()};
     }
+    auto endpoints = std::move(*resolved);
 
     // Post-resolve cancellation reap.
     auto cs = co_await asio::this_coro::cancellation_state;
@@ -958,9 +968,10 @@ void asio_tls_transport::setup_ssl_ctx_() {
     }
 
     // #347: close() runs on this strand and can have executed while we were
-    // suspended in async_resolve -- which the RESOLVER never observes, because
-    // socket_.close() does not cancel it. FR-006 is unconditional, so re-test
-    // it here instead of proceeding to open a socket the owner already closed.
+    // suspended in the bounded resolve -- which the RESOLVER never observes,
+    // because socket_.close() cancels neither it nor the gate timer (#361 made
+    // the WAIT abandonable, not the op observable). FR-006 is unconditional, so
+    // re-test it here instead of opening a socket the owner already closed.
     if (state_ == state_t::closed) {
         co_return std::unexpected{E::transport_already_closed};
     }
@@ -968,7 +979,9 @@ void asio_tls_transport::setup_ssl_ctx_() {
     // ── Connect with timeout ──────────────────────────────────────────────────
     // Arm a timer that cancels the socket on expiry.
     asio::steady_timer timer{exec_};
-    timer.expires_after(cfg_.connect_timeout);
+    // Shared deadline (#361), not a fresh connect_timeout — see the budget note
+    // at the top of this function.
+    timer.expires_at(connect_deadline);
     // Timer-epoch guard (D-4.1, FR-014): the handler captures a COPY of
     // timer_epochs_, never `this` — nothing here touches `this` until the
     // guard has passed, so a handler stranded by a destroy-with-no-drain
@@ -1740,6 +1753,17 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         // teardown would otherwise reach socket_.cancel() through a dangling
         // `this`. The epoch is retired below BEFORE cancel(), and again in the
         // destructor body.
+        // #360 fault seam. Null in production; a test sets it to throw so the
+        // catch(...) below has a witness again. Placed HERE, immediately before
+        // the deadline-timer construction, because timer construction is the
+        // first of the two throw sources this handler's own comment names as
+        // remaining — the seam stands in for one of them rather than for a
+        // shape nothing can produce. See set_close_fault_hook() in the header
+        // for why a cancellation cannot be used instead as of #358.
+        if (close_fault_hook_) {
+            close_fault_hook_();
+        }
+
         asio::steady_timer deadline{exec_};
         deadline.expires_at(close_deadline);
         const std::uint64_t close_epoch = ++timer_epochs_->close;
@@ -1800,9 +1824,19 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
         // What is gone is the WITNESS, and that is disclosed rather than papered
         // over: the cell above now exercises the normal path, not this one.
         //
-        // ⚠️ DO NOT "restore" the witness by reverting the entry reset. That reset
-        // is a hang fix (#358, measured 11 wedges / 40). A witness for this handler
-        // needs a fault-injection seam, not a cancellation.
+        // ROUND 3 (#360). The witness is BACK, and not by reverting the entry
+        // reset — that reset is a hang fix (measured 11 wedges / 40) and
+        // reverting it re-opens #358. `close_fault_hook_` (header:
+        // set_close_fault_hook) makes the deadline-timer construction above
+        // throw on demand, which is one of the two sources this comment already
+        // named as remaining. Witness:
+        //   InflightExclusivity.CloseAsyncFaultAfterQuiesceStillClosesTheSocket
+        // RED ARM, unchanged from round 1: delete the socket_.close(ec) below.
+        // Re-run it before trusting this paragraph — a witness cell that has
+        // lost its power reads exactly like one that still has it, which is the
+        // whole history recorded above.
+        // ⚠️ It pins ONE entry state, not the handler in general — the scope is
+        // stated once, at set_close_fault_hook().
         asio::error_code ec;
         socket_.close(ec);
         co_return core::expected_t<void>{};
