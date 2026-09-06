@@ -413,7 +413,10 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
     // ── Teardown ──────────────────────────────────────────────────────────────
     {
         auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut, "G2EnablementWitness::OpaqueRoundTripViaEngineLoopback")) {
+            return;
+        }
         stop_fut.get();
     }
     EXPECT_TRUE(engine.stopped()) << "engine must be stopped() after stop()";

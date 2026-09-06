@@ -34,6 +34,7 @@
 #include <memory_resource>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -104,7 +105,10 @@ TEST(SyncPmrFallback, ContendedAcquiresSucceedWithPmr) {
     for (int i = 0; i < N; ++i)
         futs.push_back(asio::co_spawn(ioc, make_waiter(&mbr), asio::use_future));
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SyncPmrFallback::ContendedAcquiresSucceedWithPmr")) {
+        return;
+    }
     fh.get();
     for (auto& f : futs) f.get();
 
@@ -172,7 +176,10 @@ TEST(SyncPmrFallback, TinyPmrExhaustionReturnsAllocFailed) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SyncPmrFallback::TinyPmrExhaustionReturnsAllocFailed")) {
+        return;
+    }
     f.get();
 
     EXPECT_TRUE(alloc_failed_received)
@@ -201,7 +208,10 @@ TEST(SyncPmrFallback, UncontendedPmrTakesFastPath) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SyncPmrFallback::UncontendedPmrTakesFastPath")) {
+        return;
+    }
     f.get();
 }
 
@@ -293,7 +303,10 @@ TEST(SyncPmrFallback, AlwaysThrowingPmrReturnsAllocFailedAndLeavesMutexHealthy) 
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SyncPmrFallback::AlwaysThrowingPmrReturnsAllocFailedAndLeavesMutexHealthy")) {
+        return;
+    }
     f.get();
 
     EXPECT_TRUE(alloc_failed_received)

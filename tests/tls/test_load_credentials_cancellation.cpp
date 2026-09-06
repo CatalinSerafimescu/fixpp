@@ -41,6 +41,8 @@
 #include <variant>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 // Path to the fixture directory (compiled-in via CMake definition
@@ -125,7 +127,10 @@ static expected_t<local_credentials> spawn_and_run(asio::io_context& ioc,
                                                    asio::cancellation_signal& signal) {
     auto fut = asio::co_spawn(ioc, cs.load_credentials(),
                               asio::bind_cancellation_slot(signal.slot(), asio::use_future));
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "spawn_and_run")) {
+        return expected_t<local_credentials>{std::unexpect,
+                                             fixpp::test_support::kWindowMissSentinel};
+    }
     ioc.restart();
     return fut.get();
 }
@@ -169,7 +174,11 @@ static expected_t<local_credentials> await_as_child_with_pending_cancel(
             co_return co_await src.load_credentials();
         },
         asio::bind_cancellation_slot(signal.slot(), asio::use_future));
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut,
+                                                          "await_as_child_with_pending_cancel")) {
+        return expected_t<local_credentials>{std::unexpect,
+                                             fixpp::test_support::kWindowMissSentinel};
+    }
     ioc.restart();
     return fut.get();
 }
@@ -259,7 +268,10 @@ TEST(LoadCredentialsCancellation, Step4InFlightCancelFiresDeterministic) {
         gate.cancel();
     });
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "LoadCredentialsCancellation::Step4InFlightCancelFiresDeterministic")) {
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_FALSE(result.has_value()) << "in-flight cancellation must produce tls_load_cancelled";
@@ -292,8 +304,25 @@ TEST(LoadCredentialsCancellation, CancelledResultIsExpectedNotException) {
 
     bool threw_non_system = false;
     expected_t<local_credentials> result{std::unexpect, error::tls_load_cancelled};
+    // ⚠️ THE #289 GUARD IS OUTSIDE THE `try` DELIBERATELY, and moving it back in is a
+    // FALSE-ATTRIBUTION bug, not a style change. `ADD_FAILURE()` THROWS under
+    // `--gtest_throw_on_failure`; inside the try, the `catch (...)` below swallows that
+    // throw, `return;` never executes, and `threw_non_system` goes true -- so a #289
+    // window miss is reported as `"cancellation must not throw arbitrary exceptions"`,
+    // blaming the code under test. Reproduced by forcing this site's label with the flag
+    // set: the miss report and this cell's own
+    // `"cancellation must not throw arbitrary exceptions"` failure appear TOGETHER, while
+    // the same forcing at a site NOT inside a try emits only the miss report. (No line
+    // number here on purpose -- a line number is a claim about a file that keeps moving,
+    // and the gate that rejects one is this repo's, from #310. The quoted phrase is the
+    // durable anchor.) Found by the batch-17 hostile round, not by the condition at
+    // the helper -- which said "a TEST body or a non-noexcept frame" and this site
+    // satisfied.
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "LoadCredentialsCancellation::CancelledResultIsExpectedNotException")) {
+        return;
+    }
     try {
-        ioc.run();
         result = fut.get();
     } catch (const std::system_error&) {
         // asio::operation_aborted as a system_error is acceptable.

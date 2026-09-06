@@ -1,0 +1,215 @@
+# ci/red-arms/batch17-labels.txt -- the seam-forceable sites of #289 batch 17.
+#
+# Feed to:  bash ci/pump-seam-arm.sh linux-clang-debug ci/red-arms/batch17-labels.txt
+#
+# One label per line. Every line here is a site that passes its label to
+# `run_to_exhaustion_or_report`, which reaches the same `forced_miss_here` strcmp
+# namespace as `run_window_then_ready` / `pump_until_ready` / `pump_until`.
+#
+# ⚠️ `ci/pump-red-arm.sh` CANNOT ARM THESE, and that is structural, not an omission.
+# The textual driver rewrites a `run_window_then_ready` CALL into a forced miss; these
+# sites do not spell that call. Batch 13 hit the same wall with `pump_until_ready` and
+# recorded it there. So the seam driver is the ONLY driver for this batch, which raises
+# what the seam driver's own header calls its blind spot: it accepts any of the three
+# report tails, so a site that called this primitive and reported `kWindowMiss` by
+# copy-paste would read RED here with nothing to contradict it. What closes that for
+# this batch is that no site spells its own miss branch -- the branch is INSIDE
+# `run_to_exhaustion_or_report`, so there is nowhere for a site to report the wrong tail
+# FROM. Re-derive by looking for a site that reports one itself; the result must be empty
+# apart from the header that defines them:
+#   git grep -n 'kRunMiss\|kWindowMiss\|kPumpBudgetMiss' -- tests/ \
+#       | grep -v 'support/pump_until_ready.hpp' | grep -F 'run_to_exhaustion_or_report'
+# ⚠️ AN EARLIER REVISION PRESCRIBED `git grep -c 'run_to_exhaustion_or_report'`, which
+# counts OCCURRENCES per file -- comments and the definition included -- and answers a
+# different question entirely. A recipe that does not check the sentence above it is worse
+# than no recipe, because it looks like evidence.
+#
+# ⚠️ EVERY LABEL IS `Suite::Case`, OPTIONALLY `/future`, AND THE SHAPE IS LOAD-BEARING
+# TWICE. `ci/pump-seam-arm.sh` derives a gtest filter from the text before `::`, so
+# `Suite::...` narrows the arm to that suite's cases rather than running the whole
+# binary; and `Suite::Case` is unique by construction, which is what
+# `ci/pump-label-uniqueness.sh` gates. A `/future` suffix appears only where one TEST
+# holds more than one migrated site.
+#
+# ⚠️ `spawn_and_run` is the one label here that is NOT `Suite::Case`: it is a
+# value-returning FILE-LOCAL helper (tests/tls/test_load_credentials_cancellation.cpp),
+# so it has no enclosing test to name and its miss branch returns
+# `kWindowMissSentinel`. The seam driver takes the unfiltered fallback for it, by
+# design -- a label with no `::` cannot name a suite.
+#
+# ⚠️ THE LAST FIVE LABELS WERE ADDED BY THE HOSTILE ROUND, NOT BY THE SWEEP. They are
+# live sites of this batch's exact class that `ci/pump-get-sweep.sh` CANNOT SEE: a long
+# lambda body pushes the declaration past its 12-line splice limit, the `auto NAME =
+# asio::co_spawn(` pattern then fails, and every later `.get()` on that future is
+# skipped. So the sweep's counts do not move when they are migrated -- they were never
+# in them. `await_as_child_with_pending_cancel` is the second label here with no `::`:
+# a file-local value-returning helper, so the seam driver takes the unfiltered fallback.
+#
+
+Backpressure::PartialWriteReturnsWriteShort
+Backpressure::SequentialWritesDrainAtStrandDepth1
+Backpressure::SingleWriteSucceeds
+EngineAcceptorFailClosedTest::AbsentIdentityNeverAdmits
+EngineAcceptorFailClosedTest::OffListIdentityFailsClosed
+EngineAcceptorTest::CoalescedFirstFrameSurplusDelivered
+EngineAcceptorTest::FragmentedFirstLogonAdmitted
+EngineAcceptorTest::LookupNullBeforeStart
+EngineAcceptorTest::OnListIdentityAdmitsToEstablished
+EngineAcceptorTest::UnmatchedReversedCompIdRejectedNoSession
+EngineCloseTeardown::E2_EngineTeardownHonorsDrainTimeout
+EngineCloseTeardown::E2_NullProviders_NoCrash
+EngineCloseTeardown::E2_ProviderShutdownCalled
+EngineConnectTest::InitiatorConnectThenLogon
+EngineFirstFrameTest::AcceptLoopRunsContinuously
+EngineFirstFrameTest::NonTlsPeerWithPayloadClosedByHandshakeBound
+EngineFirstFrameTest::NonTlsSilentPeerClosedByHandshakeBound
+EngineFirstFrameTest::PostHandshakeOverBudgetClosedByByteBudget
+EngineFirstFrameTest::PostHandshakeRejectionDoesNotStopTheAcceptLoop
+EngineFirstFrameTest::PostHandshakeStallClosedByFirstFrameDeadline
+EngineHarnessCompileSmoke::BuildSkipsWhenFixtureDirAbsent
+EngineLifecycleTest::DuplicateIdentityRejected
+EngineLifecycleTest::TwoSessionRegisterStartLookupStop/stop_fut
+EngineLifecycleTest::TwoSessionRegisterStartLookupStop/stop_fut2
+EngineReadPumpTest::EngineStopDeliversCloseNotifyToPeer_Fixes348
+EngineReadPumpTest::EofDisconnectsSession/stop_fut1
+EngineReadPumpTest::EofDisconnectsSession/stop_fut2
+EngineReadPumpTest::InOrderExactlyOnce/stop_fut1
+EngineReadPumpTest::InOrderExactlyOnce/stop_fut2
+EngineReadPumpTest::InOrderExactlyOnce/stop_fut3
+EngineReadPumpTest::OverCapacityFrameClosesSession/stop_fut1
+EngineReadPumpTest::OverCapacityFrameClosesSession/stop_fut2
+EngineReadPumpTest::SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348
+FileCertSourceFactory::SuccessPathSignerHandleIsNonNull
+FileCertSourcePmrFail::LoadCredentialsDoesNotThrow
+G2EnablementWitness::OpaqueRoundTripViaEngineLoopback
+LoadCredentialsCancellation::CancelledResultIsExpectedNotException
+LoadCredentialsCancellation::Step4InFlightCancelFiresDeterministic
+NoImplicitInsecurePlainTcp::DefaultConstructedConfigRejected
+NoImplicitInsecurePlainTcp::ExplicitUnsetWithPlaintextFactoryRejected
+PlaintextAuthzTest::AuthorizeCalledOnMtlsPositiveControl/close_fut
+PlaintextAuthzTest::AuthorizeCalledOnMtlsPositiveControl/feed_fut
+PlaintextAuthzTest::AuthorizeCalledOnMtlsPositiveControl/open_fut
+PlaintextAuthzTest::AuthorizeNotCalledOnPlaintext/close_fut
+PlaintextAuthzTest::AuthorizeNotCalledOnPlaintext/feed_fut
+PlaintextAuthzTest::AuthorizeNotCalledOnPlaintext/open_fut
+PlaintextAuthzTest::CheckCompIdRejectsMismatchOnPlaintext/close_fut
+PlaintextAuthzTest::CheckCompIdRejectsMismatchOnPlaintext/feed_fut
+PlaintextAuthzTest::CheckCompIdRejectsMismatchOnPlaintext/open_fut
+PlaintextAuthzTest::LivePeerIdNulloptOnAcceptedHandoff/close_fut
+PlaintextAuthzTest::LivePeerIdNulloptOnAcceptedHandoff/open_fut
+PlaintextAuthzTest::LivePeerIdSetOnTlsPositiveControl/close_fut
+PlaintextAuthzTest::LivePeerIdSetOnTlsPositiveControl/open_fut
+PlaintextFactoryMintWitness::Cell_g_PlaintextNoOverrideAutoDeriveMint/close_fut
+PlaintextFactoryMintWitness::Cell_g_PlaintextNoOverrideAutoDeriveMint/drive_fut
+PlaintextFactoryMintWitness::Cell_g_PlaintextNoOverrideAutoDeriveMint/open_fut
+PlaintextFactoryMintWitness::Cell_h_TlsNoOverrideEngineDefaultReachesMint/close_fut
+PlaintextFactoryMintWitness::Cell_h_TlsNoOverrideEngineDefaultReachesMint/drive_fut
+PlaintextFactoryMintWitness::Cell_h_TlsNoOverrideEngineDefaultReachesMint/open_fut
+PlaintextFactoryMismatch::Cell_a_PlaintextProfileWithTlsOverrideRejects/close_fut_a
+PlaintextFactoryMismatch::Cell_a_PlaintextProfileWithTlsOverrideRejects/fut
+PlaintextFactoryMismatch::Cell_b_TlsProfileWithPlaintextOverrideRejects/close_fut_b
+PlaintextFactoryMismatch::Cell_b_TlsProfileWithPlaintextOverrideRejects/fut
+PlaintextFactoryMismatch::Cell_c_TlsProfileWithPlaintextEngineDefaultRejects/close_fut_c
+PlaintextFactoryMismatch::Cell_c_TlsProfileWithPlaintextEngineDefaultRejects/fut
+PlaintextFactoryMismatch::Cell_d_PlaintextProfileNoOverrideOpens/close_fut
+PlaintextFactoryMismatch::Cell_d_PlaintextProfileNoOverrideOpens/fut
+PlaintextFactoryMismatch::Cell_e_TlsProfileWithTlsEngineDefaultOpens/close_fut
+PlaintextFactoryMismatch::Cell_e_TlsProfileWithTlsEngineDefaultOpens/fut
+PlaintextFactoryMismatch::Cell_f_PlaintextProfileWithPlaintextOverrideOpens/close_fut
+PlaintextFactoryMismatch::Cell_f_PlaintextProfileWithPlaintextOverrideOpens/fut
+ReadFirstFrameBounded::B1
+ReadFirstFrameBounded::B2
+ReadFirstFrameBounded::B3
+ReadFirstFrameBounded::B4
+ReadFirstFrameBounded::B5
+ReadFirstFrameBounded::B6
+ReadFirstFrameBounded::CovFramerErrorPropagates
+ReadFirstFrameBounded::CovReadErrorPropagates
+ReadFirstFrameBounded::CovSharedClockSweep
+Seam13Witness::Case1_Direct
+Seam13Witness::Case1_Strand
+Seam13Witness::Case3_Direct
+Seam13Witness::Case3_Strand
+Seam13Witness::Case4_Direct
+SeamBackpressureDropOldestBanned::LegalValuesAcceptedAtOpen
+SeamBackpressureDropOldestBanned::MaxOutOfRangeCastRejectedAtOpen
+SeamBackpressureDropOldestBanned::OutOfRangeCastRejectedAtOpen
+SeamCancelAndDrain::EightWaitersAllAbortedOnDrain/fd
+SeamCancelAndDrain::EightWaitersAllAbortedOnDrain/fh
+SeamCancelAndDrain::MultiplePostDrainAcquiresAllGetDrained
+SeamCancelAndDrain::NoDoubleResumeNoLostWaiter
+SeamCancelAndDrain::PostDrainAcquireReturnsSyncLockDrained
+SeamCancelAndDrainConcurrent::IdempotentDrainAfterEpochCompletes
+SeamCancelAndDrainConcurrent::MultipleDrainersSerialised
+SeamCancelAndDrainConcurrent::NoDoubleResumeUnderConcurrentDrain
+SeamCancellationFromAppToClose::IdempotentThreeStateModel/r
+SeamCancellationFromAppToClose::IdempotentThreeStateModel/r1
+SeamCancellationFromAppToClose::IdempotentThreeStateModel/r2
+SeamCancellationParseToFromApp::CloseGracefulPhase2FiresRootTotal/closed
+SeamCancellationParseToFromApp::CloseGracefulPhase2FiresRootTotal/opened
+SeamCancellationParseToFromApp::NotSignalledRunsHandlerExactlyOnce
+SeamContendedLatency::SecondAcquirerSuspends/f1
+SeamContendedLatency::SecondAcquirerSuspends/f2
+SeamCrossStrandAcquire::TwoStrandsNoOverlap/f1
+SeamCrossStrandAcquire::TwoStrandsNoOverlap/f2
+SeamDestructorReleaseDeath::ProperlyDrainedMutexDoesNotTerminate/fd
+SeamDestructorReleaseDeath::ProperlyDrainedMutexDoesNotTerminate/fh
+SeamDrainAwaitableCancellation::DrainCompletesEvenIfSlotFiredMidFlight/fc
+SeamDrainAwaitableCancellation::DrainCompletesEvenIfSlotFiredMidFlight/fcn
+SeamDrainAwaitableCancellation::DrainCompletesEvenIfSlotFiredMidFlight/fd
+SeamDrainAwaitableCancellation::DrainCompletesEvenIfSlotFiredMidFlight/fh
+SeamDrainLatchHolderLifecycle::AcquireAfterDrainIsRejected
+SeamDrainLatchHolderLifecycle::DrainWaitsForPreDrainHolderToRelease/fd
+SeamDrainLatchHolderLifecycle::DrainWaitsForPreDrainHolderToRelease/fh
+SeamDrainLatchHolderLifecycle::TwoConcurrentDrainersWithPreDrainHolder/f1
+SeamDrainLatchHolderLifecycle::TwoConcurrentDrainersWithPreDrainHolder/f2
+SeamDrainLatchHolderLifecycle::TwoConcurrentDrainersWithPreDrainHolder/fh
+SeamExecutorCompat::ContendedResumesOnAwaiterStrand/f1
+SeamExecutorCompat::ContendedResumesOnAwaiterStrand/f2
+SeamExecutorCompat::ResumesOnBoundExecutor
+SeamFifoFairness::DrainCycleReversesLIFO
+SeamGuardDestructiveMove::MoveAssignToEngagedUnlocksFirst
+SeamGuardDestructiveMove::MoveConstructFromEngagedDisengagesSource
+SeamGuardDestructiveMove::ReleaseDisengagesGuard
+SeamGuardDestructiveMove::SelfAssignmentIsNoOp
+SeamInFlightAcquirerCoverage::ConcurrentDrainWithInFlightAcquirers/fc
+SeamInFlightAcquirerCoverage::ConcurrentDrainWithInFlightAcquirers/fd1
+SeamInFlightAcquirerCoverage::ConcurrentDrainWithInFlightAcquirers/fd2
+SeamInFlightAcquirerCoverage::MultipleIterationsCoverRaceWindow
+SeamInFlightAcquirerCoverage::PostDrainAcquiresAllGetDrained
+SeamInFlightAcquirerCoverage::SingleInFlightResolvedBeforeDrainCompletes
+SeamResidualCancelGraceful::CancelBeforeHolderReleasesRaceWithDrain
+SeamResidualCancelGraceful::MutexFreeAfterAllResidualsCancelled/fh
+SeamResidualCancelGraceful::MutexFreeAfterAllResidualsCancelled/freshen
+SeamResidualCancelGraceful::SevenResidualWaitersCancelledWhileParked
+SeamSessionLocalLifetime::SlotValidUntilCloseCompletesThenCleared
+SeamSessionOpenRejectsUnsetSecurityProfile::DefaultSentinelRejected
+SeamSessionOpenRejectsUnsetSecurityProfile::ExplicitUnsetRejected
+SeamSessionOpenRejectsUnsetSecurityProfile::NonSentinelAccepted
+SeamTraceContextEngineFallback::PlainExecutorDoesNotThrow
+SeamTraceContextEngineFallback::PlainExecutorReturnsDefaultTraceContext
+SeamUnlockReaperSplice::ResidualFifoChainDrainedCorrectly
+SessionOpenValidationArms::DirectExecutorWithSpinLockRejected
+SessionOpenValidationArms::NullDictionaryRejected
+SessionOpenValidationArms::NullExecutorRejected
+SessionOpenValidationArms::OutOfRangeBackpressureModeRejected
+SessionOpenValidationArms::SecondOpenRejected/r1
+SessionOpenValidationArms::SecondOpenRejected/r2
+SyncAsanClean::CancelMidWaitNoUseAfterFree
+SyncAsanClean::DrainPathNoHeapErrors
+SyncPmrFallback::AlwaysThrowingPmrReturnsAllocFailedAndLeavesMutexHealthy
+SyncPmrFallback::ContendedAcquiresSucceedWithPmr
+SyncPmrFallback::TinyPmrExhaustionReturnsAllocFailed
+SyncPmrFallback::UncontendedPmrTakesFastPath
+SyncPoolExhaustionReuse::ExhaustionAt513thWaiterFailsClosed
+SyncPoolExhaustionReuse::FreedSlotReusedViaFreeListAfterExhaustion
+SyncTsanClean::FractionCancelMidWait
+SyncTsanClean::OccasionalCancelAndDrain
+TraceContextAccessors::EngineTraceContextReturnsSeededSnapshot
+TraceContextAccessors::GetTraceContextReturnsInitialValue
+TraceCorrelation::ElogCarriesEngineTrace
+TraceCorrelation::ElogTimestampFromMockClock
+ValidationGateConfig::ValidateFalse_NullDict_Succeeds
+ValidationGateConfig::ValidateTrue_NullDict_FailsClosed
+await_as_child_with_pending_cancel
+spawn_and_run

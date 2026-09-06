@@ -35,6 +35,8 @@
 #include <string>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 using fixpp::core::error;
@@ -140,7 +142,10 @@ TEST(FileCertSourcePmrFail, LoadCredentialsDoesNotThrow) {
         },
         asio::use_future);
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, future, "FileCertSourcePmrFail::LoadCredentialsDoesNotThrow")) {
+        return;
+    }
     future.get();
 
     EXPECT_FALSE(threw) << "load_credentials must not throw";

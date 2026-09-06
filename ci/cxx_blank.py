@@ -42,6 +42,36 @@ non-ASCII, and this repo's sources are full of non-ASCII comment glyphs.
 """
 import re
 
+# Compiled once and matched AT AN OFFSET; see the note at its use site for why the offset
+# form is load-bearing and the compile is not.
+_RAW = re.compile(r'(?:u8|u|U|L)?R"([^\s()\\]{0,16})\(')
+
+
+def _is_digit_separator(src: str, i: int) -> bool:
+    """Is `src[i]` (an apostrophe) a C++14 digit separator rather than a char literal?
+
+    The standard puts a digit separator BETWEEN digits of a numeric literal, so the test
+    is not "is it surrounded by alphanumerics" -- that misreads `u8'0'`, whose apostrophe
+    is also preceded by a digit and followed by one. Walk back to the start of the token
+    instead and require it to BEGIN with a digit, or with a `.` that a digit follows:
+    `10'000`, `0x1F'FF` and `.1'0` do, `u8'0'` does not (its token starts `u`).
+    """
+    if i == 0 or i + 1 >= len(src):
+        return False
+    if not (src[i - 1].isalnum() and src[i + 1].isalnum()):
+        return False
+    j = i - 1
+    while j >= 0 and (src[j].isalnum() or src[j] in "'."):
+        j -= 1
+    k = j + 1
+    # A fractional-constant may OPEN with the dot: `.1'0` is a valid literal and
+    # `c++ -fsyntax-only` accepts it. Requiring the first character to be a digit
+    # rejected it and put the blanker back in the state this predicate exists to
+    # prevent. Found by the batch-17 review, not by the controls written with the fix.
+    if k < len(src) and src[k] == ".":
+        k += 1
+    return k < len(src) and src[k].isdigit()
+
 
 def blank_non_code(source: str) -> str:
     """Blank comments and literals while preserving every newline."""
@@ -57,10 +87,15 @@ def blank_non_code(source: str) -> str:
     while i < n:
         if state == "code":
             # Raw string literals, including u8R"...", uR, UR and LR.
-            raw = re.match(
-                r'(?:u8|u|U|L)?R"([^\s()\\]{0,16})\(',
-                source[i:]
-            )
+            # ⚠️ `.match(source, i)` -- NOT `re.match(pat, source[i:])`. The slice copies
+            # the whole remainder of the file at EVERY code character, which is O(n^2)
+            # bytes per file. Measured over the 656 files under tests/ (10.0 MB): one
+            # `blank_non_code` pass goes 13.3 s -> 4.1 s, and the two tier-1 gates that
+            # call it go 30.2 s -> 10.5 s and 13.2 s -> 4.6 s. Output is byte-identical
+            # over all 656 (the two forms can only differ under `^` or a lookbehind, and
+            # this pattern has neither). Hoisting `re.compile` alone buys nothing --
+            # Python already caches compiled patterns; the copy is the cost.
+            raw = _RAW.match(source, i)
             if raw:
                 token = raw.group(0)
                 delim = raw.group(1)
@@ -79,6 +114,20 @@ def blank_non_code(source: str) -> str:
                 out.extend((" ", " "))
                 i += 2
                 state = "block-comment"
+            elif source[i] == "'" and _is_digit_separator(source, i):
+                # C++14 digit separator (`10'000`, `0x1F'FF`) -- NOT a character
+                # literal. Treated as one, it opens a literal that runs to the next
+                # apostrophe anywhere in the file and blanks every line between,
+                # code included. MEASURED, not hypothesised: one `10'000` in
+                # tests/session/read_first_frame_bounded_test.cpp hid TWO labelled
+                # seam calls from `ci/pump-label-uniqueness.sh`, which reported
+                # "every site label is unique" over a tree it could not fully read.
+                # ⚠️ THE DIRECTION IS FAILS-TOWARD-CLEAN FOR EVERY CALLER: the gate
+                # sees fewer sites, and `ci/pump-red-arm.sh` -- which REWRITES source
+                # at offsets taken from this lexer -- cannot find an anchor it has
+                # blanked. Neither reports anything.
+                out.append(source[i])
+                i += 1
             elif source[i] in ('"', "'"):
                 quote = source[i]
                 out.append(" ")
@@ -165,6 +214,29 @@ if __name__ == "__main__":
         ("CRLF line splice",    f"// hidden \\\r\n{CALL}(a);\n",                  False),
         ("raw string",          f'auto r = R"({CALL}(a))";\n',                    False),
         ("comment then code",   f"// note\n{CALL}(a);\n",                         True),
+        # ── digit separators. BOTH DIRECTIONS, because the fix is a narrowing and a
+        # narrowing that went too far would stop hiding real character literals --
+        # the failure this module exists to prevent.
+        ("digit separator",     f"int a = 10'000;\n{CALL}(a);\n",                 True),
+        ("hex digit separator", f"int a = 0x1F'FF;\n{CALL}(a);\n",                True),
+        ("char literal",        f"char c = '\\'';\n// {CALL}(a)\nint x;\n",       False),
+        # `u8'0'` has a digit on BOTH sides of the apostrophe and is still a character
+        # literal -- the case that rules out the cheap "surrounded by alphanumerics" test.
+        ("u8 char literal",     f"auto c = u8'0';\n{CALL}(a);\n",                 True),
+        # A fractional-constant OPENS with the dot. `c++ -std=c++23 -fsyntax-only` accepts
+        # `double x = .1'0;`. The first version of `_is_digit_separator` required the token
+        # to begin with a DIGIT and so ate this one -- caught in review, not by these
+        # controls, which is why the case is checked in rather than described.
+        ("leading-dot separator", f"double x = .1'0;\n{CALL}(a);\n",                True),
+        # ⚠️ THE MEMBER NAME ENDS IN A DIGIT ON PURPOSE, so this control DISCRIMINATES the
+        # widening above. Two earlier drafts did not: `obj.f'x'` and `obj.f'"'` both fail
+        # the predicate's FIRST guard (the character after `'` is not alphanumeric), so the
+        # walk-back never runs and the case passes whatever the walk-back says. Here both
+        # neighbours ARE alphanumeric, so a rule loosened to "the token contains a digit"
+        # calls this a separator, and the CLOSING apostrophe then opens a literal that
+        # swallows the call below. Proven RED against exactly that mutant.
+        ("member ending in a digit", f"auto c = obj.f9'0';\n{CALL}(a);\n",           True),
+        ("literal still hides", f'auto s = "x{CALL}(a)y";\nint x;\n',             False),
     ]
     ok = True
     for name, src, want in CASES:

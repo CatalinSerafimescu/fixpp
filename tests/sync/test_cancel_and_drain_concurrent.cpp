@@ -31,6 +31,7 @@
 #include <future>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -103,7 +104,10 @@ TEST(SeamCancelAndDrainConcurrent, MultipleDrainersSerialised) {
     for (int i = 0; i < D; ++i)
         drain_futs.push_back(asio::co_spawn(ioc, make_drainer(i), asio::use_future));
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SeamCancelAndDrainConcurrent::MultipleDrainersSerialised")) {
+        return;
+    }
     fh.get();
     for (auto& f : futs) f.get();
     for (auto& df : drain_futs) df.get();
@@ -139,7 +143,10 @@ TEST(SeamCancelAndDrainConcurrent, IdempotentDrainAfterEpochCompletes) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamCancelAndDrainConcurrent::IdempotentDrainAfterEpochCompletes")) {
+        return;
+    }
     f.get();
 
     EXPECT_TRUE(first_drain_ok) << "First cancel_and_drain() must succeed";
@@ -185,7 +192,10 @@ TEST(SeamCancelAndDrainConcurrent, NoDoubleResumeUnderConcurrentDrain) {
     };
 
     auto fp1 = asio::co_spawn(ioc, phase1(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fp1, "SeamCancelAndDrainConcurrent::NoDoubleResumeUnderConcurrentDrain")) {
+        return;
+    }
     fp1.get();
 
     // Phase 2: D concurrent drainers.

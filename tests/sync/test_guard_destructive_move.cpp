@@ -16,6 +16,8 @@
 #include <asio/use_future.hpp>
 #include <fixpp/core/sync/async_mutex.hpp>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 using fixpp::sync::async_lock_guard;
@@ -49,7 +51,10 @@ TEST(SeamGuardDestructiveMove, MoveConstructFromEngagedDisengagesSource) {
             // g2 destructor releases the lock
         },
         asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamGuardDestructiveMove::MoveConstructFromEngagedDisengagesSource")) {
+        return;
+    }
     f.get();
 
     EXPECT_TRUE(second_owns);
@@ -95,7 +100,10 @@ TEST(SeamGuardDestructiveMove, MoveAssignToEngagedUnlocksFirst) {
             if (r_retry.has_value()) ++unlock_sequence;
         },
         asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamGuardDestructiveMove::MoveAssignToEngagedUnlocksFirst")) {
+        return;
+    }
     f.get();
 
     EXPECT_EQ(unlock_sequence, 1);
@@ -121,7 +129,10 @@ TEST(SeamGuardDestructiveMove, SelfAssignmentIsNoOp) {
             still_owns = g.owns_lock();
         },
         asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamGuardDestructiveMove::SelfAssignmentIsNoOp")) {
+        return;
+    }
     f.get();
 
     EXPECT_TRUE(still_owns);
@@ -148,7 +159,10 @@ TEST(SeamGuardDestructiveMove, ReleaseDisengagesGuard) {
             mx->unlock();
         },
         asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamGuardDestructiveMove::ReleaseDisengagesGuard")) {
+        return;
+    }
     f.get();
 }
 

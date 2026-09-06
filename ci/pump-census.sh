@@ -197,6 +197,37 @@ get_re = re.compile(
     r"\b[A-Za-z_][A-Za-z_0-9]*\s*\.\s*get\s*\("
 )
 
+_RAW = re.compile(r'(?:u8|u|U|L)?R"([^\s()\\]{0,16})\(')
+
+
+def _is_digit_separator(src: str, i: int) -> bool:
+    """Is `src[i]` (an apostrophe) a C++14 digit separator rather than a char literal?
+
+    ⚠️ SECOND COPY OF THE FIX, and it is here because a fix landing on ONE of two
+    identical shapes is this repo's recurring class. The other is `ci/cxx_blank.py`,
+    where the defect was measured: a single `10'000` opened a literal that ran to the
+    next apostrophe and blanked every intervening line, hiding two labelled seam calls
+    from a gate that then said "every site label is unique".
+    Walk back to the token start and require it to BEGIN with a digit -- `u8'0'` also
+    has a digit either side of its apostrophe and IS a character literal.
+    """
+    if i == 0 or i + 1 >= len(src):
+        return False
+    if not (src[i - 1].isalnum() and src[i + 1].isalnum()):
+        return False
+    j = i - 1
+    while j >= 0 and (src[j].isalnum() or src[j] in "'."):
+        j -= 1
+    k = j + 1
+    # A fractional-constant may OPEN with the dot: `.1'0` is a valid literal and
+    # `c++ -fsyntax-only` accepts it. Requiring the first character to be a digit
+    # rejected it and put the blanker back in the state this predicate exists to
+    # prevent. Found by the batch-17 review, not by the controls written with the fix.
+    if k < len(src) and src[k] == ".":
+        k += 1
+    return k < len(src) and src[k].isdigit()
+
+
 def blank_non_code(source: str) -> str:
     """Blank comments and literals while preserving every newline."""
     out = []
@@ -211,10 +242,15 @@ def blank_non_code(source: str) -> str:
     while i < n:
         if state == "code":
             # Raw string literals, including u8R"...", uR, UR and LR.
-            raw = re.match(
-                r'(?:u8|u|U|L)?R"([^\s()\\]{0,16})\(',
-                source[i:]
-            )
+            # ⚠️ `.match(source, i)` -- NOT `re.match(pat, source[i:])`. The slice copies
+            # the whole remainder of the file at EVERY code character, which is O(n^2)
+            # bytes per file. Measured over the 656 files under tests/ (10.0 MB): one
+            # `blank_non_code` pass goes 13.3 s -> 4.1 s, and the two tier-1 gates that
+            # call it go 30.2 s -> 10.5 s and 13.2 s -> 4.6 s. Output is byte-identical
+            # over all 656 (the two forms can only differ under `^` or a lookbehind, and
+            # this pattern has neither). Hoisting `re.compile` alone buys nothing --
+            # Python already caches compiled patterns; the copy is the cost.
+            raw = _RAW.match(source, i)
             if raw:
                 token = raw.group(0)
                 delim = raw.group(1)
@@ -233,6 +269,9 @@ def blank_non_code(source: str) -> str:
                 out.extend((" ", " "))
                 i += 2
                 state = "block-comment"
+            elif source[i] == "'" and _is_digit_separator(source, i):
+                out.append(source[i])
+                i += 1
             elif source[i] in ('"', "'"):
                 quote = source[i]
                 out.append(" ")

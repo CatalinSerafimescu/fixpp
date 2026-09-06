@@ -120,7 +120,12 @@ from pathlib import Path
 root, sub, quiet = Path(sys.argv[1]), sys.argv[2], sys.argv[3] == "1"
 disposition = sys.argv[4] == "1"
 
-GUARD = re.compile(r"run_window_then_ready|pump_until_ready|pump_until\(|"
+# ⚠️ `run_to_exhaustion_or_report` is NOT reached by `run_window_then_ready` -- they
+# share the tail `then_ready` and nothing else, so a new spelling needs its own
+# alternative here and its own control below. Widening this without the control is how a
+# migration reads as unguarded and gets "migrated" a second time.
+GUARD = re.compile(r"run_window_then_ready|run_to_exhaustion_or_report|"
+                   r"pump_until_ready|pump_until\(|"
                    r"wait_for\([^)]*\)\s*[=!]=\s*std::future_status|"
                    r"std::future_status::ready")
 # A new function/TEST body resets what we know. Without this, a guarded `fut` in
@@ -155,7 +160,29 @@ def statements(lines):
     is one statement -- so anchoring on a single line makes such a future INVISIBLE.
     ⚠️ Splicing must FAIL SAFE: if the terminator is not found within MAX_SPLICE
     lines the depth tracking has gone wrong, so emit the buffered lines singly
-    rather than swallowing the region. A swallowed region is a silent false clean."""
+    rather than swallowing the region.
+
+    ⚠️ AND EMITTING SINGLY IS **ALSO** A SILENT FALSE CLEAN, ONE LEVEL UP. An earlier
+    revision of this docstring said a swallowed region is the false clean, implying the
+    single-line fallback is safe. It is not: the lone `auto fut = asio::co_spawn(` no
+    longer matches the `auto NAME = asio::co_spawn(...,` pattern, so `fut` never enters
+    `known`, and every later `.get()` on it is skipped by the `name not in known` guard.
+    The DECLARATION is dropped instead of the region, and the site vanishes with no row
+    and no diagnostic.
+
+    ⚠️ THIS IS A LIVE, MEASURED BLIND SPOT, NOT A HYPOTHETICAL. #289 batch 17 shipped a
+    residual reading of "3 remaining" that was really "3 THAT THIS SWEEP CAN SEE": five
+    live `ioc.run(); fut.get();` sites in caller-only files were invisible because a long
+    lambda body pushed the declaration past MAX_SPLICE. The discriminating experiment, and
+    the recipe to repeat it, is to collapse the lambda bodies so each declaration fits and
+    re-run -- the same sites then report. Re-derive the population:
+
+        git grep -n 'asio::co_spawn(' -- tests/ | ...   # then measure each declaration's span
+
+    ⚠️ RAISING MAX_SPLICE IS NOT OBVIOUSLY THE FIX and must not be done casually: it widens
+    the UNIVERSE every #289 count is computed over, so every historical figure in the
+    handover and the decision records would stop being comparable. Whoever changes it owes
+    a before/after on the whole corpus, not just on the site that motivated it."""
     buf, start, depth = [], None, 0
     for i, l in enumerate(lines):
         if start is None:
@@ -328,6 +355,25 @@ GUARDED_OK = """
     }
     auto r = fut.get();
 """
+# The batch-17 spelling. Its own control because the regex alternative is its own: a
+# `run_window_then_ready` control cannot prove this one is credited.
+GUARDED_RUN_OK = """
+    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "X")) {
+        fixpp::test_support::drain_or_report(ioc, "X");
+        ADD_FAILURE() << fixpp::test_support::kRunMiss << "X";
+        return;
+    }
+    auto r = fut.get();
+"""
+# ... and the shape it replaces, so the pair straddles: an unguarded `ioc.run()` + get()
+# must still READ unguarded. Without this the widening above could credit any nearby
+# `run(`-ish token and the control above would still pass.
+RUN_UNBOUNDED_BAD = """
+    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    ioc.run();
+    auto r = fut.get();
+"""
 ASSERT_OK = """
     auto fut = asio::co_spawn(ioc, fsm.drive(), asio::use_future);
     ioc.run_for(500ms);
@@ -380,6 +426,28 @@ STRING_PAREN_BAD = """
     f.drain();
     auto r = fut.get();
 """
+# ⚠️ THE SPLICE BOUNDARY, STRADDLED. `SPLIT_DECL_BAD` above splits over TWO lines, which
+# proves the splice works comfortably INSIDE the limit and says nothing about where it
+# gives up. These two are one line either side of MAX_SPLICE: the first is still spliced
+# and REPORTS, the second exceeds it and is DROPPED -- the live blind spot, pinned as a
+# known limitation rather than left to be rediscovered. If MAX_SPLICE moves, the second
+# case starts reporting and this control goes RED, which is the point.
+_FILLER = "\n".join(f"        // pad {k}" for k in range(MAX_SPLICE - 3))
+SPLICE_AT_LIMIT_BAD = f"""
+    auto fut = asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {{
+{_FILLER}
+    }}, asio::use_future);
+    ioc.run();
+    auto r = fut.get();
+"""
+_FILLER_OVER = "\n".join(f"        // pad {k}" for k in range(MAX_SPLICE + 2))
+SPLICE_OVER_LIMIT_INVISIBLE = f"""
+    auto fut = asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {{
+{_FILLER_OVER}
+    }}, asio::use_future);
+    ioc.run();
+    auto r = fut.get();
+"""
 # The declaration and its consumption on ONE statement must still be classified.
 DECL_AND_GET_BAD = """
     auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future); auto r = fut.get();
@@ -389,6 +457,8 @@ CONTROLS = [
     ("INDIRECT window (f.drain())      -> UNGUARDED", INDIRECT_BAD,      0, 1),
     ("indirect window, DOTLESS run()   -> UNGUARDED", DOTLESS_BAD,       0, 1),
     ("guarded by run_window_then_ready -> guarded",   GUARDED_OK,        1, 0),
+    ("guarded by run_to_exhaustion..   -> guarded",   GUARDED_RUN_OK,    1, 0),
+    ("bare ioc.run() then get()        -> UNGUARDED", RUN_UNBOUNDED_BAD, 0, 1),
     ("guarded by a wait_for assertion  -> guarded",   ASSERT_OK,         1, 0),
     ("`.get()` on a non-future         -> ignored",   NOT_A_FUTURE,      0, 0),
     ("idiom quoted in a COMMENT        -> ignored",   COMMENT_LOOKALIKE, 1, 0),
@@ -397,6 +467,8 @@ CONTROLS = [
     ("guard state LEAKING across tests -> UNGUARDED", CROSS_FUNCTION_BAD,1, 1),
     ("unbalanced '(' in a STRING       -> UNGUARDED", STRING_PAREN_BAD,  0, 1),
     ("declaration and get in ONE stmt  -> UNGUARDED", DECL_AND_GET_BAD,  0, 1),
+    ("decl spanning JUST UNDER MAX_SPLICE -> UNGUARDED", SPLICE_AT_LIMIT_BAD,       0, 1),
+    ("decl spanning OVER MAX_SPLICE -> INVISIBLE (known)", SPLICE_OVER_LIMIT_INVISIBLE, 0, 0),
 ]
 # The DISPOSITION axes get their own controls, straddling every boundary they
 # draw. Same rule as above: synthetic, and each names the class it must produce,

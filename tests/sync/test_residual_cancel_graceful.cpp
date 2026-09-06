@@ -34,6 +34,7 @@
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -124,7 +125,10 @@ TEST(SeamResidualCancelGraceful, SevenResidualWaitersCancelledWhileParked) {
             ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SeamResidualCancelGraceful::SevenResidualWaitersCancelledWhileParked")) {
+        return;
+    }
     fh.get();
     for (auto& f : futs) f.get();
 
@@ -184,7 +188,10 @@ TEST(SeamResidualCancelGraceful, CancelBeforeHolderReleasesRaceWithDrain) {
             ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SeamResidualCancelGraceful::CancelBeforeHolderReleasesRaceWithDrain")) {
+        return;
+    }
     fh.get();
     for (auto& f : futs) f.get();
 
@@ -229,7 +236,10 @@ TEST(SeamResidualCancelGraceful, MutexFreeAfterAllResidualsCancelled) {
             ioc, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SeamResidualCancelGraceful::MutexFreeAfterAllResidualsCancelled/fh")) {
+        return;
+    }
     fh.get();
     for (auto& f : futs) f.get();
 
@@ -243,7 +253,11 @@ TEST(SeamResidualCancelGraceful, MutexFreeAfterAllResidualsCancelled) {
         },
         asio::use_future);
     ioc.restart();  // io_context drained by the first run(); restart before re-running.
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, freshen,
+            "SeamResidualCancelGraceful::MutexFreeAfterAllResidualsCancelled/freshen")) {
+        return;
+    }
     freshen.get();
 
     EXPECT_TRUE(ok) << "After all residual waiters cancelled, mutex must be acquirable";

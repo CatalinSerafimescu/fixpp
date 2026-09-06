@@ -21,6 +21,8 @@
 #include <cstring>
 #include <fixpp/core/trace_context.hpp>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 bool is_all_zero(const fixpp::otel::trace_context& ctx) {
@@ -45,7 +47,10 @@ TEST(SeamTraceContextEngineFallback, PlainExecutorReturnsDefaultTraceContext) {
         },
         asio::use_future);
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "SeamTraceContextEngineFallback::PlainExecutorReturnsDefaultTraceContext")) {
+        return;
+    }
 
     const auto ctx = fut.get();
     EXPECT_TRUE(is_all_zero(ctx))
@@ -72,7 +77,10 @@ TEST(SeamTraceContextEngineFallback, PlainExecutorDoesNotThrow) {
         },
         asio::use_future);
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "SeamTraceContextEngineFallback::PlainExecutorDoesNotThrow")) {
+        return;
+    }
     fut.get();  // propagate any exception from the coroutine infrastructure
 
     EXPECT_FALSE(threw) << "current_trace_context() must NOT throw on a plain executor";

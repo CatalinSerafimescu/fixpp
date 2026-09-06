@@ -94,12 +94,26 @@
 // no source edit and no rebuild. It is a WEAKER witness than textual mutation and
 // does not replace it -- see the primitive.
 //
-// ⚠️ THE OTHER UNGUARDED `.get()`s IN THIS FILE ARE A DIFFERENT SHAPE AND ARE
-// DELIBERATELY NOT MIGRATED. They are `ioc.run(); stop_fut.get();` -- an UNBOUNDED
-// run, not a bounded window -- which is outside the population `ci/pump-census.sh`
-// scans and outside what this primitive replaces. Bounding them is a real question
-// and a separate one; derive them with `bash ci/pump-get-sweep.sh` rather than from
-// a count written here.
+// ⚠️ THE OTHER `.get()`s IN THIS FILE ARE A DIFFERENT SHAPE, AND #289 BATCH 17 MIGRATED
+// THEM -- this paragraph used to end "and are DELIBERATELY NOT MIGRATED", which stopped
+// being true. They are `ioc.run(); stop_fut.get();`, an UNBOUNDED run rather than a
+// bounded window, so `ci/pump-census.sh` still does not scan them and
+// `run_window_then_ready` is still the wrong primitive for them. They now call
+// `run_to_exhaustion_or_report`, which preserves the unbounded `run()` and only asks
+// whether the future came back ready. Bounding `run()` itself remains a separate and
+// open question. Derive the population with `bash ci/pump-get-sweep.sh --disposition`
+// rather than from a count written here.
+//
+// ⚠️ SOME OF THIS FILE'S NEW SITES SIT IN EARLY-EXIT GUARD BRANCHES that do not execute
+// when the acceptance path is live, so `ci/pump-seam-arm.sh` reports them NO-SUCH-SITE.
+// That is the driver being honest about an unreached site, not a defect -- and it is a
+// reason to READ a NO-SUCH-SITE before believing it names a missing label. ⚠️ The branches
+// are not all the same shape: some are `if (!acc)` (session not found / already freed) and
+// at least one is a state guard (`st == NotConnected || st == LogonSent`). An earlier
+// revision of this paragraph said all of them were `if (!acc)`, which is wrong and would
+// send the next reader looking for the wrong thing. Derive the set instead:
+//   bash ci/pump-seam-arm.sh linux-clang-debug ci/red-arms/batch17-labels.txt
+// and read each NO-SUCH-SITE label's own enclosing guard.
 //
 // The drain is the CLOCKED one, spelled `*h->engine->clock()`. `build_harness` above
 // installs a real `system_clock_source` into the `EngineConfig` and `std::move`s that
@@ -367,7 +381,10 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     if (!acc) {
         // stop cleanly then skip
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut, "EngineReadPumpTest::InOrderExactlyOnce/stop_fut1")) {
+            return;
+        }
         stop_fut.get();
         GTEST_SKIP() << "acceptor session not found — acceptance path not live";
     }
@@ -382,7 +399,10 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     auto st = acc->state();
     if (st == fsm_state::NotConnected || st == fsm_state::LogonSent) {
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut, "EngineReadPumpTest::InOrderExactlyOnce/stop_fut2")) {
+            return;
+        }
         stop_fut.get();
         GTEST_SKIP() << "session never reached established state (state=" << static_cast<int>(st)
                      << ") — Logon accept path not fully wired for this run";
@@ -396,7 +416,10 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     constexpr int expected = 2 + N;  // 4
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineReadPumpTest::InOrderExactlyOnce/stop_fut3")) {
+        return;
+    }
     stop_fut.get();
 
     EXPECT_EQ(next_inbound, expected)
@@ -465,7 +488,10 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     auto acc = h->engine->lookup(h->acc_id);
     if (!acc) {
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut, "EngineReadPumpTest::OverCapacityFrameClosesSession/stop_fut1")) {
+            return;
+        }
         stop_fut.get();
         GTEST_SKIP() << "acceptor session not found";
     }
@@ -474,7 +500,10 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     const auto next_inbound = static_cast<int>(acc->seqnum_mgr_test_access().next_inbound_unsafe());
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineReadPumpTest::OverCapacityFrameClosesSession/stop_fut2")) {
+        return;
+    }
     stop_fut.get();
 
     // STRENGTHENED GREEN assertion (T015): pump must have detected the oversized
@@ -540,7 +569,10 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
         // Session already freed — reached terminal state and was cleaned up.
         // This is the GREEN outcome: the pump drove the session through close().
         auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut, "EngineReadPumpTest::EofDisconnectsSession/stop_fut1")) {
+            return;
+        }
         stop_fut.get();
         SUCCEED() << "Session already freed (terminal state reached) — GREEN path.";
         return;
@@ -548,7 +580,10 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
 
     auto st = acc->state();
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineReadPumpTest::EofDisconnectsSession/stop_fut2")) {
+        return;
+    }
     stop_fut.get();
 
     // STRENGTHENED GREEN assertion (T015): pump must have detected the client EOF
@@ -677,7 +712,10 @@ TEST(EngineReadPumpTest, EngineStopDeliversCloseNotifyToPeer_Fixes348) {
            "whatever ended it, not the teardown";
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineReadPumpTest::EngineStopDeliversCloseNotifyToPeer_Fixes348")) {
+        return;
+    }
     stop_fut.get();
 
     expect_clean_peer_eof(hc, "Engine::stop()'s per-session transport close");
@@ -737,6 +775,10 @@ TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348)
     expect_clean_peer_eof(hc, "Session::close(terminal)'s post-root-cancel transport close");
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut,
+            "EngineReadPumpTest::SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348")) {
+        return;
+    }
     stop_fut.get();
 }

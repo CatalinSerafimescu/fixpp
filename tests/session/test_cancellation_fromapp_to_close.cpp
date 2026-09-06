@@ -37,6 +37,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -221,7 +222,10 @@ TEST(SeamCancellationFromAppToClose, IdempotentThreeStateModel) {
     {
         Session s{engine, cfg};
         auto r = asio::co_spawn(ctx, s.close(close_mode::graceful), asio::use_future);
-        ctx.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ctx, r, "SeamCancellationFromAppToClose::IdempotentThreeStateModel/r")) {
+            return;
+        }
         auto v = r.get();
         ASSERT_FALSE(v.has_value());
         EXPECT_EQ(v.error(), error::session_already_closed);
@@ -242,12 +246,18 @@ TEST(SeamCancellationFromAppToClose, IdempotentThreeStateModel) {
 
         ctx.restart();
         auto r1 = asio::co_spawn(ctx, s.close(close_mode::graceful), asio::use_future);
-        ctx.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ctx, r1, "SeamCancellationFromAppToClose::IdempotentThreeStateModel/r1")) {
+            return;
+        }
         EXPECT_TRUE(r1.get().has_value());
 
         ctx.restart();
         auto r2 = asio::co_spawn(ctx, s.close(close_mode::graceful), asio::use_future);
-        ctx.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ctx, r2, "SeamCancellationFromAppToClose::IdempotentThreeStateModel/r2")) {
+            return;
+        }
         auto v2 = r2.get();
         ASSERT_FALSE(v2.has_value());
         EXPECT_EQ(v2.error(), error::session_already_closed);

@@ -28,6 +28,7 @@
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -141,7 +142,10 @@ TEST(SyncAsanClean, CancelMidWaitNoUseAfterFree) {
         },
         asio::detached);
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SyncAsanClean::CancelMidWaitNoUseAfterFree")) {
+        return;
+    }
     fh.get();
     for (auto& f : futs) f.get();
 
@@ -191,7 +195,10 @@ TEST(SyncAsanClean, DrainPathNoHeapErrors) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, f,
+                                                          "SyncAsanClean::DrainPathNoHeapErrors")) {
+        return;
+    }
     f.get();
 
     EXPECT_EQ(total_completed.load(), N) << "Each waiter must complete exactly once";

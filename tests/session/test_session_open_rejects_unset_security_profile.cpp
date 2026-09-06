@@ -29,6 +29,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -57,7 +58,10 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, DefaultSentinelRejected) {
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, result, "SeamSessionOpenRejectsUnsetSecurityProfile::DefaultSentinelRejected")) {
+        return;
+    }
     auto val = result.get();
 
     ASSERT_FALSE(val.has_value())
@@ -82,7 +86,10 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, ExplicitUnsetRejected) {
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, result, "SeamSessionOpenRejectsUnsetSecurityProfile::ExplicitUnsetRejected")) {
+        return;
+    }
     auto val = result.get();
 
     ASSERT_FALSE(val.has_value());
@@ -109,7 +116,10 @@ TEST(SessionOpenValidationArms, NullExecutorRejected) {
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, result, "SessionOpenValidationArms::NullExecutorRejected")) {
+        return;
+    }
     auto val = result.get();
 
     ASSERT_FALSE(val.has_value());
@@ -132,7 +142,10 @@ TEST(SessionOpenValidationArms, DirectExecutorWithSpinLockRejected) {
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, result, "SessionOpenValidationArms::DirectExecutorWithSpinLockRejected")) {
+        return;
+    }
     auto val = result.get();
 
     ASSERT_FALSE(val.has_value());
@@ -156,7 +169,10 @@ TEST(SessionOpenValidationArms, OutOfRangeBackpressureModeRejected) {
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, result, "SessionOpenValidationArms::OutOfRangeBackpressureModeRejected")) {
+        return;
+    }
     auto val = result.get();
 
     ASSERT_FALSE(val.has_value());
@@ -176,7 +192,10 @@ TEST(SessionOpenValidationArms, NullDictionaryRejected) {
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, result, "SessionOpenValidationArms::NullDictionaryRejected")) {
+        return;
+    }
     auto val = result.get();
 
     ASSERT_FALSE(val.has_value());
@@ -199,14 +218,20 @@ TEST(SessionOpenValidationArms, SecondOpenRejected) {
     // First open: must succeed.
     {
         auto r1 = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, r1, "SessionOpenValidationArms::SecondOpenRejected/r1")) {
+            return;
+        }
         ioc.restart();
         ASSERT_TRUE(r1.get().has_value());
     }
     // Second open: must return session_already_open.
     {
         auto r2 = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, r2, "SessionOpenValidationArms::SecondOpenRejected/r2")) {
+            return;
+        }
         ioc.restart();
         auto val = r2.get();
         ASSERT_FALSE(val.has_value());
@@ -231,7 +256,10 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, NonSentinelAccepted) {
 
         Session s{engine, cfg};
         auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, result, "SeamSessionOpenRejectsUnsetSecurityProfile::NonSentinelAccepted")) {
+            return;
+        }
         auto val = result.get();
 
         EXPECT_TRUE(val.has_value()) << "Session::open() must NOT reject SecurityProfile with "

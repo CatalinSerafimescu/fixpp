@@ -89,6 +89,11 @@ fixpp_add_tls_test(NAME tls_pure_tests
         test_security_profile_empty_pinset.cpp            # T039 /clarify Q2
         test_certificate_lifetimebound.cpp                # T040 FR-017
 )
+# #289 batch 17: `support/pump_until_ready.hpp` includes `support/wait_until.hpp`, so a
+# relative `../support/...` spelling at the call site is not enough -- the header's OWN
+# includes need this root. Same line as tls_handshake_alloc_guard below.
+target_include_directories(tls_pure_tests PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests")
 target_compile_definitions(tls_pure_tests PRIVATE
     FIXPP_TLS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 # OpenSSL::Crypto resolves via Conan Release data even in Debug cmake build;

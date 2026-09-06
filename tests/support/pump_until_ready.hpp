@@ -177,8 +177,22 @@ inline constexpr const char* kWindowMiss =
     "#289: the operation was not ready when its preserved run window returned, and did "
     "not become ready within one boundary grace slice. Site: ";
 
-// The value a VALUE-RETURNING helper returns from its `run_window_then_ready`
-// miss branch, after it has reported the miss via `kWindowMiss`. A TEST body and
+// Failure text for a `run_to_exhaustion_or_report` that missed. A THIRD literal, for the
+// same reason `kWindowMiss` is not `kPumpBudgetMiss`: neither of the other two describes
+// what happened. No budget was granted (so not `kPumpBudgetMiss`) and no window was opened
+// either (so not `kWindowMiss`) -- `run()` was allowed to run until the context had nothing
+// left to do, and the future was STILL not ready. Stream the site after it.
+//
+// ⚠️ EVERY DRIVER THAT GRADES A FORCED ARM MATCHES ON A REPORT TAIL, so adding a literal
+// here without teaching the drivers is a silent demotion: an arm whose site reported
+// correctly reads SILENT ("the miss branch did not report"), i.e. a defect in correct code.
+// Re-derive who matches what with `git grep -n 'REPORT_TAIL' ci/`.
+inline constexpr const char* kRunMiss =
+    "#289: the io_context ran until it had no work left and the operation was STILL not "
+    "ready, so the get() that follows would have blocked forever. Site: ";
+
+// The value a VALUE-RETURNING helper returns from a #289 miss branch -- whichever
+// primitive missed -- after it has reported via `kWindowMiss` or `kRunMiss`. A TEST body and
 // a void helper just `return;`; a helper that owes its caller a value needs
 // something to hand back.
 //
@@ -887,6 +901,97 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
         // (where propagation would otherwise be legal): the exception policy for
         // every drain in this header is decided ONCE, here, not per call site.
     }
+}
+
+// `ioc.run()` -- UNBOUNDED, unchanged -- then report if the future is still not ready.
+// Returns true when the caller may `get()`. The whole miss branch is INSIDE, so a site is
+// one line: `if (!run_to_exhaustion_or_report(ioc, fut, "Site")) return;`
+//
+// THE SHAPE THIS REPLACES, and why it is a #289 hazard even though it has no window:
+//
+//     auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+//     ioc.run();
+//     auto val = fut.get();        // <- unconditional
+//
+// `run()` returns when the context has NO WORK LEFT, which is not the same as "the
+// coroutine finished". Two ways it returns early, and the second is the live one:
+//
+//   (a) the frame is suspended on something this context does not drive -- an op on a
+//       different executor, an external promise -- so the work count reaches zero with the
+//       frame still parked. `get()` then blocks forever.
+//   (b) THE CONTEXT WAS ALREADY STOPPED. `run()` returns IMMEDIATELY, having dispatched
+//       nothing, if `restart()` was not called after the previous `run()`. These tests
+//       reuse one `io_context` across several `co_spawn`/`run` pairs and hand-write the
+//       `restart()` between them; a missing one is a one-line edit away and turns the
+//       `get()` below into a permanent wedge with no diagnostic at all.
+//
+// ⚠️ THE MISS BRANCH IS ONE FIXED SHAPE HERE, WHICH IS WHY IT IS INSIDE. Every other #289
+// recipe spells its miss branch at the site because the branches VARY -- `drain_or_report`
+// vs `cancel_and_drain_or_report` vs a site-specific pump, and a value-returning helper
+// needs `kWindowMissSentinel`. At an unbounded-`run()` site none of that varies: there is
+// no clock to cancel against (these fixtures assign none) and no window to have missed. A
+// site that DOES need a different miss branch must call the two halves itself rather than
+// widening this one -- see `run_window_then_ready`, which is exactly that.
+// ⚠️ The cost of putting `ADD_FAILURE()` in a header is that gtest reports THIS file and
+// line rather than the caller's. Accepted deliberately: the report streams `site`, which
+// identifies the caller more precisely than a line number does and does not rot when the
+// file moves. `drain_or_report` already reports from here for the same reason.
+// ⚠️ AND THERE IS NO `try`/`catch` HERE, WHICH IS A CONDITION ON THE CALLER, NOT AN
+// OVERSIGHT. `ADD_FAILURE()` THROWS under `--gtest_throw_on_failure`, and `drain_or_report`
+// below carries an unconditional no-throw contract because it is reached from destructor
+// BODIES, where an escaping throw meets an implicitly-noexcept frame and terminates. This
+// helper is safe without one only while BOTH hold at the call site:
+//   (a) it sits in a frame that may throw -- a TEST body or a non-`noexcept` function; and
+//   (b) NO ENCLOSING `catch (...)` stands between it and the frame that should receive the
+//       throw.
+// ⚠️ (b) IS NOT A REFINEMENT OF (a); it is a second, independent condition, and the first
+// version of this comment had only (a). A site in
+// `tests/tls/test_load_credentials_cancellation.cpp` SATISFIED (a) and still failed: the
+// guard sat inside `try { … } catch (const std::system_error&) {…} catch (...) { flag = true; }`,
+// so under `--gtest_throw_on_failure` the ADD_FAILURE threw, the site's own `catch (...)`
+// swallowed it, `return;` never ran, and a #289 miss surfaced as
+// "cancellation must not throw arbitrary exceptions" -- blaming the code under test.
+// Found by the batch-17 hostile round, with a control at a non-`try` site in the same binary
+// under the same flag to make the attribution stick. A caller in a destructor needs the
+// guard `drain_or_report` has. Stated as the CONDITIONS rather than as a count of today's
+// callers, which would rot the moment one is added.
+//
+// ⚠️ WHAT THIS DOES **NOT** BUY, stated because it is the first thing a reader proposes: it
+// does not bound `run()` itself. If the context always has work -- a timer chain, a live
+// socket -- `run()` never returns and this guard is never reached. That is a DIFFERENT
+// hazard from #289's unconditional `get()`, it is covered by ctest's per-test timeout
+// (#337), and converting `run()` to `run_for(kPumpBudget)` here would trade a wedge for a
+// false RED on the slowest sanitiser leg. Deliberately not done.
+//
+// ⚠️ IT TOUCHES NO CONTEXT STATE ON THE SUCCESS PATH -- no `restart()`, unlike
+// `run_window_then_ready`. That is why this is a separate primitive rather than a
+// `window = infinite` argument: the migrated sites hand-write their own `restart()` calls
+// between pairs, so a helper that restarted would silently take over a decision each site
+// currently states, at every call site rather than at one. ⚠️ NOT "because a site reads the
+// stopped flag" -- that was the first
+// draft of this sentence and it is FALSE: every `stopped()` in the migrated files is
+// `engine.stopped()`, none is `ioc.stopped()`. The restart is the SITE's statement to make,
+// which does not depend on anyone reading the flag back. The miss branch does need a
+// restarted context, and `drain_or_report` calls `ioc.restart()` itself before pumping.
+//
+// ⚠️ THE FORCED PATH RETURNS WITHOUT RUNNING, and what that preserves here is NOT what
+// clause (b) of `run_window_then_ready` preserves. There, forcing preserves a SUSPENDED
+// frame, because that site's window had work queued and pending before it opened. Here
+// nothing has run at all, so forcing preserves an UNSTARTED one: the co_spawn'd coroutine
+// has not reached its first suspension point. The drain therefore STARTS the frame rather
+// than resuming it. Both exercise the drain against a live frame -- the obligation that
+// matters -- but a claim about WHICH suspension point the drain resumes is false at these
+// sites, and an earlier draft of this comment made it by copying clause (b) across.
+// [[feedback_a_forcing_mechanism_cannot_manufacture_the_state_it_preserves]]
+template <class Fut>
+[[nodiscard]] bool run_to_exhaustion_or_report(asio::io_context& ioc, Fut& fut, const char* site) {
+    if (!forced_miss_here(site)) {
+        ioc.run();
+        if (fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready) return true;
+    }
+    drain_or_report(ioc, site);
+    ADD_FAILURE() << kRunMiss << site;
+    return false;
 }
 
 // Drain `ioc` while REPEATEDLY releasing clock sleeps, and report whether it

@@ -34,6 +34,7 @@
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -93,7 +94,10 @@ TEST(SeamInFlightAcquirerCoverage, SingleInFlightResolvedBeforeDrainCompletes) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamInFlightAcquirerCoverage::SingleInFlightResolvedBeforeDrainCompletes")) {
+        return;
+    }
     f.get();
 
     EXPECT_TRUE(drain_ok) << "cancel_and_drain() must succeed";
@@ -156,7 +160,10 @@ TEST(SeamInFlightAcquirerCoverage, MultipleIterationsCoverRaceWindow) {
         };
 
         auto f = asio::co_spawn(ioc, run(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, f, "SeamInFlightAcquirerCoverage::MultipleIterationsCoverRaceWindow")) {
+            return;
+        }
         f.get();
 
         EXPECT_TRUE(drain_ok) << "Round " << round << ": cancel_and_drain() must succeed";
@@ -206,7 +213,10 @@ TEST(SeamInFlightAcquirerCoverage, PostDrainAcquiresAllGetDrained) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamInFlightAcquirerCoverage::PostDrainAcquiresAllGetDrained")) {
+        return;
+    }
     f.get();
 
     EXPECT_TRUE(drain_ok);
@@ -276,8 +286,15 @@ TEST(SeamInFlightAcquirerCoverage, ConcurrentDrainWithInFlightAcquirers) {
         },
         asio::use_future);
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fd1, "SeamInFlightAcquirerCoverage::ConcurrentDrainWithInFlightAcquirers/fd1")) {
+        return;
+    }
     fd1.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fd2, "SeamInFlightAcquirerCoverage::ConcurrentDrainWithInFlightAcquirers/fd2")) {
+        return;
+    }
     fd2.get();
 
     // After both drains complete, all K acquirers must have completed.
@@ -294,7 +311,10 @@ TEST(SeamInFlightAcquirerCoverage, ConcurrentDrainWithInFlightAcquirers) {
             post_drain_rejected = !r.has_value() && r.error() == error::sync_lock_drained;
         },
         asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fc, "SeamInFlightAcquirerCoverage::ConcurrentDrainWithInFlightAcquirers/fc")) {
+        return;
+    }
     fc.get();
     EXPECT_TRUE(post_drain_rejected) << "Post-drain acquires must be rejected";
 }
