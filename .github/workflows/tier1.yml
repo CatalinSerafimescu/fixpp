@@ -2494,7 +2494,11 @@ jobs:
       # code. `--self-test` is what caught it.
       - name: "Detector self-test — co_spawn named-closure audit (#354)"
         run: |
-          python3 tools/audit_co_spawn_named_closure.py --self-test \
+          # FIXPP_REPO_ROOT (#363): the self-test now includes screen arms pinned
+          # against two IN-TREE oracle files whose site counts the walker already
+          # reports, so it needs the repo root. Without it the arms fall back to
+          # cwd and fail loudly as "oracle unreadable" rather than silently.
+          FIXPP_REPO_ROOT="$PWD" python3 tools/audit_co_spawn_named_closure.py --self-test \
             --libclang "$LIBCLANG" --resource-dir "$RESOURCE_DIR"
 
       - name: "co_spawn named-closure audit (#354)"
