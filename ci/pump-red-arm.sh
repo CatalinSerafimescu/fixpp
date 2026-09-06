@@ -223,10 +223,13 @@ fi
 # ⚠️ A third error in the same sentence: it called the SOURCE STEM a "target". The author
 # then typed that stem into `cmake --build --target` and got `ninja: error: unknown
 # target`. A comment warning about confusable namespaces had the namespaces confused.
-# The two that matter -- target and ctest name -- share no derivation rule,
-# and matching `basename(command[0])` from `ctest --show-only=json-v1` against the target
-# name resolves NOTHING for 7 of the 9 targets this batch touches. So column 5 stays
-# explicit; what changes is that a wrong value is now caught HERE.
+# ⚠️ AND A FOURTH: the sentence that used to stand HERE repeated the very claim the
+# paragraph above labels FALSE -- that the `basename(command[0])` join "resolves NOTHING".
+# It survived the correction because that correction was written above it instead of
+# replacing it, so the file asserted a thing and its negation eight lines apart. Found by
+# a #289 batch-15 reviewer, deleted rather than reworded: a claim about what a join
+# resolves is a RESULT, and the operative conclusion needs none of it.
+# So column 5 stays explicit; what changes is that a wrong value is now caught HERE.
 #
 # ⚠️ CHECKED UP FRONT, FOR EVERY ROW, BEFORE THE FIRST MUTATION -- not per-arm inside the
 # loop. Per-arm, a bad row in position 6 is only reported after five rebuild-and-run

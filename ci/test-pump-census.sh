@@ -68,31 +68,39 @@ run_capture() {
     status=$?
 }
 
-# Runs $script against a tree that contains ONLY a decoy (no genuine
-# run_for/get() pair) and requires it to reach the "instrument produced zero
-# sites" liveness diagnostic — the pump-census.sh guard that refuses to read
-# an empty measurement as a clean tree (see the zero-match-tree case below).
-# This is the discriminating assertion for a single blanking class: if that
-# class's blanking is broken, the decoy is NOT blanked, the scanner finds a
-# real (spurious) site, the zero-sites branch is never reached, and this
-# fails for exactly that reason — independent of any other fixture or check.
+# Runs $script against a tree that contains ONLY a decoy (no genuine run_for/get()
+# pair) and requires it to read EXACTLY ZERO SITES.
 #
-# gate-b/r2 finding F5: the "was matched as a real site" check used to be
-# pinned against $baseline_pin ("tests/a.cpp:2"), a path this decoy tree
-# never contains. That is vacuous both ways: correct blanking -> zero sites
-# -> the liveness guard exits nonzero; broken blanking -> a spurious site at
-# some tests/decoy.cpp:N -> differs from tests/a.cpp:2 -> the plain diff
-# also exits nonzero. Nonzero either way, so the check could never redden
-# for its own stated reason — only the second (diagnostic) assertion below
-# ever caught a real regression.
+# ⚠️ THE REQUIRED OUTCOME INVERTED IN #289 BATCH 15, so read the arms below rather than
+# remembering this function. It used to require the run to FAIL with pump-census.sh's
+# "instrument produced zero sites" diagnostic -- a blanket refusal to read an empty
+# measurement as a clean tree. That refusal was correct for the whole life of the
+# migration and is now wrong: the direct population IS empty, so zero is the true answer,
+# and the guard was replaced by a seeded-positive control inside the scanner. A
+# decoy-only tree therefore now EXITS 0 against a zero-row pin.
 #
-# Fixed by pinning against $3, the EXACT site(s) this decoy would leak if
-# ITS OWN targeted blanking mutation were applied (measured by running the
-# real mutant against the real fixture — see the gate-b/r2 F4/F5 report).
-# Correct blanking -> zero sites -> liveness guard -> exit NONZERO (this
-# assertion passes). Broken blanking -> the leaked site(s) match $3 exactly
-# -> diff matches -> exit 0 (this assertion FAILS, discriminating for its
-# own named reason, independent of the second assertion below).
+# This is the discriminating assertion for a single blanking class, and it still is: if
+# that class's blanking is broken, the decoy is NOT blanked, the scanner finds a real
+# (spurious) site, that site diffs against the zero-row pin, and the run fails for exactly
+# that reason -- independent of any other fixture or check.
+#
+# It is also STRICTLY STRONGER than the form it replaced. The old one proved "the run
+# failed, and the reason was zero sites". This proves "the scanner emitted exactly zero
+# sites AND its seeded-positive control passed", because the control aborts the run before
+# any file is scanned -- so an exit 0 here is unreachable unless the scanner has been
+# demonstrated able to report non-zero.
+#
+# ── HISTORY THAT STILL APPLIES (gate-b/r2 finding F5) ────────────────────────
+# The "was matched as a real site" arm used to be pinned against $baseline_pin
+# ("tests/a.cpp:2"), a path this decoy tree never contains. That was vacuous BOTH ways:
+# correct blanking -> zero sites -> nonzero exit; broken blanking -> a spurious site at
+# some tests/decoy.cpp:N -> differs from tests/a.cpp:2 -> also nonzero. Nonzero either
+# way, so the arm could never redden for its own stated reason.
+#
+# Fixed by pinning that arm against $3, the EXACT site(s) this decoy would leak if ITS OWN
+# targeted blanking mutation were applied (measured by running the real mutant against the
+# real fixture). That fix is untouched by the inversion above: it governs the FIRST arm,
+# which still requires a nonzero exit against a leak pin.
 assert_decoy_alone_yields_zero_sites() {
     local label="$1" decoy_root="$2" leak_sites="$3"
     local leak_pin
