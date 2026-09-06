@@ -22,41 +22,71 @@
 #include <array>
 #include <asio/awaitable.hpp>
 #include <asio/experimental/awaitable_operators.hpp>
-#include <asio/redirect_error.hpp>
-#include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <chrono>
 #include <cstddef>
+#include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until; steady_time_point
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/wire/framer.hpp>
 #include <memory_resource>
 #include <span>
+#include <system_error>  // std::system_error — the shape Clock::sleep_until throws on cancel
 #include <vector>
 
 namespace fixpp::session::detail {
 
-// Re-awaits the timer `read_first_frame_bounded` armed exactly once, before
-// its loop (FR-017 / D-1b). MUST NOT call expires_after() — a re-arm here
-// would silently remove the deadline with every existing test still green
-// (research.md D-2).
+// Sleeps until the ABSOLUTE deadline `read_first_frame_bounded` computed exactly
+// once, before its loop (FR-017 / D-1b).
+//
+// ── ARM-ONCE IS NOW A PROPERTY OF THE SIGNATURE, NOT A RULE TO OBEY (#377) ───
+// This used to take an `asio::steady_timer&` armed by the caller with
+// `expires_after`, and carried a prohibition: "MUST NOT call expires_after() —
+// a re-arm here would silently remove the deadline with every existing test
+// still green". A prohibition is only as good as the next editor reading it.
+// Taking an absolute `steady_time_point` removes the thing being prohibited:
+// re-sleeping to the SAME absolute instant is idempotent, so this arm cannot
+// push the deadline forward no matter how many loop iterations call it. The
+// re-arm mutant now has to be written one level up, where the deadline is
+// computed — see the B6 note in read_first_frame_bounded_test.cpp, which is
+// the cell that kills it.
 //
 // Resets to total cancellation FIRST (FR-005/FR-006/D-2): co_spawn's initial
 // cancellation state is terminal-only, and `operator||` co_spawns each arm —
 // without this reset, Engine::stop()'s cancellation_type::total would be
 // silently swallowed by this arm [[feedback_asio_cospawn_total_cancellation_
-// default]].
+// default]]. `Clock::sleep_until` is a NESTED co_await, so it shares this
+// frame's cancellation state and inherits the reset; both shipped clocks then
+// honour the per-op slot (mock_clock.cpp's `cs.assign`, and system_clock_source
+// via `steady_timer::async_wait`), which is what lets the join's cancel of the
+// losing arm actually retire it.
 //
-// redirect_error (D-3): a bare use_awaitable arm throws operation_aborted on
-// EVERY established connection (the read arm winning is the common case, and
-// wait_for_one_success then cancels this arm). `ec` is deliberately ignored —
-// on the losing arm it is operation_aborted; the join's outcome.index() (not
-// this arm's ec) is what decides which arm won.
-inline asio::awaitable<void> await_deadline(asio::steady_timer& timer) {
+// The catch replaces the old `redirect_error` (D-3), which is not available
+// here because `sleep_until` returns an awaitable rather than an async op.
+// D-3's requirement is unchanged and is what both handlers exist for: NEITHER
+// ARM MAY THROW, because `outcome.index()` is the join's sole discriminator.
+// A bare `co_await clock.sleep_until(...)` throws operation_aborted on EVERY
+// established connection — the read arm winning is the common case, and
+// wait_for_one_success then cancels this arm — so an uncaught throw would make
+// the normal path an exception. Mirrors the same construction at
+// src/session/session.cpp's logout-timeout sleep.
+inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
+                                            fixpp::core::steady_time_point deadline) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
-    asio::error_code ec;
-    co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+    try {
+        co_await clock.sleep_until(deadline);
+    } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch) — see D-3 above: the
+                                          // join's outcome.index() is the control-flow decision,
+                                          // not this arm's error. Deliberately no action.
+        // Losing arm: operation_aborted, exactly what redirect_error absorbed.
+    } catch (...) {  // NOLINT(bugprone-empty-catch) — D-3 absorption.
+        // Any other throw (a clock implementation's own allocation, say) is
+        // absorbed for the same reason, and fails SAFE: this arm then completes
+        // normally, the join reports the deadline won, and the connection is
+        // rejected with transport_handshake_timeout. The alternative — letting
+        // it escape — breaks the discriminator D-3 rests on.
+    }
 }
 
 // ── Bounded first-frame read (FR-014 / E-2 / C1 steps 2-3) ──────────────────
@@ -76,17 +106,24 @@ inline asio::awaitable<void> await_deadline(asio::steady_timer& timer) {
 // [FR-014; E-2; data-model "Bounded first-frame read"]
 [[nodiscard]] inline asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(
     fixpp::transport::Transport& transport, std::vector<std::byte>& buf,
-    std::chrono::milliseconds deadline, std::size_t max_bytes) {
+    fixpp::core::Clock& clock, std::chrono::milliseconds deadline, std::size_t max_bytes) {
     using fixpp::core::error;
 
     using namespace asio::experimental::awaitable_operators;
 
-    auto exec = co_await asio::this_coro::executor;
-    asio::steady_timer timer{exec};
-    // Armed exactly ONCE, before the loop, with an absolute expiry (FR-017 /
-    // D-1b) — await_deadline (above) re-awaits this same timer on every
-    // iteration and never re-arms it.
-    timer.expires_after(deadline);
+    // Resolved to an ABSOLUTE instant exactly ONCE, before the loop (FR-017 /
+    // D-1b). await_deadline (above) re-sleeps to this same instant on every
+    // iteration, which is idempotent — see its header for why arm-once is now
+    // structural rather than a prohibition.
+    //
+    // ⚠️ THE RE-ARM MUTANT LIVES ON THIS LINE NOW. Moving this computation
+    // inside the loop (`clock.steady_now() + deadline` per iteration) pushes
+    // the deadline forward forever and is what B6 kills.
+    //
+    // `deadline` stays RELATIVE in the signature so every call site keeps its
+    // literal (`5s`, `50ms`) and contracts/read_first_frame_bounded.md's P-
+    // clauses still read as written; the clock is what makes it testable.
+    fixpp::core::steady_time_point const abs_deadline = clock.steady_now() + deadline;
 
     // 015 /simplify (Q-2) — the deadline must CANCEL the in-flight async_read_some,
     // not merely set a flag the loop checks between reads: a peer that completes the
@@ -116,14 +153,20 @@ inline asio::awaitable<void> await_deadline(asio::steady_timer& timer) {
         // The join (D-2): parallel_group::async_wait completes only once BOTH
         // arms have retired, so the loser's handler (the read's cancel, or the
         // deadline's own wait) is always retired before this co_await returns —
-        // no explicit timer.cancel()/transport.cancel() bookkeeping is needed on
-        // any return path below (FR-005/FR-006).
+        // no explicit sleep-cancel/transport.cancel() bookkeeping is needed on
+        // any return path below (FR-005/FR-006). This holds for the Clock arm
+        // (#377) on the same terms it held for the timer: the group cancels the
+        // loser through its per-op slot, and both shipped clocks complete a
+        // slot-cancelled sleep_until with operation_aborted rather than leaving
+        // it parked. A Clock that IGNORED the slot would hang here instead —
+        // that is the property to check when adding one, not a count.
         auto outcome =
             co_await (transport.async_read_some(std::span<std::byte>{read_buf.data(), want}) ||
-                      await_deadline(timer));
+                      await_deadline(clock, abs_deadline));
         if (outcome.index() == 1) {
             // Deadline arm won (D-3: outcome.index() is a sound discriminator
-            // because neither arm throws — await_deadline uses redirect_error).
+            // because neither arm throws — await_deadline absorbs, see its
+            // catch handlers).
             co_return std::unexpected(error::transport_handshake_timeout);
         }
         auto read_r = std::get<0>(std::move(outcome));

@@ -67,7 +67,10 @@
 #include <cstddef>
 #include <cstdio>
 #include <exception>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/system_clock_source.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/transport/test/mock_transport.hpp>
 #include <future>
 #include <optional>
@@ -76,6 +79,34 @@
 #include <thread>
 #include <vector>
 
+// ── #377: EVERY CELL NOW CHOOSES ITS TIMEBASE, AND MOST CHOOSE "FROZEN" ──────
+//
+// `read_first_frame_bounded` takes a `fixpp::core::Clock&`. Two shapes are used
+// below and the choice is per-cell, load-bearing, and NOT interchangeable:
+//
+//   frozen mock_clock — constructed and NEVER advanced. Its sleep_until parks
+//   the waiter in a map and completes it only on advance() or a per-op slot
+//   cancel (src/core/test/mock_clock.cpp), so THE DEADLINE CANNOT FIRE. Used by
+//   every cell that asserts a NON-timeout outcome. For those cells the deadline
+//   is a termination bound that must never compete, and freezing it deletes the
+//   competition instead of widening it.
+//
+//   system_clock_source — the real wall clock. Used ONLY by the two cells whose
+//   subject IS the deadline firing (B6) or the relative ORDER of two real
+//   elapsed waits (T1). Freezing those would make them vacuous.
+//
+// ⚠️ WHAT THIS REPLACED, so it is not "simplified" back. PR #376 raised three
+// cells' deadlines 50 ms → 5 s after `ctest --parallel 4` on windows-msvc-asan
+// diluted a 6 ms cell to 735 ms and the deadline beat the mechanism under test
+// (issue #377). That raise was interim and said so: 5 s was ~7x an observed
+// figure, not a proof, so a slow enough runner reproduces the same vacuous run.
+// A frozen clock has no figure to outrun. Do not reintroduce a wall-clock
+// deadline in a cell that asserts a non-timeout outcome, at any magnitude.
+//
+// ⚠️ A FROZEN CLOCK IS NOT A WEAKER ASSERTION. The deadline arm is still armed,
+// still joined, and still cancelled by the group on the winning path — what is
+// gone is only its ability to WIN A RACE IT WAS NEVER MEANT TO ENTER. The arm
+// being genuinely live is what B6/T2a demonstrate on the other side.
 namespace {
 
 using fixpp::core::error;
@@ -185,11 +216,14 @@ TEST(ReadFirstFrameBounded, B1) {
     ASSERT_EQ(s.inbound_bytes.size(), kMaxBytes);
 
     asio::io_context ioc;
+    // Frozen (#377): never advanced, so the deadline cannot fire and cannot
+    // race this cell's mechanism. See the timebase note at the top of file.
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
     auto fut = asio::co_spawn(
-        ioc, read_first_frame_bounded(mt, buf, std::chrono::milliseconds{1000}, kMaxBytes),
+        ioc, read_first_frame_bounded(mt, buf, clock, std::chrono::milliseconds{1000}, kMaxBytes),
         asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
@@ -225,11 +259,14 @@ TEST(ReadFirstFrameBounded, B3) {
     s.inbound_bytes = std::move(stream);
 
     asio::io_context ioc;
+    // Frozen (#377): never advanced, so the deadline cannot fire and cannot
+    // race this cell's mechanism. See the timebase note at the top of file.
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
     auto fut = asio::co_spawn(
-        ioc, read_first_frame_bounded(mt, buf, std::chrono::milliseconds{1000}, kMaxBytes),
+        ioc, read_first_frame_bounded(mt, buf, clock, std::chrono::milliseconds{1000}, kMaxBytes),
         asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
@@ -283,11 +320,14 @@ TEST(ReadFirstFrameBounded, B2) {
     ASSERT_EQ(s.inbound_chunks[1].size(), 3097u);
 
     asio::io_context ioc;
+    // Frozen (#377): never advanced, so the deadline cannot fire and cannot
+    // race this cell's mechanism. See the timebase note at the top of file.
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
     auto fut = asio::co_spawn(
-        ioc, read_first_frame_bounded(mt, buf, std::chrono::milliseconds{1000}, kMaxBytes),
+        ioc, read_first_frame_bounded(mt, buf, clock, std::chrono::milliseconds{1000}, kMaxBytes),
         asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
@@ -345,11 +385,14 @@ TEST(ReadFirstFrameBounded, B5) {
     s.read_latency = std::chrono::milliseconds{3};
 
     asio::io_context ioc;
+    // Frozen (#377): never advanced, so the deadline cannot fire and cannot
+    // race this cell's mechanism. See the timebase note at the top of file.
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
     auto fut = asio::co_spawn(
-        ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+        ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
         asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
@@ -421,11 +464,14 @@ TEST(ReadFirstFrameBounded, T1) {
     s.read_latency = std::chrono::milliseconds{1};
 
     asio::io_context ioc;
+    // REAL clock (#377): this cell's subject is a genuine elapsed wait — a
+    // frozen clock would make it vacuous. See the timebase note at top of file.
+    fixpp::core::system_clock_source clock{ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
     std::optional<expected_t<std::size_t>> result;
-    asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+    asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
                    [&result](std::exception_ptr ep, expected_t<std::size_t> r) {
                        EXPECT_FALSE(ep) << "T1: the spawned coroutine threw.";
                        result = std::move(r);
@@ -578,10 +624,13 @@ TEST(ReadFirstFrameBounded, B4) {
     s.read_latency = std::chrono::milliseconds{3};
 
     asio::io_context ioc;
+    // Frozen (#377): never advanced, so the deadline cannot fire and cannot
+    // race this cell's mechanism. See the timebase note at the top of file.
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
-    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
                               asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
@@ -660,10 +709,13 @@ TEST(ReadFirstFrameBounded, B6) {
     s.read_latency = std::chrono::milliseconds{7};
 
     asio::io_context ioc;
+    // REAL clock (#377): this cell's subject is a genuine elapsed wait — a
+    // frozen clock would make it vacuous. See the timebase note at top of file.
+    fixpp::core::system_clock_source clock{ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
-    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
                               asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
@@ -717,21 +769,55 @@ TEST(ReadFirstFrameBounded, B6) {
 // cancelling the read arm), and it runs to the FULL `kDeadline` before the
 // join retires — even though the read arm itself aborted almost immediately.
 //
-// Deterministic construction (T045/SC-016 — NOT a wall-clock threshold): an
-// intermediate timer the TEST owns is armed at `kIntermediate` (100ms)
-// against a helper `kDeadline` of 500ms — D-6.12's own figures, a one-sided
-// 5x margin (the delivered code retires in microseconds; the mutant cannot
-// retire before 500ms). `timer_fired_before_result` is set inside the
-// timer's own handler ONLY if `result` is still unset at that instant, so
-// the assertion is an ORDERING between two test-controlled events (did the
-// timer's handler run before the join retired?), not a comparison of
-// elapsed wall-clock against a constant. The context is always drained to
-// `result.has_value()` regardless of which fires first, matching D-6.2's
-// "drain to completion" discipline (T1, above) rather than aborting mid-flight.
+// ── THE PROMPTNESS CONSTRUCTION (#359 item 1, on top of #377's clock) ────────
+// There is no longer ANY wall-clock quantity in the discriminator.
+//
+// WHAT IT WAS. An intermediate 100 ms `asio::steady_timer` the test owned, armed
+// against a 500 ms helper deadline, with a flag set inside the timer's own
+// handler if `result` was still unset. A 5x margin — and the same construction
+// #357 removed from both cells in first_frame_stop_test.cpp for carrying a
+// latent false-failure mode: a process stall >= 100 ms after the arm makes the
+// reactor find the timer expired and enqueue its handler AHEAD of the join's
+// remaining work, setting the flag although the join did no extra work. T2a's
+// margin was TIGHTER than the 10x the engine cells had when one of them
+// false-failed in CI. It was never observed failing here; it was a construction
+// argument, and it is now moot rather than argued.
+//
+// WHAT IT IS. The clock is a FROZEN mock_clock, so the deadline CANNOT fire.
+// The only way this join can retire is for the group's cancel to actually reach
+// the deadline arm and abort its sleep. So:
+//
+//   delivered  — total reaches the arm (await_deadline resets to total), the
+//                arm's sleep is slot-cancelled, both arms retire, `result` is
+//                set. Measured in ~1 ms.
+//   mutant     — the arm's own cancel is silently dropped (terminal-only IN
+//                filter never sees `total`), nothing ever wakes the frozen
+//                clock's waiter, and the join CANNOT retire. Ever.
+//
+// The assertion is therefore "did the join retire at all", which is structural.
+//
+// ⚠️ THE WATCHDOG IS A HANG-TO-MESSAGE CONVERTER, NOT THE DISCRIMINATOR, and its
+// budget is derived from the ONE competing quantity rather than picked round.
+// Under the mutant the coroutine stays outstanding, so co_spawn's work guard
+// keeps the io_context alive and `run_one()` would BLOCK rather than return 0 —
+// a 120 s ctest kill with no message instead of a named failure. `run_one_for`
+// converts that into the assertion below.
+//
+// The budget MUST stay well under this cell's `read_latency` of 10 s. That
+// timer is REAL (mock_transport's own, not governed by the frozen clock), and
+// if it were allowed to elapse the read arm would complete NORMALLY, retiring
+// the join and turning the mutant GREEN — a spurious hit, the exact defect
+// class #337 shipped when a longer bounded pump let a real steady_timer satisfy
+// a wait the mock clock was supposed to govern. 2 s is 5x below that competing
+// 10 s and ~2000x above the delivered path's measured ~1 ms. Raising it toward
+// 10 s reintroduces the false pass; do not.
+constexpr auto kJoinWatchdog = std::chrono::seconds{2};
 TEST(ReadFirstFrameBounded, T2a) {
     constexpr std::size_t kMaxBytes = 4096;
+    // Inert under the frozen clock (it cannot fire); kept so the call reads like
+    // every other cell's. The promptness discriminator is the join retiring, not
+    // this value — see the construction note above.
     constexpr auto kDeadline = std::chrono::milliseconds{500};
-    constexpr auto kIntermediate = std::chrono::milliseconds{100};
 
     Script s;
     // 10s >> kDeadline (500ms): the read must be resolved ONLY by
@@ -739,6 +825,9 @@ TEST(ReadFirstFrameBounded, T2a) {
     s.read_latency = std::chrono::seconds{10};
 
     asio::io_context ioc;
+    // Frozen (#377): never advanced, so the deadline cannot fire and cannot
+    // race this cell's mechanism. See the timebase note at the top of file.
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
@@ -752,7 +841,7 @@ TEST(ReadFirstFrameBounded, T2a) {
         [&]() -> asio::awaitable<void> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
             entered_helper = true;
-            result = co_await read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes);
+            result = co_await read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes);
         },
         asio::bind_cancellation_slot(signal.slot(), [&](std::exception_ptr ep) { thrown = ep; }));
 
@@ -774,32 +863,24 @@ TEST(ReadFirstFrameBounded, T2a) {
         << "arm never became genuinely in-flight, so this cell would not exercise "
         << "D-2's join at all.";
 
-    bool timer_fired_before_result = false;
-    asio::steady_timer intermediate{ioc.get_executor()};
-    intermediate.expires_after(kIntermediate);
-    intermediate.async_wait([&](std::error_code ec) {
-        if (!ec && !result.has_value()) timer_fired_before_result = true;
-    });
-
     signal.emit(asio::cancellation_type::total);
 
+    // THE promptness assertion (SC-015/FR-015, D-6.12b) — see the construction
+    // note above this cell. It kills the bare-deadline-arm mutant, and it does
+    // so without comparing any elapsed time to any constant.
     while (!result.has_value()) {
-        ASSERT_GT(ioc.run_one(), 0u)
-            << "T2a: io_context ran out of work before the join completed — a broken "
-            << "cell (mis-wired timers), not a RED proof.";
+        ASSERT_GT(ioc.run_one_for(kJoinWatchdog), 0u)
+            << "T2a (SC-015/FR-015): the join did not retire. The clock here is a FROZEN "
+            << "mock_clock, so the deadline cannot fire and the ONLY way out of the join is "
+            << "for the group's cancel to reach the deadline arm and abort its sleep. That "
+            << "did not happen, which is exactly what the bare-deadline-arm mutant does: "
+            << "await_deadline without its reset to enable_total_cancellation() never sees "
+            << "`total` through its terminal-only IN filter, so its sleep is never woken. "
+            << "⚠️ Do NOT 'fix' this by raising kJoinWatchdog — at 10s this cell's own "
+            << "read_latency would retire the join instead and the mutant would pass.";
     }
-    intermediate.cancel();
-    ioc.poll();
 
     ASSERT_FALSE(thrown) << "T2a: the wrapper coroutine threw.";
-
-    // THE promptness assertion — kills the bare-deadline-arm mutant (D-6.12b).
-    EXPECT_FALSE(timer_fired_before_result)
-        << "T2a (SC-015/FR-015): the intermediate " << kIntermediate.count() << "ms timer "
-        << "fired BEFORE the join completed, against a " << kDeadline.count() << "ms helper "
-        << "deadline. Under the bare-deadline-arm mutant the deadline arm's own cancel is "
-        << "silently dropped, so the join cannot retire before the FULL deadline elapses "
-        << "(D-6.12b) — cancellation must be PROMPT, not merely eventual.";
 
     EXPECT_TRUE(is_cancellation_attributable(*result))
         << "T2a (SC-015): expected a cancellation-attributable outcome (transport_read_"
@@ -839,10 +920,13 @@ TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
     s.read_latency = std::chrono::milliseconds{1};
 
     asio::io_context ioc;
+    // Frozen (#377): never advanced, so the deadline cannot fire and cannot
+    // race this cell's mechanism. See the timebase note at the top of file.
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
-    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
                               asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
@@ -879,10 +963,13 @@ TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
     Script s;  // inbound_bytes left empty — immediate transport_read_eof.
 
     asio::io_context ioc;
+    // Frozen (#377): never advanced, so the deadline cannot fire and cannot
+    // race this cell's mechanism. See the timebase note at the top of file.
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
-    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
                               asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
