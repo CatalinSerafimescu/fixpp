@@ -136,8 +136,8 @@ if [ "$arms_file" = "--self-test" ]; then
     # loop reads the row with `read -r`, which packs every leftover field into the LAST
     # name. Before the sixth name was added there, this row's regex arrived as
     # "^<test>$<TAB><stem>", selected zero tests, and the run aborted BLAMING THE ARMS
-    # FILE -- a wrong verdict against a correct row. Deleting `xs_` from that `read` line
-    # turns this arm rc=0 -> rc=2, which is how it was proven to fire.
+    # FILE -- a wrong verdict against a correct row. Deleting the `_rest` sink from that `read`
+    # line turns this arm rc=0 -> rc=2, which is how it was proven to fire.
     printf 'tests/x.cpp\tanchor\tL_SIX\ttgt\t^%s$\tSomeGtestName\n' "$real" > "$st_dir/six.tsv"
     chk "a SIX-field row (explicit exec stem) is QUIET" 0 "$st_dir/six.tsv" "validated"
     # FIRE: seven fields is malformed -- the upper bound moved 5 -> 6, it did not vanish.
@@ -267,8 +267,10 @@ nosuch=""
 # 5-name read over a 6-column row would hand this validator a regex of
 # "<regex><TAB><exec stem>" -- which selects nothing, and would abort the run blaming
 # the arms file. That is precisely the two-parsers-one-file defect the comment above
-# describes, so the sixth name is read here even though this loop never uses it.
-while IFS=$'\t' read -r f_ a_ l_ tgt_ rx_ xs_ || [ -n "$f_" ]; do
+# describes, so the sixth name is read here even though this loop never uses it. It is
+# named `_rest`, not after column 6: it is a SINK for everything past the regex, so the
+# guard keeps working if a seventh column is ever added.
+while IFS=$'\t' read -r f_ a_ l_ tgt_ rx_ _rest || [ -n "$f_" ]; do
     case "$f_" in ''|\#*) continue ;; esac
     rx_="${rx_:-^$tgt_$}"
     n_=$(cd "build/$preset" && ctest -N -R "$rx_" 2>/dev/null | grep -c '^ *Test *#')

@@ -191,20 +191,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms,
                                                         "fuzz_admin_parse/logon")) {
-            // ⚠️ NO `ADD_FAILURE` AND NO `drain_or_report` HERE, DELIBERATELY -- both
-            // report through gtest, and in a libFuzzer TU that is a FALSE GREEN.
-            // MEASURED, not reasoned: a probe linking gtest into a libFuzzer target
-            // fired `ADD_FAILURE` outside any `TEST` body; it printed the failure and
-            // the process still exited 0. `ctest -L fuzz` replays the corpus with
-            // `-runs=0` and grades on the EXIT CODE, so a reported residual here would
-            // read as a pass. Escalating to `abort()` was the alternative and was
-            // rejected: a 50 ms miss on a random input under ASan+UBSan+fuzzer
-            // instrumentation is a timing observation, not a defect, so aborting would
-            // buy a flaky CI failure and no correctness signal.
-            // What this branch DOES buy is the whole of #289: there is no longer an
-            // unconditional `.get()`, so a genuinely wedged input can never hang the
-            // fuzzer forever. Abandoning the input is the disposition this file already
-            // ships on its `catch (...)` paths.
+            // Same disposition as the two other sites; the rationale -- including why
+            // `abort()` was rejected -- is stated once at `fuzz_admin_parse/open`.
             return 0;
         }
         try {

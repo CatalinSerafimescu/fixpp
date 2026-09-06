@@ -60,7 +60,7 @@ tmp="$(mktemp -d)" || setup_fail "mktemp -d failed"
 trap 'rm -rf "$tmp"' EXIT
 
 checks=0
-expected_checks=26
+expected_checks=28
 pass() { checks=$((checks + 1)); }
 
 run_capture() {
@@ -106,8 +106,22 @@ assert_decoy_alone_yields_zero_sites() {
         fail "$label decoy (alone) was matched as a real site: $output"
     pass
 
-    run_capture bash "$script" --root "$decoy_root" --expected "$baseline_pin"
-    printf '%s\n' "$output" | grep -Fq 'instrument produced zero sites' ||
+    # ⚠️ THIS ARM'S ORACLE CHANGED IN #289 BATCH 15, AND NOT COSMETICALLY. It used to
+    # require the literal 'instrument produced zero sites' -- the census's blanket refusal
+    # to emit an empty reading. That refusal was correct for the whole life of the
+    # migration and is now wrong: the direct population IS empty, so zero is the true
+    # answer and the guard was replaced by a seeded-positive control INSIDE the scanner.
+    # Deleting the guard therefore deleted this arm's discriminating oracle, and the
+    # replacement must not be a weaker one.
+    #
+    # It is STRONGER than what it replaces. The old form proved only "the run failed, and
+    # the reason was zero sites". This proves "the scanner emitted EXACTLY zero sites AND
+    # its seeded-positive control passed" -- because the control aborts the run before any
+    # file is scanned, an exit 0 here is unreachable unless the scanner is demonstrably
+    # able to report non-zero. Blanking that breaks in the dangerous direction (a decoy
+    # matched) yields a row, diffs against the zero-row pin, and exits non-zero.
+    run_capture bash "$script" --root "$decoy_root" --expected "$zero_row_pin"
+    [ "$status" -eq 0 ] ||
         fail "$label decoy (alone) failed for the wrong reason (not blanked correctly): $output"
     pass
 }
@@ -168,6 +182,14 @@ EOF
 baseline_pin="$tmp/baseline.pin"
 printf '%s\n' 'tests/a.cpp:2' >"$baseline_pin" ||
     setup_fail "baseline pin write failed: $baseline_pin"
+
+# A pin with ZERO SITE ROWS but a non-empty FILE. Both halves are load-bearing: the
+# census accepts zero rows (the production pin has none) and REJECTS a zero-byte file
+# (that is a truncation, not a clean tree), so a fixture pin must carry a header to be
+# a valid empty pin at all.
+zero_row_pin="$tmp/zero-row.pin"
+printf '%s\n' '# intentionally no site rows' >"$zero_row_pin" ||
+    setup_fail "zero-row pin write failed: $zero_row_pin"
 
 # ── 2-3: known-good fixture produces EXACTLY the expected path:line ─────────
 run_capture bash "$script" --root "$fixture" --expected "$baseline_pin"
@@ -373,9 +395,32 @@ run_capture bash "$script" --root "$zero" --expected "$baseline_pin"
     fail "zero-match tree passed"
 pass
 
-printf '%s\n' "$output" | grep -Fq \
-    'instrument produced zero sites' ||
-    fail "zero-match failure was not attributed to instrument liveness"
+printf '%s\n' "$output" | grep -Fq -- '-tests/a.cpp:2' ||
+    fail "zero-match failure was not attributed to the site that went missing: $output"
+pass
+
+# ── 17: a zero-match tree against a ZERO-ROW pin is now a legitimate PASS ────
+# The counterpart to 15-16, and the assertion that would have caught this batch's
+# own regression: emptiness is no longer a failure mode, it is a state the pin can
+# express. If a future change reinstates a blanket "zero sites is an error" guard,
+# 15-16 keep passing and only THIS goes red.
+run_capture bash "$script" --root "$zero" --expected "$zero_row_pin"
+[ "$status" -eq 0 ] ||
+    fail "a zero-match tree against a zero-row pin must PASS: $output"
+pass
+
+# ── 18: the seeded-positive control is LIVE -- break the scanner, it must fire ─
+# Without this, every assertion above that now rests on "exit 0 implies the control
+# passed" would rest on a control nobody proved could fail. Mutates a COPY; the
+# repo script is untouched.
+mutant="$tmp/mutant-census.sh"
+sed 's/run_re = re\.compile(r"\\.run_for\\s\*\\(")/run_re = re.compile(r"\\.NEVER_MATCHES\\s*\\(")/' \
+    "$script" >"$mutant" || setup_fail "mutant write failed"
+grep -Fq 'NEVER_MATCHES' "$mutant" ||
+    setup_fail "control-liveness mutation did not apply -- the arm would be vacuous"
+run_capture bash "$mutant" --root "$fixture" --expected "$baseline_pin"
+printf '%s\n' "$output" | grep -Fq 'seeded-positive control FAILED' ||
+    fail "a scanner that cannot match anything did not trip its own control: $output"
 pass
 
 # ── 17-18: missing/wrongly-rooted tests/ fails loudly, not silently-empty ───

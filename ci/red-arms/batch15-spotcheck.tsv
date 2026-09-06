@@ -27,9 +27,9 @@
 # ⚠️ COLUMN 6 (exec stem) IS LOAD-BEARING FOR NEARLY EVERY ROW HERE, and its absence
 # would have read as a defect. The driver asserts the arm's own test RAN by matching
 # the label's stem against `[ RUN ]` lines, which works only while a label names a
-# test. These labels name HELPERS -- `run_sync` has 31 callers and no single test to
-# be named after -- so without column 6 every row would report INCONCLUSIVE for a
-# reason about naming rather than about the site. The column, and this consequence,
+# test. These labels name HELPERS with no single test to be named after, so without
+# column 6 every row would report INCONCLUSIVE for a reason about naming rather than
+# about the site. The column, and this consequence,
 # were added in this same change; see ci/pump-red-arm.sh's arms-file docs.
 #
 # ⚠️ NO `fuzz_admin_parse/*` ARM. Those three sites report NOTHING by design (see
@@ -61,7 +61,7 @@
 #   EOF
 #
 # file <TAB> anchor <TAB> label <TAB> cmake target <TAB> ctest regex <TAB> exec stem
-tests/session/test_fixt_logon_establishment.cpp	auto run_sync(Setup& s, Fn&& fn)	run_sync	session_fixt_logon_establishment	^session_fixt_logon_establishment$	FixtLogonEstablishment
+tests/session/test_fixt_logon_establishment.cpp	auto run_sync(FixtSetup& s, Fn&& fn)	run_sync	session_fixt_logon_establishment	^session_fixt_logon_establishment$	FixtLogonEstablishment
 tests/session/test_seqnum_drain_on_close.cpp	auto run_coro(Coro&& c) {	MinimalSession::run_coro	session_pure_tests	^session_pure_tests$	SeqnumDrainOnClose
 tests/session/test_heartbeat_cadence_8cell.cpp	bool drive_to_active(fixpp::session::Session& s) {	drive_to_active/open	session_pure_tests	^session_pure_tests$	HeartbeatCadence8Cell
 tests/session/test_store_fail_reconcile_readfail.cpp	sess->send(std::span<const std::byte>(payload)), asio::use_future);	ReconcileFixture::drive/send	session_store_tests	^session_store_tests$	StoreFailReconcileReadFail

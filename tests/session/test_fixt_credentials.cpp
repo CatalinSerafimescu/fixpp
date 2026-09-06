@@ -346,26 +346,6 @@ constexpr std::string_view kMinimalFix50sp2XmlCreds = R"xml(
 }
 
 // Run a coroutine synchronously on an io_context.
-// ⚠️ TAKES THE FIXTURE, NOT THE `io_context`, AND THAT IS A MEASUREMENT RESULT.
-// The first migration of this helper took only `ioc` and drained with the clock-free
-// `drain_or_report`, on the reasoning that a free helper has no clock in scope. The seam
-// arm then reported RESIDUAL here: the fixture owns a `mock_clock`, a forced miss leaves a
-// frame parked on it, and a mock clock never advances on its own -- drain survivor case (i),
-// which only `cancel_sleeps()` can clear. So the parameter widened to reach the clock.
-// The `Setup` template parameter exists only because this helper is defined ABOVE the
-// fixture struct it is now used with; it is not a generalisation and has one instantiation.
-template <typename Setup, typename Fn>
-auto run_sync_creds(Setup& s, Fn&& fn)
-    -> decltype(asio::co_spawn(s.ioc, fn(), asio::use_future).get()) {
-    auto fut = asio::co_spawn(s.ioc, fn(), asio::use_future);
-    if (!fixpp::test_support::run_window_then_ready(s.ioc, fut, 200ms, "run_sync_creds")) {
-        fixpp::test_support::cancel_and_drain_or_report(s.ioc, *s.clock, "run_sync_creds");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "run_sync_creds";
-        return std::unexpected(fixpp::test_support::kWindowMissSentinel);
-    }
-    return fut.get();
-}
-
 // ── Shared fixture setup ──────────────────────────────────────────────────────
 
 struct CredsFixtSetup {
@@ -418,6 +398,30 @@ struct CredsFixtSetup {
         return cfg;
     }
 };
+
+// ⚠️ TAKES THE FIXTURE, NOT THE `io_context`, AND THAT IS A MEASUREMENT RESULT.
+// The first migration of this helper took only `ioc` and drained with the clock-free
+// `drain_or_report`, on the reasoning that a free helper has no clock in scope. The seam
+// arm then reported RESIDUAL here: the fixture owns a `mock_clock`, a forced miss leaves a
+// frame parked on it, and a mock clock never advances on its own -- drain survivor case (i),
+// which only `cancel_sleeps()` can clear. So the parameter widened to reach the clock.
+// ⚠️ IT TAKES `CredsFixtSetup&` CONCRETELY, and that is the second half of the fix. The first
+// draft kept the helper ABOVE the fixture and reached the type through a `Setup` template
+// parameter -- a fake generalisation with exactly one instantiation, whose own comment had
+// to apologise for itself, and which silently accepted anything carrying `.ioc`/`.clock`.
+// Moving the helper below the struct costs nothing (its first caller is far below both)
+// and lets the signature state the constraint instead of a comment.
+template <typename Fn>
+auto run_sync_creds(CredsFixtSetup& s, Fn&& fn)
+    -> decltype(asio::co_spawn(s.ioc, fn(), asio::use_future).get()) {
+    auto fut = asio::co_spawn(s.ioc, fn(), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(s.ioc, fut, 200ms, "run_sync_creds")) {
+        fixpp::test_support::cancel_and_drain_or_report(s.ioc, *s.clock, "run_sync_creds");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "run_sync_creds";
+        return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+    }
+    return fut.get();
+}
 
 // ── T019 / W6 ─────────────────────────────────────────────────────────────────
 //

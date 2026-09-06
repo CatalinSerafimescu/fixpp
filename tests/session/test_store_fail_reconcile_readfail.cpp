@@ -279,6 +279,10 @@ protected:
         bool read_fired = false;
     };
 
+    // ⚠️ EVERY MISS BRANCH BELOW POISONS `send_r`, and that is not defensive style.
+    // A default-constructed `expected_t<void>` HAS a value, so an early return that left
+    // the field alone would report SUCCESS to every caller of `drive()`. Stated here once
+    // because the three sites answer it identically; the sites carry a pointer.
     Driven drive(std::shared_ptr<ReconcileFaultStoreFactory> factory) {
         fixpp::session::SessionConfig cfg;
         cfg.role = session_role::initiator;
@@ -321,9 +325,7 @@ protected:
                                                         "ReconcileFixture::drive/logon")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ReconcileFixture::drive/logon");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReconcileFixture::drive/logon";
-            // The miss branch must POISON `send_r`: a default-constructed
-            // expected_t<void> HAS a value, so an early return that left it alone
-            // would report success to every caller.
+            // Poison `send_r` -- see the note above `drive()`.
             out.send_r = std::unexpected(fixpp::test_support::kWindowMissSentinel);
             out.state = sess->state();
             return out;
@@ -338,9 +340,7 @@ protected:
                                                         "ReconcileFixture::drive/send")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ReconcileFixture::drive/send");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReconcileFixture::drive/send";
-            // The miss branch must POISON `send_r`: a default-constructed
-            // expected_t<void> HAS a value, so an early return that left it alone
-            // would report success to every caller.
+            // Poison `send_r` -- see the note above `drive()`.
             out.send_r = std::unexpected(fixpp::test_support::kWindowMissSentinel);
             out.state = sess->state();
             return out;

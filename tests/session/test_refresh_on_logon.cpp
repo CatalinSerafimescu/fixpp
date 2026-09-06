@@ -459,9 +459,14 @@ static ReconnectInitiatorFixture make_reconnect_initiator(
         // `Fixture::feed`. Whether that suffices is measured by the seam arm.
         fixpp::test_support::drain_or_report(fix.ioc, "make_reconnect_initiator/open");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_reconnect_initiator/open";
-        // Return the fixture VALID, not null: every caller does
-        // `auto& fix = *result.fix;` unconditionally, so nulling it would trade
-        // a hang for a null dereference. The state EXPECT below fails too.
+        // Return the fixture VALID, not null. The condition, which is what matters and
+        // does not rot: every caller dereferences `result.fix` WITHOUT checking it, so
+        // nulling would trade a hang for a null dereference. Verified for both this
+        // helper's callers and `make_acceptor_notconnected`'s -- re-derive rather than
+        // trusting this line, the callers are the thing that moves:
+        //   git grep -n -A2 'make_reconnect_initiator(\|make_acceptor_notconnected(' \
+        //     -- tests/session/test_refresh_on_logon.cpp
+        // The state EXPECT below fails too, so the test does not pass quietly.
         return result;
     }
     (void)open_fut.get();
@@ -519,13 +524,9 @@ static AcceptorFixture make_acceptor_notconnected(
     auto open_fut = asio::co_spawn(fix.ioc, fix.session->open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, open_fut, 1s,
                                                     "make_acceptor_notconnected/open")) {
-        // Clock-free drain: `Fixture` has no clock member, same as the sibling
-        // `Fixture::feed`. Whether that suffices is measured by the seam arm.
+        // Clock-free drain and valid-fixture return, both as at `make_reconnect_initiator/open`.
         fixpp::test_support::drain_or_report(fix.ioc, "make_acceptor_notconnected/open");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "make_acceptor_notconnected/open";
-        // Return the fixture VALID, not null: every caller does
-        // `auto& fix = *result.fix;` unconditionally, so nulling it would trade
-        // a hang for a null dereference. The state EXPECT below fails too.
         return result;
     }
     (void)open_fut.get();

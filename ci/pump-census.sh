@@ -156,6 +156,14 @@ actual="$tmp/actual.txt"
 # that could not express "empty" could not express the truth. A zero-byte file
 # would say it ambiguously -- indistinguishable from a truncation -- so the
 # emptiness is stated IN the file and the rows are compared after stripping.
+# ⚠️ THE RAW FILE MUST BE NON-EMPTY EVEN THOUGH ZERO ROWS ARE LEGAL. Those are
+# different claims and the first draft shipped only the second: it deleted the old
+# `[ -s "$expected" ]` guard outright, so truncating the pin to zero bytes read as a
+# clean tree -- the exact case the paragraph above says the design is against. A pin
+# with no sites still carries its header, so "no rows" and "no bytes" stay separable.
+[ -s "$expected" ] ||
+    fail "expected-site pin is EMPTY AS A FILE: $expected -- zero site rows are legal, but the file must still carry its header; a zero-byte file is a truncation, not a clean tree"
+
 pin="$tmp/expected.txt"
 sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$expected" >"$pin"
 
@@ -302,6 +310,11 @@ def scan(source):
 # The far-`get()` negative is NOT a defect being tolerated -- it is blind spot
 # (b) from this file's header, pinned as a PROPERTY so that widening the
 # lookahead is a deliberate act that breaks this control and must be re-argued.
+# ⚠️ THAT ONLY WORKS IF THE `get()` SITS AT EXACTLY `window + 7`, THE FIRST LINE
+# OUTSIDE THE WINDOW, and the first draft of this fixture put it at +9 -- so a
+# widening to 7 or 8 would have left the control GREEN while the comment above
+# claimed otherwise. It is +7 now: count the lines before changing them, because
+# the slack is invisible and the claim is not.
 CONTROL = """\
 void positive() {
     auto fut = asio::co_spawn(ioc, c(), asio::use_future);
@@ -327,8 +340,6 @@ void far_get() {
     int c2 = 0;
     int d = 0;
     int e = 0;
-    int f2 = 0;
-    (void)a; (void)b; (void)c2; (void)d; (void)e; (void)f2;
     (void)fut.get();
 }
 """

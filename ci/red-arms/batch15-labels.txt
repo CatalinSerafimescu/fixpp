@@ -7,18 +7,14 @@
 # `ADD_FAILURE` + `return;`) drops straight in. Every site here sits in a helper
 # that RETURNS A VALUE, so each one also had to answer "what does the miss branch
 # return, and does the caller notice?" -- and the answers differ per helper. They
-# are enumerated at the sites, not here, because a list of dispositions in a second
-# file is a copy that rots. What is worth stating once is the SHAPE of the question:
+# are enumerated at the sites, not here, because a list of dispositions in a second file
+# is a copy that rots.
 #
-#   - an existing error channel     -> poison it (`std::unexpected(kWindowMissSentinel)`)
-#   - an existing bool channel      -> `return false` (drive_to_active already did)
-#   - a struct with an error field  -> poison the FIELD; a default-constructed
-#                                      `expected_t<void>` HAS a value, so an early
-#                                      return that left it alone reports SUCCESS
-#   - a fixture the caller derefs   -> return it VALID, never null; every caller of
-#     unconditionally                  `make_reconnect_initiator` does
-#                                      `auto& fix = *result.fix;` with no check, so
-#                                      nulling trades a hang for a null dereference
+# ⚠️ AND THE FIRST DRAFT OF THIS FILE BROKE THAT RULE IN THE SENTENCE THAT STATES IT --
+# it followed the words above with a four-bullet disposition list, which is exactly the
+# second copy the rule forbids. Deleted rather than corrected. Read the dispositions at
+# the sites; `ci/red-arms/batch15-spotcheck.tsv` carries the only other copy that earns
+# its place, because each of its rows maps 1:1 onto an arm the driver actually runs.
 #
 # ⚠️ TWO LABELS HERE ARE A PREFIX OF, OR PREFIXED BY, ANOTHER LABEL IN THE TREE:
 # `run_sync` inside `run_sync_creds`, and `make_acceptor` inside
