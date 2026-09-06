@@ -71,14 +71,19 @@ lines = pathlib.Path(path).read_text().split('\n')
 # clang-format (C++ concatenates adjacent literals), so match on a distinctive tail
 # rather than on the whole label as one token.
 tail = label.rsplit('/', 1)[-1]
-gi = None
-for k, l in enumerate(lines):
-    if 'run_to_exhaustion_or_report(' in l:
-        blk = '\n'.join(lines[k:k + 6])
-        if tail in blk and 'return;' in blk:
-            gi = k
-            break
-assert gi is not None, "guard block for %s not found" % label
+# ⚠️ COLLECT ALL MATCHES AND REQUIRE EXACTLY ONE. Taking the FIRST match would silently
+# mutate a different site if the label tail ever stopped being unique, or if clang-format
+# reflowed a neighbouring guard into range -- and a mutation applied to the wrong site is
+# an arm that grades something else while reporting the label it was asked for. The
+# window is deliberately wider than the block (12 lines, the same bound the close-brace
+# search uses) so a reflow makes this AMBIGUOUS and loud rather than narrow and wrong.
+hits = [k for k, l in enumerate(lines)
+        if 'run_to_exhaustion_or_report(' in l
+        and tail in '\n'.join(lines[k:k + 12])
+        and 'return;' in '\n'.join(lines[k:k + 12])]
+assert len(hits) == 1, ("expected exactly one guard block whose label tail is %r; found %d "
+                        "at lines %s" % (tail, len(hits), [h + 1 for h in hits]))
+gi = hits[0]
 gj = gi
 while lines[gj].strip() != '}':
     gj += 1
