@@ -810,8 +810,19 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         frame_buf.reserve(512);
         std::size_t first_frame_len = 0;
         {
+            // engine_cfg.clock (#377): the deadline runs on the engine's Clock
+            // rather than a private asio::steady_timer, so it is the same seam
+            // every other deadline in the engine uses and the helper's own cells
+            // can drive it with mock_clock instead of racing wall time.
+            //
+            // Lifetime: validate_engine_config rejects a null clock before any
+            // loop is spawned, and this loop holds `counter_guard guard{counter}`
+            // for its whole body while stop() joins outstanding_counter_ to zero
+            // (step 3) before anything the engine owns is torn down — the same
+            // ordering the accept loop already relies on for listeners_.
             auto read_r = co_await read_first_frame_bounded(
-                *transport, frame_buf, kFirstFrameDeadline, kFirstFrameMaxBytes);
+                *transport, frame_buf, *engine_cfg.clock, kFirstFrameDeadline,
+                kFirstFrameMaxBytes);
             if (!read_r.has_value()) {
                 transport->close();
                 continue;  // timeout / over-budget / read-error → reclaim

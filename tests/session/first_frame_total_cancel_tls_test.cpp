@@ -72,7 +72,9 @@
 #include <chrono>
 #include <cstddef>
 #include <exception>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
@@ -203,14 +205,20 @@ TEST(FirstFrameTotalCancelTls, LegA_JoinedHelper_CancellationAttributable) {
     std::exception_ptr thrown;
     std::vector<std::byte> buf;
     constexpr std::size_t kMaxBytes = 4096;
-    constexpr auto kDeadline = 5000ms;  // internal helper deadline — must not preempt the watchdog.
+    // The internal helper deadline must not preempt the watchdog. #377 makes
+    // that STRUCTURAL rather than a margin: the clock below is a frozen
+    // mock_clock (never advanced), so the deadline cannot fire at all and
+    // kDeadline's value is inert. It is kept only because the signature takes a
+    // relative duration; do not read it as a live bound.
+    constexpr auto kDeadline = 5000ms;
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
 
     asio::co_spawn(
         ioc,
         [&]() -> asio::awaitable<void> {
             co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
             entered_read = true;
-            result = co_await read_first_frame_bounded(*pair.server, buf, kDeadline, kMaxBytes);
+            result = co_await read_first_frame_bounded(*pair.server, buf, clock, kDeadline, kMaxBytes);
         },
         asio::bind_cancellation_slot(signal.slot(), [&](std::exception_ptr ep) { thrown = ep; }));
 

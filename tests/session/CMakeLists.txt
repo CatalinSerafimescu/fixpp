@@ -3136,7 +3136,9 @@ set_tests_properties(session_read_first_frame_bounded PROPERTIES
 # Anchors: research.md D-6.10/D-6.10a/D-6.13; tasks.md T023-T025.
 add_executable(session_first_frame_total_cancel_tls first_frame_total_cancel_tls_test.cpp)
 target_link_libraries(session_first_frame_total_cancel_tls PRIVATE
-  fixpp fixpp_transport fixpp_tls GTest::gtest_main)
+  # fixpp_mock_clock (#377): read_first_frame_bounded now takes a Clock& and Leg A
+  # passes a frozen mock_clock so the helper deadline cannot preempt the watchdog.
+  fixpp fixpp_transport fixpp_tls fixpp_mock_clock GTest::gtest_main)
 target_include_directories(session_first_frame_total_cancel_tls PRIVATE
   "${CMAKE_SOURCE_DIR}/src"
   "${CMAKE_SOURCE_DIR}/tests")

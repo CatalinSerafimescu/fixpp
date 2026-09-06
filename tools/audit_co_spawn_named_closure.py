@@ -173,11 +173,24 @@ import argparse
 import concurrent.futures as cf
 import json
 import os
+import re
 import shlex
 import shutil
+import subprocess
 import sys
 
 import clang.cindex as ci
+
+# ⚠️ THE FIRST CROSS-TOOL IMPORT IN tools/, and it is deliberate. The alternative
+# was a SECOND copy of a 54-line comment/literal blanker that must agree with the
+# first forever; a byte-identical copy propagates a claim that is false at the new
+# site the moment one of them is fixed. check_co_spawn_lambda is side-effect-free
+# at module scope (constants + `if __name__`), so importing it runs nothing.
+# sys.path[0] is tools/ when run as `python3 tools/<x>.py` (how CI invokes both),
+# but that is not guaranteed for any other entry point -- hence the explicit
+# insert rather than relying on it.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from check_co_spawn_lambda import splice, strip_noncode  # noqa: E402
 
 # ⚠️ A DRIVING CALL IS IDENTIFIED BY ITS OWNER, NEVER BY ITS NAME ALONE, and this
 # is the single easiest way to make this tool report a false clean. An earlier
@@ -358,6 +371,12 @@ class SiteWalker:
         # identical. The invariant is structural, not a survey: paths do not
         # change during a run.
         self._rp: dict[str, str] = {}
+        # Every in-repo file this walk touched a cursor in (#363). NOT the same as
+        # "files with sites": a header can be parsed and contain no site at all,
+        # and that distinction is exactly what the header gate needs — refusing on
+        # "no site reported" would fail CI on a parsed header whose only co_spawn
+        # is an ordinary coroutine call, which is ordinary code.
+        self.files_seen: set[str] = set()
         self.sites: list[dict] = []
         # Flat, in source order: closure_decl / ioc_decl / drive records.
         self.events: list[dict] = []
@@ -392,6 +411,8 @@ class SiteWalker:
                     self._rp[fn] = real
                 in_tu = real.startswith(self.repo_root + os.sep) and (
                     os.sep + "build" + os.sep) not in real
+                if in_tu:
+                    self.files_seen.add(real)
         except Exception:
             in_tu = False
 
@@ -690,7 +711,9 @@ def classify(site: dict, events: list[dict]) -> tuple[str, str]:
                     f"scope with no driving call after the co_spawn inside that scope")
 
 
-def parse_tu(entry: dict, extra_args: list[str]) -> tuple[list[dict], list[dict], str | None]:
+def parse_tu(
+    entry: dict, extra_args: list[str]
+) -> tuple[list[dict], list[dict], str | None, set[str]]:
     idx = ci.Index.create()
     args = [a for a in entry["arguments"][1:] if a not in ("-c",)]
     # Drop the output and input file args; keep flags/includes/defines.
@@ -723,7 +746,7 @@ def parse_tu(entry: dict, extra_args: list[str]) -> tuple[list[dict], list[dict]
     try:
         tu = idx.parse(path, args=cleaned, options=0)
     except ci.TranslationUnitLoadError as exc:
-        return [], [], f"parse failed: {exc}"
+        return [], [], f"parse failed: {exc}", set()
 
     # ⚠️ ERROR, NOT JUST FATAL. A non-fatal semantic error (severity Error) does
     # NOT stop libclang producing an AST — it produces a TRUNCATED one, and the
@@ -740,11 +763,11 @@ def parse_tu(entry: dict, extra_args: list[str]) -> tuple[list[dict], list[dict]
     if bad:
         loc = bad[0].location
         where = f"{os.path.basename(loc.file.name)}:{loc.line}" if loc.file else "?"
-        return [], [], f"{len(bad)} error diagnostic(s), first at {where}: {bad[0].spelling}"
+        return [], [], f"{len(bad)} error diagnostic(s), first at {where}: {bad[0].spelling}", set()
 
     w = SiteWalker(path, os.environ.get("FIXPP_REPO_ROOT", os.getcwd()))
     w.walk(tu.cursor, [])
-    return w.sites, w.events, None
+    return w.sites, w.events, None, w.files_seen
 
 
 def _worker_init(libclang: str, repo_root: str) -> None:
@@ -764,16 +787,16 @@ def _worker(job: tuple) -> tuple:
     entry, extra, repo_root = job
     os.environ["FIXPP_REPO_ROOT"] = repo_root
     UNKNOWN_KINDS.clear()
-    sites, events, err = parse_tu(entry, extra)
+    sites, events, err, files_seen = parse_tu(entry, extra)
     if err:
-        return (entry["file"], [], err, dict(UNKNOWN_KINDS))
+        return (entry["file"], [], err, dict(UNKNOWN_KINDS), files_seen)
     out = []
     for s in sites:
         verdict, why = classify(s, events)
         s["verdict"] = verdict
         s["why"] = why
         out.append(s)
-    return (entry["file"], out, None, dict(UNKNOWN_KINDS))
+    return (entry["file"], out, None, dict(UNKNOWN_KINDS), files_seen)
 
 
 # Worst-first, so a dedupe across TUs can never quietly downgrade a header site.
@@ -807,22 +830,27 @@ def load_db(build_dir: str, only_with_cospawn: bool) -> list[dict]:
             # reported a confident, 16.5%-incomplete clean.
             e["arguments"] = shlex.split(e["command"])
         if only_with_cospawn:
-            # ⚠️ SCOPE LIMIT (#363), AND NEITHER INSTRUMENT CAN DETECT IT. This tests the
-            # MAIN FILE's own text. A header carrying a named-closure `co_spawn`
-            # whose every including .cpp lacks the literal token is therefore never
-            # parsed — and the cross-check consumes this same population, so it
-            # cannot report the omission either. Sharing the population is what
-            # makes the set-diff mean anything; it also means the population is the
-            # one thing the pair does not check.
+            # ⚠️ SCOPE LIMIT (#363). This tests the MAIN FILE's own text. A header
+            # carrying a named-closure `co_spawn` whose every including .cpp lacks
+            # the literal token is therefore never parsed — and the cross-check
+            # consumes this same population, so it cannot report the omission
+            # either. Sharing the population is what makes the set-diff mean
+            # anything; it also means the population is the one thing the PAIR
+            # cannot check.
             #
-            # No count is recorded here — that would rot. The CONDITION is "a header
-            # with the named-closure form, reachable only from TUs without the
-            # token". Re-derive whether it is empty with:
+            # ⚠️ IT IS NO LONGER SILENT, AND THAT IS THE WHOLE OF THE #363 FIX. A
+            # third instrument outside the pair — screen_headers(), run from main()
+            # on every prefiltered sweep — screens the headers directly and FAILS
+            # the run if any carries the shape. The limit below is unchanged; what
+            # changed is that hitting it is now loud instead of invisible. Do not
+            # re-describe this as "undetectable"; do not delete the call in main()
+            # without restoring some other way to see past this line.
             #
-            #   git grep -l co_spawn -- '*.hpp' '*.h'
-            #
-            # then screen each hit for `co_spawn(<ex>, <ident>(<args>), ...)`. ⚠️ A
-            # line-based grep UNDER-REPORTS that shape twice over: the argument list
+            # No count is recorded here — that would rot, and the check that
+            # replaced the recipe cannot. The CONDITION is "a header with the
+            # named-closure form, reachable only from TUs without the token";
+            # screen_headers() evaluates exactly that on every run. ⚠️ A
+            # line-based grep UNDER-REPORTS the shape twice over: the argument list
             # spans lines, and the closure is often invoked WITH arguments
             # (`make_waiter(1)`), so an empty-parens pattern silently misses it —
             # measured 2 against an AST truth of 10 on tests/sync/
@@ -1089,6 +1117,262 @@ def _load_libclang(libclang: str) -> str | None:
     return None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# HEADER SCREEN (#363) -- the population's own blind spot, made LOUD.
+#
+# The prefilter in load_db() tests each compile-database entry's MAIN FILE text
+# for the literal token. A header carrying a named-closure co_spawn whose every
+# including .cpp lacks the token is therefore never parsed -- and
+# reconcile_co_spawn_census.py deliberately CONSUMES this population rather than
+# re-deriving one (that is what makes its set-diff mean anything), so the pair
+# cannot report the omission either. The population is the one thing the two
+# instruments do not check.
+#
+# This does not widen the population -- parsing every TU costs ~20 min on 242
+# TUs. It converts a SILENT hole into a LOUD one: screen the headers directly,
+# and if any carries the shape, refuse to report and say to re-run --all-files.
+# A false alarm here costs one --all-files run; a false zero costs the finding.
+#
+# ⚠️ THIS SCREEN IS AN INSTRUMENT AND IT IS PINNED IN --self-test, because the
+# ISSUE'S OWN SCREEN WAS WRONG TWICE. A line-based grep misses the shape (the
+# argument list spans lines) and an empty-parens pattern misses it again (the
+# closure is frequently invoked WITH arguments, `make_waiter(1)`) -- measured 2
+# against an AST truth of 10. Balanced-paren scanning is what reproduces 10/5.
+FORWARDING_WRAPPERS = frozenset({"std::move", "move", "std::forward", "forward"})
+# A leading `*` or `&` is a call through a pointer/reference to a closure --
+# `(*p)()` after the paren unwrap. Nominate it; the walker decides.
+_IDENT_HEAD = re.compile(r"^\s*[*&]?\s*([A-Za-z_][A-Za-z0-9_:]*)\s*")
+
+
+def _after_first_top_level_comma(s: str) -> str | None:
+    """Everything after `s`'s first depth-0 comma, or None if it has none.
+
+    ⚠️ DELIBERATELY DOES NOT SPLIT THE WHOLE LIST. The previous version split on
+    every top-level comma and looked at element [1], which silently LOST every
+    template-instantiated call: `co_spawn(ioc, make_thing<A,B>(), tok)` split
+    inside the template argument list and yielded `make_thing<A`. Returning the
+    remainder uncut lets _names_a_call() do its own balanced `<...>` scan, so the
+    comma inside `<>` never has to be recognised as such.
+    """
+    # ⚠️ ANGLE BRACKETS COUNT HERE TOO, AND FORGETTING THEM WAS THE SAME BUG
+    # TWICE. `_names_a_call` learned to balance `<...>` for the CALLEE
+    # (`make_thing<A,B>()`); this function is the other half and was left with the
+    # identical hole, so `co_spawn(pool<A,B>::get(), make_waiter(1), tok)` split
+    # inside the EXECUTOR's template list and lost the site. Fixing the callee and
+    # not the splitter was fixing a blast radius rather than a cause.
+    #
+    # `<` is ambiguous with less-than, so it opens a template list only when it
+    # directly follows an identifier character — `pool<` does, `a <` does not.
+    # That is a heuristic; it errs toward NOMINATING, which is the safe direction
+    # for a candidate generator whose over-approximation inside a parsed file is
+    # free.
+    depth = 0
+    angle = 0
+    prev = ""
+    for i, ch in enumerate(s):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "<" and depth == 0 and (prev.isalnum() or prev in "_>"):
+            angle += 1
+        elif ch == ">" and angle > 0:
+            angle -= 1
+        elif ch == "," and depth == 0 and angle == 0:
+            return s[i + 1 :]
+        if not ch.isspace():
+            prev = ch
+    return None
+
+
+def _names_a_call(arg: str) -> str | None:
+    r"""The callee name if `arg` begins `ident(` or `ident<...>(`, else None.
+
+    ⚠️ THE `<...>` ARM IS NOT COSMETIC -- WITHOUT IT THE SCREEN FAILS TOWARD
+    CLEAN. A bare `^ident\s*\(` pattern misses EVERY templated closure call,
+    including the single-argument `make_thing<A>()`, because `<A>` sits between
+    the identifier and the paren. Measured before the fix: `make_thing<A>()`,
+    `make_thing<A,B>()` and `make_thing<A, B>(1)` all screened as NO HIT while
+    the non-template control screened as a hit. In a screen whose whole purpose
+    is to stop being silent, that is the defect it exists to prevent.
+    """
+    # ⚠️ A PARENTHESISED CALLEE IS ORDINARY C++ AND WAS MISSED. `co_spawn(ioc,
+    # (lam)(), tok)` is the same site as `co_spawn(ioc, lam(), tok)` — the AST
+    # walker sees through the parens and reports it — but a matcher anchored on
+    # an identifier sees a leading `(` and returns nothing. Strip balanced
+    # wrapping parens first. Found by hostile review, not by the self-test, which
+    # is the fourth shape this screen has been wrong about.
+    arg = arg.lstrip()
+    while arg.startswith("("):
+        depth, k = 0, 0
+        while k < len(arg):
+            if arg[k] == "(":
+                depth += 1
+            elif arg[k] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        if depth != 0 or k + 1 >= len(arg):
+            break
+        inner, after = arg[1:k].strip(), arg[k + 1 :].lstrip()
+        # `(lam)(...)` unwraps; `(a + b)` or a cast does not name a call.
+        if not after.startswith("("):
+            break
+        arg = inner + after
+    # ⚠️ THE CALLEE IS A PATH, NOT AN IDENTIFIER. `obj.make_waiter()`,
+    # `self->make_waiter()` and `(*p)()` are all ordinary spellings of the same
+    # site and were all missed while a bare `lam()` was caught. Walk
+    # ident (`<...>`)? ( `.` | `->` | `::` ) ident (`<...>`)? ... and then require
+    # the paren.
+    m = _IDENT_HEAD.match(arg)
+    if not m:
+        return None  # a lambda literal `[&]...`, a brace-init, anything unnamed
+    name, j = m.group(1), m.end()
+
+    def skip_template(k: int) -> int | None:
+        """Index past a balanced `<...>` at k, or None if it does not close."""
+        if k >= len(arg) or arg[k] != "<":
+            return k
+        d = 0
+        while k < len(arg):
+            if arg[k] == "<":
+                d += 1
+            elif arg[k] == ">":
+                d -= 1
+                if d == 0:
+                    return k + 1
+            k += 1
+        return None  # an unbalanced `<` is a comparison, not a template list
+
+    while True:
+        nxt = skip_template(j)
+        if nxt is None:
+            return None
+        j = nxt
+        while j < len(arg) and arg[j].isspace():
+            j += 1
+        for sep in ("->", "::", "."):
+            if arg.startswith(sep, j):
+                k = j + len(sep)
+                while k < len(arg) and arg[k].isspace():
+                    k += 1
+                seg = _IDENT_HEAD.match(arg[k:])
+                if not seg:
+                    return None
+                name, j = seg.group(1), k + seg.end()
+                break
+        else:
+            break
+    return name if j < len(arg) and arg[j] == "(" else None
+
+
+def screen_named_closure(text: str) -> list[int]:
+    """1-based line numbers of `co_spawn(<ex>, <ident>(<args>), ...)` in `text`.
+
+    Whole-file and balanced-paren, NOT line-based -- see the note above for the
+    two ways a simpler pattern reports a false zero on this exact shape.
+
+    ⚠️ RUNS ON BLANKED CODE, NEVER ON RAW TEXT, and it used the raw text first.
+    A `co_spawn(ex, name(...), ...)` inside a `//` comment, a `/* */` block, or a
+    string literal screened IDENTICALLY to a real one -- measured, all four
+    returning [1]. Since a hit REFUSES the whole audit in a gating CI step, one
+    commented-out example added to any tracked header would have failed tier1
+    with "a header carries the named-closure co_spawn shape". The sibling scanner
+    check_co_spawn_lambda.scan_text() already blanks for exactly this reason on
+    its own balanced-paren walk; reuse it rather than re-deriving it.
+    splice() is not optional either: without it a backslash-newline inside a
+    `/* ... */` close leaves the stripper believing the comment never closes,
+    and it blanks the REST OF THE FILE into a clean result -- fail-toward-clean in the screen whose
+    whole job is to stop being silent.
+
+    Deliberately over-approximates: any identifier-call in argument 2 counts,
+    because a screen that guesses wrong should guess LOUD. The one enumerated
+    exception is FORWARDING_WRAPPERS -- `std::move(coro)` names a std facility
+    and moves an awaitable, so it cannot be a named-closure invocation. That
+    exception is NOT covered by the 10/5 oracle below (neither oracle file
+    contains the shape), so it carries its own self-test arm; without one, a
+    count identity on two files would have been mistaken for proof the screen
+    does not over-match.
+    """
+    spliced, line_of = splice(text)
+    code = strip_noncode(spliced)
+
+    def lineno(off: int) -> int:
+        # Map a blanked-text offset back to the ORIGINAL line, so a refusal names
+        # a line a human can open. splice() removed characters; a raw
+        # `text[:off].count()` would drift past every line continuation.
+        if off < len(line_of):
+            return line_of[off]
+        return line_of[-1] if line_of else 1
+
+    hits: list[int] = []
+    for m in re.finditer(r"\bco_spawn\s*\(", code):
+        i, depth = m.end(), 1
+        while i < len(code) and depth:
+            if code[i] in "([{":
+                depth += 1
+            elif code[i] in ")]}":
+                depth -= 1
+            i += 1
+        if depth:
+            continue  # unbalanced (macro, truncated file) -- not a claim either way
+        rest = _after_first_top_level_comma(code[m.end() : i - 1])
+        if rest is None:
+            continue  # fewer than two arguments -- not the shape
+        name = _names_a_call(rest)
+        if name is not None and name not in FORWARDING_WRAPPERS:
+            hits.append(lineno(m.start()))
+    return hits
+
+
+def includers_of(header_rel: str, build_dir: str, repo_root: str) -> list[dict]:
+    """Compile-database entries whose OWN TEXT `#include`s `header_rel`.
+
+    Direct includers only, matched on the include line rather than the bare
+    basename so a mention in a comment does not admit a TU. Transitive inclusion
+    is not resolved — a header reached only through another header is not found
+    here, and that is the residual the gate still refuses on.
+    """
+    base = os.path.basename(header_rel)
+    pat = re.compile(r'#\s*include\s*[<"][^">]*' + re.escape(base) + r'[">]')
+    out: list[dict] = []
+    for e in load_db(build_dir, only_with_cospawn=False):
+        f = os.path.realpath(os.path.join(e.get("directory", "."), e["file"]))
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                if pat.search(fh.read()):
+                    out.append(e)
+        except OSError:
+            continue  # unreadable TUs are already handled by load_db's own path
+    return out
+
+
+def screen_headers(repo_root: str) -> dict[str, list[int]]:
+    """Every tracked header carrying the named-closure shape. Empty == none."""
+    try:
+        listing = subprocess.run(
+            ["git", "grep", "-l", "co_spawn", "--", "*.hpp", "*.h"],
+            cwd=repo_root, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        raise RuntimeError(f"header screen could not run git grep: {exc}") from exc
+    if listing.returncode not in (0, 1):  # 1 == no match, which is a real answer
+        raise RuntimeError(f"header screen: git grep failed: {listing.stderr.strip()}")
+    out: dict[str, list[int]] = {}
+    for rel in listing.stdout.split("\n"):
+        if not rel:
+            continue
+        try:
+            with open(os.path.join(repo_root, rel), encoding="utf-8", errors="replace") as fh:
+                hits = screen_named_closure(fh.read())
+        except OSError as exc:
+            # Unreadable is NOT clean -- same rule the population uses.
+            raise RuntimeError(f"header screen could not read {rel}: {exc}") from exc
+        if hits:
+            out[rel] = hits
+    return out
+
+
 def run_self_test(libclang: str, resource_dir: str) -> int:
     err = _load_libclang(libclang)
     if err:
@@ -1099,6 +1383,140 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
         args += ["-resource-dir", resource_dir]
 
     passed = failed = 0
+
+    # ── screen arms (#363) -- no libclang needed; see screen_named_closure ──
+    # The two in-tree oracles are files whose site count this tool ALREADY
+    # reports, so they pin the screen against something external rather than
+    # against itself. The synthetic arms cover the shapes the oracles do not
+    # contain.
+    #
+    # ⚠️ THESE ARMS DO NOT PIN "THE SCREEN AND THE WALKER AGREE ABOUT WHAT A SITE
+    # IS", and an earlier version of the failure message claimed they did. The two
+    # disagree BY DESIGN and always have: the screen nominates any identifier call
+    # in argument two, so it reports `run_liveness_loop()`, `run_accept_loop()`,
+    # `asio::bind_executor(...)` — all of which the walker correctly REJECTS,
+    # since none is a lambda-typed variable (see SiteWalker._named_closure_arg,
+    # which names run_liveness_loop() as its example of what a crude grep
+    # over-counts). Neither oracle file contains a divergent shape, so an arm
+    # asserting agreement could not have failed for the reason it stated.
+    #
+    # Since the gate refuses only on UNPARSED files, that divergence costs
+    # nothing: the screen is a CANDIDATE GENERATOR and the walker is the
+    # authority. What these arms actually pin is narrower and still worth having —
+    # that the screen has not stopped seeing a shape it used to see.
+    screen_arms: list[tuple[str, str, int]] = [
+        ("screen/oracle-fifo-across-cycles", "tests/sync/test_fifo_across_cycles.cpp", 10),
+        ("screen/oracle-asan-clean", "tests/sync/test_asan_clean.cpp", 5),
+    ]
+    repo_root = os.environ.get("FIXPP_REPO_ROOT", os.getcwd())
+    for name, rel, expected_n in screen_arms:
+        path = os.path.join(repo_root, rel)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                got = len(screen_named_closure(fh.read()))
+        except OSError as exc:
+            print(f"FAIL  {name}\n      oracle unreadable: {exc}")
+            failed += 1
+            continue
+        if got != expected_n:
+            print(f"FAIL  {name}\n      expected {expected_n} screen hits, got {got}. "
+                  f"⚠️ Do NOT relax the expectation to match — re-derive why the count "
+                  f"moved. These two files are pinned because their shapes are ones the "
+                  f"screen and the walker DO agree on, so a change here means the screen "
+                  f"stopped seeing a shape it used to see.")
+            failed += 1
+        else:
+            passed += 1
+
+    synthetic: list[tuple[str, str, int]] = [
+        # Multi-line argument list -- the shape a line-based grep misses.
+        ("screen/multiline-args",
+         "co_spawn(\n    ioc,\n    make_waiter(1),\n    asio::use_future);", 1),
+        # Closure invoked WITH arguments -- the shape an empty-parens pattern misses.
+        ("screen/closure-with-args", "co_spawn(ioc, make_waiter(1), use_future);", 1),
+        # Zero-argument closure.
+        ("screen/closure-no-args", "co_spawn(ioc, holder(), use_future);", 1),
+        # A lambda LITERAL is not a named closure -- nothing outlives the call.
+        ("screen/lambda-literal",
+         "co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }, use_future);", 0),
+        # Forwarding wrappers move an awaitable, not a closure. NOT covered by the
+        # oracles (neither file contains the shape), which is why this arm exists:
+        # without it, 10/5 would have been mistaken for proof of no over-matching.
+        ("screen/forwarder-move", "co_spawn(pool.get_executor(), std::move(coro), use_future);", 0),
+        ("screen/forwarder-forward", "co_spawn(ex, std::forward<C>(c), use_future);", 0),
+        # An executor argument containing its own parens must not break the split.
+        ("screen/executor-with-parens",
+         "co_spawn(ioc.get_executor(), make_waiter(1), use_future);", 1),
+        # ── NON-CODE ARMS. Each of these screened as 1 -- identical to the
+        # control -- before strip_noncode() was applied. A hit REFUSES the audit
+        # in a gating CI step, so one commented-out example in a tracked header
+        # would have failed tier1. These are the arms that would catch the
+        # blanking being dropped again.
+        ("screen/comment-line", "// co_spawn(ioc, make_waiter(1), use_future);", 0),
+        ("screen/comment-block", "/* co_spawn(ioc, holder(), use_future); */", 0),
+        ("screen/string-literal", 'const char* s = "co_spawn(ioc, holder(), t)";', 0),
+        # splice(): a backslash-newline inside the comment close. Without splicing
+        # the stripper believes the comment never ends and blanks the rest of the
+        # file -- so the REAL call below it would vanish and the screen would
+        # report a clean 0. The control is the point of this arm.
+        ("screen/spliced-comment-close",
+         "/* co_spawn(ioc, holder(), t); *\\\n/\nco_spawn(ioc, make_waiter(1), use_future);", 1),
+        # Blanking must not eat real code that merely sits after a comment.
+        ("screen/code-after-comment",
+         "// co_spawn(ioc, holder(), t);\nco_spawn(ioc, make_waiter(1), use_future);", 1),
+        # ── TEMPLATE ARMS. Every one of these screened as NO HIT before
+        # _names_a_call() grew its balanced `<...>` scan -- silently, which in a
+        # screen built to be loud is the defect it exists to prevent. Note the
+        # single-argument case fails too: `<A>` sits between the identifier and
+        # the paren, so it is not only about the comma.
+        ("screen/template-one-arg", "co_spawn(ioc, make_thing<A>(), use_future);", 1),
+        ("screen/template-two-args", "co_spawn(ioc, make_thing<A,B>(), use_future);", 1),
+        ("screen/template-spaced-with-args",
+         "co_spawn(ioc, make_thing<A, B>(1), use_future);", 1),
+        ("screen/template-nested", "co_spawn(ioc, make_thing<A<B>>(), use_future);", 1),
+        # A templated forwarder is still a forwarder.
+        ("screen/template-forwarder", "co_spawn(ex, std::forward<C>(c), use_future);", 0),
+        # A bare `<` is a comparison, not a template list -- must not be read as
+        # an unterminated template and must not become a hit.
+        ("screen/comparison-not-template", "co_spawn(ioc, a < b, use_future);", 0),
+        # Fewer than two arguments is not the shape.
+        ("screen/single-argument", "co_spawn(ioc);", 0),
+        # ── PARENTHESISED CALLEE. `(lam)()` is the same site as `lam()` and the
+        # AST walker reports it; a matcher anchored on an identifier saw the
+        # leading `(` and returned nothing. Found by hostile review — the FOURTH
+        # shape this screen has been wrong about, and the third found by a human
+        # rather than by these arms.
+        ("screen/paren-callee", "co_spawn(ioc, (lam)(), use_future);", 1),
+        ("screen/paren-callee-double", "co_spawn(ioc, ((lam))(), use_future);", 1),
+        ("screen/paren-callee-template", "co_spawn(ioc, (make<A,B>)(), use_future);", 1),
+        ("screen/paren-forwarder", "co_spawn(ex, (std::move)(coro), use_future);", 0),
+        # Parens that do NOT wrap a callee must stay silent.
+        ("screen/paren-cast", "co_spawn(ioc, (Foo)x, use_future);", 0),
+        ("screen/paren-arith", "co_spawn(ioc, (a + b), use_future);", 0),
+        # ── THE CALLEE IS A PATH, NOT AN IDENTIFIER. All four were missed while a
+        # bare `lam()` was caught. The last one is the SAME `<...>` defect as
+        # screen/template-two-args but on the EXECUTOR side: fixing the callee's
+        # template handling and not the comma splitter's was fixing a blast radius
+        # rather than a cause.
+        ("screen/member-call", "co_spawn(ioc, obj.make_waiter(), use_future);", 1),
+        ("screen/arrow-call", "co_spawn(ioc, self->make_waiter(), use_future);", 1),
+        ("screen/deref-callee", "co_spawn(ioc, (*p)(), use_future);", 1),
+        ("screen/template-comma-in-executor",
+         "co_spawn(pool<A,B>::get(), make_waiter(1), use_future);", 1),
+        # Qualified + templated member path, both halves at once.
+        ("screen/qualified-template-member",
+         "co_spawn(ioc, reg<A,B>::inst().make<C>(), use_future);", 1),
+        # A member path on a forwarder is still a forwarder.
+        ("screen/member-forwarder", "co_spawn(ex, std::move(coro), use_future);", 0),
+    ]
+    for name, body, expected_n in synthetic:
+        got = len(screen_named_closure(body))
+        if got != expected_n:
+            print(f"FAIL  {name}\n      expected {expected_n}, got {got}\n      body: {body!r}")
+            failed += 1
+        else:
+            passed += 1
+
     for name, body, expected in SELF_TEST_CASES:
         src = SELF_TEST_PREAMBLE + body
         idx = ci.Index.create()
@@ -1182,16 +1600,64 @@ def main() -> int:
         os.path.realpath(os.path.join(e.get("directory", "."), e["file"])) for e in entries
     )
 
-    best: dict[tuple[str, int, int], dict] = {}
-    errors: list[tuple[str, str]] = []
     repo_root = os.environ.get("FIXPP_REPO_ROOT", os.getcwd())
+
+    # ── #363: EXTEND the population to cover screened header hits ─────────────
+    # The blind spot is a header carrying the shape that no admitted TU pulls in.
+    # Refusing on it was the first design and it is the wrong end: the operator's
+    # only remedy was a ~20 min --all-files run. Instead, ADMIT the TUs that
+    # include such a header — the issue's own option (3) — so the walker gets to
+    # adjudicate the nominations instead of the run dying on them.
+    #
+    # This found a real instance on its first CI run:
+    # tests/session/support/group_dispatch_fixture.hpp carries three sites and
+    # ALL SIX of its includers have no `co_spawn` token of their own, so the
+    # prefilter admitted none of them. The sites are `sess.open()` /
+    # `sess.on_inbound_frame(...)` — member calls, the shape the screen itself
+    # was blind to until #363's own review round, which is why the hole read as
+    # empty for so long.
+    #
+    # The screen stays a NOMINATOR: everything it finds is handed to the walker,
+    # which decides. The post-sweep gate below then refuses only for a header
+    # that has no includer in the compile database at all.
+    if not args.all_files:
+        try:
+            pre_hits = screen_headers(repo_root)
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            print("The header screen could not run. That is NOT a clean result — it is "
+                  "the same fail-toward-clean this check exists to remove.")
+            return 1
+        have = {os.path.realpath(os.path.join(e.get("directory", "."), e["file"]))
+                for e in entries}
+        added = 0
+        for rel in sorted(pre_hits):
+            for e in includers_of(rel, args.build_dir, repo_root):
+                f = os.path.realpath(os.path.join(e.get("directory", "."), e["file"]))
+                if f not in have:
+                    have.add(f)
+                    entries.append(e)
+                    added += 1
+        if added:
+            print(f"header screen (#363): admitted {added} extra TU(s) so the walker can "
+                  f"adjudicate {sum(len(v) for v in pre_hits.values())} screened header "
+                  f"nomination(s) in {len(pre_hits)} header(s).")
+        population = sorted(
+            os.path.realpath(os.path.join(e.get("directory", "."), e["file"]))
+            for e in entries
+        )
+
+    best: dict[tuple[str, int, int], dict] = {}
+    parsed_files: set[str] = set()
+    errors: list[tuple[str, str]] = []
     jobs = [(e, extra, repo_root) for e in entries]
     done = 0
     with cf.ProcessPoolExecutor(
         max_workers=args.jobs, initializer=_worker_init, initargs=(args.libclang, repo_root)
     ) as pool:
-        for fname, sites, err, unknown in pool.map(_worker, jobs, chunksize=1):
+        for fname, sites, err, unknown, files_seen in pool.map(_worker, jobs, chunksize=1):
             done += 1
+            parsed_files |= files_seen
             for kid, cnt in unknown.items():
                 UNKNOWN_KINDS[kid] = UNKNOWN_KINDS.get(kid, 0) + cnt
             if err:
@@ -1236,6 +1702,117 @@ def main() -> int:
         with open(args.json_out, "w", encoding="utf-8") as fh:
             json.dump({"sites": all_sites, "errors": errors, "files": population}, fh, indent=2)
         print(f"\nwrote {args.json_out}")
+
+    # ── #363: the population's blind spot, CHECKED — after the sweep, against
+    # what the walker actually saw ──────────────────────────────────────────────
+    #
+    # ⚠️ THIS RAN BEFORE THE SWEEP AND REFUSED ON THE WRONG CONDITION. The blind
+    # spot is a conjunction — a header carries the shape AND is unreachable from
+    # the population — and the first version tested only the first conjunct. That
+    # is not a nitpick: the walker records sites IN-REPO, NOT IN-TU (see the
+    # in_tu note in SiteWalker), precisely so header sites are reported. So a
+    # header included by an ADMITTED TU is already parsed and already in the
+    # report, and refusing on it would have failed CI with the explanation "the
+    # prefilter cannot see it" — FALSE for exactly that header — and the only
+    # remedy offered was a 20-minute --all-files run to disprove a hole that was
+    # never there.
+    #
+    # ⚠️ AND THE ARM THAT WAS SUPPOSED TO PROVE THIS GATE WORKS DEMONSTRATED THE
+    # FALSE REFUSAL INSTEAD. The seeded header was tests/session/_fixtures_/
+    # test_double_fsm.hpp, which 21 token-carrying .cpp files include — i.e. the
+    # most thoroughly ADMITTED header available. It went red for the wrong
+    # reason, and a forced-RED arm that fires for the wrong reason certifies
+    # nothing. Proving a guard CAN fire is not proving it fires ON ITS CONDITION.
+    #
+    # THE ARM THAT DOES DISCRIMINATE seeds BOTH sides in one run and requires the
+    # gate to separate them. Against --filter test_fifo_across_cycles:
+    #
+    #   seed in include/fixpp/core/sync/async_mutex.hpp   (the TU INCLUDES it)
+    #   seed in tests/session/_fixtures_/test_double_fsm.hpp (it does NOT)
+    #
+    #   result: named-closure sites 10 -> 11  (the walker picked up the covered
+    #           seed), and the refusal named test_double_fsm.hpp ONLY.
+    #   control (both seeds reverted): 10 sites, no refusal.
+    #
+    # The site-count moving is the part that matters: it proves the covered seed
+    # was genuinely parsed, so its ABSENCE from the refusal is a discrimination
+    # rather than a miss. Re-derive with that pair; a single-sided seed cannot
+    # tell this gate from the one it replaced.
+    #
+    # So the screen NOMINATES and the walker CONFIRMS: a hit is a finding only
+    # where the sweep reported no site in that header. That also demotes the
+    # regex from an authority to a candidate generator — it may over-approximate
+    # loudly without costing a false CI failure, and it stops being a second
+    # definition of "what is a site" competing with the AST walker's.
+    #
+    # ⚠️ THE CONDITION IS "WAS THIS FILE PARSED", NOT "DID IT YIELD A SITE", AND
+    # THE DIFFERENCE IS A CI OUTAGE. It was written the second way first, using
+    # the site list as a proxy because the walker did not report what it parsed.
+    # That proxy fails on ORDINARY CODE: the screen deliberately nominates any
+    # identifier call in argument two, so `co_spawn(ioc, run_pump(), tok)` in a
+    # header is a candidate — while the AST walker correctly reports no site,
+    # because `run_pump` is a plain coroutine function, not a lambda-typed
+    # variable. Under the proxy that header had no site, the gate refused, and a
+    # perfectly ordinary spawn in a perfectly ordinary header would have failed
+    # the required CI command with no way to satisfy it. SiteWalker now records
+    # every in-repo file it walked a cursor in (`files_seen`), so the gate asks
+    # the question it means. Over-approximation inside a PARSED file is now free,
+    # which is what lets the screen stay deliberately loud.
+    #
+    # ⚠️ TWO RESIDUALS, AND A GREEN HERE MEANS LESS THAN IT LOOKS. Neither is
+    # closable without `--all-files`; both are stated so the green is read for
+    # what it is.
+    #
+    #   1. THE SCREEN CAN MISS THE SHAPE. It is a regex over blanked text and has
+    #      already been wrong FOUR times — raw text, forwarding wrappers,
+    #      template argument lists, parenthesised callees — every one found by a
+    #      reviewer, none by this gate's own arms. A miss in an unreachable header
+    #      is silent.
+    #
+    #   2. `files_seen` IS FILE-GRANULAR; THE HAZARD IS REGION-GRANULAR. `walk`
+    #      adds a file on ANY in-repo cursor, so the set proves ">= 1 cursor from
+    #      this file was walked" — NOT "the region holding this site was parsed".
+    #      The screen ignores the preprocessor (measured: a `co_spawn` inside
+    #      `#ifdef FIXPP_WIN ... #endif` is still nominated). So a header whose
+    #      site sits in a region compiled out of every admitted TU, but which
+    #      contributes any other cursor, lands in `parsed_files` and this gate
+    #      passes SILENTLY. Zero instances today; the shape is ordinary enough
+    #      that it will not stay that way by luck.
+    #
+    # Treat a green as "no NOMINATED candidate lies in a file the walker never
+    # touched" — never as "no uncovered site exists".
+    if not args.all_files:
+        try:
+            header_hits = screen_headers(repo_root)
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            print("The header screen could not run. That is NOT a clean result — it is "
+                  "the same fail-toward-clean this check exists to remove.")
+            return 1
+        unseen = {
+            rel: lines
+            for rel, lines in header_hits.items()
+            if os.path.realpath(os.path.join(repo_root, rel)) not in parsed_files
+        }
+        if unseen:
+            print("ERROR: a header carries the named-closure co_spawn shape and the sweep "
+                  "NEVER PARSED it (#363).")
+            for rel, lines in sorted(unseen.items()):
+                print(f"  {rel}: lines {', '.join(str(n) for n in lines)}")
+            print("\nThe prefilter admits a TU only if its MAIN FILE text contains the "
+                  "literal token, so a header reachable only from TUs without it is never "
+                  "parsed — and reconcile_co_spawn_census.py consumes this same "
+                  "population, so the cross-check cannot see the hole either. That is the "
+                  "#363 blind spot.\n"
+                  "This is NOT the screen merely over-matching: a nomination inside a "
+                  "PARSED file is ignored, because the test is whether the walker PARSED "
+                  "the file, not whether it agreed there was a site there.\n"
+                  "Re-run with --all-files to include it in the population.")
+            return 1
+        print(f"header screen (#363): {len(population)} TUs, {len(parsed_files)} in-repo "
+              f"files parsed; {len(header_hits)} screened header hit(s), all inside the "
+              f"parsed set.")
+
 
     # Fails closed: a sweep that parsed nothing, or found no site, reports the
     # same "0 FLAG" a clean tree does.
