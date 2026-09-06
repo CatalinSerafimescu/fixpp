@@ -1139,7 +1139,9 @@ def _load_libclang(libclang: str) -> str | None:
 # closure is frequently invoked WITH arguments, `make_waiter(1)`) -- measured 2
 # against an AST truth of 10. Balanced-paren scanning is what reproduces 10/5.
 FORWARDING_WRAPPERS = frozenset({"std::move", "move", "std::forward", "forward"})
-_IDENT_HEAD = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_:]*)\s*")
+# A leading `*` or `&` is a call through a pointer/reference to a closure --
+# `(*p)()` after the paren unwrap. Nominate it; the walker decides.
+_IDENT_HEAD = re.compile(r"^\s*[*&]?\s*([A-Za-z_][A-Za-z0-9_:]*)\s*")
 
 
 def _after_first_top_level_comma(s: str) -> str | None:
@@ -1152,14 +1154,34 @@ def _after_first_top_level_comma(s: str) -> str | None:
     remainder uncut lets _names_a_call() do its own balanced `<...>` scan, so the
     comma inside `<>` never has to be recognised as such.
     """
+    # ⚠️ ANGLE BRACKETS COUNT HERE TOO, AND FORGETTING THEM WAS THE SAME BUG
+    # TWICE. `_names_a_call` learned to balance `<...>` for the CALLEE
+    # (`make_thing<A,B>()`); this function is the other half and was left with the
+    # identical hole, so `co_spawn(pool<A,B>::get(), make_waiter(1), tok)` split
+    # inside the EXECUTOR's template list and lost the site. Fixing the callee and
+    # not the splitter was fixing a blast radius rather than a cause.
+    #
+    # `<` is ambiguous with less-than, so it opens a template list only when it
+    # directly follows an identifier character — `pool<` does, `a <` does not.
+    # That is a heuristic; it errs toward NOMINATING, which is the safe direction
+    # for a candidate generator whose over-approximation inside a parsed file is
+    # free.
     depth = 0
+    angle = 0
+    prev = ""
     for i, ch in enumerate(s):
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
             depth -= 1
-        elif ch == "," and depth == 0:
+        elif ch == "<" and depth == 0 and (prev.isalnum() or prev in "_>"):
+            angle += 1
+        elif ch == ">" and angle > 0:
+            angle -= 1
+        elif ch == "," and depth == 0 and angle == 0:
             return s[i + 1 :]
+        if not ch.isspace():
+            prev = ch
     return None
 
 
@@ -1198,29 +1220,50 @@ def _names_a_call(arg: str) -> str | None:
         if not after.startswith("("):
             break
         arg = inner + after
+    # ⚠️ THE CALLEE IS A PATH, NOT AN IDENTIFIER. `obj.make_waiter()`,
+    # `self->make_waiter()` and `(*p)()` are all ordinary spellings of the same
+    # site and were all missed while a bare `lam()` was caught. Walk
+    # ident (`<...>`)? ( `.` | `->` | `::` ) ident (`<...>`)? ... and then require
+    # the paren.
     m = _IDENT_HEAD.match(arg)
     if not m:
         return None  # a lambda literal `[&]...`, a brace-init, anything unnamed
     name, j = m.group(1), m.end()
-    if j < len(arg) and arg[j] == "<":
-        depth = 0
-        closed = False
-        while j < len(arg):
-            if arg[j] == "<":
-                depth += 1
-            elif arg[j] == ">":
-                depth -= 1
-                if depth == 0:
-                    j += 1
-                    closed = True
-                    break
-            j += 1
-        if not closed:
-            # An unbalanced `<` is a comparison, not a template list. Not a claim
-            # either way -- fall through and let the paren test decide.
+
+    def skip_template(k: int) -> int | None:
+        """Index past a balanced `<...>` at k, or None if it does not close."""
+        if k >= len(arg) or arg[k] != "<":
+            return k
+        d = 0
+        while k < len(arg):
+            if arg[k] == "<":
+                d += 1
+            elif arg[k] == ">":
+                d -= 1
+                if d == 0:
+                    return k + 1
+            k += 1
+        return None  # an unbalanced `<` is a comparison, not a template list
+
+    while True:
+        nxt = skip_template(j)
+        if nxt is None:
             return None
+        j = nxt
         while j < len(arg) and arg[j].isspace():
             j += 1
+        for sep in ("->", "::", "."):
+            if arg.startswith(sep, j):
+                k = j + len(sep)
+                while k < len(arg) and arg[k].isspace():
+                    k += 1
+                seg = _IDENT_HEAD.match(arg[k:])
+                if not seg:
+                    return None
+                name, j = seg.group(1), k + seg.end()
+                break
+        else:
+            break
     return name if j < len(arg) and arg[j] == "(" else None
 
 
@@ -1428,6 +1471,21 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
         # Parens that do NOT wrap a callee must stay silent.
         ("screen/paren-cast", "co_spawn(ioc, (Foo)x, use_future);", 0),
         ("screen/paren-arith", "co_spawn(ioc, (a + b), use_future);", 0),
+        # ── THE CALLEE IS A PATH, NOT AN IDENTIFIER. All four were missed while a
+        # bare `lam()` was caught. The last one is the SAME `<...>` defect as
+        # screen/template-two-args but on the EXECUTOR side: fixing the callee's
+        # template handling and not the comma splitter's was fixing a blast radius
+        # rather than a cause.
+        ("screen/member-call", "co_spawn(ioc, obj.make_waiter(), use_future);", 1),
+        ("screen/arrow-call", "co_spawn(ioc, self->make_waiter(), use_future);", 1),
+        ("screen/deref-callee", "co_spawn(ioc, (*p)(), use_future);", 1),
+        ("screen/template-comma-in-executor",
+         "co_spawn(pool<A,B>::get(), make_waiter(1), use_future);", 1),
+        # Qualified + templated member path, both halves at once.
+        ("screen/qualified-template-member",
+         "co_spawn(ioc, reg<A,B>::inst().make<C>(), use_future);", 1),
+        # A member path on a forwarder is still a forwarder.
+        ("screen/member-forwarder", "co_spawn(ex, std::move(coro), use_future);", 0),
     ]
     for name, body, expected_n in synthetic:
         got = len(screen_named_closure(body))
