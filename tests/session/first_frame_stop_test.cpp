@@ -153,7 +153,16 @@ void run_until(asio::io_context& ioc, std::atomic<bool> const& done,
 // cell's handler count above the budget. What still carries it is its OTHER
 // assertion — the accept-slot reclaim, which observes the peer seeing a close.
 // Anyone adding a witness for the promptness leg must MEASURE the pair, not
-// reason about it; see #359, which tracks the same gap for D-6.12b.
+// reason about it. #359 tracked the same gap for D-6.12b and is CLOSED: its
+// item 1 (T2a's own promptness construction) is done — T2a no longer arms a
+// real intermediate timer, it runs on a frozen clock and asserts that the join
+// retires at all, measured lethal against the bare-arm mutant. Its item 2 was
+// the question this comment answers, and the answer taken was the one recorded
+// here: the D-6.12b claim is DROPPED at engine scope rather than propped up
+// with a new assertion. SC-015's non-vacuity rests on T2a + T6 and on the
+// sibling cell below, whose mutant IS proven lethal at engine scope. Adding a
+// real positive barrier here remains possible and remains unfiled — it needs a
+// peer that cannot make progress, which is what that sibling cell already does.
 constexpr std::size_t kPromptHandlerBudget = 1000;
 
 struct PostHandshakeProbe {

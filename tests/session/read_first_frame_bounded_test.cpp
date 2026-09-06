@@ -46,8 +46,9 @@
 // Both land after T016-T018/T026-T029 (the fix), so both are regression
 // guards over the delivered design, not RED-against-`main` cells — B4 is
 // GREEN on pre-fix source by construction (research.md D-6.7); B6's RED is a
-// mutant of the delivered design (`expires_after` moved into the loop), not
-// `main`. See each cell's own comment for its RED basis.
+// mutant of the delivered design (a per-iteration deadline RE-ARM — see B6's
+// own comment for where that mutant lives after #377), not `main`. See each
+// cell's own comment for its RED basis.
 
 #include "session/read_first_frame_bounded.hpp"
 
@@ -479,12 +480,20 @@ TEST(ReadFirstFrameBounded, T1) {
 
     // Step 1: run the spawn to its first real suspension. co_spawn's initial
     // resume is posted, not inline, so this poll() call executes the
-    // coroutine synchronously through timer.expires_after(10ms) and the
-    // callback-form timer.async_wait(...) registration (neither suspends —
-    // async_wait with a callback starts the wait without co_await'ing it)
-    // until it reaches the genuine suspension inside async_read_some: the
-    // mock's own 1ms read_latency co_await. Both timers are now armed;
-    // nothing is expired yet, so poll() returns with work outstanding.
+    // coroutine synchronously through the helper's deadline resolution
+    // (`clock.steady_now() + deadline`, which since #377 is arithmetic rather
+    // than a timer arm and cannot suspend) and the callback-form
+    // timer.async_wait(...) registration (async_wait with a callback starts the
+    // wait without co_await'ing it) until it reaches the genuine suspension
+    // inside async_read_some: the mock's own 1ms read_latency co_await.
+    //
+    // ⚠️ The deadline's own timer is created LATER than it used to be — #377
+    // moved it inside await_deadline, i.e. inside the join, so it is armed on
+    // the first loop iteration rather than before the loop. It is armed by the
+    // time this poll() returns (the join is what suspends), which is all this
+    // step needs; nothing is expired yet, so poll() returns with work
+    // outstanding. This cell keeps the REAL clock — its subject is the relative
+    // order of two genuinely elapsed waits.
     ioc.poll();
 
     // Step 2: elapse BOTH absolute deadlines with no handler running at all
@@ -584,32 +593,28 @@ TEST(ReadFirstFrameBounded, T1) {
 // issued — and the read-count pin fails too. Two failures and three are the
 // SAME defect at different points; neither count is a signature.
 //
-// 5 s is derived from the competing quantity rather than taken as a round
-// number: the loaded wall time actually measured was 735 ms, so this is ~7x
-// the observed worst case, while staying 360x inside the 1800 s ctest timeout
-// the driver passes. The mutant still terminates, just in 5 s instead of 50 ms.
+// ── RESOLVED (#377). THE RACE IS DELETED, NOT SHRUNK. ────────────────────────
+// The history above is kept because it is what makes the fix legible; the fix
+// itself is that THIS CELL NO LONGER RUNS A WALL CLOCK.
 //
-// ⚠️ Raising it does NOT weaken any assertion, because no assertion in this
-// cell reads the deadline. Do not "restore" 50 ms to make the mutant fail
-// faster — that reintroduces the race.
+// PR #376's interim answer was to raise the deadline 50 ms -> 5 s, derived as
+// ~7x the observed 735 ms. It said of itself that 5 s was a GUESS and not a
+// proof, so a slow enough runner would reproduce the same vacuous run, just
+// rarely. #377 removed the quantity instead: `read_first_frame_bounded` now
+// takes a `fixpp::core::Clock&`, and this cell passes a FROZEN mock_clock that
+// is never advanced. The deadline cannot fire at any runner speed.
 //
-// ⚠️ THIS IS AN INTERIM FIX, AND THE ROOT CAUSE IS NAMED SO IT IS NOT MISTAKEN
-// FOR THE FINAL WORD. 5 s is still a wall-clock GUESS — 7x an observed 735 ms,
-// not a proof — so a slow enough runner reproduces the same vacuous run, just
-// rarely. The real fix is to stop depending on wall time: this repo already has
-// the seam (`fixpp::core::Clock`, include/fixpp/core/clock.hpp — virtual
-// `sleep_until` / `cancel_sleeps`, with a deterministic
-// `fixpp::core::test::mock_clock`), and `src/session/session.cpp` uses it for
-// every comparable deadline race. `read_first_frame_bounded` is the outlier: it
-// builds its own `asio::steady_timer` and calls `expires_after` directly
-// (src/session/read_first_frame_bounded.hpp), takes no `Clock&`, and therefore
-// CANNOT be driven by mock_clock. Threading a `Clock&` through it would let
-// these three cells fire the deadline deterministically and delete the race
-// rather than shrink it. That is a production-code change, outside this
-// branch's scope, and it is FILED — issue #377 — rather than left for someone
-// to rediscover from a future flake. ⚠️ Any such port must keep `await_deadline`
-// ARM-ONCE (it is documented as forbidden from calling `expires_after`); B6 is
-// the cell that kills the per-iteration re-arm mutant.
+// ⚠️ `kDeadline` BELOW IS THEREFORE INERT, and is kept only so the call reads
+// like every other cell's. Do not tune it, do not "restore" 50 ms, and do not
+// read it as a live bound — under this clock no value of it changes anything.
+// If you find yourself reasoning about its magnitude, the clock has been
+// changed out from under this comment.
+//
+// ⚠️ The deadline arm is still ARMED, still JOINED, and still CANCELLED by the
+// group on the winning path — freezing removes only its ability to win a race
+// it was never meant to enter. That the arm is genuinely live is demonstrated
+// on the other side by B6 (the deadline firing) and T2a (the arm's cancel
+// being delivered); both were measured against mutants after the port.
 TEST(ReadFirstFrameBounded, B4) {
     constexpr std::size_t kMaxBytes = 4096;
     constexpr auto kDeadline = std::chrono::seconds{5};
@@ -682,12 +687,25 @@ TEST(ReadFirstFrameBounded, B4) {
 // 14-ms.../49-ms derivation is recorded here and in the failure message, not
 // pinned as an assertion.
 //
-// Mutant killed: `expires_after` moved into the loop (or into
-// `await_deadline`) — a per-iteration re-arm. Under it the deadline is reset
+// Mutant killed: a per-iteration RE-ARM. #377 moved where that mutant can be
+// written — `await_deadline` now takes an ABSOLUTE instant, so re-sleeping to
+// it is idempotent and the arm itself can no longer push the deadline forward.
+// The mutant is therefore written one level up, on the line that computes
+// `abs_deadline` in read_first_frame_bounded.hpp: recomputing
+// `clock.steady_now() + deadline` per iteration. Under it the deadline is reset
 // every 7 ms and never fires; the loop drains all 201 chunks and reaches
-// `201 > 200` at the foot ⇒ `wire_frame_too_large`, with `buf.size() == 201`.
-// `await_deadline` is documented (read_first_frame_bounded.hpp) as forbidden
-// from calling `expires_after` for exactly this reason.
+// `201 > 200` at the foot.
+//
+// MEASURED against the ported code, not inherited across it: healthy 50 ms
+// PASS; mutant FAILS at 1468 ms with `wire_frame_too_large` and
+// `buf.size() == 201` — the exact terminal values this comment predicted before
+// the port, and B6 is the ONLY cell in the file that reddens.
+//
+// ⚠️ This cell keeps the REAL clock, deliberately. Its subject is the deadline
+// actually firing, so the frozen mock_clock the non-timeout cells use would
+// make it vacuous — it would assert a timeout that can never happen. The 7 ms
+// read cadence vs the 50 ms deadline (D-6.11: no common multiple inside the
+// window) is therefore still load-bearing here, and only here.
 TEST(ReadFirstFrameBounded, B6) {
     constexpr std::size_t kMaxBytes = 200;
     constexpr auto kDeadline = std::chrono::milliseconds{50};
@@ -789,10 +807,20 @@ TEST(ReadFirstFrameBounded, B6) {
 //
 //   delivered  — total reaches the arm (await_deadline resets to total), the
 //                arm's sleep is slot-cancelled, both arms retire, `result` is
-//                set. Measured in ~1 ms.
+//                set.
 //   mutant     — the arm's own cancel is silently dropped (terminal-only IN
 //                filter never sees `total`), nothing ever wakes the frozen
 //                clock's waiter, and the join CANNOT retire. Ever.
+//
+// MEASURED, both arms, against the ported code (linux-clang-asan):
+//     delivered                              PASS,   0 ms
+//     mutant (bare `co_await clock.sleep_until`, no reset, no absorption)
+//                                            FAIL, 2003 ms — this assertion
+// and T2a is the ONLY cell in the file that reddens under it, which is what
+// "D-6.12b is witnessed at HELPER scope" means concretely. The binary's hash
+// was compared across the pair, so the mutant is known to have reached it —
+// a rebuild that silently did nothing would otherwise report the healthy
+// result twice and read as a lethal mutant surviving.
 //
 // The assertion is therefore "did the join retire at all", which is structural.
 //
