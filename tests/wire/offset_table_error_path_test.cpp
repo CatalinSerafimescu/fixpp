@@ -42,17 +42,19 @@
 // is why this block was repaired rather than merely renumbered.
 
 #include <gtest/gtest.h>
-#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <cstddef>
 #include <cstring>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <vector>
 
+#include "../support/msvc_debug_arena_skip.hpp"
+#include "support/context_group_member_fn.hpp"
 #include "support/failing_pmr_resource.hpp"
 #include "support/frame_view_factory.hpp"
 
@@ -190,22 +192,53 @@ TEST(OffsetTableErrorPath, GroupOnRedTableReturnsStatusErrorCoversLines165to166)
 
 TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
+    // 220: this cell is now DICT-AWARE, and that is load-bearing rather than
+    // cosmetic. It used to build the table dict-free, and its only assertion is
+    // `slices.empty()`. Once fixpp#220 made group() decline for a dict-free
+    // table, "empty" became satisfiable WITHOUT the bad_alloc catch ever
+    // running — the cell would have kept passing while covering nothing, which
+    // is the failure mode it exists to guard against. A dictionary is what
+    // makes a non-empty result possible, so an empty one can only come from the
+    // catch.
     auto buf = make_raw_frame(
         "453=1\x01"
         "448=A\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
+    fixpp::dict::table_view dict;
+    dict.set_group_first(453, 448);
+    auto* const member_fn = &fixpp_test_support::context_group_member_fn;
+
+    // ── CONTROL ARM: prove the instrument can report NON-empty. ──
+    // Without this, the failing arm below is indistinguishable from a cell
+    // whose group_slices() returns empty for some unrelated reason.
+    {
+        std::pmr::monotonic_buffer_resource ok_arena;
+        OffsetTable ok{*fv, &ok_arena, &dict, member_fn};
+        ASSERT_TRUE(ok.build_status().has_value());
+        ASSERT_FALSE(ok.group_slices(453).empty())
+            << "control: with allocation succeeding, this frame MUST materialise one slice — "
+               "if it does not, the failing arm below proves nothing about the bad_alloc catch";
+    }
+
     // Measure how many PMR allocations OffsetTable construction performs. This is
     // allocator-dependent (libstdc++/libc++ grow vectors 2x → 5 calls here; MSVC's
     // std::pmr grows 1.5x → a different count), so it cannot be hard-coded. We then
     // fail the FIRST post-construction allocation — group_slices_.reserve — which
-    // exercises the bad_alloc degrade path (lines 231-232) on every platform.
+    // exercises the bad_alloc degrade path on every platform.
+    //
+    // The reserve is still the first post-construction allocation on the
+    // dict-aware path: group_slices_reserve_bound()'s dictionary branch runs
+    // stored_group_context(), parse_declared_count() and the membership
+    // predicate, and all three are alloc-free (the predicate is documented so
+    // in tests/support/context_group_member_fn.hpp — group_member_tags returns
+    // a span).
     std::size_t construction_calls = 0;
     {
         std::pmr::monotonic_buffer_resource probe_upstream;
         failing_pmr_resource probe_mr{&probe_upstream, /*fail_on_call_n=*/0};  // never fail
-        OffsetTable probe{*fv, &probe_mr};
+        OffsetTable probe{*fv, &probe_mr, &dict, member_fn};
         ASSERT_TRUE(probe.build_status().has_value());
         construction_calls = probe_mr.allocate_calls();
     }
@@ -215,7 +248,7 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     // Fail the first allocation AFTER construction (the group_slices_.reserve).
     failing_pmr_resource fail_mr{&upstream, /*fail_on_call_n=*/construction_calls + 1};
 
-    OffsetTable t{*fv, &fail_mr};
+    OffsetTable t{*fv, &fail_mr, &dict, member_fn};
 
     // Construction must succeed (all construction allocs complete before the
     // (construction_calls + 1)-th call).
@@ -224,16 +257,15 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
         << " allocations allowed";
     EXPECT_GT(t.size(), 0U) << "table must have entries after successful build";
 
-    // group_slices(453) triggers alloc #6 (reserve) → bad_alloc → catch → {}.
+    // group_slices(453) triggers the reserve → bad_alloc → catch → {}.
     auto slices = t.group_slices(453);
     EXPECT_TRUE(slices.empty())
-        << "lines 231-232: group_slices() must return empty span on bad_alloc";
+        << "group_slices() must return an empty span on bad_alloc — and the control arm above "
+           "establishes that a non-empty span is what this frame otherwise produces";
 
-    // Verify noexcept guarantee: second call must not crash (alloc #6 already
-    // consumed; subsequent allocs succeed → group_slices rebuilds normally).
+    // Verify noexcept guarantee: second call must not crash (the failing alloc
+    // already fired; subsequent allocs succeed → group_slices rebuilds normally).
     auto slices2 = t.group_slices(453);
-    // slices2 may be non-empty on the second call (the failing resource only
-    // fires once); the invariant is just that the call completes without throwing.
     SUCCEED() << "second group_slices() after OOM must not crash";
     (void)slices2;
 }

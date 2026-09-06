@@ -590,7 +590,6 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     }
 
     std::uint16_t const delim = entries_[first].tag;
-    std::size_t group_end = first;
     // This table's stored membership context (msg_type + bounded parent
     // path). A ROOT table is seeded at `MessageView` construction time
     // (`MessageView::group<>()` re-applies the same value, idempotent);
@@ -612,7 +611,7 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // instance). consume_group_extent recursively consumes each nested
     // group's full declared extent so the outer slice encloses all of it.
     bool overflow = false;
-    group_end = consume_group_extent(count_idx, ctx, ctx.depth, overflow);
+    std::size_t const group_end = consume_group_extent(count_idx, ctx, ctx.depth, overflow);
     if (overflow) {
         return err_group_too_large<group_index>();
     }
@@ -642,10 +641,23 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
 }
 
 std::uint32_t OffsetTable::group_slices_reserve_bound() const noexcept {
-    // Dict-free callers have no membership oracle to identify count fields —
-    // keep the conservative entry-count bound (unchanged behaviour).
+    // 220: a dict-free table can never append to `group_slices_`, because
+    // group() declines for it at this function's sibling guard and
+    // group_slices_status() only pushes inside `if (gi)`. The bound is
+    // therefore 0, not the old conservative `entries_.size()` — which reserved
+    // up to 4096 * sizeof(group_slice) out of the fixed, null-upstream parse
+    // arena for slices that provably cannot exist. That is the same
+    // arena-exhaustion mode this bound was introduced to fix (PR #181 Tier-2
+    // arena_fit), reappearing on the branch that lost its justification.
+    //
+    // ⚠️ PRECONDITION, not an observation: this 0 is correct only while group()
+    // declines unconditionally without a membership oracle. If that is ever
+    // relaxed, this MUST go back to `entries_.size()` — the reserve-once
+    // contract above ("subsequent appends never reallocate, so every previously
+    // returned span stays valid") is upheld here only because there are no
+    // appends at all.
     if (opaque_dict_ == nullptr || group_member_fn_ == nullptr) {
-        return static_cast<std::uint32_t>(entries_.size());
+        return 0U;
     }
     // Sum the DECLARED instance count of every TOP-LEVEL group count-field,
     // using the SAME predicate group() gates a push on: the dictionary

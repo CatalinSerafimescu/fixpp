@@ -2753,6 +2753,19 @@ Evidence: issues #346, #348, #349; new issue #351.
   returns from `Message::setGroup` when `DataDictionary::getGroup` fails and forms no `Group` at all;
   QuickFIX/J guards all three `parseGroup` call sites on a non-null dictionary and, with no
   dictionary, flattens the members as ordinary top-level fields.
+  **⚠️ This is a visible C-ABI behaviour change, and the only one.** A dict-free caller's
+  `fixpp_msg_get_group(msg, <group tag>, …)` went from `FIXPP_ERR_OK` **plus a cursor whose last
+  nested instance absorbed trailing outer members** — a wrong value the caller could not distinguish
+  from a real one — to `FIXPP_ERR_TYPE_MISMATCH`. `fixpp_group_get_nested_group` is unreachable in
+  that state because there is no outer cursor to descend from. **No exported symbol, header, or enum
+  changes; the 1.5.0 C-ABI freeze holds.** This **supersedes 065's FR-008**, whose bar was "no
+  regression versus today's positional behaviour": 065 took the positional result as a floor because
+  it was fixing the dict-aware path and would not touch the other one. #220 establishes that the
+  positional result **was** the defect, so trading a silently wrong value for a defined refusal
+  removes that floor rather than regressing against it. Witnessed by
+  `MessageReadGroup.DictFreeGroupReadReportsTypeMismatch` (`tests/capi/message_read_test.cpp`),
+  rewritten from 065's `DictFreeNestedReadDegradesToPositional` — which existed precisely to force
+  this change to be made deliberately, and did.
   **Migration:** a caller that needs groups must construct through a dictionary
   (`Parser<access_mode::Index>{dict}`). A caller that does not need groups is unaffected.
   *(#220; replaces the rest-of-message degradation formerly recorded as L-085-1, now resolved.)*
