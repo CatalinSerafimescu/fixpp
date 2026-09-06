@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <asio/awaitable.hpp>
+#include <asio/cancellation_type.hpp>
 #include <asio/experimental/awaitable_operators.hpp>
 #include <asio/this_coro.hpp>
 #include <chrono>
@@ -89,13 +90,58 @@ namespace fixpp::session::detail {
 inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
                                             fixpp::core::steady_time_point deadline) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
-    try {
-        co_await clock.sleep_until(deadline);
-    } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch) — see D-3 above: the
-                                          // join's outcome.index() is the control-flow decision,
-                                          // not this arm's error. Deliberately no action.
-        // Losing arm: operation_aborted, exactly what redirect_error absorbed.
-        // Anything that is NOT a system_error propagates, as it did pre-#377.
+    for (;;) {
+        try {
+            co_await clock.sleep_until(deadline);
+            co_return;  // the deadline was actually reached
+        } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch) — the decision is
+                                              // made below; there is nothing to do in the handler.
+            // operation_aborted, and it does NOT say which of two very different
+            // things happened. See the disambiguation immediately below.
+            // Anything that is NOT a system_error propagates, as it did pre-#377.
+        }
+
+        // ── WHY THIS IS A LOOP, AND WHY THE CLOCK IS THE ORACLE (#377 round 2) ──
+        // `operation_aborted` out of sleep_until has TWO causes and they need
+        // opposite responses:
+        //
+        //   (a) the JOIN cancelled this arm — the read won, this arm must retire.
+        //   (b) somebody called `Clock::cancel_sleeps()`, which is GLOBAL over the
+        //       whole clock and sweeps EVERY registered sleeper.
+        //
+        // (b) is not exotic and it is not a teardown path. A Session in LogoutSent
+        // that receives the peer's confirming 35=5 calls cancel_sleeps() to wake
+        // its own logout wait (src/session/session.cpp, the LogoutSent case), and
+        // absent a per-session clock_override that Session's clock IS this engine
+        // clock (session.cpp: `effective_clock_ = cfg_.clock_override ? ... :
+        // engine_.clock`). So one routine Logout on ANY session would sweep the
+        // accept path's deadline here.
+        //
+        // Treating (b) as (a) is a SILENT DROPPED LOGON: this arm completes, the
+        // join reports outcome.index() == 1, and the caller rejects a perfectly
+        // healthy inbound connection as transport_handshake_timeout and closes it
+        // without a log at that site.
+        //
+        // ⚠️ THIS IS A HAZARD #377 CREATED. Before it, the deadline was a private
+        // asio::steady_timer built inside this helper and registered with no
+        // Clock, so cancel_sleeps() could not reach it. Putting the deadline on
+        // the shared engine clock is what made the accept path reachable from
+        // every other session's traffic. Do not "simplify" this back to a single
+        // sleep.
+        //
+        // The exception cannot tell (a) from (b) — both are operation_aborted —
+        // so ask the two authorities that can. Re-sleeping targets the SAME
+        // ABSOLUTE INSTANT, so this cannot push the deadline forward however many
+        // times it is swept, and it still terminates AT the deadline.
+        auto cs = co_await asio::this_coro::cancellation_state;
+        if (cs.cancelled() != asio::cancellation_type::none) {
+            co_return;  // (a) the join cancelled us — retire, as before.
+        }
+        if (clock.steady_now() >= deadline) {
+            co_return;  // the deadline genuinely elapsed; report it as a timeout.
+        }
+        // (b) a spurious sweep with time still on the clock. Re-arm to the same
+        // instant and keep waiting — the connection is NOT dropped.
     }
 }
 

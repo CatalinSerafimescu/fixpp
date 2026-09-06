@@ -928,6 +928,80 @@ TEST(ReadFirstFrameBounded, T2a) {
         << "cancelled or transport_handshake_timeout), got " << describe(*result);
 }
 
+// ── CovSharedClockSweep (#377 round 2) — cancel_sleeps() MUST NOT drop a Logon ──
+// THE HAZARD #377 CREATED, and the only cell that can see it.
+//
+// `Clock::cancel_sleeps()` is GLOBAL over the whole clock — it sweeps every
+// registered sleeper, with no session scoping. Before #377 the first-frame
+// deadline was a private asio::steady_timer registered with no Clock, so nothing
+// could reach it. Putting it on the shared engine clock made the accept path
+// reachable from every other session's ROUTINE traffic: a Session in LogoutSent
+// receiving the peer's confirming 35=5 calls cancel_sleeps() to wake its own
+// logout wait (src/session/session.cpp, LogoutSent case), and absent a
+// per-session clock_override that Session's clock IS the engine clock.
+//
+// Without the disambiguation in await_deadline, that sweep completes the deadline
+// arm, the join reports outcome.index() == 1, and the engine rejects a HEALTHY
+// inbound connection as transport_handshake_timeout and closes it with no log at
+// that site — one unrelated Logout silently dropping one inbound Logon.
+//
+// ⚠️ THE OTHER NINE CELLS CANNOT SEE THIS, BY CONSTRUCTION: each drives a clock
+// with exactly one sleeper, so a global sweep and a per-op cancel are
+// indistinguishable there. This cell is the one that separates them, which is why
+// it exists rather than being folded into an existing cell.
+//
+// RED ARM (measured, do not assume): delete the `cs.cancelled()` /
+// `steady_now() >= deadline` disambiguation in await_deadline so the sweep is
+// treated as the join's cancel. This cell then returns transport_handshake_timeout
+// instead of the frame length.
+TEST(ReadFirstFrameBounded, CovSharedClockSweep) {
+    constexpr std::size_t kMaxBytes = 4096;
+    constexpr auto kDeadline = std::chrono::seconds{5};
+
+    // A complete Logon, delivered in two chunks so the loop genuinely iterates and
+    // the sweep lands with a read in flight rather than before the first one.
+    // 2048 keeps make_logon_of_length's 4-digit-BodyLength precondition satisfied
+    // (the same reason the other cells use kMaxBytes-scale lengths).
+    std::vector<std::byte> const payload = make_logon_of_length(2048);
+    ASSERT_EQ(payload.size(), 2048u) << "CovSharedClockSweep: fixture did not build a frame.";
+    Script s;
+    s.inbound_chunks.emplace_back(payload.begin(), payload.begin() + 8);
+    s.inbound_chunks.emplace_back(payload.begin() + 8, payload.end());
+    s.read_latency = std::chrono::milliseconds{2};
+
+    asio::io_context ioc;
+    // Frozen: the deadline must not fire. The sweep below is the subject.
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
+                              asio::use_future);
+
+    // Drive until the helper is genuinely suspended inside the join with a read in
+    // flight — a sweep before that would not exercise the deadline arm at all.
+    for (int i = 0; i < 10'000 && mt.async_reads_observed() == 0; ++i) ioc.poll();
+    ASSERT_GE(mt.async_reads_observed(), 1u)
+        << "CovSharedClockSweep: no read was ever initiated — the sweep below would land "
+           "before the deadline arm existed, making this cell vacuous.";
+
+    // The sweep. This is what a routine Logout on ANY other session does.
+    clock.cancel_sleeps();
+
+    ioc.run();
+    expected_t<std::size_t> const result = fut.get();
+
+    ASSERT_TRUE(result.has_value())
+        << "CovSharedClockSweep (#377): a global Clock::cancel_sleeps() — which routine "
+        << "traffic on an UNRELATED session performs — aborted this first-frame read and the "
+        << "connection would have been closed as a handshake timeout. The deadline arm must "
+        << "distinguish `the join cancelled me` from `the whole clock was swept`; both arrive "
+        << "as operation_aborted, so the clock itself is the oracle. Got " << describe(result);
+    EXPECT_EQ(*result, payload.size())
+        << "CovSharedClockSweep: expected the complete Logon to be returned intact after the "
+        << "sweep, not a truncated or partial frame.";
+}
+
 // ── COVERAGE CELL — framer-error propagation (Article IX §1) ─────────────────
 // NOT one of the 13 mutation-proven witness cells and deliberately not named
 // like one. Added at /speckit-verify to close a genuine uncovered error path:
