@@ -13,14 +13,14 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
 #include <cstring>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -35,9 +35,10 @@
 #include <string_view>
 #include <vector>
 
-#include "frame_field_extract.hpp"          // sibling (tests/session/support/)
-#include "support/minimal_dictionary.hpp"   // tests/support/ via -I tests
+#include "frame_field_extract.hpp"         // sibling (tests/session/support/)
+#include "support/minimal_dictionary.hpp"  // tests/support/ via -I tests
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace fixpp::session::test {
 
@@ -178,20 +179,29 @@ protected:
         return cfg;
     }
 
-    void run_ioc() {
-        ioc.run_for(std::chrono::milliseconds{200});
-        ioc.restart();
-    }
-
     // Open acceptor session + feed Logon(seq=1) → Active (next expected inbound = 2).
     void drive_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
+                                                        "PossDupTestBase::drive_to_active/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "PossDupTestBase::drive_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "PossDupTestBase::drive_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_logon(1, "TW", "ISLD");
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, std::chrono::milliseconds{200},
+                                                        "PossDupTestBase::drive_to_active/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "PossDupTestBase::drive_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "PossDupTestBase::drive_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon feed failed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
@@ -199,7 +209,13 @@ protected:
     // Feed a frame and block until complete.
     void feed(Session& sess, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
+                                                        "PossDupTestBase::feed/frame")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "PossDupTestBase::feed/frame");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "PossDupTestBase::feed/frame";
+            return;
+        }
         (void)fut.get();
     }
 

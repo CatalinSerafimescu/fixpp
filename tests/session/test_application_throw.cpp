@@ -56,6 +56,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
@@ -66,6 +67,12 @@ using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
 
 namespace fixpp::session::test {
+// The #289 window every migrated site in this file uses. File-scope rather than a
+// fixture member because one of the sites sits in a free helper taking the fixture
+// by reference. It is ONE value here; files whose windows genuinely differ per site
+// keep theirs inline, where a single constant would be a lie.
+constexpr auto kWindow = 400ms;
+
 namespace {
 
 // ── Frame helpers ─────────────────────────────────────────────────────────────
@@ -159,19 +166,36 @@ struct ThrowFixture {
         return cfg;
     }
 
-    void run(int ms = 400) {
+    // Settle pump for the calls with NO future in scope -- #289's own text puts a
+    // bare settle pump outside the conversion. The `= 400` default went with the 17
+    // migrated callers; every survivor passes its window explicitly.
+    void run(int ms) {
         ioc.run_for(std::chrono::milliseconds{ms});
         ioc.restart();
     }
 
     void open_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        run();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                        "ThrowFixture::open_to_active/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ThrowFixture::open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ThrowFixture::open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value());
 
         auto logon = make_logon_frame();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        run();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, kWindow,
+                                                        "ThrowFixture::open_to_active/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ThrowFixture::open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ThrowFixture::open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value());
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
     }
@@ -192,14 +216,28 @@ struct ThrowFixture {
         Session sess2(engine_cfg, cfg2);
 
         auto fut = asio::co_spawn(ioc, sess2.open(), asio::use_future);
-        run();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut, kWindow, "ThrowFixture::verify_second_session_works/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "ThrowFixture::verify_second_session_works/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ThrowFixture::verify_second_session_works/open";
+            return;
+        }
         if (!fut.get().has_value()) {
             ADD_FAILURE() << "second session open() failed — engine may be corrupted";
             return;
         }
         auto logon = make_logon_frame();
         auto fut2 = asio::co_spawn(ioc, sess2.on_inbound_frame(logon), asio::use_future);
-        run();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut2, kWindow, "ThrowFixture::verify_second_session_works/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "ThrowFixture::verify_second_session_works/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ThrowFixture::verify_second_session_works/logon";
+            return;
+        }
         (void)fut2.get();
         EXPECT_EQ(sess2.state(), fixpp::session::fsm_state::Active)
             << "second session must reach Active — engine not corrupted";
@@ -290,7 +328,13 @@ TEST(ApplicationThrow, FromAppThrowTerminatesSession) {
     // Feed an app frame — fromApp will throw.
     auto frame = make_app_frame(2);
     auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(frame), asio::use_future);
-    f.run();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, kWindow,
+                                                    "FromAppThrowTerminatesSession/frame")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "FromAppThrowTerminatesSession/frame");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "FromAppThrowTerminatesSession/frame";
+        return;
+    }
     // on_inbound_frame may return an error or ok (the throw is caught inside).
     // Either way, the session must have been terminal-closed.
     (void)fut.get();
@@ -318,7 +362,14 @@ TEST(ApplicationThrow, FromAdminThrowTerminatesSession) {
     // Feed a Heartbeat (admin frame) — fromAdmin will throw.
     auto hb = make_heartbeat_frame(2);
     auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(hb), asio::use_future);
-    f.run();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, kWindow,
+                                                    "FromAdminThrowTerminatesSession/frame")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "FromAdminThrowTerminatesSession/frame");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "FromAdminThrowTerminatesSession/frame";
+        return;
+    }
     (void)fut.get();
 
     f.run(300);
@@ -344,7 +395,13 @@ TEST(ApplicationThrow, ToAppThrowTerminatesSession) {
     // Call Session::send — toApp will throw inside send_impl.
     auto payload = make_app_payload();
     auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    f.run();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, kWindow,
+                                                    "ToAppThrowTerminatesSession/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "ToAppThrowTerminatesSession/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ToAppThrowTerminatesSession/send";
+        return;
+    }
     auto result = fut.get();
     // Result is unexpected(app_callback_threw) because the throw is caught
     // inside invoke_callback_safe and returned; Session::send_impl propagates it.
@@ -387,7 +444,14 @@ TEST(ApplicationThrow, ToAdminThrowTerminatesSession) {
     // terminal-closed.
     {
         auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, kWindow,
+                                                        "ToAdminThrowTerminatesSession/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "ToAdminThrowTerminatesSession/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ToAdminThrowTerminatesSession/open";
+            return;
+        }
         auto result = fut.get();
         // open() returns an error because toAdmin threw during the initial Logon emit.
         // The throw was caught; the session was terminal-closed.
@@ -423,7 +487,13 @@ TEST(ApplicationThrow, OnCreateThrowTerminatesSession) {
 
     // open() fires onCreate — it will throw.
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.run();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, kWindow,
+                                                    "OnCreateThrowTerminatesSession/open")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "OnCreateThrowTerminatesSession/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "OnCreateThrowTerminatesSession/open";
+        return;
+    }
     (void)fut.get();  // may succeed or return an error
     f.run(300);
 
@@ -451,7 +521,14 @@ TEST(ApplicationThrow, OnLogonThrowTerminatesSession) {
 
     {
         auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, kWindow,
+                                                        "OnLogonThrowTerminatesSession/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "OnLogonThrowTerminatesSession/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "OnLogonThrowTerminatesSession/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value());
     }
 
@@ -459,7 +536,14 @@ TEST(ApplicationThrow, OnLogonThrowTerminatesSession) {
     {
         auto logon = make_logon_frame();
         auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(logon), asio::use_future);
-        f.run();
+        if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, kWindow,
+                                                        "OnLogonThrowTerminatesSession/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                            "OnLogonThrowTerminatesSession/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "OnLogonThrowTerminatesSession/logon";
+            return;
+        }
         (void)fut.get();
     }
     f.run(300);  // drain close work
@@ -486,7 +570,13 @@ TEST(ApplicationThrow, OnLogoutThrowHandledCleanly) {
 
     // Terminal close — onLogout fires during the Active→Disconnected transition.
     auto fut = asio::co_spawn(f.ioc, sess.close(close_mode::terminal), asio::use_future);
-    f.run();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, kWindow,
+                                                    "OnLogoutThrowHandledCleanly/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "OnLogoutThrowHandledCleanly/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "OnLogoutThrowHandledCleanly/close";
+        return;
+    }
     (void)fut.get();
     f.run(300);
 
@@ -525,11 +615,25 @@ public:
 // The acceptor reply Logon triggers toAdmin call #1.
 static void open_acceptor_to_active(ThrowFixture& f, Session& sess) {
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.run();
+    if (!fixpp::test_support::run_window_then_ready(
+            f.ioc, fut, kWindow, "ApplicationThrow::open_acceptor_to_active/open")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "ApplicationThrow::open_acceptor_to_active/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ApplicationThrow::open_acceptor_to_active/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value());
     auto logon = make_logon_frame();
     auto fut2 = asio::co_spawn(f.ioc, sess.on_inbound_frame(logon), asio::use_future);
-    f.run();
+    if (!fixpp::test_support::run_window_then_ready(
+            f.ioc, fut2, kWindow, "ApplicationThrow::open_acceptor_to_active/logon")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "ApplicationThrow::open_acceptor_to_active/logon");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ApplicationThrow::open_acceptor_to_active/logon";
+        return;
+    }
     ASSERT_TRUE(fut2.get().has_value());
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 }
@@ -565,7 +669,14 @@ TEST(ApplicationThrow, ToAdminConfirmingLogoutThrowTerminatesSession) {
     // Feed inbound Logout → session tries to emit confirming Logout → toAdmin call #2 throws.
     auto logout_frame = make_logout_frame(2);
     auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(logout_frame), asio::use_future);
-    f.run();
+    if (!fixpp::test_support::run_window_then_ready(
+            f.ioc, fut, kWindow, "ToAdminConfirmingLogoutThrowTerminatesSession/logout")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "ToAdminConfirmingLogoutThrowTerminatesSession/logout");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ToAdminConfirmingLogoutThrowTerminatesSession/logout";
+        return;
+    }
     (void)fut.get();
     f.run(300);
 
@@ -597,7 +708,14 @@ TEST(ApplicationThrow, ToAdminGracefulCloseLogoutThrowTerminatesSession) {
 
     // close(graceful) emits Logout → toAdmin call #2 throws.
     auto fut = asio::co_spawn(f.ioc, sess.close(close_mode::graceful), asio::use_future);
-    f.run();
+    if (!fixpp::test_support::run_window_then_ready(
+            f.ioc, fut, kWindow, "ToAdminGracefulCloseLogoutThrowTerminatesSession/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "ToAdminGracefulCloseLogoutThrowTerminatesSession/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ToAdminGracefulCloseLogoutThrowTerminatesSession/close";
+        return;
+    }
     (void)fut.get();
     f.run(300);
 
@@ -628,7 +746,14 @@ TEST(ApplicationThrow, ToAdminTestRequestReplyThrowTerminatesSession) {
     // Feed inbound TestRequest → session emits a Heartbeat reply → toAdmin call #2 throws.
     auto tr_frame = make_raw_frame("FIX.4.2", "1", 2, "TW", "ISLD", "112=TR1\x01");
     auto fut = asio::co_spawn(f.ioc, sess.on_inbound_frame(tr_frame), asio::use_future);
-    f.run();
+    if (!fixpp::test_support::run_window_then_ready(
+            f.ioc, fut, kWindow, "ToAdminTestRequestReplyThrowTerminatesSession/test-request")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "ToAdminTestRequestReplyThrowTerminatesSession/test-request");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ToAdminTestRequestReplyThrowTerminatesSession/test-request";
+        return;
+    }
     (void)fut.get();
     f.run(300);
 

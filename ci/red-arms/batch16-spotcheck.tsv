@@ -1,0 +1,45 @@
+# ci/red-arms/batch16-spotcheck.tsv -- TEXTUAL spot-checks for #289 batch 16.
+#
+# Feed to:  bash ci/pump-red-arm.sh linux-clang-debug ci/red-arms/batch16-spotcheck.tsv
+#
+# The stronger witness. `ci/red-arms/batch16-labels.txt` runs all 49 sites through the
+# runtime seam in one build; these six rebuild the tree once PER ARM with the miss
+# forced textually, so they check the recipe as WRITTEN rather than as the seam
+# reports it. Run both.
+#
+# ⚠️ EVERY ROW CARRIES SIX FIELDS, AND COLUMN 6 IS LOAD-BEARING HERE.
+# file <TAB> anchor <TAB> label <TAB> cmake-target <TAB> ctest-regex <TAB> exec-stem
+# A label matches EXACTLY at the forcing seam but by CONTAINMENT for the driver's
+# "did this arm's own test run?" assertion, and those two coincide only while labels
+# are named after TESTS. Four of these six sites live in fixture HELPERS reached from
+# many tests, so without column 6 they would every one read INCONCLUSIVE for a reason
+# about naming rather than about the site. Column 6 names the gtest SUITE.
+# ⚠️ AND SAY WHAT COLUMN 6 DOES NOT PROVE: a suite name shows the SUITE ran, not that
+# the armed site was reached. A site no executed test calls would grade SILENT (a
+# finding about the site) rather than INCONCLUSIVE. That gap is recorded as open
+# #289 work in the batch-15 handover; it is not closed here.
+#
+# ⚠️ ANCHOR ON THE SITE, NOT ON WHAT ENCLOSES IT -- UNLESS THE LABEL NAMES THE
+# ENCLOSING FUNCTION'S FIRST SITE. The driver forces the FIRST `run_window_then_ready(`
+# at or after the anchor, so a signature anchor on a two-site helper forces site one and
+# reports about site two. That cost batch 15 a wrong verdict against correct code. The
+# three signature anchors below are each a helper's FIRST site, checked; the other
+# three anchor on the `co_spawn` immediately above their own call.
+#
+# ⚠️ AN ANCHOR MUST BE UNIQUE IN ITS FILE, and that is not free here: the two shared
+# helpers below both spawn `sess.open()`, and that exact line recurs in the same file.
+# Re-derive rather than trusting these strings after an edit:
+#   grep -cF '<anchor>' <file>      # must print 1
+#
+# ⚠️ `PossDupTestBase::drive_to_active/open` LIVES IN A SHARED HEADER compiled into
+# four binaries. Its arm targets ONE of them on purpose (session_inbound_poss_resend):
+# the mutation is textual and rebuilds every includer, so a broader ctest regex would
+# multiply the arm's cost without adding a witness -- the same source line is under
+# test either way. That the OTHER three includers still build and pass with the
+# mutation reverted is what the full suite run covers, not this arm.
+tests/session/test_application_throw.cpp	void open_to_active(Session& sess) {	ThrowFixture::open_to_active/open	application_throw_019_test	^application_throw_019$	ApplicationThrow
+tests/session/test_application_throw.cpp	auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);	ThrowFixture::open_to_active/logon	application_throw_019_test	^application_throw_019$	ApplicationThrow
+tests/session/support/possdup_test_support.hpp	void drive_to_active(Session& sess) {	PossDupTestBase::drive_to_active/open	session_inbound_poss_resend	^session_inbound_poss_resend$	InboundPossResendTest
+tests/session/test_send_allow_pos_dup_strip.cpp	void feed(Session& sess, const std::vector<std::byte>& frame) {	AllowPosDupStripTest::feed/frame	session_send_allow_pos_dup_strip	^session_send_allow_pos_dup_strip$	AllowPosDupStripTest
+tests/session/test_send_allow_pos_dup_strip.cpp	TEST_P(MalformedField131Test, W6_MalformedField_Returns131_NoSeqnum_NoTransmit_NoExcision) {	W6_MalformedField/send	session_send_allow_pos_dup_strip	^session_send_allow_pos_dup_strip$	MalformedField131Test
+tests/session/test_sending_time_precision.cpp	auto fut = asio::co_spawn(ioc, sess2.on_inbound_frame(hb), asio::use_future);	MaxLatency_OnNanosInbound/beyond	session_sending_time_precision	^session_sending_time_precision$	SendingTimePrecisionTest
