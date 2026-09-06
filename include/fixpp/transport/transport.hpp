@@ -107,8 +107,47 @@ struct ConnectInfo;
 // associated cancellation slot. Both transports' async_connect suspend there
 // FIRST, and arm their connect_timeout timer only AFTERWARDS, so a stop() during
 // a slow or blocked DNS lookup is bounded by neither the cancellation nor
-// `connect_timeout` — it waits for the system resolver. No reset shape fixes
-// that; it needs a timeout around the resolve itself.
+// `connect_timeout`. No reset shape fixes that (#361).
+//
+// ⚠️ AND THE OBVIOUS FIX DOES NOT WORK. This paragraph used to end "it needs a
+// timeout around the resolve itself". That is FALSE and is corrected here rather
+// than deleted, because it is the fix anyone reaching this point will reach for.
+// A timeout cannot abort a resolve that has already begun:
+//
+//   asio/detail/impl/socket_ops.ipp, background_getaddrinfo() —
+//       if (cancel_token.expired())  ec = operation_aborted;
+//       else                         socket_ops::getaddrinfo(...);
+//
+// The expired-token test happens ONCE, BEFORE the blocking call. So
+// `resolver.cancel()` (which is only `impl.reset()` in resolver_service_base)
+// wins the QUEUED window and nothing else; once getaddrinfo is running on the
+// resolver's own pool thread it runs to completion no matter what we do.
+// ⚠️ Joining the resolve against a timer with `operator||` is WORSE than
+// useless: the group retires only when BOTH arms retire, so it would still wait
+// for getaddrinfo AND add an arm — the trap #359 records in that construction.
+//
+// ⚠️ IT IS NOT UNBOUNDED, AND CALLING IT THAT OVERSTATES IT. getaddrinfo is
+// bounded by the HOST's resolver policy — glibc's `timeout` (default 5 s) x
+// `attempts` (default 2) x each `nameserver` x the A/AAAA pair. fixpp has no say
+// in any of those. The failure mode is therefore "teardown inherits the
+// deployment's DNS policy", not "teardown hangs".
+//
+// MEASURED 2026-09-06, glibc, direct getaddrinfo() in a private mount namespace
+// with /etc/resolv.conf bind-mounted (the host's resolver untouched):
+//     working resolver, control                             62 ms
+//     1 blackholed nameserver, defaults                  20,016 ms
+//     3 blackholed nameservers, defaults                 56,048 ms
+//     1 blackholed nameserver, options timeout:1 attempts:1  2,002 ms
+// Re-derive with a bind-mounted resolv.conf pointing at a TEST-NET address; the
+// control arm is not optional, since a resolver that answers makes every number
+// here meaningless.
+//
+// The ONLY construction that bounds stop() is to stop AWAITING the resolve —
+// detach it and let the frame abandon it. ⚠️ That is not a small change and it
+// is not obviously safe: the abandoned op must keep the resolver, and therefore
+// the transport's executor, alive past the frame, and nothing holding a strand
+// may outlive its io_context — POSIX ignores a stranded work count on
+// ~io_context, but Windows spins forever on it. Deliberately NOT done; see #361.
 //
 // So "raw vs composed" is the discriminator for shapes (a) and (b) ONLY, and this
 // list is not a taxonomy of every awaited op. ⚠️ Derive from the op you are
