@@ -47,6 +47,22 @@ prints `0` for a whole syntax.
   from SYNTHETIC fixtures assert a property of the instrument.** Prefer synthetic. A real-file anchor
   fails when the tree legitimately changes, and a later reader cannot distinguish a rotted anchor from
   a broken instrument.
+- ⚠️ **WHEN THE INSTRUMENT IS A PREDICATE OVER A GRAMMAR, ENUMERATE THE PRODUCTION — NOT THE EXAMPLES
+  YOU CAN THINK OF.** A fix's own controls are written by whoever held the wrong model, so they
+  inherit its blind spot, and brainstorming cases samples exactly the model that was wrong. Reading
+  the production is the only step that does not. #289 batch 17: a lexer read every `'` as opening a
+  character literal, so a C++14 digit separator (`10'000`) started a literal that ran to the next
+  apostrophe and blanked every intervening line, code included. The fix shipped with controls for
+  `10'000`, `0x1F'FF` and `u8'0'` — and a reviewer immediately produced `.1'0`, which the grammar
+  admits (`fractional-constant: digit-sequence_opt . digit-sequence`) and which the fix still ate.
+  The examples were the wrong instrument for choosing examples.
+- ⚠️ **A FORMATTER CHANGES WHAT A SOURCE-READING INSTRUMENT SEES WITHOUT CHANGING WHAT THE PROGRAM
+  DOES, so run those gates AFTER formatting.** C++ concatenates adjacent string literals and
+  `clang-format` splits one that crosses the column limit; a gate harvesting "the last string literal
+  in the call" then reads only the tail. #289 batch 17's label-uniqueness gate was GREEN before
+  `clang-format` and reported a nonexistent duplicate after it — and the same defect has a
+  fails-toward-clean sign: two sites carrying the SAME label, one split and one not, harvest as `tail`
+  and `full` and read as DISTINCT. The runtime value never moved; only the instrument's view of it did.
 - ⚠️ **A FIX for a false-clean is itself an instrument change, and routinely introduces the NEXT
   false-clean.** Measured: one detector took three rounds, each remedy creating the next hole —
   anchoring on one physical line, then swallowing a region whose parens were unbalanced *inside a

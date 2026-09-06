@@ -6,6 +6,40 @@ status: stable
 
 # Log
 
+- **2026-09-07 — #289 batch 17, the unbounded-`run()` class.** `failure-classes.md` class 1 gains two
+  bullets, both about instruments that read SOURCE TEXT.
+
+  **(1) A fix's own controls inherit the fix's blind spot.** `ci/cxx_blank.py` read every `'` as
+  opening a character literal; `10'000` is a C++14 digit separator, and reading it as an opener
+  started a literal that ran to the next apostrophe *anywhere in the file* and blanked every
+  intervening line, code included. Measured: one such token hid two labelled seam calls from
+  `ci/pump-label-uniqueness.sh`, which then printed *"every site label is unique"* over a tree it
+  could not fully read. The fix shipped with controls for `10'000`, `0x1F'FF` and `u8'0'` — the cases
+  the author could think of — and the review immediately produced `.1'0`, which the C++ grammar admits
+  and the fix still ate. **The examples were chosen by the model that was wrong.** The transferable
+  step is to enumerate the grammar production, not to brainstorm harder. ⚠️ Scoped by measurement
+  rather than by alarm: running the scanner with both lexers over each tree gives `main` **505 → 505,
+  hidden 0** and the branch **666 → 668, hidden 2**. No pre-existing site was ever hidden — the defect
+  was latent and this batch was the first change to put a labelled call after a separator in the same
+  file. The narrow claim is the true one.
+
+  **(2) A formatter moves what an instrument reads without moving what the program does.**
+  `clang-format` splits a string literal that crosses the column limit; C++ concatenates the halves
+  back. `ci/pump-label-uniqueness.sh` harvested "the last literal in the call" and so read only the
+  tail — GREEN before formatting, a nonexistent duplicate after it. The dangerous sign is reachable
+  from the same defect: two sites with the SAME label, one split and one not, harvest as `tail` and
+  `full` and read as DISTINCT. Source-reading gates now run after formatting, and the harvest joins
+  the trailing RUN of whitespace-separated literals.
+
+  Also recorded, because it is the batch's own justification and it took two attempts to state
+  honestly: **a forced-miss arm proves the miss branch RUNS, not that it is REACHABLE.** The seam
+  driver forced 158 of 162 sites RED, which says nothing about whether any real edit could reach
+  those branches. `ci/red-arms/batch17-genuine-miss.sh` injects the defect a real edit would make
+  (delete one `ioc.restart()`) and runs three shapes: base-with-restart PASSES (the attribution
+  control), base-without WEDGES at exit 124, guarded-without REPORTS at exit 1. An earlier draft ran
+  only the third arm while its header claimed the pair — *"the guard reports"* is not *"the old code
+  was worse"*.
+
 - **2026-09-04 — #289 batch 10, the shared surfaces.** `failure-classes.md` gains **class 8:
   consolidating N copies dissolves the population an audit asserts over.** Hoisting
   `kWindowMissSentinel` out of three test files emptied the byte-identity population
