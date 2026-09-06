@@ -94,12 +94,20 @@
 // no source edit and no rebuild. It is a WEAKER witness than textual mutation and
 // does not replace it -- see the primitive.
 //
-// ⚠️ THE OTHER UNGUARDED `.get()`s IN THIS FILE ARE A DIFFERENT SHAPE AND ARE
-// DELIBERATELY NOT MIGRATED. They are `ioc.run(); stop_fut.get();` -- an UNBOUNDED
-// run, not a bounded window -- which is outside the population `ci/pump-census.sh`
-// scans and outside what this primitive replaces. Bounding them is a real question
-// and a separate one; derive them with `bash ci/pump-get-sweep.sh` rather than from
-// a count written here.
+// ⚠️ THE OTHER `.get()`s IN THIS FILE ARE A DIFFERENT SHAPE, AND #289 BATCH 17 MIGRATED
+// THEM -- this paragraph used to end "and are DELIBERATELY NOT MIGRATED", which stopped
+// being true. They are `ioc.run(); stop_fut.get();`, an UNBOUNDED run rather than a
+// bounded window, so `ci/pump-census.sh` still does not scan them and
+// `run_window_then_ready` is still the wrong primitive for them. They now call
+// `run_to_exhaustion_or_report`, which preserves the unbounded `run()` and only asks
+// whether the future came back ready. Bounding `run()` itself remains a separate and
+// open question. Derive the population with `bash ci/pump-get-sweep.sh --disposition`
+// rather than from a count written here.
+//
+// ⚠️ FOUR OF THIS FILE'S NEW SITES SIT IN `if (!acc)` EARLY-EXIT BRANCHES that do not
+// execute on a healthy box, so `ci/pump-seam-arm.sh` reports them NO-SUCH-SITE. That is
+// the driver being honest about an unreached site, not a defect -- and it is a reason to
+// read a NO-SUCH-SITE before believing it names a missing label.
 //
 // The drain is the CLOCKED one, spelled `*h->engine->clock()`. `build_harness` above
 // installs a real `system_clock_source` into the `EngineConfig` and `std::move`s that

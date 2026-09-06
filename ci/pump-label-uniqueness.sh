@@ -103,6 +103,36 @@ CALLS = ("run_window_then_ready(", "run_to_exhaustion_or_report(",
          "pump_until_ready(", "pump_until(")
 
 
+def _join_adjacent(lits, text):
+    """The label is the TRAILING RUN of adjacent string literals, concatenated.
+
+    ⚠️ NOT `lits[-1]`, and this is a fix, not a refinement. C++ concatenates adjacent
+    string literals, and `clang-format` SPLITS a long one at the column limit -- so
+    `"Suite::Case/close_fut_a"` becomes `"Suite::Case/" "close_fut_a"` in the source
+    while the runtime label is unchanged. Taking the last literal harvested
+    `close_fut_a`, i.e. a DIFFERENT string from the one the seam actually compares.
+    MEASURED in #289 batch 17: `clang-format` split two labels this way and the gate
+    then reported `410 seam sites (409 distinct label(s))` -- a duplicate that does not
+    exist.
+    ⚠️ AND THE DANGEROUS DIRECTION IS REACHABLE, not just this false alarm: two sites
+    carrying the SAME label, one split and one not, harvest as `tail` and `full` and
+    read as DISTINCT. That is a real collision the gate would pass. Same defect, other
+    sign.
+
+    Adjacency is "nothing but whitespace between them", which is what the C++ rule is.
+    A literal separated by a comma is a different ARGUMENT and must not be joined.
+    """
+    if not lits:
+        return None
+    out = [lits[-1][2]]
+    for k in range(len(lits) - 1, 0, -1):
+        gap = text[lits[k - 1][1]:lits[k][0]]
+        if gap.strip():
+            break
+        out.insert(0, lits[k - 1][2])
+    return "".join(out)
+
+
 def calls(text):
     """Yield (line, label_or_None) for every call into the forcing seam.
 
@@ -146,10 +176,11 @@ def calls(text):
                     if depth == 0:
                         break
                 j += 1
-            lits = [lm.group(0) for lm in _STR.finditer(text, i, j)
+            lits = [(lm.start(), lm.end(), lm.group(0)[1:-1])
+                    for lm in _STR.finditer(text, i, j)
                     if not is_comment[lm.start()]]
             line = blanked.count("\n", 0, m.start()) + 1
-            out.append((line, lits[-1][1:-1] if lits else None))
+            out.append((line, _join_adjacent(lits, text)))
     return sorted(out)
 
 
@@ -204,6 +235,22 @@ _COMMENT_INSIDE_THE_ARGUMENT_LIST = '''
         return;
     }
 '''
+# ⚠️ clang-format SPLITS a label that crosses the column limit, and C++ concatenates the
+# halves back. The harvest must too -- see `_join_adjacent`. A literal separated by a
+# COMMA is a different argument and must NOT be joined, which is the second case.
+_SPLIT_LITERAL = '''
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, fut, 200ms,
+            "Suite::LongCaseNameThatCrossesTheColumnLimit/"
+            "close_fut_a")) {
+        return;
+    }
+'''
+_COMMA_SEPARATED_ARGS = '''
+    if (!fixpp::test_support::pump_until(ioc, [&] { return done; }, 5s, 1ms, "K/settle")) {
+        ADD_FAILURE() << "unrelated";
+    }
+'''
 _LABEL_IN_A_STRING = '''
     ADD_FAILURE() << "the old call was run_window_then_ready(ioc, fut, 200ms, \\"GHOST/open\\")";
     if (!run_window_then_ready(ioc, fut, 200ms, "H/open")) { return; }
@@ -218,6 +265,9 @@ _CASES = [
     ("pump_until_ready reaches the same seam", _PUMP_UNTIL_READY, ["F/open"]),
     ("pump_until reaches the same seam", _PUMP_UNTIL, ["G/settle"]),
     ("run_to_exhaustion_or_report reaches the same seam", _RUN_TO_EXHAUSTION, ["J/open"]),
+    ("a SPLIT literal is ONE label", _SPLIT_LITERAL,
+     ["Suite::LongCaseNameThatCrossesTheColumnLimit/close_fut_a"]),
+    ("a comma-separated literal is a different argument", _COMMA_SEPARATED_ARGS, ["K/settle"]),
     ("a call quoted in a STRING is not a call", _LABEL_IN_A_STRING, ["H/open"]),
     # ⚠️ INSIDE the argument list, not on the line before it -- the earlier control put it
     # before the call, outside the extent, and therefore never exercised the harvest.

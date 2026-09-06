@@ -936,6 +936,14 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // line rather than the caller's. Accepted deliberately: the report streams `site`, which
 // identifies the caller more precisely than a line number does and does not rot when the
 // file moves. `drain_or_report` already reports from here for the same reason.
+// ⚠️ AND THERE IS NO `try`/`catch` HERE, WHICH IS A CONDITION ON THE CALLER, NOT AN
+// OVERSIGHT. `ADD_FAILURE()` THROWS under `--gtest_throw_on_failure`, and `drain_or_report`
+// below carries an unconditional no-throw contract because it is reached from destructor
+// BODIES, where an escaping throw meets an implicitly-noexcept frame and terminates. This
+// helper is safe without one only while every caller sits in a frame that may throw -- a
+// TEST body or a non-`noexcept` function. A caller in a destructor needs the guard
+// `drain_or_report` has. Stated as the CONDITION rather than as a count of today's callers,
+// which would rot the moment one is added.
 //
 // ⚠️ WHAT THIS DOES **NOT** BUY, stated because it is the first thing a reader proposes: it
 // does not bound `run()` itself. If the context always has work -- a timer chain, a live
@@ -948,7 +956,8 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // `run_window_then_ready`. That is why this is a separate primitive rather than a
 // `window = infinite` argument: the migrated sites hand-write their own `restart()` calls
 // between pairs, so a helper that restarted would silently take over a decision each site
-// currently states. ⚠️ NOT "because a site reads the stopped flag" -- that was the first
+// currently states, at every call site rather than at one. ⚠️ NOT "because a site reads the
+// stopped flag" -- that was the first
 // draft of this sentence and it is FALSE: every `stopped()` in the migrated files is
 // `engine.stopped()`, none is `ioc.stopped()`. The restart is the SITE's statement to make,
 // which does not depend on anyone reading the flag back. The miss branch does need a
