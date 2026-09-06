@@ -18,8 +18,13 @@
 # `run_to_exhaustion_or_report`'s header. These tests reuse ONE io_context across several
 # co_spawn/run pairs and hand-write the restart between them. `run()` on a context still
 # stopped from the previous `run()` returns IMMEDIATELY having dispatched nothing, so the
-# future is never ready and the `get()` below it never returns. One line, and 21 of the 43
-# files this batch touched hand-write at least one.
+# future is never ready and the `get()` below it never returns. One line, and most of the
+# files this batch touched hand-write at least one -- re-derive rather than trusting a
+# number here:
+#   git grep -l 'run_to_exhaustion_or_report' -- tests/ | grep -v support/pump_until_ready.hpp
+#   ... then `git grep -l '\.restart()' --` over that list.
+# (An earlier revision of this line wrote "21 of the 43". It reads 19: the 21 was counted
+# over a list that still included the deferred-only files.)
 #
 # ⚠️ ARM 1 MUST HANG FOR THE RIGHT REASON. A binary that crashed at startup also fails to
 # finish and would read as a hang, so the arm additionally requires the gtest `[ RUN` line

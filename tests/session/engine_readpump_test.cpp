@@ -104,10 +104,16 @@
 // open question. Derive the population with `bash ci/pump-get-sweep.sh --disposition`
 // rather than from a count written here.
 //
-// ⚠️ FOUR OF THIS FILE'S NEW SITES SIT IN `if (!acc)` EARLY-EXIT BRANCHES that do not
-// execute on a healthy box, so `ci/pump-seam-arm.sh` reports them NO-SUCH-SITE. That is
-// the driver being honest about an unreached site, not a defect -- and it is a reason to
-// read a NO-SUCH-SITE before believing it names a missing label.
+// ⚠️ SOME OF THIS FILE'S NEW SITES SIT IN EARLY-EXIT GUARD BRANCHES that do not execute
+// when the acceptance path is live, so `ci/pump-seam-arm.sh` reports them NO-SUCH-SITE.
+// That is the driver being honest about an unreached site, not a defect -- and it is a
+// reason to READ a NO-SUCH-SITE before believing it names a missing label. ⚠️ The branches
+// are not all the same shape: some are `if (!acc)` (session not found / already freed) and
+// at least one is a state guard (`st == NotConnected || st == LogonSent`). An earlier
+// revision of this paragraph said all of them were `if (!acc)`, which is wrong and would
+// send the next reader looking for the wrong thing. Derive the set instead:
+//   bash ci/pump-seam-arm.sh linux-clang-debug ci/red-arms/batch17-labels.txt
+// and read each NO-SUCH-SITE label's own enclosing guard.
 //
 // The drain is the CLOCKED one, spelled `*h->engine->clock()`. `build_harness` above
 // installs a real `system_clock_source` into the `EngineConfig` and `std::move`s that
