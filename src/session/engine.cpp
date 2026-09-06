@@ -691,8 +691,27 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         engine.control_strand_,
         [&engine, session_id, bound_ep,
          lptr = std::move(listener)]() mutable -> asio::awaitable<bool> {
-            // Check stopped_ first: if stop() already ran, skip the write (the maps
-            // are cleared or in the process of being cleared). [INV-2a parallel for map writes]
+            // Fail-fast when stop() has already begun. [INV-2a parallel for map writes]
+            //
+            // ⚠️ NOT A SAFETY GUARD, and this comment used to claim it was — it read
+            // "the maps are cleared or in the process of being cleared", which is FALSE
+            // and is the belief that would make someone "fix" the ordering here. The
+            // maps CANNOT have been cleared while this loop is running: run_accept_loop
+            // holds `counter_guard guard{counter}` for its whole body, and stop() joins
+            // outstanding_counter_ to zero (its step 3) BEFORE it clears listeners_ /
+            // listener_endpoints_ (its step 5). So the write below is happens-before
+            // ordered ahead of the clear whether this check is here or not — the same
+            // join the DD-2026-06-06 note above cites for removing the park seam.
+            //
+            // What the check DOES buy: acceptor_bound_endpoint() stops reporting a live
+            // port a few handlers sooner once stop() has begun. Post-stop state is
+            // identical either way. Re-derive by deleting these three lines and running
+            // the acceptor/engine cells — measured 2026-09-06 under #267: nothing
+            // reddens, and nothing should, because there is nothing to detect.
+            //
+            // Contrast publish_entry() above, whose stopped_ check IS load-bearing: it
+            // keeps a live transport from being pumped after stop(). Do not generalise
+            // from one to the other.
             if (engine.stopped_.load(std::memory_order_acquire)) {
                 co_return false;
             }
@@ -707,8 +726,10 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         asio::use_awaitable);
 
     if (!write_ok) {
-        // stop() is already in progress; the maps are cleared or will be cleared
-        // without our entries (we never wrote them). Exit cleanly.
+        // stop() is already in progress; the maps will be cleared without our entries
+        // (we never wrote them). Exit cleanly. Reached only via the fail-fast above,
+        // which returns false at exactly one place — so this arm and that one are one
+        // condition at two locations, not two independent races.
         co_return;
     }
 
