@@ -1,0 +1,60 @@
+# ci/red-arms/batch14-spotcheck.tsv -- TEXTUAL spot-checks for #289 batch 14.
+#
+# Feed to:  bash ci/pump-red-arm.sh linux-clang-debug ci/red-arms/batch14-spotcheck.tsv
+#
+# The seam (ci/pump-seam-arm.sh, ci/red-arms/batch14-labels.txt) covers this batch
+# broadly; these arms mutate the SOURCE instead, so the block as WRITTEN AT THAT SITE is
+# what compiles and reports. The seam proves the primitive's forced path; only textual
+# mutation proves the site's own miss block.
+#
+# ⚠️ THIS BATCH HAS ONE RECIPE SHAPE, SO THE ARMS PARTITION ON ENCLOSING CONTEXT, NOT ON
+# RECIPE. Every site is `run_window_then_ready` + `drain_or_report` + `ADD_FAILURE` +
+# `return;`. An earlier draft of this line explained that with *"no fixture in the batch's
+# five files has a Clock"*, which is FALSE -- see the corrected paragraph in
+# `ci/red-arms/batch14-labels.txt`, which carries the whole account rather than a second
+# copy of it. The short form: two sites do have a real clock in scope and still take the
+# unclocked drain, on a condition (no clock-parked frame can exist at that site) that was
+# measured, not assumed. What differs between sites is where the `return;` lands and what
+# the drain has to quiesce, and that is what these six rows sample:
+#
+#   row 1  TEST_F body, statement at TEST scope; the site's discarded-result comment
+#          (`may fail due to null session_ handoff`) must survive the migration
+#   row 2  TEST_F body, site inside a nested `{ }` block -- `return;` leaves the whole TEST,
+#          not the block, which is what makes the recipe legal here
+#   row 3  plain TEST body whose `.get()` was genuinely UNGUARDED before this batch, inside
+#          a large shared-target binary (session_pure_tests) rather than its own executable
+#   row 4  the site the CENSUS COULD NOT SEE (its `.get()` is seven lines below its window)
+#          -- so this row is the only mechanical check that the extra 31st site is real
+#   row 5  a future from `acceptor.async_accept(asio::use_future)`, NOT from `co_spawn`:
+#          `ci/pump-get-sweep.sh` is structurally blind to this file (proven -- see below)
+#   row 6  the second copy of a two-copy shape -- `test_live_identity_binding.cpp` holds
+#          two `/open` sites spelled identically, in two tests, and this row arms the
+#          one in the file's second test. (This descriptor named the FIRST test and
+#          called it the second; the arm was corrected to match the descriptor's intent
+#          rather than the descriptor softened to match the arm.)
+#
+# ⚠️ ROW 5 EXISTS BECAUSE AN INSTRUMENT WAS PROVEN BLIND, NOT BECAUSE THE SITE LOOKED ODD.
+# `ci/pump-get-sweep.sh` recognises `auto NAME = asio::co_spawn(...)`. Re-derive rather than
+# trusting this: copy the tree at HEAD, delete every
+# `wait_for(0s), std::future_status::ready` line from a file, and re-run the sweep against
+# it. Three of this batch's five files then report; `test_transport_factory_paths.cpp` still
+# reports NOTHING, because its future never came from `co_spawn`. A silence from an
+# instrument that cannot see the file is not evidence, so that site's guarded/unguarded
+# status is hand-resolved and this row is its only mechanical arm.
+#
+# ⚠️ THE LIVE-TLS ARMS CAN SKIP THEMSELVES INTO A FALSE `SILENT`. Rows 4 and 5 sit in tests
+# that `GTEST_SKIP()` when `FIXPP_TLS_FIXTURE_DIR` names no readable cert. A skipped test
+# announces nothing, which this driver reports as "the miss branch did not announce itself"
+# -- the same output as a real defect. Before believing a SILENT on either, check the arm's
+# ctest output for `SKIPPED`.
+#
+# Columns: file <TAB> anchor <TAB> label <TAB> cmake-target [<TAB> ctest regex]
+# The anchor must be unique in the file's CODE (comments are blanked before the search);
+# the driver forces the FIRST `run_window_then_ready(` after it. Column 5 is omitted
+# throughout because every target here registers a ctest of the same name.
+tests/session/test_credentials_rotated_emit.cpp	TEST_F(CredentialsRotatedEmitTest, FirstLoadEmitsNoEvent) {	FirstLoadEmitsNoEvent/attempt	credentials_rotated_emit
+tests/session/test_credentials_rotated_emit.cpp	TEST_F(CredentialsRotatedEmitTest, NoOpRotationStillEmits) {	NoOpRotationStillEmits/attempt-0	credentials_rotated_emit
+tests/session/test_live_outbound_serialized.cpp	TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {	WriteErrorPropagatesAsFsmDisconnected/open	session_pure_tests
+tests/session/test_reconnect_live_happy_path.cpp	reconnect_fsm.set_tls_profile(fixpp::tls::SecurityProfile::mtls_ca);	LiveTlsReconnectReachesActive/reconnect	reconnect_live_happy_path
+tests/transport/test_transport_factory_paths.cpp	TEST(TransportFactoryPaths, MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes) {	MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes/accept	transport_factory_paths
+tests/session/test_live_identity_binding.cpp	TEST_F(LiveIdentityBindingTest, LiveTlsCertCnDrivesAuthorizationDecision) {	LiveTlsCertCnDrivesAuthorizationDecision/open	live_identity_binding

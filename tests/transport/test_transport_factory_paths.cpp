@@ -5,6 +5,7 @@
 
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/error_code.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/address_v4.hpp>
 #include <asio/ip/tcp.hpp>
@@ -24,7 +25,22 @@
 #include <string>
 #include <utility>
 
+#include "support/pump_until_ready.hpp"
 #include "transport/asio_tls_transport.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 #ifndef FIXPP_TLS_FIXTURE_DIR
 #define FIXPP_TLS_FIXTURE_DIR ""
@@ -250,11 +266,27 @@ TEST(TransportFactoryPaths, MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes) {
         },
         asio::use_future);
 
-    ioc.run_for(2s);
-    ASSERT_EQ(accepted_future.wait_for(0s), std::future_status::ready)
-        << "raw accept did not complete within the deadline";
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, accepted_future, 2s, "MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes/accept")) {
+        // DRAIN SURVIVOR CASE (ii), and the only site in this batch that reaches it.
+        // On a miss the accept is still outstanding AND the client coroutine is parked
+        // in async_connect/async_handshake on a live TLS transport it MOVED IN and the
+        // test therefore cannot close. Pumping does not end either, and there is no
+        // Clock here, so `cancel_sleeps()` is not the lever. Closing the acceptor is:
+        // it completes the pending accept with operation_aborted and drops the pending
+        // connection, which fails the peer's handshake and lets that frame finish.
+        // MEASURED both ways with `ci/pump-seam-arm.sh` — re-derive rather than trusting
+        // this line: with the close removed the arm reports RESIDUAL, with it present it
+        // does not. Non-throwing overload deliberately: this runs on the failure path.
+        asio::error_code close_ec;
+        acceptor.close(close_ec);
+        fixpp::test_support::drain_or_report(
+            ioc, "MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes/accept");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes/accept";
+        return;
+    }
     auto accepted_socket = accepted_future.get();
-    ioc.restart();
 
     auto server_transport_result = server_factory->make_accepted(std::move(accepted_socket), nullptr);
     ASSERT_TRUE(server_transport_result.has_value()) << static_cast<int>(server_transport_result.error());

@@ -506,10 +506,36 @@ template <class Pump>
 //     after. That sequence is currently spelled out at both sites rather than factored
 //     into a helper here, deliberately: two call sites in one file is a coincidence, and
 //     a helper would also collapse them onto one gtest file:line.
+//     ⚠️ A SECOND FILE NOW EXISTS AND IT DOES **NOT** DISCHARGE THE GRADUATION CONDITION,
+//     because the LEVER differs. #289 batch 14's
+//     `MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes/accept`
+//     (`tests/transport/test_transport_factory_paths.cpp`) is the same SHAPE -- close the
+//     owner of the live op inside another await's miss branch -- but what it closes is a
+//     bare `asio::ip::tcp::acceptor`, not an engine. Two instances, two different closers.
+//     That is exactly the parameter a premature primitive would have to guess, and the
+//     note above already records the last guess failing: the single-`Transport*` overload
+//     did not fit batch 13's site. So the condition is restated as a CONDITION rather than
+//     a count: **graduate when a LEVER RECURS**, not when the file count reaches two.
+//
+//     ⚠️ WHICH SITES CAN REACH (ii) AT ALL has a sharper predicate than "is a live
+//     transport involved", and batch 14 measured it: of 31 forced sites across five files
+//     that ALL hold a live transport, exactly one left a residual. The discriminator is
+//     whether the counterparty is driveable BY THE PUMP ALONE. Where the far side is a
+//     self-contained detached coroutine (accept, then handshake, needing nothing from the
+//     test body), the drain is a longer pump than the window and simply finishes the
+//     exchange. Where the TEST BODY is a required step -- factory-paths hands the accepted
+//     socket back through `.get()` and only then builds the server transport, so a miss
+//     returns before the server side exists -- the peer's handshake waits for someone who
+//     will never arrive. Only that second shape is (ii).
+//     ⚠️ That measurement is bounded by how forcing works: it PRESERVES the state at entry,
+//     so it witnesses the drain against a HEALTHY exchange not yet dispatched, which is the
+//     opposite of the wedged exchange a real miss implies.
+//     [[feedback_a_forcing_mechanism_cannot_manufacture_the_state_it_preserves]]
+//
 //     ⚠️ GRADUATION CONDITION, so this is a decision and not an oversight: promote
 //     "stop the engine, then drain" to a primitive next to `cancel_and_drain_or_report`
-//     when a SECOND FILE needs it. Enumerate the candidates, then RESOLVE EACH BY HAND --
-//     this is not a count, and a grep cannot decide it:
+//     when a SECOND FILE needs THAT LEVER. Enumerate the candidates, then RESOLVE EACH BY
+//     HAND -- this is not a count, and a grep cannot decide it:
 //       git grep -n -B6 'engine.stop(), asio::use_future' -- tests/ ':!tests/support/*'
 //     ⚠️ THE DISCRIMINATOR, because the common shape out-numbers this one and a loose
 //     grep reports both: in the ORDINARY shape `engine.stop()` IS the awaited future and

@@ -73,6 +73,33 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
+//
+// ⚠️ PER-FILE ADDENDUM, because the block above names ONE primitive and this file uses
+// TWO. Sites migrated by #289 batch 14 use `run_window_then_ready` (a preserved WINDOW,
+// reporting `kWindowMiss`); sites that predate it use `ASSERT_TRUE(pump_until_ready(...))`
+// (a bounded BUDGET loop, reporting `kPumpBudgetMiss`, and passing NO label, so the seam
+// cannot reach them). Enumerate both before assuming which a given site is -- do not
+// generalise from the one you happen to read first.
+//
+// ⚠️ AND SEVERAL TESTS HERE ARM A `quiesce_on_exit` GUARD, which the block above does not
+// mention. Where one is in scope, a miss branch's `return` runs the guard too, so the
+// site drain is not the only teardown -- it is what attributes a residual to THIS site
+// (the guard reports `Site: quiesce_on_exit`). Derive which tests arm one; the set moves:
+//   grep -n 'quiesce_on_exit ' tests/session/test_live_outbound_serialized.cpp
+
 using namespace std::chrono_literals;
 
 namespace fixpp::session::test {
@@ -407,8 +434,13 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run_for(100ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, open_fut, 100ms,
+                                                    "WriteErrorPropagatesAsFsmDisconnected/open")) {
+        fixpp::test_support::drain_or_report(ioc, "WriteErrorPropagatesAsFsmDisconnected/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "WriteErrorPropagatesAsFsmDisconnected/open";
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<FailFirstWriteTransport>(ioc.get_executor());
@@ -522,8 +554,14 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run_for(100ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, open_fut, 100ms, "ConcurrentWritesNotSubmittedGenuineSecondEmit/open")) {
+        fixpp::test_support::drain_or_report(ioc,
+                                             "ConcurrentWritesNotSubmittedGenuineSecondEmit/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ConcurrentWritesNotSubmittedGenuineSecondEmit/open";
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     // Attach a ControlledWriteTransport initially unblocked so the reply-Logon
@@ -629,8 +667,13 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run_for(100ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, open_fut, 100ms,
+                                                    "ReplayTransmitErrorForcesDisconnect/open")) {
+        fixpp::test_support::drain_or_report(ioc, "ReplayTransmitErrorForcesDisconnect/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "ReplayTransmitErrorForcesDisconnect/open";
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     // Drive session to Active via peer Logon (using sync transport_send_ path).
@@ -796,10 +839,24 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
         << "blocked send() must resolve once close() tears down the live transport";
 
     raw_ptr->close();
-    ioc.run_for(100ms);
-    ioc.restart();
-
-    ASSERT_EQ(close_fut.wait_for(0ms), std::future_status::ready);
+    if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 100ms,
+                                                    "CloseCancelsBlockedPublicSend/close")) {
+        // TRANSPORT-AWARE, and NOT because a clock-parked frame can exist here -- it
+        // cannot: `make_acceptor_cfg` sets `heartbeat_interval = 0s`, so no liveness loop
+        // is ever spawned. The reason is the TRANSPORT: `raw_ptr` is a live
+        // `ControlledWriteTransport` with a blocked write armed, and `teardown_guard`
+        // already tears down with exactly this call. A bare `drain_or_report` here would
+        // be strictly weaker than the drain the same scope runs on the way out.
+        // ⚠️ It is not deleted in favour of the guard: the guard reports
+        // `Site: quiesce_on_exit`, and `ci/pump-seam-arm.sh` attributes a residual by
+        // `Site: <label>`, so deleting this would make a residual here unattributable --
+        // an arm reading clean for want of a name.
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *teardown_clock, "CloseCancelsBlockedPublicSend/close",
+            fixpp::test_support::kQuiesceBudget, raw_ptr);
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "CloseCancelsBlockedPublicSend/close";
+        return;
+    }
     auto close_r = close_fut.get();
     ASSERT_TRUE(close_r.has_value()) << "close() failed unexpectedly";
 
@@ -997,8 +1054,12 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run_for(100ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, open_fut, 100ms,
+                                                    "StopDuringLivenessWriteNoCrash/open")) {
+        fixpp::test_support::drain_or_report(ioc, "StopDuringLivenessWriteNoCrash/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "StopDuringLivenessWriteNoCrash/open";
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     // Attach a ControlledWriteTransport (writes complete immediately by default).

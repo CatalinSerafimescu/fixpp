@@ -84,7 +84,22 @@
 
 #include "loopback_tls_session_harness.hpp"
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 #include "transport/loopback_tls_fixture.hpp"
+
+// ── #289: bounded pumps ──────────────────────────────────────────────────────
+//
+// Where a site in this file is migrated it uses `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED:
+// the hazard #289 names is the UNCONDITIONAL `get()`, not the fixed window.
+//
+// The site label passed to `run_window_then_ready` is the FORCING SEAM: exporting
+// FIXPP_FORCE_WINDOW_MISS=<label> makes exactly that site take its miss branch, with
+// no source edit and no rebuild. It is a WEAKER witness than textual mutation and
+// does not replace it -- see the primitive.
+//
+// Rationale and the teardown-shape rule live at the primitive, not duplicated here
+// (#324).
 
 using namespace std::chrono_literals;
 
@@ -325,11 +340,14 @@ TEST_F(CredentialsRotatedEmitTest, FirstLoadEmitsNoEvent) {
     // set_session_owner(nullptr) is the default.
 
     auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-    ioc.run_for(500ms);
-    ioc.restart();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                    "FirstLoadEmitsNoEvent/attempt")) {
+        fixpp::test_support::drain_or_report(ioc, "FirstLoadEmitsNoEvent/attempt");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "FirstLoadEmitsNoEvent/attempt";
+        return;
+    }
 
     // FSM completes (make succeeds → connect → handshake → session_ null → drop t).
-    ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
     (void)fut.get();  // may fail due to null session_ handoff; that's OK
 
     // FR-009 SPEC-FIXED: first-ever load is NOT a rotation → no event.
@@ -374,9 +392,14 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
             });
 
         auto fut = asio::co_spawn(ioc, fsm_init.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut, 500ms, "RotationEmitBeforeMakeWithRealFingerprints/init-attempt")) {
+            fixpp::test_support::drain_or_report(
+                ioc, "RotationEmitBeforeMakeWithRealFingerprints/init-attempt");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "RotationEmitBeforeMakeWithRealFingerprints/init-attempt";
+            return;
+        }
         (void)fut.get();
         ASSERT_EQ(init_events.size(), 0u) << "Precondition: first load must emit no event.";
 
@@ -411,9 +434,14 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
     // Attempt 0 (first load — source_a): sets baseline, no event.
     {
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut, 500ms, "RotationEmitBeforeMakeWithRealFingerprints/attempt-0")) {
+            fixpp::test_support::drain_or_report(
+                ioc, "RotationEmitBeforeMakeWithRealFingerprints/attempt-0");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "RotationEmitBeforeMakeWithRealFingerprints/attempt-0";
+            return;
+        }
         (void)fut.get();
         EXPECT_EQ(events.size(), 0u) << "Precondition: first load emits no event.";
         factory->factory_make_count = 0;  // reset for next attempt
@@ -427,9 +455,14 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
     // Attempt 1 (rotated source_b): must emit one credentials_rotated BEFORE make().
     {
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut, 500ms, "RotationEmitBeforeMakeWithRealFingerprints/attempt-1")) {
+            fixpp::test_support::drain_or_report(
+                ioc, "RotationEmitBeforeMakeWithRealFingerprints/attempt-1");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "RotationEmitBeforeMakeWithRealFingerprints/attempt-1";
+            return;
+        }
         (void)fut.get();
     }
 
@@ -490,9 +523,12 @@ TEST_F(CredentialsRotatedEmitTest, NoOpRotationStillEmits) {
     // Attempt 0 (first load — source_c1): sets baseline, no event.
     {
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "NoOpRotationStillEmits/attempt-0")) {
+            fixpp::test_support::drain_or_report(ioc, "NoOpRotationStillEmits/attempt-0");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "NoOpRotationStillEmits/attempt-0";
+            return;
+        }
         (void)fut.get();
         ASSERT_EQ(events.size(), 0u) << "Precondition: first load emits no event.";
     }
@@ -504,9 +540,12 @@ TEST_F(CredentialsRotatedEmitTest, NoOpRotationStillEmits) {
     // Even though old_sha == new_sha, the event MUST be emitted (FR-011).
     {
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "NoOpRotationStillEmits/attempt-1")) {
+            fixpp::test_support::drain_or_report(ioc, "NoOpRotationStillEmits/attempt-1");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "NoOpRotationStillEmits/attempt-1";
+            return;
+        }
         (void)fut.get();
     }
 
@@ -598,10 +637,14 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
                 co_return creds_r->leaf.sha256();
             },
             asio::use_future);
-        ioc.run_for(2s);
-        ioc.restart();
-        ASSERT_EQ(fp_fut.wait_for(0s), std::future_status::ready)
-            << "Failed to get fingerprint from source_b.";
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fp_fut, 2s, "LiveTlsRotationEmitRealFingerprint/fingerprint")) {
+            fixpp::test_support::drain_or_report(ioc,
+                                                 "LiveTlsRotationEmitRealFingerprint/fingerprint");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LiveTlsRotationEmitRealFingerprint/fingerprint";
+            return;
+        }
         expected_sha = fp_fut.get();
     }
 
@@ -648,10 +691,13 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
     // ── Open the Session (initial open — LogonSent) ───────────────────────
     {
         auto open_fut = asio::co_spawn(ioc, session.open(), asio::use_future);
-        ioc.run_for(1s);
-        ioc.restart();
-        ASSERT_EQ(open_fut.wait_for(0s), std::future_status::ready)
-            << "Session::open() did not complete.";
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, open_fut, 1s, "LiveTlsRotationEmitRealFingerprint/open")) {
+            fixpp::test_support::drain_or_report(ioc, "LiveTlsRotationEmitRealFingerprint/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LiveTlsRotationEmitRealFingerprint/open";
+            return;
+        }
         auto open_r = open_fut.get();
         ASSERT_TRUE(open_r.has_value())
             << "Session::open() failed: " << static_cast<int>(open_r.error());
@@ -699,10 +745,13 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
 
         auto prime_fut =
             asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(5s);
-        ioc.restart();
-        ASSERT_EQ(prime_fut.wait_for(0s), std::future_status::ready)
-            << "Priming attempt did not complete.";
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, prime_fut, 5s, "LiveTlsRotationEmitRealFingerprint/prime")) {
+            fixpp::test_support::drain_or_report(ioc, "LiveTlsRotationEmitRealFingerprint/prime");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LiveTlsRotationEmitRealFingerprint/prime";
+            return;
+        }
         (void)prime_fut.get();
         ASSERT_EQ(captured_events.size(), 0u)
             << "First load (source_a) must emit no event (FR-009 SPEC-FIXED).";
@@ -748,10 +797,13 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
 
         auto client_fut =
             asio::co_spawn(ioc, reconnect_fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(5s);
-        ioc.restart();
-        ASSERT_EQ(client_fut.wait_for(0s), std::future_status::ready)
-            << "Rotation attempt did not complete within 5s.";
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, client_fut, 5s, "LiveTlsRotationEmitRealFingerprint/rotate")) {
+            fixpp::test_support::drain_or_report(ioc, "LiveTlsRotationEmitRealFingerprint/rotate");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "LiveTlsRotationEmitRealFingerprint/rotate";
+            return;
+        }
         (void)client_fut.get();
     }
 
@@ -841,9 +893,13 @@ TEST_F(CredentialsRotatedEmitTest, ThrowingCallbackContained_AttemptProceeds_Bas
     // ── Attempt 0: source_a (first load — sets baseline, no rotation, no throw) ──
     {
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "ThrowingCallbackContained/attempt-0")) {
+            fixpp::test_support::drain_or_report(ioc, "ThrowingCallbackContained/attempt-0");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ThrowingCallbackContained/attempt-0";
+            return;
+        }
         (void)fut.get();
         EXPECT_EQ(callback_call_count, 0) << "First load must not invoke the callback";
     }
@@ -857,9 +913,13 @@ TEST_F(CredentialsRotatedEmitTest, ThrowingCallbackContained_AttemptProceeds_Bas
     // rethrows on .get() (test aborts here). Post-fix: returns normally.
     {
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "ThrowingCallbackContained/attempt-1")) {
+            fixpp::test_support::drain_or_report(ioc, "ThrowingCallbackContained/attempt-1");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ThrowingCallbackContained/attempt-1";
+            return;
+        }
         // We don't assert the return value — the attempt may succeed or fail
         // depending on the null session_ path; what matters is it returned at all.
         (void)fut.get();
@@ -885,9 +945,13 @@ TEST_F(CredentialsRotatedEmitTest, ThrowingCallbackContained_AttemptProceeds_Bas
     int callback_count_before = callback_call_count;
     {
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "ThrowingCallbackContained/attempt-2")) {
+            fixpp::test_support::drain_or_report(ioc, "ThrowingCallbackContained/attempt-2");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ThrowingCallbackContained/attempt-2";
+            return;
+        }
         (void)fut.get();
     }
     EXPECT_EQ(callback_call_count, callback_count_before)
@@ -931,9 +995,12 @@ TEST_F(CredentialsRotatedEmitTest, NonThrowingCallback_BehaviourUnchanged) {
     // Attempt 0: first load (source_a → baseline, no event).
     {
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "NonThrowingCallback/attempt-0")) {
+            fixpp::test_support::drain_or_report(ioc, "NonThrowingCallback/attempt-0");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "NonThrowingCallback/attempt-0";
+            return;
+        }
         (void)fut.get();
         ASSERT_EQ(events.size(), 0u) << "Precondition: first load emits no event";
     }
@@ -945,9 +1012,12 @@ TEST_F(CredentialsRotatedEmitTest, NonThrowingCallback_BehaviourUnchanged) {
     // Attempt 1: rotation → must emit one event with correct fingerprints (INV-9).
     {
         auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(), asio::use_future);
-        ioc.run_for(500ms);
-        ioc.restart();
-        ASSERT_EQ(fut.wait_for(0s), std::future_status::ready);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
+                                                        "NonThrowingCallback/attempt-1")) {
+            fixpp::test_support::drain_or_report(ioc, "NonThrowingCallback/attempt-1");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "NonThrowingCallback/attempt-1";
+            return;
+        }
         (void)fut.get();
     }
 
