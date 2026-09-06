@@ -126,14 +126,20 @@ struct ConnectInfo;
 // useless: the group retires only when BOTH arms retire, so it would still wait
 // for getaddrinfo AND add an arm — the trap #359 records in that construction.
 //
-// ⚠️ IT IS NOT UNBOUNDED, AND CALLING IT THAT OVERSTATES IT. getaddrinfo is
-// bounded by the HOST's resolver policy — glibc's `timeout` (default 5 s) x
-// `attempts` (default 2) x each `nameserver` x the A/AAAA pair. fixpp has no say
-// in any of those. The failure mode is therefore "teardown inherits the
-// deployment's DNS policy", not "teardown hangs".
+// ⚠️ CALLING IT UNBOUNDED OVERSTATES IT — AND CALLING IT BOUNDED OVERSTATES IT
+// THE OTHER WAY, which is the correction this paragraph carries. getaddrinfo is
+// dispatched through /etc/nsswitch.conf, so the bound is whatever backend
+// resolves `hosts:`. For the `dns` backend it is glibc's `timeout` (default 5 s)
+// x `attempts` (default 2) x each `nameserver` x the A/AAAA pair, and fixpp has
+// no say in any of them. But `hosts:` may route to sss, ldap, mdns, systemd-
+// resolved or a vendor module, which impose their own deadline or none and which
+// resolv.conf does not govern. So: teardown inherits whatever bound the host's
+// NAME-SERVICE STACK has, INCLUDING NONE. The figures below are the one backend
+// that has been measured — they are evidence about `dns`, not a guarantee.
 //
-// MEASURED 2026-09-06, glibc, direct getaddrinfo() in a private mount namespace
-// with /etc/resolv.conf bind-mounted (the host's resolver untouched):
+// MEASURED 2026-09-06, glibc, `hosts: files mdns4_minimal [NOTFOUND=return] dns`,
+// direct getaddrinfo() in a private mount namespace with /etc/resolv.conf
+// bind-mounted (the host's resolver untouched):
 //     working resolver, control                             62 ms
 //     1 blackholed nameserver, defaults                  20,016 ms
 //     3 blackholed nameservers, defaults                 56,048 ms

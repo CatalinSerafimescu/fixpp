@@ -830,14 +830,26 @@ TEST(ReadFirstFrameBounded, B6) {
 // a 120 s ctest kill with no message instead of a named failure. `run_one_for`
 // converts that into the assertion below.
 //
-// The budget MUST stay well under this cell's `read_latency` of 10 s. That
-// timer is REAL (mock_transport's own, not governed by the frozen clock), and
-// if it were allowed to elapse the read arm would complete NORMALLY, retiring
-// the join and turning the mutant GREEN — a spurious hit, the exact defect
-// class #337 shipped when a longer bounded pump let a real steady_timer satisfy
-// a wait the mock clock was supposed to govern. 2 s is 5x below that competing
-// 10 s and ~2000x above the delivered path's measured ~1 ms. Raising it toward
-// 10 s reintroduces the false pass; do not.
+// The budget must stay well under this cell's `read_latency`. That timer is
+// REAL (mock_transport's own, which no Clock governs), and if it elapsed the
+// read arm would complete NORMALLY, retiring the join and turning the mutant
+// GREEN — a spurious hit, the exact class #337 shipped when a longer bounded
+// pump let a real steady_timer satisfy a wait the mock clock was supposed to
+// govern.
+//
+// ⚠️ THE WATCHDOG IS NOT THE ONLY THING THAT HAS TO CLEAR THAT TIMER, and the
+// first version of this note missed the other half. Capping the watchdog only
+// bounds how long THIS LOOP waits; the real read timer is running the whole
+// time regardless, so a process stall longer than `read_latency` retires the
+// join on its own and the mutant passes — with the watchdog never involved.
+// That escape is bounded by `read_latency` and by nothing else, so the fix is
+// to put `read_latency` beyond any stall this cell could plausibly survive
+// rather than merely above the watchdog: 1 h against a 2 s budget is ~1800x,
+// where 10 s was 5x. The delivered path retires in ~1 ms.
+//
+// ⚠️ `read_latency` here is a NEVER, not a duration to tune. The read must be
+// resolved ONLY by cancellation; if you find yourself reasoning about how long
+// it is, the cell has stopped testing what it claims to.
 TEST(ReadFirstFrameBounded, T2a) {
     constexpr auto kJoinWatchdog = std::chrono::seconds{2};
     constexpr std::size_t kMaxBytes = 4096;
@@ -847,9 +859,11 @@ TEST(ReadFirstFrameBounded, T2a) {
     constexpr auto kDeadline = std::chrono::milliseconds{500};
 
     Script s;
-    // 10s >> kDeadline (500ms): the read must be resolved ONLY by
-    // cancellation, never by the mock's own latency timer racing it.
-    s.read_latency = std::chrono::seconds{10};
+    // Effectively NEVER: the read must be resolved ONLY by cancellation. This is
+    // the mock's own REAL timer, which the frozen clock does not govern, so it is
+    // the cell's second exit from the join — see the note above. 1 h makes that
+    // exit unreachable in practice instead of merely unlikely.
+    s.read_latency = std::chrono::hours{1};
 
     asio::io_context ioc;
     // Frozen (#377): never advanced, so the deadline cannot fire and cannot

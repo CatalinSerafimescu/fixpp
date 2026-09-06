@@ -2631,15 +2631,30 @@ Evidence: issues #346, #348, #349; new issue #351.
   yet published is also unreachable from `stop()`'s socket-closing path. **Status: follow-up
   (#361).** *(Found by review during PR #362, pre-existing; not introduced there.)*
 
-  ⚠️ **It is NOT unbounded, and the operator action is a deployment one.** The wait is bounded by
-  the **host's resolver policy**, which fixpp does not control: glibc's `timeout` (default 5 s) x
-  `attempts` (default 2) x each `nameserver` x the A/AAAA pair. Measured 2026-09-06 with a
-  bind-mounted `/etc/resolv.conf` in a private mount namespace — 1 blackholed nameserver at
-  defaults **20.0 s**, 3 blackholed nameservers **56.0 s**, a working resolver **62 ms**, and
-  1 blackholed nameserver with `options timeout:1 attempts:1` **2.0 s**. So a host whose
-  `resolv.conf` lists several unreachable nameservers at glibc defaults can hold `Engine::stop()`
-  for the better part of a minute, and **lowering `timeout`/`attempts` in `resolv.conf` is
-  currently the only lever that shortens it.**
+  ⚠️ **How long the wait can be is a property of the HOST, not of fixpp — and the answer depends
+  on which NSS backend resolves `hosts:`.** `getaddrinfo` is dispatched through
+  `/etc/nsswitch.conf`, so the bound is whatever that backend imposes. **For the `dns` backend**
+  it is glibc's `timeout` (default 5 s) x `attempts` (default 2) x each `nameserver` x the
+  A/AAAA pair. Measured 2026-09-06 against that backend (`hosts: files mdns4_minimal
+  [NOTFOUND=return] dns`), with a bind-mounted `/etc/resolv.conf` in a private mount namespace:
+
+  | `/etc/resolv.conf` | elapsed |
+  |---|---|
+  | working resolver — control | 62 ms |
+  | 1 blackholed nameserver, glibc defaults | 20.0 s |
+  | 3 blackholed nameservers, glibc defaults | 56.0 s |
+  | 1 blackholed nameserver, `options timeout:1 attempts:1` | 2.0 s |
+
+  So on such a host, several unreachable nameservers at glibc defaults hold `Engine::stop()` for
+  the better part of a minute, and lowering `timeout`/`attempts` in `resolv.conf` shortens it.
+
+  ⚠️ **DO NOT READ THAT AS "BOUNDED" IN GENERAL.** It is measured for the `dns` backend only.
+  `nsswitch.conf` may route `hosts:` to `sss`, `ldap`, `mdns`, `resolve` (systemd-resolved) or a
+  vendor module, and those impose their own deadline or none — `resolv.conf` does not govern them
+  and the figures above say nothing about them. The honest statement is that **`Engine::stop()`
+  inherits whatever bound the host's name-service stack has, including none**; the DNS numbers
+  above are the one case that has been measured, and they are what makes the deployment-side lever
+  worth naming, not a guarantee.
 
   ⚠️ **No in-library timeout can fix this, and the obvious one is worse than nothing.** asio's
   `background_getaddrinfo` tests its cancellation token **once, before** the blocking call, so

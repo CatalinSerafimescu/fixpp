@@ -63,13 +63,29 @@ namespace fixpp::session::detail {
 //
 // The catch replaces the old `redirect_error` (D-3), which is not available
 // here because `sleep_until` returns an awaitable rather than an async op.
-// D-3's requirement is unchanged and is what both handlers exist for: NEITHER
-// ARM MAY THROW, because `outcome.index()` is the join's sole discriminator.
-// A bare `co_await clock.sleep_until(...)` throws operation_aborted on EVERY
-// established connection — the read arm winning is the common case, and
-// wait_for_one_success then cancels this arm — so an uncaught throw would make
-// the normal path an exception. Mirrors the same construction at
-// src/session/session.cpp's logout-timeout sleep.
+// D-3's requirement is unchanged and is what it exists for: THIS ARM MAY NOT
+// THROW ON THE NORMAL PATH, because `outcome.index()` is the join's sole
+// discriminator. A bare `co_await clock.sleep_until(...)` throws
+// operation_aborted on EVERY established connection — the read arm winning is
+// the common case, and wait_for_one_success then cancels this arm — so an
+// uncaught throw would make the normal path an exception.
+//
+// ⚠️ EXACTLY ONE HANDLER, AND THE ABSENCE OF `catch (...)` IS DELIBERATE. It was
+// written with one, and that was a WIDENING rather than a port. The pre-#377 arm
+// was `timer.async_wait(redirect_error(use_awaitable, ec))`, which absorbed every
+// ERROR CODE and no EXCEPTION — a `bad_alloc` out of asio's own allocation
+// propagated. A catch-all absorbs those too, after which this arm completes
+// normally, `outcome.index() == 1`, and the caller rejects the connection with
+// `transport_handshake_timeout`: an OOM silently relabelled as a peer timeout, a
+// misdiagnosis the old code did not make. `system_clock_source::sleep_until`
+// allocates a timer per call on the engine-scope fallback, so bad_alloc is a
+// concrete possibility here, not a hypothetical. Catching only `system_error` is
+// the faithful equivalent — it is the exception form of "an error code arrived".
+// Do not re-add the catch-all.
+//
+// (session.cpp's logout-timeout sleep DOES carry both handlers. Do not
+// generalise from it: its second handler absorbs into a noexcept window per
+// FR-15, a constraint this arm does not have.)
 inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
                                             fixpp::core::steady_time_point deadline) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
@@ -79,12 +95,7 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
                                           // join's outcome.index() is the control-flow decision,
                                           // not this arm's error. Deliberately no action.
         // Losing arm: operation_aborted, exactly what redirect_error absorbed.
-    } catch (...) {  // NOLINT(bugprone-empty-catch) — D-3 absorption.
-        // Any other throw (a clock implementation's own allocation, say) is
-        // absorbed for the same reason, and fails SAFE: this arm then completes
-        // normally, the join reports the deadline won, and the connection is
-        // rejected with transport_handshake_timeout. The alternative — letting
-        // it escape — breaks the discriminator D-3 rests on.
+        // Anything that is NOT a system_error propagates, as it did pre-#377.
     }
 }
 

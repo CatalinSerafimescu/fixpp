@@ -371,6 +371,12 @@ class SiteWalker:
         # identical. The invariant is structural, not a survey: paths do not
         # change during a run.
         self._rp: dict[str, str] = {}
+        # Every in-repo file this walk touched a cursor in (#363). NOT the same as
+        # "files with sites": a header can be parsed and contain no site at all,
+        # and that distinction is exactly what the header gate needs — refusing on
+        # "no site reported" would fail CI on a parsed header whose only co_spawn
+        # is an ordinary coroutine call, which is ordinary code.
+        self.files_seen: set[str] = set()
         self.sites: list[dict] = []
         # Flat, in source order: closure_decl / ioc_decl / drive records.
         self.events: list[dict] = []
@@ -405,6 +411,8 @@ class SiteWalker:
                     self._rp[fn] = real
                 in_tu = real.startswith(self.repo_root + os.sep) and (
                     os.sep + "build" + os.sep) not in real
+                if in_tu:
+                    self.files_seen.add(real)
         except Exception:
             in_tu = False
 
@@ -703,7 +711,9 @@ def classify(site: dict, events: list[dict]) -> tuple[str, str]:
                     f"scope with no driving call after the co_spawn inside that scope")
 
 
-def parse_tu(entry: dict, extra_args: list[str]) -> tuple[list[dict], list[dict], str | None]:
+def parse_tu(
+    entry: dict, extra_args: list[str]
+) -> tuple[list[dict], list[dict], str | None, set[str]]:
     idx = ci.Index.create()
     args = [a for a in entry["arguments"][1:] if a not in ("-c",)]
     # Drop the output and input file args; keep flags/includes/defines.
@@ -736,7 +746,7 @@ def parse_tu(entry: dict, extra_args: list[str]) -> tuple[list[dict], list[dict]
     try:
         tu = idx.parse(path, args=cleaned, options=0)
     except ci.TranslationUnitLoadError as exc:
-        return [], [], f"parse failed: {exc}"
+        return [], [], f"parse failed: {exc}", set()
 
     # ⚠️ ERROR, NOT JUST FATAL. A non-fatal semantic error (severity Error) does
     # NOT stop libclang producing an AST — it produces a TRUNCATED one, and the
@@ -753,11 +763,11 @@ def parse_tu(entry: dict, extra_args: list[str]) -> tuple[list[dict], list[dict]
     if bad:
         loc = bad[0].location
         where = f"{os.path.basename(loc.file.name)}:{loc.line}" if loc.file else "?"
-        return [], [], f"{len(bad)} error diagnostic(s), first at {where}: {bad[0].spelling}"
+        return [], [], f"{len(bad)} error diagnostic(s), first at {where}: {bad[0].spelling}", set()
 
     w = SiteWalker(path, os.environ.get("FIXPP_REPO_ROOT", os.getcwd()))
     w.walk(tu.cursor, [])
-    return w.sites, w.events, None
+    return w.sites, w.events, None, w.files_seen
 
 
 def _worker_init(libclang: str, repo_root: str) -> None:
@@ -777,16 +787,16 @@ def _worker(job: tuple) -> tuple:
     entry, extra, repo_root = job
     os.environ["FIXPP_REPO_ROOT"] = repo_root
     UNKNOWN_KINDS.clear()
-    sites, events, err = parse_tu(entry, extra)
+    sites, events, err, files_seen = parse_tu(entry, extra)
     if err:
-        return (entry["file"], [], err, dict(UNKNOWN_KINDS))
+        return (entry["file"], [], err, dict(UNKNOWN_KINDS), files_seen)
     out = []
     for s in sites:
         verdict, why = classify(s, events)
         s["verdict"] = verdict
         s["why"] = why
         out.append(s)
-    return (entry["file"], out, None, dict(UNKNOWN_KINDS))
+    return (entry["file"], out, None, dict(UNKNOWN_KINDS), files_seen)
 
 
 # Worst-first, so a dedupe across TUs can never quietly downgrade a header site.
@@ -1164,6 +1174,30 @@ def _names_a_call(arg: str) -> str | None:
     the non-template control screened as a hit. In a screen whose whole purpose
     is to stop being silent, that is the defect it exists to prevent.
     """
+    # ⚠️ A PARENTHESISED CALLEE IS ORDINARY C++ AND WAS MISSED. `co_spawn(ioc,
+    # (lam)(), tok)` is the same site as `co_spawn(ioc, lam(), tok)` — the AST
+    # walker sees through the parens and reports it — but a matcher anchored on
+    # an identifier sees a leading `(` and returns nothing. Strip balanced
+    # wrapping parens first. Found by hostile review, not by the self-test, which
+    # is the fourth shape this screen has been wrong about.
+    arg = arg.lstrip()
+    while arg.startswith("("):
+        depth, k = 0, 0
+        while k < len(arg):
+            if arg[k] == "(":
+                depth += 1
+            elif arg[k] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        if depth != 0 or k + 1 >= len(arg):
+            break
+        inner, after = arg[1:k].strip(), arg[k + 1 :].lstrip()
+        # `(lam)(...)` unwraps; `(a + b)` or a cast does not name a call.
+        if not after.startswith("("):
+            break
+        arg = inner + after
     m = _IDENT_HEAD.match(arg)
     if not m:
         return None  # a lambda literal `[&]...`, a brace-init, anything unnamed
@@ -1365,6 +1399,18 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
         ("screen/comparison-not-template", "co_spawn(ioc, a < b, use_future);", 0),
         # Fewer than two arguments is not the shape.
         ("screen/single-argument", "co_spawn(ioc);", 0),
+        # ── PARENTHESISED CALLEE. `(lam)()` is the same site as `lam()` and the
+        # AST walker reports it; a matcher anchored on an identifier saw the
+        # leading `(` and returned nothing. Found by hostile review — the FOURTH
+        # shape this screen has been wrong about, and the third found by a human
+        # rather than by these arms.
+        ("screen/paren-callee", "co_spawn(ioc, (lam)(), use_future);", 1),
+        ("screen/paren-callee-double", "co_spawn(ioc, ((lam))(), use_future);", 1),
+        ("screen/paren-callee-template", "co_spawn(ioc, (make<A,B>)(), use_future);", 1),
+        ("screen/paren-forwarder", "co_spawn(ex, (std::move)(coro), use_future);", 0),
+        # Parens that do NOT wrap a callee must stay silent.
+        ("screen/paren-cast", "co_spawn(ioc, (Foo)x, use_future);", 0),
+        ("screen/paren-arith", "co_spawn(ioc, (a + b), use_future);", 0),
     ]
     for name, body, expected_n in synthetic:
         got = len(screen_named_closure(body))
@@ -1460,14 +1506,16 @@ def main() -> int:
     repo_root = os.environ.get("FIXPP_REPO_ROOT", os.getcwd())
 
     best: dict[tuple[str, int, int], dict] = {}
+    parsed_files: set[str] = set()
     errors: list[tuple[str, str]] = []
     jobs = [(e, extra, repo_root) for e in entries]
     done = 0
     with cf.ProcessPoolExecutor(
         max_workers=args.jobs, initializer=_worker_init, initargs=(args.libclang, repo_root)
     ) as pool:
-        for fname, sites, err, unknown in pool.map(_worker, jobs, chunksize=1):
+        for fname, sites, err, unknown, files_seen in pool.map(_worker, jobs, chunksize=1):
             done += 1
+            parsed_files |= files_seen
             for kid, cnt in unknown.items():
                 UNKNOWN_KINDS[kid] = UNKNOWN_KINDS.get(kid, 0) + cnt
             if err:
@@ -1555,14 +1603,19 @@ def main() -> int:
     # loudly without costing a false CI failure, and it stops being a second
     # definition of "what is a site" competing with the AST walker's.
     #
-    # ⚠️ THE CONDITION IS AN APPROXIMATION AND THE MESSAGE SAYS SO RATHER THAN
-    # PRETENDING OTHERWISE. "the sweep reported no SITE in this header" is a
-    # proxy for "this header was never PARSED"; the walker does not report the
-    # set of files it parsed, only the sites it found. The two diverge one way:
-    # a header that IS parsed but yields no site (because the screen
-    # over-matched) refuses spuriously. That is loud, and disposition (b) below
-    # names it. They do NOT diverge the other way — an unparsed header can never
-    # produce a site — so a real blind spot is never missed HERE.
+    # ⚠️ THE CONDITION IS "WAS THIS FILE PARSED", NOT "DID IT YIELD A SITE", AND
+    # THE DIFFERENCE IS A CI OUTAGE. It was written the second way first, using
+    # the site list as a proxy because the walker did not report what it parsed.
+    # That proxy fails on ORDINARY CODE: the screen deliberately nominates any
+    # identifier call in argument two, so `co_spawn(ioc, run_pump(), tok)` in a
+    # header is a candidate — while the AST walker correctly reports no site,
+    # because `run_pump` is a plain coroutine function, not a lambda-typed
+    # variable. Under the proxy that header had no site, the gate refused, and a
+    # perfectly ordinary spawn in a perfectly ordinary header would have failed
+    # the required CI command with no way to satisfy it. SiteWalker now records
+    # every in-repo file it walked a cursor in (`files_seen`), so the gate asks
+    # the question it means. Over-approximation inside a PARSED file is now free,
+    # which is what lets the screen stay deliberately loud.
     #
     # ⚠️ RESIDUAL, and it is the one this whole check cannot close: if the SCREEN
     # itself misses the shape in an unreachable header, there is no refusal and
@@ -1579,36 +1632,29 @@ def main() -> int:
             print("The header screen could not run. That is NOT a clean result — it is "
                   "the same fail-toward-clean this check exists to remove.")
             return 1
-        # Files in which the sweep REPORTED A SITE — see the approximation note.
-        seen_headers = {s["file"] for s in all_sites}
         unseen = {
             rel: lines
             for rel, lines in header_hits.items()
-            if os.path.realpath(os.path.join(repo_root, rel)) not in seen_headers
+            if os.path.realpath(os.path.join(repo_root, rel)) not in parsed_files
         }
         if unseen:
             print("ERROR: a header carries the named-closure co_spawn shape and the sweep "
-                  "reported NO site in it (#363).")
+                  "NEVER PARSED it (#363).")
             for rel, lines in sorted(unseen.items()):
                 print(f"  {rel}: lines {', '.join(str(n) for n in lines)}")
-            print("\nTwo things produce this, and this check does not claim to tell them "
-                  "apart:\n"
-                  "  (a) the header is OUTSIDE the population. The prefilter admits a TU "
-                  "only if its MAIN FILE text contains the literal token, so a header "
-                  "reachable only from TUs without it is never parsed — and "
-                  "reconcile_co_spawn_census.py consumes this same population, so the "
-                  "cross-check cannot see the hole either. This is the #363 blind spot.\n"
-                  "  (b) the screen OVER-MATCHED. It is a regex over blanked text, not an "
-                  "AST walk; it nominates candidates and is deliberately loud.\n"
-                  "Re-run with --all-files to distinguish: under (a) the site appears in "
-                  "the report, under (b) it does not.")
+            print("\nThe prefilter admits a TU only if its MAIN FILE text contains the "
+                  "literal token, so a header reachable only from TUs without it is never "
+                  "parsed — and reconcile_co_spawn_census.py consumes this same "
+                  "population, so the cross-check cannot see the hole either. That is the "
+                  "#363 blind spot.\n"
+                  "This is NOT the screen merely over-matching: a nomination inside a "
+                  "PARSED file is ignored, because the test is whether the walker PARSED "
+                  "the file, not whether it agreed there was a site there.\n"
+                  "Re-run with --all-files to include it in the population.")
             return 1
-        covered = len(header_hits)
-        print(f"header screen (#363): {len(population)} TUs parsed; "
-              f"{covered} screened header hit(s), all confirmed by the walker."
-              if covered else
-              f"header screen (#363): {len(population)} TUs parsed; no header carries the "
-              f"named-closure shape outside what the sweep saw.")
+        print(f"header screen (#363): {len(population)} TUs, {len(parsed_files)} in-repo "
+              f"files parsed; {len(header_hits)} screened header hit(s), all inside the "
+              f"parsed set.")
 
 
     # Fails closed: a sweep that parsed nothing, or found no site, reports the
