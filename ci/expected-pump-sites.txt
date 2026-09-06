@@ -1,17 +1,24 @@
-tests/fuzz/fuzz_session_recovery_admin_parse.cpp:102
-tests/fuzz/fuzz_session_recovery_admin_parse.cpp:174
-tests/fuzz/fuzz_session_recovery_admin_parse.cpp:192
-tests/session/heartbeat_testrequest_test.cpp:168
-tests/session/test_application_lifecycle.cpp:232
-tests/session/test_fixt_credentials.cpp:351
-tests/session/test_fixt_logon_establishment.cpp:624
-tests/session/test_heartbeat_cadence_8cell.cpp:172
-tests/session/test_heartbeat_cadence_8cell.cpp:177
-tests/session/test_refresh_on_logon.cpp:424
-tests/session/test_refresh_on_logon.cpp:491
-tests/session/test_refresh_on_logon.cpp:546
-tests/session/test_seqnum_drain_on_close.cpp:175
-tests/session/test_session_dict_snapshot_provenance.cpp:185
-tests/session/test_store_fail_reconcile_readfail.cpp:301
-tests/session/test_store_fail_reconcile_readfail.cpp:309
-tests/session/test_store_fail_reconcile_readfail.cpp:317
+# ci/expected-pump-sites.txt -- the #289 DIRECT-shape census pin.
+#
+# ⚠️ THIS PIN IS DELIBERATELY EMPTY, AND EMPTY DOES NOT MEAN #289 IS DONE.
+#
+# It pins ONE population: a lexically present `run_for(...)` window with an
+# unconditional `.get()` within six following lines. That population is now
+# migrated out, so the correct reading is zero rows. The scanner is licensed to
+# report that zero by its own seeded-positive control (ci/pump-census.sh) -- not
+# by anyone's confidence -- and set equality still catches a new site appearing.
+#
+# WHAT IS STILL OUT THERE, AND HOW TO SEE IT -- do not quote a number from here,
+# it is a property of a moving tree:
+#
+#   bash ci/pump-get-sweep.sh     # every `.get()` on a co_spawn future, asking
+#                                 # whether a guard precedes it and NAMES it.
+#
+# That sweep is the instrument for blind spot (c) (the window indirected behind
+# a helper, which has no `run_for` for this census to anchor on) and for blind
+# spot (b) (a `.get()` further than six lines below its window). It reported
+# hundreds of unguarded candidates on the tree that emptied this pin. A
+# candidate is not a defect -- a self-driving executor is correct with a bare
+# `get()` -- but the set is where the remaining #289 work is chosen from.
+#
+# Adding a row here is a REGRESSION unless the change also explains it.

@@ -172,8 +172,12 @@ struct MinimalSession {
     template <class Coro>
     auto run_coro(Coro&& c) {
         auto fut = asio::co_spawn(ioc, std::forward<Coro>(c), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        using R = decltype(fut.get());
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms, "MinimalSession::run_coro")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "MinimalSession::run_coro");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "MinimalSession::run_coro";
+            return R{std::unexpected(fixpp::test_support::kWindowMissSentinel)};
+        }
         return fut.get();
     }
 

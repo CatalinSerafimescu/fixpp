@@ -216,6 +216,8 @@ TEST(RedactTag554, Tag554AtFrameEnd_NoTrailingSOH) {
 #include <string_view>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
+
 namespace fixpp_fixt_creds {
 
 using namespace std::chrono_literals;
@@ -344,12 +346,23 @@ constexpr std::string_view kMinimalFix50sp2XmlCreds = R"xml(
 }
 
 // Run a coroutine synchronously on an io_context.
-template <typename Fn>
-auto run_sync_creds(asio::io_context& ioc, Fn&& fn)
-    -> decltype(asio::co_spawn(ioc, fn(), asio::use_future).get()) {
-    auto fut = asio::co_spawn(ioc, fn(), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+// ⚠️ TAKES THE FIXTURE, NOT THE `io_context`, AND THAT IS A MEASUREMENT RESULT.
+// The first migration of this helper took only `ioc` and drained with the clock-free
+// `drain_or_report`, on the reasoning that a free helper has no clock in scope. The seam
+// arm then reported RESIDUAL here: the fixture owns a `mock_clock`, a forced miss leaves a
+// frame parked on it, and a mock clock never advances on its own -- drain survivor case (i),
+// which only `cancel_sleeps()` can clear. So the parameter widened to reach the clock.
+// The `Setup` template parameter exists only because this helper is defined ABOVE the
+// fixture struct it is now used with; it is not a generalisation and has one instantiation.
+template <typename Setup, typename Fn>
+auto run_sync_creds(Setup& s, Fn&& fn)
+    -> decltype(asio::co_spawn(s.ioc, fn(), asio::use_future).get()) {
+    auto fut = asio::co_spawn(s.ioc, fn(), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(s.ioc, fut, 200ms, "run_sync_creds")) {
+        fixpp::test_support::cancel_and_drain_or_report(s.ioc, *s.clock, "run_sync_creds");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "run_sync_creds";
+        return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+    }
     return fut.get();
 }
 
@@ -430,7 +443,7 @@ TEST(FixtCredentials, W6a_ConfiguredCreds_EmittedOnOutboundLogon) {
         init_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session initiator(s.engine, init_cfg, &s.registry);
-    run_sync_creds(s.ioc, [&] { return initiator.open(); });
+    run_sync_creds(s, [&] { return initiator.open(); });
 
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator must emit a Logon";
     std::string wire = span_to_str(init_frame_out);
@@ -472,7 +485,7 @@ TEST(FixtCredentials, W6b_NoCreds_553and554Absent_EstablishmentUnaffected) {
         acpt_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
-    run_sync_creds(s.ioc, [&] { return acceptor.open(); });
+    run_sync_creds(s, [&] { return acceptor.open(); });
 
     // Initiator: NO credentials configured.
     auto init_cfg = s.make_initiator_cfg(application_version::v50sp2);
@@ -482,7 +495,7 @@ TEST(FixtCredentials, W6b_NoCreds_553and554Absent_EstablishmentUnaffected) {
         init_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session initiator(s.engine, init_cfg, &s.registry);
-    run_sync_creds(s.ioc, [&] { return initiator.open(); });
+    run_sync_creds(s, [&] { return initiator.open(); });
 
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator must emit a Logon";
     std::string init_wire = span_to_str(init_frame_out);
@@ -494,7 +507,7 @@ TEST(FixtCredentials, W6b_NoCreds_553and554Absent_EstablishmentUnaffected) {
         << "Unconfigured credentials: 554 must be absent; got: " << init_wire;
 
     // (b-2) Feed initiator Logon to acceptor — acceptor must still reach Active.
-    auto r = run_sync_creds(s.ioc, [&] {
+    auto r = run_sync_creds(s, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{init_frame_out.data(), init_frame_out.size()});
     });
@@ -504,7 +517,7 @@ TEST(FixtCredentials, W6b_NoCreds_553and554Absent_EstablishmentUnaffected) {
 
     // (b-3) Feed acceptor reply to initiator.
     ASSERT_FALSE(acpt_frame_out.empty()) << "Acceptor must have emitted a reply";
-    auto r2 = run_sync_creds(s.ioc, [&] {
+    auto r2 = run_sync_creds(s, [&] {
         return initiator.on_inbound_frame(
             std::span<const std::byte>{acpt_frame_out.data(), acpt_frame_out.size()});
     });
@@ -551,14 +564,14 @@ TEST(FixtCredentials, W6c_InboundCreds_SurfacedToAuthorizeLogon) {
         acpt_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
-    run_sync_creds(s.ioc, [&] { return acceptor.open(); });
+    run_sync_creds(s, [&] { return acceptor.open(); });
 
     // Build an inbound FIXT Logon WITH 553/554.
     auto logon =
         make_fixt_logon_frame_with_creds("FIXT.1.1", 1, "TW", "ISLD", 30, "9",
                                          /*username=*/"charlie", /*password=*/"sentinel-W6c-xyzzy");
 
-    auto r = run_sync_creds(s.ioc, [&] {
+    auto r = run_sync_creds(s, [&] {
         return acceptor.on_inbound_frame(std::span<const std::byte>{logon.data(), logon.size()});
     });
     ASSERT_TRUE(r.has_value()) << "on_inbound_frame must succeed for valid Logon";
@@ -610,12 +623,12 @@ TEST(FixtCredentials, W6d_CredentialFreeLogon_ReachesActive) {
         acpt_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
-    run_sync_creds(s.ioc, [&] { return acceptor.open(); });
+    run_sync_creds(s, [&] { return acceptor.open(); });
 
     // Logon WITHOUT 553/554.
     auto logon = make_fixt_logon_frame_with_creds("FIXT.1.1", 1, "TW", "ISLD", 30, "9");
 
-    auto r = run_sync_creds(s.ioc, [&] {
+    auto r = run_sync_creds(s, [&] {
         return acceptor.on_inbound_frame(std::span<const std::byte>{logon.data(), logon.size()});
     });
     ASSERT_TRUE(r.has_value());
@@ -771,7 +784,7 @@ TEST(FixtCredentials, FQ2_ThrowingLogonValidator_SessionDisconnectsNoTerminate) 
         acpt_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
-    run_sync_creds(s.ioc, [&] { return acceptor.open(); });
+    run_sync_creds(s, [&] { return acceptor.open(); });
 
     // Send a credentialed inbound FIXT Logon to trigger authorize_logon.
     auto logon = make_fixt_logon_frame_with_creds(
@@ -780,7 +793,7 @@ TEST(FixtCredentials, FQ2_ThrowingLogonValidator_SessionDisconnectsNoTerminate) 
 
     // Pre-fix: this call terminates the process via std::terminate.
     // Post-fix: it returns normally (the throw is absorbed inside authorize_logon).
-    auto r = run_sync_creds(s.ioc, [&] {
+    auto r = run_sync_creds(s, [&] {
         return acceptor.on_inbound_frame(
             std::span<const std::byte>{logon.data(), logon.size()});
     });
@@ -817,7 +830,7 @@ TEST(FixtCredentials, FQ3a_PasswordWithSOH_ReturnsInvalidConfig_NoWireEmit) {
     };
 
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
-    auto result = run_sync_creds(s.ioc, [&] { return sess.open(); });
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
 
     // Must reject — credential contains a SOH delimiter.
     ASSERT_FALSE(result.has_value())
@@ -849,7 +862,7 @@ TEST(FixtCredentials, FQ3b_UsernameWithSOH_ReturnsInvalidConfig_NoWireEmit) {
     };
 
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
-    auto result = run_sync_creds(s.ioc, [&] { return sess.open(); });
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
 
     ASSERT_FALSE(result.has_value())
         << "open() must fail when username contains SOH (FQ-3b)";
@@ -875,7 +888,7 @@ TEST(FixtCredentials, FQ3c_UsernameWithEquals_ReturnsInvalidConfig_NoWireEmit) {
     };
 
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
-    auto result = run_sync_creds(s.ioc, [&] { return sess.open(); });
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
 
     ASSERT_FALSE(result.has_value())
         << "open() must fail when username contains '=' (FQ-3c)";
@@ -900,7 +913,7 @@ TEST(FixtCredentials, FQ3d_PasswordWithEquals_ReturnsInvalidConfig_NoWireEmit) {
     };
 
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
-    auto result = run_sync_creds(s.ioc, [&] { return sess.open(); });
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
 
     ASSERT_FALSE(result.has_value())
         << "open() must fail when password contains '=' (FQ-3d)";
@@ -927,7 +940,7 @@ TEST(FixtCredentials, FQ3e_PasswordWithControlByte_ReturnsInvalidConfig_NoWireEm
     };
 
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
-    auto result = run_sync_creds(s.ioc, [&] { return sess.open(); });
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
 
     ASSERT_FALSE(result.has_value())
         << "open() must fail when password contains a sub-0x20 control byte (FQ-3e)";

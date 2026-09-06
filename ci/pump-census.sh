@@ -27,16 +27,17 @@
 # 346/85. Do not describe 346 as reconciling with 340; it does not, and
 # claiming otherwise misrepresents two different classifiers as one.
 #
-# ── KNOWN LEXICAL FALSE POSITIVE ─────────────────────────────────────────────
-# tests/session/test_application_lifecycle.cpp, the one-line `run_ioc()` helper —
-#   void run_ioc() { ioc.run_for(300ms); ioc.restart(); }
-# ⚠️ NAMED, NOT CITED BY LINE. This comment used to say `:213` and #289 batch 12 moved the
-# helper to :232 by inserting a header block above it -- the pin row was updated and the
-# prose was not. Find it by its text; the pin (below) is the line-numbered record.
-# is a complete one-line function; the matching `fut.get()` six lines later is
-# in a DIFFERENT function entirely. It is kept in the pin (the pin is a set of
-# LEXICAL candidates, not a hand-verified semantic set) but is named here so
-# nobody rediscovers it as a surprise.
+# ── KNOWN LEXICAL FALSE POSITIVES: NONE, BECAUSE THE POPULATION IS EMPTY ─────
+# This section used to name one -- a one-line `void run_ioc() { ioc.run_for(...);
+# ioc.restart(); }` helper in tests/session/test_application_lifecycle.cpp, whose
+# matching `fut.get()` six lines later was in a DIFFERENT function. That helper was
+# deleted in #289 batch 15 (its six call sites each had a future in scope, so the
+# indirection inlined away), and with it the false positive.
+#
+# The paragraph is REPLACED rather than corrected because the interesting part was
+# never the site: it was that a one-line helper can manufacture a lexical match
+# across a function boundary. That remains true of this scanner and is why the
+# seeded-positive control below asserts an EXACT hit set rather than a count.
 #
 # ── PRESERVED SITES THIS PIN CANNOT SPEAK ABOUT ──────────────────────────────
 # A site that is deliberately NOT migrated can still LEAVE this census, because
@@ -142,16 +143,6 @@ done
     fail "tests directory not found under scan root: $scan_root"
 [ -f "$expected" ] ||
     fail "expected-site pin not found: $expected"
-[ -s "$expected" ] ||
-    fail "expected-site pin is empty: $expected"
-
-if grep -Evq '^tests/.+\.(cpp|hpp):[1-9][0-9]*$' "$expected"; then
-    fail "expected-site pin contains a blank or malformed row: $expected"
-fi
-
-if ! LC_ALL=C sort -u "$expected" | cmp -s - "$expected"; then
-    fail "expected-site pin must be sorted and contain no duplicates: $expected"
-fi
 
 command -v python3 >/dev/null ||
     fail "python3 is required"
@@ -159,6 +150,22 @@ command -v python3 >/dev/null ||
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 actual="$tmp/actual.txt"
+
+# The pin may carry `#` comments and may hold ZERO site rows. Both are new, and
+# both exist for the same reason: the direct population is now empty, so a pin
+# that could not express "empty" could not express the truth. A zero-byte file
+# would say it ambiguously -- indistinguishable from a truncation -- so the
+# emptiness is stated IN the file and the rows are compared after stripping.
+pin="$tmp/expected.txt"
+sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$expected" >"$pin"
+
+if [ -s "$pin" ] && grep -Evq '^tests/.+\.(cpp|hpp):[1-9][0-9]*$' "$pin"; then
+    fail "expected-site pin contains a malformed row: $expected"
+fi
+
+if ! LC_ALL=C sort -u "$pin" | cmp -s - "$pin"; then
+    fail "expected-site pin must be sorted and contain no duplicates: $expected"
+fi
 
 if ! python3 - "$scan_root" >"$actual" <<'PY'
 from pathlib import Path
@@ -267,6 +274,73 @@ def blank_non_code(source: str) -> str:
 
     return "".join(out)
 
+def scan(source):
+    """Return the 1-based line of every window whose `.get()` is within six lines."""
+    lines = blank_non_code(source).splitlines()
+    hits = []
+    for index, line in enumerate(lines):
+        if not run_re.search(line):
+            continue
+        following = lines[index + 1:index + 7]
+        if any(get_re.search(candidate) for candidate in following):
+            hits.append(index + 1)
+    return hits
+
+
+# ── SEEDED-POSITIVE CONTROL ──────────────────────────────────────────────────
+# This scanner USED to treat a zero reading as proof it was broken, because for
+# the whole life of the #289 migration a zero could only mean that. That is no
+# longer true: the direct population it scans is now empty, so the blanket
+# refusal would reject the one correct answer and make the pin unmaintainable.
+#
+# A zero is admissible only from an instrument PROVEN able to report non-zero,
+# so the licence comes from a control rather than from trust. The fixture below
+# carries one site of each shape the scanner must separate; the assertion is
+# EXACT (`!=`), so a scanner that widened into matching the negatives fails here
+# too, not just one that stopped matching the positive.
+#
+# The far-`get()` negative is NOT a defect being tolerated -- it is blind spot
+# (b) from this file's header, pinned as a PROPERTY so that widening the
+# lookahead is a deliberate act that breaks this control and must be re-argued.
+CONTROL = """\
+void positive() {
+    auto fut = asio::co_spawn(ioc, c(), asio::use_future);
+    ioc.run_for(200ms);
+    ioc.restart();
+    (void)fut.get();
+}
+void migrated() {
+    auto fut = asio::co_spawn(ioc, c(), asio::use_future);
+    if (!run_window_then_ready(ioc, fut, 200ms, "x")) { return; }
+    (void)fut.get();
+}
+void commented_out() {
+    // ioc.run_for(200ms);
+    // ioc.restart();
+    // (void)fut.get();
+}
+void far_get() {
+    ioc.run_for(200ms);
+    ioc.restart();
+    int a = 0;
+    int b = 0;
+    int c2 = 0;
+    int d = 0;
+    int e = 0;
+    int f2 = 0;
+    (void)a; (void)b; (void)c2; (void)d; (void)e; (void)f2;
+    (void)fut.get();
+}
+"""
+# Line 3 is `ioc.run_for` in positive(); nothing else may match.
+control_hits = scan(CONTROL)
+if control_hits != [3]:
+    raise SystemExit(
+        "pump-census: error: seeded-positive control FAILED "
+        f"(expected [3], got {control_hits}); the scanner cannot be trusted to "
+        "report either a zero or a non-zero, so no reading is admissible"
+    )
+
 sites = []
 
 for path in files:
@@ -277,22 +351,9 @@ for path in files:
             f"pump-census: error: cannot read {path}: {exc}"
         )
 
-    lines = blank_non_code(source).splitlines()
-
-    for index, line in enumerate(lines):
-        if not run_re.search(line):
-            continue
-
-        following = lines[index + 1:index + 7]
-        if any(get_re.search(candidate) for candidate in following):
-            rel = path.relative_to(root).as_posix()
-            sites.append(f"{rel}:{index + 1}")
-
-if not sites:
-    raise SystemExit(
-        "pump-census: error: instrument produced zero sites; "
-        "refusing to interpret an empty measurement as a clean tree"
-    )
+    rel = path.relative_to(root).as_posix()
+    for line_no in scan(source):
+        sites.append(f"{rel}:{line_no}")
 
 for site in sorted(set(sites)):
     print(site)
@@ -301,14 +362,17 @@ then
     fail "scanner failed"
 fi
 
-[ -s "$actual" ] ||
-    fail "scanner succeeded but emitted no sites"
+# NOTE: no `[ -s "$actual" ]` guard. An empty reading is now a legitimate
+# outcome -- the direct population is migrated out -- and the licence to believe
+# it comes from the seeded-positive control inside the scanner, not from the
+# emptiness of this file. Set equality against the pin still catches drift in
+# both directions.
 
 # Emit the authoritative current reading even on mismatch.
 cat "$actual"
 
-if ! diff -u "$expected" "$actual" >&2; then
-    expected_count="$(wc -l <"$expected" | tr -d '[:space:]')"
+if ! diff -u "$pin" "$actual" >&2; then
+    expected_count="$(wc -l <"$pin" | tr -d '[:space:]')"
     actual_count="$(wc -l <"$actual" | tr -d '[:space:]')"
     echo "pump-census: error: census differs from pin" >&2
     echo "pump-census: expected=$expected_count actual=$actual_count" >&2

@@ -64,6 +64,8 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+
+#include "support/pump_until_ready.hpp"
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
@@ -298,24 +300,51 @@ protected:
         auto sess = std::make_unique<Session>(engine, cfg);
 
         auto open_r = asio::co_spawn(ioc, sess->open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, open_r, 200ms,
+                                                        "ReconcileFixture::drive/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ReconcileFixture::drive/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReconcileFixture::drive/open";
+            // The miss branch must POISON `send_r`: a default-constructed
+            // expected_t<void> HAS a value, so an early return that left it alone
+            // would report success to every caller.
+            out.send_r = std::unexpected(fixpp::test_support::kWindowMissSentinel);
+            out.state = sess->state();
+            return out;
+        }
         EXPECT_TRUE(open_r.get().has_value()) << "open() must succeed";
         EXPECT_EQ(sess->state(), fsm_state::LogonSent);
 
         auto peer_logon = make_logon("FIX.4.2", 1, "ACCEPTR", "INITR");
         auto logon_r = asio::co_spawn(
             ioc, sess->on_inbound_frame(std::span<const std::byte>(peer_logon)), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, logon_r, 200ms,
+                                                        "ReconcileFixture::drive/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ReconcileFixture::drive/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReconcileFixture::drive/logon";
+            // The miss branch must POISON `send_r`: a default-constructed
+            // expected_t<void> HAS a value, so an early return that left it alone
+            // would report success to every caller.
+            out.send_r = std::unexpected(fixpp::test_support::kWindowMissSentinel);
+            out.state = sess->state();
+            return out;
+        }
         EXPECT_TRUE(logon_r.get().has_value()) << "peer Logon-ack must be accepted";
         EXPECT_EQ(sess->state(), fsm_state::Active);
 
         auto payload = make_app_payload("ORD-K");
         auto send_fut =
             asio::co_spawn(ioc, sess->send(std::span<const std::byte>(payload)), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!fixpp::test_support::run_window_then_ready(ioc, send_fut, 200ms,
+                                                        "ReconcileFixture::drive/send")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ReconcileFixture::drive/send");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReconcileFixture::drive/send";
+            // The miss branch must POISON `send_r`: a default-constructed
+            // expected_t<void> HAS a value, so an early return that left it alone
+            // would report success to every caller.
+            out.send_r = std::unexpected(fixpp::test_support::kWindowMissSentinel);
+            out.state = sess->state();
+            return out;
+        }
         out.send_r = send_fut.get();
         out.state = sess->state();
 

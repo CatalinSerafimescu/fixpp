@@ -229,25 +229,35 @@ struct LifecycleFixture {
         return cfg;
     }
 
-    void run_ioc() { ioc.run_for(300ms); ioc.restart(); }
-
     // Open session to Active state (acceptor path: NotConnected → Active via Logon).
     void open_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms, "open_to_active/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "open_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "open_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         // Feed peer Logon to advance to Active.
         auto logon = make_logon_frame();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 300ms, "open_to_active/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "open_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "open_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon feed failed";
         ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "must be Active after Logon";
     }
 
     void feed(Session& s, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms, "feed/frame")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "feed/frame");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "feed/frame";
+            return;
+        }
         (void)fut.get();
     }
 };
@@ -267,7 +277,13 @@ TEST(ApplicationLifecycle, OnCreateFiresOnceBeforeLogon) {
 
     // open() initializes exec_ — onCreate must fire.
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    f.run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms,
+                                                    "OnCreateFiresOnceBeforeLogon/open")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "OnCreateFiresOnceBeforeLogon/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "OnCreateFiresOnceBeforeLogon/open";
+        return;
+    }
     ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
     ASSERT_EQ(app->lifecycle_calls.size(), 1u) << "onCreate must fire exactly once after open()";
@@ -379,7 +395,12 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_TerminalClose) {
     // Terminal close.
     auto close_fut = asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::terminal),
                                     asio::use_future);
-    f.run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, close_fut, 300ms,
+                                                    "OnLogoutFiresOnce_TerminalClose/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "OnLogoutFiresOnce_TerminalClose/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "OnLogoutFiresOnce_TerminalClose/close";
+        return;
+    }
     (void)close_fut.get();
 
     std::size_t logout_count = 0;
@@ -410,7 +431,12 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_CallbackThrew) {
     // does NOT fire a second time.
     auto close_fut = asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::terminal),
                                     asio::use_future);
-    f.run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, close_fut, 300ms,
+                                                    "OnLogoutFiresOnce_CallbackThrew/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "OnLogoutFiresOnce_CallbackThrew/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "OnLogoutFiresOnce_CallbackThrew/close";
+        return;
+    }
     (void)close_fut.get();
 
     // The throw happened: the session should be Disconnected.
