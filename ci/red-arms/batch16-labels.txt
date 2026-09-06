@@ -1,0 +1,104 @@
+# ci/red-arms/batch16-labels.txt -- the seam-forceable sites of #289 batch 16.
+#
+# Feed to:  bash ci/pump-seam-arm.sh linux-clang-debug ci/red-arms/batch16-labels.txt
+#
+# One label per line. Every line here is a site that passes its label to
+# `run_window_then_ready`, which is what `FIXPP_FORCE_WINDOW_MISS` matches on.
+#
+# ⚠️ ONE RECIPE SHAPE, ONE DRAIN, AND THAT IS A PROPERTY OF THE POPULATION THIS
+# BATCH TOOK, NOT OF THE BATCH SIZE. Every site here was a census blind-spot-(c)
+# site -- the window indirected behind a `run()`/`run_ioc()` fixture helper -- in a
+# file whose fixture owns a `mock_clock`. So every one is
+# `run_window_then_ready` + `cancel_and_drain_or_report(ioc, *clock, ...)` +
+# `ADD_FAILURE` + `return;`. Enumerate rather than counting:
+#   git grep -n 'cancel_and_drain_or_report' -- tests/session/test_application_throw.cpp \
+#       tests/session/test_send_allow_pos_dup_strip.cpp \
+#       tests/session/test_sending_time_precision.cpp \
+#       tests/session/support/possdup_test_support.hpp
+#
+# ⚠️ EVERY LABEL HERE IS FIXTURE-QUALIFIED, AND THAT IS A FIX, NOT A STYLE.
+# The natural names -- `drive_to_active/open`, `feed/frame`, `open_to_active/open`
+# -- collided with labels already on `main`, and one pair collided IN ONE TRANSLATION
+# UNIT: `possdup_test_support.hpp` is included by `test_send_allow_pos_dup_strip.cpp`,
+# which defines a `drive_to_active` of its own.
+# ⚠️ AN EARLIER DRAFT OF THIS PARAGRAPH SAID THE TWO "WOULD HAVE COMPILED INTO THE SAME
+# EXECUTABLE" AND THAT WAS FALSE, measured: that TU includes the header only for
+# `extract_field`, never instantiates `PossDupTestBase`, and so emits none of its
+# implicitly-inline members (`strings -a <that binary> | grep -c 'PossDupTestBase::'`
+# reads 0; an includer that does instantiate it reads 3). The duplicate was real at
+# SOURCE level and becomes a runtime one in any TU that emits both -- which nothing
+# prevents and nothing else would notice. That conditional form is the honest one.
+# `ci/pump-label-uniqueness.sh` now gates this in tier1; it was added in this same
+# change, after the obvious one-line grep for duplicates reported clean over all
+# five of them. That gate scans EVERY spelling that reaches the forcing seam, not
+# just `run_window_then_ready(` -- its header says why.
+#
+# ⚠️ WHAT THE SEAM ARMS MEASURE, STATED AS WHAT THEY MEASURE. Forcing happens AT
+# WINDOW-OPEN, which PRESERVES the state at entry and cannot MANUFACTURE one: the
+# forced state is a healthy exchange not yet dispatched, and the drain then completes
+# work the window would have completed. A REAL miss is the opposite condition by
+# definition. So `RESIDUAL=0` across these labels is evidence that the drain reaches
+# a fixed point when the exchange is HEALTHY; it is not evidence that it does when
+# the exchange is WEDGED.
+# [[feedback_a_forcing_mechanism_cannot_manufacture_the_state_it_preserves]]
+#
+# ⚠️ THE HELPER SITES ARE REACHED FROM MANY TESTS, WHICH IS WHY THE TEXTUAL ARMS
+# IN `ci/red-arms/batch16-spotcheck.tsv` CARRY A 6TH COLUMN (the exec stem). A
+# label matches EXACTLY at the seam but by CONTAINMENT for the driver's "did this
+# arm's test run?" check, and those diverge the moment a label names a HELPER
+# rather than a test. Read `ci/pump-red-arm.sh`'s header for the contract.
+#
+# Textual arms -- the stronger witness -- are in `ci/red-arms/batch16-spotcheck.tsv`.
+# Run both. What forcing does, and why a silent arm is NO-SUCH-SITE rather than a
+# pass, is `ci/pump-seam-arm.sh`'s own contract; that script's header forbids
+# restating it here.
+
+AllowPosDupStripTest::drive_to_active/logon
+AllowPosDupStripTest::drive_to_active/open
+AllowPosDupStripTest::feed/frame
+ApplicationThrow::open_acceptor_to_active/logon
+ApplicationThrow::open_acceptor_to_active/open
+Cell2_RetainCase_ReplayDedups/send
+Cell3_DefaultPath_ReplayByteIdentical/send
+DefaultMillis_ByteIdentical/logon
+DefaultMillis_ByteIdentical/open
+FromAdminThrowTerminatesSession/frame
+FromAppThrowTerminatesSession/frame
+InboundNanos52_ParsedNotRejected/frame
+MaxLatency_OnNanosInbound/beyond
+MaxLatency_OnNanosInbound/within
+Micros_Emits24Char52/logon
+Micros_Emits24Char52/open
+Nanos_Emits27Char52/logon
+Nanos_Emits27Char52/open
+OnCreateThrowTerminatesSession/open
+OnLogonThrowTerminatesSession/logon
+OnLogonThrowTerminatesSession/open
+OnLogoutThrowHandledCleanly/close
+OrigSendingTime122_PreservedVerbatim/resend-request
+OrigSendingTime122_PreservedVerbatim/send
+PossDupTestBase::drive_to_active/logon
+PossDupTestBase::drive_to_active/open
+PossDupTestBase::feed/frame
+SendingTimePrecisionTest::drive_to_active/logon
+SendingTimePrecisionTest::drive_to_active/open
+ThrowFixture::open_to_active/logon
+ThrowFixture::open_to_active/open
+ThrowFixture::verify_second_session_works/logon
+ThrowFixture::verify_second_session_works/open
+ToAdminConfirmingLogoutThrowTerminatesSession/logout
+ToAdminGracefulCloseLogoutThrowTerminatesSession/close
+ToAdminTestRequestReplyThrowTerminatesSession/test-request
+ToAdminThrowTerminatesSession/open
+ToAppThrowTerminatesSession/send
+W1_StripDefault/send
+W2_Retain/send
+W3_EmbeddedText43_HostileWitness/send
+W4_SohBoundary_DefaultStrip/send
+W4_SohBoundary_Retain/send
+W5_NoOp_WhenAbsent/send-default
+W5_NoOp_WhenAbsent/send-retain
+W6_MalformedField/send
+W6b_OversizedStrippedPayload/send
+W7_ResendIndependence/send
+W8_NoHeap_Scaffold/send

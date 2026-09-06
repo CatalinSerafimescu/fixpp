@@ -56,11 +56,17 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/possdup_test_support.hpp"  // extract_field
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
 
 namespace fixpp::session::test {
+// The #289 window every migrated site in this file uses. File-scope rather than a
+// fixture member because one of the sites sits in a free helper taking the fixture
+// by reference. It is ONE value here; files whose windows genuinely differ per site
+// keep theirs inline, where a single constant would be a lie.
+constexpr auto kWindow = 200ms;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -219,20 +225,29 @@ protected:
         return cfg;
     }
 
-    void run_ioc() {
-        ioc.run_for(200ms);
-        ioc.restart();
-    }
-
     // Open acceptor session + feed Logon(seq=1, TW→ISLD) → Active.
     void drive_to_active(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut, kWindow, "AllowPosDupStripTest::drive_to_active/open")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "AllowPosDupStripTest::drive_to_active/open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AllowPosDupStripTest::drive_to_active/open";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_peer_logon_44(1, "TW", "ISLD");
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut2, kWindow, "AllowPosDupStripTest::drive_to_active/logon")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "AllowPosDupStripTest::drive_to_active/logon");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AllowPosDupStripTest::drive_to_active/logon";
+            return;
+        }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon feed failed";
         ASSERT_EQ(sess.state(), fsm_state::Active);
         captured_frames.clear();  // discard open()+logon-ack frames; tests assert only user sends
@@ -241,7 +256,13 @@ protected:
     // Feed inbound frame; ignore the result (used for ResendRequest drive).
     void feed(Session& sess, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                        "AllowPosDupStripTest::feed/frame")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "AllowPosDupStripTest::feed/frame");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "AllowPosDupStripTest::feed/frame";
+            return;
+        }
         (void)fut.get();
     }
 
@@ -314,7 +335,11 @@ TEST_F(AllowPosDupStripTest, W1_StripDefault_43And122AbsentInOutbound) {
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, "W1_StripDefault/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W1_StripDefault/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W1_StripDefault/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_TRUE(result.has_value()) << "Session::send must succeed for a well-formed payload";
@@ -353,7 +378,11 @@ TEST_F(AllowPosDupStripTest, W2_Retain_43And122PresentInOutbound) {
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, "W2_Retain/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W2_Retain/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W2_Retain/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_TRUE(result.has_value()) << "Session::send must succeed";
@@ -398,7 +427,14 @@ TEST_F(AllowPosDupStripTest, W3_EmbeddedText43_HostileWitness_ValueIntactBoundar
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                    "W3_EmbeddedText43_HostileWitness/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "W3_EmbeddedText43_HostileWitness/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "W3_EmbeddedText43_HostileWitness/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_TRUE(result.has_value()) << "Session::send must succeed for a well-formed payload";
@@ -454,7 +490,13 @@ TEST_F(AllowPosDupStripTest, W4_SohBoundary_DefaultStrip_BothRemoved) {
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                    "W4_SohBoundary_DefaultStrip/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "W4_SohBoundary_DefaultStrip/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W4_SohBoundary_DefaultStrip/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_TRUE(result.has_value()) << "Session::send must succeed";
@@ -485,7 +527,12 @@ TEST_F(AllowPosDupStripTest, W4_SohBoundary_Retain_BothPresent) {
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                    "W4_SohBoundary_Retain/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W4_SohBoundary_Retain/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W4_SohBoundary_Retain/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_TRUE(result.has_value()) << "Session::send must succeed";
@@ -526,7 +573,13 @@ TEST_F(AllowPosDupStripTest, W5_NoOp_WhenAbsent_ByteIdenticalOutput) {
         auto payload = to_payload(kPayloadStr);
         auto fut =
             asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                        "W5_NoOp_WhenAbsent/send-default")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "W5_NoOp_WhenAbsent/send-default");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W5_NoOp_WhenAbsent/send-default";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "Session::send (default) must succeed";
         ASSERT_FALSE(captured_frames.empty());
         frame_default = captured_frames.back();
@@ -546,7 +599,13 @@ TEST_F(AllowPosDupStripTest, W5_NoOp_WhenAbsent_ByteIdenticalOutput) {
         auto payload = to_payload(kPayloadStr);
         auto fut =
             asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                        "W5_NoOp_WhenAbsent/send-retain")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "W5_NoOp_WhenAbsent/send-retain");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W5_NoOp_WhenAbsent/send-retain";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "Session::send (retain) must succeed";
         ASSERT_FALSE(captured_frames.empty());
         const auto& frame_retain = captured_frames.back();
@@ -719,7 +778,11 @@ TEST_P(MalformedField131Test, W6_MalformedField_Returns131_NoSeqnum_NoTransmit_N
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, "W6_MalformedField/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W6_MalformedField/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W6_MalformedField/send";
+        return;
+    }
     auto result = fut.get();
 
     // C2.4: must return app_payload_malformed=131.
@@ -777,7 +840,13 @@ TEST_F(AllowPosDupStripTest, W6b_OversizedStrippedPayload_ReturnsWireFrameTooLar
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                    "W6b_OversizedStrippedPayload/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "W6b_OversizedStrippedPayload/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W6b_OversizedStrippedPayload/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_FALSE(result.has_value())
@@ -824,7 +893,12 @@ TEST_F(AllowPosDupStripTest, W7_ResendIndependence_ReplayAlwaysAdds43And122) {
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                    "W7_ResendIndependence/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W7_ResendIndependence/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W7_ResendIndependence/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_TRUE(result.has_value()) << "Session::send must succeed";
@@ -913,7 +987,11 @@ TEST_F(AllowPosDupStripTest, W8_NoHeap_Scaffold_SendSucceeds_NoPmrAllocDuringSen
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, "W8_NoHeap_Scaffold/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "W8_NoHeap_Scaffold/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W8_NoHeap_Scaffold/send";
+        return;
+    }
     auto result = fut.get();
 
     // Structural prerequisite: send must succeed and emit a frame.
@@ -957,7 +1035,13 @@ TEST_F(AllowPosDupStripTest, Cell2_RetainCase_ReplayDedups43And122) {
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                    "Cell2_RetainCase_ReplayDedups/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "Cell2_RetainCase_ReplayDedups/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Cell2_RetainCase_ReplayDedups/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_TRUE(result.has_value()) << "Session::send must succeed";
@@ -1040,7 +1124,14 @@ TEST_F(AllowPosDupStripTest, Cell3_DefaultPath_ReplayByteIdentical) {
 
     auto fut =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-    run_ioc();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
+                                                    "Cell3_DefaultPath_ReplayByteIdentical/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "Cell3_DefaultPath_ReplayByteIdentical/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Cell3_DefaultPath_ReplayByteIdentical/send";
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_TRUE(result.has_value()) << "Cell3: send must succeed";

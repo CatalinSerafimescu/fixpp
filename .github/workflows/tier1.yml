@@ -2274,6 +2274,15 @@ jobs:
       - name: "Regression pin — run_for/get pump census (#289)"
         run: bash ci/test-pump-census.sh
 
+      # #289 site labels must be UNIQUE across tests/, or `FIXPP_FORCE_WINDOW_MISS`
+      # fires at more than one site and no seam arm can tell. WHY, and why the
+      # obvious grep for it reports clean: see ci/pump-label-uniqueness.sh's own
+      # header — restating it here would be a second copy to keep true, and the
+      # two copies of the first draft already carried the same wrong mechanism.
+      # Buildless — python3 + coreutils only.
+      - name: "Regression pin — #289 site-label uniqueness"
+        run: bash ci/pump-label-uniqueness.sh
+
       # Gate B round 1 (#326) found this checker had NO CI-visible signal at
       # all: the gate itself only runs as a local pre-commit hook (nothing in
       # .github/ invokes pre-commit), and `gate()` explicitly skips its own
