@@ -1,7 +1,7 @@
 ---
 type: Render Recipe
 title: Recurring failure classes — what goes wrong here, and the check that catches each
-description: Six classes, not a checklist. Each carries the condition that triggers it and the procedure that refutes it; the instances live outside this repo.
+description: A taxonomy, not a checklist. Each carries the condition that triggers it and the procedure that refutes it; the instances live outside this repo.
 status: stable
 refs:
   - tools/check_brain.py
@@ -12,7 +12,7 @@ codegraph_entry: []
 
 # Recurring failure classes
 
-**This page is a taxonomy, not a list.** Seven classes have produced most of the defects found in this
+**This page is a taxonomy, not a list.** These classes have produced most of the defects found in this
 project — including several found *in the documents and tools built to prevent them*. Each entry gives
 the **trigger** (when you are at risk) and the **procedure** (what refutes it). No counts, no instances.
 
@@ -177,6 +177,50 @@ bare-token selector still selected them while the span they were selected for no
 three `EXTRACTOR FAILED` lines. The fix was to make the selector match the definition, not the token;
 the FULL population is now empty by construction, and the control that builds a synthetic definer each
 run is what makes that emptiness readable.
+
+---
+
+### 9. A correctness fix leaves the OLD rule standing on the path that lacked the information
+
+The usual shape of a boundary fix is: thread in the thing the rule needed — a dictionary, a real
+parent context, an actual bound — and compute the answer properly. That fix lands on the branch that
+now has the information. The branch that never will keeps the old rule, and keeps it *silently*,
+because nothing about it looks unfinished: it still compiles, its tests still pass, and within a
+release or two somebody writes a waiver explaining why it is acceptable. At that point the leftover
+has acquired the appearance of design, and the next reader — including the next reader who is
+looking straight at it — will treat it as a deliberate degradation rather than as the fragment it is.
+
+- **Trigger:** you are fixing a rule by supplying the information it was missing, and some branch
+  (no dictionary, no context, no oracle) will not receive it.
+- **Procedure:** decide what that branch *answers*, and write the answer down as a contract. Usually
+  the honest options are only two: **decline** — return the same "not applicable" the informed path
+  returns when it cannot establish the thing — or keep the old rule with its wrongness named in the
+  signature's own documentation. Do not leave it as a fallback. A fallback is a decision nobody has
+  made yet, and it will be read as one that was.
+- ⚠️ **A WAIVER'S PREMISE IS A FACT ABOUT THE CALL GRAPH, NOT ABOUT THE CODE.** "No production caller
+  takes this path" is the standard justification, and it is exactly the kind of claim that decays
+  without touching the file it justifies. One default constructor, one convenience overload, one
+  caller who did not know to pass the dictionary, and the waived path is the shipping path — with
+  the waiver still sitting there reading as current. When you rely on such a premise, name the
+  constructor or call site that would falsify it, so the next reader can re-check it in one grep
+  instead of re-deriving the call graph.
+- ⚠️ **THE REPORTED SYMPTOM IS USUALLY THE SMALLER HALF.** A leftover rule produces a wrong *value*,
+  and the bug report names whichever consumer noticed. Enumerate every consumer of that value before
+  scoping the fix. Fixing the reported consumer while the wrong value still flows to the others is
+  the outcome this class is really about, and it closes the issue while the defect stands.
+
+**Reference instance:** fixpp#220. `OffsetTable::group()` bounded a repeating group by rest-of-message
+when no dictionary was threaded. That rule was the surviving fragment of a heuristic whose
+end-of-message fallback had been removed from the dict-aware path as a P1 two gate-rounds into PR #68;
+it stayed where membership was unavailable, and was later documented as a scoped `[2b §4.7]`
+deviation, waived on "no production wire caller uses the dict-free construction path". That premise
+had already been false once — `Session::parse_and_dispatch_` built its `Parser` with the
+dictionary-free default constructor, so every inbound-dispatched message took the waived path until
+066 — and `Parser<Mode>::Parser() = default` is public API besides. The filed symptom was a cap false
+positive; the same over-extent also fed `group_slices_status()` and so the typed `group_view<GroupT>`,
+which is the half nobody had reported. Resolved by declining rather than by a better guess: with no
+dictionary the boundary is undefined per `[FIX50SP2 §3]`, which is also why both reference engines
+form no group at all without one.
 
 ---
 

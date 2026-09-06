@@ -1753,7 +1753,6 @@ Spec: `specs/060-int128-decimal-compare/`.
 > **The row's *"0 nested/parent delimiter collisions"* measurement (Fable audit 2026-07-08), re-derived on the POST-FIX basis as FR-012a/SC-014 requires:** still **0**, now across all **ten** dictionaries rather than the six group-bearing ones, and now under delimiters that 083 changed in 330 contexts. The re-derivation was necessary precisely because the original was taken against the delimiters this feature replaced.]
 > *(historical 072 bracket follows)* [PINNED + LOAD-GUARDED by 072-nested-group-hardening (2026-07-13) — `XmlLoader::load_*` now REJECTS a dialect in which any nested group's delimiter (`first_field_tag`) equals its immediate parent group's delimiter, throwing `dict::group_delimiter_collision_error` (derives `dict::xml_parse_error`, reuses inherited `code()`, discriminated by catch type — no `core::error` append). Enforced in `LoaderState::finalize()` before any `table_view` is built; `as_table_view()` stays non-throwing. A permanent all-contexts census (FR-001, `reused_tag_census_test.cpp::NestedGroupDelimiterCensus`, raw per-`<group>` walk with parent-delimiter threading + component expansion + post-expansion delimiter) pins 0 collisions across all 9 runtime dicts non-vacuously. RECORDED RESIDUALS (caller responsibility, not covered): (a) a hand-built `table_view` / non-`load_*` `Dictionary` is not re-validated (FR-005a); (b) the loader `groups_` table is global-first-seen-deduped per no_tag, so a collision only in a non-first-seen context of a reused no_tag is unguarded (FR-005b); (c) scalar-member disjointness is census-only, not load-enforced (FR-004); (d) the FR-002 scalar census recovers member sets structurally for all 9 dicts incl. FIX40/41/42 (no unpinned residual required); (e) the FR-001/FR-002 census coverage is bounded to the membership contexts the raw walk structurally reaches. The splitter itself remains flat, but is now unreachable for the collision case via the load path.] `OffsetTable::group_slices()`'s slice splitter (and its redundant flat cap loop) re-walk the group's extent FLAT, not nesting-aware — a defense-in-depth gap deferred as real-dictionary-unreachable.** `consume_group_extent()` (`src/wire/offset_table.cpp`) correctly computes the nesting-aware `group_end` for the outer group, but `group_slices()`'s instance splitter (`:596-599`) and the redundant post-extent cap loop (`:548-558`) then re-walk that extent with a **flat** "does `entries_[k].tag == delim` mark a new outer instance" test, with no notion of nesting depth. If a nested group's own delimiter tag ever equalled its enclosing group's delimiter tag, the nested group's repeated delimiter fields would be mistaken for new outer-instance boundaries and the outer slice would be split incorrectly (the extent walk would still be correct; only the splitter would err). **This configuration does not occur in any shipped FIX dictionary** (Fable audit 2026-07-08: 0 nested/parent delimiter collisions across all 6 group-bearing vendored dicts). NOTE the earlier rationale that "the wire itself would be ambiguous" is **overstated** — `consume_group_extent` decodes such a collision *correctly* via declared counts, so the wire is decidable; only the flat splitter errs. The "impossible" is therefore a **convention of the shipped XMLs**, not a structural guarantee (confirmed: every real-dict nested/parent delimiter pair censused by 063 is distinct; the real-dict guard `NestedGroupExtent.MultiEntryNestedExtentGuard` passes for exactly this reason, not by accident). Reproducing the gap requires a **hand-built, non-representative** membership forcing outer/nested delimiter collision (`tests/wire/nested_group_extent_test.cpp:511-519`'s documented synthetic scoping trick). **Unenforced for user/dialect dictionaries:** nothing in the loader, `as_table_view()`, or the public `table_view` mutators rejects a nested==parent delimiter collision, so a user-supplied dialect XML or hand-built `table_view` (both public APIs) CAN construct it and reach the splitter bug — hardening (pin + optional load-time guard) tracked in **issue #180**. **Status: genuine internal inconsistency (extent walk is nesting-aware, the splitter is not); unreachable via any SHIPPED dictionary but unenforced for user/dialect dicts — deferred as defense-in-depth, non-blocking.** **Fix (deferred follow-up):** make the splitter nesting-aware too (advance `k` via the same `consume_group_extent` recursion on a nested count before testing outer-delimiter boundaries) and fold the redundant flat cap loop into the same traversal. *(Gate B PR#176 r1, Codex finding #2, downgraded and waived at P3 by orchestrator triage (real-dict-unreachable); `src/wire/offset_table.cpp:548-558,596-599`.)*
 
-**L-085-1 — the dict-free per-instance cap measures the group's last instance as running to END-OF-MESSAGE, so top-level fields following the group count toward it. UNREACHABLE UNDER DEFAULT CONFIGURATION; reachable only under a caller-tightened cap. Preserved, not repaired — tracked as fixpp#220.** On the dict-free path (`OffsetTable::group()`'s `else` branch — no `opaque_dict_`/`group_member_fn_`, i.e. `OffsetTable(frame, mr)` / `OffsetTable(frame, mr, Config)`, test/utility callers only) there is no membership oracle, so the group extent degrades to rest-of-message: `group_end = entries_.size()`. The per-instance cap loop's final boundary therefore falls at `entries_.size()`, and any **top-level, non-group** fields appearing after the group's last instance are counted into that instance's `inst_count`. Where the cap then trips, the resulting `wire_group_too_large` is a **false positive** — the group's real last instance is smaller than measured. **Reachability, stated precisely — this row deliberately neither overstates nor understates it:** under **default `Config` the branch is arithmetically unreachable.** `default_max_offset_entries` and `default_max_group_entries_per_instance` are **both 4096** (`include/fixpp/wire/offset_table.hpp:27-28`), and `build()` clamps the table at the former (`src/wire/offset_table.cpp:326`, `entries_.size() >= cfg_.max_offset_entries` → `err_offset_table_full`), so the measured segment can never exceed `4095` and can never exceed a cap of `4096`. It becomes reachable **only** where a caller explicitly sets `max_group_entries_per_instance < max_offset_entries - 1`. It is **not** a defect on the default path, and it is **not** reachable at all from the dictionary path (which bounds the extent by real membership) — that includes every production wire caller, since no production caller constructs an `OffsetTable` dict-free. **Why preserved rather than repaired:** 085's mandate is a semantics-preserving relocation (FR-001a/FR-003 — the moved lines are byte-identical modulo indentation), so changing the boundary rule while moving it was explicitly out of scope; repairing it needs a rest-of-message terminator rule the dict-free path does not currently have. The looseness is **pre-existing on `main`**, not introduced by 085 — the same loop computed the same `inst_count` before the move, on the same path. *(085 T018 / FR-003a / SC-010; contract `specs/085-fold-flat-cap-loop/contracts/group_cap_accounting.md` C-3 "Recorded looseness"; `research.md` R-2; filed 2026-08-03 as **fixpp#220**.)*
 
 ## Membership-aware C-ABI nested repeating-group read (065-cabi-nested-group-membership / #179)
 
@@ -2728,3 +2727,53 @@ Evidence: issues #346, #348, #349; new issue #351.
   `resolver.cancel()` only wins the window before the lookup starts; an in-flight `getaddrinfo` runs
   to completion regardless. That is exactly why #361's fix abandons the op instead of cancelling it.
   *(#361; the residual left by B-361-1.)*
+
+---
+
+## fixpp#220 — `OffsetTable::group()` is a dictionary-only operation (2026-09-06)
+
+### Behaviors
+
+- **B-220-1 — a dict-free `OffsetTable` reports every repeating group ABSENT; it no longer derives a
+  group extent from the wire.** Construction without a group-membership predicate —
+  `OffsetTable(frame, mr)`, `OffsetTable(frame, mr, Config)`, any construction passing a null
+  `group_member_fn`, and `Parser<access_mode::Index>{}` (the **public default constructor**, which
+  threads no dictionary) — makes `group(no_tag)` return `wire_required_field_missing` for **every**
+  `no_tag`, including one that is a real group count field on the wire. Consequently
+  `group_slices(no_tag)` yields an **empty span**, and the C-ABI thunk reports
+  `FIXPP_ERR_TYPE_MISMATCH` — the documented E-2 / CA-010-read result, the same answer the
+  dict-aware path gives for a tag the dictionary does not know to be a group. **Nothing else
+  changes:** scalar reads, `find()`, `entries()`, `unknown_fields()` and the whole Iter-mode surface
+  are unaffected, and the dictionary-backed path (`Parser{dict}` — every production caller) is
+  byte-for-byte unchanged in behaviour.
+  **Why this is the conformant answer rather than a capability regression:** `[2b §4.7]` defines a
+  repeating group's boundary as the dictionary's first-field-of-group rule per `[FIX50SP2 §3]`, so
+  with no dictionary the boundary is **undefined**, not merely unavailable — there is no sound
+  wire-only rule to fall back on. Both reference engines decline for the same reason: QuickFIX C++
+  returns from `Message::setGroup` when `DataDictionary::getGroup` fails and forms no `Group` at all;
+  QuickFIX/J guards all three `parseGroup` call sites on a non-null dictionary and, with no
+  dictionary, flattens the members as ordinary top-level fields.
+  **Migration:** a caller that needs groups must construct through a dictionary
+  (`Parser<access_mode::Index>{dict}`). A caller that does not need groups is unaffected.
+  *(#220; replaces the rest-of-message degradation formerly recorded as L-085-1, now resolved.)*
+
+### Limitations
+
+- **L-220-1 — repeating groups are unavailable, not approximated, without a dictionary; and the
+  per-instance DoS cap therefore does not apply on that path.** Two consequences of B-220-1, stated
+  so neither is inferred:
+  **(a)** A dict-free caller cannot enumerate group instances at all. Previously it got instances
+  split on the wire delimiter — but the last one absorbed every trailing top-level field, so what it
+  got was wrong rather than merely coarse (that was `L-085-1` / #220). There is no supported way to
+  slice a group without membership; this is a deliberate removal of a wrong answer, not a deferred
+  feature.
+  **(b)** `Config::max_group_entries_per_instance` is a **dictionary-path cap only**. On the
+  dict-free path nothing is measured, so nothing is capped — a dict-free table is bounded solely by
+  `Config::max_offset_entries` (`build()`'s clamp), which is the real memory bound in any case. This
+  is not a widened attack surface: no group is materialised on that path, so there is nothing per
+  instance to bound.
+  **What this row does NOT claim:** it says nothing about `group_slices_status()`'s own instance
+  splitter, which remains flat and is `L-063-4` leg 1, descoped with evidence by 083 and untouched
+  here.
+  *(#220; `tests/wire/offset_table_test.cpp` — `DictFreeGroupDeclines*`, `DictFreeGroupSlicesAreEmpty`,
+  `TrailingFieldNotCountedIntoLastInstance`, `FR001_NoFlatInstanceWalkInGroup`.)*

@@ -15,27 +15,26 @@
 //   - find()'s probe-cap break (:394-396) — unreachable under load-factor < 1,
 //     waived
 //
-// REPAIRED by 085-fold-flat-cap-loop (2026-08-03), research.md R-3. This block
-// previously carried a THIRD waiver reading "group() err_group_too_large —
-// provably unreachable: max table entries = 4096, so avail <= 4095 <
-// default_max_group_entries_per_instance". That claim was FALSE and is
-// withdrawn, not re-pointed. group() has TWO err_group_too_large returns and
-// BOTH are now covered:
-//   - the consume_group_extent overflow return (:577) has been covered since
-//     063 shipped that walk's per-instance cap, by
-//     WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance;
-//   - the flat per-instance cap return, now inside group()'s dict-free `else`
-//     branch (:607), is covered for the first time by
-//     WireOffsetTable.DictFreeDoSCapPerInstanceRejectsOversizedInstance, which
-//     supplies the combination no prior test did — dict-free construction AND
-//     a tightened Config simultaneously.
-// The old waiver's arithmetic was sound only for the DEFAULT Config (both
-// bounds 4096, table clamped at :326, so a segment is <= 4095); it wrongly
-// generalised that to "unreachable", which a caller-tightened
-// max_group_entries_per_instance defeats. The residual looseness on that path
-// is recorded as limitation L-085-1 / fixpp#220, not waived here.
-// Retaining the stale claim would have been a waiver asserting unreachability
-// for a branch a delivered test exercises.
+// REPAIRED by 085-fold-flat-cap-loop (2026-08-03), research.md R-3; AMENDED by
+// 220 (dict-free group() declines). This block once carried a THIRD waiver
+// reading "group() err_group_too_large — provably unreachable: max table
+// entries = 4096, so avail <= 4095 < default_max_group_entries_per_instance".
+// That claim was FALSE and was withdrawn, not re-pointed: its arithmetic held
+// only for the DEFAULT Config, and a caller-tightened
+// max_group_entries_per_instance defeated it.
+//
+// STATE AFTER 220: group() has ONE err_group_too_large return, not two. The
+// flat per-instance cap return that 085 relocated into the dict-free `else`
+// branch is GONE with that branch — group() is now a dictionary-only
+// operation, so there is no second cap to reach. What remains is
+// consume_group_extent's overflow return, covered since 063 by
+// WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance and again,
+// in both directions, by WireOffsetTable.TrailingFieldNotCountedIntoLastInstance.
+//
+// Nothing here is waived as unreachable. The dict-free path's own outcome — an
+// ABSENT group rather than a cap breach — is covered by the
+// WireOffsetTable.DictFreeGroupDeclines* cells, and the limitation the removed
+// branch carried (L-085-1 / fixpp#220) is RESOLVED rather than documented.
 //
 // The line numbers were also stale independently of the false claim: the
 // previous set (125-127, 157-158, 183-184, 231-232) dated from a pre-063

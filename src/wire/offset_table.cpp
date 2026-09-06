@@ -542,6 +542,37 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     if (!status_) {
         return fail<group_index>(status_.error());
     }
+    // DICT-FREE CONSTRUCTION DECLINES (fixpp#220). Without a membership
+    // oracle nothing in this frame can be established as a repeating group,
+    // so this function does not answer for a dict-free table: it reports the
+    // group ABSENT, which is the same answer the dict-aware path below gives
+    // when the dictionary does not recognise `delim` as a member of `no_tag`.
+    // group_slices() then yields an empty span and the C-ABI reports
+    // TYPE_MISMATCH -- the documented E-2 / CA-010-read result ("not a
+    // spurious group instance", 066 contracts/inbound-parse.md).
+    //
+    // WHAT THIS REPLACED. This branch used to bound the extent at
+    // rest-of-message and cap each wire-delimiter-split instance over it.
+    // That rule is the surviving fragment of the pre-`55b13459` heuristic
+    // extent walk, whose end-of-message fallback was removed from the
+    // dict-aware path as a P1 in that commit and never from this one. Kept
+    // here it produced TWO defects from one cause: trailing top-level fields
+    // were absorbed into the last instance -- reaching group_slices_status()
+    // and so the typed group_view<GroupT>, not merely the cap -- and a
+    // caller-tightened max_group_entries_per_instance could reject a
+    // conforming frame outright.
+    //
+    // WHY DECLINING RATHER THAN A BETTER GUESS. There is no sound
+    // wire-only rule: [2b 4.7] defines the boundary as the dictionary's
+    // first-field-of-group rule per [FIX50SP2 3], so absent a dictionary the
+    // boundary is undefined, not merely hard to compute. Both reference
+    // engines decline for the same reason -- QuickFIX C++ returns from
+    // Message::setGroup when DataDictionary::getGroup fails, forming no
+    // Group at all; QuickFIX/J guards every parseGroup call site on a
+    // non-null dictionary. Neither derives a group extent from the wire.
+    if (opaque_dict_ == nullptr || group_member_fn_ == nullptr) {
+        return err_required_field_missing<group_index>();
+    }
     std::size_t count_idx = entries_.size();
     for (std::size_t e = 0; e < entries_.size(); ++e) {
         if (entries_[e].tag == no_tag) {
@@ -560,65 +591,53 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
 
     std::uint16_t const delim = entries_[first].tag;
     std::size_t group_end = first;
-    if (opaque_dict_ != nullptr && group_member_fn_ != nullptr) {
-        // This table's stored membership context (msg_type + bounded parent
-        // path). A ROOT table is seeded at `MessageView` construction time
-        // (`MessageView::group<>()` re-applies the same value, idempotent);
-        // a NESTED sub-table is seeded once by `build_nested_subview`.
-        group_context const ctx = stored_group_context();
-        // Validate that `no_tag` is actually a group count field by confirming
-        // the dictionary recognises `delim` (the tag immediately following the
-        // count field) as a member of `no_tag`'s group.  If the dict does NOT
-        // know about this membership the count field is a plain scalar (e.g.
-        // SenderCompID=49) and we must return an absent result so that
-        // group_slices() yields an empty span → the thunk can report
-        // TYPE_MISMATCH (E-2 / CA-010-read contract).
-        if (!group_member_fn_(opaque_dict_, ctx, no_tag, delim)) {
-            return err_required_field_missing<group_index>();
-        }
-        // 063 Defect B: nesting-aware extent. The pre-063 flat
-        // `seen_in_instance` heuristic truncated a multi-entry NESTED group at
-        // its 2nd entry (its repeated delimiter looked like a new outer
-        // instance). consume_group_extent recursively consumes each nested
-        // group's full declared extent so the outer slice encloses all of it.
-        bool overflow = false;
-        group_end = consume_group_extent(count_idx, ctx, ctx.depth, overflow);
-        if (overflow) {
-            return err_group_too_large<group_index>();
-        }
-        // 085: the flat per-instance cap loop that used to run here
-        // unconditionally after this if/else was removed from the dictionary
-        // path. Why it could go: consume_group_extent's per-instance cap
-        // check (`:521-524` as-of `ae65c36a`) already caps the same
-        // nesting-aware instances whose extent its normal exit (`:527` as-of
-        // `ae65c36a`) returns; the flat partition that used to run here
-        // merely refined that one, and consume_group_extent returns as soon
-        // as its own check breaches — so the flat loop's cap comparison
-        // could never be the first to fire on this path. What stands in its
-        // place (C-1, standing): this branch's entire per-instance DoS
-        // defence is now consume_group_extent's cap over the instances
-        // whose extent it returns. Any future change to that walk (the
-        // instance-opening rule at `:477-478` as-of `ae65c36a`, the cap
-        // check itself, or the delimiter consume_group_extent resolves at
-        // `:458` as-of `ae65c36a`) MUST re-verify the cap still measures the
-        // partition the function's return describes, or re-introduce an
-        // independent per-instance cap on this branch.
-    } else {
-        // Dict-free fallback kept for non-dictionary callers.
-        group_end = entries_.size();
-        std::size_t inst_start = first;
-        for (std::size_t k = first; k <= group_end; ++k) {
-            bool const boundary = (k == group_end) || (k > first && entries_[k].tag == delim);
-            if (!boundary) {
-                continue;
-            }
-            std::size_t const inst_count = k - inst_start;
-            if (inst_count > cfg_.max_group_entries_per_instance) {
-                return err_group_too_large<group_index>();
-            }
-            inst_start = k;
-        }
+    // This table's stored membership context (msg_type + bounded parent
+    // path). A ROOT table is seeded at `MessageView` construction time
+    // (`MessageView::group<>()` re-applies the same value, idempotent);
+    // a NESTED sub-table is seeded once by `build_nested_subview`.
+    group_context const ctx = stored_group_context();
+    // Validate that `no_tag` is actually a group count field by confirming
+    // the dictionary recognises `delim` (the tag immediately following the
+    // count field) as a member of `no_tag`'s group.  If the dict does NOT
+    // know about this membership the count field is a plain scalar (e.g.
+    // SenderCompID=49) and we must return an absent result so that
+    // group_slices() yields an empty span → the thunk can report
+    // TYPE_MISMATCH (E-2 / CA-010-read contract).
+    if (!group_member_fn_(opaque_dict_, ctx, no_tag, delim)) {
+        return err_required_field_missing<group_index>();
     }
+    // 063 Defect B: nesting-aware extent. The pre-063 flat
+    // `seen_in_instance` heuristic truncated a multi-entry NESTED group at
+    // its 2nd entry (its repeated delimiter looked like a new outer
+    // instance). consume_group_extent recursively consumes each nested
+    // group's full declared extent so the outer slice encloses all of it.
+    bool overflow = false;
+    group_end = consume_group_extent(count_idx, ctx, ctx.depth, overflow);
+    if (overflow) {
+        return err_group_too_large<group_index>();
+    }
+    // 085: the flat per-instance cap loop that used to run here
+    // unconditionally, after what was then a dict-aware/dict-free if/else,
+    // was removed from the dictionary path. Why it could go: consume_group_extent's per-instance
+    // cap check (`:521-524` as-of `ae65c36a`) already caps the same nesting-aware instances whose
+    // extent its normal exit (`:527` as-of `ae65c36a`) returns; the flat partition that used to run
+    // here merely refined that one, and consume_group_extent returns as soon as its own check
+    // breaches — so the flat loop's cap comparison could never be the first to fire on this path.
+    //
+    // 220: the dict-free arm that loop was relocated INTO is now gone as
+    // well — this function declines for a dict-free table at its entry
+    // guard above, so there is no second arm and no second cap.
+    // `OffsetTable::group()` is a dictionary-only operation.
+    //
+    // What stands in the flat loop's place (C-1, standing): this
+    // function's entire per-instance DoS defence is now
+    // consume_group_extent's cap over the instances whose extent it
+    // returns. Any future change to that walk (the
+    // instance-opening rule at `:477-478` as-of `ae65c36a`, the cap
+    // check itself, or the delimiter consume_group_extent resolves at
+    // `:458` as-of `ae65c36a`) MUST re-verify the cap still measures the
+    // partition the function's return describes, or re-introduce an
+    // independent per-instance cap in this function.
     return group_index{no_tag, first, group_end - first};
 }
 
