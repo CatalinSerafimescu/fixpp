@@ -34,10 +34,11 @@
 #include <asio/use_future.hpp>
 #include <atomic>
 #include <chrono>
+#include <fixpp/core/sync/async_mutex.hpp>
 #include <future>
 #include <vector>
-#include <fixpp/core/sync/async_mutex.hpp>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -171,10 +172,22 @@ TEST(SeamDrainAwaitableCancellation, DrainCompletesEvenIfSlotFiredMidFlight) {
         ioc, drain_coro(), asio::bind_cancellation_slot(drain_cancel_sig.slot(), asio::use_future));
     auto fcn = asio::co_spawn(ioc, canceller(), asio::use_future);
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SeamDrainAwaitableCancellation::DrainCompletesEvenIfSlotFiredMidFlight/fh")) {
+        return;
+    }
     fh.get();
     for (auto& f : futs) f.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fd, "SeamDrainAwaitableCancellation::DrainCompletesEvenIfSlotFiredMidFlight/fd")) {
+        return;
+    }
     fd.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fcn,
+            "SeamDrainAwaitableCancellation::DrainCompletesEvenIfSlotFiredMidFlight/fcn")) {
+        return;
+    }
     fcn.get();
 
     // The drain must succeed (uninterruptible) even with the slot fired.
@@ -187,7 +200,11 @@ TEST(SeamDrainAwaitableCancellation, DrainCompletesEvenIfSlotFiredMidFlight) {
         post_drain_lock_drained = !r.has_value() && r.error() == error::sync_lock_drained;
     };
     auto fc = asio::co_spawn(ioc2, check(), asio::use_future);
-    ioc2.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc2, fc,
+            "SeamDrainAwaitableCancellation::DrainCompletesEvenIfSlotFiredMidFlight/fc")) {
+        return;
+    }
     fc.get();
 
     EXPECT_TRUE(post_drain_lock_drained)

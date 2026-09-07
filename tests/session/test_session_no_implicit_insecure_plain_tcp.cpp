@@ -38,6 +38,7 @@
 #include <fixpp/transport/transport_factory.hpp>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -62,7 +63,10 @@ TEST(NoImplicitInsecurePlainTcp, DefaultConstructedConfigRejected) {
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, result, "NoImplicitInsecurePlainTcp::DefaultConstructedConfigRejected")) {
+        return;
+    }
     auto val = result.get();
 
     ASSERT_FALSE(val.has_value())
@@ -95,7 +99,10 @@ TEST(NoImplicitInsecurePlainTcp, ExplicitUnsetWithPlaintextFactoryRejected) {
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, result, "NoImplicitInsecurePlainTcp::ExplicitUnsetWithPlaintextFactoryRejected")) {
+        return;
+    }
     auto val = result.get();
 
     ASSERT_FALSE(val.has_value())

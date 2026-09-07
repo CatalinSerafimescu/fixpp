@@ -99,7 +99,66 @@ root = Path(sys.argv[1])
 _STR = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 # Every spelling that reaches `forced_miss_here` -- see the header. The list is the
 # gate's SCOPE, so widening it is a deliberate act with a control, not a tweak.
-CALLS = ("run_window_then_ready(", "pump_until_ready(", "pump_until(")
+CALLS = ("run_window_then_ready(", "run_to_exhaustion_or_report(",
+         "pump_until_ready(", "pump_until(")
+
+
+def _join_adjacent(lits, text, gap_view=None):
+    """The label is the TRAILING RUN of adjacent string literals, concatenated.
+
+    ⚠️ NOT `lits[-1]`, and this is a fix, not a refinement. C++ concatenates adjacent
+    string literals, and `clang-format` SPLITS a long one at the column limit -- so
+    `"Suite::Case/close_fut_a"` becomes `"Suite::Case/" "close_fut_a"` in the source
+    while the runtime label is unchanged. Taking the last literal harvested
+    `close_fut_a`, i.e. a DIFFERENT string from the one the seam actually compares.
+    MEASURED in #289 batch 17: `clang-format` split two labels this way and the gate
+    then reported `410 seam sites (409 distinct label(s))` -- a duplicate that does not
+    exist.
+    ⚠️ AND THE DANGEROUS DIRECTION IS REACHABLE, not just this false alarm: two sites
+    carrying the SAME label, one split and one not, harvest as `tail` and `full` and
+    read as DISTINCT. That is a real collision the gate would pass. Same defect, other
+    sign.
+
+    Adjacency is "nothing but whitespace between them", which is what the C++ rule is.
+    A literal separated by a comma is a different ARGUMENT and must not be joined.
+
+    ⚠️ THE GAP IS MEASURED ON A COMMENT-BLANKED VIEW, NOT ON THE RAW SOURCE. C++ joins
+    adjacent literals across a COMMENT too, and `lits` has already had comment-resident
+    literals filtered out -- so testing the raw gap re-opened exactly the false-clean
+    direction this function was written to close: two sites whose runtime label is
+    identically `Suite::Case/close_fut_a`, one of them wrapped with `// wrapped for width`
+    between the halves, harvested as `full` and `tail` and read as DISTINCT. Measured:
+    `4 seam sites (4 distinct)` with the comment, `4 (1 distinct)` without it. Found by
+    the batch-17 hostile round, one round after the fix that introduced the gap test.
+
+    ⚠️ AND ONE LIMITATION THAT IS DISCLOSED RATHER THAN FIXED: the harvested value is the
+    literal's SOURCE bytes, so `"a\tb"` and a literal tab inside quotes are one runtime
+    label and two harvested ones. Decoding escapes here would need the full C++ escape
+    grammar and would make the harvest disagree with `strings`-based drivers, which also
+    read source-shaped bytes out of the binary. The condition, not a count: a label
+    containing a backslash escape is outside what this gate can compare.
+    """
+    if not lits:
+        return None
+    # ⚠️ A RAW-STRING LABEL IS HARVESTED WRONG, AND THIS REFUSES RATHER THAN GUESSES.
+    # `_STR` matches the `"(A/open)"` inside `R"(A/open)"`, so the harvest would return
+    # `(A/open)` while the runtime label is `A/open` -- and a duplicate between
+    # `R"(A/open)"` and `"A/open"` would then read as DISTINCT, which is the fails-toward-
+    # clean direction this gate exists to close. Nothing in the tree spells a label that
+    # way today; supporting it needs the delimiter grammar, and a wrong answer is worse
+    # than a refusal. Raised, not returned, so it cannot be mistaken for a label.
+    for start, _end, _val in lits:
+        if start > 0 and text[start - 1] == "R":
+            raise SystemExit("pump-label-uniqueness: error: raw-string site label at offset "
+                             f"{start}. Spell the label as an ordinary string literal.")
+    view = gap_view if gap_view is not None else text
+    out = [lits[-1][2]]
+    for k in range(len(lits) - 1, 0, -1):
+        gap = view[lits[k - 1][1]:lits[k][0]]
+        if gap.strip():
+            break
+        out.insert(0, lits[k - 1][2])
+    return "".join(out)
 
 
 def calls(text):
@@ -145,10 +204,11 @@ def calls(text):
                     if depth == 0:
                         break
                 j += 1
-            lits = [lm.group(0) for lm in _STR.finditer(text, i, j)
+            lits = [(lm.start(), lm.end(), lm.group(0)[1:-1])
+                    for lm in _STR.finditer(text, i, j)
                     if not is_comment[lm.start()]]
             line = blanked.count("\n", 0, m.start()) + 1
-            out.append((line, lits[-1][1:-1] if lits else None))
+            out.append((line, _join_adjacent(lits, text, comment_blanked)))
     return sorted(out)
 
 
@@ -187,6 +247,9 @@ _NESTED_PARENS = '''
 _PUMP_UNTIL_READY = '''
     if (!fixpp::test_support::pump_until_ready(ioc, fut, 5s, "F/open")) { return; }
 '''
+_RUN_TO_EXHAUSTION = '''
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "J/open")) { return; }
+'''
 _PUMP_UNTIL = '''
     if (!fixpp::test_support::pump_until(ioc, [&] { return done; }, 5s, 1ms, "G/settle")) { return; }
 '''
@@ -198,6 +261,33 @@ _COMMENT_INSIDE_THE_ARGUMENT_LIST = '''
     if (!run_window_then_ready(ioc, fut, 200ms, "I/open"
                                /* was "GHOST/open" */)) {
         return;
+    }
+'''
+# ⚠️ clang-format SPLITS a label that crosses the column limit, and C++ concatenates the
+# halves back. The harvest must too -- see `_join_adjacent`. A literal separated by a
+# COMMA is a different argument and must NOT be joined, which is the second case.
+_SPLIT_LITERAL = '''
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, fut, 200ms,
+            "Suite::LongCaseNameThatCrossesTheColumnLimit/"
+            "close_fut_a")) {
+        return;
+    }
+'''
+# ⚠️ C++ joins adjacent literals ACROSS A COMMENT, and the first version of the gap test
+# read the RAW source, so a comment between the halves broke the join and re-opened the
+# false-clean direction the join was written to close.
+_SPLIT_ACROSS_A_COMMENT = '''
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, fut, 200ms,
+            "Suite::Case/"  // wrapped for width
+            "close_fut_a")) {
+        return;
+    }
+'''
+_COMMA_SEPARATED_ARGS = '''
+    if (!fixpp::test_support::pump_until(ioc, [&] { return done; }, 5s, 1ms, "K/settle")) {
+        ADD_FAILURE() << "unrelated";
     }
 '''
 _LABEL_IN_A_STRING = '''
@@ -213,12 +303,30 @@ _CASES = [
     ("nested parens in an argument", _NESTED_PARENS, ["E/open"]),
     ("pump_until_ready reaches the same seam", _PUMP_UNTIL_READY, ["F/open"]),
     ("pump_until reaches the same seam", _PUMP_UNTIL, ["G/settle"]),
+    ("run_to_exhaustion_or_report reaches the same seam", _RUN_TO_EXHAUSTION, ["J/open"]),
+    ("a SPLIT literal is ONE label", _SPLIT_LITERAL,
+     ["Suite::LongCaseNameThatCrossesTheColumnLimit/close_fut_a"]),
+    ("a SPLIT literal joined ACROSS A COMMENT", _SPLIT_ACROSS_A_COMMENT, ["Suite::Case/close_fut_a"]),
+    ("a comma-separated literal is a different argument", _COMMA_SEPARATED_ARGS, ["K/settle"]),
     ("a call quoted in a STRING is not a call", _LABEL_IN_A_STRING, ["H/open"]),
     # ⚠️ INSIDE the argument list, not on the line before it -- the earlier control put it
     # before the call, outside the extent, and therefore never exercised the harvest.
     ("a literal COMMENTED OUT inside the arg list", _COMMENT_INSIDE_THE_ARGUMENT_LIST, ["I/open"]),
 ]
-bad = []
+# ⚠️ THE REFUSAL IS A CONTROL TOO. A guard that raises is worth exactly as much as a
+# guard that returns, and only running it says which one this is.
+_RAW_STRING_LABEL = '''
+    if (!run_window_then_ready(ioc, fut, 200ms, R"(RAW/open)")) { return; }
+'''
+try:
+    _got = [lab for _, lab in calls(_RAW_STRING_LABEL)]
+    print(f"  WRONG raw-string label was accepted as {_got} instead of refused")
+    _raw_ok = False
+except SystemExit as _e:
+    print(f"  ok    a RAW-STRING label is REFUSED, not guessed ({_e})")
+    _raw_ok = True
+
+bad = [] if _raw_ok else ["raw-string label was not refused"]
 for name, src, want in _CASES:
     got = [lab for _, lab in calls(src)]
     mark = "ok   " if got == want else "WRONG"

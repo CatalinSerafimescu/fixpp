@@ -32,6 +32,7 @@
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <memory>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -427,8 +428,15 @@ TEST(SeamDestructorReleaseDeath, ProperlyDrainedMutexDoesNotTerminate) {
     futs.reserve(N);
     for (int i = 0; i < N; ++i)
         futs.push_back(asio::co_spawn(ioc, make_waiter(), asio::use_future));
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SeamDestructorReleaseDeath::ProperlyDrainedMutexDoesNotTerminate/fh")) {
+        return;
+    }
     fh.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fd, "SeamDestructorReleaseDeath::ProperlyDrainedMutexDoesNotTerminate/fd")) {
+        return;
+    }
     fd.get();
     for (auto& f : futs) f.get();
 

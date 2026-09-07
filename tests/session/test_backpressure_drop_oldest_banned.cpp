@@ -30,6 +30,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -74,7 +75,10 @@ TEST(SeamBackpressureDropOldestBanned, OutOfRangeCastRejectedAtOpen) {
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, result, "SeamBackpressureDropOldestBanned::OutOfRangeCastRejectedAtOpen")) {
+        return;
+    }
     auto val = result.get();
 
     EXPECT_FALSE(val.has_value()) << "Session::open() must reject out-of-range backpressure_mode";
@@ -97,7 +101,10 @@ TEST(SeamBackpressureDropOldestBanned, MaxOutOfRangeCastRejectedAtOpen) {
 
     Session s{engine, cfg};
     auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, result, "SeamBackpressureDropOldestBanned::MaxOutOfRangeCastRejectedAtOpen")) {
+        return;
+    }
     auto val = result.get();
 
     EXPECT_FALSE(val.has_value());
@@ -121,7 +128,10 @@ TEST(SeamBackpressureDropOldestBanned, LegalValuesAcceptedAtOpen) {
 
         Session s{engine, cfg};
         auto result = asio::co_spawn(ioc, s.open(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, result, "SeamBackpressureDropOldestBanned::LegalValuesAcceptedAtOpen")) {
+            return;
+        }
         auto val = result.get();
 
         EXPECT_TRUE(val.has_value())

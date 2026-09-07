@@ -39,35 +39,34 @@
 #include <opentelemetry/common/key_value_iterable.h>
 
 // OTel SDK headers for building real SDK providers in the spy factory.
-#include <opentelemetry/sdk/trace/tracer_provider.h>
-#include <opentelemetry/sdk/trace/tracer_provider_factory.h>
-#include <opentelemetry/sdk/trace/simple_processor_factory.h>
-#include <opentelemetry/sdk/trace/exporter.h>
-#include <opentelemetry/sdk/trace/span_data.h>
+#include <gtest/gtest.h>
 #include <opentelemetry/sdk/metrics/meter_provider.h>
 #include <opentelemetry/sdk/metrics/meter_provider_factory.h>
 #include <opentelemetry/sdk/metrics/view/view_registry.h>
 #include <opentelemetry/sdk/resource/resource.h>
+#include <opentelemetry/sdk/trace/exporter.h>
+#include <opentelemetry/sdk/trace/simple_processor_factory.h>
+#include <opentelemetry/sdk/trace/span_data.h>
+#include <opentelemetry/sdk/trace/tracer_provider.h>
+#include <opentelemetry/sdk/trace/tracer_provider_factory.h>
 
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/engine.hpp>
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/otel/providers.hpp>
-#include <fixpp/log/logger.hpp>
-#include <fixpp/log/sink.hpp>
-#include <fixpp/log/record.hpp>
-#include <fixpp/core/error.hpp>
-
-#include <asio/io_context.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
-#include <gtest/gtest.h>
-
 #include <atomic>
 #include <chrono>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/log/logger.hpp>
+#include <fixpp/log/record.hpp>
+#include <fixpp/log/sink.hpp>
+#include <fixpp/otel/providers.hpp>
+#include <fixpp/session/engine.hpp>
 #include <memory>
 #include <thread>
+
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -203,7 +202,10 @@ TEST(EngineCloseTeardown, E2_ProviderShutdownCalled) {
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "EngineCloseTeardown::E2_ProviderShutdownCalled")) {
+        return;
+    }
     fut.get();
 
     // Verify the tracer provider's SDK exporter Shutdown() was called, which
@@ -224,7 +226,10 @@ TEST(EngineCloseTeardown, E2_NullProviders_NoCrash) {
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "EngineCloseTeardown::E2_NullProviders_NoCrash")) {
+        return;
+    }
     EXPECT_NO_THROW(fut.get());
 }
 
@@ -302,7 +307,10 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
     // blocked for the full k_flush_delay.
     auto t0  = std::chrono::steady_clock::now();
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "EngineCloseTeardown::E2_EngineTeardownHonorsDrainTimeout")) {
+        return;
+    }
     EXPECT_NO_THROW(fut.get());
     auto stop_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0);

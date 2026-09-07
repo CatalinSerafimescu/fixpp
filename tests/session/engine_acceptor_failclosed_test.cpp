@@ -56,6 +56,7 @@
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
 using namespace std::chrono_literals;
@@ -236,7 +237,10 @@ TEST(EngineAcceptorFailClosedTest, OffListIdentityFailsClosed) {
                                 (acc_session->state() == fixpp::session::fsm_state::Disconnected);
 
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineAcceptorFailClosedTest::OffListIdentityFailsClosed")) {
+        return;
+    }
     stop_fut.get();
 
     // SC-002 / FR-008 / C3: off-list identity must fail CLOSED.
@@ -360,7 +364,10 @@ TEST(EngineAcceptorFailClosedTest, AbsentIdentityNeverAdmits) {
     bool auth_failed = (acc_session != nullptr) && has_authz_failed_event(*acc_session);
 
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineAcceptorFailClosedTest::AbsentIdentityNeverAdmits")) {
+        return;
+    }
     stop_fut.get();
 
     // Happens-before invariant: session MUST NOT reach Active.

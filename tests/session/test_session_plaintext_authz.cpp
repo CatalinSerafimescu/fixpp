@@ -95,6 +95,8 @@
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #include <fixpp/session/security_profile.hpp>
 
+#include "support/pump_until_ready.hpp"
+
 using namespace std::chrono_literals;
 
 namespace {
@@ -263,7 +265,10 @@ TEST(PlaintextAuthzTest, AuthorizeNotCalledOnPlaintext) {
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, open_fut, "PlaintextAuthzTest::AuthorizeNotCalledOnPlaintext/open_fut")) {
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed for insecure_plain_tcp session";
 
     // Attach with an EMPTY handshake_result (D-10: plaintext path → empty hr).
@@ -277,7 +282,11 @@ TEST(PlaintextAuthzTest, AuthorizeNotCalledOnPlaintext) {
         auto feed_fut = asio::co_spawn(
             ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
         ioc.restart();
-        ioc.run();  // on_inbound_frame + liveness loop (exits immediately for heartbt=0) complete
+        // on_inbound_frame + liveness loop (exits immediately for heartbt=0) complete
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, feed_fut, "PlaintextAuthzTest::AuthorizeNotCalledOnPlaintext/feed_fut")) {
+            return;
+        }
         (void)feed_fut.get();
     }
 
@@ -300,7 +309,10 @@ TEST(PlaintextAuthzTest, AuthorizeNotCalledOnPlaintext) {
     {
         auto close_fut = asio::co_spawn(ioc, sess.close(), asio::use_future);
         ioc.restart();
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, close_fut, "PlaintextAuthzTest::AuthorizeNotCalledOnPlaintext/close_fut")) {
+            return;
+        }
         (void)close_fut.get();
     }
 }
@@ -329,7 +341,10 @@ TEST(PlaintextAuthzTest, AuthorizeCalledOnMtlsPositiveControl) {
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, open_fut, "PlaintextAuthzTest::AuthorizeCalledOnMtlsPositiveControl/open_fut")) {
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed for mtls_ca session";
 
     // Attach with the sentinel — on mtls_ca, D-10 guard does NOT suppress it.
@@ -343,7 +358,11 @@ TEST(PlaintextAuthzTest, AuthorizeCalledOnMtlsPositiveControl) {
         auto feed_fut = asio::co_spawn(
             ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
         ioc.restart();
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, feed_fut,
+                "PlaintextAuthzTest::AuthorizeCalledOnMtlsPositiveControl/feed_fut")) {
+            return;
+        }
         (void)feed_fut.get();
     }
 
@@ -357,7 +376,11 @@ TEST(PlaintextAuthzTest, AuthorizeCalledOnMtlsPositiveControl) {
     {
         auto close_fut = asio::co_spawn(ioc, sess.close(), asio::use_future);
         ioc.restart();
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, close_fut,
+                "PlaintextAuthzTest::AuthorizeCalledOnMtlsPositiveControl/close_fut")) {
+            return;
+        }
         (void)close_fut.get();
     }
 }
@@ -382,7 +405,10 @@ TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, open_fut, "PlaintextAuthzTest::LivePeerIdNulloptOnAcceptedHandoff/open_fut")) {
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     // Pre-check: live_peer_id_ must already be nullopt before attach.
@@ -405,7 +431,11 @@ TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
     {
         auto close_fut = asio::co_spawn(ioc, sess.close(), asio::use_future);
         ioc.restart();
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, close_fut,
+                "PlaintextAuthzTest::LivePeerIdNulloptOnAcceptedHandoff/close_fut")) {
+            return;
+        }
         (void)close_fut.get();
     }
 }
@@ -427,7 +457,10 @@ TEST(PlaintextAuthzTest, LivePeerIdSetOnTlsPositiveControl) {
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, open_fut, "PlaintextAuthzTest::LivePeerIdSetOnTlsPositiveControl/open_fut")) {
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed for one_way_ca";
 
     // Pass the sentinel to a TLS session — must NOT be suppressed.
@@ -445,7 +478,11 @@ TEST(PlaintextAuthzTest, LivePeerIdSetOnTlsPositiveControl) {
     {
         auto close_fut = asio::co_spawn(ioc, sess.close(), asio::use_future);
         ioc.restart();
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, close_fut,
+                "PlaintextAuthzTest::LivePeerIdSetOnTlsPositiveControl/close_fut")) {
+            return;
+        }
         (void)close_fut.get();
     }
 }
@@ -467,7 +504,10 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, open_fut, "PlaintextAuthzTest::CheckCompIdRejectsMismatchOnPlaintext/open_fut")) {
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<BlockingTransport>(ioc.get_executor());
@@ -480,7 +520,11 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
         auto feed_fut = asio::co_spawn(
             ioc, sess.on_inbound_frame(std::span<const std::byte>{bad_logon}), asio::use_future);
         ioc.restart();
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, feed_fut,
+                "PlaintextAuthzTest::CheckCompIdRejectsMismatchOnPlaintext/feed_fut")) {
+            return;
+        }
         (void)feed_fut.get();
     }
 
@@ -494,7 +538,11 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
     {
         auto close_fut = asio::co_spawn(ioc, sess.close(), asio::use_future);
         ioc.restart();
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, close_fut,
+                "PlaintextAuthzTest::CheckCompIdRejectsMismatchOnPlaintext/close_fut")) {
+            return;
+        }
         (void)close_fut.get();
     }
 }

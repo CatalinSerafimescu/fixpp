@@ -60,7 +60,7 @@ tmp="$(mktemp -d)" || setup_fail "mktemp -d failed"
 trap 'rm -rf "$tmp"' EXIT
 
 checks=0
-expected_checks=28
+expected_checks=30
 pass() { checks=$((checks + 1)); }
 
 run_capture() {
@@ -444,6 +444,43 @@ pass
 
 printf '%s\n' "$output" | grep -Fq 'tests directory not found' ||
     fail "missing-root failure lacked an attributed diagnostic"
+pass
+
+# ── 29-30: a C++14 DIGIT SEPARATOR must not open a character literal ─────────
+# `10'000` is one token, not the start of a char literal. Read as one, it opens a
+# literal that runs to the next apostrophe ANYWHERE in the file and blanks every
+# intervening line -- so the census sees a clean file and says so. MEASURED in
+# #289 batch 17 on `ci/cxx_blank.py`, the sibling of this script's lexer: one
+# `10'000` in tests/session/read_first_frame_bounded_test.cpp hid two labelled
+# seam calls from `ci/pump-label-uniqueness.sh`, which then reported that every
+# label was unique over a tree it could not fully read.
+#
+# ⚠️ BOTH DIRECTIONS. The positive arm (site FOUND despite the separator) is what
+# a regression breaks. The negative arm re-uses the string decoy above and is
+# already present: a narrowing that stopped treating `'` as a literal opener at
+# all would leave that one standing, so the pair straddles the fix.
+sep_decoy="$tmp/sep_decoy"
+mkdir -p "$sep_decoy/tests" || setup_fail "mkdir failed: $sep_decoy/tests"
+cat >"$sep_decoy/tests/decoy.cpp" <<'EOF' || setup_fail "fixture write failed: $sep_decoy/tests/decoy.cpp"
+void f() {
+    int n = 10'000;
+    ioc.run_for(1ms);
+    decoy.get();
+}
+EOF
+sep_pin="$tmp/sep.pin"
+printf 'tests/decoy.cpp:3\n' >"$sep_pin" || setup_fail "sep pin write failed"
+run_capture bash "$script" --root "$sep_decoy" --expected "$sep_pin"
+[ "$status" -eq 0 ] ||
+    fail "a run_for/get pair after a digit separator was not seen: $output"
+pass
+
+# ... and it must be the SEPARATOR that is load-bearing, not the pin: against the
+# zero-row pin the same tree must DISAGREE, which proves the row is really emitted
+# rather than the pin being matched by an empty reading.
+run_capture bash "$script" --root "$sep_decoy" --expected "$zero_row_pin"
+[ "$status" -ne 0 ] ||
+    fail "digit-separator fixture read as zero sites -- the lexer swallowed the pair"
 pass
 
 # ── self-assert the declared assertion count ────────────────────────────────

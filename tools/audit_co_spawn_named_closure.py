@@ -234,11 +234,21 @@ DRIVING_METHODS: dict[str, tuple[str, ...]] = {
 # a helper missing from this set makes its callers read as FLAG (a finding someone
 # reads), never as SAFE (a silence nobody checks). Keep it biased that way — if in
 # doubt about whether something drives, leave it OUT.
+# ⚠️ THIS SET IS WHY THIS TOOL RUNS IN CI, AND #289 BATCH 17 PROVED THE HEADER'S OWN
+# WARNING LIVE. That warning says to re-run this "when touching the pump/drain helpers,
+# since DRIVING_FREE_FUNCTIONS decides what counts as driven and a rename there silently
+# turns callers into FLAGs". Batch 17 did not rename one -- it ADDED one
+# (`run_to_exhaustion_or_report`, which replaces a bare `ioc.run()`), taught three other
+# instruments about it, and missed this one. Seven sites across three files went FLAG in
+# CI, every one of them correctly driven. The lesson is the enumeration, not the entry:
+# when a new pump spelling lands, `git grep -l 'DRIVING_FREE_FUNCTIONS\|GUARD = re.compile\|CALLS = (' ci/ tools/`
+# names every instrument that has to learn it.
 DRIVING_FREE_FUNCTIONS = frozenset(
     {
         "pump_until",
         "pump_until_ready",
         "run_window_then_ready",
+        "run_to_exhaustion_or_report",
         "drain_or_report",
         "cancel_and_drain_or_report",
         "run_until",
@@ -972,6 +982,27 @@ void f() {
   auto lam = [&]() { return 0; };
   co_spawn(ioc, lam(), detached);
   pump();
+}
+""",
+        [("lam", "SAFE-DRIVEN")],
+    ),
+    (
+        # ⚠️ ONE ARM PER FREE-FUNCTION DRIVER SPELLING, so widening DRIVING_FREE_FUNCTIONS is
+        # proven rather than asserted. #289 batch 17 added `run_to_exhaustion_or_report` and
+        # taught three other instruments about it while missing this set; seven correctly
+        # driven sites across three files went FLAG in CI. An entry in a frozenset with no
+        # arm is a claim, not a check.
+        "run_to_exhaustion_or_report is a DRIVING free function (#289 batch 17)",
+        """
+namespace fixpp { namespace test_support {
+bool run_to_exhaustion_or_report(io_context&, int&, const char*);
+} }
+void f() {
+  io_context ioc;
+  int fut = 0;
+  auto lam = [&]() { return 0; };
+  co_spawn(ioc, lam(), detached);
+  if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "S::C")) { return; }
 }
 """,
         [("lam", "SAFE-DRIVEN")],

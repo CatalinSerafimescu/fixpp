@@ -293,7 +293,10 @@ TEST(EngineFirstFrameTest, NonTlsSilentPeerClosedByHandshakeBound) {
     const bool measured_closed = closed.load(std::memory_order_acquire);
 
     auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineFirstFrameTest::NonTlsSilentPeerClosedByHandshakeBound")) {
+        return;
+    }
     stop_fut.get();
 
     EXPECT_TRUE(measured_closed)
@@ -342,7 +345,10 @@ TEST(EngineFirstFrameTest, NonTlsPeerWithPayloadClosedByHandshakeBound) {
     const bool measured_closed = closed.load(std::memory_order_acquire);
 
     auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineFirstFrameTest::NonTlsPeerWithPayloadClosedByHandshakeBound")) {
+        return;
+    }
     stop_fut.get();
 
     EXPECT_TRUE(measured_closed)
@@ -395,7 +401,10 @@ TEST(EngineFirstFrameTest, AcceptLoopRunsContinuously) {
                              second_closed.load(std::memory_order_acquire);
 
     auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineFirstFrameTest::AcceptLoopRunsContinuously")) {
+        return;
+    }
     stop_fut.get();
 
     EXPECT_TRUE(both_closed)
@@ -462,7 +471,10 @@ TEST(EngineFirstFrameTest, PostHandshakeStallClosedByFirstFrameDeadline) {
     const auto measured_ms = probe.elapsed.count();
 
     auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineFirstFrameTest::PostHandshakeStallClosedByFirstFrameDeadline")) {
+        return;
+    }
     stop_fut.get();
 
     ASSERT_TRUE(measured_closed)
@@ -557,7 +569,10 @@ TEST(EngineFirstFrameTest, PostHandshakeOverBudgetClosedByByteBudget) {
     const auto measured_ms = probe.elapsed.count();
 
     auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineFirstFrameTest::PostHandshakeOverBudgetClosedByByteBudget")) {
+        return;
+    }
     stop_fut.get();
 
     ASSERT_TRUE(measured_closed)
@@ -647,7 +662,11 @@ TEST(EngineFirstFrameTest, PostHandshakeRejectionDoesNotStopTheAcceptLoop) {
     const auto second_ms = second.elapsed.count();
 
     auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut,
+            "EngineFirstFrameTest::PostHandshakeRejectionDoesNotStopTheAcceptLoop")) {
+        return;
+    }
     stop_fut.get();
 
     ASSERT_TRUE(first_closed) << "SC-011 (FR-014): the first over-budget peer must be "

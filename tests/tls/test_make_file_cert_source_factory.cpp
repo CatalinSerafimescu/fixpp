@@ -27,6 +27,8 @@
 #include <string>
 #include <variant>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 using fixpp::core::error;
@@ -317,7 +319,10 @@ TEST(FileCertSourceFactory, SuccessPathSignerHandleIsNonNull) {
             }
         },
         asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "FileCertSourceFactory::SuccessPathSignerHandleIsNonNull")) {
+        return;
+    }
     fut.get();
 
     ASSERT_TRUE(got_creds) << "load_credentials must succeed and coroutine must complete";

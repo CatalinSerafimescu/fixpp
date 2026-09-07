@@ -21,32 +21,31 @@
 
 #include <algorithm>
 #include <array>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <memory_resource>
-#include <mutex>
-#include <thread>
-#include <vector>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/core/trace_context.hpp>
-#include "support/wait_until.hpp"
-
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
 #include <fixpp/session/engine.hpp>
+#include <memory_resource>
+#include <mutex>
+#include <thread>
+#include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
+#include "support/pump_until_ready.hpp"
+#include "support/wait_until.hpp"
 
 namespace {
 
@@ -199,7 +198,10 @@ TEST(TraceCorrelation, ElogCarriesEngineTrace) {
 
     // Engine teardown.
     auto stop_future = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_future, "TraceCorrelation::ElogCarriesEngineTrace")) {
+        return;
+    }
     stop_future.get();
 }
 
@@ -322,7 +324,10 @@ TEST(TraceCorrelation, ElogTimestampFromMockClock) {
 
     // Engine teardown.
     auto stop_future = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_future, "TraceCorrelation::ElogTimestampFromMockClock")) {
+        return;
+    }
     stop_future.get();
 }
 

@@ -18,6 +18,8 @@
 #include <chrono>
 #include <fixpp/core/sync/async_mutex.hpp>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 using fixpp::sync::async_mutex;
@@ -63,8 +65,15 @@ TEST(SeamContendedLatency, SecondAcquirerSuspends) {
 
     auto f1 = asio::co_spawn(ioc, coro1(), asio::use_future);
     auto f2 = asio::co_spawn(ioc, coro2(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f1, "SeamContendedLatency::SecondAcquirerSuspends/f1")) {
+        return;
+    }
     f1.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f2, "SeamContendedLatency::SecondAcquirerSuspends/f2")) {
+        return;
+    }
     f2.get();
 
     EXPECT_EQ(overlap_detected, 0) << "Mutual exclusion violated";

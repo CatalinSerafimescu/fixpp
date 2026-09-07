@@ -75,6 +75,7 @@
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
 using namespace std::chrono_literals;
@@ -401,7 +402,10 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
 
     // ── Stop the engine ───────────────────────────────────────────────────────
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineConnectTest::InitiatorConnectThenLogon")) {
+        return;
+    }
     stop_fut.get();
 
     // ── Load-bearing RED assertions ───────────────────────────────────────────

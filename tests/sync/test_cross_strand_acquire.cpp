@@ -26,6 +26,8 @@
 #include <atomic>
 #include <fixpp/core/sync/async_mutex.hpp>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 using fixpp::sync::async_mutex;
@@ -71,8 +73,15 @@ TEST(SeamCrossStrandAcquire, TwoStrandsNoOverlap) {
 
     auto f1 = asio::co_spawn(strand1, coro1(), asio::use_future);
     auto f2 = asio::co_spawn(strand2, coro2(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f1, "SeamCrossStrandAcquire::TwoStrandsNoOverlap/f1")) {
+        return;
+    }
     f1.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f2, "SeamCrossStrandAcquire::TwoStrandsNoOverlap/f2")) {
+        return;
+    }
     f2.get();
 
     EXPECT_EQ(overlap, 0) << "Mutual exclusion violated cross-strand";

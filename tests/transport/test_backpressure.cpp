@@ -26,6 +26,8 @@
 #include <fixpp/transport/test/mock_transport.hpp>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 using namespace std::chrono_literals;
@@ -67,7 +69,10 @@ TEST(Backpressure, SequentialWritesDrainAtStrandDepth1) {
         },
         asio::use_future);
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "Backpressure::SequentialWritesDrainAtStrandDepth1")) {
+        return;
+    }
     fut.get();
 
     EXPECT_EQ(completed, kFrames);
@@ -93,7 +98,10 @@ TEST(Backpressure, PartialWriteReturnsWriteShort) {
     auto fut = asio::co_spawn(ioc.get_executor(), mt.async_write(std::span<const std::byte>{frame}),
                               asio::use_future);
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "Backpressure::PartialWriteReturnsWriteShort")) {
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_FALSE(result.has_value());
@@ -126,7 +134,10 @@ TEST(Backpressure, SingleWriteSucceeds) {
     auto fut = asio::co_spawn(ioc.get_executor(), mt.async_write(std::span<const std::byte>{frame}),
                               asio::use_future);
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut,
+                                                          "Backpressure::SingleWriteSucceeds")) {
+        return;
+    }
     auto result = fut.get();
 
     ASSERT_TRUE(result.has_value());

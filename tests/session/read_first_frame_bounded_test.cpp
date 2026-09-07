@@ -79,6 +79,8 @@
 #include <thread>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
+
 // ── #377: EVERY CELL NOW CHOOSES ITS TIMEBASE, AND MOST CHOOSE "FROZEN" ──────
 //
 // `read_first_frame_bounded` takes a `fixpp::core::Clock&`. Two shapes are used
@@ -225,7 +227,9 @@ TEST(ReadFirstFrameBounded, B1) {
     auto fut = asio::co_spawn(
         ioc, read_first_frame_bounded(mt, buf, clock, std::chrono::milliseconds{1000}, kMaxBytes),
         asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B1")) {
+        return;
+    }
     expected_t<std::size_t> const result = fut.get();
 
     EXPECT_TRUE(result.has_value())
@@ -268,7 +272,9 @@ TEST(ReadFirstFrameBounded, B3) {
     auto fut = asio::co_spawn(
         ioc, read_first_frame_bounded(mt, buf, clock, std::chrono::milliseconds{1000}, kMaxBytes),
         asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B3")) {
+        return;
+    }
     expected_t<std::size_t> const result = fut.get();
 
     EXPECT_TRUE(result.has_value())
@@ -329,7 +335,9 @@ TEST(ReadFirstFrameBounded, B2) {
     auto fut = asio::co_spawn(
         ioc, read_first_frame_bounded(mt, buf, clock, std::chrono::milliseconds{1000}, kMaxBytes),
         asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B2")) {
+        return;
+    }
     expected_t<std::size_t> const result = fut.get();
 
     EXPECT_TRUE(result.has_value())
@@ -394,7 +402,9 @@ TEST(ReadFirstFrameBounded, B5) {
     auto fut = asio::co_spawn(
         ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
         asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B5")) {
+        return;
+    }
     expected_t<std::size_t> const result = fut.get();
 
     std::vector<std::size_t> const sizes = mt.read_sizes();
@@ -636,7 +646,9 @@ TEST(ReadFirstFrameBounded, B4) {
 
     auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
                               asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B4")) {
+        return;
+    }
     expected_t<std::size_t> const result = fut.get();
 
     EXPECT_FALSE(result.has_value())
@@ -734,7 +746,9 @@ TEST(ReadFirstFrameBounded, B6) {
 
     auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
                               asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B6")) {
+        return;
+    }
     expected_t<std::size_t> const result = fut.get();
 
     EXPECT_FALSE(result.has_value())
@@ -988,7 +1002,10 @@ TEST(ReadFirstFrameBounded, CovSharedClockSweep) {
     // The sweep. This is what a routine Logout on ANY other session does.
     clock.cancel_sleeps();
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "ReadFirstFrameBounded::CovSharedClockSweep")) {
+        return;
+    }
     expected_t<std::size_t> const result = fut.get();
 
     ASSERT_TRUE(result.has_value())
@@ -1043,7 +1060,10 @@ TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
 
     auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
                               asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "ReadFirstFrameBounded::CovFramerErrorPropagates")) {
+        return;
+    }
     expected_t<std::size_t> const result = fut.get();
 
     ASSERT_FALSE(result.has_value())
@@ -1086,7 +1106,10 @@ TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
 
     auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
                               asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "ReadFirstFrameBounded::CovReadErrorPropagates")) {
+        return;
+    }
     expected_t<std::size_t> const result = fut.get();
 
     ASSERT_FALSE(result.has_value())

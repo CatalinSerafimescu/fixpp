@@ -154,6 +154,10 @@ set_tests_properties(transport_reconnect_policy_schedule PROPERTIES
 
 add_executable(transport_backpressure
   test_backpressure.cpp)
+# #289 batch 17: for "support/pump_until_ready.hpp", which itself includes
+# "support/wait_until.hpp" -- so the header's own includes need this root too.
+target_include_directories(transport_backpressure PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
 target_link_libraries(transport_backpressure PRIVATE
   fixpp_transport
   fixpp_tls

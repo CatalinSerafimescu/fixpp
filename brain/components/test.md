@@ -12,6 +12,8 @@ refs:
   - ci/pump-get-sweep.sh
   - ci/pump-red-arm.sh
   - ci/pump-seam-arm.sh
+  - ci/pump-label-uniqueness.sh
+  - ci/cxx_blank.py
 codegraph_entry: [mock_transport, Clock, system_clock_source]
 constitution: ["§VII", "§VII.4", "§VIII.5"]
 ---
@@ -86,6 +88,39 @@ So `run_window_then_ready` runs the caller's own window, then grants **one** bou
 because `run_one_until` tests `now < abs_time` *before* dispatching, leaving a handler that became
 ready at the instant the window closed merely QUEUED. The grace is not a CI tolerance and must not be
 grown into one.
+
+### The SECOND shape: `ioc.run()` with no window at all (#289 batch 17)
+
+`run_window_then_ready` is not the whole story, and a reader who finds only it will reach for the
+wrong primitive. A large class of sites had **no window**:
+
+```cpp
+auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+ioc.run();
+auto val = fut.get();        // unconditional
+```
+
+`run()` returns when the context has **no work left**, which is not "the coroutine finished" — and
+the live failure is not the exotic one. These tests reuse ONE `io_context` across several
+`co_spawn`/`run` pairs and hand-write the `restart()` between them; **on a context still stopped from
+the previous `run()`, `run()` returns immediately having dispatched nothing**, and the `get()` below
+never returns. One deleted line.
+
+`run_to_exhaustion_or_report(ioc, fut, "Site")` is the replacement. Three things about it differ from
+`run_window_then_ready` and each is deliberate:
+
+- **`ioc.run()` is preserved verbatim.** Bounding it is a *different* hazard (a context that always
+  has work never returns), covered by ctest's per-test timeout (#337); a budget here would trade a
+  wedge for a false RED on the slowest sanitiser leg.
+- **It touches no context state on the success path** — no `restart()`. The migrated sites state that
+  decision themselves, and a helper that restarted would take it over at every call site.
+- **The miss branch is INSIDE the helper**, unlike every other #289 recipe, because at these sites it
+  does not vary: no clock to cancel against, no window to have missed. The cost is that gtest reports
+  the header's line; the report streams the site label instead.
+
+⚠️ **A forced-miss arm proves the branch RUNS, not that it is REACHABLE.** The pairing that justifies
+the class is `ci/red-arms/batch17-genuine-miss.sh`: base-shape-with-restart PASSES, base-shape-without
+WEDGES, guarded-without REPORTS. Read all three; the third alone says nothing about the second.
 
 ⚠️ **The teardown shape is a property of the FIXTURE, not a style choice.** A drain is what RESUMES a
 suspended frame, so draining in the wrong scope is worse than not draining:

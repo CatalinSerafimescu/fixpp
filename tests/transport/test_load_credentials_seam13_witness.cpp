@@ -91,6 +91,8 @@
 #include <string>
 #include <variant>
 
+#include "support/pump_until_ready.hpp"
+
 // Path to the 011-shipped fixture directory (compiled-in via CMake).
 #ifndef FIXPP_TLS_FIXTURE_DIR
 #define FIXPP_TLS_FIXTURE_DIR ""
@@ -252,7 +254,10 @@ TEST(Seam13Witness, Case1_Strand) {
     // load_credentials() on file_cert_source uses the cached-state fast path —
     // no cancellable_dispatch hop (the §6.4 footnote authorises this).
     auto fut = asio::co_spawn(f.ioc, fcs->load_credentials(), asio::use_future);
-    f.ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(f.ioc, fut,
+                                                          "Seam13Witness::Case1_Strand")) {
+        return;
+    }
     f.ioc.restart();
 
     auto result = fut.get();
@@ -284,7 +289,10 @@ TEST(Seam13Witness, Case1_Direct) {
     }
 
     auto fut = asio::co_spawn(f.ioc, fcs->load_credentials(), asio::use_future);
-    f.ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(f.ioc, fut,
+                                                          "Seam13Witness::Case1_Direct")) {
+        return;
+    }
     f.ioc.restart();
 
     auto result = fut.get();
@@ -403,7 +411,10 @@ TEST(Seam13Witness, Case3_Strand) {
     // Post a driver: after the coroutine reaches the gate wait, cancel the gate.
     asio::post(f.ioc, [&]() { gate.cancel(); });
 
-    f.ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(f.ioc, fut,
+                                                          "Seam13Witness::Case3_Strand")) {
+        return;
+    }
     f.ioc.restart();
 
     auto result = fut.get();
@@ -439,7 +450,10 @@ TEST(Seam13Witness, Case3_Direct) {
 
     asio::post(f.ioc, [&]() { gate.cancel(); });
 
-    f.ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(f.ioc, fut,
+                                                          "Seam13Witness::Case3_Direct")) {
+        return;
+    }
     f.ioc.restart();
 
     auto result = fut.get();
@@ -503,7 +517,10 @@ TEST(Seam13Witness, Case4_Direct) {
         },
         asio::use_future);
 
-    f.ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(f.ioc, fut,
+                                                          "Seam13Witness::Case4_Direct")) {
+        return;
+    }
     f.ioc.restart();
 
     auto result = fut.get();

@@ -62,6 +62,7 @@
 #include <string>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 
@@ -205,7 +206,10 @@ TEST(EngineLifecycleTest, TwoSessionRegisterStartLookupStop) {
     // joins-before-clear. An unbounded ioc.run() that returns proves no hang.
     {
         auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut, "EngineLifecycleTest::TwoSessionRegisterStartLookupStop/stop_fut")) {
+            return;
+        }
         stop_fut.get();
     }
     EXPECT_TRUE(engine.stopped()) << "engine must be stopped() after stop().";
@@ -218,7 +222,11 @@ TEST(EngineLifecycleTest, TwoSessionRegisterStartLookupStop) {
     {
         ioc.restart();
         auto stop_fut2 = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, stop_fut2,
+                "EngineLifecycleTest::TwoSessionRegisterStartLookupStop/stop_fut2")) {
+            return;
+        }
         stop_fut2.get();  // must complete promptly (no work to join)
     }
     EXPECT_TRUE(engine.stopped())
@@ -264,7 +272,10 @@ TEST(EngineLifecycleTest, DuplicateIdentityRejected) {
     // (a never-started engine has stopped_ == false). stop() with a null
     // outstanding counter skips the join and just clears the registry.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineLifecycleTest::DuplicateIdentityRejected")) {
+        return;
+    }
     stop_fut.get();
     EXPECT_TRUE(engine.stopped());
 }

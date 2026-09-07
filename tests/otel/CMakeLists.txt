@@ -17,6 +17,10 @@ if(TARGET opentelemetry-cpp::api)
     test_engine_close_teardown.cpp
     test_session_spans_full.cpp
   )
+  # #289 batch 17: for "support/pump_until_ready.hpp", which itself includes
+  # "support/wait_until.hpp" -- so the header's own includes need this root too.
+  target_include_directories(otel_e2_spans_tests PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests")
   target_link_libraries(otel_e2_spans_tests PRIVATE
     fixpp_otel
     fixpp_session

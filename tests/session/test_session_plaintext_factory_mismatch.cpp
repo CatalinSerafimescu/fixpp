@@ -70,6 +70,7 @@
 #include <span>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -156,7 +157,11 @@ TEST(PlaintextFactoryMismatch, Cell_a_PlaintextProfileWithTlsOverrideRejects) {
 
     Session s{eng, cfg};
     auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut,
+            "PlaintextFactoryMismatch::Cell_a_PlaintextProfileWithTlsOverrideRejects/fut")) {
+        return;
+    }
     auto val = fut.get();
 
     ASSERT_FALSE(val.has_value())
@@ -177,7 +182,12 @@ TEST(PlaintextFactoryMismatch, Cell_a_PlaintextProfileWithTlsOverrideRejects) {
     // Proves state_==never_opened, not lifecycle::open (which would run full two-phase teardown).
     ioc.restart();
     auto close_fut_a = asio::co_spawn(ioc, s.close(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, close_fut_a,
+            "PlaintextFactoryMismatch::Cell_a_PlaintextProfileWithTlsOverrideRejects/"
+            "close_fut_a")) {
+        return;
+    }
     auto close_r_a = close_fut_a.get();
     ASSERT_FALSE(close_r_a.has_value())
         << "Cell (a) FQ-5: close() on a never-opened session must return an error";
@@ -207,7 +217,11 @@ TEST(PlaintextFactoryMismatch, Cell_b_TlsProfileWithPlaintextOverrideRejects) {
 
     Session s{eng, cfg};
     auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut,
+            "PlaintextFactoryMismatch::Cell_b_TlsProfileWithPlaintextOverrideRejects/fut")) {
+        return;
+    }
     auto val = fut.get();
 
     ASSERT_FALSE(val.has_value())
@@ -223,7 +237,12 @@ TEST(PlaintextFactoryMismatch, Cell_b_TlsProfileWithPlaintextOverrideRejects) {
         << "Cell (b) FQ-5: failed open() must NOT leave session observable as open";
     ioc.restart();
     auto close_fut_b = asio::co_spawn(ioc, s.close(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, close_fut_b,
+            "PlaintextFactoryMismatch::Cell_b_TlsProfileWithPlaintextOverrideRejects/"
+            "close_fut_b")) {
+        return;
+    }
     auto close_r_b = close_fut_b.get();
     ASSERT_FALSE(close_r_b.has_value())
         << "Cell (b) FQ-5: close() on a never-opened session must return an error";
@@ -264,7 +283,11 @@ TEST(PlaintextFactoryMismatch, Cell_c_TlsProfileWithPlaintextEngineDefaultReject
 
     Session s{eng, cfg};
     auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut,
+            "PlaintextFactoryMismatch::Cell_c_TlsProfileWithPlaintextEngineDefaultRejects/fut")) {
+        return;
+    }
     auto val = fut.get();
 
     ASSERT_FALSE(val.has_value())
@@ -287,7 +310,12 @@ TEST(PlaintextFactoryMismatch, Cell_c_TlsProfileWithPlaintextEngineDefaultReject
            "state_=open → is_open()==true leaked; after FQ-4 it is before → false.";
     ioc.restart();
     auto close_fut_c = asio::co_spawn(ioc, s.close(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, close_fut_c,
+            "PlaintextFactoryMismatch::Cell_c_TlsProfileWithPlaintextEngineDefaultRejects/"
+            "close_fut_c")) {
+        return;
+    }
     auto close_r_c = close_fut_c.get();
     ASSERT_FALSE(close_r_c.has_value())
         << "Cell (c) FQ-5: close() on a never-opened session must return an error";
@@ -317,7 +345,10 @@ TEST(PlaintextFactoryMismatch, Cell_d_PlaintextProfileNoOverrideOpens) {
 
     Session s{eng, cfg};
     auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "PlaintextFactoryMismatch::Cell_d_PlaintextProfileNoOverrideOpens/fut")) {
+        return;
+    }
     auto val = fut.get();
 
     EXPECT_TRUE(val.has_value())
@@ -328,7 +359,11 @@ TEST(PlaintextFactoryMismatch, Cell_d_PlaintextProfileNoOverrideOpens) {
     if (val.has_value()) {
         ioc.restart();
         auto close_fut = asio::co_spawn(ioc, s.close(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, close_fut,
+                "PlaintextFactoryMismatch::Cell_d_PlaintextProfileNoOverrideOpens/close_fut")) {
+            return;
+        }
         (void)close_fut.get();
     }
 }
@@ -347,7 +382,10 @@ TEST(PlaintextFactoryMismatch, Cell_e_TlsProfileWithTlsEngineDefaultOpens) {
 
     Session s{eng, cfg};
     auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "PlaintextFactoryMismatch::Cell_e_TlsProfileWithTlsEngineDefaultOpens/fut")) {
+        return;
+    }
     auto val = fut.get();
 
     EXPECT_TRUE(val.has_value())
@@ -358,7 +396,11 @@ TEST(PlaintextFactoryMismatch, Cell_e_TlsProfileWithTlsEngineDefaultOpens) {
     if (val.has_value()) {
         ioc.restart();
         auto close_fut = asio::co_spawn(ioc, s.close(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, close_fut,
+                "PlaintextFactoryMismatch::Cell_e_TlsProfileWithTlsEngineDefaultOpens/close_fut")) {
+            return;
+        }
         (void)close_fut.get();
     }
 }
@@ -384,7 +426,11 @@ TEST(PlaintextFactoryMismatch, Cell_f_PlaintextProfileWithPlaintextOverrideOpens
 
     Session s{eng, cfg};
     auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut,
+            "PlaintextFactoryMismatch::Cell_f_PlaintextProfileWithPlaintextOverrideOpens/fut")) {
+        return;
+    }
     auto val = fut.get();
 
     EXPECT_TRUE(val.has_value())
@@ -395,7 +441,12 @@ TEST(PlaintextFactoryMismatch, Cell_f_PlaintextProfileWithPlaintextOverrideOpens
     if (val.has_value()) {
         ioc.restart();
         auto close_fut = asio::co_spawn(ioc, s.close(), asio::use_future);
-        ioc.run();
+        if (!fixpp::test_support::run_to_exhaustion_or_report(
+                ioc, close_fut,
+                "PlaintextFactoryMismatch::Cell_f_PlaintextProfileWithPlaintextOverrideOpens/"
+                "close_fut")) {
+            return;
+        }
         (void)close_fut.get();
     }
 }
@@ -466,7 +517,11 @@ TEST(PlaintextFactoryMintWitness, Cell_g_PlaintextNoOverrideAutoDeriveMint) {
 
     Session s{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, open_fut,
+            "PlaintextFactoryMintWitness::Cell_g_PlaintextNoOverrideAutoDeriveMint/open_fut")) {
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value())
         << "Cell (g): open() must succeed for plaintext/no-override (auto-derive) session";
 
@@ -475,7 +530,11 @@ TEST(PlaintextFactoryMintWitness, Cell_g_PlaintextNoOverrideAutoDeriveMint) {
     // connect to ::1:19999 → ECONNREFUSED → transport_connect_refused is returned.
     ioc.restart();
     auto drive_fut = asio::co_spawn(ioc, s.drive_reconnect(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, drive_fut,
+            "PlaintextFactoryMintWitness::Cell_g_PlaintextNoOverrideAutoDeriveMint/drive_fut")) {
+        return;
+    }
     auto drive_r = drive_fut.get();
 
     ASSERT_FALSE(drive_r.has_value())
@@ -489,7 +548,11 @@ TEST(PlaintextFactoryMintWitness, Cell_g_PlaintextNoOverrideAutoDeriveMint) {
 
     ioc.restart();
     auto close_fut = asio::co_spawn(ioc, s.close(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, close_fut,
+            "PlaintextFactoryMintWitness::Cell_g_PlaintextNoOverrideAutoDeriveMint/close_fut")) {
+        return;
+    }
     (void)close_fut.get();
 }
 
@@ -531,7 +594,11 @@ TEST(PlaintextFactoryMintWitness, Cell_h_TlsNoOverrideEngineDefaultReachesMint) 
 
     Session s{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, open_fut,
+            "PlaintextFactoryMintWitness::Cell_h_TlsNoOverrideEngineDefaultReachesMint/open_fut")) {
+        return;
+    }
     ASSERT_TRUE(open_fut.get().has_value())
         << "Cell (h): open() must succeed for one_way_ca/no-override + TLS engine-default";
 
@@ -540,7 +607,12 @@ TEST(PlaintextFactoryMintWitness, Cell_h_TlsNoOverrideEngineDefaultReachesMint) 
 
     ioc.restart();
     auto drive_fut = asio::co_spawn(ioc, s.drive_reconnect(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, drive_fut,
+            "PlaintextFactoryMintWitness::Cell_h_TlsNoOverrideEngineDefaultReachesMint/"
+            "drive_fut")) {
+        return;
+    }
     (void)drive_fut.get();
 
     EXPECT_GT(counting_fac->make_count_.load(), 0)
@@ -552,7 +624,12 @@ TEST(PlaintextFactoryMintWitness, Cell_h_TlsNoOverrideEngineDefaultReachesMint) 
 
     ioc.restart();
     auto close_fut = asio::co_spawn(ioc, s.close(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, close_fut,
+            "PlaintextFactoryMintWitness::Cell_h_TlsNoOverrideEngineDefaultReachesMint/"
+            "close_fut")) {
+        return;
+    }
     (void)close_fut.get();
 }
 

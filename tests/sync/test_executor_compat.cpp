@@ -19,6 +19,8 @@
 #include <asio/use_future.hpp>
 #include <fixpp/core/sync/async_mutex.hpp>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 using fixpp::sync::async_mutex;
@@ -48,7 +50,10 @@ TEST(SeamExecutorCompat, ResumesOnBoundExecutor) {
 
     // Run coro on the strand.
     auto fut = asio::co_spawn(strand, coro(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "SeamExecutorCompat::ResumesOnBoundExecutor")) {
+        return;
+    }
     fut.get();
 
     EXPECT_TRUE(resumed_on_strand);
@@ -90,8 +95,15 @@ TEST(SeamExecutorCompat, ContendedResumesOnAwaiterStrand) {
 
     auto f1 = asio::co_spawn(strand, holder(), asio::use_future);
     auto f2 = asio::co_spawn(strand, waiter(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f1, "SeamExecutorCompat::ContendedResumesOnAwaiterStrand/f1")) {
+        return;
+    }
     f1.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f2, "SeamExecutorCompat::ContendedResumesOnAwaiterStrand/f2")) {
+        return;
+    }
     f2.get();
 
     EXPECT_EQ(overlap, 0);

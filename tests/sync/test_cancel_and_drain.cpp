@@ -29,6 +29,7 @@
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -94,8 +95,15 @@ TEST(SeamCancelAndDrain, EightWaitersAllAbortedOnDrain) {
     futs.reserve(N);
     for (int i = 0; i < N; ++i)
         futs.push_back(asio::co_spawn(ioc, make_waiter(), asio::use_future));
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SeamCancelAndDrain::EightWaitersAllAbortedOnDrain/fh")) {
+        return;
+    }
     fh.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fd, "SeamCancelAndDrain::EightWaitersAllAbortedOnDrain/fd")) {
+        return;
+    }
     fd.get();
     for (auto& f : futs) f.get();
 
@@ -127,7 +135,10 @@ TEST(SeamCancelAndDrain, PostDrainAcquireReturnsSyncLockDrained) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamCancelAndDrain::PostDrainAcquireReturnsSyncLockDrained")) {
+        return;
+    }
     f.get();
 
     EXPECT_TRUE(drain_ok) << "cancel_and_drain() must succeed";
@@ -176,7 +187,10 @@ TEST(SeamCancelAndDrain, NoDoubleResumeNoLostWaiter) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamCancelAndDrain::NoDoubleResumeNoLostWaiter")) {
+        return;
+    }
     f.get();
 
     EXPECT_EQ(total_completed.load(), N)
@@ -219,7 +233,10 @@ TEST(SeamCancelAndDrain, MultiplePostDrainAcquiresAllGetDrained) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamCancelAndDrain::MultiplePostDrainAcquiresAllGetDrained")) {
+        return;
+    }
     f.get();
 
     EXPECT_TRUE(drain_ok);

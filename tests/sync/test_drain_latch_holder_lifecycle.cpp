@@ -29,6 +29,7 @@
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -108,8 +109,15 @@ TEST(SeamDrainLatchHolderLifecycle, DrainWaitsForPreDrainHolderToRelease) {
     for (int i = 0; i < N; ++i)
         futs.push_back(asio::co_spawn(ioc, make_waiter(), asio::use_future));
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SeamDrainLatchHolderLifecycle::DrainWaitsForPreDrainHolderToRelease/fh")) {
+        return;
+    }
     fh.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fd, "SeamDrainLatchHolderLifecycle::DrainWaitsForPreDrainHolderToRelease/fd")) {
+        return;
+    }
     fd.get();
     for (auto& f : futs) f.get();
 
@@ -178,7 +186,10 @@ TEST(SeamDrainLatchHolderLifecycle, AcquireAfterDrainIsRejected) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SeamDrainLatchHolderLifecycle::AcquireAfterDrainIsRejected")) {
+        return;
+    }
     f.get();
 
     EXPECT_TRUE(drain_ok);
@@ -246,10 +257,21 @@ TEST(SeamDrainLatchHolderLifecycle, TwoConcurrentDrainersWithPreDrainHolder) {
     auto f1 = asio::co_spawn(ioc, make_drainer(0), asio::use_future);
     auto f2 = asio::co_spawn(ioc, make_drainer(1), asio::use_future);
 
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fh, "SeamDrainLatchHolderLifecycle::TwoConcurrentDrainersWithPreDrainHolder/fh")) {
+        return;
+    }
     fh.get();
     for (auto& f : futs) f.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f1, "SeamDrainLatchHolderLifecycle::TwoConcurrentDrainersWithPreDrainHolder/f1")) {
+        return;
+    }
     f1.get();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f2, "SeamDrainLatchHolderLifecycle::TwoConcurrentDrainersWithPreDrainHolder/f2")) {
+        return;
+    }
     f2.get();
 
     EXPECT_EQ(completed_count.load(), N) << "All N waiters must complete exactly once";

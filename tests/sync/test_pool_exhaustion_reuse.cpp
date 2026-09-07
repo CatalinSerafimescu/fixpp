@@ -153,7 +153,10 @@ TEST(SyncPoolExhaustionReuse, ExhaustionAt513thWaiterFailsClosed) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SyncPoolExhaustionReuse::ExhaustionAt513thWaiterFailsClosed")) {
+        return;
+    }
     f.get();
 
     // waiters 0..511's parked-state was checked inside the coroutine
@@ -293,7 +296,10 @@ TEST(SyncPoolExhaustionReuse, FreedSlotReusedViaFreeListAfterExhaustion) {
     };
 
     auto f = asio::co_spawn(ioc, run(), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, f, "SyncPoolExhaustionReuse::FreedSlotReusedViaFreeListAfterExhaustion")) {
+        return;
+    }
     f.get();
 
     ASSERT_TRUE(saturated_probe.has_value())
