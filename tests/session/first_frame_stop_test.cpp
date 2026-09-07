@@ -47,7 +47,6 @@
 
 #include <gtest/gtest.h>
 
-
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
@@ -59,7 +58,9 @@
 #include <chrono>
 #include <cstddef>
 #include <exception>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/tls_transport.hpp>
@@ -73,6 +74,90 @@ using namespace std::chrono_literals;
 using fixpp::test_support::EngineLoopbackHarness;
 
 namespace {
+
+// ── #237: the POSITIVE near-side barrier, built from a seam that already exists ─
+//
+// WHAT #237 ASKED FOR. T2b asserted that stop() reclaims an accept slot held
+// inside `read_first_frame_bounded`, but nothing observed that the accept loop
+// had ever GOT there: stop() can land while the server is still inside
+// `async_handshake`, and every rejection arm in `run_accept_loop` is the same
+// `transport->close(); continue;` (src/session/engine.cpp), so the two are
+// indistinguishable from outside. The cell's claim rested on a stated inference
+// — the client's handshake completed and the peer then sent nothing, so the
+// server is SOMEWHERE between the handshake and the publish. That is a real
+// interval, and `read_first_frame_bounded` is only one point in it.
+//
+// ⚠️ #237 PRICED THIS AS A 7TH MECHANISM ON THE PRODUCTION ACCEPT PATH and
+// declined to buy it: "instrument the accepted transport to record
+// async_read_some INITIATION". That route really does need production code —
+// the accepted transport is minted by an `asio_listener` that `run_accept_loop`
+// CONSTRUCTS (engine.cpp, "Build the asio_listener"), with no injection seam;
+// `TransportFactory` is the initiator's, not the acceptor's. But that is not
+// the only route, and the issue did not consider this one: since #377 the
+// first-frame deadline runs on `EngineConfig::clock`
+// (`await_deadline(clock, abs_deadline)` → `clock.sleep_until(...)`), and that
+// clock IS injectable — `EngineLoopbackHarness` only supplies one when the
+// caller left it null. So the barrier costs a test-side decorator and ZERO
+// production mechanisms.
+//
+// WHY THIS IS A POSITIVE BARRIER, not the inverted hook Gate A round 4 rejected.
+// It counts a call that HAPPENS — the deadline arm of the join inside
+// `read_first_frame_bounded` starting its sleep — rather than observing that
+// something has not happened yet. `sleeps_observed() >= 1` is satisfiable only
+// by the accept loop having entered the helper and armed the join. It is the
+// Clock-side analogue of `mock_transport`'s "mechanism 4"
+// (`reads_observed_` incremented at INITIATION, before the latency wait) and it
+// is counted at the same moment, before the wrapped sleep is awaited.
+//
+// ⚠️ AND IT IS PROVEN ABLE TO REPORT ABSENCE, which is the half that makes a
+// counter a barrier rather than a decoration. Two arms, both below:
+//   * `sleeps_observed() == 0` immediately after start() and before any client
+//     connects — nothing else the engine does on this path sleeps on the Clock,
+//     so a non-zero here would mean the counter is not specific to the read.
+//   * `sleeps_observed() == 0` in `StopIsPromptWhileAcceptedHandshakeIsInFlight`
+//     at the moment stop() is called. That cell parks the accept loop inside
+//     `async_handshake` — ONE STEP BEFORE the read, which is exactly the
+//     ambiguity #237 names. A counter that could not tell those two cells apart
+//     would report the same value in both.
+// A count with no zero arm is the shape this repo keeps paying for; do not
+// delete either arm to "simplify".
+class counting_clock final : public fixpp::core::Clock {
+public:
+    explicit counting_clock(std::shared_ptr<fixpp::core::Clock> inner) : inner_(std::move(inner)) {}
+
+    [[nodiscard]] fixpp::core::utc_time_point now() const noexcept override {
+        return inner_->now();
+    }
+    [[nodiscard]] fixpp::core::steady_time_point steady_now() const noexcept override {
+        return inner_->steady_now();
+    }
+    // ⚠️ COUNT BEFORE THE co_await, not after. After is a COMPLETION count, and
+    // the deadline arm of a healthy first-frame read never completes — the read
+    // wins and the join cancels it — so an after-count would read 0 on exactly
+    // the path this barrier exists to witness.
+    [[nodiscard]] asio::awaitable<void> sleep_until(
+        fixpp::core::steady_time_point deadline) override {
+        sleeps_.fetch_add(1, std::memory_order_release);
+        co_await inner_->sleep_until(deadline);
+    }
+    void cancel_sleeps() noexcept override { inner_->cancel_sleeps(); }
+
+    [[nodiscard]] std::size_t sleeps_observed() const noexcept {
+        return sleeps_.load(std::memory_order_acquire);
+    }
+
+private:
+    std::shared_ptr<fixpp::core::Clock> inner_;
+    std::atomic<std::size_t> sleeps_{0};
+};
+
+// Build the EngineConfig both cells use, with the counting clock installed.
+// The harness injects a `system_clock_source` only when `clock` is null
+// (engine_loopback_harness.hpp), so supplying one here is the whole seam.
+std::shared_ptr<counting_clock> make_counting_clock(asio::any_io_executor const& exec) {
+    return std::make_shared<counting_clock>(
+        std::make_shared<fixpp::core::system_clock_source>(exec));
+}
 
 // Drive `ioc` in slices until `done` flips or `cap` elapses. Same pattern as
 // engine_firstframe_test.cpp's run_until — copied rather than shared because
@@ -220,6 +305,8 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    auto clock = make_counting_clock(ioc.get_executor());  // #237 — see the barrier note
+    eng_cfg.clock = clock;
     auto harness = EngineLoopbackHarness::build(ioc.get_executor(), std::move(eng_cfg));
     if (!harness) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
@@ -229,6 +316,16 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
     fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
     ioc.run_for(50ms);
     ioc.restart();
+
+    // #237 ZERO ARM — the barrier must be able to report absence. The engine is
+    // started and its accept loop is parked in async_accept; no client has
+    // connected. Nothing on this path sleeps on the Clock, so a non-zero here
+    // would mean the counter is not specific to the first-frame deadline and
+    // the >= 1 wait below would be satisfiable without the read.
+    ASSERT_EQ(clock->sleeps_observed(), 0u)
+        << "T2b [#237 barrier, zero arm]: the engine slept on its Clock before any client "
+           "connected, so `sleeps_observed() >= 1` no longer means the accept loop reached "
+           "read_first_frame_bounded. Find the other sleeper before trusting the barrier.";
     std::uint16_t const port = harness->server_endpoint().port;
     if (port == 0) {
         GTEST_SKIP() << "acceptor listener did not bind";
@@ -240,11 +337,32 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
                                                /*self_deadline_after=*/10s, probe),
                    asio::detached);
 
-    // Let the client complete its handshake and the server-side accept loop
-    // (as far as this test can tell — see the non-vacuity note above the
-    // fixture) settle into read_first_frame_bounded before calling stop().
-    ioc.run_for(200ms);
-    ioc.restart();
+    // #237 POSITIVE ARM — wait for the accept loop to be OBSERVED inside
+    // read_first_frame_bounded, rather than assuming it after a fixed window.
+    //
+    // ⚠️ WHAT THIS REPLACED: `ioc.run_for(200ms); ioc.restart();`, whose own
+    // comment conceded the gap ("as far as this test can tell"). Two defects in
+    // one line. It was an INFERENCE — 200 ms is not an observation, and stop()
+    // could land with the loop still in async_handshake, which every arm of
+    // run_accept_loop then closes identically. And it was a WALL-CLOCK FIGURE,
+    // the same class that took T1/B6 red on windows-msvc-asan (run
+    // 34074957982): on a runner slow enough, 200 ms does not cover a loopback
+    // TLS handshake and the cell goes quietly vacuous. Staging on the observable
+    // fixes both, and cannot go vacuous in silence — a barrier that is never
+    // reached FAILS here instead of passing weaker.
+    {
+        auto const limit = std::chrono::steady_clock::now() + 10s;
+        while (clock->sleeps_observed() == 0 && std::chrono::steady_clock::now() < limit) {
+            ioc.run_for(5ms);
+            ioc.restart();
+        }
+    }
+    ASSERT_GE(clock->sleeps_observed(), 1u)
+        << "T2b [#237 barrier, positive arm]: the accept loop never armed the first-frame "
+           "deadline within the budget, so it never entered read_first_frame_bounded and "
+           "everything below would be asserted about a slot held somewhere else — the exact "
+           "inference #237 was filed to remove. Not a stop() defect: look at whether the "
+           "client's handshake completed at all.";
 
     // Deterministic promptness (D-6.12b) — see the kPromptHandlerBudget note at
     // the top of this file. ⚠️ THIS USED TO ARM A REAL 500 ms steady_timer and
@@ -364,6 +482,8 @@ TEST(FirstFrameStop, StopIsPromptWhileAcceptedHandshakeIsInFlight) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
+    auto clock = make_counting_clock(ioc.get_executor());  // #237 — the absence arm
+    eng_cfg.clock = clock;
     auto harness = EngineLoopbackHarness::build(ioc.get_executor(), std::move(eng_cfg));
     if (!harness) {
         GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
@@ -395,6 +515,25 @@ TEST(FirstFrameStop, StopIsPromptWhileAcceptedHandshakeIsInFlight) {
     // Let the accept loop pick the connection up and reach async_handshake.
     ioc.run_for(200ms);
     ioc.restart();
+
+    // #237 ABSENCE ARM — this is the run where the read is NEVER reached, and
+    // the barrier the sibling cell relies on must read zero here.
+    //
+    // ⚠️ READ THE SCOPE, not more than it says. This does NOT positively locate
+    // the accept loop in `async_handshake` — nothing here observes that, and the
+    // peer holding its silence only makes the handshake unable to COMPLETE. What
+    // it does establish is the half the sibling's `>= 1` needs: on a run that
+    // never enters `read_first_frame_bounded`, the counter is 0. Without this,
+    // `sleeps_observed() >= 1` over there could be satisfied by anything the
+    // engine happens to sleep on, and would be a decoration rather than a
+    // barrier. That is why the arm lives in THIS cell — it is the only one in
+    // the file whose peer, by construction, can never produce a first frame.
+    EXPECT_EQ(clock->sleeps_observed(), 0u)
+        << "[#237 barrier, absence arm]: the Clock was slept on during a run whose peer never "
+           "sent a ClientHello, so the accept loop cannot have reached read_first_frame_bounded "
+           "— something ELSE sleeps on the engine Clock, and the sibling cell's "
+           "`sleeps_observed() >= 1` no longer proves what it claims. Fix the barrier there "
+           "before trusting either cell.";
 
     bool stop_done = false;
     asio::co_spawn(ioc, harness->engine().stop(), [&](std::exception_ptr ep) {
