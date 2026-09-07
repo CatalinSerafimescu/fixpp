@@ -56,7 +56,7 @@
 
 - [x] CHK029 Is the 057 prerequisite (reify + multi-char dispatch, PR #161 merged) documented as a validated assumption? [Assumption, Spec §Assumptions] — PASS: Assumptions states this; independently confirmed merged (PR #161, squash `5a7a944`, 2026-07-02, per project memory / phase-4 record).
 - [x] CHK030 Is the codegen force-regen trap (Codegen.cmake blind to emitter edits) documented so it can't be silently missed? [Assumption, Spec §Assumptions] — PASS: Assumptions states it explicitly; tasks T013/T017 operationalize the rebuild+clear-markers step so it cannot be silently skipped.
-- [x] CHK031 Is the assumption that group slices are already lifetime-stable (arena-owned, `.data` into the parent frame) stated and validated against source? [Assumption, Spec §Assumptions] — PASS: Assumptions states it; source-verified against `include/fixpp/wire/offset_table.hpp:164-176` (append-only, reserved-once `group_slices_`/`group_index_`) and `src/wire/offset_table.cpp:456-460` (stable cached span returned) — both anchors resolve and match.
+- [x] CHK031 Is the assumption that group slices are already lifetime-stable (arena-owned, `.data` into the parent frame) stated and validated against source? [Assumption, Spec §Assumptions] — PASS: Assumptions states it; source-verified against `include/fixpp/wire/offset_table.hpp:164-176` (append-only, reserved-once `group_slices_`/`group_index_` — ⚠️ superseded by #389: `group_slices_` is DELETED and each group now owns an exact-sized array; the lifetime-stability assumption this row certifies is STRENGTHENED, not broken, since no group's read can move another's slices) and `src/wire/offset_table.cpp:456-460` (stable cached span returned) — both anchors resolve and match.
 
 ## Ambiguities, Conflicts & Scope Boundary
 
@@ -94,7 +94,7 @@ Anchors spot-verified (source-level, not just "looks plausible"):
 - `include/fixpp/wire/view.hpp:33` (`generation_token`) — pre-existing, confirmed.
 - `include/fixpp/wire/offset_table.hpp:29,70,77,151` (`group_member_fn_t`) — pre-existing, confirmed.
 - `src/wire/offset_table.cpp:264-268` (whole-frame `build()` SOH guard, unchanged), `:436-439` (dict-free fallback `group_end = entries_.size()`), `:495-505` (slice `len` computation) — all resolve, match RC1/INV-G7 citations exactly.
-- `include/fixpp/wire/offset_table.hpp:164-176` + `src/wire/offset_table.cpp:456-460` (lazy, reserved-once, stable `group_slices_`) — resolves, matches the lifetime-stability assumption (CHK031).
+- `include/fixpp/wire/offset_table.hpp:164-176` + `src/wire/offset_table.cpp:456-460` (lazy, reserved-once, stable `group_slices_`) — resolves, matches the lifetime-stability assumption (CHK031). ⚠️ #389 deleted `group_slices_` for per-group exact arrays; the assumption still holds, by construction rather than by reservation.
 - `.specify/constitution.md` Article VIII §5 ("Arena/PMR is the default"), Article XV §1 ("arena/PMR for the rare materialise cases"), Appendix A ("Wire format/parser", "Codegen layout" trigger rows) — all resolve verbatim.
 - `entry_context` — grep-confirmed **absent** from `include/`/`src/`/`tools/` today, i.e. genuinely NEW as the bundle claims (not a stale "already exists" claim).
 - `.specify/decisions/062-grouped-typed-read-fix-gatea.md` + `research/reviews/{codex,opus}_062-grouped-typed-read-fix_gate_a{,_2,_3}_*.md` (parent-repo `research/reviews/`) — all exist, round-3 convergence (0/0/0 Codex findings) confirmed.

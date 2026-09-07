@@ -113,9 +113,13 @@ What the omission actually costs: `declared` comes from `parse_declared_count` �
 > (*"impossible by construction"*) is retracted there; its scoped body stands.
 >
 > `FR-021c`'s residual requirement — *"`:597` keeps its wire-derived membership-probe role"* — is
-> **vacated with the site**. The membership-probe role at the three OTHER sites
-> (`consume_group_extent`, `group()`, and the splitter's own gate) is untouched and still
-> wire-derived.
+> **vacated with the site**. ⚠️ FR-021c named **four** delimiter-deriving sites — `:454`
+> (`consume_group_extent`), `:526` (`group()`), `:597` (the estimator) and `:656` (the splitter).
+> With `:597` deleted, the membership-probe role survives at **TWO** other sites, `:454` and
+> `:526`, both untouched and still wire-derived. *(An earlier version of this paragraph said
+> "three OTHER sites" and listed `group()` twice — once under its own name and once as "the
+> splitter's own gate" — while `:656` is the splitter itself and was never one of the others.
+> Deleting a site changes an ENUMERATION that other prose restates by count.)*
 
 ## The lookup surface — resolved
 

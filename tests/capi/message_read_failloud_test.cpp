@@ -5,7 +5,8 @@
 // Faithful exhaustion harness (research.md D6 / quickstart.md "Faithful
 // exhaustion harness"): a tiny-capacity `std::pmr::monotonic_buffer_resource`
 // over `std::pmr::null_memory_resource()` is used as the SAME parse arena
-// for the whole message (top-level OffsetTable + its group_slices_/
+// for the whole message (top-level OffsetTable + its group_index_ and
+// per-group slice arrays /
 // nested_cache_ + the nested sub-`OffsetTable`) — `OffsetTable::
 // build_nested_subview` allocates the nested sub-table from
 // `OffsetTable::resource()`, which is `entries_.get_allocator().resource()`,

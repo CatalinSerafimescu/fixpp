@@ -144,7 +144,7 @@ public:
         // below. Every root group_slices(N) caller (C-ABI fixpp_msg_get_group,
         // direct offsets().group_slices(), and the typed group<>() path) must
         // agree on context so the no_tag-keyed cache (offset_table.cpp
-        // group_slices_) can never be poisoned by an unseeded call that runs
+        // group_index_) can never be poisoned by an unseeded call that runs
         // before the typed path seeds it (table_ is fully built by this point —
         // msg_type() reads via table_.find(35), valid post-construction).
         table_.set_group_context(group_context{.msg_type = msg_type()});

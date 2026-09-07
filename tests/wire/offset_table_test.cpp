@@ -767,9 +767,12 @@ std::string slurp(std::filesystem::path const& p) {
 // would satisfy all of them vacuously. The witness is therefore the SIBLING
 // walk that must still exist: group_slices_status()'s own instance splitter
 // (L-063-4 leg 1, deliberately still flat and out of #220's scope) declares
-// `inst_start` at 16-space and uses the POSITIVE `if (boundary) {` at
-// 20-space. Asserting those FIRST proves the matcher can see this TU and can
+// `inst_start` at 16-space and defines the POSITIVE `is_boundary` lambda at
+// 16-space. Asserting those FIRST proves the matcher can see this TU and can
 // report a non-zero count, before any zero below is believed.
+// ⚠️ 389: this paragraph said `if (boundary) {` at 20-space, which is the
+// needle the diff replaced 15 lines below — a re-anchored needle must be
+// re-stated in the prose that JUSTIFIES it, not only where it is used.
 TEST(WireOffsetTable, FR001_NoFlatInstanceWalkInGroup) {
     std::filesystem::path const src{FIXPP_SRC_DIR};
     std::string const tu = slurp(src / "wire" / "offset_table.cpp");
