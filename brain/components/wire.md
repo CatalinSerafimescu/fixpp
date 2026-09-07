@@ -138,6 +138,49 @@ it is recorded here so the next reader does not infer from #384's close that the
 Read `src/wire/offset_table.cpp`'s `group_slices_status()` for the disposition in place, and
 `spec/behaviors-and-limitations.md` **B-384-1 / B-384-2 / L-384-1** for what a caller must know.
 
+### The third consequence of the same divergence: the reserve that outlived its loop (#389)
+
+083 made the SPLIT LOOP use the dictionary delimiter. It left two other things alone, and both
+became wrong by that change rather than by any edit to them:
+
+| what it was | what 083 made of it |
+|---|---|
+| C-8.4's fallback justification (**#384**) | argued about a disjunct #220 had deleted — a rationale that lost its SUBJECT |
+| `group_slices_reserve_bound()` (**#389**) | sized from the WIRE delimiter's capped extent walk, but had to dominate a loop now driven by the DICTIONARY delimiter under NO cap |
+
+⭐ **The estimator was DELETED, not corrected — and that choice is the transferable part.** A better
+bound would have restated the obligation that broke: an estimator and a split loop, in **two
+places**, that must agree **forever**. 083 changed the loop, left the estimator, and nothing noticed
+for two features. Each `no_tag` now materializes into its **own exact-sized array**, so the shared
+growable buffer — the thing that let materializing group B move group A's already-returned spans —
+is gone. There is no second place left to keep in agreement.
+
+| Rejected | Why |
+|---|---|
+| **Cap the split loop at `declared`** | Silently merges an instance away. W-10 pins 3 slices as the CORRECT post-083 answer and C-8.2 makes the dictionary delimiter authoritative — this is the silent-instance-loss class FR-021e exists to eliminate |
+| **Make the estimator exact (count delimiter occurrences in the extent)** | Correct, but keeps the two-places-must-agree hazard, duplicates `group()`'s extent walk inside the estimator, and breaks the same witness anyway. Buys nothing on arena cost over what shipped |
+| **Bound = Σ extent ENTRIES (delimiter-free, keeps C-8.0a verbatim)** | Rejected **on measurement**, not on taste: it is ~3x the instance count — exactly the ratio PR #181 existed to remove. 3600 B against the 3744 B that exhausted the MSVC-release arena |
+
+⚠️ **Two traps this fix had to dodge, both of which look like details and are not.**
+
+**The count pass is load-bearing.** Allocating exactly means pre-counting boundaries; pushing into an
+unreserved vector over the fixed **null-upstream monotonic** arena strands every superseded buffer
+(1+2+4+…, never reused) — 255×16 = 4080 B for a 75-instance group against 1200 B exact. Deleting the
+pre-count re-opens #181 while every test stays green.
+
+**The obvious witness cannot see the bug.** Reading through a span after the shared vector moved is
+UB that, on the shipped path, **returns correct bytes** — monotonic arenas never reuse the abandoned
+block. A "contents are still right" assertion is green under both the broken and the fixed shape,
+which is *why this survived since 083*. The discriminator is **pointer identity of the re-fetched
+cached span**: the old cache hit recomputed `group_slices_.data() + start`, so a reallocation makes
+it differ from the pointer handed out earlier. Mutation-proven RED against the pre-#389 tree.
+
+⚠️ **C-8.0a was SATISFIED and the code was still broken** — the sharpest lesson here. C-8.0a asked
+whether 083's changed *member sets* perturbed the estimator; they did not, and that assessment was
+correct. It was the wrong question, because the same feature also changed the *delimiter*. **An
+assessment scoped to one of a feature's changes cannot certify a site the feature's OTHER change
+invalidates.** See [`failure-classes.md`](../failure-classes.md) class 9 and B&L B-389-1.
+
 ## The seam into the session layer
 
 `wire_error_to_session_reject_reason` (`include/fixpp/wire/reject_reason_map.hpp`) maps a validator

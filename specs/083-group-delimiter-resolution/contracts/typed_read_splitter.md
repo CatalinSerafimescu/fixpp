@@ -98,6 +98,25 @@ What the omission actually costs: `declared` comes from `parse_declared_count` �
 
 **C-8.0a — `:597` gets its own assessment.** It sizes a reservation in the **fixed 16 KiB inbound parse arena** whose under-reserve failure mode is a *documented silent truncation* (`spec/behaviors-and-limitations.md` L-073-1 top-level; L-065-2 nested). This feature changes the member sets it consumes. D-3's impact statement covers lookup *cost* only and says nothing about changed *values* reaching a consumer that sizes memory from them. **Assessment — inferred, not measured; the FR-021c task confirms it**: the risk is low, because the tag removed from a polluted member set is the global first-seen delimiter, which by definition is not what a message in that context puts on the wire, so the probe's outcome should be unchanged. Recording "low, and here is why" is the deliverable; a bare assumption is not.
 
+> ⚠️ **AMENDMENT 2026-09-07 (fixpp#389) — THE SITE THIS CLAUSE ASSESSES NO LONGER EXISTS.**
+> `group_slices_reserve_bound()` is **deleted**. Each `no_tag` now materializes into its own
+> exact-sized array, so allocation EQUALS the slice count and there is no reservation to size, to
+> estimate, or to assess. The obligation is discharged by construction rather than by a recorded
+> measurement.
+>
+> **What went wrong is worth keeping, because this clause was satisfied and the code was still
+> broken.** C-8.0a asked whether 083's changed MEMBER SETS perturbed the estimator. They did not —
+> that assessment was correct. It was the wrong question: 083 also changed the SPLIT LOOP's
+> delimiter (C-8.2) while `consume_group_extent` kept the wire delimiter and the `declared` cap, and
+> the estimator summed declared counts. **An assessment scoped to one of a feature's changes cannot
+> certify a site the feature's OTHER change invalidates.** research.md's Leg 1 verdict
+> (*"impossible by construction"*) is retracted there; its scoped body stands.
+>
+> `FR-021c`'s residual requirement — *"`:597` keeps its wire-derived membership-probe role"* — is
+> **vacated with the site**. The membership-probe role at the three OTHER sites
+> (`consume_group_extent`, `group()`, and the splitter's own gate) is untouched and still
+> wire-derived.
+
 ## The lookup surface — resolved
 
 **C-8.1 — Reuse the existing dictionary-callback seam; do not thread a new parameter through the public read API.** `OffsetTable` already carries an opaque dictionary pointer and a membership callback:

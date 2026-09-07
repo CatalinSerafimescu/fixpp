@@ -50,7 +50,7 @@
 
 #include "support/context_group_delim_fn.hpp"  // 384: the production delimiter oracle
 #include "support/frame_view_factory.hpp"
-#include "support/wire_test_hooks.hpp"  // 083 T056 (W-10): reserve-bound seam
+#include "support/pmr_allocation_tracking_resource.hpp"
 
 namespace {
 
@@ -705,7 +705,10 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg4Depth
 //   MOVES     `group_slices_status(no_tag)`'s split          (C-8.2 / T058)
 //   UNCHANGED `consume_group_extent`'s extent bound          (C-8.0, `:454`)
 //   UNCHANGED `group(no_tag)`'s group_index (no_tag, first_entry, entry_count)
-//   UNCHANGED `group_slices_reserve_bound()`                 (C-8.0, `:597`)
+//   [RETIRED]  `group_slices_reserve_bound()`                 (C-8.0, `:597`)
+//              — #389 DELETED that function. See the retirement note at probe
+//              3 below for why the probe was TRUE and the property it was read
+//              as certifying was not.
 //
 // ── The pre-083 oracle is RUN, not hardcoded ────────────────────────────────
 // A second `OffsetTable` is built over the SAME frame and the SAME dictionary
@@ -949,15 +952,24 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
         << "group()'s reported extent must be unchanged: pre=" << pre_gi->entry_count()
         << " post=" << post_gi->entry_count();
 
-    // ── UNCHANGED probe 3: the reserve bound ────────────────────────────────
-    // `:597` keeps its wire-derived membership-probe role (C-8.0) — it never
-    // consults a delimiter, and this feature must not perturb the reservation
-    // made in the fixed 16 KiB inbound arena (research.md D-6 / C-8.0a).
-    using fixpp::wire::reserve_bound_access_for_testing;
-    EXPECT_EQ(reserve_bound_access_for_testing::get(post),
-              reserve_bound_access_for_testing::get(pre))
-        << "C-8.0a: the reserve estimator's inputs are member sets alone, so with exclusion 2 "
-           "asserted it must be byte-for-byte the same reservation.";
+    // ── UNCHANGED probe 3: RETIRED by #389, not deleted quietly ─────────────
+    // This probe asserted that the reserve bound was byte-for-byte equal between
+    // the pre-083 and post-083 tables, citing C-8.0a: "the reserve estimator's
+    // inputs are member sets alone".
+    //
+    // ⚠️ THE PROBE WAS TRUE AND THE PROPERTY IT CERTIFIED WAS NOT. The estimator
+    // really did consume member sets alone — that is exactly why it could not
+    // see that 083 had changed the SPLIT LOOP's delimiter underneath it. Equal
+    // reservations on both tables was a fact about the estimator's inputs, and
+    // it was read as evidence the reservation was ADEQUATE. It never was: on
+    // this very fixture the bound is 2 and the post-083 split pushes 3.
+    //
+    // #389 deleted the estimator (each group now allocates its own exact-sized
+    // array), so there is no reservation left to compare. The property this
+    // probe was reaching for — materializing one group must not disturb another
+    // group's already-returned slices — is now witnessed POSITIVELY and
+    // directly by `MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices`
+    // below, which fails RED against the shared-vector shape.
 
     // ── CHANGED probe: the split ────────────────────────────────────────────
     auto const post_res = post.group_slices_status(100);
@@ -987,6 +999,247 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     ASSERT_NE(post_res.slices.size(), pre_res.slices.size())
         << "W-10 is vacuous unless the delimiter callback demonstrably changes the split on this "
            "fixture — that is the single permitted movement the three probes above bound.";
+}
+
+// ============================================================================
+// #389 — the positive witness that replaces W-10's retired probe 3.
+//
+// THE HAZARD, stated as the thing that can actually go wrong: slices for
+// DIFFERENT `no_tag`s used to live in ONE shared, growable vector sized by an
+// estimator. Materializing group B could therefore reallocate that vector and
+// move group A's slices — after A's span had already been handed to a caller
+// and, on the C-ABI path, stored in `fixpp_group::slices` across calls.
+//
+// ⚠️ WHY THE OBVIOUS ASSERTION WOULD NOT CATCH IT. Reading through the held
+// span after the move is undefined behaviour that, on the shipped path, READS
+// CORRECT BYTES: the parse arena is a monotonic_buffer_resource, which never
+// reuses the abandoned block. A "contents still correct" assertion is green
+// under both the broken and the fixed shape — that is precisely why this
+// survived since 083.
+//
+// The discriminator is the POINTER IDENTITY of the cached span. Re-fetch A
+// after materializing B: on a cache hit the old code recomputed the span as
+// `group_slices_.data() + start`, so a reallocation makes the re-fetched
+// pointer DIFFER from the one handed out earlier. That is a defined,
+// deterministic comparison with no reliance on UB.
+//
+// Fixture arithmetic, hand-derived from the bytes below:
+//   - 110 declares 2, splits on 211 -> 2 slices.
+//   - 100 declares 2 but splits on E's dictionary delimiter 202 -> 3 slices
+//     ({201=A}, {202=x|201=B}, {202=y}) — the same divergence W-10 pins.
+//   - Old estimator = 2 + 2 = 4; actual pushes = 5. Materializing 110 THEN 100
+//     therefore crosses the reserve and reallocates.
+// MUTATION THAT MAKES THIS RED: put both groups back in one shared vector with
+// the pre-#389 cache, which recomputed the span as `group_slices_.data() +
+// start`. That is the shape that shipped, and it is what this cell was
+// mutation-proven against.
+//
+// ⚠️ WHAT THIS CELL DOES NOT CATCH, stated rather than left implied. A
+// DIFFERENT shared-vector shape — one caching raw element pointers instead of
+// offsets — would leave the re-fetched pointer comparing EQUAL after a
+// reallocation, into freed memory, and this cell would stay green. Pointer
+// identity discriminates the relocation only because the old cache recomputed
+// from the base. That variant is excluded structurally, not by this test: with
+// per-group arrays there is no shared buffer to reallocate, and the
+// `static_assert` on `group_span` is what guards the row's shape.
+// ============================================================================
+
+constexpr std::string_view kTwoGroupDivergentXml =
+    R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+    R"(<fields>)"
+    R"(<field number='8' name='BeginString' type='STRING'/>)"
+    R"(<field number='9' name='BodyLength' type='INT'/>)"
+    R"(<field number='10' name='CheckSum' type='STRING'/>)"
+    R"(<field number='35' name='MsgType' type='STRING'/>)"
+    R"(<field number='100' name='NoDivergent' type='NUMINGROUP'/>)"
+    R"(<field number='110' name='NoSimple' type='NUMINGROUP'/>)"
+    R"(<field number='201' name='FieldA' type='STRING'/>)"
+    R"(<field number='202' name='FieldB' type='STRING'/>)"
+    R"(<field number='211' name='FieldC' type='STRING'/>)"
+    R"(</fields>)"
+    R"(<messages>)"
+    // Declared FIRST, so 201 is the global first-seen delimiter for 100 — the
+    // same divergence W-10 relies on, reproduced rather than shared.
+    // ⚠️ Copied deliberately, not by oversight: W-10's `kDivergentDelimXml` is
+    // SPEC-PINNED — `specs/083-group-delimiter-resolution/data-model.md` states
+    // its fixture "is now constrained to exclude mode (c)" — so adding a second
+    // group to it would edit a shape another feature's contract fixes. Extending
+    // it would not in fact have broken W-10's probes, but the pin is the reason
+    // the copy is correct rather than merely harmless.
+    R"(<message name='DMsg' msgtype='D' msgcat='app'>)"
+    R"(<field name='BeginString' required='N'/>)"
+    R"(<field name='BodyLength' required='N'/>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<field name='CheckSum' required='N'/>)"
+    R"(<group name='NoDivergent' required='N'>)"
+    R"(<field name='FieldA' required='N'/>)"
+    R"(<field name='FieldB' required='N'/>)"
+    R"(</group></message>)"
+    // SAME group tag, OPPOSITE order -> E's per-context delimiter is 202.
+    R"(<message name='EMsg' msgtype='E' msgcat='app'>)"
+    R"(<field name='BeginString' required='N'/>)"
+    R"(<field name='BodyLength' required='N'/>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<field name='CheckSum' required='N'/>)"
+    R"(<group name='NoDivergent' required='N'>)"
+    R"(<field name='FieldB' required='N'/>)"
+    R"(<field name='FieldA' required='N'/>)"
+    R"(</group>)"
+    R"(<group name='NoSimple' required='N'>)"
+    R"(<field name='FieldC' required='N'/>)"
+    R"(</group></message>)"
+    R"(</messages></fix>)";
+
+TEST(TypedReadSplitAgreement, MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices) {
+    std::vector<std::byte> dict_buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource dict_mr{dict_buf.data(), dict_buf.size()};
+    auto dict = fixpp::dict::XmlLoader{}.load_from_string(kTwoGroupDivergentXml, &dict_mr);
+    auto tv = dict.as_table_view();
+
+    std::span<std::uint16_t const> const root_path{};
+    // Precondition: the divergence this cell needs must actually exist. Without
+    // it 100 splits into 2, the old bound of 4 is never crossed, and the cell
+    // would pass on the broken shape too.
+    ASSERT_EQ(tv.group_first_field(std::uint16_t{100}), 201U)
+        << "fixture precondition: DMsg declares FieldA first, so the bare global delimiter is 201";
+    ASSERT_EQ(tv.group_first_field("E", root_path, std::uint16_t{100}), 202U)
+        << "fixture precondition: E declares FieldB first, so E's per-context delimiter is 202; "
+           "equal to 201 would mean the context store MISSED and this cell is vacuous";
+
+    auto buf = make_frame(
+        "35=E\x01"
+        "100=2\x01"
+        "201=A\x01"
+        "202=x\x01"
+        "201=B\x01"
+        "202=y\x01"
+        "110=2\x01"
+        "211=p\x01"
+        "211=q\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value()) << "make_frame_view failed";
+
+    Parser<access_mode::Index> parser{tv};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv.has_value()) << "parser.parse failed";
+    auto const& t = mv->offsets();
+
+    // 1. Materialize the SIMPLE group first and HOLD its span, exactly as the
+    //    C-ABI does when it stores one in `fixpp_group::slices`.
+    auto const held = t.group_slices(110);
+    ASSERT_EQ(held.size(), 2U) << "fixture: 110 carries two instances split on 211";
+    auto const* const held_data = held.data();
+    ASSERT_EQ(slice_text(held[0]), "211=p");
+    ASSERT_EQ(slice_text(held[1]), "211=q");
+
+    // 2. Materialize the DIVERGENT group. This is the push that used to cross
+    //    the estimator's bound (5 pushes against a reserve of 4).
+    auto const divergent = t.group_slices(100);
+    ASSERT_EQ(divergent.size(), 3U)
+        << "fixture precondition: 100 must split into THREE on E's delimiter 202, or the old "
+           "reserve of 4 is never crossed and this cell cannot discriminate. observed="
+        << divergent.size();
+
+    // 3. THE ASSERTION. Re-fetch 110 through the cache. Under the pre-#389
+    //    shared vector this span was recomputed as `group_slices_.data() + start`,
+    //    so the reallocation in step 2 would make it differ from `held_data`.
+    auto const refetched = t.group_slices(110);
+    EXPECT_EQ(refetched.data(), held_data)
+        << "#389: materializing one group must not relocate another group's already-returned "
+           "slices. A differing pointer means the two groups still share one growable buffer, "
+           "and the span handed out in step 1 — which the C-ABI stores across calls — is dangling";
+    ASSERT_EQ(refetched.size(), 2U);
+    EXPECT_EQ(slice_text(refetched[0]), "211=p");
+    EXPECT_EQ(slice_text(refetched[1]), "211=q");
+}
+
+// ============================================================================
+// #389 — THE ORDER-INDEPENDENCE WITNESS. Catches the regression variant the
+// pointer-identity cell above provably cannot.
+//
+// Pointer identity discriminates only a shared buffer whose cache-hit path
+// RECOMPUTES the span from the current base. A shared-vector variant that
+// stores the already-RESOLVED pointer at push time compares EQUAL after a
+// reallocation — into freed memory — and both pointer cells stay green. That
+// variant is the MINIMAL regression, because the row already holds a
+// `group_slice const*`, so it must be witnessed rather than argued away.
+//
+// The property that separates per-group arrays from ANY shared growable
+// buffer is ORDER-INDEPENDENCE OF ARENA CONSUMPTION. Each group's array is
+// sized by its own count pass, so materializing {110, 100} allocates the same
+// multiset of blocks as {100, 110} and the arena totals are EQUAL. A shared
+// buffer grows through different intermediate capacities depending on which
+// group lands first, and the monotonic arena never reuses the superseded
+// blocks — so the two totals DIVERGE, whether the cache stores offsets or
+// resolved pointers.
+//
+// Threshold-free and platform-independent: it compares two measurements of the
+// same build against each other rather than against a byte constant that would
+// encode one STL's growth policy.
+//
+// ⚠️ CONDITION THE EQUALITY DEPENDS ON, beyond the slice arrays: both orders
+// must push the same number of `group_index_` rows, since that vector's own
+// growth is counted in the delta. Two groups both of which MATERIALIZE satisfy
+// it. If this fixture is ever extended to a tag that DECLINES in one order but
+// not the other, the row counts diverge and this cell fails for a reason that
+// is not the defect — re-derive rather than adjusting the assertion.
+// ============================================================================
+TEST(TypedReadSplitAgreement, ArenaConsumptionIsIndependentOfGroupMaterializationOrder) {
+    std::pmr::monotonic_buffer_resource dict_mr;
+    auto dict = fixpp::dict::XmlLoader{}.load_from_string(kTwoGroupDivergentXml, &dict_mr);
+    auto tv = dict.as_table_view();
+
+    auto buf = make_frame(
+        "35=E\x01"
+        "100=2\x01"
+        "201=A\x01"
+        "202=x\x01"
+        "201=B\x01"
+        "202=y\x01"
+        "110=2\x01"
+        "211=p\x01"
+        "211=q\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    // Materialize the two groups in the given order; return the arena bytes
+    // consumed by the materializations alone (construction excluded).
+    auto consume = [&](std::uint16_t first_tag, std::uint16_t second_tag, std::size_t& out_delta) {
+        std::pmr::monotonic_buffer_resource upstream;
+        fixpp::test_support::pmr_allocation_tracking_resource arena{&upstream};
+        Parser<access_mode::Index> parser{tv};
+        auto mv = parser.parse(*fv, &arena);
+        ASSERT_TRUE(mv.has_value());
+        auto const& t = mv->offsets();
+
+        auto const before = arena.total_bytes_allocated();
+        auto const s1 = t.group_slices(first_tag);
+        auto const s2 = t.group_slices(second_tag);
+        out_delta = arena.total_bytes_allocated() - before;
+
+        // Fixture precondition: the two groups must split to DIFFERENT counts,
+        // or the two orders are the same multiset trivially and the cell is
+        // vacuous. 100 splits into 3 on E's delimiter 202; 110 into 2 on 211.
+        ASSERT_NE(s1.size(), s2.size())
+            << "fixture: the groups must differ in slice count for order to matter";
+    };
+
+    std::size_t simple_first = 0;
+    ASSERT_NO_FATAL_FAILURE(consume(110, 100, simple_first));
+    std::size_t divergent_first = 0;
+    ASSERT_NO_FATAL_FAILURE(consume(100, 110, divergent_first));
+
+    ASSERT_GT(simple_first, 0U)
+        << "instrument check: materialization must consume a NON-ZERO number of arena bytes, or "
+           "the equality below is satisfied by an instrument that measures nothing";
+
+    EXPECT_EQ(simple_first, divergent_first)
+        << "#389: each group must allocate its own exact-sized array, so arena consumption cannot "
+           "depend on which group is materialized first. A difference means the groups still share "
+           "one growable buffer, whose superseded blocks the monotonic arena never reclaims — and "
+           "any span handed out before the growth is dangling. 110-then-100 consumed "
+        << simple_first << " B; 100-then-110 consumed " << divergent_first << " B";
 }
 
 // ============================================================================

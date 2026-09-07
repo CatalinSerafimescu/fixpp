@@ -228,7 +228,7 @@ public:
     // parse; `MessageView::group<>()` re-applies the same root context
     // (idempotent) before its typed read. A NESTED sub-table is seeded once
     // by `build_nested_subview` at construction. Mutable/const like the
-    // table's other lazily-set state (group_slices_/nested_cache_) — safe to
+    // table's other lazily-set state (group_index_/nested_cache_) — safe to
     // call repeatedly with the SAME value within one parse (context is
     // constant per parse, FR-005).
     void set_group_context(group_context const& ctx) const noexcept;
@@ -331,7 +331,7 @@ private:
     // 062 T005: dict-aware sub-view-over-slice builder. Placement-constructs
     // a sub-OffsetTable into `mr` (an arena-owned pointer; never freed
     // individually — reclaimed wholesale with the arena, same lifetime
-    // contract as `group_slices_`) over the slice-scoped `{data, len+1}`
+    // contract as `group_index_`) over the slice-scoped `{data, len+1}`
     // bytes via the dict-aware ctor (`opaque_dict`/`group_member_fn`
     // threaded — MANDATORY, INV-G7; the dict-free fallback is never taken on
     // this path). RC1: the terminal SOH at `data+len` is provably already
@@ -355,16 +355,28 @@ private:
     // includes group_view.hpp).
     [[nodiscard]] group_context stored_group_context() const noexcept;
 
-    // Tight upper bound on the total number of top-level group instances that
-    // can ever be appended to `group_slices_` (summed over every top-level group
-    // tag a caller may read): the sum of the DECLARED counts of the top-level
-    // group count-fields, clamped to `entries_.size()`. Used to `reserve()`
-    // `group_slices_` ONCE so it never reallocates (held spans stay valid) while
-    // keeping the lazy materialization inside the fixed parse arena on
-    // toolchains with larger STL metadata (MSVC release — PR #181 Tier-2
-    // arena_fit; the loose `entries_.size()` reserve over-allocated ~3x and
-    // exhausted the 16 KiB null-upstream arena there). See offset_table.cpp.
-    [[nodiscard]] std::uint32_t group_slices_reserve_bound() const noexcept;
+    // 389: `group_slices_reserve_bound()` used to live here. It is DELETED, not
+    // corrected — see the `group_span` comment below. PR #181's constraint that
+    // motivated it (the loose `entries_.size()` reserve over-allocated ~3x and
+    // exhausted the 16 KiB null-upstream arena on MSVC release) is now met more
+    // tightly than any estimate could: each group allocates EXACTLY its own
+    // slice count, strictly less than the old reservation whenever `declared`
+    // exceeded the actual instance count. It is NOT <= the old reservation for
+    // every input -- where the old bound was too small (the #389 defect), exact
+    // allocation is necessarily larger than it; see B&L B-389-1.
+    //
+    // ⚠️ The exactness depends on the COUNT PASS in `group_slices_status()`,
+    // which is load-bearing rather than an optimization: pushing into an
+    // UNRESERVED vector backed by a monotonic arena strands every superseded
+    // buffer, because such a resource never reuses one. That is the #181
+    // exhaustion mode, re-entered. The magnitude is a RESULT and deliberately
+    // not written here — it depends on the STL's vector growth factor (2x on
+    // libstdc++, 1.5x on the MSVC release build #181 is actually about), so any
+    // number would be platform-specific and would rot. To re-derive it,
+    // replace the exact `allocate()` below with repeated `push_back` into an
+    // unreserved vector -- i.e. delete the count pass -- and measure with
+    // tests/support/pmr_allocation_tracking_resource.hpp against
+    // `ArenaFit.NearCapHeadroomProbe`.
 
     static constexpr std::uint8_t kMaxGroupDepth = 16;  // mirror emit_messages.cpp:137
 
@@ -396,7 +408,7 @@ private:
     // need the complete type here, which would require including
     // group_view.hpp and cycle back to THIS header. Set via
     // set_group_context() (mutable — same lazy-const-method idiom as
-    // group_slices_/nested_cache_ below); default-empty on a table that never
+    // group_index_/nested_cache_ below); default-empty on a table that never
     // calls it (dict-free ctors — group_member_fn_ is null there, so this
     // state is never read).
     mutable std::string_view group_ctx_msg_type_{};
@@ -414,19 +426,57 @@ private:
     // static). 0 on a default-constructed (never-built) table (unused: find()
     // returns absent before hashing when overlay_ is empty).
     std::uint32_t seed_ = 0;
-    // Lazy mr-backed group slices. Append-only and reserved once to the
-    // entry-count upper bound, so no push_back ever reallocates — every
-    // span handed out stays valid for the message lifetime even when
-    // several distinct groups are accessed and held simultaneously
-    // (the prior static thread_local clobbered across calls; this does not).
+    // Lazy mr-backed group slices, ONE EXACT-SIZED ARRAY PER `no_tag`.
+    //
+    // 389: this used to be a single shared `group_slices_` vector plus a
+    // `{start, count}` index, reserved ONCE to an estimated upper bound so that
+    // "no push_back ever reallocates — every span handed out stays valid". That
+    // contract was FALSE: the estimator summed the wire's DECLARED counts while
+    // the split loop is driven by the DICTIONARY delimiter under no cap, so on a
+    // divergent context the pushes exceeded the reserve, the shared vector
+    // reallocated, and every span already handed out for an EARLIER `no_tag`
+    // dangled.
+    //
+    // ⭐ The structural point, which is why this is not merely a better bound:
+    // the hazard was that N groups shared ONE growable array, so materializing
+    // group B could move group A's spans. An estimator and a split loop in two
+    // places had to agree FOREVER — and they stopped agreeing the moment 083
+    // changed the loop. Per-group storage removes the agreement requirement
+    // instead of restating it: the only vector that grows while group G is being
+    // split is G's own, no span into it exists yet, and once G is materialized
+    // its array is never appended to again. There is nothing left to estimate,
+    // which is why `group_slices_reserve_bound()` is gone rather than fixed.
+    //
+    // The row is a RAW (ptr, count) into the arena, NOT a `std::pmr::vector`.
+    // A vector member was the first shape and it was measured wrong: the row
+    // went 12 B -> 40 B, because a `std::pmr::vector` member costs three
+    // pointers PLUS a `memory_resource*` duplicating the table's own -- 32 B of
+    // metadata on this toolchain -- to hold what a raw (ptr, count) holds in 12. That matters
+    // because `group_index_` gains a row per DISTINCT no_tag QUERIED — including tags that decline,
+    // since the negative result is memoised too — and the C-ABI's `fixpp_msg_get_group` takes a
+    // caller-supplied tag, so the row count is driven by CALLER BEHAVIOUR, not by message content.
+    // Tripling the row tripled a caller-reachable arena budget; at 16 B it does not.
+    //
+    // Raw storage is safe here and has precedent in this same class
+    // (`nested_cache_row::table` below): `group_slice` is trivially
+    // destructible, the buffer is arena-allocated and reclaimed wholesale with
+    // the arena, and it is never individually freed. It also makes `group_span`
+    // trivially copyable, so `group_index_` reallocation is a memcpy — there is
+    // no move-vs-copy question to get wrong, and no `noexcept` property a future
+    // member could silently break.
     struct group_span {
-        std::uint16_t no_tag;
-        std::uint32_t start;  // index into group_slices_
+        group_slice const* data;  // arena-allocated, exactly `count` entries
         std::uint32_t count;
+        std::uint16_t no_tag;
     };
-    mutable std::pmr::vector<group_slice> group_slices_;
+    static_assert(std::is_trivially_copyable_v<group_span>,
+                  "group_index_ reallocation must be a memcpy: a non-trivial member would "
+                  "reintroduce the move-vs-copy question this shape exists to delete");
+    static_assert(sizeof(group_span) <= 16,
+                  "group_index_ gains a row per DISTINCT no_tag QUERIED, and the C-ABI lets a "
+                  "caller choose the tag — the row size is a caller-reachable arena budget, so "
+                  "growing it needs the measurement in B&L B-389-1, not a default");
     mutable std::pmr::vector<group_span> group_index_;
-    mutable bool group_slices_reserved_ = false;
 
     // 062 T006: single flat nested-subview cache row — see
     // `nested_group_slices()` above for the ownership/keying contract.
@@ -457,17 +507,20 @@ private:
     // §D2 mode (a)/(b)/(c) by introspecting the real sub-table rather than a
     // `sizeof(OffsetTable)`-tuned cap band (not portable across toolchains,
     // research.md "Platform-robust mode pinning").
-    // 083 T056 (W-10): TEST-ONLY read of `group_slices_reserve_bound()`, same
-    // seam and same gating as the sibling above — the DEFINITION lives in the
-    // non-installed tests/support/wire_test_hooks.hpp, so this installed
-    // header gains a friend DECLARATION and no accessor code. W-10 must assert
-    // the reserve bound is UNCHANGED across a pre-083 / post-083 pair of
-    // tables; there is no behavioural proxy for it (it is a reservation, not
-    // an output), and a re-derivation in the test would assert the test's own
-    // arithmetic rather than `:597`'s.
+    // 389: a second friend declaration stood here for W-10's TEST-ONLY read of
+    // `group_slices_reserve_bound()`. Both the hook and the function are gone.
+    //
+    // Its rationale is worth one line, because it was CORRECT and still led
+    // somewhere wrong: a reservation "is a reservation, not an output", so there
+    // was no behavioural proxy for it and the test had to reach in. That is true
+    // of any estimate — and it is why an estimate is a poor thing to build a
+    // safety property on. The property W-10 actually wanted (materializing one
+    // group must not relocate another's slices) IS behavioural, and is now
+    // asserted directly through the public API by
+    // `TypedReadSplitAgreement.MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices`,
+    // with no friend and no hook.
 #ifdef FIXPP_TEST_HOOKS
     friend struct nested_cache_access_for_testing;
-    friend struct reserve_bound_access_for_testing;
 #endif  // FIXPP_TEST_HOOKS
 };
 
