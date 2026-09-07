@@ -48,6 +48,23 @@ prints `0` for a whole syntax.
   that happened to land there. Say which bucket moved, not which shape is done — and check whether
   the sweep can even *see* the shape (a `.get()` on a range-for variable over a container of futures
   is not a receiver most sweeps can trace to its spawn).
+  **Closed for this instrument in #289 batch 20, and the fix is the general lesson: give the sweep
+  an axis for the MECHANISM.** `ci/pump-get-sweep.sh` gained a call-site-scope axis (is the `.get()`
+  inside an `awaitable`-returning function or lambda?) and container tracking. Teaching it the
+  receiver shape moved 39 previously-invisible sites into the candidate list — 2 of them the
+  coroutine-side wedge shape, in a file batch 19 never opened.
+  ⚠️ **The scope discriminator must be STRUCTURAL — the return type — not keyword presence.** "The
+  enclosing scope contains a `co_await`" is satisfied by a TEST body that merely *spawns* a
+  coroutine, so it marks the caller-side `.get()` after that lambda's closing brace as coroutine-side
+  and reports nearly the whole corpus. Both readings pass a hand-check; only a control that puts one
+  `.get()` inside the lambda and one immediately after it separates them.
+- ⚠️ **A NEW AXIS WHOSE HEADLINE IS A ZERO NEEDS A KNOWN-NON-ZERO CORPUS, AND THE OLD TREE IS ONE.**
+  Batch 20's axis reports 0 coroutine-side candidates; its synthetic controls prove it *can* say
+  CORO, but a broken traversal or a wrong root survives those. `ci/red-arms/batch20-coroutine-axis.sh`
+  runs the **current** instrument against `tests/` at the pre-batch-19 commit — where the same sites
+  were unguarded — and requires non-zero. Same instrument, older corpus: a git object is immutable,
+  so the pin is a fixed corpus rather than a claim that rots. Extract only the corpus; checking out
+  the whole old tree would run the OLD instrument and pass by construction.
 - ⚠️ **A GREEN SUITE IS EVIDENCE ABOUT THE EXECUTABLE YOU RAN, NOT ABOUT THE DIRECTORY IT IS NAMED
   AFTER.** One source directory routinely fans out into several test binaries, and the one whose name
   reads like the directory is rarely all of it. Reporting "`<dir>_tests` N/N" then reads as coverage

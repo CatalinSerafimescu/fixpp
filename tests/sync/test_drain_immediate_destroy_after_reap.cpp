@@ -46,6 +46,7 @@
 #include <memory>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -136,8 +137,30 @@ TEST(DrainImmediateDestroyAfterReap, AllCallbacksCompletedBeforeDrainReturns) {
         delete mtx_ptr;
         mtx_ptr = nullptr;
 
-        // Collect futures (should all be ready since completed==N).
-        for (auto& f : futs) f.get();
+        // ─── #289 batch 20: a COROUTINE-SIDE `.get()`, reached through a CONTAINER ──
+        // These futures should all be ready (`completed == N` was just captured), but
+        // "should" is the whole hazard. This `.get()` runs INSIDE the coroutine, on the
+        // thread pumping `ioc`, inside the handler that `ioc.run_for(100ms)` below
+        // dispatched — so a block here wedges the driver too. The 5 s deadline loop is
+        // not a bound on it: `run_for` never returns, the `while` never re-tests, and
+        // the `ASSERT_FALSE(timed_out)` whose message names `futs.get()` is never
+        // reached. Measured for this exact shape in batch 19
+        // (`ci/red-arms/batch19-coroutine-side-get.sh`: unguarded WEDGES, guarded
+        // REPORTS).
+        //
+        // ⚠️ THE CONTAINER IS WHY THIS SITE OUTLIVED BATCH 19. A `.get()` on a range-for
+        // variable is not a receiver the sweep could trace back to a `co_spawn`, so the
+        // site was invisible to the very instrument that found its eleven siblings.
+        // `ci/pump-get-sweep.sh` now tracks containers filled by `push_back(co_spawn(…))`.
+        for (auto& f : futs) {
+            if (!co_await fixpp::test_support::yield_window_then_ready(
+                    f, 8,
+                    "DrainImmediateDestroyAfterReap::AllCallbacksCompletedBeforeDrainReturns"
+                    "/waiters")) {
+                co_return;
+            }
+            f.get();
+        }
     };
 
     auto f = asio::co_spawn(ioc, main_coro(), asio::use_future);
@@ -203,7 +226,15 @@ TEST(DrainImmediateDestroyAfterReap, RepeatedDestroyIsClean) {
 
             delete mtx_ptr;
             mtx_ptr = nullptr;
-            for (auto& f : futs) f.get();
+            // #289 batch 20 — same shape as the site above, 50 reps of it. See the
+            // comment there for why the outer deadline loop does not bound this.
+            for (auto& f : futs) {
+                if (!co_await fixpp::test_support::yield_window_then_ready(
+                        f, 8, "DrainImmediateDestroyAfterReap::RepeatedDestroyIsClean/waiters")) {
+                    co_return;
+                }
+                f.get();
+            }
         };
 
         auto f = asio::co_spawn(ioc, coro(), asio::use_future);

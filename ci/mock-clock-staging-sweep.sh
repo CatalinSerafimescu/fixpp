@@ -90,7 +90,7 @@ from pathlib import Path
 # another worktree -- that would import that tree's blanker to judge this one. Same
 # reasoning, verbatim, as `ci/pump-label-uniqueness.sh`.
 sys.path.insert(0, os.environ["FIXPP_CI_DIR"])
-from cxx_blank import blank_non_code
+from cxx_blank import (blank_non_code, brace_blocks, line_starts, line_index_of)
 
 root, quiet = Path(sys.argv[1]), sys.argv[2] == "1"
 
@@ -206,25 +206,16 @@ def enclosing_spans(blanked, lines, idx):
     NO-PUMP-IN-SCOPE, because the word had to match the thing) -- a genuinely blind window demoted
     to the escalation bucket, under a verdict that says *function* while meaning
     *block*. Found by the hostile review, synthetically; no live instance existed."""
-    offs, pos = [], 0
-    for l in lines:
-        offs.append(pos)
-        pos += len(l) + 1
+    offs = line_starts(lines)
     target = offs[idx]
-    stack, spans = [], []
-    for i, ch in enumerate(blanked):
-        if ch == "{":
-            stack.append(i)
-        elif ch == "}":
-            if not stack:
-                return None
-            open_at = stack.pop()
-            if open_at < target < i:
-                spans.append((open_at, i))
+    blocks = brace_blocks(blanked)
+    if blocks is None:                # unbalanced -- indistinguishable from "no block",
+        return None                   # deliberately, per the docstring above
+    spans = [sp for sp in blocks if sp[0] < target < sp[1]]
     if not spans:
         return None
     spans.sort(key=lambda sp: -sp[0])  # innermost first
-    return [(sum(1 for o in offs if o <= sp[0]) - 1, sp) for sp in spans]
+    return [(line_index_of(offs, sp[0]), sp) for sp in spans]
 
 
 def function_span(blanked, lines, idx):
@@ -247,29 +238,14 @@ def enclosing_span(blanked, lines, idx):
     enclosing block; the caller cannot tell those apart and reports `UNPARSED` for
     either, which is deliberate -- both mean "this site was not classified", and a site
     that vanished would be the silent outcome."""
-    offs, pos = [], 0
-    for l in lines:
-        offs.append(pos)
-        pos += len(l) + 1
-    target = offs[idx]
-    stack, span = [], None
-    for i, ch in enumerate(blanked):
-        if ch == "{":
-            stack.append(i)
-        elif ch == "}":
-            if not stack:
-                return None
-            open_at = stack.pop()
-            if open_at < target < i and (span is None or open_at > span[0]):
-                span = (open_at, i)
-    if span is None:
+    chain = enclosing_spans(blanked, lines, idx)
+    if chain is None:
         return None
-    # Only the OPENING line is needed -- callers use the span to read the block's head
-    # and to compare two spans for identity, and the char offsets serve identity
-    # directly. Converting the closing offset to a line number as well cost a second
-    # O(lines) scan for a value nothing read.
-    lo = sum(1 for o in offs if o <= span[0]) - 1
-    return lo, span
+    # `enclosing_spans` already sorts innermost first, so the innermost block is its
+    # head. Only the OPENING line is needed -- callers use the span to read the block's
+    # head and to compare two spans for identity, and the char offsets serve identity
+    # directly.
+    return chain[0]
 
 
 def classify(path):

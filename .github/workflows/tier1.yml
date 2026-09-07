@@ -2315,6 +2315,23 @@ jobs:
       - name: "Regression pin — line-citation checker self-test (#310, #326)"
         run: python3 tools/check_line_citations.py --self-test
 
+      # ci/pump-get-sweep.sh REPORTS a candidate list and deliberately does not gate on
+      # it — the list is not pinnable, because a `.get()` is only a hazard where the
+      # calling thread must pump. But its CONTROLS are gateable, and until #289 batch 20
+      # nothing ran them: the sweep is invoked by hand, so a regression in its classifier
+      # would have surfaced only as a number nobody could tell was wrong. It exits
+      # non-zero when a control fails and zero otherwise whatever the candidate count, so
+      # this step gates the instrument without pinning its output. ~2.4 s, buildless.
+      # ⚠️ It does NOT cover `ci/red-arms/batch20-coroutine-axis.sh`, which needs a
+      # historical commit present locally and is run by hand; the synthetic controls
+      # prove the scope axis can say CORO, that arm proves it on real code.
+      # ⚠️ NOT `--quiet`. That flag suppresses the CONTROL lines while still printing the
+      # candidate rows and still exiting non-zero — noise without evidence. Run loud so
+      # the log shows each control passing; a green step that prints nothing is
+      # indistinguishable from a step that ran nothing.
+      - name: "Regression pin — get-sweep classifier controls (#289)"
+        run: bash ci/pump-get-sweep.sh --disposition
+
       # ── #291: co_spawn closure lifetime ────────────────────────────────────
       #
       # A lambda coroutine reaches its captures THROUGH the closure object, so
