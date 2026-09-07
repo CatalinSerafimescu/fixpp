@@ -37,6 +37,17 @@ prints `0` for a whole syntax.
   no match. Assert how many files the sweep actually examined, and check whether any root is a link.
 - ⚠️ **A self-test written from the implementation certifies the implementation**, bug included. Build
   fixtures from the real artefact, verbatim.
+- ⚠️ **A BOUND THAT IS LEXICALLY OUTSIDE THE THING IT BOUNDS MAY BE INSIDE IT AT RUNTIME.** A bounded
+  driver around a blocking call bounds nothing if the blocking call ends up executing *on the driving
+  thread*, inside a handler that driver dispatched: the driver never gets another turn, and the bound
+  it looks like it has is never re-tested. Reading the source suggests a bound; only running the
+  wedge shows there is none. **Procedure:** inject a defect the wait cannot recover from and time it.
+  If it hangs, the outer bound was decoration.
+- ⚠️ **A RESIDUAL BUCKET GOING TO ZERO IS NOT THE CLASS GOING TO ZERO.** When a sweep classifies on
+  axes that do not encode the mechanism you fixed, the sites it puts in "your" bucket are the ones
+  that happened to land there. Say which bucket moved, not which shape is done — and check whether
+  the sweep can even *see* the shape (a `.get()` on a range-for variable over a container of futures
+  is not a receiver most sweeps can trace to its spawn).
 - ⚠️ **A GREEN SUITE IS EVIDENCE ABOUT THE EXECUTABLE YOU RAN, NOT ABOUT THE DIRECTORY IT IS NAMED
   AFTER.** One source directory routinely fans out into several test binaries, and the one whose name
   reads like the directory is rarely all of it. Reporting "`<dir>_tests` N/N" then reads as coverage
@@ -208,6 +219,12 @@ which is "this check no longer has anything to check".
   one.** Retire the population, keep a synthetic positive control that constructs the thing the
   selector looks for and requires it to be found. Otherwise "empty" and "broken" print identically —
   which is class 1 reached by a different road.
+
+- ⚠️ **A HARNESS THAT RELOCATES THE THING UNDER TEST BREAKS WHEN THAT THING GAINS AN IMPORT.** The
+  consolidated helper is resolved at runtime relative to the script, so a harness that copies or
+  mutates the script into a temp directory now dies with a module-resolution error — which its own
+  assertion reports as "the scanner failed", i.e. the right verdict for the wrong reason. Run the
+  harness after the consolidation, and make the sandbox carry the module.
 
 **Reference instance:** #289 batch 10. `kWindowMissSentinel` was copy-defined in three test files and
 `audit-copy-span.sh` asserted byte-identity over the span containing it. Hoisting the constant into

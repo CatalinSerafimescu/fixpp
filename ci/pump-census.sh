@@ -178,11 +178,15 @@ if ! LC_ALL=C sort -u "$pin" | cmp -s - "$pin"; then
     fail "expected-site pin must be sorted and contain no duplicates: $expected"
 fi
 
-if ! python3 - "$scan_root" >"$actual" <<'PY'
+if ! FIXPP_CI_DIR="$repo_root/ci" python3 - "$scan_root" >"$actual" <<'PY'
 from pathlib import Path
+import os
 import re
 import sys
 import tempfile
+
+sys.path.insert(0, os.environ["FIXPP_CI_DIR"])
+from cxx_blank import blank_non_code, blank_unevaluated
 
 root = Path(sys.argv[1]).resolve()
 tests = root / "tests"
@@ -197,129 +201,26 @@ get_re = re.compile(
     r"\b[A-Za-z_][A-Za-z_0-9]*\s*\.\s*get\s*\("
 )
 
-_RAW = re.compile(r'(?:u8|u|U|L)?R"([^\s()\\]{0,16})\(')
-
-
-def _is_digit_separator(src: str, i: int) -> bool:
-    """Is `src[i]` (an apostrophe) a C++14 digit separator rather than a char literal?
-
-    ⚠️ SECOND COPY OF THE FIX, and it is here because a fix landing on ONE of two
-    identical shapes is this repo's recurring class. The other is `ci/cxx_blank.py`,
-    where the defect was measured: a single `10'000` opened a literal that ran to the
-    next apostrophe and blanked every intervening line, hiding two labelled seam calls
-    from a gate that then said "every site label is unique".
-    Walk back to the token start and require it to BEGIN with a digit -- `u8'0'` also
-    has a digit either side of its apostrophe and IS a character literal.
-    """
-    if i == 0 or i + 1 >= len(src):
-        return False
-    if not (src[i - 1].isalnum() and src[i + 1].isalnum()):
-        return False
-    j = i - 1
-    while j >= 0 and (src[j].isalnum() or src[j] in "'."):
-        j -= 1
-    k = j + 1
-    # A fractional-constant may OPEN with the dot: `.1'0` is a valid literal and
-    # `c++ -fsyntax-only` accepts it. Requiring the first character to be a digit
-    # rejected it and put the blanker back in the state this predicate exists to
-    # prevent. Found by the batch-17 review, not by the controls written with the fix.
-    if k < len(src) and src[k] == ".":
-        k += 1
-    return k < len(src) and src[k].isdigit()
-
-
-def blank_non_code(source: str) -> str:
-    """Blank comments and literals while preserving every newline."""
-    out = []
-    i = 0
-    n = len(source)
-    state = "code"
-    quote = ""
-
-    def blank(ch: str) -> str:
-        return "\n" if ch == "\n" else " "
-
-    while i < n:
-        if state == "code":
-            # Raw string literals, including u8R"...", uR, UR and LR.
-            # ⚠️ `.match(source, i)` -- NOT `re.match(pat, source[i:])`. The slice copies
-            # the whole remainder of the file at EVERY code character, which is O(n^2)
-            # bytes per file. Measured over the 656 files under tests/ (10.0 MB): one
-            # `blank_non_code` pass goes 13.3 s -> 4.1 s, and the two tier-1 gates that
-            # call it go 30.2 s -> 10.5 s and 13.2 s -> 4.6 s. Output is byte-identical
-            # over all 656 (the two forms can only differ under `^` or a lookbehind, and
-            # this pattern has neither). Hoisting `re.compile` alone buys nothing --
-            # Python already caches compiled patterns; the copy is the cost.
-            raw = _RAW.match(source, i)
-            if raw:
-                token = raw.group(0)
-                delim = raw.group(1)
-                end_token = ")" + delim + '"'
-                end = source.find(end_token, i + len(token))
-                end = n if end < 0 else end + len(end_token)
-                out.extend(blank(ch) for ch in source[i:end])
-                i = end
-                continue
-
-            if source.startswith("//", i):
-                out.extend((" ", " "))
-                i += 2
-                state = "line-comment"
-            elif source.startswith("/*", i):
-                out.extend((" ", " "))
-                i += 2
-                state = "block-comment"
-            elif source[i] == "'" and _is_digit_separator(source, i):
-                out.append(source[i])
-                i += 1
-            elif source[i] in ('"', "'"):
-                quote = source[i]
-                out.append(" ")
-                i += 1
-                state = "literal"
-            else:
-                out.append(source[i])
-                i += 1
-
-        elif state == "line-comment":
-            ch = source[i]
-            # Backslash-newline splice (C++ phase 2, applied before comment
-            # recognition in phase 3): a `\` immediately followed by a
-            # newline continues the line comment onto the next physical
-            # line, so the newline must NOT end the comment here. Both
-            # characters are still blanked (preserving the physical line
-            # count other callers rely on for path:line reporting).
-            if ch == "\\" and i + 1 < n and source[i + 1] == "\n":
-                out.append(blank(ch))
-                out.append(blank(source[i + 1]))
-                i += 2
-                continue
-            out.append(blank(ch))
-            i += 1
-            if ch == "\n":
-                state = "code"
-
-        elif state == "block-comment":
-            if source.startswith("*/", i):
-                out.extend((" ", " "))
-                i += 2
-                state = "code"
-            else:
-                out.append(blank(source[i]))
-                i += 1
-
-        else:  # normal string or character literal
-            ch = source[i]
-            out.append(blank(ch))
-            i += 1
-            if ch == "\\" and i < n:
-                out.append(blank(source[i]))
-                i += 1
-            elif ch == quote:
-                state = "code"
-
-    return "".join(out)
-
+# ── The lexer: IMPORTED, not copied ──────────────────────────────────────────
+#
+# This file used to carry a verbatim second copy of `_RAW` / `_is_digit_separator` /
+# `blank_non_code`, and its own comment said why that was dangerous: "a fix landing on
+# ONE of two identical shapes is this repo's recurring class". It had already happened.
+# MEASURED at the point of removal (#289 batch 19), by diffing the two bodies: the copy
+# here was missing `ci/cxx_blank.py`'s CRLF line-splice arm (`\\` `\r` `\n` inside a
+# literal). Latent, because the tree has no CRLF sources today -- which is precisely the
+# shape of clean this repo keeps rediscovering. One source now.
+#
+# `blank_unevaluated` comes with it, and closes a second gap of the same kind: the
+# `get_re` below is the same pattern `ci/pump-get-sweep.sh` uses, and an unevaluated
+# `decltype(fut.get())` inside a `run_for` window would have produced a false census
+# row. None exists in the tree today -- again a property of the tree, not of this
+# scanner. ⚠️ IT IS APPLIED PER LINE here because this scanner is line-based, so a
+# `decltype` operand WRAPPED across lines does not close on the line it opens on. Say the
+# DIRECTION, not just the limitation: `blank_unevaluated` leaves an unterminated operand
+# ALONE (see its comment), so a wrapped one costs at worst a FALSE ROW against an empty
+# pin -- loud, and someone reads it. The version that blanked as it walked would have
+# erased the rest of the line instead, hiding a real site.
 def scan(source):
     """Return the 1-based line of every window whose `.get()` is within six lines."""
     lines = blank_non_code(source).splitlines()
@@ -328,7 +229,7 @@ def scan(source):
         if not run_re.search(line):
             continue
         following = lines[index + 1:index + 7]
-        if any(get_re.search(candidate) for candidate in following):
+        if any(get_re.search(blank_unevaluated(candidate)) for candidate in following):
             hits.append(index + 1)
     return hits
 

@@ -113,9 +113,15 @@ done
 
 command -v python3 >/dev/null || fail "python3 is required"
 
-python3 - "$scan_root" "$sub" "$quiet" "$disposition" <<'PY'
-import re, sys
+FIXPP_CI_DIR="$repo_root/ci" python3 - "$scan_root" "$sub" "$quiet" "$disposition" <<'PY'
+import os, re, sys
 from pathlib import Path
+
+# The shared lexer, not a private copy -- see `ci/cxx_blank.py`'s header. `blank_comments`
+# below is still local because this sweep needs comment blanking WITHOUT literal blanking
+# (its controls quote the idiom inside strings); `blank_unevaluated` has no such split.
+sys.path.insert(0, os.environ["FIXPP_CI_DIR"])
+from cxx_blank import blank_unevaluated
 
 root, sub, quiet = Path(sys.argv[1]), sys.argv[2], sys.argv[3] == "1"
 disposition = sys.argv[4] == "1"
@@ -125,6 +131,7 @@ disposition = sys.argv[4] == "1"
 # alternative here and its own control below. Widening this without the control is how a
 # migration reads as unguarded and gets "migrated" a second time.
 GUARD = re.compile(r"run_window_then_ready|run_to_exhaustion_or_report|"
+                   r"yield_window_then_ready|"
                    r"pump_until_ready|pump_until\(|"
                    r"wait_for\([^)]*\)\s*[=!]=\s*std::future_status|"
                    r"std::future_status::ready")
@@ -147,51 +154,6 @@ def blank_comments(text):
     text = _BLOCK.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
     return _LINE.sub(lambda m: " " * len(m.group(0)), text)
 
-_DECLTYPE = re.compile(r"\bdecltype\s*\(")
-
-def blank_unevaluated(stmt):
-    """Blank `decltype(...)` operands, preserving length.
-
-    ⚠️ `using R = decltype(fut.get());` DOES NOT CALL `get()` -- the operand is
-    unevaluated -- yet it matched this sweep's `.get()` pattern and produced a row.
-    That row is worse than noise: the idiom is part of #316's SETTLED value-helper
-    recipe, so it appears at sites that are already MIGRATED, and the sweep reported
-    two of them as `CALLER-ONLY x HELPER` residue in a file whose very next line is
-    `run_window_then_ready`. Migrating a value-returning helper therefore RAISED the
-    residual, which is the one direction an instrument must never move.
-
-    It also cost two rows a second way: the `since` walk treats any statement naming
-    `<fut>.get()` as the end of that future's segment, so a `decltype` line truncated
-    the window evidence and could flip RUN-BOUNDED to HELPER.
-
-    Scope, stated so it is not read as more than it is: `decltype` is the only
-    unevaluated context this blanks. `sizeof`, `noexcept` and `requires` can hold the
-    same call and are NOT handled -- no instance exists in this tree today, and a
-    speculative widening would need controls no site justifies. The controls below
-    straddle the boundary this DOES draw.
-
-    ⚠️ THE EARLY-OUT IS NOT AN OPTIMISATION TO TASTE: on this corpus ~10^5 statements
-    reach here and a couple of DOZEN contain `decltype`, so without it the char-list copy
-    runs about ten thousand times per useful call. No exact pair is written down -- an
-    earlier revision did, and the numbers rotted inside the same PR when its own migration
-    changed the corpus. Re-derive by counting `statements()` output against
-    `'decltype' in stmt`. The early-out is exactly safe: `_DECLTYPE` requires that literal
-    substring, so no statement the regex would match can be skipped by it."""
-    if "decltype" not in stmt:
-        return stmt
-    out = list(stmt)
-    for m in _DECLTYPE.finditer(stmt):
-        depth, i = 0, m.end() - 1
-        while i < len(stmt):
-            if stmt[i] == "(":
-                depth += 1
-            elif stmt[i] == ")":
-                depth -= 1
-                if depth == 0:
-                    break
-            out[i] = " "
-            i += 1
-    return "".join(out)
 
 def depth_text(line):
     """Parens for splicing must ignore those inside string literals -- an
@@ -414,6 +376,25 @@ GUARDED_RUN_OK = """
     }
     auto r = fut.get();
 """
+# The batch-19 COROUTINE-SIDE spelling, for the same reason: it is its own regex
+# alternative, so no other control can prove it is credited. The straddle is the
+# unguarded twin two entries below (`RUN_UNBOUNDED_BAD` and friends) -- a bare
+# `co_await yield_n(N); fd.get();` carries no guard token at all and still reads
+# UNGUARDED.
+GUARDED_YIELD_OK = """
+    auto fd = asio::co_spawn(ex, drain(), asio::use_future);
+    co_await yield_n(8);
+    if (!co_await fixpp::test_support::yield_window_then_ready(fd, 8, "X/drain")) {
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "X/drain";
+        co_return;
+    }
+    fd.get();
+"""
+YIELD_ONLY_BAD = """
+    auto fd = asio::co_spawn(ex, drain(), asio::use_future);
+    co_await yield_n(8);
+    fd.get();
+"""
 # ... and the shape it replaces, so the pair straddles: an unguarded `ioc.run()` + get()
 # must still READ unguarded. Without this the widening above could credit any nearby
 # `run(`-ish token and the control above would still pass.
@@ -531,6 +512,8 @@ CONTROLS = [
     ("indirect window, DOTLESS run()   -> UNGUARDED", DOTLESS_BAD,       0, 1),
     ("guarded by run_window_then_ready -> guarded",   GUARDED_OK,        1, 0),
     ("guarded by run_to_exhaustion..   -> guarded",   GUARDED_RUN_OK,    1, 0),
+    ("guarded by yield_window_then_ready-> guarded",  GUARDED_YIELD_OK,  1, 0),
+    ("yield_n alone is NOT a guard     -> UNGUARDED", YIELD_ONLY_BAD,    0, 1),
     ("bare ioc.run() then get()        -> UNGUARDED", RUN_UNBOUNDED_BAD, 0, 1),
     ("guarded by a wait_for assertion  -> guarded",   ASSERT_OK,         1, 0),
     ("`.get()` on a non-future         -> ignored",   NOT_A_FUTURE,      0, 0),
@@ -663,6 +646,23 @@ if not quiet:
 # ── the real scan ────────────────────────────────────────────────────────────
 files = sorted(p for p in (root / sub).rglob("*")
                if p.suffix in (".cpp", ".hpp", ".cc", ".h") and p.is_file())
+# ⚠️ A ZERO-FILE CORPUS IS AN ERROR, NOT A CLEAN BILL. Every control above runs on
+# SYNTHETIC fixtures, so they all pass on nothing: a wrong `--root` used to print
+# "SWEEP PROVEN", "UNGUARDED .get() ... : 0", "scanned 0 file(s)" and exit 0. That is
+# this repo's signature defect reached from the direction of the corpus rather than the
+# matcher [[feedback_every_broken_instrument_in_this_repo_fails_toward_clean]].
+# ⚠️ IT CLOSES THE ZERO CASE ONLY, and says so rather than implying more:
+# `brain/failure-classes.md` also asks for a file COUNT assertion and a symlinked-root
+# check, and `Path.rglob` does NOT descend a symlinked directory. A small non-zero
+# corpus -- a partial checkout, a `--root` one level off, a symlinked test subtree --
+# still reports clean. The count is printed for a reader to judge; nothing asserts it.
+if not files:
+    print(f"NO FILES under {root / sub} -- the walk found nothing. Every control above",
+          file=sys.stderr)
+    print("passes on synthetic fixtures, so this would have read GREEN over a corpus it",
+          file=sys.stderr)
+    print("never opened. Check the scan root.", file=sys.stderr)
+    sys.exit(2)
 tot_g = tot_b = 0
 rows = []
 for p in files:

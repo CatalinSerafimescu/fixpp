@@ -41,7 +41,7 @@
 # can see".
 #
 # The enclosing function is found by BRACE MATCHING over comment/literal-blanked
-# source (`ci/cxx_blank.py`, the shared lexer -- not a fifth copy), so the SCOPE of the
+# source (`ci/cxx_blank.py`, the shared lexer -- not a private copy), so the SCOPE of the
 # search carries no N-line constant and none of the census's blind spot.
 # ⚠️ ONE CONSTANT SURVIVES AND IT IS A REAL BLIND SPOT: `MAX_HEAD = 8` bounds how far a
 # WRAPPED `while`/`for`/function head may reach back. A head split over more than that
@@ -111,7 +111,8 @@ FIXED = re.compile(r"\.(run_for|run_one_for|run_until)\s*\(")
 EXHAUST = re.compile(r"\.(poll|poll_one|run)\s*\(")
 # Condition-bounded: already an observation.
 CONDITION = re.compile(r"pump_until\s*\(|pump_until_ready\s*\(|"
-                       r"run_window_then_ready\s*\(|run_to_exhaustion_or_report\s*\(")
+                       r"run_window_then_ready\s*\(|run_to_exhaustion_or_report\s*\(|"
+                       r"yield_window_then_ready\s*\(")
 # ⚠️ A FIXED WINDOW INSIDE A `while`/`for` IS NOT A FIXED WINDOW -- it is a
 # HAND-ROLLED `pump_until`, and calling it a candidate is a false positive. This
 # rule was added because the sweep's first run reported
@@ -489,6 +490,12 @@ void f() {
     clock->advance(seconds{3});
 }
 """, ["CONDITION"]),
+    ("CONDITION spelling: yield_window_then_ready", """
+void f() {
+    if (!co_await yield_window_then_ready(fd, 8, "S")) { co_return; }
+    clock->advance(seconds{3});
+}
+""", ["CONDITION"]),
     ("CONDITION spelling: run_to_exhaustion_or_report", """
 void f() {
     if (!run_to_exhaustion_or_report(ioc, fut, "S")) { return; }
@@ -577,6 +584,23 @@ if bad:
     sys.exit(2)
 
 files = sorted((root / "tests").rglob("*.cpp")) + sorted((root / "tests").rglob("*.hpp"))
+# ⚠️ A ZERO-FILE CORPUS IS AN ERROR, NOT A CLEAN TREE, and this sweep used to print
+# "scanned 0 file(s)" and exit 0. Every control above passes on nothing -- they run on
+# synthetic fixtures -- so the whole script read GREEN while opening not one real file.
+# MEASURED: a mutation arm written for the KIND control ran the script from a copied
+# `ci/` with no `tests/` beside it and reported success. A proven PATTERN is not a
+# proven TRAVERSAL; this is the traversal half.
+# ⚠️ IT IS ONLY THE ZERO CASE, stated so it is not read as more.
+# `brain/failure-classes.md` asks for two more things this does NOT do: assert how many
+# files were examined, and check whether any root is a LINK -- `Path.rglob` does not
+# descend a symlinked directory, so a symlinked test subtree is silently skipped with no
+# row and no diagnostic. A small non-zero corpus still reports clean. The count is
+# printed for a reader to judge; nothing asserts it.
+if not files:
+    print(f"  !!BAD no .cpp/.hpp under {root / 'tests'} -- the walk found nothing. Every")
+    print("        control above passes on synthetic fixtures, so this would have read")
+    print("        GREEN over a corpus it never opened. Check --root.")
+    sys.exit(2)
 rows, escalate, tally = [], [], {}
 for p in files:
     try:
@@ -598,14 +622,120 @@ print("  neither bucket, so a site the loop rule MISCLASSIFIED vanished with no 
 for rel, ln, txt, v in rows:
     print(f"  {v:<13} {rel}:{ln}")
     print(f"                {txt}")
+# ⚠️ THE TAXONOMY IS DATA, NOT PROSE, so the letters at the sites and the letters here
+# cannot drift apart silently. A letter is a CLASSIFICATION written at a test site with no
+# re-derivation recipe attached to the letter itself; if this table is renamed or a letter
+# retired, every site carrying it becomes a dangling reference and nothing says so. That is
+# the `NO-PUMP-IN-FUNCTION` -> `NO-PUMP-IN-SCOPE` rename shape, which this repo has already
+# paid for once. The control below closes it in the loud direction.
+KIND_TABLE = [
+    ("A", ["the advance is a TIME STAMP -- what consumes it is a synchronous",
+           "`clock.now()` in the next builder call, on the caller's thread. No",
+           "waiter exists to miss it."]),
+    ("B", ["no waiter EXISTS: the session was destroyed before the advance."]),
+    ("C", ["the advance must fire NOTHING, and that IS the test's oracle. A staging",
+           "barrier here would invert the test."]),
+    ("D", ["a sleeper must fire, and its arm is a STORED ANCHOR predating the",
+           "advance -- `sleep_until` fires immediately when `deadline <= steady`, so",
+           "a late arm is RESCUED. See the ARM-SHAPE note in",
+           "tests/session/heartbeat_testrequest_test.cpp."]),
+    ("E", ["the sleeper is armed and was OBSERVED before the advance."]),
+    ("F", ["fail-loud: a lost advance surfaces as a BOUNDED, named assertion",
+           "failure, not a hang."]),
+    ("G", ["vestigial: the advance fires nothing the oracle depends on."]),
+]
+
 print("\n=== ESCALATION: no pump in the enclosing function ===")
 print("  These are NOT candidates and NOT dismissals. The staging may be in a CALLER, which")
 print("  no same-function analysis can see, or the sleeper may be parked by construction.")
 print("  ⚠️ THEY ARE LISTED RATHER THAN COUNTED ON PURPOSE: an escalation nobody can")
 print("  enumerate reads as a clean bill, and this bucket is the larger one.")
+print("  #289 batch 19 read every row in this bucket and each site now names its OWN")
+print("  reason at the site. The reasons are NOT interchangeable, which is why the")
+print("  taxonomy is here and the verdict is there:")
+for _letter, _lines in KIND_TABLE:
+    print(f"    {_letter}  {_lines[0]}")
+    for _cont in _lines[1:]:
+        print(f"       {_cont}")
+print("  ⚠️ A / B / C / G MEAN A LOST ADVANCE IS HARMLESS. D / E / F mean it is not lost.")
+print("  Collapsing them into one word (\"rescued\") is how a right answer from a wrong")
+print("  mechanism gets copied to a site the mechanism does not cover.")
 for rel, ln, txt in escalate:
     print(f"  {rel}:{ln}")
     print(f"      {txt}")
+
+# ── CONTROL: the KIND vocabulary at the sites must exist in the table above ──────
+# A letter written at a test site is a classification with no recipe attached to it; the
+# definitions live here. Nothing checks the join, so a retired or renamed letter leaves
+# every site carrying it pointing at nothing -- silently. This closes that in the LOUD
+# direction: a letter used but not defined is an error. The reverse (a letter defined but
+# unused) is NOT an error, because deleting the last site of a kind is legitimate.
+#
+# ⚠️ THE CONTROL MUST PROVE IT CAN FIRE. `_KIND_PROBE` is a synthetic site carrying a
+# letter no table entry defines; if the scan does not flag it, the scan is broken and the
+# real reading below is worthless. That is this file's own rule applied to its newest rule.
+_KIND_AT_A_SITE = re.compile(r"KIND ([A-Z])\b")
+_KIND_PROBE = "// #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND Z (synthetic)."
+_defined = {letter for letter, _ in KIND_TABLE}
+
+def _kinds_in(text):
+    return set(_KIND_AT_A_SITE.findall(text))
+
+if _kinds_in(_KIND_PROBE) - _defined != {"Z"}:
+    print("  !!BAD the KIND-vocabulary scan cannot see an undefined letter -- it is inert.")
+    sys.exit(2)
+print("  ok    the KIND-vocabulary scan flags an undefined letter (probe: KIND Z)")
+
+# ⚠️ PER ROW, NOT PER TREE, and the first revision of this control was per tree -- which
+# a hostile review falsified in one line: `_used` was a set over ALL of `tests/`, so
+# deleting ONE escalation row's disposition left every letter still present somewhere and
+# the control still printed `ok`. A control whose population is the whole tree cannot see
+# a single site lose its answer. Each row is checked against the comment block ABOVE IT.
+# ⚠️ THE CONTIGUOUS COMMENT RUN, NOT AN N-LINE LOOKBACK, and the difference is the whole
+# control. A flat window reads a NEIGHBOUR's answer: two of this file's own rows sit a few
+# lines below another dispositioned advance, so a fixed lookback credited them with a
+# letter written about a different site -- and a newly added, undispositioned advance
+# placed under an existing block would have been credited too. Both measured by a hostile
+# round, both EXIT 0 under the lookback version. Walking up only over `//` lines stops at
+# the first statement, so a row can only be credited by a comment written about IT.
+def _kind_above(text_lines, ln):
+    """The KIND letters in the contiguous `//` run immediately above a 1-based row."""
+    run, i = [], ln - 2
+    while i >= 0 and text_lines[i].lstrip().startswith("//"):
+        run.append(text_lines[i])
+        i -= 1
+    return _kinds_in("".join(run))
+
+_used, _rowless = set(), []
+_cache = {}
+for _rel, _ln, _ in escalate:
+    _lines = _cache.setdefault(_rel, (root / _rel).read_text(
+        encoding="utf-8", errors="replace").splitlines(keepends=True))
+    _here = _kind_above(_lines, _ln)
+    if _here:
+        _used |= _here
+    else:
+        _rowless.append(f"{_rel}:{_ln}")
+
+if _rowless:
+    print(f"  !!BAD {len(_rowless)} escalation row(s) carry NO `KIND <letter>` in the "
+          f"comment run immediately above them:")
+    for _r in _rowless:
+        print(f"          {_r}")
+    print("        An escalation row is not a finding and not a dismissal -- it is a")
+    print("        question. Read the site, pick a letter from the table above, and write")
+    print("        it there with the site-specific reason. If no letter fits, the taxonomy")
+    print("        is short one and the table is where to add it.")
+    sys.exit(2)
+
+_undefined = sorted(_used - _defined)
+if _undefined:
+    print(f"  !!BAD KIND letter(s) used at a site but NOT defined above: {_undefined}")
+    print("        Either the taxonomy was renamed and the sites were not, or a site")
+    print("        invented a letter. Both are the rename-propagation shape.")
+    sys.exit(2)
+print(f"  ok    all {len(escalate)} escalation row(s) carry a KIND, and every letter used "
+      f"({sorted(_used)}) is defined here")
 
 print("\n=== TALLY (nearest preceding pump, same function) ===")
 for k in sorted(tally, key=lambda x: -tally[x]):

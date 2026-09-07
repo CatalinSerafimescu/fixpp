@@ -1,0 +1,39 @@
+# ci/red-arms/batch19-labels.txt -- the seam-forceable sites of #289 batch 19.
+#
+# Feed to:  bash ci/pump-seam-arm.sh linux-clang-debug ci/red-arms/batch19-labels.txt
+#
+# One label per line. Every line here is a site that passes its label to
+# `yield_window_then_ready`, the COROUTINE-SIDE primitive added by this batch. It
+# reaches the same `forced_miss_here` strcmp namespace as `run_window_then_ready` /
+# `pump_until_ready` / `pump_until` / `run_to_exhaustion_or_report`, and it reports via
+# `kWindowMiss` -- so `ci/pump-seam-arm.sh` grades these with NO change to its
+# `REPORT_TAIL` set. That reuse was the point; see the primitive's header for why a
+# FOURTH literal was rejected.
+#
+# ⚠️ `ci/pump-red-arm.sh` CANNOT ARM THESE, and that is structural, not an omission: its
+# textual driver rewrites a `run_window_then_ready` CALL into a forced miss, and these
+# are `yield_window_then_ready` calls inside a coroutine. Same standing gap as the
+# `pump_until_ready` and `run_to_exhaustion_or_report` sites of batches 13 and 17.
+#
+# ⚠️ THE SEAM ARM IS NOT THE ARM THAT PRICES THIS BATCH. A forced miss proves the miss
+# branch reports; it cannot show that the guard was worth adding, because forcing skips
+# the very wait whose absence is the defect. That is
+# `ci/red-arms/batch19-coroutine-side-get.sh`, which injects a defect and shows the
+# pre-batch shape WEDGES where the guarded shape REPORTS.
+#
+# ⚠️ THE THREE FILES ARE THREE EXECUTABLES, NOT ONE. `test_pool_exhaustion_reuse` is its
+# own `add_executable` (tests/sync/CMakeLists.txt); the other two are in
+# `sync_pure_tests`. `pump-seam-arm.sh` loops over all binaries, so this is a note for
+# anyone running a cell by hand -- derive targets from `ninja -t targets`, never from the
+# directory name.
+DrainPredrainHolder::HolderSplicesWaitersWhenUnlocking/drain
+DrainPredrainHolder::HolderSplicesWaitersWhenUnlocking/waiters
+DrainPredrainHolder::HolderUnlocksWhileDrainYields/drain
+DrainPredrainHolder::StressMultipleHolders/drain
+DrainPredrainHolder::StressMultipleHolders/waiters
+DrainReentrantDuringActive::SecondDrainerAwaitsFirstCompletion/drain1
+DrainReentrantDuringActive::SecondDrainerAwaitsFirstCompletion/drain2
+DrainReentrantDuringActive::SecondDrainerAwaitsFirstCompletion/waiters
+SyncPoolExhaustionReuse::BoundedCounterPreventsWrapAndReissue/drain
+SyncPoolExhaustionReuse::ExhaustionAt513thWaiterFailsClosed/drain
+SyncPoolExhaustionReuse::FreedSlotReusedViaFreeListAfterExhaustion/drain

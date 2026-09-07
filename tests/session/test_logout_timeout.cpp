@@ -365,6 +365,20 @@ TEST_F(LogoutTimeoutTest, Acceptor_TimeoutFires_SurfacesLogoutTimeoutEvent) {
     feed(sess, peer_logout);
 
     // Advance clock past the 300ms timeout (peer doesn't TCP-close).
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND G (vestigial).
+    // The comment above describes an acceptor arming a 300 ms disconnect timeout. That is
+    // not what this cell exercises today: `Existing005_Acceptor_PeerLogout_EchoesAnd-
+    // Disconnects` in this same file asserts the acceptor is already Disconnected once
+    // `feed(peer_logout)` returns, and `Initiator_DriveLogout_EmitsNoEvent_ConfirmStub-
+    // Symmetry` below asserts THIS cell's oracle -- a non-empty `recent_events()` -- with
+    // no clock advance at all. So the event comes from the feed, not from a timeout, and
+    // this advance fires nothing the oracle depends on.
+    // ⚠️ RE-DERIVE, DO NOT TRUST THIS: starve both lines below to `advance(0ms)` /
+    // `run_for(0ms)`, rebuild, run the cell. GREEN means it is still vestigial; RED means
+    // a timeout path has since become live and this comment is the thing that is wrong.
+    // Left in place rather than deleted: the intent it records (013's drive_logout
+    // timeout) is a real design point, and deleting the line would delete the only
+    // remaining trace of it.
     clock->advance(std::chrono::milliseconds{500});
     ioc.run_for(50ms);
     ioc.restart();

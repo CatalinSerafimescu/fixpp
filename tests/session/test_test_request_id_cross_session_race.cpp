@@ -1743,6 +1743,18 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // The concurrent phase after this is unchanged and is still what opens the
     // TSan window; this phase only removes the oracle's dependence on a lucky
     // schedule.
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND F (fail-loud) + D.
+    // Two independent reasons, and they are not equally durable -- rely on the first.
+    //   FAIL-LOUD: every advance here is followed by `await_test_req_ids(N, deadline)`
+    //     under `kWaitBudget` with an ASSERT. Deleting all four advances was measured to
+    //     fail at that budget with a named assertion, NOT to hang -- so a lost advance in
+    //     this file is a bounded, attributable failure by construction. Re-derive by
+    //     deleting them and timing the cell; the budget is the source constant, not a
+    //     figure worth writing down here.
+    //   ARM SHAPE: the liveness loop arms from a stored anchor that predates the advance,
+    //     so `sleep_until`'s `deadline <= steady` branch rescues a late arm anyway.
+    // The second reason would evaporate if the arm ever became now-relative; the first
+    // would not. That is why they are written in this order.
     clock_a->advance(std::chrono::milliseconds{1500});
     // Its own deadline, deliberately NOT shared with session B's wait below. These
     // two are sequential but UNRELATED — B's clock is not advanced until after A's
@@ -1762,6 +1774,8 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         ASSERT_TRUE(f.get().has_value()) << "session A rejected its first Heartbeat";
     }
 
+    // #289 batch 19 -- ESCALATION ROW: KIND F, same disposition and same
+    // measurement as the first advance in this test. See it there.
     clock_b->advance(std::chrono::milliseconds{1500});
     ASSERT_TRUE(
         sB.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
@@ -1786,7 +1800,11 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
 
     // ── Iterations 1..N-1, CONCURRENT: the TSan window ────────────────────────
     for (int i = 1; i < kIterations; ++i) {
+        // #289 batch 19 -- ESCALATION ROW: KIND F, same disposition and same
+        // measurement as the first advance in this test. See it there.
         clock_a->advance(std::chrono::milliseconds{1500});
+        // #289 batch 19 -- ESCALATION ROW: KIND F, same disposition and same
+        // measurement as the first advance in this test. See it there.
         clock_b->advance(std::chrono::milliseconds{1500});
 
         const auto want = static_cast<std::size_t>(i + 1);
