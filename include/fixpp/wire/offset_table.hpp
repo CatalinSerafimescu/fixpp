@@ -125,18 +125,26 @@ public:
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]]) noexcept;
 
+    // 384 (C-8.4 row 1): `group_delim_fn` has NO default. It used to default to
+    // `nullptr`, which let a caller build a table carrying a dictionary AND a
+    // membership predicate but NO delimiter oracle *without saying so* — the
+    // half-threaded shape whose splitter behaviour C-8.4 row 1 justified for a
+    // case (`opaque_dict == nullptr`) that #220 made unreachable. Passing an
+    // explicit `nullptr` is still supported and still takes the wire-derived
+    // split; what is gone is doing it by omission. See C-8.4 and
+    // `group_slices_status()`.
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], void const* opaque_dict,
-                group_member_fn_t group_member_fn,
-                group_delim_fn_t group_delim_fn = nullptr) noexcept;
+                group_member_fn_t group_member_fn, group_delim_fn_t group_delim_fn) noexcept;
 
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg) noexcept;
 
+    // 384: same no-default rule as the sibling ctor above.
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg,
                 void const* opaque_dict, group_member_fn_t group_member_fn,
-                group_delim_fn_t group_delim_fn = nullptr) noexcept;
+                group_delim_fn_t group_delim_fn) noexcept;
 
     // Non-RED build status (ok, or the wire_* cap/format error hit).
     [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
@@ -340,7 +348,7 @@ private:
     [[nodiscard]] static OffsetTable* build_nested_subview(
         std::byte const* data, std::size_t len, std::pmr::memory_resource* mr,
         void const* opaque_dict, group_member_fn_t group_member_fn, detail::generation_token gen,
-        group_context const& ctx, group_delim_fn_t group_delim_fn = nullptr) noexcept;
+        group_context const& ctx, group_delim_fn_t group_delim_fn) noexcept;
 
     // 063 T006: builds an actual `group_context` value from the raw fields
     // below (needs the complete type — defined in offset_table.cpp, which

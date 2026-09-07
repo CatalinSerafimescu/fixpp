@@ -408,7 +408,17 @@ public:
     // The three-arg `group_first_field` above cannot tell a caller which of two
     // things happened, because both come back as a plain `std::uint16_t`:
     //
-    //   0        — `no_tag` is not a group anywhere (the group bit is clear)
+    //   0        — no delimiter is resolvable for `no_tag` here. ⚠️ 384: this is
+    //              NOT the same as "not a group anywhere", which is what this
+    //              line used to say. `add_group_member(no_tag, t)` SETS the
+    //              group bit while leaving `group_first_` empty, so a
+    //              hand-built table can answer members-YES / delimiter-0 for
+    //              the same tag. A consumer that reads 0 as "absent" is wrong
+    //              in exactly that state — see
+    //              `OffsetTable::group_slices_status()`, which is reached only
+    //              AFTER membership has said yes and therefore treats 0 as
+    //              "no answer", not as "no group" (B&L B-384-2). A LOADED
+    //              dictionary cannot be in that state; the bare API can.
     //   non-zero — EITHER the context store answered, OR the context MISSED and
     //              the legacy bare store answered with the globally-first-seen
     //              variant (the DUAL-STORE INVARIANT note above is the

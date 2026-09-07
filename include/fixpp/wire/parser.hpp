@@ -123,9 +123,12 @@ public:
     using group_member_fn_t = OffsetTable::group_member_fn_t;
     using group_delim_fn_t = OffsetTable::group_delim_fn_t;
 
+    // 384: `group_delim_fn` has NO default — see the same note on
+    // `OffsetTable`'s dict-aware ctors (offset_table.hpp). A table carrying a
+    // dictionary but no delimiter oracle must now say so at the call site.
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr, void const* opaque_dict,
                 classify_fn_t classify_fn, group_member_fn_t group_member_fn,
-                group_delim_fn_t group_delim_fn = nullptr) noexcept
+                group_delim_fn_t group_delim_fn) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
                frame.token()},  // [2b §6.4] thread real pool token
@@ -150,8 +153,7 @@ public:
     // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr, OffsetTable::Config cfg,
                 void const* opaque_dict, classify_fn_t classify_fn,
-                group_member_fn_t group_member_fn,
-                group_delim_fn_t group_delim_fn = nullptr) noexcept
+                group_member_fn_t group_member_fn, group_delim_fn_t group_delim_fn) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
                frame.token()},  // [2b §6.4] thread real pool token

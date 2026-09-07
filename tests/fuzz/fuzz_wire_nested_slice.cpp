@@ -87,6 +87,79 @@ bool always_group_member(void const*, fixpp::wire::group_context const&, std::ui
     return true;
 }
 
+// 384: the delimiter oracle, fuzzer-driven. Before 384 this harness omitted
+// the callback entirely and took the default `nullptr`, so the ONLY splitter
+// shape it ever exercised was the wire-derived one — the half-threaded shape
+// that no production construction builds. The answer travels through the
+// `opaque_dict` pointer this harness already threads, exactly as a real oracle
+// reads a real dictionary through it; nothing here needs mutable state.
+//
+// An answer of 0 leaves `group_slices_status()` on the wire-derived delimiter,
+// which is behaviourally the pre-384 `nullptr` construction; a non-zero answer
+// takes the dictionary-sourced branch.
+//
+// ⚠️ HOW THE VALUE IS CHOSEN IS LOAD-BEARING, and the obvious choice — 16
+// arbitrary input bits — is a COVERAGE REGRESSION, not a gain. Two ways:
+//   (a) an arbitrary 16-bit value is non-zero on all but 2^-16 of inputs, so
+//       the wire-derived shape (which EVERY input took before 384) would become
+//       effectively unreachable; and
+//   (b) an arbitrary delimiter almost never equals a tag that is actually on
+//       the wire, so `entries_[k].tag == delim` is false throughout and the
+//       split collapses to a single slice — whereas the wire-derived delimiter
+//       is present by construction.
+// So the value is chosen from the SLICE'S OWN BYTES and a selector bit picks
+// the shape (see `pick_fuzz_delim`).
+//
+// MEASURED, because a coverage claim asserted is a coverage claim that rots.
+// Method: a temporary `__builtin_trap()` on the stated condition, 500k runs
+// over `tests/fuzz/corpus`, one arm per line. Re-run it the same way.
+//   - oracle answers 0,   split non-empty ......... REACHED
+//   - oracle answers != 0, split non-empty ......... REACHED
+//   - oracle answers 0,   split has >= 2 instances . REACHED
+//   - oracle answers != 0, split has >= 2 instances . NOT reached in 500k
+//
+// ⚠️ THAT LAST LINE IS A REAL LIMIT OF THIS HARNESS, NOT A ROUNDING ERROR, and
+// it is recorded rather than papered over. A MULTI-instance split needs the
+// delimiter to equal a tag the sub-table actually parsed out of the slice; the
+// wire-derived delimiter IS such a tag by construction, while an oracle-supplied
+// one only coincides by luck. So this harness covers the dictionary-sourced
+// branch and its single-instance split, and does NOT cover a dictionary-sourced
+// MULTI-instance split. Closing that would need the harness to plant a
+// structured `tag=value<SOH>` run in the slice and hand the oracle that tag —
+// the same trick the zero-count exposer below already uses for a fixed prefix.
+// Deliberately not done here; `tests/wire/offset_table_test.cpp` and
+// `typed_read_split_agreement_test.cpp` carry the multi-instance dictionary
+// split as deterministic cells.
+std::uint16_t fuzz_group_delim(void const* d, fixpp::wire::group_context const&,
+                               std::uint16_t) noexcept {
+    return *static_cast<std::uint16_t const*>(d);
+}
+
+// The delimiter the oracle above reports, per input.
+//   - selector bit clear -> 0: the pre-384 wire-derived shape.
+//   - selector bit set   -> the raw big-endian value of the first two input
+//     BYTES. ⚠️ This is NOT a parsed tag and does not tend to match one: FIX
+//     tags are ASCII DECIMAL read up to `=`, so a slice opening `12=` parses
+//     as tag 12 while this returns 0x3132 == 12594. An earlier version of this
+//     comment claimed the value was "drawn from the slice's own leading bytes,
+//     so it has a real chance of matching an entry the sub-table parsed" —
+//     false, and it contradicted the coverage note above, which says the same
+//     thing correctly (the two coincide only by luck). What the arm actually
+//     buys is a NON-ZERO oracle answer reaching the dictionary-sourced branch;
+//     the multi-instance dictionary split stays uncovered here and is carried
+//     by the deterministic cells named above. A drawn 0 stays 0 and simply
+//     lands in the first arm.
+std::uint16_t pick_fuzz_delim(const uint8_t* data, size_t size) noexcept {
+    if (size < 4U) {
+        return 0;  // too short to carry both a selector and a value
+    }
+    if ((data[size - 1U] & 1U) == 0U) {
+        return 0;
+    }
+    return static_cast<std::uint16_t>((static_cast<unsigned>(data[0]) << 8) |
+                                      static_cast<unsigned>(data[1]));
+}
+
 }  // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
@@ -117,9 +190,16 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
                                               std::pmr::null_memory_resource()};
 
-    int dict_token = 0;  // arbitrary non-null opaque_dict identity
+    // 384: the opaque_dict identity is now also the delimiter the oracle above
+    // reports (see `pick_fuzz_delim` for why the value is drawn from the slice
+    // rather than from arbitrary bits). `always_group_member` ignores the
+    // pointer, so widening its meaning costs that predicate nothing.
+    std::uint16_t dict_token = pick_fuzz_delim(data, size);
     // Dict-aware ctor is MANDATORY on the nested-descent path (INV-G7).
-    OffsetTable root{*fv_or_err, &arena, &dict_token, &always_group_member};
+    // 384: BOTH callbacks, because the dict-aware ctors no longer default the
+    // delimiter one — the omission this harness used to rely on is what the
+    // issue is about.
+    OffsetTable root{*fv_or_err, &arena, &dict_token, &always_group_member, &fuzz_group_delim};
 
     // The slice-scoped input shape under test: `data[0 .. size-2]` is the
     // slice content, `data[size-1]` plays the RC1-guaranteed in-bounds
