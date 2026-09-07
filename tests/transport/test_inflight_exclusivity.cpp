@@ -48,9 +48,11 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_errors.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 // Internal transport header — needed for asio_tls_transport::timer_epochs(), the
@@ -58,10 +60,27 @@
 #include "transport/asio_tls_transport.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
+// Test-access class — `asio_tls_transport` declares
+// `friend class asio_tls_transport_test_access;` UNCONDITIONALLY, so reaching a
+// private member through it changes nothing inside the class definition. That is
+// the point: a `#ifdef FIXPP_TEST_HOOKS` setter would make the class a different
+// TOKEN SEQUENCE here than in fixpp_transport.a, which is an ODR violation even
+// though the layout is identical. Same shape as the local definitions in
+// tests/session/test_engine_session_strand.cpp and tests/perf/.
+namespace fixpp::transport {
+class asio_tls_transport_test_access {
+public:
+    static void set_close_fault_hook(asio_tls_transport& t, std::function<void()> hook) {
+        t.close_fault_hook_ = std::move(hook);
+    }
+};
+}  // namespace fixpp::transport
+
 namespace {
 
 using fixpp::core::error;
 using fixpp::core::expected_t;
+using fixpp::transport::asio_tls_transport;
 using fixpp::transport::ConnectInfo;
 using fixpp::transport::handshake_result;
 using fixpp::transport::make_asio_plain_transport_factory;
@@ -1349,6 +1368,121 @@ TEST(InflightExclusivity, CloseAsyncCancelledMidCloseStillClosesTheSocket) {
     // a suspended SSL op is the hazard close() documents — so the outcome is the
     // #348 symptom and that is correct here. What must hold is that the peer's
     // read TERMINATED.
+
+    (void)pair.server->close();
+    ioc.run_for(200ms);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #360 — close_async()'s catch(...) recovery path, witnessed through the fault
+// seam instead of through a cancellation.
+//
+// WHY THIS CELL EXISTS. The cell above used to drive that handler: it emitted a
+// cancellation during the quiesce, the wait_ec break fell through with the state
+// still cancelled, and the throw landed at the async_shutdown co_await's
+// precheck. #358 replaced close_async()'s entry reset with disable_cancellation{}
+// to fix a measured hang, and with it that whole route — while the cell above
+// stayed GREEN. It now observes the normal path.
+//
+// So this cell does not repeat the cancellation. It sets the #360 seam, which
+// makes the deadline-timer construction throw — one of the two sources the
+// catch's own comment names as remaining — and re-establishes the SAME ENTRY
+// STATE the lost witness had: the quiesce ran (the client has a read in flight,
+// asserted below), the socket is still open, state_ is already `closed`.
+//
+// THE RED ARM, unchanged from #348's: delete the `socket_.close(ec)` from
+// close_async's catch(...) and this cell MUST fail on `server_read.has_value()`.
+// It is the peer's read that discriminates: nothing else closes the client
+// socket inside the assertion window — the transport is still owned by `pair`,
+// and the server's own close() is after the assertions.
+//
+// ⚠️ hook_fired is not decoration. Without it a seam that silently never ran
+// would let close_async take the NORMAL path, which also closes the socket and
+// also terminates the peer's read — i.e. the cell would pass while witnessing
+// nothing, which is exactly the failure #360 was filed about.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(InflightExclusivity, CloseAsyncFaultAfterQuiesceStillClosesTheSocket) {
+    if (std::string(FIXPP_TLS_FIXTURE_DIR).empty()) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    asio::io_context ioc;
+    LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
+    auto pair = make_handshaken_pair(fixture, ioc);
+
+    std::optional<expected_t<std::size_t>> server_read;
+    std::optional<expected_t<std::size_t>> client_read;
+    std::byte server_buf{0};
+    std::byte client_buf{0};
+    Transport* server_raw = pair.server.get();
+    Transport* client_raw = pair.client.get();
+
+    auto* client_tls = dynamic_cast<asio_tls_transport*>(client_raw);
+    ASSERT_NE(client_tls, nullptr) << "the seam lives on the concrete TLS transport";
+
+    bool hook_fired = false;
+    fixpp::transport::asio_tls_transport_test_access::set_close_fault_hook(
+        *client_tls, [&hook_fired]() {
+            hook_fired = true;
+            throw std::runtime_error("#360 close_async fault seam");
+        });
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&server_read, server_raw, &server_buf]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            server_read =
+                co_await server_raw->async_read_some(std::span<std::byte>{&server_buf, 1});
+        },
+        asio::detached);
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&client_read, client_raw, &client_buf]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            client_read =
+                co_await client_raw->async_read_some(std::span<std::byte>{&client_buf, 1});
+        },
+        asio::detached);
+
+    ioc.run_for(300ms);
+    ASSERT_FALSE(server_read.has_value());
+    ASSERT_FALSE(client_read.has_value())
+        << "the closing side must have a read in flight, or close_async never enters the quiesce "
+           "and this cell does not reproduce the lost witness's entry state";
+
+    std::optional<expected_t<void>> closed;
+    bool escaped = false;
+
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&closed, &escaped, client_raw]() -> asio::awaitable<void> {
+            try {
+                closed = co_await client_raw->close_async();
+            } catch (...) {
+                escaped = true;
+            }
+        },
+        asio::detached);
+
+    ioc.run_for(3s);
+
+    EXPECT_TRUE(hook_fired)
+        << "the fault seam never ran, so this cell witnesses the NORMAL close path — the same "
+           "loss of power #360 is filed about, one level down";
+    EXPECT_FALSE(escaped) << "close_async let the injected exception escape to its caller";
+    ASSERT_TRUE(closed.has_value());
+    EXPECT_TRUE(closed->has_value())
+        << "the recovery path reports the same best-effort success close() reports";
+
+    ASSERT_TRUE(server_read.has_value())
+        << "THE DEFECT: close_async unwound past its state transition without closing the "
+           "socket, so the peer's read is still pending and the connection is live behind a "
+           "transport whose state_ says closed — close() and a second close_async() are both "
+           "no-ops from here, so nothing can recover it.";
+    ASSERT_FALSE(server_read->has_value());
+
+    // Deliberately NOT asserting WHICH error the peer sees, for the same reason
+    // the cell above does not: the recovery close is abortive by construction.
 
     (void)pair.server->close();
     ioc.run_for(200ms);

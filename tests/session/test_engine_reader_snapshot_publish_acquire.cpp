@@ -160,7 +160,12 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     // ── Build an insecure plain-TCP factory (no TLS fixtures required). ─────
     // insecure_plain_tcp is [[deprecated]]; the pragma at the top suppresses it.
     fixpp::transport::Transport::Config tcfg;
-    tcfg.connect_timeout = 200ms;  // short connect timeout; connect is instant on loopback
+    // Short connect timeout. ⚠️ Since #361 this budget covers the RESOLVE as well
+    // as the connect — it is one absolute deadline for the whole attempt. Still
+    // ample: the host is a literal, and the first async_resolve in a process
+    // (which lazily spawns asio's resolver work thread and loads the NSS modules)
+    // measures ~1 ms under ASan, i.e. 0.5 % of this budget.
+    tcfg.connect_timeout = 200ms;
     auto factory_r = fixpp::transport::make_asio_plain_transport_factory(tcfg);
     ASSERT_TRUE(factory_r.has_value()) << "make_asio_plain_transport_factory failed";
 

@@ -128,11 +128,19 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
 //
 // ── #289: the `run_for(W); restart(); fut.get()` migration ───────────────────
 //
-// The sites in this file use `run_window_then_ready`
+// Most sites in this file use `run_window_then_ready`
 // (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard
 // #289 names is the UNCONDITIONAL `get()`, not the fixed window. On a
 // manually-driven io_context a `get()` the window did not satisfy blocks with
 // nothing left to pump it -- a deadlock ctest reports as a timeout.
+//
+// ⚠️ `do_close` IS THE EXCEPTION, and its own comment says why. A fixed window is
+// safe where the thing being awaited is driven by QUEUED WORK the window can run.
+// It is NOT safe where the window's job is to get a coroutine to a MOCK-CLOCK
+// sleep before the test advances that clock: too short a window loses the advance
+// outright, and no later pump recovers it. That site is bounded by a CONDITION
+// (`pump_until` on `LogoutSent`) instead. `drive_to_active`'s two sites are not
+// clock-staged and keep their windows.
 //
 // Teardown is deliberately NOT a fixture-destructor drain, which is the shape
 // PRs #301 and #307 used for fixtures that OWN their Session. Here every
@@ -212,28 +220,53 @@ protected:
         (void)td;
     }
 
-    // Clean-up close: advance clock past timeout and drain.
-    void do_close(Session& sess) {
+    // Clean-up close: stage the Logout, advance the mock clock past the timeout, drain.
+    //
+    // ⚠️ THE STAGING WINDOW IS A CONDITION, NOT A DURATION, AND THAT IS THE WHOLE FIX.
+    // `close(graceful)` must still be PENDING when staging returns -- the Logout timeout
+    // it parks on only elapses at the `clock->advance` below -- so this is a staging
+    // window and not a completion window. An earlier revision drew the wrong conclusion
+    // from that correct premise and left the window BLIND (`ioc.run_for(50ms)`), on the
+    // reasoning that migrating it would report a miss on the one outcome the helper
+    // requires. Migrating it to an OBSERVABLE staging condition does not: `LogoutSent`
+    // is reached when the coroutine has emitted Logout and parked, which is exactly
+    // "staged but not complete".
+    //
+    // Blind is what broke it. If the coroutine has not reached its mock-clock sleep when
+    // the window returns, `clock->advance()` lands on a timer that is not yet armed, the
+    // advance is LOST, and no later pump can complete the close -- it is unrecoverable,
+    // not slow. On a starved `ctest --parallel` lane 50 ms of wall clock buys nothing,
+    // and the failure is byte-identical to starving the window to `0ms`, which is how it
+    // was reproduced. Same shape, same cause and same fix as
+    // `tc_logout_test.cpp`'s `GracefulLogoutTimeout/phase1` (#337).
+    void do_close(Session& sess, const SessionConfig& cfg) {
         auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
-        // #289 PRESERVED SITE -- deliberately NOT migrated. This `run_for` is a
-        // STAGING window, not a completion window: `close(graceful)` is REQUIRED to
-        // still be pending when it returns, because the Logout timeout it is waiting
-        // on only elapses at the `clock->advance` two lines below. Migrating it would
-        // report a miss on the one outcome this helper requires -- the same lexical
-        // homograph PR #313 found in `cancellation_two_phase_test.cpp` and preserved
-        // for the same reason. The discriminator is the `clock->advance()` BETWEEN
-        // the window and the `get()`.
-        //
-        // NOTE FOR #289 TRACKING: migrating the terminal window below pushes
-        // `close_fut.get()` past `ci/pump-census.sh`'s six-line lookahead, so THIS
-        // line leaves the census pin as a side effect of that edit rather than by
-        // being migrated. This comment is the record the census can no longer be.
-        ioc.run_for(50ms);
-        ioc.restart();
+
+        if (!fixpp::test_support::pump_until(
+                ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+                fixpp::test_support::kPumpBudget, fixpp::test_support::kPumpSlice,
+                "TC004Liveness::do_close/stage")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "TC004Liveness::do_close/stage");
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                          << "TC004Liveness::do_close/stage";
+            return;
+        }
+
         clock->advance(std::chrono::seconds{3});
-        if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms)) {
+
+        // ⚠️ BOUNDED BELOW `logout_disconnect_timeout_ms`, AND DERIVED RATHER THAN CHOSEN.
+        // `Session::close` joins phase 1 with a REAL `asio::steady_timer close_grace`
+        // armed for that same duration, which the mock clock does not govern. A budget
+        // above it completes `close_fut` off the REAL timer whenever the mock path did
+        // not fire, and the test goes green having never exercised the mock-clock
+        // timeout it exists to test. Deriving it means it cannot drift if the default
+        // moves. The arm for this is NOT a forced miss -- it is deleting the
+        // `clock->advance()` above and asserting RED.
+        const auto close_budget = std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms} / 2;
+        if (!fixpp::test_support::pump_until_ready(ioc, close_fut, close_budget)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "TC004Liveness::do_close");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "TC004Liveness::do_close";
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "TC004Liveness::do_close";
             return;
         }
         (void)close_fut.get();
@@ -300,7 +333,7 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest) {
     EXPECT_TRUE(found_hb) << "Engine must emit Heartbeat(35=0) in reply to TestRequest";
     EXPECT_EQ(hb_test_req_id, "HELLO") << "Heartbeat must echo the inbound TestReqID(112=HELLO)";
 
-    do_close(sess);
+    do_close(sess, cfg);
 }
 
 // ── TC-004 4b variant: TestReqID empty / different value ──────────────────────
@@ -347,7 +380,7 @@ TEST_F(TC004Liveness, Fix42_4b_ReceivedTestRequest_EchoIsExact) {
     EXPECT_EQ(echoed_id, "LIVENESS_PROBE_42")
         << "Heartbeat must echo the exact TestReqID from the inbound TestRequest";
 
-    do_close(sess);
+    do_close(sess, cfg);
 }
 
 }  // namespace fixpp::session::test

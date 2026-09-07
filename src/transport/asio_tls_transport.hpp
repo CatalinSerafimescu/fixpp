@@ -65,6 +65,7 @@
 #include <fixpp/transport/listener_events.hpp>  // 013 T039: ListenerEvents
 #include <fixpp/transport/tls_transport.hpp>    // TlsTransport + handshake_result
 #include <fixpp/transport/transport.hpp>        // Transport + ConnectInfo + Config
+#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -259,6 +260,20 @@ public:
     // call async_handshake twice). Used by:
     //   tests/transport/test_inflight_exclusivity.cpp (DISABLED_ integration cells)
     //   tests/transport/test_tls_handshake_pinset_rotation.cpp (rotation cell)
+    //   tests/session/test_engine_session_strand.cpp, tests/perf/... (socket_of)
+    // Each such TU DEFINES this class locally; the declaration here is
+    // unconditional, so the class definition is token-identical in every TU.
+    //
+    // ⚠️ THAT LAST SENTENCE IS WHY close_fault_hook_ (#360) HAS NO SETTER.
+    // A setter would have to be either always public — a production method that
+    // exists only for a test — or `#ifdef FIXPP_TEST_HOOKS`-gated, which is what
+    // `Engine` and `file_store` do and which is FORMALLY AN ODR VIOLATION: the
+    // ODR requires the class definition to be the same TOKEN SEQUENCE in every
+    // TU, and identical layout does not discharge that. The library is compiled
+    // without the macro, so a gated setter really would give the test TU and
+    // fixpp_transport.a two different definitions of this class, linked into one
+    // program. This friend is already unconditional, so routing through it
+    // changes nothing inside the class and the question does not arise.
     friend class asio_tls_transport_test_access;
 
 private:
@@ -325,6 +340,45 @@ private:
     // already throwing ([arch §5.3] carve-out) and one already does a
     // make_shared (ssl_ctx_ above) inside the same trap_throw boundary.
     std::shared_ptr<timer_epoch_state> timer_epochs_{std::make_shared<timer_epoch_state>()};
+
+    // ── close_async fault seam (#360) ───────────────────────────────────────
+    //
+    // Makes the statement after close_async()'s state transition throw ON
+    // DEMAND, so the `catch (...)` recovery path has a witness again.
+    //
+    // WHY A SEAM AND NOT A CANCELLATION. #348's witness reached that handler by
+    // emitting a cancellation during the quiesce; #358 replaced close_async()'s
+    // entry reset with `disable_cancellation{}` to fix a measured hang, after
+    // which nothing is recorded, nothing throws, and the route is gone. The cell
+    // stayed GREEN while losing all of its power over the branch — the 2x2 is at
+    // the `catch` itself. Reverting the entry reset is NOT the way back: it
+    // re-opens the #358 hang.
+    //
+    // PRIVATE, WITH NO SETTER. Reached only through
+    // asio_tls_transport_test_access, for the ODR reason spelled out at that
+    // friend declaration above. No production code path writes it, so it is null
+    // in every shipped build; src/ is not an installed include root either, so
+    // SC-010/SC-017 hold twice over. Cost on the close path: one null
+    // std::function test.
+    //
+    // Not in *timer_epochs_: that block's admission rule is "must survive the
+    // transport's destruction", and this is read only from a live frame.
+    //
+    // ⚠️ WHAT THE WITNESS DOES AND DOES NOT COVER. The hook is invoked at ONE
+    // point, chosen to be the one ROUND 1's cancellation threw at: the
+    // `async_shutdown` co_await's precheck. Entry state there — quiesce
+    // completed, socket still open, `state_` already `closed`, AND the close
+    // deadline armed with its epoch un-retired, so the catch is re-entered with
+    // a live timer handler holding `this`. An earlier site (before the deadline
+    // is constructed) would have been simpler and would NOT have reproduced that
+    // last part; the first draft placed it there and claimed a like-for-like
+    // restoration it did not have.
+    //
+    // Still not covered: a throw from anywhere else in the `try` — the quiesce
+    // loop above has no witness. And the hook INJECTS an exception at that
+    // boundary rather than making asio's own allocation fail, so this is
+    // evidence about the catch, not about allocation behaviour.
+    std::function<void()> close_fault_hook_{};
 
     // #346: read/write in-flight flags live in *timer_epochs_, managed by
     // detail::inflight_flag_guard — rationale in that header.

@@ -378,18 +378,26 @@ template <std::uint16_t NoTag, class GroupT>
     // defeating the dedicated OOM error code and violating fail-closed.
     [[nodiscard]] fixpp::dict::table_view membership_copy() const;
 
-    // 066-dict-backed-inbound-parse T007/T008: companion predicate to
-    // membership_copy() — true iff THIS view is itself dict-backed
-    // (opaque_dict_ non-null). A clone/reify propagation site MUST bind its
-    // re-framed MessageView dict-backed ONLY when this is true: binding a
-    // non-null opaque_dict at an (empty) copy from a genuinely dict-free
-    // source would flip OffsetTable::group()/consume_group_extent from the
-    // positional dict-free fallback (gated on pointer NULLITY, not table
-    // content — offset_table.cpp:441/:519) to the membership walk, which
-    // fails closed on an empty table (err_required_field_missing) — NOT the
-    // "clone/reify stays dict-free" degenerate case data-model.md / contracts/
-    // inbound-parse.md C4 requires.
-    [[nodiscard]] bool is_dict_backed() const noexcept { return opaque_dict_ != nullptr; }
+// 066-dict-backed-inbound-parse T007/T008: companion predicate to
+// membership_copy() — true iff THIS view is itself dict-backed
+// (opaque_dict_ non-null). A clone/reify propagation site MUST bind its
+// re-framed MessageView dict-backed ONLY when this is true: binding a
+// non-null opaque_dict at an (empty) copy from a genuinely dict-free
+// source would flip OffsetTable::group()/consume_group_extent from the
+// dict-free DECLINE (gated on pointer NULLITY, not table content) to the
+// membership walk over an empty table — NOT the "clone/reify stays
+// dict-free" degenerate case data-model.md / contracts/inbound-parse.md C4
+// requires.
+//
+// 220: this sentence used to end "...from the POSITIONAL dict-free
+// fallback", which no longer exists — group() declines dict-free. Note
+// what that costs the rationale and what it does not: for GROUPS the two
+// states are no longer distinguishable from outside (both yield absent,
+// hence TYPE_MISMATCH), so the predicate is no longer load-bearing THERE.
+// It remains load-bearing for the non-group reasons this method also
+// gates — field classification and unknown_fields(), which do read table
+// CONTENT and so do differ between "no dictionary" and "an empty one".
+[[nodiscard]] bool is_dict_backed() const noexcept { return opaque_dict_ != nullptr; }
 
 private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag) const noexcept {
         if constexpr (Mode == access_mode::Index) {

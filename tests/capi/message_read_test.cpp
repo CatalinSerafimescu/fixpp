@@ -1982,30 +1982,46 @@ TEST(MessageReadGroup, NestedTrailingMemberExcluded_Fix44LegsAsTableView) {
     EXPECT_EQ(outer_687->as_string(), "100");
 }
 
-// 065 T011 — FR-008 dict-free degradation pin (research Decision 3; /analyze
-// E-1 named-safety-invariant needing a DIRECT regression witness). Parses
-// the SAME nested-trailing-member layout as
-// NestedGroupLastInstanceExtentDoesNotAbsorbTrailingOuterMember above (outer
-// 453 -> nested 539 x2 -> trailing outer member 999) with a genuinely
-// dict-free Parser (default ctor: opaque_dict_==nullptr,
-// group_member_fn_==nullptr — no membership oracle at all). Confirms:
-//   (i) no crash / clean run under ASan+UBSan descending via the C-ABI, and
-//  (ii) the result is BYTE-IDENTICAL to today's (pre-065) positional
-//       behavior — the trailing outer member IS STILL absorbed into the
-//       last nested instance (FIXPP_ERR_OK, not TAG_NOT_FOUND). This is the
-//       OPPOSITE disposition of the dict-aware witness above, deliberately:
-//       with no membership predicate, OffsetTable::group()'s dict-free
-//       fallback (src/wire/offset_table.cpp:554-557,
-//       `group_end = entries_.size();`) and the corresponding
-//       build_nested_subview() null-predicate path reproduce the OLD
-//       positional scanner exactly (research Decision 3), so a dict-free
-//       caller sees NO regression relative to pre-065 behavior — satisfying
-//       FR-008's "no worse than today" bar. Asserting FIXPP_ERR_OK here (not
-//       TAG_NOT_FOUND) pins that documented degradation as a regression
-//       guard: if a future change made the dict-free path ALSO exclude the
-//       trailing member, this test would need to change deliberately, not
-//       silently.
-TEST(MessageReadGroup, DictFreeNestedReadDegradesToPositional) {
+// 220 — REWRITTEN from 065 T011's FR-008 dict-free degradation pin, and
+// rewritten DELIBERATELY, which is exactly what the old cell asked for. Its
+// closing sentence read:
+//
+//   "Asserting FIXPP_ERR_OK here (not TAG_NOT_FOUND) pins that documented
+//    degradation as a regression guard: if a future change made the dict-free
+//    path ALSO exclude the trailing member, this test would need to change
+//    deliberately, not silently."
+//
+// This is that change, and it goes further than the old cell anticipated: the
+// dict-free path does not exclude the trailing member, it declines to identify
+// a group at all. `OffsetTable::group()` is now a dictionary-only operation
+// (fixpp#220), so with no membership predicate there is nothing for the C-ABI
+// cursor to descend into and `fixpp_msg_get_group` reports
+// FIXPP_ERR_TYPE_MISMATCH — the E-2 / CA-010-read result for "this tag is not
+// a group here", the same answer a scalar tag gets (see
+// ScalarAsGroupCapi.SymbolTagQueriedAsGroupReturnsTypeMismatch).
+//
+// FR-008's bar was "no crash, no UB, no regression versus today's positional
+// behaviour". The first two still hold — this cell is still an ASan/UBSan
+// witness for a dict-free descent attempt. The third is deliberately NOT met
+// and is SUPERSEDED: 065 took pre-065 positional behaviour as the floor
+// because it was fixing the dict-AWARE path and would not touch the other.
+// #220 establishes that the positional result was itself the defect — the
+// trailing outer member absorbed into the last nested instance is a wrong
+// value returned under FIXPP_ERR_OK, and a caller cannot tell it from a real
+// one. Trading a silently wrong value for a defined refusal is not a
+// regression against that floor; it removes the floor.
+//
+// ⚠️ THIS IS A VISIBLE C-ABI BEHAVIOUR CHANGE for a dict-free caller:
+// fixpp_msg_get_group(453) went from FIXPP_ERR_OK + a cursor whose last nested
+// instance absorbed trailing outer members, to FIXPP_ERR_TYPE_MISMATCH. No
+// exported symbol, header, or enum changes (the 1.5.0 freeze holds); the
+// behaviour is recorded as B-220-1 / L-220-1 in
+// spec/behaviors-and-limitations.md. A caller that needs groups must parse
+// with a dictionary — Parser<access_mode::Index>{dict}.
+//
+// Frame is unchanged from the old cell (outer 453 -> nested 539 x2 -> trailing
+// outer member 999), so the two dispositions are directly comparable.
+TEST(MessageReadGroup, DictFreeGroupReadReportsTypeMismatch) {
     auto buf = make_raw_frame(
         "35=D\x01"
         "453=1\x01"
@@ -2030,35 +2046,31 @@ TEST(MessageReadGroup, DictFreeNestedReadDegradesToPositional) {
     InboundHandle h;
     h.msg.view = &mv_res.value();
 
+    // ANTI-VACUITY: the parse itself must have succeeded and seen the frame.
+    // Without this, a failed parse would produce the same TYPE_MISMATCH below
+    // for an entirely different reason, and this cell would pass while proving
+    // nothing about group identification.
+    const char* probe = nullptr;
+    size_t probe_len = 0;
+    ASSERT_EQ(fixpp_msg_get_string(h.ptr(), 448, &probe, &probe_len), FIXPP_ERR_OK)
+        << "the dict-free parse must still read ordinary scalars — only GROUP identification "
+           "is withdrawn, and this cell is worthless if the message did not parse";
+    EXPECT_EQ(std::string_view(probe, probe_len), "PA");
+
+    // The change proper: no membership oracle => 453 is not identifiable as a
+    // group, so the cursor is never handed out.
     const fixpp_group_t* grp = nullptr;
     size_t count = 0;
-    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
-    ASSERT_EQ(count, 1U);
-    ASSERT_NE(grp, nullptr);
+    EXPECT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_TYPE_MISMATCH)
+        << "dict-free: fixpp#220 makes group identification a dictionary-only operation, so a "
+           "group read reports TYPE_MISMATCH rather than handing back a positionally-derived "
+           "cursor whose last nested instance absorbs trailing outer members";
 
+    // The nested tag behaves identically — there is no path to a nested cursor
+    // that does not go through the outer one.
     const fixpp_group_t* nested = nullptr;
     size_t nested_count = 0;
-    ASSERT_EQ(fixpp_group_get_nested_group(grp, 0, 539, &nested, &nested_count), FIXPP_ERR_OK);
-    ASSERT_EQ(nested_count, 2U);
-    ASSERT_NE(nested, nullptr);
-
-    const char* val = nullptr;
-    size_t vlen = 0;
-    // Genuine nested members still read correctly (no crash / clean run).
-    ASSERT_EQ(fixpp_group_get_field_string(nested, 0, 524, &val, &vlen), FIXPP_ERR_OK);
-    EXPECT_EQ(std::string_view(val, vlen), "NPA0");
-    ASSERT_EQ(fixpp_group_get_field_string(nested, 1, 524, &val, &vlen), FIXPP_ERR_OK);
-    EXPECT_EQ(std::string_view(val, vlen), "NPA1");
-
-    // FR-008 discriminator: dict-free degradation is the documented,
-    // intentional NON-regression vs. pre-065 positional behavior, NOT the
-    // 065 membership-aware fix (which requires a dictionary). The trailing
-    // outer member 999 IS STILL absorbed into nested[last]'s own span.
-    EXPECT_EQ(fixpp_group_get_field_string(nested, 1, 999, &val, &vlen), FIXPP_ERR_OK)
-        << "dict-free degradation: without a membership oracle, the trailing outer "
-           "member is (as before 065) absorbed into the last nested instance — the "
-           "documented safe fallback (research Decision 3), not a regression";
-    EXPECT_EQ(std::string_view(val, vlen), "TRAIL");
+    EXPECT_EQ(fixpp_msg_get_group(h.ptr(), 539, &nested, &nested_count), FIXPP_ERR_TYPE_MISMATCH);
 }
 
 }  // namespace

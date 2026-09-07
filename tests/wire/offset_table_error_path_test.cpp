@@ -15,27 +15,26 @@
 //   - find()'s probe-cap break (:394-396) — unreachable under load-factor < 1,
 //     waived
 //
-// REPAIRED by 085-fold-flat-cap-loop (2026-08-03), research.md R-3. This block
-// previously carried a THIRD waiver reading "group() err_group_too_large —
-// provably unreachable: max table entries = 4096, so avail <= 4095 <
-// default_max_group_entries_per_instance". That claim was FALSE and is
-// withdrawn, not re-pointed. group() has TWO err_group_too_large returns and
-// BOTH are now covered:
-//   - the consume_group_extent overflow return (:577) has been covered since
-//     063 shipped that walk's per-instance cap, by
-//     WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance;
-//   - the flat per-instance cap return, now inside group()'s dict-free `else`
-//     branch (:607), is covered for the first time by
-//     WireOffsetTable.DictFreeDoSCapPerInstanceRejectsOversizedInstance, which
-//     supplies the combination no prior test did — dict-free construction AND
-//     a tightened Config simultaneously.
-// The old waiver's arithmetic was sound only for the DEFAULT Config (both
-// bounds 4096, table clamped at :326, so a segment is <= 4095); it wrongly
-// generalised that to "unreachable", which a caller-tightened
-// max_group_entries_per_instance defeats. The residual looseness on that path
-// is recorded as limitation L-085-1 / fixpp#220, not waived here.
-// Retaining the stale claim would have been a waiver asserting unreachability
-// for a branch a delivered test exercises.
+// REPAIRED by 085-fold-flat-cap-loop (2026-08-03), research.md R-3; AMENDED by
+// 220 (dict-free group() declines). This block once carried a THIRD waiver
+// reading "group() err_group_too_large — provably unreachable: max table
+// entries = 4096, so avail <= 4095 < default_max_group_entries_per_instance".
+// That claim was FALSE and was withdrawn, not re-pointed: its arithmetic held
+// only for the DEFAULT Config, and a caller-tightened
+// max_group_entries_per_instance defeated it.
+//
+// STATE AFTER 220: group() has ONE err_group_too_large return, not two. The
+// flat per-instance cap return that 085 relocated into the dict-free `else`
+// branch is GONE with that branch — group() is now a dictionary-only
+// operation, so there is no second cap to reach. What remains is
+// consume_group_extent's overflow return, covered since 063 by
+// WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance and again,
+// in both directions, by WireOffsetTable.TrailingFieldNotCountedIntoLastInstance.
+//
+// Nothing here is waived as unreachable. The dict-free path's own outcome — an
+// ABSENT group rather than a cap breach — is covered by the
+// WireOffsetTable.DictFreeGroupDeclines* cells, and the limitation the removed
+// branch carried (L-085-1 / fixpp#220) is RESOLVED rather than documented.
 //
 // The line numbers were also stale independently of the false claim: the
 // previous set (125-127, 157-158, 183-184, 231-232) dated from a pre-063
@@ -43,19 +42,22 @@
 // is why this block was repaired rather than merely renumbered.
 
 #include <gtest/gtest.h>
-#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <cstddef>
 #include <cstring>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <vector>
 
+#include "../support/msvc_debug_arena_skip.hpp"
+#include "support/context_group_member_fn.hpp"
 #include "support/failing_pmr_resource.hpp"
 #include "support/frame_view_factory.hpp"
+#include "support/wire_test_hooks.hpp"
 
 namespace {
 
@@ -191,22 +193,69 @@ TEST(OffsetTableErrorPath, GroupOnRedTableReturnsStatusErrorCoversLines165to166)
 
 TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
+    // 220: this cell is now DICT-AWARE, and that is load-bearing rather than
+    // cosmetic. It used to build the table dict-free, and its only assertion is
+    // `slices.empty()`. Once fixpp#220 made group() decline for a dict-free
+    // table, "empty" became satisfiable WITHOUT the bad_alloc catch ever
+    // running — the cell would have kept passing while covering nothing, which
+    // is the failure mode it exists to guard against. A dictionary is what
+    // makes a non-empty result possible, so an empty one can only come from the
+    // catch.
     auto buf = make_raw_frame(
         "453=1\x01"
         "448=A\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
+    fixpp::dict::table_view dict;
+    dict.set_group_first(453, 448);
+    auto* const member_fn = &fixpp_test_support::context_group_member_fn;
+
+    // ── CONTROL ARM: prove the instrument can report NON-empty. ──
+    // Without this, the failing arm below is indistinguishable from a cell
+    // whose group_slices() returns empty for some unrelated reason.
+    {
+        std::pmr::monotonic_buffer_resource ok_arena;
+        OffsetTable ok{*fv, &ok_arena, &dict, member_fn};
+        ASSERT_TRUE(ok.build_status().has_value());
+        ASSERT_FALSE(ok.group_slices(453).empty())
+            << "control: with allocation succeeding, this frame MUST materialise one slice — "
+               "if it does not, the failing arm below proves nothing about the bad_alloc catch";
+
+        // SECOND anti-vacuity guard, and a distinct one: `vector::reserve(n)` is
+        // a NO-OP when n <= capacity(), so a zero reserve bound would allocate
+        // nothing and the injection index below would land on some later call —
+        // silently retargeting the test away from the reserve it names. Assert
+        // the bound is non-zero rather than assuming the dictionary made it so.
+        ASSERT_GT(fixpp::wire::reserve_bound_access_for_testing::get(ok), 0U)
+            << "the dict-aware reserve bound must be non-zero, or reserve() allocates nothing "
+               "and this cell no longer exercises the allocation it is written around";
+    }
+
     // Measure how many PMR allocations OffsetTable construction performs. This is
     // allocator-dependent (libstdc++/libc++ grow vectors 2x → 5 calls here; MSVC's
     // std::pmr grows 1.5x → a different count), so it cannot be hard-coded. We then
     // fail the FIRST post-construction allocation — group_slices_.reserve — which
-    // exercises the bad_alloc degrade path (lines 231-232) on every platform.
+    // exercises the bad_alloc degrade path on every platform.
+    //
+    // The reserve is still the first post-construction allocation on the path
+    // this cell drives: group_slices_reserve_bound()'s dictionary branch runs
+    // stored_group_context(), parse_declared_count() and the membership
+    // predicate, and all three are alloc-free (the predicate is documented so
+    // in tests/support/context_group_member_fn.hpp — group_member_tags returns
+    // a span).
+    //
+    // SCOPE, stated because "dict-aware" would overclaim: MEMBERSHIP is
+    // threaded here, the DELIMITER callback is not (it defaults to null), so
+    // group_slices_status() resolves the delimiter from the wire. That is
+    // deliberate — this cell is about the bad_alloc degrade, not about
+    // delimiter resolution — but it means the cell does not cover the
+    // fully-threaded splitter path, and should not be cited as if it did.
     std::size_t construction_calls = 0;
     {
         std::pmr::monotonic_buffer_resource probe_upstream;
         failing_pmr_resource probe_mr{&probe_upstream, /*fail_on_call_n=*/0};  // never fail
-        OffsetTable probe{*fv, &probe_mr};
+        OffsetTable probe{*fv, &probe_mr, &dict, member_fn};
         ASSERT_TRUE(probe.build_status().has_value());
         construction_calls = probe_mr.allocate_calls();
     }
@@ -216,7 +265,7 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     // Fail the first allocation AFTER construction (the group_slices_.reserve).
     failing_pmr_resource fail_mr{&upstream, /*fail_on_call_n=*/construction_calls + 1};
 
-    OffsetTable t{*fv, &fail_mr};
+    OffsetTable t{*fv, &fail_mr, &dict, member_fn};
 
     // Construction must succeed (all construction allocs complete before the
     // (construction_calls + 1)-th call).
@@ -225,16 +274,15 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
         << " allocations allowed";
     EXPECT_GT(t.size(), 0U) << "table must have entries after successful build";
 
-    // group_slices(453) triggers alloc #6 (reserve) → bad_alloc → catch → {}.
+    // group_slices(453) triggers the reserve → bad_alloc → catch → {}.
     auto slices = t.group_slices(453);
     EXPECT_TRUE(slices.empty())
-        << "lines 231-232: group_slices() must return empty span on bad_alloc";
+        << "group_slices() must return an empty span on bad_alloc — and the control arm above "
+           "establishes that a non-empty span is what this frame otherwise produces";
 
-    // Verify noexcept guarantee: second call must not crash (alloc #6 already
-    // consumed; subsequent allocs succeed → group_slices rebuilds normally).
+    // Verify noexcept guarantee: second call must not crash (the failing alloc
+    // already fired; subsequent allocs succeed → group_slices rebuilds normally).
     auto slices2 = t.group_slices(453);
-    // slices2 may be non-empty on the second call (the failing resource only
-    // fires once); the invariant is just that the call completes without throwing.
     SUCCEED() << "second group_slices() after OOM must not crash";
     (void)slices2;
 }

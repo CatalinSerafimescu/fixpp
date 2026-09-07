@@ -44,3 +44,10 @@ reconnect uses** — which is why connect and reconnect cannot drift, and why bo
 initiator arms converge on a single `handshake_result`. The acceptor mirror is
 [`engine-accept-path`](./engine-accept-path.md); the retry/backoff invariants are in
 [`session-liveness-and-reconnect`](./session-liveness-and-reconnect.md).
+
+⚠️ **`connect_timeout` bounds the attempt AS A WHOLE, resolution included (#361) — and the
+mechanism is not cancellation.** asio's resolve op takes no cancellation slot, so the lookup is
+ABANDONED at a shared deadline rather than aborted, which also means the io_context drain is NOT
+bounded by it. The decision, the falsified alternatives, and the head-of-line regression this
+introduced and then capped are on [`transport`](./transport.md); the residual is `L-361-2`. Do not
+re-derive either here.

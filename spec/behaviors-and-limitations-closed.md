@@ -191,3 +191,56 @@ All in `tests/session/test_fixt_logon_establishment.cpp`.
 
 <!-- L-050-4 — closed: DISCHARGED by 051 — the [1400,1499] session/app C-ABI error block shipped (error.h:165-179); translate() re-points ordinals 119/77/129/130/131 off UNKNOWN (error.cpp:131-134/218-223); B-051-3 explicitly discharges it. Verified by Codex 2026-07-08. -->
 **L-050-4 — the published `[2i §4.3]` session/app C-ABI error block is DEFERRED; the reachable `session_*`/`app_*` send/open arms map to `FIXPP_ERR_UNKNOWN`.** `[2i §4.3]` publishes no session/app code block, so re-pointing the 5 reachable arms (`session_invalid_argument` 119, `session_invalid_state_for_send` 77, `app_do_not_send` 129, `app_callback_threw` 130, `app_payload_malformed` 131) off `UNKNOWN` would require editing the signed-off `[2i]` (out of scope, contradicts the Gate-A LEAVE/CHK030). User decision 2026-06-24: DESCOPE. No new `error.h` codes / no `translate()` re-point / no `error_codes_v1.txt` append / no occupancy delta. The existing-published send arms (`wire_frame_too_large`→`WIRE_LIMIT_EXCEEDED`, `store_seqnum_overflow`→`STORE_RUNTIME`, `session_already_closed`→`THREAD_SESSION_LIFECYCLE`, cancellation→`CANCELLED`) are unchanged. **L-049-2 stays open.** FR-015/SC-005 deferred with this block. **Status: documented v1.0 behaviour; awaits a dedicated `[2i §4.3]` amendment.** *(050 spec FR-015/SC-005; data-model.)*
+
+<!-- L-361-1 — closed: resolved 2026-09-06 by #360/#361 (bounded, abandonable resolve) -->
+- **L-361-1 — Neither cancellation nor `connect_timeout` bounded the DNS resolution window, so
+  `Engine::stop()` could wait on a slow or blocked resolver — RESOLVED 2026-09-06 (#361).**
+  `async_connect`'s first suspension was `resolver.async_resolve`, and asio's `resolve_query_op`
+  obtains **no per-operation cancellation slot at all**; the `connect_timeout` timer was armed only
+  *after* resolution returned, and an unpublished outbound transport is unreachable from `stop()`'s
+  socket-closing path. **Status: resolved** — `src/transport/bounded_resolve.hpp` stops AWAITING the
+  resolve: the op is issued with a handler that owns the shared state, and the caller waits on a gate
+  timer the handler cancels, so a deadline or a `total` retires the frame and the resolve is
+  abandoned. Both transports now pass ONE absolute `now() + connect_timeout` deadline to the resolve
+  and to the connect timer.
+
+  MEASURED against a blackholed nameserver (private mount namespace, glibc defaults, control arm on a
+  working resolver), `connect_timeout = 2 s`, cancellation emitted at 300 ms:
+
+  | tree | arm | `async_connect` retired | error |
+  |---|---|---|---|
+  | before | deadline | 20,030 ms | `transport_resolve_failed` |
+  | before | cancel @300 ms | 20,030 ms | `transport_resolve_failed` |
+  | **after** | deadline | **2,000 ms** | `transport_connect_timeout` |
+  | **after** | cancel @300 ms | **~302 ms** | `transport_connect_cancelled` |
+  | after | control, working resolver | 43-87 ms over 3 runs | success |
+
+  ⚠️ **The residual is a DIFFERENT statement and is LIVE: see L-361-2** — abandoning bounds the
+  operation and its caller, not draining the io_context. *(Found by review during PR #362,
+  pre-existing there; resolved in the #360/#361 batch.)*
+
+<!-- L-085-1 — closed: RESOLVED 2026-09-06 by #220 (dict-free group() declines) -->
+- **L-085-1 — RESOLVED 2026-09-06 by fixpp#220. The dict-free per-instance cap that produced this
+  false positive no longer exists, because the branch it lived on no longer exists:
+  `OffsetTable::group()` is now a dictionary-only operation and reports every group ABSENT on a
+  dict-free table (see **B-220-1** / **L-220-1** in the live file).** The fix is deliberately NOT the
+  narrower one this row anticipated. Repairing only the cap would have left the **extent** wrong, and
+  the extent was the larger half: `group_slices_status()` derives its slice boundary from
+  `group()`'s `entry_count()`, so the same rest-of-message over-extent reached `group_slices()` and
+  the typed `group_view<GroupT>` — not merely the cap. That is the identical shape L-063-2 records as
+  having shipped on the production dispatch path until 066 (`Session::parse_and_dispatch_` built its
+  `Parser` with the dictionary-free default constructor), which is why the "test/utility callers
+  only" premise this row relied on was not load-bearing enough to keep waiving.
+  **Provenance that decided it:** the rest-of-message rule was never a design — it is the surviving
+  fragment of the pre-`55b13459` first-instance-member-set heuristic, whose *"no end-of-message
+  fallback, no 32-tag ceiling"* removal from the dict-aware path was a **P1** at PR #68 gate round 3.
+  It survived only where there is no membership oracle. `[2b §4.7]` defines the boundary as the
+  dictionary's first-field-of-group rule per `[FIX50SP2 §3]`, so dict-free the boundary is undefined
+  and both reference engines decline rather than guess. *(#220; the `[2b §4.7]` D-I' deviation in
+  `.specify/decisions/004-wire-codec-completeness.md` is RETIRED by the same change, not re-waived.)*
+
+  <details><summary>Original row as it stood before resolution (085 T018 / FR-003a / SC-010)</summary>
+
+  **L-085-1 — the dict-free per-instance cap measures the group's last instance as running to END-OF-MESSAGE, so top-level fields following the group count toward it. UNREACHABLE UNDER DEFAULT CONFIGURATION; reachable only under a caller-tightened cap. Preserved, not repaired — tracked as fixpp#220.** On the dict-free path (`OffsetTable::group()`'s `else` branch — no `opaque_dict_`/`group_member_fn_`, i.e. `OffsetTable(frame, mr)` / `OffsetTable(frame, mr, Config)`, test/utility callers only) there is no membership oracle, so the group extent degrades to rest-of-message: `group_end = entries_.size()`. The per-instance cap loop's final boundary therefore falls at `entries_.size()`, and any **top-level, non-group** fields appearing after the group's last instance are counted into that instance's `inst_count`. Where the cap then trips, the resulting `wire_group_too_large` is a **false positive** — the group's real last instance is smaller than measured. **Reachability, stated precisely — this row deliberately neither overstates nor understates it:** under **default `Config` the branch is arithmetically unreachable.** `default_max_offset_entries` and `default_max_group_entries_per_instance` are **both 4096** (`include/fixpp/wire/offset_table.hpp:27-28`), and `build()` clamps the table at the former (`src/wire/offset_table.cpp:326`, `entries_.size() >= cfg_.max_offset_entries` → `err_offset_table_full`), so the measured segment can never exceed `4095` and can never exceed a cap of `4096`. It becomes reachable **only** where a caller explicitly sets `max_group_entries_per_instance < max_offset_entries - 1`. It is **not** a defect on the default path, and it is **not** reachable at all from the dictionary path (which bounds the extent by real membership) — that includes every production wire caller, since no production caller constructs an `OffsetTable` dict-free. **Why preserved rather than repaired:** 085's mandate is a semantics-preserving relocation (FR-001a/FR-003 — the moved lines are byte-identical modulo indentation), so changing the boundary rule while moving it was explicitly out of scope; repairing it needs a rest-of-message terminator rule the dict-free path does not currently have. The looseness is **pre-existing on `main`**, not introduced by 085 — the same loop computed the same `inst_count` before the move, on the same path. *(085 T018 / FR-003a / SC-010; contract `specs/085-fold-flat-cap-loop/contracts/group_cap_accounting.md` C-3 "Recorded looseness"; `research.md` R-2; filed 2026-08-03 as **fixpp#220**.)*
+
+  </details>

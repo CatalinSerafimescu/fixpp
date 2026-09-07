@@ -64,6 +64,34 @@ correctly on the first hop:
 | **Opaque round-trip for custom fields**, `unknown_fields()` as a filtered view | materialising a vector — which would allocate, violating `[const §VIII.5]` |
 | **`BodyLength` + `CheckSum` verified BEFORE the parser sees a frame** | parsing first and validating after. A frame that fails the envelope check never reaches the parser at all |
 
+## Repeating groups need a dictionary — and that is a hard boundary, not a soft one
+
+`OffsetTable::group()` is a **dictionary-only** operation. Constructed without a group-membership
+predicate — `OffsetTable(frame, mr)`, or `Parser<access_mode::Index>{}` with its **public default
+constructor** — it reports every group ABSENT, `group_slices()` yields an empty span, and the C-ABI
+reports `TYPE_MISMATCH`. Verify in `src/wire/offset_table.cpp`; the contract is stated on the
+`group_index` declaration in `include/fixpp/wire/offset_table.hpp`.
+
+**Why it is a boundary and not a limitation to route around:** `[2b §4.7]` defines a group's extent
+by the dictionary's first-field-of-group rule per `[FIX50SP2 §3]`. Without a dictionary the boundary
+is **undefined**, not merely unavailable — there is no wire-only rule that is sound. QuickFIX C++ and
+QuickFIX/J both decline for the same reason (`Message::setGroup` returns when
+`DataDictionary::getGroup` fails; `parseGroup` is unreachable with a null dictionary), which is worth
+knowing before anyone proposes "just split on the delimiter".
+
+### What was rejected, and by whom
+
+| Rejected | Why, and where it died |
+|---|---|
+| **First-instance member-set heuristic** — collect the first instance's tags, bound the group by them | Shipped at PR #68 gate round 2; removed at round 3 as a **P1**. It carried a 32-tag ceiling and, for a single-instance group, fell back to end-of-message anyway |
+| **Rest-of-message extent when dict-free** | The residue of that heuristic. Absorbed trailing top-level fields into the last instance — which reached `group_slices_status()` and the typed `group_view<GroupT>`, not just the DoS cap. Removed by #220 |
+| **Repairing only the DoS cap** (#220's own suggestion) | Would have closed the issue with the wrong extent still flowing to every slice consumer |
+| **A waiver on "test/utility callers only"** | The premise had already been false in shipped code: `Session::parse_and_dispatch_` default-constructed its `Parser` until 066 |
+
+⚠️ **The lesson generalises past this file** — see [`failure-classes`](../failure-classes.md) class 9:
+a correctness fix that threads in missing information leaves the old rule standing wherever the
+information cannot reach, and a waiver written over it reads as design within one release.
+
 ## The seam into the session layer
 
 `wire_error_to_session_reject_reason` (`include/fixpp/wire/reject_reason_map.hpp`) maps a validator

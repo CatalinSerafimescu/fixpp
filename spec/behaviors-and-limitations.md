@@ -1753,7 +1753,6 @@ Spec: `specs/060-int128-decimal-compare/`.
 > **The row's *"0 nested/parent delimiter collisions"* measurement (Fable audit 2026-07-08), re-derived on the POST-FIX basis as FR-012a/SC-014 requires:** still **0**, now across all **ten** dictionaries rather than the six group-bearing ones, and now under delimiters that 083 changed in 330 contexts. The re-derivation was necessary precisely because the original was taken against the delimiters this feature replaced.]
 > *(historical 072 bracket follows)* [PINNED + LOAD-GUARDED by 072-nested-group-hardening (2026-07-13) — `XmlLoader::load_*` now REJECTS a dialect in which any nested group's delimiter (`first_field_tag`) equals its immediate parent group's delimiter, throwing `dict::group_delimiter_collision_error` (derives `dict::xml_parse_error`, reuses inherited `code()`, discriminated by catch type — no `core::error` append). Enforced in `LoaderState::finalize()` before any `table_view` is built; `as_table_view()` stays non-throwing. A permanent all-contexts census (FR-001, `reused_tag_census_test.cpp::NestedGroupDelimiterCensus`, raw per-`<group>` walk with parent-delimiter threading + component expansion + post-expansion delimiter) pins 0 collisions across all 9 runtime dicts non-vacuously. RECORDED RESIDUALS (caller responsibility, not covered): (a) a hand-built `table_view` / non-`load_*` `Dictionary` is not re-validated (FR-005a); (b) the loader `groups_` table is global-first-seen-deduped per no_tag, so a collision only in a non-first-seen context of a reused no_tag is unguarded (FR-005b); (c) scalar-member disjointness is census-only, not load-enforced (FR-004); (d) the FR-002 scalar census recovers member sets structurally for all 9 dicts incl. FIX40/41/42 (no unpinned residual required); (e) the FR-001/FR-002 census coverage is bounded to the membership contexts the raw walk structurally reaches. The splitter itself remains flat, but is now unreachable for the collision case via the load path.] `OffsetTable::group_slices()`'s slice splitter (and its redundant flat cap loop) re-walk the group's extent FLAT, not nesting-aware — a defense-in-depth gap deferred as real-dictionary-unreachable.** `consume_group_extent()` (`src/wire/offset_table.cpp`) correctly computes the nesting-aware `group_end` for the outer group, but `group_slices()`'s instance splitter (`:596-599`) and the redundant post-extent cap loop (`:548-558`) then re-walk that extent with a **flat** "does `entries_[k].tag == delim` mark a new outer instance" test, with no notion of nesting depth. If a nested group's own delimiter tag ever equalled its enclosing group's delimiter tag, the nested group's repeated delimiter fields would be mistaken for new outer-instance boundaries and the outer slice would be split incorrectly (the extent walk would still be correct; only the splitter would err). **This configuration does not occur in any shipped FIX dictionary** (Fable audit 2026-07-08: 0 nested/parent delimiter collisions across all 6 group-bearing vendored dicts). NOTE the earlier rationale that "the wire itself would be ambiguous" is **overstated** — `consume_group_extent` decodes such a collision *correctly* via declared counts, so the wire is decidable; only the flat splitter errs. The "impossible" is therefore a **convention of the shipped XMLs**, not a structural guarantee (confirmed: every real-dict nested/parent delimiter pair censused by 063 is distinct; the real-dict guard `NestedGroupExtent.MultiEntryNestedExtentGuard` passes for exactly this reason, not by accident). Reproducing the gap requires a **hand-built, non-representative** membership forcing outer/nested delimiter collision (`tests/wire/nested_group_extent_test.cpp:511-519`'s documented synthetic scoping trick). **Unenforced for user/dialect dictionaries:** nothing in the loader, `as_table_view()`, or the public `table_view` mutators rejects a nested==parent delimiter collision, so a user-supplied dialect XML or hand-built `table_view` (both public APIs) CAN construct it and reach the splitter bug — hardening (pin + optional load-time guard) tracked in **issue #180**. **Status: genuine internal inconsistency (extent walk is nesting-aware, the splitter is not); unreachable via any SHIPPED dictionary but unenforced for user/dialect dicts — deferred as defense-in-depth, non-blocking.** **Fix (deferred follow-up):** make the splitter nesting-aware too (advance `k` via the same `consume_group_extent` recursion on a nested count before testing outer-delimiter boundaries) and fold the redundant flat cap loop into the same traversal. *(Gate B PR#176 r1, Codex finding #2, downgraded and waived at P3 by orchestrator triage (real-dict-unreachable); `src/wire/offset_table.cpp:548-558,596-599`.)*
 
-**L-085-1 — the dict-free per-instance cap measures the group's last instance as running to END-OF-MESSAGE, so top-level fields following the group count toward it. UNREACHABLE UNDER DEFAULT CONFIGURATION; reachable only under a caller-tightened cap. Preserved, not repaired — tracked as fixpp#220.** On the dict-free path (`OffsetTable::group()`'s `else` branch — no `opaque_dict_`/`group_member_fn_`, i.e. `OffsetTable(frame, mr)` / `OffsetTable(frame, mr, Config)`, test/utility callers only) there is no membership oracle, so the group extent degrades to rest-of-message: `group_end = entries_.size()`. The per-instance cap loop's final boundary therefore falls at `entries_.size()`, and any **top-level, non-group** fields appearing after the group's last instance are counted into that instance's `inst_count`. Where the cap then trips, the resulting `wire_group_too_large` is a **false positive** — the group's real last instance is smaller than measured. **Reachability, stated precisely — this row deliberately neither overstates nor understates it:** under **default `Config` the branch is arithmetically unreachable.** `default_max_offset_entries` and `default_max_group_entries_per_instance` are **both 4096** (`include/fixpp/wire/offset_table.hpp:27-28`), and `build()` clamps the table at the former (`src/wire/offset_table.cpp:326`, `entries_.size() >= cfg_.max_offset_entries` → `err_offset_table_full`), so the measured segment can never exceed `4095` and can never exceed a cap of `4096`. It becomes reachable **only** where a caller explicitly sets `max_group_entries_per_instance < max_offset_entries - 1`. It is **not** a defect on the default path, and it is **not** reachable at all from the dictionary path (which bounds the extent by real membership) — that includes every production wire caller, since no production caller constructs an `OffsetTable` dict-free. **Why preserved rather than repaired:** 085's mandate is a semantics-preserving relocation (FR-001a/FR-003 — the moved lines are byte-identical modulo indentation), so changing the boundary rule while moving it was explicitly out of scope; repairing it needs a rest-of-message terminator rule the dict-free path does not currently have. The looseness is **pre-existing on `main`**, not introduced by 085 — the same loop computed the same `inst_count` before the move, on the same path. *(085 T018 / FR-003a / SC-010; contract `specs/085-fold-flat-cap-loop/contracts/group_cap_accounting.md` C-3 "Recorded looseness"; `research.md` R-2; filed 2026-08-03 as **fixpp#220**.)*
 
 ## Membership-aware C-ABI nested repeating-group read (065-cabi-nested-group-membership / #179)
 
@@ -2619,24 +2618,64 @@ Evidence: issues #346, #348, #349; new issue #351.
   `close_async()` (measured 11 of 40 runs wedged; 0 of 40 after). Verify at every callee that
   suspends inside the shield, not at the call site. *(#358; PR #362.)*
 
+## fixpp#360 / #361 — close_async's recovery witness, and a resolve a deadline can end (2026-09-06)
+
+### Behaviors
+
+- **B-361-1 — `Transport::Config::connect_timeout` now bounds `async_connect` AS A WHOLE, name
+  resolution included, and `Engine::stop()`'s `total` reaches a connect suspended in resolution.**
+  Both transports compute ONE absolute deadline (`now() + connect_timeout`) before resolving and
+  reuse it for the connect timer, so the budget is not spent once per phase. The resolve itself is
+  issued through `src/transport/bounded_resolve.hpp`, which waits on a gate timer rather than on the
+  resolve — asio's `resolve_query_op` takes no cancellation slot, so the op cannot be aborted and is
+  instead ABANDONED, its completion handler owning the resolver and the result storage. Callers see
+  `transport_connect_timeout` when the deadline wins and `transport_connect_cancelled` when the
+  cancellation does; both leave the transport `fresh` and retryable. ⚠️ The cancelled case CHANGES
+  C-API CATEGORY for a caller that was previously seeing a resolve failure: 94
+  `FIXPP_ERR_TRANSPORT_LIFECYCLE` becomes 111 `FIXPP_ERR_CANCELLED`. The timeout case does not
+  (94 and 96 share `FIXPP_ERR_TRANSPORT_LIFECYCLE`), and the reconnect FSM branches only on
+  success/failure, so retry policy is unaffected either way.
+
+  ⚠️ **A `connect_timeout` shorter than the host's name-service bound now fails EVERY attempt in
+  resolution** — which is the honest report, but it is a new way to configure a session into never
+  connecting. See L-361-2 for what those abandoned lookups then do to each other. Measured against a blackholed
+  nameserver with `connect_timeout = 2 s`: `async_connect` retires at 2,000 ms (was 20,030 ms), and
+  at ~302 ms under a `total` emitted at 300 ms (was 20,030 ms); control arm on a working resolver,
+  43-87 ms — that row varies with the network and is the one figure here not to read as a constant.
+  Re-derive with `tools/probes/resolve_bound_probe.cpp`; its control arm is not optional. *(#361; supersedes L-361-1, which is
+  in the closed archive.)*
+
+- **B-360-1 — `close_async()`'s `catch (...)` recovery path has a witness again, through a fault
+  seam rather than a cancellation.** `asio_tls_transport::set_close_fault_hook()` (internal header;
+  `src/` is not an installed include root) INJECTS an exception at the `async_shutdown` co_await —
+  the same point #348's cancellation used to throw at, chosen so the handler is re-entered with the
+  close deadline ARMED and its epoch un-retired, not merely with the socket open. It is reached
+  through the class's already-unconditional `asio_tls_transport_test_access` friend rather than
+  through a setter, so nothing inside the class definition differs between the test TU and the
+  library. Witness: `InflightExclusivity.CloseAsyncFaultAfterQuiesceStillClosesTheSocket`; RED arm,
+  unchanged from #348's: delete the `socket_.close(ec)` from the handler. ⚠️ It pins ONE entry
+  state; a throw earlier in the `try` (the quiesce loop) is still unwitnessed, and injecting at that
+  boundary is not evidence about asio's own allocation failing there. *(#360.)*
+
 ### Limitations
 
-- **L-361-1 — Neither cancellation nor `connect_timeout` bounds the DNS resolution window, so
-  `Engine::stop()` can wait on a slow or blocked resolver.** `async_connect`'s first suspension is
-  `resolver.async_resolve`, and asio's `resolve_query_op` obtains **no per-operation cancellation
-  slot at all** — a fourth category alongside raw, composed and teardown ops in B-357-1, and the one
-  no OUT filter can help. The `connect_timeout` timer is armed only *after* resolution returns
-  (`src/transport/asio_plain_transport.cpp`, `async_connect`: the `expires_after` call sits below the
-  `async_resolve` await), so it does not cover that window either. An outbound transport that is not
-  yet published is also unreachable from `stop()`'s socket-closing path. **Status: follow-up
-  (#361).** *(Found by review during PR #362, pre-existing; not introduced there.)*
+- **L-361-2 — Bounding the resolve bounds the OPERATION, not DRAINING the io_context: an abandoned
+  `getaddrinfo` still holds asio work, so `io_context::run()` does not return and `~io_context`
+  blocks until the host's name-service stack gives up.** `resolver_thread_pool::start_resolve_op`
+  calls `scheduler_.work_started()`, and `resolver_thread_pool::shutdown()` **joins** its work
+  threads — both unconditional in asio 1.38 and independent of the IOCP/reactor split, so this is
+  not a Linux-only property. Measured against a blackholed nameserver, abandoning at 300 ms:
+  `io_context::run()` returned at 20,019-20,039 ms across runs, and `~io_context` took 19,715 ms in
+  a variant that destroys the context instead — against a sub-100 ms control on a working resolver. **Status: by design / wontfix at this cost.** The only construction
+  that would bound it is leaving asio's resolver for a thread fixpp detaches, which trades a bounded
+  teardown for a detached thread per attempt and an exit-time hazard; not taken.
 
-  ⚠️ **How long the wait can be is a property of the HOST, not of fixpp — and the answer depends
-  on which NSS backend resolves `hosts:`.** `getaddrinfo` is dispatched through
-  `/etc/nsswitch.conf`, so the bound is whatever that backend imposes. **For the `dns` backend**
-  it is glibc's `timeout` (default 5 s) x `attempts` (default 2) x each `nameserver` x the
-  A/AAAA pair. Measured 2026-09-06 against that backend (`hosts: files mdns4_minimal
-  [NOTFOUND=return] dns`), with a bind-mounted `/etc/resolv.conf` in a private mount namespace:
+  ⚠️ **How long that is remains a property of the HOST, not of fixpp**, and depends on which NSS
+  backend resolves `hosts:`. `getaddrinfo` is dispatched through `/etc/nsswitch.conf`. **For the
+  `dns` backend** the bound is glibc's `timeout` (default 5 s) x `attempts` (default 2) x each
+  `nameserver` x the A/AAAA pair. Measured 2026-09-06 against that backend (`hosts: files
+  mdns4_minimal [NOTFOUND=return] dns`), with a bind-mounted `/etc/resolv.conf` in a private mount
+  namespace:
 
   | `/etc/resolv.conf` | elapsed |
   |---|---|
@@ -2645,20 +2684,138 @@ Evidence: issues #346, #348, #349; new issue #351.
   | 3 blackholed nameservers, glibc defaults | 56.0 s |
   | 1 blackholed nameserver, `options timeout:1 attempts:1` | 2.0 s |
 
-  So on such a host, several unreachable nameservers at glibc defaults hold `Engine::stop()` for
-  the better part of a minute, and lowering `timeout`/`attempts` in `resolv.conf` shortens it.
-
   ⚠️ **DO NOT READ THAT AS "BOUNDED" IN GENERAL.** It is measured for the `dns` backend only.
   `nsswitch.conf` may route `hosts:` to `sss`, `ldap`, `mdns`, `resolve` (systemd-resolved) or a
-  vendor module, and those impose their own deadline or none — `resolv.conf` does not govern them
-  and the figures above say nothing about them. The honest statement is that **`Engine::stop()`
-  inherits whatever bound the host's name-service stack has, including none**; the DNS numbers
-  above are the one case that has been measured, and they are what makes the deployment-side lever
-  worth naming, not a guarantee.
+  vendor module, and those impose their own deadline or none — `resolv.conf` does not govern them.
+  The honest statement is that **draining the io_context inherits whatever bound the host's
+  name-service stack has, including none**; the DNS numbers are the one case measured, and they are
+  what makes the deployment-side lever worth naming, not a guarantee.
 
-  ⚠️ **No in-library timeout can fix this, and the obvious one is worse than nothing.** asio's
+  ⚠️ **THE SHARPER HALF IS SERIALISATION, NOT DRAIN TIME.** asio's resolver pool defaults to ONE
+  work thread (`config(context).get("resolver", "threads", 0U)`, then `num_work_threads_ = 1`) and
+  is an `execution_context_service_base` — one pool per `io_context`, shared by every session on it,
+  draining blocking lookups SERIALLY. Before #361 a wedged `getaddrinfo` blocked its own caller, so
+  at most one lookup was outstanding per transport and the next reconnect attempt could not start
+  until the previous returned. Now the attempt retires at its deadline while the lookup keeps
+  running, so **retries stack behind it, and so does every other session's resolve on that
+  `io_context` — including for hosts that would answer instantly.**
+
+  fixpp bounds the stacking rather than the lookup: `bounded_resolve.hpp`'s
+  `kMaxAbandonedResolves` (4) makes `resolve_bounded` REFUSE with `transport_resolve_failed` once
+  that many abandoned lookups are still outstanding, instead of adding one more. That turns the
+  drain from unbounded into "at most 4 x the host's name-service bound", and a lookup queued behind
+  four wedged ones could not have completed inside any caller's budget anyway. The count is
+  process-wide while the pool is per-`io_context`, so it is conservative — it can refuse earlier
+  than strictly necessary, never later. ⚠️ **The lever that actually helps is not fixpp's**: asio's
+  `resolver`/`threads` config key is set at the application's `io_context` construction.
+
+  ⚠️ **THAT "COULD NOT HAVE COMPLETED ANYWAY" IS CONDITIONAL ON THE ONE POOL THREAD, AND THE
+  APPLICATION CAN REMOVE THE CONDITION.** It holds because a fifth lookup cannot even START until
+  the four outstanding ones return — which, by definition of outstanding, they have not. Raise
+  asio's `resolver`/`threads` above 1 and the lookups drain in PARALLEL, at which point a refused
+  fifth resolve might have answered promptly and `kMaxAbandonedResolves` becomes a real
+  false-refusal: `transport_resolve_failed` for a host that is fine. The same shape is reachable at
+  `threads = 1` without a wedge at all — a SLOW-BUT-WORKING resolver plus a `connect_timeout`
+  shorter than it — except there the refusal is the honest answer rather than a false one, because
+  the serial queue really does put the fifth lookup past the budget. **A deployment that raises
+  `threads` should raise `kMaxAbandonedResolves` with it**; the constant is a compile-time
+  `inline constexpr` in `bounded_resolve.hpp`, not configuration, because no caller has asked for
+  the knob and the coupling is to a value fixpp cannot read back from asio.
+
+  ⚠️ **`resolver.cancel()` is still not a fix for this half either.** asio's
   `background_getaddrinfo` tests its cancellation token **once, before** the blocking call, so
-  `resolver.cancel()` only wins the window before the lookup starts; an in-flight `getaddrinfo`
-  runs to completion regardless. Joining the resolve against a timer with `operator||` would still
-  wait for it *and* add an arm, since the group retires only when both arms retire. The bound
-  above is therefore a property of the deployment, not a value fixpp can offer as a knob.
+  `resolver.cancel()` only wins the window before the lookup starts; an in-flight `getaddrinfo` runs
+  to completion regardless. That is exactly why #361's fix abandons the op instead of cancelling it.
+  *(#361; the residual left by B-361-1.)*
+
+---
+
+## fixpp#220 — `OffsetTable::group()` is a dictionary-only operation (2026-09-06)
+
+### Behaviors
+
+- **B-220-1 — a dict-free `OffsetTable` reports every repeating group ABSENT; it no longer derives a
+  group extent from the wire.** Construction without a group-membership predicate —
+  `OffsetTable(frame, mr)`, `OffsetTable(frame, mr, Config)`, any construction passing a null
+  `group_member_fn`, and `Parser<access_mode::Index>{}` (the **public default constructor**, which
+  threads no dictionary) — makes `group(no_tag)` return `wire_required_field_missing` for **every**
+  `no_tag`, including one that is a real group count field on the wire. Consequently
+  `group_slices(no_tag)` yields an **empty span**, and the C-ABI thunk reports
+  `FIXPP_ERR_TYPE_MISMATCH` — the documented E-2 / CA-010-read result, the same answer the
+  dict-aware path gives for a tag the dictionary does not know to be a group. **What else changes, stated
+  rather than waved past:** scalar reads, `find()`, `entries()`, `unknown_fields()` and the whole
+  Iter-mode surface are unaffected, and the dictionary-backed path (`Parser{dict}` — every production
+  caller) is byte-for-byte unchanged in behaviour. **One further dict-free change is NOT nothing:**
+  `group_slices_reserve_bound()` now returns `0` for a dict-free table instead of `entries_.size()`,
+  because such a table can no longer append a slice. That lowers arena consumption (the old bound
+  reserved up to `4096 * sizeof(group_slice)` for slices that cannot exist) and, as a consequence,
+  makes the dict-free `alloc_failed` degrade in `group_slices_status()` unreachable — there is no
+  longer an allocation on that path to fail. The `bad_alloc` degrade is still covered, on the
+  dict-aware path, by `OffsetTableErrorPath.GroupSlicesBadAllocDegradeCoversLines231to232`.
+  **Why this is the conformant answer rather than a capability regression:** `[2b §4.7]` defines a
+  repeating group's boundary as the dictionary's first-field-of-group rule per `[FIX50SP2 §3]`, so
+  with no dictionary the boundary is **undefined**, not merely unavailable — there is no sound
+  wire-only rule to fall back on. Both reference engines decline for the same reason: QuickFIX C++
+  returns from `Message::setGroup` when `DataDictionary::getGroup` fails and forms no `Group` at all;
+  QuickFIX/J guards all three `parseGroup` call sites on a non-null dictionary and, with no
+  dictionary, flattens the members as ordinary top-level fields.
+  **⚠️ THE SURFACE THAT ACTUALLY CHANGED IS THE C++ TYPED ONE.** Stated first because an earlier
+  draft of this row led with the C-ABI and called it "the only" visible change, which inverted the
+  emphasis and was wrong as a universal claim. `MessageView::group<NoTag, GroupT>()` — the accessor
+  every 2c-generated message class uses, e.g. `NewOrderList::orders()` — resolves through
+  `group_slices()`, so on a dict-free view it now yields an **empty** `group_view<GroupT>` where it
+  previously yielded wire-split instances whose last one absorbed trailing top-level fields. That is
+  the change with real reach: **nine** test cells across `tests/wire`, `tests/codegen` and
+  `tests/capi` were asserting non-empty typed groups off a dict-free parse and had to be rethreaded
+  through a dictionary. If you consume fixpp from C++ and construct `Parser<access_mode::Index>{}`,
+  this is the row that concerns you.
+
+  **The C-ABI change, in proportion.** A dict-free caller's
+  `fixpp_msg_get_group(msg, <group tag>, …)` went from `FIXPP_ERR_OK` **plus a cursor whose last
+  nested instance absorbed trailing outer members** — a wrong value the caller could not distinguish
+  from a real one — to `FIXPP_ERR_TYPE_MISMATCH`. `fixpp_group_get_nested_group` is unreachable in
+  that state because there is no outer cursor to descend from. **No exported symbol, header, or enum
+  changes; the 1.5.0 C-ABI freeze holds.** ⚠️ **And no shipped C entry point can reach it:** an
+  inbound `fixpp_msg_t` is produced by `Session::parse_and_dispatch_`, which has been dict-backed
+  since 066, so a dict-free handle exists only where a test constructs one directly. Zero C-ABI
+  cells broke on this change; all nine that did were on the C++ typed path above. The C-ABI row is
+  recorded for completeness and for anyone embedding the view types directly — not because it is the
+  likely way to meet this. This **supersedes 065's FR-008**, whose bar was "no
+  regression versus today's positional behaviour": 065 took the positional result as a floor because
+  it was fixing the dict-aware path and would not touch the other one. #220 establishes that the
+  positional result **was** the defect, so trading a silently wrong value for a defined refusal
+  removes that floor rather than regressing against it. Witnessed by
+  `MessageReadGroup.DictFreeGroupReadReportsTypeMismatch` (`tests/capi/message_read_test.cpp`),
+  rewritten from 065's `DictFreeNestedReadDegradesToPositional` — which existed precisely to force
+  this change to be made deliberately, and did.
+  **Migration:** a caller that needs groups must construct through a dictionary
+  (`Parser<access_mode::Index>{dict}`). A caller that does not need groups is unaffected.
+  *(#220; replaces the rest-of-message degradation formerly recorded as L-085-1, now resolved.)*
+
+### Limitations
+
+- **L-220-1 — repeating groups are unavailable, not approximated, without a dictionary; and the
+  per-instance DoS cap therefore does not apply on that path.** Two consequences of B-220-1, stated
+  so neither is inferred:
+  **(a)** A dict-free caller cannot enumerate group instances at all. Previously it got instances
+  split on the wire delimiter — but the last one absorbed every trailing top-level field, so what it
+  got was wrong rather than merely coarse (that was `L-085-1` / #220). There is no supported way to
+  slice a group without membership; this is a deliberate removal of a wrong answer, not a deferred
+  feature.
+  **(b)** `Config::max_group_entries_per_instance` is a **dictionary-path cap only**. On the
+  dict-free path nothing is measured, so nothing is capped — a dict-free table is bounded solely by
+  `Config::max_offset_entries` (`build()`'s clamp), which is the real memory bound in any case. This
+  is not a widened attack surface: no group is materialised on that path, so there is nothing per
+  instance to bound.
+  **What this row does NOT claim.** Two things, both untouched here and neither implied by the
+  above. (i) `group_slices_status()`'s own instance splitter remains flat — that is `L-063-4` leg 1,
+  descoped with evidence by 083. (ii) That splitter still resolves the instance delimiter from the
+  WIRE when `group_delim_fn_` is null, a shape the dict-aware constructors still permit by
+  defaulting that callback — filed as **fixpp#384**, because #220 removed the only case its stated
+  justification covered. It is a materially weaker concern than this row: that delimiter is
+  membership-VALIDATED before use (`group()` proceeds only once `group_member_fn_` confirms the
+  wire's first tag after the count is a member of the group), so it is always a confirmed member of
+  the right group — the open question is whether it is the right MEMBER, which is 083's C-8.4
+  contract question, not this one.
+  *(#220; `tests/wire/offset_table_test.cpp` — `DictFreeGroupDeclines*`, `DictFreeGroupSlicesAreEmpty`,
+  `TrailingFieldNotCountedIntoLastInstance`, `FR001_NoFlatInstanceWalkInGroup`.)*

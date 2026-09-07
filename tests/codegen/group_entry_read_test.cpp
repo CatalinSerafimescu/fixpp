@@ -29,7 +29,10 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+#include "support/typed_group_table_views.hpp"
 
 namespace {
 
@@ -54,8 +57,21 @@ std::vector<std::byte> make_frame(std::string_view body) {
     return out;
 }
 
-// Parse a raw FIX frame into a MessageView using the production Framer
-// (dict-free — same as production session.cpp Parser<Index> pd_parser{}).
+// Parse a raw FIX frame into a MessageView using the production Framer.
+//
+// 220: DICT-AWARE, and it has to be. This helper used to build the view
+// dict-free, justified as "same as production session.cpp Parser<Index>
+// pd_parser{}" — a comment that was already stale, because 066 dict-backed
+// `Session::parse_and_dispatch_` (session.cpp threads `{*inbound_tv_}`). Since
+// fixpp#220, group identification is a dictionary-only operation, so a
+// dict-free parse yields NO typed group at all and every cell below that reads
+// `nol.orders()` would see an empty group.
+//
+// This file already knew the dict-free extent rule was wrong:
+// EmptyGroupSizeZeroNoDeref below went dict-aware precisely because the
+// dict-free fallback "misclassifies the checksum tag itself as a single
+// phantom NoOrders member". That is the same defect #220 removed; these cells
+// simply never had a frame that exposed it.
 MV parse_frame(std::vector<std::byte> const& buf, std::pmr::memory_resource* mr) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), mr};
     fixpp::wire::Framer fr{};
@@ -65,7 +81,16 @@ MV parse_frame(std::vector<std::byte> const& buf, std::pmr::memory_resource* mr)
         std::span<fixpp::wire::frame_view>{fvs, 1});
     EXPECT_TRUE(framed.has_value()) << "Framer::feed failed";
     EXPECT_FALSE(framed->empty()) << "Framer produced no frames";
-    return MV{(*framed)[0], mr};
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{
+        fixpp_test_support::group73_table_view()};
+    auto mv = parser.parse((*framed)[0], mr);
+    if (!mv.has_value()) {
+        // MessageView is move-only, so no value_or here; fail loudly and hand
+        // back a well-formed object so the caller's own assertions still run.
+        ADD_FAILURE() << "dict-aware parse failed";
+        return MV{(*framed)[0], mr};
+    }
+    return std::move(*mv);
 }
 
 decimal_t parse_decimal(std::string_view sv, std::pmr::memory_resource* mr) {

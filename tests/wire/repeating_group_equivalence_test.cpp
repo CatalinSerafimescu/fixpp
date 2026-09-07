@@ -20,6 +20,7 @@
 
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
+#include "support/typed_group_table_views.hpp"
 
 namespace {
 
@@ -90,7 +91,9 @@ TEST(WireRepeatingGroupEquivalence, IterAndIndexAgreeIncludingNested) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    Parser<access_mode::Index> parser{};
+    // 220: DICT-AWARE. group() is a dictionary-only operation now, so a
+    // dict-free parse yields no typed group and gv.size() below would be 0.
+    Parser<access_mode::Index> parser{fixpp_test_support::legs_and_alt_table_view()};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
@@ -155,7 +158,8 @@ TEST(WireRepeatingGroupEquivalence, GroupViewsDoNotAliasAcrossCalls) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    Parser<access_mode::Index> parser{};
+    // 220: DICT-AWARE — see the note in the cell above.
+    Parser<access_mode::Index> parser{fixpp_test_support::legs_and_alt_table_view()};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
@@ -199,7 +203,9 @@ TEST(WireRepeatingGroupEquivalence, GeneratedFlyweightOperatorEqualsIter) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    Parser<access_mode::Index> parser{};
+    // 220: DICT-AWARE — this cell drives the GENERATED v44 flyweight over
+    // group 73, so it needs the 35=E membership rather than the 35=AB one.
+    Parser<access_mode::Index> parser{fixpp_test_support::group73_table_view()};
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
