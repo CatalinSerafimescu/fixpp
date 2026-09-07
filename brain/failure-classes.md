@@ -51,6 +51,21 @@ prints `0` for a whole syntax.
   happened to use. Enumerate the configurations the *real run* uses and require a control per
   configuration; a suite that is exhaustive within one of them still reports PROVEN while another is
   broken.
+- ⚠️ **A CORRECT INSTRUMENT WATCHING A CONDITION NOTHING CAN VIOLATE FAILS TOWARD CLEAN JUST THE
+  SAME**, and it arrives from the opposite direction — not a broken check, a sound one whose subject
+  cannot go wrong. #289 batch 18 built exactly the barrier its own design argument called for (expose
+  `mock_clock`'s parked-waiter count, since `advance()` already computes the woken set) and had to
+  remove it: at BOTH sites it was written for, a mutation that should have made it fire left the cell
+  GREEN, because the mock clock is monotonic and those cells assert on total elapsed time rather than
+  on a per-advance wake. **The argument was sound; the measurement killed it.** So the trigger is not
+  "does this check look right" but *"show me the mutation that makes it RED"* — and if there is no
+  such mutation in the tree, the check is an assertion that cannot fail and does not ship.
+- ⚠️ **AN INSTRUMENT WHOSE RESIDUAL RISES WHEN YOU FIX A SITE IS MISCOUNTING, AND THE DIRECTION IS THE
+  TELL.** `ci/pump-get-sweep.sh` matched `using R = decltype(fut.get());` as a `.get()` call — an
+  UNEVALUATED operand — and that idiom is part of the settled value-helper recipe, so every migrated
+  value helper ADDED a row to the residual it was reducing. Nothing in the count looked wrong; only
+  the sign of the change did. **Before believing a residual, migrate one site and check the number
+  moved the way you expect.**
 - ⚠️ **Controls anchored to REAL artefacts assert a contingent fact about today's tree; controls built
   from SYNTHETIC fixtures assert a property of the instrument.** Prefer synthetic. A real-file anchor
   fails when the tree legitimately changes, and a later reader cannot distinguish a rotted anchor from

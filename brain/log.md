@@ -6,6 +6,39 @@ status: stable
 
 # Log
 
+- **2026-09-07 — #289 batch 18, the lost mock-clock advance.** `components/test.md` gains a THIRD
+  `#289` shape: a fixed `run_for` STAGING a mock-clock advance. No `.get()` near it, so the census
+  never saw it; the terminal half was usually already migrated and correct. If the coroutine has not
+  parked when the window returns, the advance lands on a timer that is not yet armed and is LOST —
+  unrecoverable, not slow. The migration is an observable condition (`pump_until` on `LogoutSent`),
+  never a longer window, and `ci/mock-clock-staging-sweep.sh` is the detector.
+
+  **The entry worth reading is the instrument that was NOT shipped.** The obvious mechanism-level
+  barrier — expose `mock_clock`'s parked-waiter count, since `advance()` already computes the woken
+  set — is a better idea than a lexical sweep on every axis that can be argued: no lookahead, no
+  same-function constraint, a positive observation rather than a proxy. It was built and then
+  **removed**, because running it at both sites no FSM state covers showed it could not
+  discriminate. One cell passes with its staging window starved to `run_for(0ms)`; the other goes RED
+  when starved but RED with the barrier in place too, because starving removed a TERMINAL collection
+  window instead. ⚠️ **The mechanism first written for that was wrong and the correction is the
+  durable half**: not monotonicity but the ARM SHAPE — `sleep_until` fires immediately for a deadline
+  already passed, so an arm from a STORED ANCHOR is rescued while a NOW-RELATIVE arm is lost, which
+  is also why no clock-side fix reaches the second case. It would have shipped as an assertion that cannot go RED for
+  its own class — `failure-classes.md` class 1, arrived at from the opposite direction: not an
+  instrument that reports clean because it is broken, but a *correct* instrument watching a
+  condition nothing in the tree can violate. **The argument for it was sound and the measurement
+  killed it**; that asymmetry is the reason the removal is recorded rather than the addition.
+
+  Two more, both class 1. `ci/pump-get-sweep.sh` counted `using R = decltype(fut.get());` as a
+  `.get()` CALL — an unevaluated operand — and that idiom is part of #316's settled value-helper
+  recipe, so **migrating a value helper RAISED the residual**, the one direction an instrument must
+  never move. And the new sweep's own controls all passed while it misread the single real
+  hand-rolled `pump_until` in the tree, whose `while` condition WRAPS across two lines: fixtures
+  written by the same hand as the rule share the rule's blind spot, so the control that catches it
+  is copied from the shape that broke it (`ci/mock-clock-staging-sweep.sh`).
+
+  Record: `decisions/speckit/pr-batch18-lost-advance-and-the-instrument-that-could-not-fail.md`.
+
 - **2026-09-07 — #289 batch 17, the unbounded-`run()` class.** `failure-classes.md` class 1 gains two
   bullets, both about instruments that read SOURCE TEXT.
 

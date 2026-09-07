@@ -44,6 +44,7 @@
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
 #include "support/alloc_guard_markers.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -63,10 +64,30 @@ using fixpp::session::SeqnumManager;
 
 // Run a single awaitable synchronously on an io_context (mirrors the helper
 // in tests/session/seqnum_manager_test.cpp).
+//
+// ── #289: `ioc.run(); fut.get()` is a hazard even though it opens no window ───
+//
+// `run()` returns when the context has NO WORK LEFT, which is not "the coroutine
+// finished"; the `get()` would then block forever. Same reasoning, and the same
+// `R{...}` requirement, as the seqnum_manager_test twin — read that one for why
+// the "deduced type is sometimes void" deferral does not apply per file.
+//
+// ⚠️ THIS HELPER RUNS INSIDE THE MEASURED REGION (2 x 10^4 calls between
+// `alloc_guard_start()` and `alloc_guard_end()`), so the guard added here must not
+// allocate. It does not: `forced_miss_here` is a `strcmp` against a `static` whose
+// `getenv` runs ONCE, and that once happens during the WARM-UP loop above the
+// markers, not under them. `wait_for(0s)` on a ready future touches only the
+// shared state's futex. The check that this stayed true is the cell itself — it is
+// an allocation counter, so a regression here fails it rather than slowing it.
 template <class Awaitable>
 auto run_sync(asio::io_context& ioc, Awaitable&& aw) {
     auto fut = asio::co_spawn(ioc, std::forward<Awaitable>(aw), asio::use_future);
-    ioc.run();
+    using R = decltype(fut.get());
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut,
+                                                          "SessionAllocGuard::run_sync")) {
+        ioc.restart();
+        return R{std::unexpected(fixpp::test_support::kWindowMissSentinel)};
+    }
     ioc.restart();
     return fut.get();
 }

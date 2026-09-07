@@ -332,12 +332,24 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
     }
 
     // Trigger an outbound: close(graceful) builds + emits a Logout via
-    // store_then_emit() (the I-3 outbound-half code path). Drive ioc briefly
-    // so close() registers its 2s sleep, then advance the mock clock past
-    // the timeout so phase-1 returns and close() completes.
+    // store_then_emit() (the I-3 outbound-half code path), then advance the mock clock
+    // past the 2 s timeout so phase-1 returns and close() completes.
     auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
-    ioc.run_for(100ms);
-    ioc.restart();
+    // #289 STAGING BARRIER. "Drive ioc briefly so close() registers its 2s sleep" was
+    // the old comment and it named the requirement exactly -- a fixed `run_for(100ms)`
+    // just did not MEET it. If the coroutine has not parked when a wall-clock window
+    // expires, the advance below lands on a timer that is not yet armed and is LOST,
+    // unrecoverably. `LogoutSent` is precisely "Logout emitted, parked, not complete".
+    // Mechanism, and why a longer window is not the fix: `ci/mock-clock-staging-sweep.sh`.
+    if (!fixpp::test_support::pump_until(
+            ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+            "OutboundStoreBeforeTransportSend/stage")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "OutboundStoreBeforeTransportSend/stage");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                      << "OutboundStoreBeforeTransportSend/stage";
+        return;
+    }
     clock->advance(std::chrono::seconds{3});
     if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 200ms,
                                                     "OutboundStoreBeforeTransportSend")) {

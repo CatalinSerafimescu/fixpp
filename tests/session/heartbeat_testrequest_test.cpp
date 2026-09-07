@@ -401,6 +401,35 @@ TEST_F(HbTrTest, UnansweredTestRequestDisconnects) {
 
     // Advance clock past inbound-silence threshold (1s + buffer).
     // This should trigger the session to emit a TestRequest.
+    // ⚠️ A `ci/mock-clock-staging-sweep.sh` CANDIDATE, READ AND DISPOSITIONED **NOT A
+    // DEFECT** -- left as a candidate on purpose, because the sweep reports rather than
+    // gates and a row it cannot suppress is better than a suppression that outlives its
+    // reason. The class statement lives in that sweep's header; what is site-specific is
+    // below.
+    //
+    // ⚠️ THE DISCRIMINATOR IS **HOW THE SLEEP IS ARMED**, not how monotonic the clock is
+    // -- an earlier revision of this note said "monotonic" and that was the wrong
+    // mechanism. `mock_clock::sleep_until` fires IMMEDIATELY when `deadline <= steady`
+    // (the `fire_now` branch, src/core/test/mock_clock.cpp), so a late arm is rescued
+    // exactly when the deadline it names is already in the past:
+    //   * armed from a STORED ANCHOR (`last_inbound_steady_ + heartbt_int`, the liveness
+    //     loop) -> a late arm still names an instant the advance has passed -> RESCUED.
+    //   * armed NOW-RELATIVE (`steady_now() + logout_disconnect_timeout_ms`,
+    //     `run_logout_phase1`) -> a late arm names a deadline in the NEW future, and
+    //     nothing advances the clock again -> LOST.
+    // This site is the first kind. The `close(graceful)` sites migrated by this batch are
+    // the second, which is why they needed the barrier and this one does not.
+    //
+    // ⚠️ AND THE RULE HAS A CONDITION ON IT, because "stored anchor" is not by itself
+    // enough: `last_inbound_steady_` is REFRESHED to `steady_now()` on inbound traffic
+    // (`src/session/session.cpp`), so an arm taken after such a refresh is now-relative
+    // again in effect. The rescued case is the one where the anchor PREDATES the advance.
+    // Check that at the site rather than reading the table as unconditional.
+    // Site-specific: the sleep here is the liveness loop's, armed from a stored anchor,
+    // so the advance is rescued by `fire_now` rather than lost.
+    // ⚠️ RE-DERIVE, DO NOT TRUST THIS: starve the window below to `run_for(0ms)`,
+    // rebuild, and run the cell. GREEN means the disposition still holds; RED means it
+    // has stopped holding and this comment is the thing that is wrong.
     clock->advance(2s);
     ioc.run_for(20ms);
     ioc.restart();

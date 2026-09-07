@@ -24,17 +24,22 @@
 // read_first_frame_bounded cannot return until the FULL kFirstFrameDeadline
 // (5000ms, engine.cpp:772) elapses — and neither can stop().
 //
-// T2b does NOT discharge SC-015's non-vacuity clause (research.md D-6.13a,
-// settled at Gate A round 4): no positive barrier exists at engine scope. The
-// client completing its handshake and the server then closing it after
-// stop() is a STATED, BOUNDED INFERENCE that the accept loop was somewhere
-// between the handshake and Session-publish — not a proof it was inside
-// read_first_frame_bounded specifically. SC-015's non-vacuity rests on T2a
-// and T6 (first_frame_total_cancel_tls_test.cpp), which have real barriers.
-// A round-3 proposal to fake a positive barrier via an inverted
-// test_hook_pre_publish_ was WITHDRAWN at round 4 (it is a negative barrier —
-// an absence — the same shape round 4 rejected for T6's round-2 form); filed
-// as residual T046, not bought here.
+// T2b USED TO rest on an inference rather than a barrier, and #237 closed that.
+// As shipped through 2026-09-06, no positive barrier existed at engine scope
+// (research.md D-6.13a, settled at Gate A round 4): the client completing its
+// handshake and the server then closing it after stop() was a STATED, BOUNDED
+// INFERENCE that the accept loop was somewhere between the handshake and
+// Session-publish — not a proof it was inside read_first_frame_bounded
+// specifically, so SC-015's non-vacuity rested on T2a and T6
+// (first_frame_total_cancel_tls_test.cpp), which had real barriers. That gap was
+// filed as residual T046 and closed by #237; the barrier the cells now carry is
+// described ONCE, in the #237 note below — do not restate its mechanism here.
+//
+// ⚠️ KEEP, because it does not rot and it is why the barrier took the shape it
+// did: a round-3 proposal to fake a positive barrier via an inverted
+// test_hook_pre_publish_ was WITHDRAWN at round 4 — it is a NEGATIVE barrier,
+// an absence, satisfied just as well by a coroutine that never ran, which is
+// the same shape round 4 rejected for T6's round-2 form.
 //
 // Deterministic promptness construction (T045/SC-016): see kPromptHandlerBudget
 // below — ONE canonical statement, and the cells point at it. Both cells must

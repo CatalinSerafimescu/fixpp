@@ -63,6 +63,7 @@
 #include "session/support/frame_field_extract.hpp"  // via -I tests/
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
@@ -312,20 +313,34 @@ protected:
         return cfg;
     }
 
-    void run_ioc() {
-        ioc.run_for(200ms);
-        ioc.restart();
-    }
-
+    // #289 blind spot (c): the 200 ms window used to sit inside a `run_ioc()` wrapper,
+    // which hid it from the lexical census AND left the `get()` below it
+    // unconditional. The window is PRESERVED -- the hazard is the unconditional
+    // `get()`, not the fixed window -- and is now spelled at each site so both
+    // instruments can see it. The wrapper is deleted rather than kept unused: it was
+    // the invisibility.
     void open_session(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "AcceptorLogonSendingTime::open_session")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock_, "AcceptorLogonSendingTime::open_session");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "AcceptorLogonSendingTime::open_session";
+            return;
+        }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
     }
 
     fixpp::core::expected_t<void> feed(Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "AcceptorLogonSendingTime::feed")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock_,
+                                                            "AcceptorLogonSendingTime::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "AcceptorLogonSendingTime::feed";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 

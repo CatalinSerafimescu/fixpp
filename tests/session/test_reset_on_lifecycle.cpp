@@ -74,11 +74,12 @@
 // no source edit and no rebuild. It is a WEAKER witness than textual mutation and
 // does not replace it -- see the primitive.
 //
-// ⚠️ THE `run_ioc()` CALLERS IN THIS FIXTURE ARE STILL UNGUARDED AND ARE CENSUS-
-// INVISIBLE. `run_ioc()` hides `ioc.run_for(200ms); ioc.restart();` behind one call,
-// and the census scan is lexical (`.run_for(` on the line), so those sites carry no
-// pin row and are not in this batch. Same hazard; enumerate them with a per-file
-// `run_for` excess count rather than from any list written here.
+// `run_ioc()` -- which hid `ioc.run_for(200ms); ioc.restart();` behind one call and so
+// carried no census row, the census scan being lexical -- IS GONE. Every one of its
+// callers now spells the window at the site through `run_window_then_ready`, which is
+// what makes them visible to `ci/pump-get-sweep.sh` as well as guarded. Do not
+// reintroduce a fixture-level pump wrapper: the invisibility was the wrapper, not the
+// window.
 //
 // Rationale and the teardown-shape rule live at the primitive, not duplicated here
 // (#324).
@@ -248,17 +249,17 @@ protected:
         return cfg;
     }
 
-    // Run the ioc for a bounded duration (self-deadline = 200 ms).
-    void run_ioc() {
-        ioc.run_for(200ms);
-        ioc.restart();
-    }
-
     // Open (initiator: sends Logon; acceptor: waits for inbound Logon).
     // Returns the open() result.
     fixpp::core::expected_t<void> open_sync(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "ResetOnLifecycleTest::open_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ResetOnLifecycleTest::open_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ResetOnLifecycleTest::open_sync";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 
@@ -266,7 +267,13 @@ protected:
     fixpp::core::expected_t<void> feed_sync(Session& sess,
                                             const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "ResetOnLifecycleTest::feed_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ResetOnLifecycleTest::feed_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ResetOnLifecycleTest::feed_sync";
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
         return fut.get();
     }
 
@@ -274,14 +281,39 @@ protected:
     // graceful-close (Logout) timeout so teardown completes.
     void graceful_close_sync(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
-        // Partial drive: let close() emit Logout and register its 2 s sleep. NOT the
-        // guarded window -- no `get()` follows it. The census names THIS line because
-        // its 6-line lookahead reaches the `get()` below; the migration guards that get.
-        ioc.run_for(50ms);
-        ioc.restart();
+        // ⚠️ A STAGING WINDOW, AND A BLIND ONE IS NOT SAFE JUST BECAUSE NO `get()`
+        // FOLLOWS IT. Its job is to get `close(graceful)` to its MOCK-CLOCK sleep
+        // before the advance below fires that sleep. If the coroutine has not parked
+        // when the window returns, the advance lands on a timer that is not yet armed
+        // and is LOST -- unrecoverable, not slow, because nothing advances the clock
+        // again and no later pump rescues it. An earlier revision of this comment was
+        // right that this is a staging window rather than a completion window, and
+        // drew from that the wrong conclusion that it therefore had to stay blind.
+        // Bounding it by an OBSERVABLE CONDITION keeps it a staging window:
+        // `LogoutSent` is exactly "Logout emitted, parked, not complete".
+        // Same mechanism, cause and fix as `TC004Liveness::do_close` (fixpp 4179da94).
+        if (!fixpp::test_support::pump_until(
+                ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+                "ResetOnLifecycleTest::graceful_close_sync/stage")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "ResetOnLifecycleTest::graceful_close_sync/stage");
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                          << "ResetOnLifecycleTest::graceful_close_sync/stage";
+            return;
+        }
         clock->advance(std::chrono::seconds{3});
-        // Inlined from `run_ioc()`, which is `run_for(200ms); restart();` -- the same
-        // window, now with the readiness check the primitive adds before the get.
+        // The terminal half: the same 200 ms window this fixture always used, now with
+        // the readiness check the primitive adds before the get.
+        //
+        // ⚠️ THE CONDITION ON THIS BUDGET, not a comparison of today's numbers.
+        // `Session::close` joins phase 1 with a REAL `asio::steady_timer close_grace`
+        // armed for `logout_disconnect_timeout_ms`, which the mock clock does not
+        // govern. A budget ABOVE it completes `fut` off the REAL timer whenever the
+        // mock path did not fire, and the cell goes green having never exercised the
+        // mock-clock timeout. So this window must stay strictly under whatever
+        // `make_cfg()` leaves that field at -- re-read both rather than trusting a
+        // remembered pair. The arm is not a forced miss: it is deleting the
+        // `clock->advance()` above and asserting RED.
         if (!fixpp::test_support::run_window_then_ready(
                 ioc, fut, 200ms, "ResetOnLifecycleTest::graceful_close_sync")) {
             fixpp::test_support::cancel_and_drain_or_report(
@@ -297,7 +329,14 @@ protected:
     // (no graceful Logout exchange, so no clock advance needed).
     void terminal_close_sync(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
-        run_ioc();
+        if (!fixpp::test_support::run_window_then_ready(
+                ioc, fut, 200ms, "ResetOnLifecycleTest::terminal_close_sync")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "ResetOnLifecycleTest::terminal_close_sync");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "ResetOnLifecycleTest::terminal_close_sync";
+            return;
+        }
         (void)fut.get();
     }
 
