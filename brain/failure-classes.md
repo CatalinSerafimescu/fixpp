@@ -248,11 +248,37 @@ looking straight at it — will treat it as a deliberate degradation rather than
 
 - **Trigger:** you are fixing a rule by supplying the information it was missing, and some branch
   (no dictionary, no context, no oracle) will not receive it.
-- **Procedure:** decide what that branch *answers*, and write the answer down as a contract. Usually
-  the honest options are only two: **decline** — return the same "not applicable" the informed path
-  returns when it cannot establish the thing — or keep the old rule with its wrongness named in the
-  signature's own documentation. Do not leave it as a fallback. A fallback is a decision nobody has
-  made yet, and it will be read as one that was.
+- **Procedure:** decide what that branch *answers*, and write the answer down as a contract. The
+  honest options are three: **decline** — return the same "not applicable" the informed path returns
+  when it cannot establish the thing; **keep the old rule** with its wrongness named in the
+  signature's own documentation; or **make the un-informed construction unspellable by omission** —
+  strip the defaulted parameter, so the branch is entered only by a call site that wrote the null on
+  purpose. Do not leave it as a fallback. A fallback is a decision nobody has made yet, and it will
+  be read as one that was.
+- ⚠️ **THE THIRD OPTION ALSO HANDS YOU THE INSTRUMENT.** Removing the default turns every
+  half-threaded site into a **compile error**, so the population is enumerated by the compiler
+  instead of by a source sweep — which is what converts *"no production caller takes this path"*
+  from a claim into a measurement. It costs a source-compatibility break and nothing at runtime.
+- ⚠️ **AND IT IS ONLY HALF A CURE UNLESS YOU CHECK THE ANSWER SPACE.** Stripping the default removes
+  the un-informed spelling *by omission*; it does not remove the branch if the supplied callback can
+  still ANSWER "absent". fixpp#384's delimiter oracle returns `0` for "not a group", and the splitter
+  keeps the wire value on `0` — so a zero-returning callback reaches the leftover with no caller
+  writing a null, and a *"we thread it everywhere"* claim is falsifiable by a stub. **Strip the
+  default AND check that the callback's answer space carries no value equivalent to absence** —
+  otherwise you have moved the un-informed spelling rather than removed it. The same test kills the
+  obvious "just decline when the callback is null" fix, for the same reason.
+- ⚠️ **THE STRUCTURAL CURE FOR A DISJUNCTION IS TO STOP HAVING ONE.** Where the guard reads
+  `a == nullptr || b == nullptr` because two things must be supplied together, the change that
+  removes the class is to bundle them into one value with a both-or-neither invariant, so there is
+  one predicate and no disjunct that can lose its subject. It is a wider blast radius than a
+  single-issue fix usually takes; record it as considered when you defer it, or the next reader
+  will read the narrower fix as the whole answer.
+- ⚠️ **A JUSTIFICATION GOES STALE BY LOSING ITS SUBJECT, NOT BY DRIFTING.** Where the branch is
+  guarded by a **disjunction**, check what each disjunct is actually argued for. A later fix can
+  delete one disjunct and leave the other running on a sentence written about the deleted one — and
+  unlike a line-number citation, that sentence still reads as current, because nothing about it has
+  changed. This is how fixpp#384 arose out of fixpp#220's own fix. **When you delete a disjunct,
+  re-read what justified the guard, not just what the guard did.**
 - ⚠️ **A WAIVER'S PREMISE IS A FACT ABOUT THE CALL GRAPH, NOT ABOUT THE CODE.** "No production caller
   takes this path" is the standard justification, and it is exactly the kind of claim that decays
   without touching the file it justifies. One default constructor, one convenience overload, one
@@ -277,6 +303,26 @@ positive; the same over-extent also fed `group_slices_status()` and so the typed
 which is the half nobody had reported. Resolved by declining rather than by a better guess: with no
 dictionary the boundary is undefined per `[FIX50SP2 §3]`, which is also why both reference engines
 form no group at all without one.
+
+**Second instance, produced BY the first: fixpp#384.** `group()`'s decline is guarded by
+`opaque_dict_ == nullptr || group_member_fn_ == nullptr`. The instance splitter one function over —
+`group_slices_status()` — has the sibling guard `opaque_dict_ == nullptr || group_delim_fn_ ==
+nullptr`, and 083's contract justified its wire-derived fallback by arguing the **first** disjunct
+only. #220 deleted that disjunct; the sentence stayed, over the disjunct it was never about, and read
+as a deliberate design for one release. Two things distinguish this instance from its parent and are
+why it is recorded rather than folded in: the leftover was **not wrong in the same way** — the wire
+delimiter is membership-validated before use, so it is always a member of the right group, where
+#220's extent had no oracle at all — and the fix was the **third** option above rather than a
+decline. ⚠️ **The first reason recorded for that choice was wrong, and its wrongness is the more
+useful half.** It said declining was *"measured RED"* against
+`TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged`, which builds the half-threaded table on
+purpose as its pre-083 baseline. True, but that witness passes `nullptr` only as a *spelling* — a
+zero-returning oracle yields the same delimiter and the same slices, so a one-line fixture change
+removes the cost entirely. **A cost a one-line fixture change removes is not a design constraint**, and citing it as
+one is this class's own error committed inside this class's own fix. The reason that survives is the
+answer-space bullet above: declining on a null callback does not remove the branch, because a
+callback answering 0 still reaches it. See [`components/wire`](./components/wire.md) and
+`spec/behaviors-and-limitations.md` B-384-1 / B-384-2 / L-384-1.
 
 ---
 

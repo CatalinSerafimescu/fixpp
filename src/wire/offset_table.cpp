@@ -663,8 +663,17 @@ std::uint32_t OffsetTable::group_slices_reserve_bound() const noexcept {
     // using the SAME predicate group() gates a push on: the dictionary
     // recognises entries_[e].tag as a group (under this table's ROOT context)
     // whose first member is the immediately following tag. So every tag that can
-    // push into group_slices_ is counted here, and each contributes ≥ its actual
-    // pushes (consume_group_extent caps instances at `declared`). Nested count
+    // push into group_slices_ is counted here.
+    //
+    // ⚠️ THE NEXT INFERENCE IS THE DEFECT, and it used to be stated here as
+    // fact: *"each contributes ≥ its actual pushes (consume_group_extent caps
+    // instances at `declared`)"*. That cap governs the EXTENT WALK, which uses
+    // the WIRE delimiter; `group_slices_status()`'s SPLIT LOOP re-splits the
+    // resulting extent with the DICTIONARY delimiter and is capped only by
+    // `group_end`. Two different delimiters, one cap — so the bound does not
+    // dominate the pushes on a divergent context. PRE-EXISTING since 083, NOT
+    // introduced or fixed by #384; tracked as fixpp#389. See the reserve-once
+    // contract comment in group_slices_status() and B&L L-384-1 residual (b). Nested count
     // fields resolve under a different group_context and do not match the ROOT
     // ctx (their instances live in nested_cache_, not group_slices_). The
     // `parse_declared_count(e) > 0` prefilter prunes string/absent fields without
@@ -711,7 +720,28 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
     try {
         // Reserve once to a tight upper bound (sum of top-level declared counts,
         // clamped to entry count): subsequent appends never reallocate, so every
-        // previously returned span stays valid. The old `entries_.size()` bound
+        // previously returned span stays valid.
+        //
+        // ⚠️ THAT INVARIANT IS FALSE POST-083, and this is the sentence a reader
+        // will otherwise trust. TWO DIFFERENT DELIMITERS decide the two halves:
+        // `consume_group_extent` walks with the WIRE delimiter
+        // (`entries_[first].tag`) and DOES cap at `declared`, producing
+        // `group_end`; the split loop below then RE-SPLITS `[first, group_end]`
+        // with the DICTIONARY delimiter and has NO cap at all — it pushes once
+        // per occurrence plus once at `group_end`. So when the per-context
+        // delimiter diverges from the wire's and occurs more often than
+        // `declared` inside the extent, the pushes exceed the reserve, this
+        // vector reallocates, and every span already handed out for an EARLIER
+        // `no_tag` on this table goes stale. Measured on the shipped path, not
+        // hypothetical:
+        // `TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged` pushes 3
+        // slices for a `100=2` group against a bound of 2. What keeps it
+        // harmless today (fixpp#389) is a CALLER-CHOSEN allocator property this did
+        // not state — a monotonic_buffer_resource never reuses the abandoned
+        // block, so the stale span still reads correct bytes. A reusing resource
+        // would make it a use-after-free, and the C-ABI does hold these spans
+        // across calls. PRE-EXISTING since 083; not introduced or fixed by #384.
+        // See B&L L-384-1 residual (b) for the full disposition. The old `entries_.size()` bound
         // over-reserved ~3x (fields, not instances) and exhausted the fixed
         // null-upstream parse arena on MSVC-release, silently degrading large
         // groups to empty (PR #181 Tier-2 arena_fit). See
@@ -747,38 +777,39 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                 // query one path element too long, violating Entity 1's
                 // "parent_path EXCLUDES no_tag" invariant.
                 //
-                // C-8.4's fallback has exactly TWO cases and no third: no
-                // dictionary / no callback -> today's wire-derived
-                // `entries_[first].tag`; dictionary present -> the store's
-                // answer, with no wire fallback (a zero means "not a group",
-                // which callers already handle as absent).
+                // 384 RESOLVES C-8.4, whose two rows were BOTH stale here.
+                // The archaeology — which row said what, and why each went
+                // stale — is in the C-8.4 AMENDMENT dated 2026-09-07 and in
+                // brain/components/wire.md; what stays here is the CONDITION
+                // this code runs under.
                 //
-                // ⚠️ 220 CHANGED WHICH OF C-8.4's TWO CASES CAN RUN, and this
-                // text used to justify the fallback as "behaviour-preserving,
-                // and the CORRECT answer for a table with no dictionary". That
-                // justification is now DEAD: a table with no dictionary cannot
-                // reach this line at all, because group() declines for it and
-                // this splitter only runs inside `if (gi)`. What survives is
-                // the OTHER disjunct of the same guard — dictionary present but
-                // `group_delim_fn_` null, which the dict-aware ctors still
-                // default (offset_table.hpp / parser.hpp) — and that case was
-                // never what the sentence above was written about. It is a
-                // wire-derived rule running on a rationale that belonged to a
-                // branch #220 removed: the same shape as #220 itself, one
-                // callback over. No production construction reaches it (every
-                // dict-aware site in src/ and include/ threads both callbacks;
-                // Parser sets them together or not at all), but the fuzz
-                // harness and several wire tests instantiate exactly that
-                // shape. Deliberately NOT fixed here — a dict-aware behaviour
-                // change does not belong in a dict-free-decline change.
+                // This fallback is not justified as CORRECT. The two
+                // constructions disagree on a divergent context — pinned by
+                // tests/wire/typed_read_split_agreement_test.cpp
+                // `OutOfScopeWireProbesUnchanged`, which builds the
+                // half-threaded table on purpose as its pre-083 oracle. It is
+                // justified as REQUESTED and BOUNDED:
+                //   - requested: 384 removed the `= nullptr` default from every
+                //     dict-aware OffsetTable/MessageView ctor, so this shape can
+                //     no longer be built by omission. ⚠️ Removing the default
+                //     does NOT remove the shape — a delimiter callback that
+                //     ANSWERS 0 reaches this same fallback without any caller
+                //     writing a null (see the guard's own comment). The default
+                //     removal narrows the accidental spelling; the answer space
+                //     still contains a value equivalent to absence.
+                //   - bounded: this `delim` is membership-VALIDATED before use.
+                //     group() proceeds only after group_member_fn_ confirms the
+                //     wire's first tag after the count IS a member of this group
+                //     in this context, so an arbitrary attacker-chosen tag can
+                //     never become the delimiter — unlike #220's extent, which
+                //     had no oracle at all. For a message that CONFORMS to FIX's
+                //     "every instance opens with the group's first field" rule
+                //     the wire tag and the dictionary's answer coincide; they
+                //     diverge only where the dictionary's per-context record
+                //     disagrees with the order actually on the wire, which is
+                //     precisely what the oracle a caller declined to supply
+                //     exists to arbitrate.
                 //
-                // Tracked as fixpp#384, which also records what is NOT wrong
-                // here: this `delim` is membership-VALIDATED before use —
-                // group() proceeds only after group_member_fn_ confirms the
-                // wire's first tag after the count is a member of this group —
-                // so it is always a confirmed member, unlike #220's extent,
-                // which had no oracle at all. The open question is whether it
-                // is the RIGHT member, which is C-8.4's to answer.
                 // There is deliberately no "or the context did not resolve"
                 // branch: the splitter cannot observe that state, since
                 // `group_first_field` has already fallen through to the bare
@@ -787,6 +818,40 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                 std::uint16_t delim = entries_[first].tag;
                 if (opaque_dict_ != nullptr && group_delim_fn_ != nullptr) {
                     group_context const ctx = stored_group_context();
+                    // 384 (C-8.4 row 2): a 0 answer means the store has no
+                    // delimiter record for `(msg_type, parent_path, no_tag)` —
+                    // `group_first_field` returns 0 both when `group_bit` is
+                    // clear and when the record's `group_first` is itself 0. We
+                    // are already past group()'s membership check, so the
+                    // dictionary has asserted that this no_tag HAS members in
+                    // this context; a missing delimiter record alongside a
+                    // non-empty member set is an INCONSISTENT dictionary, not an
+                    // absent group. Declining here would drop instances the
+                    // membership oracle just confirmed are present, so the
+                    // membership-validated wire tag is kept instead. Reachable
+                    // through the hand-built table_view surface
+                    // (`add_group_member` without `set_group_first` — pinned by
+                    // tests/wire/offset_table_test.cpp
+                    // `GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero`).
+                    // A LOADED dictionary cannot reach it, and the reason is
+                    // TWO loader facts, neither of them the one that comes to
+                    // mind first (`as_table_view()` does NOT read the capture
+                    // directly — it does a store lookup and writes back whatever
+                    // it gets, including 0):
+                    //   (1) neither loader ever STORES a record with delimiter
+                    //       0 — both guard the push on `captured != 0`
+                    //       (xml_loader.cpp / orchestra_loader.cpp, 083 T036 /
+                    //       FR-006 / C-6.1), so a 0 from the lookup can only
+                    //       mean NO RECORD; and
+                    //   (2) the FR-023 / C-3.4 completeness sweep in both
+                    //       loaders' finalize() THROWS if a context
+                    //       as_table_view() will register has no record.
+                    // (1)+(2) => the delimiter written is non-zero. ⚠️ An earlier
+                    // version of this comment said the FR-023 sweep was NOT
+                    // load-bearing "because it never inspects delimiter" — that
+                    // is backwards, and it pointed the reader away from the
+                    // guard that carries the claim. See B&L B-384-2, which keeps
+                    // both wrong versions on purpose.
                     if (std::uint16_t const d = group_delim_fn_(opaque_dict_, ctx, no_tag);
                         d != 0) {
                         delim = d;

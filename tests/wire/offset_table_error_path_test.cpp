@@ -54,6 +54,7 @@
 #include <vector>
 
 #include "../support/msvc_debug_arena_skip.hpp"
+#include "support/context_group_delim_fn.hpp"
 #include "support/context_group_member_fn.hpp"
 #include "support/failing_pmr_resource.hpp"
 #include "support/frame_view_factory.hpp"
@@ -210,13 +211,20 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     fixpp::dict::table_view dict;
     dict.set_group_first(453, 448);
     auto* const member_fn = &fixpp_test_support::context_group_member_fn;
+    // 384: the delimiter oracle is now threaded too. The fixture sets
+    // `set_group_first(453, 448)`, so it resolves 448 — the same tag the
+    // wire-derived fallback resolved, which is why every assertion below is
+    // unchanged. It is alloc-free (context_group_delim_fn.hpp), so the
+    // allocation accounting this cell is built on is unchanged as well; the
+    // probe arm below RE-MEASURES that count rather than assuming it.
+    auto* const delim_fn = &fixpp_test_support::context_group_delim_fn;
 
     // ── CONTROL ARM: prove the instrument can report NON-empty. ──
     // Without this, the failing arm below is indistinguishable from a cell
     // whose group_slices() returns empty for some unrelated reason.
     {
         std::pmr::monotonic_buffer_resource ok_arena;
-        OffsetTable ok{*fv, &ok_arena, &dict, member_fn};
+        OffsetTable ok{*fv, &ok_arena, &dict, member_fn, delim_fn};
         ASSERT_TRUE(ok.build_status().has_value());
         ASSERT_FALSE(ok.group_slices(453).empty())
             << "control: with allocation succeeding, this frame MUST materialise one slice — "
@@ -245,17 +253,11 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     // in tests/support/context_group_member_fn.hpp — group_member_tags returns
     // a span).
     //
-    // SCOPE, stated because "dict-aware" would overclaim: MEMBERSHIP is
-    // threaded here, the DELIMITER callback is not (it defaults to null), so
-    // group_slices_status() resolves the delimiter from the wire. That is
-    // deliberate — this cell is about the bad_alloc degrade, not about
-    // delimiter resolution — but it means the cell does not cover the
-    // fully-threaded splitter path, and should not be cited as if it did.
     std::size_t construction_calls = 0;
     {
         std::pmr::monotonic_buffer_resource probe_upstream;
         failing_pmr_resource probe_mr{&probe_upstream, /*fail_on_call_n=*/0};  // never fail
-        OffsetTable probe{*fv, &probe_mr, &dict, member_fn};
+        OffsetTable probe{*fv, &probe_mr, &dict, member_fn, delim_fn};
         ASSERT_TRUE(probe.build_status().has_value());
         construction_calls = probe_mr.allocate_calls();
     }
@@ -265,7 +267,7 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     // Fail the first allocation AFTER construction (the group_slices_.reserve).
     failing_pmr_resource fail_mr{&upstream, /*fail_on_call_n=*/construction_calls + 1};
 
-    OffsetTable t{*fv, &fail_mr, &dict, member_fn};
+    OffsetTable t{*fv, &fail_mr, &dict, member_fn, delim_fn};
 
     // Construction must succeed (all construction allocs complete before the
     // (construction_calls + 1)-th call).

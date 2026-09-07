@@ -28,6 +28,51 @@ status: stable
   does not move — a disposition is not a migration — and that is stated up front rather than
   compensated for with a metric that does.
 
+- **2026-09-07 — #384: a rationale can outlive the branch it was written about.** `failure-classes.md`
+  class 9 gains a **third** disposition and two warnings; `components/wire.md` gains the delimiter-
+  oracle section.
+
+  083's C-8.4 justified `group_slices_status()`'s wire-derived instance delimiter for a guard with
+  two disjuncts — `opaque_dict_ == nullptr || group_delim_fn_ == nullptr` — and argued only the
+  first (*"pre-083 behaviour is the correct answer for a table with no dictionary"*). **#220 deleted
+  that disjunct**, and the sentence stayed, sitting over the disjunct it was never about. Unlike a
+  stale line number, it still read as current: nothing about it had changed. **The lesson is that a
+  justification goes stale by losing its SUBJECT, not by drifting — so when you delete a disjunct,
+  re-read what justified the guard, not just what the guard did.**
+
+  Two findings the fix itself produced, both recorded because they cut against the obvious move:
+
+  **(1) I rejected the obvious fix on a measurement, and the measurement was not the reason.**
+  Folding `group_delim_fn_ == nullptr` into #220's decline does turn
+  `TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged` RED — it builds the half-threaded table on
+  purpose as its pre-083 baseline. But that witness passes `nullptr` only as a **spelling**: a
+  zero-returning oracle is behaviourally identical, so a one-line fixture change removes the cost
+  and the decline stands. **A cost a one-line fixture change removes is not a design constraint.**
+  The reason that survives is structural — declining on a null callback does not remove the branch,
+  because a callback ANSWERING 0 still reaches it. Caught by the altitude review, not by me, and it
+  is this class's own error committed inside this class's own fix.
+
+  **(2) The row nobody had re-read was ALSO wrong.** C-8.4's *second* row said "there is no wire
+  fallback" for the dictionary-present case. The shipped guard is `if (d != 0) { delim = d; }` — a
+  zero answer keeps the wire value. Its stated reason ("a zero means not-a-group, which callers
+  handle as absent") cannot hold at that point either, because the splitter runs only after
+  membership has confirmed the group HAS members. Correcting only the disjunct the issue named would
+  have left this one for the next round.
+
+  ⚠️ **The corollary that bites hardest: a zero-returning stub is not a threaded oracle.** It is
+  behaviourally identical to `nullptr`, so "every site threads the callback" is falsifiable by a
+  stub. `tests/support/context_group_delim_fn.hpp` carries that warning at the point of use.
+
+  **What shipped** is class 9's new third option — make the un-informed construction *unspellable by
+  omission*. Removing the `= nullptr` default from all four dict-aware constructors changes no
+  runtime behaviour in either direction and turns every half-threaded site into a compile error,
+  which is what let the compiler — not a source sweep — enumerate the population: 5 test/fuzz files,
+  **zero** sites in `src/` or `include/`. ⚠️ It is deliberately recorded as HALF a cure: stripping a
+  default removes the un-informed spelling by omission, not the branch, whenever the callback's
+  answer space still carries a value equivalent to absence. Class 9's new bullet states that test;
+  the structural cure — one both-or-neither aggregate instead of a two-disjunct guard — is recorded
+  as deferred with its blast radius, not silently dropped.
+
 - **2026-09-07 — #289 batch 18, the lost mock-clock advance.** `components/test.md` gains a THIRD
   `#289` shape: a fixed `run_for` STAGING a mock-clock advance. No `.get()` near it, so the census
   never saw it; the terminal half was usually already migrated and correct. If the coroutine has not

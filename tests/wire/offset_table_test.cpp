@@ -22,6 +22,8 @@
 #include <string_view>
 #include <vector>
 
+#include "support/context_group_delim_fn.hpp"
+#include "support/context_group_member_fn.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
 
@@ -372,7 +374,12 @@ TEST(WireOffsetTable, DictFreeGroupDeclinesWhenMembershipFnMissing) {
     fill_group_with_trailing_field_dict(dict);
 
     std::pmr::monotonic_buffer_resource arena;
-    OffsetTable t{*fv, &arena, &dict, /*group_member_fn=*/nullptr};
+    // 384: the delimiter oracle is spelled out too, now that it has no default.
+    // It is deliberately null here — the point of this cell is a table with no
+    // MEMBERSHIP oracle, which group() declines before any delimiter is
+    // resolved, so a threaded delimiter callback would never be called.
+    OffsetTable t{*fv, &arena, &dict, /*group_member_fn=*/nullptr,
+                  /*group_delim_fn=*/nullptr};
     ASSERT_TRUE(t.build_status().has_value());
     ASSERT_TRUE(t.find(453).has_value())
         << "anti-vacuity: see DictFreeGroupDeclinesUnderDefaultConfig";
@@ -792,6 +799,140 @@ TEST(WireOffsetTable, FR001_NoFlatInstanceWalkInGroup) {
     EXPECT_EQ(boundary_guard_12space, 0U)
         << "12-space 'if (!boundary) {' occurrences: " << boundary_guard_12space
         << " — the flat early-continue guard is back in a nested arm of group()";
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 384 (C-8.4 row 2): the splitter KEEPS the wire-derived delimiter when a
+// threaded delimiter oracle answers 0.
+//
+// C-8.4 row 2 said of the dictionary-present case: "There is no wire fallback.
+// A zero return means `no_tag` is not a group at all ... which the caller
+// already handles as absent." Both halves are wrong about this code. The
+// splitter's guard is `if (d != 0) { delim = d; }`, so a zero answer leaves
+// `delim` at `entries_[first].tag`; and we only reach the splitter after
+// group()'s membership check has ALREADY established that `no_tag` is a group
+// with members in this context, so "absent" is not what a zero means here.
+//
+// The shape is a dictionary that registers a group's MEMBERS without its
+// first-field record (`add_group_member` with no `set_group_first`), which
+// sets `group_bit` — so membership answers yes — while `group_first_` has no
+// row, so `group_first_field` answers 0. A loaded dictionary cannot be in this
+// state: `as_table_view()` calls `set_group_first_ctx` before registering
+// members, and a context with no Entity-2 record is rejected at load time by
+// the FR-023 / C-3.4 completeness sweep. The hand-built table_view surface can,
+// which is why this cell exists at all.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Two instances of group 453, each opening on 448 — so a correct split yields
+// two slices and a delimiter mix-up yields one or four.
+std::vector<std::byte> two_instance_group_frame() {
+    return make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "453=2\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "448=PB\x01"
+        "447=E\x01");
+}
+
+std::string slice_text(fixpp::wire::group_slice const& gs) {
+    return std::string{reinterpret_cast<char const*>(gs.data), gs.len};
+}
+
+// A DELIBERATELY WRONG oracle: it names 447 (a real member, but the second
+// field of each instance) as the delimiter. Used only by the control arm, to
+// show the threaded answer is what the splitter uses when it is non-zero — so
+// the zero-answer arm below is about the ZERO and not about the callback being
+// ignored outright.
+std::uint16_t wrong_group_delim(void const*, fixpp::wire::group_context const&,
+                                std::uint16_t) noexcept {
+    return 447;
+}
+
+TEST(WireOffsetTable, GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero) {
+    auto buf = two_instance_group_frame();
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    // Members registered; NO first-field record for 453.
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35)
+        .add_valid("D", 34)
+        .add_valid("D", 453)
+        .add_valid("D", 448)
+        .add_valid("D", 447)
+        .add_group_member(453, 448)
+        .add_group_member(453, 447);
+
+    // ── Fixture preconditions, asserted rather than assumed ─────────────────
+    // Asserted through the ORACLE THE ARM ACTUALLY CALLS, not through the bare
+    // one-arg accessor: `context_group_delim_fn` goes to the three-arg
+    // context-keyed overload, and the two agree here only because a hand-built
+    // table populates no context store. Pinning the bare one would be pinning a
+    // different function than the arm exercises.
+    ASSERT_EQ(fixpp_test_support::context_group_delim_fn(&dict, fixpp::wire::group_context{},
+                                                         std::uint16_t{453}),
+              0U)
+        << "fixture: add_group_member must NOT register a first-field record, or this cell is "
+           "about the ordinary dictionary-sourced path and not about the zero answer";
+    ASSERT_FALSE(dict.group_member_tags(std::uint16_t{453}).empty())
+        << "fixture: membership must be non-empty, or group() declines before the splitter runs "
+           "and the split below would be empty for an unrelated reason";
+
+    auto* const member_fn = &fixpp_test_support::context_group_member_fn;
+
+    // ── CONTROL ARM: the threaded oracle IS consulted and DOES win ──────────
+    // With a non-zero (and deliberately wrong) answer of 447, the split moves:
+    // each instance now opens at 447, so the division changes. Without this
+    // arm, the zero-answer arm below would also pass on a build that ignored
+    // `group_delim_fn_` entirely.
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        OffsetTable t{*fv, &arena, &dict, member_fn, &wrong_group_delim};
+        ASSERT_TRUE(t.build_status().has_value());
+        auto const slices = t.group_slices(453);
+        // The EXACT split, not `!= 2`. `EXPECT_NE(size, 2)` also holds at 0 and
+        // 1 — i.e. it would pass on a splitter that had degenerated to a single
+        // slice for some unrelated reason, which is the opposite of what this
+        // arm is for. Naming the three instances pins that the oracle's answer
+        // (447) is what drew the boundaries.
+        ASSERT_EQ(slices.size(), 3U)
+            << "control: with the oracle answering 447, each instance must open at 447 — three "
+               "slices, not the wire-derived two. A different count means this cell cannot tell a "
+               "consulted oracle from an ignored one";
+        EXPECT_EQ(slice_text(slices[0]), "448=PA");
+        EXPECT_EQ(slice_text(slices[1]), std::string("447=D\x01"
+                                                     "448=PB"));
+        EXPECT_EQ(slice_text(slices[2]), "447=E");
+    }
+
+    // ── THE ARM: a zero answer leaves the wire-derived delimiter in place ───
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        OffsetTable t{*fv, &arena, &dict, member_fn, &fixpp_test_support::context_group_delim_fn};
+        ASSERT_TRUE(t.build_status().has_value());
+        auto const slices = t.group_slices(453);
+        EXPECT_EQ(slices.size(), 2U)
+            << "with the store answering 0, the splitter must keep the membership-validated wire "
+               "delimiter (448) and yield the two instances the frame carries — NOT decline, and "
+               "NOT split on 0";
+    }
+
+    // ── And that is the SAME answer the explicitly-null construction gives ──
+    // The two spellings produce the same delimiter and the same slices (the
+    // callback is still invoked in the zero-answering arm, so they differ in
+    // side effects, not in the split), which is exactly why
+    // context_group_delim_fn.hpp warns against a zero-returning stub being
+    // offered as "threaded".
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        OffsetTable t{*fv, &arena, &dict, member_fn, /*group_delim_fn=*/nullptr};
+        ASSERT_TRUE(t.build_status().has_value());
+        EXPECT_EQ(t.group_slices(453).size(), 2U)
+            << "an explicit null oracle and a zero-answering one must agree — the equivalence "
+               "C-8.4 row 2 denied";
+    }
 }
 
 }  // namespace
