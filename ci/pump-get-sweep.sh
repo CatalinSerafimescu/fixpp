@@ -147,6 +147,52 @@ def blank_comments(text):
     text = _BLOCK.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
     return _LINE.sub(lambda m: " " * len(m.group(0)), text)
 
+_DECLTYPE = re.compile(r"\bdecltype\s*\(")
+
+def blank_unevaluated(stmt):
+    """Blank `decltype(...)` operands, preserving length.
+
+    ⚠️ `using R = decltype(fut.get());` DOES NOT CALL `get()` -- the operand is
+    unevaluated -- yet it matched this sweep's `.get()` pattern and produced a row.
+    That row is worse than noise: the idiom is part of #316's SETTLED value-helper
+    recipe, so it appears at sites that are already MIGRATED, and the sweep reported
+    two of them as `CALLER-ONLY x HELPER` residue in a file whose very next line is
+    `run_window_then_ready`. Migrating a value-returning helper therefore RAISED the
+    residual, which is the one direction an instrument must never move.
+
+    It also cost two rows a second way: the `since` walk treats any statement naming
+    `<fut>.get()` as the end of that future's segment, so a `decltype` line truncated
+    the window evidence and could flip RUN-BOUNDED to HELPER.
+
+    Scope, stated so it is not read as more than it is: `decltype` is the only
+    unevaluated context this blanks. `sizeof`, `noexcept` and `requires` can hold the
+    same call and are NOT handled -- no instance exists in this tree today, and a
+    speculative widening would need controls no site justifies. The controls below
+    straddle the boundary this DOES draw.
+
+    ⚠️ THE EARLY-OUT IS NOT AN OPTIMISATION TO TASTE: on this corpus ~10^5 statements
+    reach here and a couple of DOZEN contain `decltype`, so without it the char-list copy
+    runs about ten thousand times per useful call. No exact pair is written down -- an
+    earlier revision did, and the numbers rotted inside the same PR when its own migration
+    changed the corpus. Re-derive by counting `statements()` output against
+    `'decltype' in stmt`. The early-out is exactly safe: `_DECLTYPE` requires that literal
+    substring, so no statement the regex would match can be skipped by it."""
+    if "decltype" not in stmt:
+        return stmt
+    out = list(stmt)
+    for m in _DECLTYPE.finditer(stmt):
+        depth, i = 0, m.end() - 1
+        while i < len(stmt):
+            if stmt[i] == "(":
+                depth += 1
+            elif stmt[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            out[i] = " "
+            i += 1
+    return "".join(out)
+
 def depth_text(line):
     """Parens for splicing must ignore those inside string literals -- an
     unbalanced `(` in a literal (e.g. EXPECT_FATAL_FAILURE's message) otherwise
@@ -304,10 +350,12 @@ def classify(text):
             for name in known:
                 if re.search(rf'\b{re.escape(name)}\b', stmt):
                     guarded_state[name] = True
+        # Only the CALL sites matter from here down; an unevaluated operand is not one.
+        evaluated = blank_unevaluated(stmt)
         for name in list(since):
-            if not re.search(rf'\b{re.escape(name)}\s*\.get\(\)', stmt):
+            if not re.search(rf'\b{re.escape(name)}\s*\.get\(\)', evaluated):
                 since[name].append(stmt)
-        for gm in re.finditer(r'(?:^|[^\w.])(\w+)\.get\(\)', stmt):
+        for gm in re.finditer(r'(?:^|[^\w.])(\w+)\.get\(\)', evaluated):
             name = gm.group(1)
             if name not in known:
                 continue
@@ -452,7 +500,32 @@ SPLICE_OVER_LIMIT_INVISIBLE = f"""
 DECL_AND_GET_BAD = """
     auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future); auto r = fut.get();
 """
+# The `decltype` boundary, straddled in BOTH directions in ONE fixture so a
+# blanket exclusion cannot pass it. `decltype(fut.get())` must vanish; the real
+# `fut.get()` four lines below it must still be the row. A fix that blanked the
+# whole statement, or the whole line, or everything after `decltype`, fails here.
+DECLTYPE_UNEVALUATED = """
+    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    using R = decltype(fut.get());
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        return R{std::unexpected(kWindowMissSentinel)};
+    }
+    return fut.get();
+"""
+# ... and the NEGATIVE edge: the same idiom with the guard REMOVED. The real
+# `get()` must still report, i.e. the exclusion must not have swallowed the
+# statement that carries it.
+DECLTYPE_STILL_BAD = """
+    auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+    using R = decltype(fut.get());
+    ioc.run_for(200ms);
+    ioc.restart();
+    return fut.get();
+"""
+
 CONTROLS = [
+    ("decltype operand is NOT a call   -> guarded",   DECLTYPE_UNEVALUATED, 1, 0),
+    ("...and the REAL get() still reports",           DECLTYPE_STILL_BAD,   0, 1),
     ("direct   window, unguarded get   -> UNGUARDED", DIRECT_BAD,        0, 1),
     ("INDIRECT window (f.drain())      -> UNGUARDED", INDIRECT_BAD,      0, 1),
     ("indirect window, DOTLESS run()   -> UNGUARDED", DOTLESS_BAD,       0, 1),

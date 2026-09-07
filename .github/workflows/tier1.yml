@@ -2283,6 +2283,17 @@ jobs:
       - name: "Regression pin — #289 site-label uniqueness"
         run: bash ci/pump-label-uniqueness.sh
 
+      # #289 batch 18: a fixed `run_for` staging a MOCK-CLOCK advance is a
+      # wall-clock hope, and a starved runner turns it into a LOST advance --
+      # unrecoverable, not slow. The sweep REPORTS candidates and exits 0; what
+      # runs here as a gate is its CONTROLS, which exit 2 when the classifier
+      # stops discriminating. That is the half worth having in CI: a reporter
+      # whose rules have silently broken reports clean, which is this repo's
+      # most recurring instrument defect. Mechanism and the LOWER-BOUND caveat:
+      # ci/mock-clock-staging-sweep.sh's own header. Buildless — python3 only.
+      - name: "Regression pin — #289 mock-clock staging sweep controls"
+        run: bash ci/mock-clock-staging-sweep.sh
+
       # Gate B round 1 (#326) found this checker had NO CI-visible signal at
       # all: the gate itself only runs as a local pre-commit hook (nothing in
       # .github/ invokes pre-commit), and `gate()` explicitly skips its own

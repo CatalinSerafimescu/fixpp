@@ -133,6 +133,73 @@ suspended frame, so draining in the wrong scope is worse than not draining:
 ⚠️ **`ioc` must stay the FIRST fixture member.** Nothing holding a strand taken from the context may
 outlive the context.
 
+### The THIRD shape: a STAGING window before a mock-clock advance (#289 batch 18)
+
+Neither of the two above. There is no `.get()` near it at all, so the census cannot see it; the
+terminal half is usually already migrated and correct.
+
+```cpp
+auto close_fut = co_spawn(ioc, sess.close(graceful), use_future);
+ioc.run_for(50ms);                    // <- STAGING window, blind
+ioc.restart();
+clock->advance(seconds{3});           // <- the discriminator
+if (!run_window_then_ready(ioc, close_fut, 200ms)) { ... }   // terminal half, already migrated
+```
+
+The window's job is to get the coroutine to its **mock-clock sleep** before the test advances that
+clock. If it has not parked when the window returns, the advance lands on a timer that is not yet
+armed and is **LOST** — unrecoverable, not slow, because nothing advances the clock again and no
+later pump rescues it. It surfaced as `session_tc_liveness` failing 1-of-369 on a starved
+`linux-clang-asan` lane; fixed exemplar fixpp `4179da94`.
+
+⚠️ **A LONGER `run_for` IS THE FIX EVERYONE REACHES FOR FIRST AND IT IS NOT A FIX** — it lowers the
+probability and keeps the failure mode. The migration is an **observable staging condition**:
+`pump_until(sess.state() == fsm_state::LogoutSent)`. `LogoutSent` is exactly "Logout emitted,
+parked, not complete", so the window stays a *staging* window rather than becoming a *completion*
+window — which is the objection that kept these sites blind.
+
+⚠️ **#316 TOUCHED ONE OF THESE FUNCTIONS AND WROTE A COMMENT JUSTIFYING THE BLINDNESS.** Its premise
+was right (*"the future must still be PENDING when this returns, so it is a staging window, not a
+completion window"*) and its conclusion was wrong: the premise rules out a COMPLETION check, it does
+not license a blind window. Batch 18 found the identical comment shape a second time, in
+`cancellation_two_phase_test.cpp`. Both were **replaced**, not annotated.
+
+⚠️ **A POST-HOC `EXPECT_EQ(state, LogoutSent)` IS NOT THE FIX EITHER**, and three sites had one. It
+observes the right thing at the wrong time — it converts a lost advance into a confusing failure
+instead of preventing it, and being non-fatal it lets the advance run anyway. Waiting on the same
+predicate makes the same claim and removes the race.
+
+**The instrument is `ci/mock-clock-staging-sweep.sh`**, which classifies each `advance()`/`step_to()`
+by the nearest preceding pump inside its enclosing brace block. `poll()`/`run()` are NOT candidates —
+they return on "no ready work", so starvation lengthens them, never shortens them; only a WALL-CLOCK
+bound can return with the staging work still queued. Its verdict `NO-PUMP-IN-SCOPE` is an
+**escalation**, not a clean bill: a fixture helper can stage while its caller advances, and no
+same-function analysis finds that pair. **Quote the candidate count as "N that the sweep can see".**
+
+⚠️ **THE FORCING SEAM IS THE WRONG INSTRUMENT FOR THIS SHAPE.** A forced MISS cannot catch a
+spurious HIT — the hazard is a REAL `asio::steady_timer` completing the awaited future while the
+mock-clock path never runs (PR #337: green in 2202 ms with all four forced-miss arms passing). The
+arms that work inject the defect: delete the `clock->advance()` and assert RED, and force the staging
+predicate to `true` and assert RED. `ci/red-arms/batch18-lost-advance.sh`.
+
+⚠️ **AND THE OBVIOUS MECHANISM-LEVEL BARRIER WAS BUILT, MEASURED, AND REMOVED.** `mock_clock` already
+computes the woken set in `advance()`, so exposing the parked-waiter count looks strictly better than
+a lexical sweep — no lookahead, no same-function constraint, a positive observation. At both sites no
+FSM state covers, it FAILED TO DISCRIMINATE, proven by running rather than by reading. `HbTrTest`'s cell passes with
+its staging window starved to `run_for(0ms)`; `AdminDistinctNow`'s goes RED when starved but RED with
+the barrier in place too, because what starving removed there was the TERMINAL collection window.
+
+⚠️ **The mechanism first written for that disposition was WRONG, and the correction is the durable
+half.** Not monotonicity — **how the sleep is ARMED**. `sleep_until` fires immediately when
+`deadline <= steady`, so a late arm is rescued exactly when the deadline it names is already past: an
+arm from a **stored anchor** (`last_inbound_steady_ + heartbt_int`) names a passed instant and is
+RESCUED, while a **now-relative** arm (`steady_now() + logout_disconnect_timeout_ms`) names a NEW
+future instant and is LOST. The condition on the first row: the anchor must PREDATE the advance —
+inbound traffic refreshes it to `steady_now()`, after which that arm is now-relative in effect. That
+rule decides candidate-vs-defect for the whole class, and it is why no clock-side fix reaches the
+second row. It would have shipped as an assertion that cannot go RED for its own
+class. Rebuild it only against a site where a mutation shows it load-bearing.
+
 ### ⚠️⚠️ A state assertion after a helper call is NOT a masking barrier
 
 When designing forced-miss (RED) arms, the natural model is that a helper's miss-branch `return` will

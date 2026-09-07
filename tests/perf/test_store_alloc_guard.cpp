@@ -72,6 +72,7 @@
 // without the alloc counting (so it passes trivially — the mallocnesia run
 // is the real gate).
 #include "support/alloc_guard_markers.hpp"
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -233,7 +234,33 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapStoreSteadyState) {
             },
             asio::use_future);
         // Drive the context until all handlers complete.
-        ioc.run();
+        //
+        // ⚠️ #289 — AND THIS SITE IS WHY `MAX_SPLICE` WAS MEASURED RATHER THAN
+        // ARGUED. `ci/pump-get-sweep.sh` could not see it: the declaration above
+        // spans more than the sweep's 12-line splice limit, so `fut` never entered
+        // `known` and this `.get()` produced no row at all. The classifier files it
+        // under THREAD-IN-FILE (a `thread_pool` exists elsewhere in this TU), which is
+        // escalation and not a dismissal, and reading the site says the caller is the
+        // only pump.
+        //
+        // ⚠️ NO DELTA IS WRITTEN HERE, and an earlier revision's "+46 rows" had already
+        // rotted before it shipped -- the migration in this very diff changes the corpus
+        // the number is computed over, so the reader re-running it gets a different one
+        // and cannot tell rot from a broken instrument. THE RECIPE: raise `MAX_SPLICE`
+        // in a COPY of `ci/pump-get-sweep.sh`, run `--disposition` on the tree you mean,
+        // and diff the class table against the unmodified run. The finding that stands
+        // is the SHAPE -- widening the limit reveals rows, and the batch-18 measurement
+        // found none of them `CALLER-ONLY` except this one, which the executor axis had
+        // filed elsewhere.
+        //
+        // `false` here is honest rather than merely convenient: the caller asserts
+        // on it, and `run_to_exhaustion_or_report` has already reported the site by
+        // name, so a miss cannot read as a store failure in the output.
+        if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut,
+                                                              "StoreAllocGuard::run_batch")) {
+            ioc.restart();
+            return false;
+        }
         ioc.restart();
         fut.get();  // propagate any exception; coroutine is done by now
         return all_ok;

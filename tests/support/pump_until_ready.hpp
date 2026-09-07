@@ -109,6 +109,25 @@ template <class Ready>
     return done;
 }
 
+// Label-only form of `pump_until`, for the overwhelmingly common case of a site that
+// wants the DEFAULT budget and slice and needs to name itself for the forcing seam.
+//
+// Same reason the sibling `pump_until_ready(ioc, fut, budget, site)` exists: without it a
+// site has to spell `kPumpBudget, kPumpSlice` purely to reach `site`, WHICH READS AS A
+// DELIBERATE TUNING AND IS NOT ONE. That is the point: after this overload exists, a site
+// that DOES spell a budget is saying something. #289 batch 18 has one such site
+// (`FlushRunsAndFramesDurableAfterClose/stage`, a deliberate 10 s), and the rest take the
+// defaults -- which is now visible in the call rather than buried in matching arguments.
+//
+// ⚠️ SAME SIGNATURE HAZARD AS BOTH FORMS ABOVE. A bare `0` is a null pointer constant, so
+// `pump_until(ioc, ready, 0)` binds `site = nullptr` here rather than `budget = 0` on the
+// primary. Derive whether any caller does that rather than trusting a count:
+//   git grep -n 'pump_until(' -- tests/ | grep -E ', *0 *[,)]'
+template <class Ready>
+[[nodiscard]] bool pump_until(asio::io_context& ioc, Ready ready, const char* site) {
+    return pump_until(ioc, std::move(ready), kPumpBudget, kPumpSlice, site);
+}
+
 // Future-shaped specialisation of `pump_until`.
 //
 // Callers MUST check the bool BEFORE fut.get(), so a genuine lost-wake FAILs

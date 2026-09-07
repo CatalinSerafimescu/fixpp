@@ -419,9 +419,21 @@ TEST_F(LogoutExchangeTest, NeverConfirmedForceDisconnect) {
     // Trigger graceful close.
     auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
-    // Run until Logout is emitted and FSM is LogoutSent.
-    ioc.run_for(100ms);
-    ioc.restart();
+    // #289 STAGING BARRIER: phase 1 must be PARKED on its mock-clock sleep before the
+    // advance below, or that advance lands on a timer that is not yet armed and is
+    // LOST -- unrecoverable, not slow, because nothing advances the clock again.
+    // `LogoutSent` is exactly "Logout emitted, parked, not complete".
+    // Mechanism, and why a longer `run_for` is not the fix:
+    // `ci/mock-clock-staging-sweep.sh`.
+    if (!fixpp::test_support::pump_until(
+            ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+            "NeverConfirmedForceDisconnect/stage")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "NeverConfirmedForceDisconnect/stage");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                      << "NeverConfirmedForceDisconnect/stage";
+        return;
+    }
 
     // Advance clock past the 2 s graceful-close timeout, then pump until close
     // completes (the timeout firing drives the FSM to Disconnected and resolves
@@ -466,13 +478,20 @@ TEST_F(LogoutExchangeTest, ConfigurableTimeoutHonored) {
     // Trigger graceful close.
     auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
-    // Run briefly so run_logout_phase1 starts and registers sleep_until.
-    ioc.run_for(100ms);
-    ioc.restart();
-
-    // Must be in LogoutSent (Logout sent, waiting for peer reply or timeout).
-    EXPECT_EQ(sess.state(), fsm_state::LogoutSent)
-        << "RC#D: session should be in LogoutSent after emitting Logout.";
+    // #289 STAGING BARRIER, REPLACING a post-hoc assertion rather than adding to one.
+    // The `EXPECT_EQ(state, LogoutSent)` that used to follow a blind `run_for(100ms)`
+    // observed the right thing at the wrong time: it turned a lost advance into a
+    // confusing failure instead of preventing it, and being non-fatal it let the
+    // advance run anyway. Waiting on the same predicate makes the claim AND removes
+    // the race. Mechanism: `ci/mock-clock-staging-sweep.sh`.
+    if (!fixpp::test_support::pump_until(
+            ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+            "ConfigurableTimeoutHonored/stage")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "ConfigurableTimeoutHonored/stage");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "ConfigurableTimeoutHonored/stage";
+        return;
+    }
     ASSERT_GE(td.sent_count(), 1u) << "Logout frame must have been emitted.";
 
     // Advance clock by 300 ms — past the 200 ms configured timeout but only
@@ -717,17 +736,28 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
 
     auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
-    ioc.run_for(100ms);
-    ioc.restart();
+    // #289 STAGING BARRIER: phase 1 must be PARKED on its mock-clock sleep before the
+    // advance below, or that advance lands on a timer that is not yet armed and is
+    // LOST -- unrecoverable, not slow, because nothing advances the clock again.
+    // `LogoutSent` is exactly "Logout emitted, parked, not complete".
+    // Mechanism, and why a longer `run_for` is not the fix:
+    // `ci/mock-clock-staging-sweep.sh`.
+    if (!fixpp::test_support::pump_until(
+            ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+            "InitiateLogoutFromActive/stage")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "InitiateLogoutFromActive/stage");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "InitiateLogoutFromActive/stage";
+        return;
+    }
 
     // Logout should have been emitted. T011 (US2): open() emits Logon first.
     // sent(0) = Logon (from open), sent(1) = Logout (from close).
+    // The LogoutSent assertion that used to sit here is now the staging barrier above:
+    // same claim, made at the point where it also removes the race.
     ASSERT_GE(td.sent_count(), 2u) << "Logout frame must be emitted on graceful close";
     EXPECT_EQ(extract_field(td.sent(td.sent_count() - 1), 35), "5")
         << "Emitted frame must be Logout(35=5)";
-    // FSM should be LogoutSent.
-    EXPECT_EQ(sess.state(), fsm_state::LogoutSent)
-        << "After emitting Logout, FSM should be LogoutSent";
 
     // Clean up: advance clock past timeout to complete close.
     clock->advance(std::chrono::seconds{3});
@@ -871,36 +901,39 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // armed, so LogoutSent observed ⟹ sleeper armed ⟹ the advance below is
         // guaranteed to fire it. A work_guard keeps ioc alive so each slice blocks on
         // real work instead of hot-spinning.
-        {
-            auto wg = asio::make_work_guard(ioc);
-            const auto arm_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
-            while (sess.state() != fixpp::session::fsm_state::LogoutSent &&
-                   std::chrono::steady_clock::now() < arm_deadline) {
-                ioc.run_for(std::chrono::milliseconds{20});
-            }
-            wg.reset();
-        }
-        ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogoutSent)
-            << "close(graceful) did not reach LogoutSent within 10 s — flush/Logout offload "
-               "wedged before the logout timer was armed (see flush_for_session_close)";
+        // ⚠️ NORMALISATION, NOT A FIX -- this site was ALREADY CORRECT, and it is where
+        // the recipe the rest of #289 batch 18 applies came from. Both loops were
+        // hand-rolled copies of shared primitives: the first of `pump_until` (a
+        // work-guarded, sliced pump bounded by a predicate and a wall-clock budget),
+        // the second of `pump_until_ready`. Folding them onto the primitives buys the
+        // SITE LABEL -- without one the forcing seam (`FIXPP_FORCE_WINDOW_MISS`) cannot
+        // reach either branch, so neither could ever be armed -- and the miss-branch
+        // drain. The budget is unchanged at 10 s; the slice moves from a hand-picked
+        // 20 ms to `kPumpSlice`, which is what every other site in the campaign uses.
+        // The paragraph above is the ORIGINAL analysis and stays: it is the clearest
+        // statement in the tree of why a blind window loses the advance outright.
+        ASSERT_TRUE(fixpp::test_support::pump_until(
+            ioc, [&sess] { return sess.state() == fixpp::session::fsm_state::LogoutSent; },
+            std::chrono::seconds{10}, fixpp::test_support::kPumpSlice,
+            "FlushRunsAndFramesDurableAfterClose/stage"))
+            << fixpp::test_support::kPumpBudgetMiss
+            << "FlushRunsAndFramesDurableAfterClose/stage -- close(graceful) did not reach "
+               "LogoutSent "
+               "within 10 s; flush/Logout offload wedged before the logout timer was armed (see "
+               "flush_for_session_close)";
 
         // Sleeper is armed: fire the 2 s logout timeout deterministically.
         clock->advance(std::chrono::seconds{3});
 
         // Drive close to completion. Bounded + asserted so a genuine lost-wake FAILs
         // loudly at 10 s wall clock rather than hanging out the whole ctest timeout.
-        {
-            auto wg = asio::make_work_guard(ioc);
-            const auto done_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
-            while (close_fut.wait_for(std::chrono::milliseconds{0}) != std::future_status::ready &&
-                   std::chrono::steady_clock::now() < done_deadline) {
-                ioc.run_for(std::chrono::milliseconds{20});
-            }
-            wg.reset();
-        }
-        ASSERT_EQ(close_fut.wait_for(std::chrono::milliseconds{0}), std::future_status::ready)
-            << "close(graceful) did not complete within 10 s after the logout timeout fired — "
-               "possible lost-wake in the close/flush continuation";
+        ASSERT_TRUE(fixpp::test_support::pump_until_ready(
+            ioc, close_fut, std::chrono::seconds{10}, fixpp::test_support::kPumpSlice,
+            "FlushRunsAndFramesDurableAfterClose/close"))
+            << fixpp::test_support::kPumpBudgetMiss
+            << "FlushRunsAndFramesDurableAfterClose/close -- close(graceful) did not complete "
+               "within 10 s "
+               "after the logout timeout fired; possible lost-wake in the close/flush continuation";
         auto close_r = close_fut.get();
         // close() returns logout_timeout (no peer) or ok (if peer confirmed). Both are fine.
         (void)close_r;

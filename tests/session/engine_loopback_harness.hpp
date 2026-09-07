@@ -41,6 +41,7 @@
 #include <string>
 
 #include "support/minimal_dictionary.hpp"
+#include "support/pump_until_ready.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
 using namespace std::chrono_literals;
@@ -220,12 +221,38 @@ public:
         // catch swallows the report's own throw. Reporting inside a single catch
         // would trade this abort for a different one -- which is exactly the
         // mistake #308's first fix shipped.
+        // ⚠️ #289: `run(); get()` HERE IS THE WORST PLACE FOR IT. `run()` returns when
+        // the context has no work left, which is not "stop() finished"; the `get()`
+        // then blocks forever, in a destructor, with no test name attached -- ctest
+        // reports a whole-binary timeout. The guard turns that into a named failure and
+        // does NOT call `get()` on the miss branch.
+        //
+        // ⚠️ THE ENCLOSING DOUBLE-`catch` IS WHY THIS SITE NEEDED ITS OWN DECISION, and
+        // reading it settles the direction rather than leaving it a worry. `ADD_FAILURE`
+        // RECORDS first and throws only under `throw_on_failure`. ⚠️ THAT FLAG IS LIVE IN
+        // THIS TREE, and the obvious grep does not find it: no `ctest` invocation passes
+        // `--gtest_throw_on_failure`, but `test_quiesce_on_exit_residual.cpp` and
+        // `test_test_request_id_cross_session_race.cpp` each set it PROGRAMMATICALLY via
+        // an RAII `GTEST_FLAG_SET(throw_on_failure, true)`. Enumerate BOTH spellings --
+        // `git grep -n 'gtest_throw_on_failure\|GTEST_FLAG_SET(throw_on_failure'` -- and
+        // note the flag is process-global while those scopes are per-TU, so what matters
+        // is whether a binary LINKING this header ever enters one.
+        //
+        // If it does, the throw is `GoogleTestFailureException`, which derives from
+        // `std::runtime_error` (gtest/internal/gtest-internal.h), so the INNER catch takes
+        // it and adds one "teardown threw" line BELOW the correct site-named one.
+        // Additive noise, not the shape where an enclosing catch REPLACES the diagnosis
+        // and blames the code under test: the miss is on the record by name before any
+        // throw exists. Nothing escapes the destructor either way, which is the contract
+        // this guard actually owes.
         try {
             try {
                 auto fut = asio::co_spawn(*ioc_, h_->engine().stop(), asio::use_future);
                 ioc_->restart();
-                ioc_->run();
-                fut.get();
+                if (fixpp::test_support::run_to_exhaustion_or_report(
+                        *ioc_, fut, "engine_stop_guard::~engine_stop_guard")) {
+                    fut.get();
+                }
             } catch (const std::exception& e) {
                 ADD_FAILURE() << "engine_stop_guard: engine teardown threw -- what(): " << e.what();
             } catch (...) {
