@@ -424,21 +424,29 @@ cell "T19 an inflated summed test time is called out on a VALID sample" 0 \
 # ── T23/T24: is it the LANE's workload, or some other workload? ──────────────
 #
 # Three passes agreeing with each other says nothing about agreeing with
-# PRODUCTION. `linux-clang-asan` is pinned at 362 in ci/expected-eligible-tests
+# PRODUCTION. `linux-clang-asan` is pinned at 369 in ci/expected-eligible-tests
 # .txt; a job that configures the tree differently measures a suite that does
 # not ship. The disposition is the probe document's own designed one for a basis
 # mismatch — DIAGNOSTIC ONLY, i.e. toward "not evidence", never toward a false
 # acceptance.
 cell "T23 a count that disagrees with the lane's pinned basis VOIDs the sample" 3 \
   "NOT THE LANE'S PRODUCTION WORKLOAD" --preset linux-clang-asan --ran 300,300,300
-# ⚠️ 368 TRACKS `ci/expected-eligible-tests.txt` AND MOVES WITH IT. This is a
+# ⚠️ 369 TRACKS `ci/expected-eligible-tests.txt` AND MOVES WITH IT. This is a
 # deliberate coupling, not a leak: the cell asserts that a MATCHING count is
 # confirmed, so it has to state a number the pin actually holds. When a pin is
 # re-recorded, this line is re-recorded in the same commit — that file's header
 # says a mismatch is the designed prompt, and this is the same prompt one level
 # up. It fired exactly that way when `linux-clang-asan` went 362 -> 368.
+#
+# ⚠️ AND IT FIRED AGAIN at 368 -> 369 (2026-09-08), which is why this paragraph
+# is no longer only history. That re-record RED-ed `ci-script-pins` on `main`
+# and therefore `tier1-required`, because the pin was moved and this line was
+# not — the exact miss this comment was written to prevent. Reading a comment
+# is not a step anyone performs; the pin file now carries a POINTER BACK to
+# this cell, so the coupling is discoverable from the file you are editing
+# rather than only from the file that breaks.
 cell "T24 a count matching the pinned basis is confirmed on the page" 0 \
-  "matching \`ci/expected-eligible-tests.txt\`" --preset linux-clang-asan --ran 368,368,368
+  "matching \`ci/expected-eligible-tests.txt\`" --preset linux-clang-asan --ran 369,369,369
 # A preset with no pin line must NOT void — inventing an expectation for an
 # unpinned lane would void every sample it ever took.
 #

@@ -33,6 +33,22 @@
 # Named here because this is the file someone edits, and the coupling is
 # invisible from it otherwise.
 #
+# ⚠️ THIS PARAGRAPH EXISTED AND WAS NOT READ, 2026-09-08. The `368 -> 369`
+# re-record moved the asan pin without moving T24, RED-ing `ci-script-pins` and
+# `tier1-required` on `main`. The pointer above was already here, correct, and
+# one screen up from the line being edited — it failed because the edit was made
+# programmatically and the header was never opened. **A pointer only works on a
+# reader.** So, the step that does NOT depend on anyone reading anything:
+#
+#   AFTER EDITING ANY LINE IN THIS FILE, RUN:
+#       bash ci/test-parallelism-verdict.sh      # 57 cells; T23/T24 read this file
+#
+#   ⚠️ NOT `ci/test-peak-rss.sh`. That harness is the #266 peak-memory one, it
+#   passes 72/72 against a broken pin, and its name is the trap: it is the
+#   obvious choice for a file whose subject is the peak-memory basis, and it
+#   does not read this file at all. Running it and shipping is exactly how the
+#   2026-09-08 break reached `main`.
+#
 # ── WHY IT IS PER-LANE, AND NOT ONE NUMBER ───────────────────────────────────
 #
 # The counts genuinely DIFFER per lane — some tests are registered only under
@@ -80,20 +96,20 @@
 # answer here.
 linux-clang-debug     364
 linux-clang-release   364
-# ⚠️ 362 -> 368, RE-RECORDED 2026-09-06 because the pin did its job and caught
-# the drift. Campaign run 33990959916 VOIDed this lane with "the passes ran [368]
-# tests against the pinned basis of 362" — correctly: a widening measured over a
-# workload that is not the lane's is not evidence for the lane.
+# ⚠️ 368 -> 369, RE-RECORDED 2026-09-08. This lane has now drifted twice; the
+# earlier 362 -> 368 (2026-09-06, campaign run 33990959916) was a lane-local
+# fuzz-target drift, and the note that then said "of the eleven Linux pins, ten
+# still match production exactly" was true THEN and is retracted now: on
+# 2026-09-08 ALL ELEVEN Linux lanes were +1 together, which is a suite-wide
+# change and not this lane's fuzz targets.
 #
-# The lane genuinely grew, and only this one did: of the eleven Linux pins below
-# and above, ten still match production exactly. `linux-clang-asan` is the FUZZ
-# lane (`FIXPP_BUILD_FUZZ=ON`, ci/assert-ci-lane-policy.py), so registered fuzz
-# targets land here and nowhere else — which is why the drift is confined to it
-# rather than being a suite-wide count change.
+# `linux-clang-asan` is still the FUZZ lane (`FIXPP_BUILD_FUZZ=ON`,
+# ci/assert-ci-lane-policy.py); that remains why a LANE-LOCAL drift would land
+# here and nowhere else. It is not the explanation for a uniform +1.
 #
 # Provenance, per this file's own rule that a basis is read off CI and never a
-# workstation: Tier 1 run 33995191244, `push:main` at `9e03680d`, job
-# `linux-clang-asan` — "100% tests passed, 0 tests failed out of 368".
+# workstation: Tier 1 run 34160147412 at commit `d66b4351` (PR #392), job
+# `linux-clang-asan` — annotation "the executed test count (369)".
 linux-clang-asan      369
 linux-clang-ubsan     363
 linux-clang-tsan      363
@@ -105,16 +121,20 @@ linux-clang-tsan      363
 # `Test (full tier incl. packaging)` instead, the FULL suite with no label
 # filter.  It is the only lane in the matrix that runs the packaging tier at all.
 #
-# Read off TWO independent CI runs, 32007171995 and 32011816399, both `ran: 370`.
-# Shipped as `-` until then rather than guessed from `linux-clang-release`, whose
-# 362 is a `-LE packaging` count and therefore a different quantity.
+# Originally read off TWO independent CI runs, 32007171995 and 32011816399, both
+# `ran: 370`, and shipped as `-` until then rather than guessed from
+# `linux-clang-release` (a `-LE packaging` count, a different quantity).
+# ⚠️ RE-RECORDED 2026-09-08 to 372 in the suite-wide +1 — provenance now Tier 1
+# run 34160147412 at `d66b4351`.
 linux-gcc-release     372
 
 # Tier 3 (`.github/workflows/tier3-libcxx.yml`). These lanes run the FULL suite
 # — their Test step carries no `-LE packaging` — so the counts are lower than
 # the Tier 1 five for a different reason than a label filter: fewer tests are
-# registered under libc++. Same provenance: Tier 3 run 31737273304, `5c56a17e`.
-# Measured but NOT widened by this change; see #267 phase 3.
+# registered under libc++. Measured but NOT widened by this change; see #267
+# phase 3. ⚠️ RE-RECORDED 2026-09-08 in the suite-wide +1 (was 358/357/357/357);
+# provenance now Tier 3 run 34160147444 at `d66b4351`, replacing the original
+# Tier 3 run 31737273304 at `5c56a17e`.
 linux-clang-libc++        359
 linux-clang-libc++-asan   358
 linux-clang-libc++-ubsan  358
@@ -127,9 +147,11 @@ linux-clang-libc++-tsan   358
 # the lane rendered DIAGNOSTIC ONLY, which is the honest disposition for a basis
 # nobody had measured.
 #
-# Read off run 32003367497 (workflow_dispatch, branch ci/266-peak-rss-instrument,
-# `Peak memory` step: `ran: 369/-`).  369 rather than 362 because this lane runs
-# the packaging tier the five filtered lanes exclude.
+# First read off run 32003367497 (workflow_dispatch, branch
+# ci/266-peak-rss-instrument, `Peak memory` step: `ran: 369/-`) — higher than the
+# filtered lanes because this one runs the packaging tier they exclude.
+# ⚠️ RE-RECORDED 2026-09-08 in the suite-wide +1: 370 -> 371, provenance Tier 1
+# run 34160147412 at `d66b4351`.
 linux-clang-coverage  371
 
 # ── Tier 2, MSVC (`.github/workflows/tier2.yml`) — NEW 2026-09-06 ────────────
