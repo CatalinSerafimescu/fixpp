@@ -332,7 +332,7 @@ jobs:
       # `cmake --preset linux-clang-coverage` — no artifact dir, no Python
       # bindings. Copying the matrix lanes' flags here would register a
       # different test set and the verdict would void every coverage sample
-      # against the pinned basis of 370.
+      # against the pinned basis of 371.
       - name: Configure (coverage lane)
         if: matrix.preset == 'linux-clang-coverage'
         run: cmake --preset linux-clang-coverage
