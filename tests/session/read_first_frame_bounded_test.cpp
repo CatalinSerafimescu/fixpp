@@ -54,6 +54,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/awaitable.hpp>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
@@ -83,8 +84,11 @@
 
 // ── #377: EVERY CELL NOW CHOOSES ITS TIMEBASE, AND MOST CHOOSE "FROZEN" ──────
 //
-// `read_first_frame_bounded` takes a `fixpp::core::Clock&`. Two shapes are used
-// below and the choice is per-cell, load-bearing, and NOT interchangeable:
+// `read_first_frame_bounded` takes a `fixpp::core::Clock&`. THREE shapes are
+// used below and the choice is per-cell, load-bearing, and NOT interchangeable.
+// The axis that matters is advance-vs-freeze, not mock-vs-real — a mock clock
+// that is ADVANCED is not a weaker deadline than a real one, it is a
+// SCHEDULED one:
 //
 //   frozen mock_clock — constructed and NEVER advanced. Its sleep_until parks
 //   the waiter in a map and completes it only on advance() or a per-op slot
@@ -93,9 +97,22 @@
 //   is a termination bound that must never compete, and freezing it deletes the
 //   competition instead of widening it.
 //
-//   system_clock_source — the real wall clock. Used ONLY by the two cells whose
-//   subject IS the deadline firing (B6) or the relative ORDER of two real
-//   elapsed waits (T1). Freezing those would make them vacuous.
+//   ADVANCED mock_clock — constructed, then advanced by exactly the deadline
+//   at a point the cell has STAGED on an observable. Used by B6, the cell whose
+//   subject IS the deadline firing. The deadline genuinely fires; what the
+//   advance removes is the scheduler's vote on WHEN, relative to the loop it is
+//   supposed to interrupt. Freezing this cell WOULD make it vacuous (it would
+//   assert a timeout that can never happen) — the advance is what separates the
+//   two, and it is why "frozen" above is not a synonym for "mock".
+//
+//   system_clock_source — the real wall clock. Used ONLY by T1, whose subject
+//   is the relative ORDER of two real elapsed waits. It stays real because both
+//   instants have to come out of ONE timer queue for the order to be decided by
+//   expiry rather than by asio internals; a mock sleep completes by
+//   `asio::post`, whose order against an already-expired steady_timer is not a
+//   property a test may assert. T1 pays for that with a wall-clock margin — the
+//   only one left in this file — and asserts both of its preconditions
+//   explicitly so a runner that breaks it says so instead of blaming the code.
 //
 // ⚠️ WHAT THIS REPLACED, so it is not "simplified" back. PR #376 raised three
 // cells' deadlines 50 ms → 5 s after `ctest --parallel 4` on windows-msvc-asan
@@ -104,6 +121,20 @@
 // figure, not a proof, so a slow enough runner reproduces the same vacuous run.
 // A frozen clock has no figure to outrun. Do not reintroduce a wall-clock
 // deadline in a cell that asserts a non-timeout outcome, at any magnitude.
+//
+// ⚠️ THAT PREDICTION CAME TRUE, on the two cells #377 left on the real clock.
+// Run 34074957982 (windows-msvc-asan, `push:main`) failed BOTH: T1 with the
+// deadline winning the race it must lose, B6 with zero reads completed inside
+// its window. Neither is a defect in `read_first_frame_bounded` — both are the
+// ARM GAP, the interval between the helper computing `abs_deadline` at entry
+// and the mock transport arming its latency timer a few instructions later. A
+// starved runner stretches that interval past `deadline - read_latency` and the
+// expiry order inverts. B6 answered it by leaving the real clock (above); T1
+// cannot, so it answers with a checked-and-retried staging (see the cell).
+// `ci/red-arms/first-frame-arm-gap.sh` re-derives the mechanism on T1 — the
+// half that reproduces on Linux — in both directions: pre-fix constants under
+// load go RED, this construction under the SAME load does not. B6's half is
+// re-derived by mutation instead (the re-arm, at its own cell).
 //
 // ⚠️ A FROZEN CLOCK IS NOT A WEAKER ASSERTION. The deadline arm is still armed,
 // still joined, and still cancelled by the group on the winning path — what is
@@ -464,89 +495,179 @@ TEST(ReadFirstFrameBounded, T1) {
     constexpr std::size_t kLogonLen = 1024;  // well under max_bytes; also the smallest
                                              // value make_logon_of_length's 4-digit
                                              // BodyLength assumption admits.
-    constexpr auto kDeadline = std::chrono::milliseconds{10};
+    // ⚠️ THESE FIGURES ARE A MARGIN AGAINST THE *ARM GAP*, NOT A CADENCE.
+    // What decides this cell is the ORDER of two real expiry instants:
+    //   read     expires at  t_read_arm + kReadLatency
+    //   deadline expires at  t0         + kDeadline   (t0 = the helper's entry,
+    //                                                  where abs_deadline is computed)
+    // so the read wins iff  (t_read_arm - t0) + kReadLatency < kDeadline. Both arms
+    // are established inside step 1's single poll(), so that gap is microseconds of
+    // CPU work — until the runner deschedules the process between them. At the
+    // original 10 ms / 1 ms it took only a 9 ms gap to invert the order, and
+    // windows-msvc-asan under `ctest --parallel 4` produced one (run 34074957982:
+    // T1 reported `transport: handshake timeout` — the deadline winning — in 377 ms
+    // against a ~55 ms nominal).
+    //
+    // ⚠️ AND WIDENING THE FIGURE IS *NOT* WHAT FIXES IT — that is the move #377
+    // recorded against itself at the top of this file, and re-running it here
+    // would earn the same epitaph. The margin below is only the cheap half. The
+    // load-bearing half is that BOTH staging preconditions are CHECKED, and a
+    // starved staging is RETRIED rather than reported: starvation is a property
+    // of the runner, and a cell that cannot reach its own starting state has not
+    // observed anything about the code under test. If every attempt is starved
+    // the cell still fails — naming the harness, with the measured span.
+    //
+    // Re-derive both halves with `ci/red-arms/first-frame-arm-gap.sh`, which
+    // reproduces the pre-fix inversion on Linux under load and re-runs this
+    // construction against the same load.
+    constexpr auto kDeadline = std::chrono::milliseconds{500};
+    constexpr auto kReadLatency = std::chrono::milliseconds{50};
+    constexpr int kAttempts = 4;
 
     std::vector<std::byte> const frame = make_logon_of_length(kLogonLen);
     ASSERT_EQ(frame.size(), kLogonLen);
 
-    Script s;
-    s.inbound_bytes = frame;
-    s.read_latency = std::chrono::milliseconds{1};
+    std::chrono::milliseconds worst_poll{0};
 
-    asio::io_context ioc;
-    // REAL clock (#377): this cell's subject is a genuine elapsed wait — a
-    // frozen clock would make it vacuous. See the timebase note at top of file.
-    fixpp::core::system_clock_source clock{ioc.get_executor()};
-    mock_transport mt{ioc.get_executor(), std::move(s)};
-    std::vector<std::byte> buf;
+    for (int attempt = 1; attempt <= kAttempts; ++attempt) {
+        Script s;
+        s.inbound_bytes = frame;
+        s.read_latency = kReadLatency;
 
-    std::optional<expected_t<std::size_t>> result;
-    asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
-                   [&result](std::exception_ptr ep, expected_t<std::size_t> r) {
-                       EXPECT_FALSE(ep) << "T1: the spawned coroutine threw.";
-                       result = std::move(r);
-                   });
+        // ⚠️ `ioc` FIRST, so it is destroyed LAST. Nothing holding an executor
+        // taken from the context may outlive the context — see PR #301's
+        // measured heap-use-after-free. That ordering also makes the retry path
+        // below safe to construct in a loop.
+        asio::io_context ioc;
+        // REAL clock (#377): this cell's subject is a genuine elapsed wait — a
+        // frozen clock would make it vacuous. See the timebase note at top of
+        // file for why B6's advanced-mock-clock construction is NOT available
+        // here: a mock sleep completes by `asio::post`, and a posted handler's
+        // order against an already-expired steady_timer is an asio
+        // implementation detail, not a property this cell may assert. Both
+        // instants have to come out of ONE timer queue.
+        fixpp::core::system_clock_source clock{ioc.get_executor()};
+        mock_transport mt{ioc.get_executor(), std::move(s)};
+        std::vector<std::byte> buf;
 
-    // Step 1: run the spawn to its first real suspension. co_spawn's initial
-    // resume is posted, not inline, so this poll() call executes the
-    // coroutine synchronously through the helper's deadline resolution
-    // (`clock.steady_now() + deadline`, which since #377 is arithmetic rather
-    // than a timer arm and cannot suspend) and the callback-form
-    // timer.async_wait(...) registration (async_wait with a callback starts the
-    // wait without co_await'ing it) until it reaches the genuine suspension
-    // inside async_read_some: the mock's own 1ms read_latency co_await.
-    //
-    // ⚠️ The deadline's own timer is created LATER than it used to be — #377
-    // moved it inside await_deadline, i.e. inside the join, so it is armed on
-    // the first loop iteration rather than before the loop. It is armed by the
-    // time this poll() returns (the join is what suspends), which is all this
-    // step needs; nothing is expired yet, so poll() returns with work
-    // outstanding. This cell keeps the REAL clock — its subject is the relative
-    // order of two genuinely elapsed waits.
-    ioc.poll();
+        std::optional<expected_t<std::size_t>> result;
+        asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
+                       [&result](std::exception_ptr ep, expected_t<std::size_t> r) {
+                           EXPECT_FALSE(ep) << "T1: the spawned coroutine threw.";
+                           result = std::move(r);
+                       });
 
-    // Step 2: elapse BOTH absolute deadlines with no handler running at all
-    // (the context is not being driven). This is a one-sided, 5x-slack
-    // margin on elapsing two wall-clock expiries, not a race.
-    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        // Step 1: run the spawn to its first real suspension. co_spawn's initial
+        // resume is posted, not inline, so this poll() call executes the
+        // coroutine synchronously through the helper's deadline resolution
+        // (`clock.steady_now() + deadline`, which since #377 is arithmetic rather
+        // than a timer arm and cannot suspend) and the callback-form
+        // timer.async_wait(...) registration (async_wait with a callback starts the
+        // wait without co_await'ing it) until it reaches the genuine suspension
+        // inside async_read_some: the mock's own kReadLatency co_await.
+        //
+        // ⚠️ The deadline's own timer is created LATER than it used to be — #377
+        // moved it inside await_deadline, i.e. inside the join, so it is armed on
+        // the first loop iteration rather than before the loop. It is armed by the
+        // time this poll() returns (the join is what suspends), which is all this
+        // step needs; nothing is expired yet, so poll() returns with work
+        // outstanding.
+        //
+        // The span of this poll() is measured because it UPPER-BOUNDS the arm
+        // gap: t0 and t_read_arm both fall inside it.
+        auto const poll_begin = std::chrono::steady_clock::now();
+        ioc.poll();
+        auto const poll_span = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - poll_begin);
+        worst_poll = std::max(worst_poll, poll_span);
 
-    // Step 3: both timers are now expired. asio's timer queue is a heap
-    // ordered by expiry, so the ready queue is drained in expiry order: the
-    // 1ms read completion first (resumes the coroutine -> feeds -> finds the
-    // frame -> timer.cancel() [cannot un-queue the already-ready deadline
-    // handler] -> co_return, freeing the frame), then the 10ms deadline
-    // handler (writes into the freed frame, then transport.cancel()).
-    ioc.poll();
+        // The two staging preconditions, checked rather than assumed:
+        //
+        //  (1) `poll_span < kReadLatency`, observed directly as `buf.empty()`.
+        //      poll() drains for as long as handlers keep becoming ready, so a
+        //      process descheduled INSIDE it can come back to an expired read
+        //      timer and dispatch the read's own completion here. The frame is
+        //      then found before the deadline could ever be expired, and every
+        //      assertion below passes without D-6.2's race having happened —
+        //      silently vacuous. MEASURED: a 97 ms poll against a 50 ms latency,
+        //      1 run in 30 under 250 spinning hogs on linux-clang-asan. `buf` is
+        //      appended per completed read (read_first_frame_bounded.hpp,
+        //      `buf.insert(...)`), so emptiness is the direct observable.
+        //
+        //  (2) `poll_span + kReadLatency < kDeadline` — a sufficient condition
+        //      for the read's expiry to precede the deadline's, since
+        //      t0 >= poll_begin and t_read_arm <= poll_begin + poll_span. This
+        //      is the one run 34074957982 broke.
+        if (!buf.empty() || poll_span + kReadLatency >= kDeadline) {
+            // Retire this attempt before retrying: the coroutine is still
+            // suspended and holds references to `buf` and `mt`. run() returns
+            // once it completes — bounded by the deadline arm, which fires at
+            // t0 + kDeadline at the latest whichever way the staging went.
+            ioc.run();
+            continue;
+        }
 
-    // Drain to completion (D-6.2: "after the context is drained to
-    // completion") in case anything remains posted (e.g. the completion
-    // handler's own dispatch).
-    ioc.run();
+        // Step 2: elapse BOTH absolute deadlines with no handler running at all
+        // (the context is not being driven). Derived from kDeadline rather than
+        // written as a literal, so changing the margin above cannot leave a
+        // sleep that no longer covers it.
+        std::this_thread::sleep_for(kDeadline + std::chrono::milliseconds{100});
 
-    ASSERT_TRUE(result.has_value())
-        << "T1: the spawned coroutine never completed — the drain above is insufficient, not the "
-        << "elapse-then-poll construction. Without a completed result, cancels_observed()==0 would "
-        << "be a vacuous pass.";
-    EXPECT_TRUE(result->has_value())
-        << "T1 (SC-005/SC-006): expected the first frame's length (" << kLogonLen << "), got "
-        << describe(*result) << " — the read that raced the deadline must still win the frame.";
-    if (result->has_value()) {
-        EXPECT_EQ(**result, kLogonLen) << "T1 (SC-005/SC-006): the admitted frame's exact length.";
+        // Step 3: both timers are now expired. asio's timer queue is a heap
+        // ordered by expiry, so the ready queue is drained in expiry order: the
+        // kReadLatency read completion first (resumes the coroutine -> feeds ->
+        // finds the frame -> timer.cancel() [cannot un-queue the already-ready
+        // deadline handler] -> co_return, freeing the frame), then the kDeadline
+        // handler (writes into the freed frame, then transport.cancel()).
+        // Precondition (2) is what makes "in expiry order" mean "read first".
+        ioc.poll();
+
+        // Drain to completion (D-6.2: "after the context is drained to
+        // completion") in case anything remains posted (e.g. the completion
+        // handler's own dispatch).
+        ioc.run();
+
+        ASSERT_TRUE(result.has_value())
+            << "T1: the spawned coroutine never completed — the drain above is insufficient, not "
+            << "the elapse-then-poll construction. Without a completed result, "
+            << "cancels_observed()==0 would be a vacuous pass.";
+        EXPECT_TRUE(result->has_value())
+            << "T1 (SC-005/SC-006): expected the first frame's length (" << kLogonLen << "), got "
+            << describe(*result) << " — the read that raced the deadline must still win the frame."
+            << " Staging was verified before this ran (poll span " << poll_span.count()
+            << " ms, read " << kReadLatency.count() << " ms, deadline " << kDeadline.count()
+            << " ms), so this is NOT the arm-gap starvation of run 34074957982.";
+        if (result->has_value()) {
+            EXPECT_EQ(**result, kLogonLen)
+                << "T1 (SC-005/SC-006): the admitted frame's exact length.";
+        }
+        EXPECT_EQ(mt.async_reads_observed(), 1u)
+            << "T1: expected exactly one read (the whole frame arrives in it) — a second read "
+            << "would mean framer.feed found nothing on the first and this cell is not exercising "
+            << "the frame-found race D-6.2 describes.";
+
+        EXPECT_EQ(mt.cancels_observed(), 0u)
+            << "T1 (SC-005/SC-006) [S5 proxy — research.md D-6.2/N3, not the full postcondition: "
+            << "this observes that no cancel() RAN, which is narrower than 'no handler armed by "
+            << "this call is outstanding on return']: expected zero cancel() calls after the "
+            << "context drains. A nonzero count means the stranded deadline handler survived the "
+            << "coroutine's return and called transport.cancel() through its dangling reference — "
+            << "the pre-fix defect this cell targets. Under linux-clang-asan this must instead "
+            << "manifest as a heap-use-after-free abort (the write to `timed_out` lands first); a "
+            << "clean ASan run here means the proof did not fire, not that there is no defect "
+            << "(D-6.3).";
+        return;  // one STAGED attempt is the whole cell.
     }
-    EXPECT_EQ(mt.async_reads_observed(), 1u)
-        << "T1: expected exactly one read (the whole frame arrives in it) — a second read would "
-        << "mean framer.feed found nothing on the first and this cell is not exercising the "
-        << "frame-found race D-6.2 describes.";
 
-    EXPECT_EQ(mt.cancels_observed(), 0u)
-        << "T1 (SC-005/SC-006) [S5 proxy — research.md D-6.2/N3, not the full postcondition: "
-        << "this observes that no cancel() RAN, which is narrower than 'no handler armed by this "
-        << "call is outstanding on return']: expected zero cancel() calls after the context "
-        << "drains. A nonzero count means the stranded deadline handler survived the coroutine's "
-        << "return and called transport.cancel() through its dangling reference — the pre-fix "
-        << "defect this cell targets. Under linux-clang-asan this must instead manifest as a "
-        << "heap-use-after-free abort (the write to `timed_out` lands first); a clean ASan run "
-        << "here means the proof did not fire, not that there is no defect (D-6.3).";
+    FAIL() << "T1 [staging, NOT a claim about the code under test]: all " << kAttempts
+           << " attempts were starved before the cell reached its own starting state — the worst "
+           << "step-1 poll() ran for " << worst_poll.count()
+           << " ms against kReadLatency=" << kReadLatency.count()
+           << " ms and kDeadline=" << kDeadline.count()
+           << " ms. Either the runner descheduled this process for that long on every attempt, "
+           << "or the mock's read latency is no longer being honoured. Nothing here says the read "
+           << "lost a race it should have won; run 34074957982 is the failure this message exists "
+           << "to stop being mistaken for.";
 }
 
 // ── B4 (SC-003) — regression guard, NOT a RED cell against `main` ────────────
@@ -677,26 +798,50 @@ TEST(ReadFirstFrameBounded, B4) {
 
 // ── B6 (SC-004 / D-1b) ────────────────────────────────────────────────────────
 // The arm-once deadline. `max_bytes = 200`, `deadline = 50 ms`, `read_latency
-// = 7 ms`, `inbound_chunks` = 201 chunks of 1 byte (mechanism 5). Reads
-// complete at 7, 14, 21, 28, 35, 42, 49 ms; the 8th read's latency wait is
-// still in flight when the deadline expires at 50 ms, with `buf.size() == 7`
-// — far below the 200-byte budget — so the deadline arm must win.
+// = 7 ms`, `inbound_chunks` = 201 chunks of 1 byte (mechanism 5). The cell is
+// STAGED, not raced: it pumps until the loop has genuinely completed a read
+// (observed on `buf`), and only then advances the mock clock by exactly
+// `kDeadline` so the arm-once deadline is reached. Both halves of the subject
+// survive that — the deadline still fires, and it still fires with the loop
+// mid-flight and `buf.size()` far below the 200-byte budget.
 //
-// `7 ms` is load-bearing (research.md D-6.11): the two timer series MUST NOT
-// share a common multiple inside the deadline window, or the cell depends on
-// an ordering §D-6.4/SC-014 explicitly refuse to depend on (5 ms would
-// co-expire the 10th read with the 50 ms deadline in the same drain).
+// ⚠️ WHAT THIS REPLACED, AND WHY IT IS NOT A WEAKENING. Until run
+// 34074957982 this cell ran on the REAL clock and let the 7 ms read series
+// race the 50 ms deadline. That race is decided by the ARM GAP — the deadline
+// instant is fixed at the helper's entry (`abs_deadline = steady_now() +
+// deadline`) while the first read's 7 ms timer is armed a few instructions
+// later — so it inverts whenever the runner deschedules the process for
+// >43 ms between the two. windows-msvc-asan under `ctest --parallel 4` did
+// exactly that: ZERO reads completed inside the window and the cell failed its
+// own non-vacuity check (`buf.size() >= 1`) while the code under test was
+// correct. Widening 50 ms would have moved that coin, not removed it — the
+// same interim move #377 recorded against itself at the top of this file. The
+// advance removes the coin: nothing about WHEN the deadline fires is left to
+// the scheduler.
 //
-// `buf.size()` is asserted as a BAND (`[1, kMaxBytes)`), not the exact
-// derived value 7: pinning the wall-clock-derived exact count is a <2%
-// margin against real timer/scheduler slop (49ms vs a 50ms deadline) and
-// would false-RED under ASan/TSan or a loaded CI lane
-// ([[feedback_timing_band_witness_range_admits_the_mutant_it_claims_to_kill]]).
-// The band is tight on the side that matters: `< kMaxBytes` still excludes
-// the mutant's terminal value of 201 (all chunks drained), and `>= 1` keeps
-// the cell non-vacuous (the loop genuinely ran at least once). The 7-ms/
-// 14-ms.../49-ms derivation is recorded here and in the failure message, not
-// pinned as an assertion.
+// ⚠️ AND IT IS NOT THE FROZEN CLOCK EITHER — a frozen clock here would assert
+// a timeout that can never happen, which is what the top-of-file note forbids.
+// The distinction is advance-vs-freeze, not mock-vs-real; see that note.
+//
+// What the advance costs, stated rather than implied: the cell no longer
+// witnesses that a REAL elapsed 50 ms reaches the deadline. That is a property
+// of `system_clock_source`, which is covered on its own, not of this helper —
+// the helper only ever sees `Clock&`. In exchange the cell gained a mutant it
+// could not previously see: computing `abs_deadline` from
+// `std::chrono::steady_clock::now()` instead of `clock.steady_now()` is GREEN
+// under a real clock and RED here.
+//
+// `7 ms` is no longer load-bearing for D-6.11's reason (there is no longer a
+// window for two real timer series to co-expire inside), but it is kept: it is
+// what makes the staging pump non-trivial, and it keeps the re-arm mutant's
+// drain at the measured ~1.4 s rather than changing a second variable.
+//
+// `buf.size()` is asserted only on the side that discriminates (`< kMaxBytes`,
+// which excludes the mutant's terminal 201). The lower bound moved OUT of the
+// assertions and INTO the staging pump — see the note at the assertion site
+// ([[feedback_timing_band_witness_range_admits_the_mutant_it_claims_to_kill]]
+// is why it was a band and not an exact count in the first place; that reason
+// still stands for never pinning the exact read count).
 //
 // Mutant killed: a per-iteration RE-ARM. #377 moved where that mutant can be
 // written — `await_deadline` now takes an ABSOLUTE instant, so re-sleeping to
@@ -707,16 +852,11 @@ TEST(ReadFirstFrameBounded, B4) {
 // every 7 ms and never fires; the loop drains all 201 chunks and reaches
 // `201 > 200` at the foot.
 //
-// MEASURED against the ported code, not inherited across it: healthy 50 ms
-// PASS; mutant FAILS at 1468 ms with `wire_frame_too_large` and
-// `buf.size() == 201` — the exact terminal values this comment predicted before
-// the port, and B6 is the ONLY cell in the file that reddens.
-//
-// ⚠️ This cell keeps the REAL clock, deliberately. Its subject is the deadline
-// actually firing, so the frozen mock_clock the non-timeout cells use would
-// make it vacuous — it would assert a timeout that can never happen. The 7 ms
-// read cadence vs the 50 ms deadline (D-6.11: no common multiple inside the
-// window) is therefore still load-bearing here, and only here.
+// The mutant's terminal values (`wire_frame_too_large`, `buf.size() == 201`)
+// are unchanged by the staging: it never fires the deadline at all, so it
+// drains all 201 chunks whatever the clock does. Re-derive by applying the
+// re-arm to read_first_frame_bounded.hpp's `abs_deadline` line and running
+// this cell alone; B6 is the only cell in the file that reddens under it.
 TEST(ReadFirstFrameBounded, B6) {
     constexpr std::size_t kMaxBytes = 200;
     constexpr auto kDeadline = std::chrono::milliseconds{50};
@@ -738,14 +878,70 @@ TEST(ReadFirstFrameBounded, B6) {
     s.read_latency = std::chrono::milliseconds{7};
 
     asio::io_context ioc;
-    // REAL clock (#377): this cell's subject is a genuine elapsed wait — a
-    // frozen clock would make it vacuous. See the timebase note at top of file.
-    fixpp::core::system_clock_source clock{ioc.get_executor()};
+    // ADVANCED mock_clock — NOT the frozen one the non-timeout cells use, and
+    // no longer the real clock. See the timebase note at top of file for the
+    // three-way distinction. The deadline still genuinely fires; what is gone
+    // is its ability to fire BEFORE the loop has run, which is the only thing
+    // the real clock ever contributed here and the thing that broke.
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
     auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
                               asio::use_future);
+
+    // Stage on the OBSERVABLE, then fire the deadline — instead of racing them.
+    // `buf` is appended per completed read (read_first_frame_bounded.hpp,
+    // `buf.insert(...)`), so this pump returns exactly when the loop has
+    // genuinely run once. It cannot race the deadline: the clock has not been
+    // advanced, so `sleep_until(abs_deadline)` is parked in mock_clock's waiter
+    // map and CANNOT complete (src/core/test/mock_clock.cpp).
+    ASSERT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&buf] { return !buf.empty(); }, fixpp::test_support::kPumpBudget,
+        fixpp::test_support::kPumpSlice, "ReadFirstFrameBounded::B6::first-read"))
+        << "B6 [non-vacuity, staged]: no read completed within the pump budget, so the loop never "
+           "genuinely ran and the timeout below would be vacuous. This is the assertion the "
+           "wall-clock construction used to make AFTER the fact (`buf.size() >= 1`), where a "
+           "starved runner failed it by inverting the arm order rather than by any defect.";
+
+    // ⚠️ ADVANCE IN TWO STEPS WITH AN ITERATION BETWEEN THEM. A single
+    // `advance(kDeadline)` here is GREEN under the re-arm mutant and was
+    // MEASURED so before this shape was settled: with the clock parked at its
+    // seed the whole time, `steady_now() + deadline` and a hoisted
+    // `abs_deadline` name the SAME instant, so a mutant that recomputes it
+    // every iteration recomputes the same value and the cell cannot see the
+    // difference. What discriminates them is mock time MOVING while the loop
+    // iterates. Hence:
+    //
+    //   advance #1 (half)  → arm-once deadline (kDeadline) NOT yet reached
+    //   one more read      → the arm the loop is now parked on was computed
+    //                        AFTER the advance: kDeadline for arm-once,
+    //                        1.5 * kDeadline for the re-arm mutant
+    //   advance #2 (half)  → reaches kDeadline exactly: arm-once FIRES, the
+    //                        mutant's does not, and the mutant then drains all
+    //                        201 chunks into wire_frame_too_large.
+    //
+    // A lost advance is not a failure mode here: mock_clock::sleep_until
+    // completes IMMEDIATELY for a deadline already <= steady_now
+    // (src/core/test/mock_clock.cpp), so re-sleeping to an absolute instant the
+    // clock has already passed fires rather than parking
+    // ([[feedback_mock_clock_advance_before_timer_armed_race]] is about a
+    // relative re-arm, which is what #377 removed from await_deadline).
+    static_assert(kDeadline.count() % 2 == 0,
+                  "the two half-advances must sum to kDeadline exactly");
+    clock.advance(kDeadline / 2);
+
+    std::size_t const staged = buf.size();
+    ASSERT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&buf, staged] { return buf.size() > staged; }, fixpp::test_support::kPumpBudget,
+        fixpp::test_support::kPumpSlice, "ReadFirstFrameBounded::B6::iterate-after-advance"))
+        << "B6 [mutant discrimination]: no further read completed after the first half-advance, so "
+           "no loop iteration re-entered the join at the new time and the second half-advance "
+           "below would reach an arm-once deadline and a re-armed one alike — the cell would go "
+           "GREEN under the very mutant it exists to kill.";
+
+    clock.advance(kDeadline / 2);
+
     if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B6")) {
         return;
     }
@@ -756,21 +952,21 @@ TEST(ReadFirstFrameBounded, B6) {
         << describe(result);
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::transport_handshake_timeout)
-            << "B6 (SC-004/D-1b): expected transport_handshake_timeout (the arm-once deadline "
-               "firing "
-            << "at 50ms, derived buf.size() == 7 from reads completing at 7/14/.../49ms), got "
-            << describe(result)
-            << " — a per-iteration re-arm would let the deadline keep being pushed "
-            << "forward and the loop would drain all 201 chunks instead.";
+            << "B6 (SC-004/D-1b): expected transport_handshake_timeout — the arm-once deadline "
+            << "reached by the advance above — got " << describe(result)
+            << ". A per-iteration re-arm would put the deadline kDeadline beyond every advance "
+            << "and the loop would drain all 201 chunks instead.";
     }
-    EXPECT_GE(buf.size(), 1u)
-        << "B6 (SC-004/D-1b) [non-vacuity]: expected at least one completed read before the "
-           "deadline "
-        << "fired (derived: 7, from reads at 7/14/.../49ms) — buf.size() == 0 would mean the loop "
-        << "never genuinely ran.";
+    // ⚠️ NO `EXPECT_GE(buf.size(), 1u)` HERE ANY MORE, deliberately. Under the
+    // wall-clock construction that was the non-vacuity check and it is the
+    // assertion windows-msvc-asan failed (run 34074957982, buf.size() == 0 —
+    // the arm gap, not a defect). It is now established BEFORE the deadline can
+    // fire, by the staging pump above. Re-adding it here would be an assertion
+    // that cannot go RED: the pump does not return until `!buf.empty()`, and
+    // nothing between there and here removes bytes from `buf`.
     EXPECT_LT(buf.size(), kMaxBytes)
         << "B6 (SC-004/D-1b): expected buf.size() far below the " << kMaxBytes << "-byte budget "
-        << "(derived: 7) — the re-arm mutant drains all 201 chunks, reaching buf.size() == 201.";
+        << "— the re-arm mutant drains all 201 chunks, reaching buf.size() == 201.";
 }
 
 // ── T2a (SC-015 / FR-015) ──────────────────────────────────────────────────────
