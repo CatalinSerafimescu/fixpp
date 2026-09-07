@@ -56,6 +56,17 @@
 # Restores by `cp` from a copy taken at entry -- never `git checkout --`, which would wipe
 # uncommitted work in the same file.
 #
+# ⚠️ SIBLING: `ci/red-arms/batch17-genuine-miss.sh` carries BOTH of those idioms (the
+# mktemp/cp-restore trap and the binary-SHA guard) and the same two rationales. They are
+# NOT extracted into `ci/pump-arm-common.sh`, and that is a decision, not an oversight:
+# both helpers there `exit`, while batch17's copy sits inside a `run_arm()` that must
+# `return 1` and carry on to the next arm -- a shared helper cannot serve both without
+# making that file mixed-convention. Same reasoning `pump-arm-common.sh`'s own header
+# gives for leaving pump-red-arm.sh's NO-SUCH-TEST guard unshared. What that header says
+# must not be duplicated is the REASON, so read it there and here as one pair: if you
+# change the restore idiom or the SHA guard in either script, the other is the file to
+# open next.
+#
 # Usage:  ci/red-arms/first-frame-arm-gap.sh [ITERATIONS] [HOGS]
 # Needs a configured build dir; override with BUILD_DIR=... (default linux-clang-asan).
 set -uo pipefail

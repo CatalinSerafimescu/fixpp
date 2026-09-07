@@ -35,6 +35,10 @@
 #
 # Restores by `cp` from a copy taken at entry -- never `git checkout --`, which would wipe
 # uncommitted work in the same file.
+#
+# ⚠️ SIBLING: `ci/red-arms/first-frame-arm-gap.sh` carries both of those idioms too, with
+# the same rationales, deliberately unshared -- the reason is written there. Change one,
+# open the other.
 set -uo pipefail
 # ⚠️ THE FORCING SEAM MUST BE OFF, OR ARM 2 PASSES FOR THE WRONG REASON. With
 # FIXPP_FORCE_WINDOW_MISS set to this site's label -- which is exactly what
