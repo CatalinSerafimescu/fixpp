@@ -73,6 +73,40 @@
 // — a clang-only sweep cannot see the notch, which is exactly how this
 // regression reached CI.
 //
+// ── 389 RE-TUNE (fixpp#389): exact per-group allocation moved the band DOWN ─
+//
+// #389 gave each group its own exact-sized slice array instead of one shared
+// growable vector sized by an estimator. That FREES arena headroom, so the cap
+// at which "everything fits" begins fell — and 4900, which had been mid-band,
+// became ALL_FITS. Both this cell and its repeated-read sibling went RED. The
+// failure direction is worth naming: a fix that consumes LESS memory breaks an
+// exhaustion witness by making it VACUOUS, not by making it fail loudly.
+//
+// Re-measured on both platforms (the MSVC probe this header demands, run in
+// the /mnt/c/temp sandbox against this branch):
+//   linux-clang-debug:   band [1900, 4500]      (was [1700, 6000])
+//   windows-msvc-debug:  band [2800, 5500]      (was [3400, 6250])
+//                        TERMINATE NOTCH at [3025, 3050] — and a second
+//                        terminate point at 2600, below the band.
+//
+// ⚠️ The notch MOVED with the band, and a 200-byte grid steps straight over
+// it: 3000 and 3200 both read BAND. It was found only by re-sweeping the
+// intended region at 25-byte resolution (69 points, [2800,4500]), which is why
+// this header insists on that resolution rather than treating it as thorough-
+// ness. ⚠️ A notch run produces NO gtest verdict at all — it terminates after
+// `[ RUN ]` — so a sweep classifier that looks only for PASSED/FAILED files it
+// in the same bucket as ALL_FITS. Classify all five states explicitly.
+//
+// kTinyCap = 3775 is the midpoint of the intersected safe region: the two
+// binding constraints are the notch top (3050) and linux's upper edge (4500),
+// giving a margin of 725 on each side. MSVC's own edges are further still
+// (975 below, 1725 above).
+//
+// T001 (`nested_group_slices_failloud_test.cpp`, kTinyCap=6000, same
+// 40-instance fixture) was CHECKED against this same change and needs no
+// re-tune: its `EXPECT_TRUE(r1.alloc_failed)` still passes, which it could not
+// do if its arena had stopped exhausting.
+//
 // Faithful exhaustion harness (research.md D6 / quickstart.md "Faithful
 // exhaustion harness"): a tiny-capacity `std::pmr::monotonic_buffer_resource`
 // over `std::pmr::null_memory_resource()` is the SAME parse arena used for
@@ -112,7 +146,7 @@ constexpr std::uint16_t kOuterDelim = 302;  // QuoteSetID
 constexpr std::uint16_t kInnerNoTag = 295;  // NoQuoteEntries
 constexpr std::uint16_t kInnerDelim = 299;  // QuoteEntryID
 constexpr int kInnerInstances = 40;         // wide-margin fixture (2x T001's 20)
-constexpr std::size_t kTinyCap = 4900;      // 083 re-tune, see sweep above
+constexpr std::size_t kTinyCap = 3775;      // 389 re-tune, see sweep above
 constexpr std::size_t kAmpleCap = 16384;
 
 fixpp::dict::table_view make_dict() {

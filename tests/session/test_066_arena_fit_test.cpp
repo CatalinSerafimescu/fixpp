@@ -190,7 +190,8 @@ TEST(ArenaFit, AdminGroupMessageFitsAdminArena) {
 // A large-but-realistic group-bearing ExecutionReport (many NoLegs
 // instances). Empirically sized to a comfortably large instance count (NOT a
 // byte-exact boundary search — the arena holds the OffsetTable's own PMR
-// structures (entries_/group_slices_/overlay_/nested_cache_), not raw frame
+// structures (entries_/group_index_ + per-group slice arrays/overlay_/
+// nested_cache_), not raw frame
 // bytes, so "near-cap" is field-count-driven, not byte-count-driven); this
 // probe demonstrates real headroom for realistic message sizes, not the
 // precise failure boundary.

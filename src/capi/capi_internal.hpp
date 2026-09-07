@@ -310,7 +310,9 @@ struct fixpp_msg {
 // and placed into an arena-allocated shell so the pointer returned to the C
 // consumer remains valid for the dispatch window.
 //
-// slices: span into the parent OffsetTable's lazily-built group_slices_ arena.
+// slices: span into the per-group, exact-sized slice array the parent
+//         OffsetTable allocates from its arena (389 — before that, one shared
+//         `group_slices_` vector, whose growth could strand this very span).
 //         Each slice is a (ptr,len) sub-frame aliasing the original wire buffer.
 // parent_view: the owning MessageView<Index>; needed for nested group descent
 //              (group_slices calls on sub-instances require a fresh OffsetTable).

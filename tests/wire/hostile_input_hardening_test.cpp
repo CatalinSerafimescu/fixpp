@@ -30,6 +30,7 @@
 // seam #1: complete table_view must precede parser.hpp (single-definition rule).
 // clang-format off
 #include "support/mock_dict_table.hpp"
+#include "support/pmr_allocation_tracking_resource.hpp"
 // clang-format on
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/offset_table.hpp>
@@ -384,17 +385,33 @@ TEST(HostileInputHardening, CraftedCollisionSetDefeatedByDifferentSeed) {
     }
 }
 
-// ── #221 (2): an inflated group count must not inflate the reserve bound ──────
-// group_slices_reserve_bound() sums the DECLARED instance count of every
-// top-level group count-field to size the one-shot group_slices_ reservation.
-// A hostile frame can declare an arbitrarily large count (453=999 here) while
-// carrying a single instance; without the clamp that number is what gets
-// reserved out of the fixed inbound parse arena — the arena_fit exhaustion mode
-// (PR #181), reachable from the wire. The clamp holds it at entries_.size(),
-// which is a valid upper bound because every instance needs at least one entry.
+// ── #221 (2): an inflated group count must not reach the parse arena ─────────
+// A hostile frame can declare an arbitrarily large instance count (453=999
+// here) while carrying a single instance. If that number sizes an allocation
+// out of the fixed inbound parse arena, it is the arena_fit exhaustion mode
+// (PR #181) reachable from the wire.
 //
-// Mutation-proof: with the clamp removed the bound is 999, not the entry count.
-TEST(HostileInputHardening, InflatedGroupCountClampedToEntryCountInReserveBound) {
+// 389 CHANGED WHAT THIS CELL CAN ASSERT, and made the assertion stronger.
+// It used to read `group_slices_reserve_bound()` and check the declared count
+// was CLAMPED to `entries_.size()` (999 -> 8). There is no estimator any more:
+// each group allocates exactly its own slice count, so the subject is now
+// checked directly, in BYTES the arena actually handed out, rather than through
+// an estimator's return value. Clamping was a bound on a guess; exactness is the
+// property the cell always wanted.
+//
+// Mutation-proof: size the `allocate()` from the DECLARED count instead of
+// from the count pass, and the hostile frame's delta diverges from the honest
+// frame's — RED. The old cell could not have caught that, because a clamped
+// bound of 8 would still have looked correct while the split loop allocated
+// for 999.
+//
+// The assertion is DIFFERENTIAL, not a threshold: the same body is parsed
+// twice, once declaring 999 and once declaring the true 1, and the two
+// materialization deltas must be EQUAL. A ceiling would have admitted a
+// regression that allocated for 997 — measured, not supposed. The ceiling is
+// kept only as the weaker complement, for the case where both frames regress
+// by the same declared-count-independent amount.
+TEST(HostileInputHardening, InflatedGroupCountDoesNotInflateArenaUse) {
     fixpp::dict::table_view dict;
     dict.add_valid("D", 35)
         .add_valid("D", 34)
@@ -404,33 +421,77 @@ TEST(HostileInputHardening, InflatedGroupCountClampedToEntryCountInReserveBound)
         .set_group_first(453, 448)
         .add_group_member(453, 447);
 
+    // Measure ONLY the slice materialization, not construction. Both frames
+    // carry the SAME single instance (448=PA|447=D) and differ only in the
+    // digits of 453, so any difference between the two deltas is attributable
+    // to the declared count alone.
+    auto measure = [&dict](char const* frame, std::size_t& out_delta, std::size_t& out_entries) {
+        auto buf = make_raw_frame(frame);
+        auto fv = fixpp::wire::test::make_frame_view(buf);
+        ASSERT_TRUE(fv.has_value());
+
+        std::pmr::monotonic_buffer_resource upstream;
+        fixpp::test_support::pmr_allocation_tracking_resource arena{&upstream};
+        fixpp::wire::Parser<access_mode::Index> parser{dict};
+        auto mv = parser.parse(*fv, &arena);
+        ASSERT_TRUE(mv.has_value());
+        auto const& t = mv->offsets();
+        out_entries = t.size();
+
+        auto const before = arena.total_bytes_allocated();
+        auto const slices = t.group_slices(453);
+        out_delta = arena.total_bytes_allocated() - before;
+
+        ASSERT_EQ(slices.size(), 1U)
+            << "the frame carries exactly one instance (448=PA|447=D) regardless of what 453 "
+               "declares; a declared count is a claim, not a measurement";
+    };
+
     // NoPartyIDs(453) declares 999 instances; exactly one is present.
-    auto buf = make_raw_frame(
-        "35=D\x01"
-        "34=1\x01"
-        "453=999\x01"
-        "448=PA\x01"
-        "447=D\x01");
-    auto fv = fixpp::wire::test::make_frame_view(buf);
-    ASSERT_TRUE(fv.has_value());
+    std::size_t hostile_delta = 0;
+    std::size_t hostile_entries = 0;
+    ASSERT_NO_FATAL_FAILURE(
+        measure("35=D\x01"
+                "34=1\x01"
+                "453=999\x01"
+                "448=PA\x01"
+                "447=D\x01",
+                hostile_delta, hostile_entries));
 
-    std::pmr::monotonic_buffer_resource arena;
-    fixpp::wire::Parser<access_mode::Index> parser{dict};
-    auto mv = parser.parse(*fv, &arena);
-    ASSERT_TRUE(mv.has_value());
-    auto const& t = mv->offsets();
+    // The CONTROL: the same body declaring the truth.
+    std::size_t honest_delta = 0;
+    std::size_t honest_entries = 0;
+    ASSERT_NO_FATAL_FAILURE(
+        measure("35=D\x01"
+                "34=1\x01"
+                "453=1\x01"
+                "448=PA\x01"
+                "447=D\x01",
+                honest_delta, honest_entries));
 
-    // Setup precondition: the declared count must exceed the entry count, or the
-    // clamp is not the thing being exercised. t.size() is 8 here — build() scans
-    // the WHOLE frame, so the three envelope fields (8=, 9=, 10=) are entries
-    // alongside the five body fields. Deriving the expectation from t.size()
-    // rather than hardcoding 8 keeps that off the assertion.
-    ASSERT_LT(t.size(), 999U) << "test setup: declared count must exceed the entry count";
+    // Setup precondition: the declared count must exceed the entry count, or
+    // nothing hostile is being exercised. build() scans the WHOLE frame, so the
+    // three envelope fields (8=, 9=, 10=) are entries alongside the body's.
+    // Derived rather than hardcoded, to keep the figure off the assertion.
+    ASSERT_LT(hostile_entries, 999U) << "test setup: declared count must exceed the entry count";
+    ASSERT_EQ(hostile_entries, honest_entries)
+        << "test setup: the two frames must differ only in the declared count";
+    ASSERT_GT(honest_delta, 0U)
+        << "instrument check: the control must report a NON-ZERO materialization, or equality "
+           "below is satisfied by an arena that measures nothing";
 
-    EXPECT_EQ(fixpp::wire::reserve_bound_access_for_testing::get(t),
-              static_cast<std::uint32_t>(t.size()))
-        << "a malicious declared instance count must be clamped to the entry "
-           "count, not reserved verbatim out of the fixed parse arena";
+    // THE ASSERTION. A declared count never sizes an allocation.
+    EXPECT_EQ(hostile_delta, honest_delta)
+        << "a malicious declared instance count must not size an allocation out of the fixed "
+           "parse arena; 453=999 materialized "
+        << hostile_delta << " B against " << honest_delta << " B for the identical body at 453=1";
+
+    // The weaker complement (see the header comment): catches a regression that
+    // inflates BOTH frames by the same declared-count-independent amount.
+    constexpr std::size_t kDeclared = 999;
+    EXPECT_LT(hostile_delta, kDeclared * sizeof(fixpp::wire::group_slice))
+        << "measured " << hostile_delta << " B against a declared-count reservation of "
+        << (kDeclared * sizeof(fixpp::wire::group_slice)) << " B";
 }
 
 }  // namespace

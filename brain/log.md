@@ -6,6 +6,58 @@ status: stable
 
 # Log
 
+- **2026-09-07 — #389: an assessment can be SATISFIED while the code it certifies is broken.**
+  `components/wire.md` gains the reserve-estimator section; `failure-classes.md` gains a NEW
+  **class 10** (an assessment scoped to one of a change's effects certifies a site the OTHER effect
+  breaks) — sibling to class 9, which is the same function's other failure.
+
+  083 changed the repeating-group split loop to use the DICTIONARY delimiter. It left
+  `group_slices_reserve_bound()` alone — an estimator that sums the wire's DECLARED counts and
+  justified itself by citing the cap in `consume_group_extent`, which walks with the WIRE delimiter.
+  Two delimiters, one cap, and an inference across them. The bound could be exceeded, the single
+  shared `group_slices_` vector reallocated, and every span already handed out for an earlier
+  `no_tag` dangled — including ones the C-ABI stores across calls. Live on the shipped path since
+  083, exhibited by 083's own `OutOfScopeWireProbesUnchanged` (bound 2, three pushes).
+
+  ⭐ **The estimator was DELETED rather than repaired.** The hazard was never "the bound is wrong";
+  it was that N groups shared ONE growable array, so an estimator and a split loop in two places had
+  to agree forever. A better bound restates that obligation. Per-group exact-sized arrays remove it.
+
+  **Three things this turned up that generalise:**
+
+  **(1) C-8.0a was satisfied and the code was still broken.** The clause obliged 083 to assess
+  whether its changed MEMBER SETS perturbed the estimator. They did not — the assessment was
+  correct, and useless, because the same feature also changed the DELIMITER. *An assessment scoped
+  to one of a feature's changes cannot certify a site the feature's OTHER change invalidates.* Its
+  recorded verdict — *"the under-reserve failure mode is impossible by construction"* — is retracted;
+  ⚠️ but narrowly: the leg's own body is scoped to a member-set change and stays TRUE. The unscoped
+  verdict above it generalised past its own argument. **Retract the sentence, not the leg.**
+
+  **(2) The witness that fails is not the obvious one.** Reading through a moved span is UB that
+  returns CORRECT BYTES on the shipped path, because the parse arena is a monotonic resource that
+  never reuses the abandoned block. A contents assertion is green under both the broken and the
+  fixed shape — which is exactly why this survived two features. The discriminator is POINTER
+  IDENTITY of the re-fetched cached span. Mutation-proven RED against the pre-fix tree.
+
+  **(3) The delimiter-free bound that looked obvious was rejected ON MEASUREMENT.** Summing extent
+  ENTRIES is correct and keeps C-8.0a verbatim — and is ~3x the instance count, the exact ratio
+  PR #181 existed to remove (3600 B against the 3744 B that exhausted the MSVC-release arena). The
+  cheap-looking option was the one that re-opened a closed defect.
+
+  **(4) I broke rule one inside my own verification.** To prove the index rows could not deep-copy
+  the slice buffers I wrote a harness and reported *"0 of 64 relocated"* — a ZERO I never showed the
+  harness could report as NON-zero. The review added the control (one member with a `noexcept(false)`
+  move): it reports **32/64**, which is what makes the zeros real. ⭐ **A verification harness is an
+  instrument and gets the same rule as any other**; writing it yourself is not an exemption, and the
+  moment you are proving something cannot happen is exactly when a silent no-op looks like success.
+
+  ⚠️ Also fixed here: the withdrawn B-384-2 carrier that SHIPPED in PR #390 at
+  `tests/wire/offset_table_test.cpp` — a FOURTH restatement, missed because the re-derivation recipe
+  written to prevent exactly that omitted `tests`, the one directory holding it. **An instrument that
+  cannot search where the defect lives fails toward clean.**
+
+  Record: `decisions/speckit/389-two-delimiters-one-cap-and-the-estimator-that-was-deleted.md`.
+
 - **2026-09-07 — #289 batch 19, the `.get()` inside the coroutine.** `components/test.md` gains a
   FOURTH `#289` shape, and it is the one where the standing remedy does not apply: the `.get()` runs
   **on the pumping thread**, inside a handler the driver dispatched, so a bounded outer driver — a
