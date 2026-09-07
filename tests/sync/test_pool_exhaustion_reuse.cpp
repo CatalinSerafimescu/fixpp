@@ -73,7 +73,6 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
 #include <chrono>
 #include <cstdint>
 #include <fixpp/core/sync/async_mutex.hpp>
@@ -148,7 +147,15 @@ TEST(SyncPoolExhaustionReuse, ExhaustionAt513thWaiterFailsClosed) {
         co_await yield_n(4);
 
         holder = expected_t<async_lock_guard>{};
-        co_await yield_n(static_cast<int>(kCapacity) + 16);
+        // #289 batch 19 -- coroutine-side; see tests/sync/test_drain_predrain_holder.cpp
+        // for the mechanism. Note the driver below is `run_to_exhaustion_or_report`,
+        // which is ALREADY the #289 guard for the outer future -- and it does not help
+        // here, because it is inside `ioc.run()` when this `get()` blocks.
+        if (!co_await fixpp::test_support::yield_window_then_ready(
+                fd, static_cast<int>(kCapacity) + 16,
+                "SyncPoolExhaustionReuse::ExhaustionAt513thWaiterFailsClosed/drain")) {
+            co_return;
+        }
         fd.get();
     };
 
@@ -291,7 +298,12 @@ TEST(SyncPoolExhaustionReuse, FreedSlotReusedViaFreeListAfterExhaustion) {
         if (results[1].has_value()) {
             results[1] = expected_t<async_lock_guard>{};  // releases waiter 1's guard
         }
-        co_await yield_n(static_cast<int>(kCapacity) + 16);
+        // #289 batch 19 -- coroutine-side; see test_drain_predrain_holder.cpp.
+        if (!co_await fixpp::test_support::yield_window_then_ready(
+                fd, static_cast<int>(kCapacity) + 16,
+                "SyncPoolExhaustionReuse::FreedSlotReusedViaFreeListAfterExhaustion/drain")) {
+            co_return;
+        }
         fd.get();
     };
 
@@ -440,7 +452,11 @@ TEST(SyncPoolExhaustionReuse, BoundedCounterPreventsWrapAndReissue) {
         co_await yield_n(4);
 
         holder = expected_t<async_lock_guard>{};
-        co_await yield_n(16);
+        // #289 batch 19 -- coroutine-side; see test_drain_predrain_holder.cpp.
+        if (!co_await fixpp::test_support::yield_window_then_ready(
+                fd, 16, "SyncPoolExhaustionReuse::BoundedCounterPreventsWrapAndReissue/drain")) {
+            co_return;
+        }
         fd.get();
     };
 

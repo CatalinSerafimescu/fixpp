@@ -200,6 +200,87 @@ rule decides candidate-vs-defect for the whole class, and it is why no clock-sid
 second row. It would have shipped as an assertion that cannot go RED for its own
 class. Rebuild it only against a site where a mutation shows it load-bearing.
 
+### The FOURTH shape: a `.get()` INSIDE the coroutine (#289 batch 19)
+
+The three shapes above are all caller-side: the `.get()` runs on a thread that is *outside* the
+io_context, and the whole #289 remedy is to give that thread a bounded way to wait. This one is
+different in the only way that matters.
+
+```cpp
+auto fd = co_spawn(ex, drain(), use_future);   // spawned from inside a coroutine
+co_await yield_n(8);                           // the window, counted in YIELDS
+fd.get();                                      // <- runs ON the pumping thread
+```
+
+**The bounded outer driver does not bound this.** `fd.get()` executes inside the handler the driver
+dispatched, so the block happens *within* `ioc.run_for(100ms)` / `ioc.run()`. The driver never gets
+another turn: a 5 s deadline loop never re-tests its deadline, and `run_to_exhaustion_or_report` —
+already the #289 guard for the outer future — is itself inside `run()`. The binary hangs and ctest
+reports a timeout naming no site.
+
+⚠️ **That is a measurement, not a reading of asio.** `ci/red-arms/batch19-coroutine-side-get.sh`
+injects a defect no yielding can fix (the holder is never released, so the drain can never finalize)
+and runs both shapes under it: the pre-batch shape **WEDGES** at the arm's budget, the guarded shape
+**REPORTS** naming the site. Two arms, and they must not be collapsed.
+
+⚠️ **THE WINDOW IS NOT THE MUTATION HERE, and reaching for it is the obvious mistake.** Starving the
+yields is *recovered* by the guard's grace — correctly, that is what the grace is for — so it
+produces a PASS, not a report. The injected defect has to be one no amount of yielding fixes.
+
+The primitive is `yield_window_then_ready(fut, window, site, grace = kYieldGrace)` in
+`tests/support/pump_until_ready.hpp` — the coroutine-side twin of `run_window_then_ready`, and it
+**preserves the window** the same way: the `window` posts are issued unconditionally, so a site that
+used `co_await yield_n(N)` for its own interleaving semantics keeps every one of those N yields.
+
+⚠️ **IT REPORTS VIA `kWindowMiss`, AND THAT LITERAL WAS REWORDED TO BE UNIT-NEUTRAL RATHER THAN
+DUPLICATED OR DISCLOSED.** The handover priced this item at "a fourth report literal, which is a
+change to every driver that greps a `REPORT_TAIL`" — the thing batch 17 got wrong, shipping seven
+correctly-driven sites as FLAG. The first draft accepted that price, reused `kWindowMiss` unchanged,
+and shipped a **20-line comment explaining why the sentence was wrong** for the new caller ("run
+window" and "one boundary grace slice" are durations; here they are yields). Both halves were
+mistakes and the `/simplify` altitude pass caught them:
+
+- **The cost estimate was never measured**, and no corrected size is written here either — a
+  corrected estimate rots on the same schedule as the one it replaced. What is durable is **how to
+  enumerate the dependants**, and every shortcut was tried and failed: not by the constant's NAME
+  (a gtest-spi matcher binds the message, naming nothing); not by a driver's variable name
+  (`git grep REPORT_TAIL` misses `pump-red-arm.sh`'s `TAIL=`); not by ONE fragment (drivers bind
+  the tail, matchers bind the head); and **not with `git grep` at all**, because every #289 batch
+  adds an *untracked* red-arm script carrying the tail, so a tracked-files-only search fails toward
+  clean over exactly the files the batch is adding. The canonical recipe lives at `kWindowMiss`.
+- **A knowingly-wrong sentence plus a disclosure is not a fix.** The literal now reads "its preserved
+  **window**" and "the **bounded grace that follows**" — true of both primitives, at all ~540 sites.
+  Both drivers re-proven against the new tail: seam arm 11/11 RED, `pump-red-arm.sh` RED as required.
+- ⚠️ **AND THE REWORD BROKE A TEST MATCHER THE ENUMERATION COULD NOT SEE.** `EXPECT_NONFATAL_FAILURE`
+  in `test_next_expected_msgseqnum.cpp` binds the literal's **head**; both probes used to size the
+  change (`git grep REPORT_TAIL ci/`, and the literal's **tail**) were partial, and each was partial
+  in a different way. **Enumerate a shared literal's dependants over the WHOLE tree, by a fragment
+  the change does not touch** — and check `EXPECT_NONFATAL_FAILURE` / `ScopedFakeTestPartResultReporter`
+  specifically, because a matcher bound to a message is invisible to every search keyed on the
+  constant's NAME. The matcher was then proven load-bearing (old wording ⇒ RED), which is what makes
+  the fix a fix rather than a second guess.
+
+⚠️ **`yield_window_then_ready` IS DELIBERATELY ABSENT FROM `DRIVING_FREE_FUNCTIONS`** in
+`tools/audit_co_spawn_named_closure.py`, and that is the one instrument where "teach it the new
+spelling" was the wrong answer. It takes no `io_context&`, so that tool cannot resolve which context
+it drove — which is the whole basis on which an entry there credits a caller. The exclusion errs
+LOUD (a named closure driven only by it reads FLAG, never SAFE) and is pinned by a self-test arm.
+
+⚠️ **`ci/mock-clock-staging-sweep.sh` NOW GATES THE ESCALATION BUCKET.** Every `NO-PUMP-IN-SCOPE`
+row must carry a `KIND <letter>` in the comment block above it, drawn from the taxonomy table in the
+sweep itself; a row without one exits 2. The first version of that control was per TREE — a set of
+every letter used anywhere — and a hostile round falsified it in one line: delete ONE row's
+disposition and every letter is still present somewhere, so it printed `ok`. **A control whose
+population is the whole tree cannot see a single site lose its answer.**
+
+⚠️ **`CALLER-ONLY × HELPER 9 → 1` IS A BUCKET, NOT THE CLASS.** `ci/pump-get-sweep.sh` classifies by
+executor class × pump shape, and **neither axis captures "inside a coroutine"**. The eight sites
+batch 19 took are the ones that happened to land in that bucket; the same shape can sit under POOL,
+THREADED or THREAD-IN-FILE and the sweep would say nothing. It also under-counts *within* a file it
+does classify: three live sites of this exact shape were `for (auto& f : futs) f.get();`, and a
+range-for variable is not a receiver the sweep can trace back to a `co_spawn`. Do not read the
+bucket going to 1 as the shape being done.
+
 ### ⚠️⚠️ A state assertion after a helper call is NOT a masking barrier
 
 When designing forced-miss (RED) arms, the natural model is that a helper's miss-branch `return` will

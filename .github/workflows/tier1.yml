@@ -2294,6 +2294,16 @@ jobs:
       - name: "Regression pin — #289 mock-clock staging sweep controls"
         run: bash ci/mock-clock-staging-sweep.sh
 
+      # ci/cxx_blank.py is the SHARED lexer three of the gates above resolve at
+      # runtime, and #289 batch 19 moved `blank_unevaluated` into it and replaced
+      # ci/pump-census.sh's verbatim second copy of the whole module with an import.
+      # Its self-test had never run in CI: a break in it would have surfaced only as
+      # whichever caller happened to notice, and the two copies had ALREADY diverged
+      # (the census copy was missing the CRLF line-splice arm) with nothing to say so.
+      # Buildless — python3 only.
+      - name: "Regression pin — shared C++ lexer controls (ci/cxx_blank.py)"
+        run: python3 ci/cxx_blank.py
+
       # Gate B round 1 (#326) found this checker had NO CI-visible signal at
       # all: the gate itself only runs as a local pre-commit hook (nothing in
       # .github/ invokes pre-commit), and `gate()` explicitly skips its own

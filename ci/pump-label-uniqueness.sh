@@ -100,7 +100,7 @@ _STR = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 # Every spelling that reaches `forced_miss_here` -- see the header. The list is the
 # gate's SCOPE, so widening it is a deliberate act with a control, not a tweak.
 CALLS = ("run_window_then_ready(", "run_to_exhaustion_or_report(",
-         "pump_until_ready(", "pump_until(")
+         "pump_until_ready(", "pump_until(", "yield_window_then_ready(")
 
 
 def _join_adjacent(lits, text, gap_view=None):
@@ -253,6 +253,11 @@ _RUN_TO_EXHAUSTION = '''
 _PUMP_UNTIL = '''
     if (!fixpp::test_support::pump_until(ioc, [&] { return done; }, 5s, 1ms, "G/settle")) { return; }
 '''
+# The coroutine-side spelling (#289 batch 19). It reaches the SAME `forced_miss_here`
+# strcmp namespace, so a label it carries can collide with a window-site label.
+_YIELD_WINDOW = '''
+    if (!co_await fixpp::test_support::yield_window_then_ready(fd, 8, "L/drain")) { co_return; }
+'''
 # ⚠️ THE COMMENTED LITERAL MUST COME AFTER THE REAL LABEL, and that is the whole control.
 # The harvest takes the LAST literal in the extent, so a comment placed BEFORE the label --
 # or on the line above the call, as an earlier control had it -- leaves the right answer
@@ -304,6 +309,7 @@ _CASES = [
     ("pump_until_ready reaches the same seam", _PUMP_UNTIL_READY, ["F/open"]),
     ("pump_until reaches the same seam", _PUMP_UNTIL, ["G/settle"]),
     ("run_to_exhaustion_or_report reaches the same seam", _RUN_TO_EXHAUSTION, ["J/open"]),
+    ("yield_window_then_ready reaches the same seam", _YIELD_WINDOW, ["L/drain"]),
     ("a SPLIT literal is ONE label", _SPLIT_LITERAL,
      ["Suite::LongCaseNameThatCrossesTheColumnLimit/close_fut_a"]),
     ("a SPLIT literal joined ACROSS A COMMENT", _SPLIT_ACROSS_A_COMMENT, ["Suite::Case/close_fut_a"]),

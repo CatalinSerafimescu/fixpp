@@ -16,8 +16,12 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <asio/awaitable.hpp>
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
+#include <asio/post.hpp>
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -33,6 +37,12 @@
 // already has -- without this header's asio/gtest/Clock dependencies leaking
 // into the tests/capi callers that also need it. See wait_until.hpp for why.
 #include "support/wait_until.hpp"
+
+// `yield_n`, hoisted out of tests/sync/sync_test_support.hpp so this header can call it
+// (#289 batch 19). Included, not defined here, for the same reason wait_until.hpp is:
+// the ~20 tests/sync TUs that want only `yield_n` must not inherit this file's
+// gtest/asio/Clock/Transport dependencies.
+#include "support/yield_n.hpp"
 
 namespace fixpp::test_support {
 
@@ -188,13 +198,37 @@ template <class Fut>
 inline constexpr const char* kPumpBudgetMiss =
     "#284: the operation did not complete within the bounded-pump budget. Site: ";
 
-// Failure text for a `run_window_then_ready` that missed. DELIBERATELY NOT
-// `kPumpBudgetMiss`: no bounded-pump budget was ever granted to this shape, so
-// that wording would misdescribe what happened (and legitimate budget-miss
+// Failure text for a `run_window_then_ready` or `yield_window_then_ready` that missed.
+// DELIBERATELY NOT `kPumpBudgetMiss`: no bounded-pump budget was ever granted to this
+// shape, so that wording would misdescribe what happened (and legitimate budget-miss
 // callers still need it unchanged). Stream the site name after it.
+//
+// ⚠️ IT IS UNIT-NEUTRAL ON PURPOSE, and it was not always. It used to read "its preserved
+// RUN window" and "within one boundary grace SLICE" -- true of `run_window_then_ready`,
+// where both are durations, and false of `yield_window_then_ready` (#289 batch 19), whose
+// window is counted in YIELDS and whose grace is `kYieldGrace` of them. That batch first
+// shipped the mismatch with a long comment explaining it, on the estimate that rewording
+// would cost "every driver that grades a forced arm". Rewording is the fix; a disclosure
+// is not. ⚠️ NO SIZE IS WRITTEN HERE -- the estimate was the problem, and a corrected
+// estimate rots on the same schedule as the one it replaced.
+//
+// ⚠️ HOW TO RE-DERIVE THE DEPENDANTS, and every shortcut below was tried and FAILED:
+//   * NOT by the constant's NAME. A gtest-spi matcher binds the MESSAGE, so
+//     `EXPECT_NONFATAL_FAILURE(..., "was not ready when its preserved window returned")`
+//     in `tests/session/test_next_expected_msgseqnum.cpp` names `kWindowMiss` nowhere.
+//   * NOT by a driver's variable name. `git grep REPORT_TAIL` misses `ci/pump-red-arm.sh`,
+//     which spells the same anchor `TAIL=`.
+//   * NOT by ONE fragment. Drivers bind the TAIL, matchers bind the HEAD; each probe
+//     finds its own half and reports the other half as absent.
+//   * NOT with `git grep`. Every #289 batch adds an untracked red-arm script that carries
+//     the tail, so a tracked-files-only search fails toward clean over exactly the files
+//     the batch is adding, at exactly the moment someone runs it.
+//     # BOTH fragments, `grep -rn` not `git grep`, and the WHOLE tree:
+//     grep -rn -e 'preserved window returned' -e 'bounded grace that follows' \
+//          ci/ tools/ tests/ brain/ .github/
 inline constexpr const char* kWindowMiss =
-    "#289: the operation was not ready when its preserved run window returned, and did "
-    "not become ready within one boundary grace slice. Site: ";
+    "#289: the operation was not ready when its preserved window returned, and did "
+    "not become ready within the bounded grace that follows. Site: ";
 
 // Failure text for a `run_to_exhaustion_or_report` that missed. A THIRD literal, for the
 // same reason `kWindowMiss` is not `kPumpBudgetMiss`: neither of the other two describes
@@ -758,6 +792,104 @@ template <class Fut>
                                          std::chrono::steady_clock::duration window,
                                          const char* site) {
     return run_window_then_ready(ioc, fut, window, kPumpSlice, site);
+}
+
+// Default grace for `yield_window_then_ready`, in YIELDS. Generous by design, and it
+// costs nothing on the happy path: the grace loop is entered only when the preserved
+// window already returned not-ready, and it exits the moment the future becomes ready.
+inline constexpr int kYieldGrace = 4096;
+
+// ── The COROUTINE-SIDE twin of `run_window_then_ready` (#289 batch 19) ──────────────
+//
+// For a `.get()` that sits INSIDE a coroutine running on the very io_context that has
+// to make the future ready. You cannot pump a context from within it, so the only
+// currency available is yielding back to the executor -- which is why these sites spell
+// their window as `co_await yield_n(N)` rather than `ioc.run_for(W)`, and why this
+// primitive calls the same `yield_n` rather than open-coding a third copy of its loop.
+//
+// ⚠️ THE HAZARD HERE IS NOT THE ONE THE WALL-CLOCK SITES HAVE, AND IT IS WORSE.
+// At a caller-side site the miss is a scheduling question and every enclosing driver
+// still gets to run. Here the blocking `get()` executes ON the pumping thread, from
+// inside the handler the driver dispatched, so it wedges the driver too:
+//
+//     tests/sync/test_drain_predrain_holder.cpp  -- a 5 s deadline loop around
+//         `ioc.run_for(100ms)`; the 100 ms call never returns, so the deadline is
+//         never re-tested and `ASSERT_FALSE(timed_out)` is never reached.
+//     tests/sync/test_pool_exhaustion_reuse.cpp  -- `run_to_exhaustion_or_report`
+//         and `pump_until_ready`; both are pumping when the coroutine blocks.
+//
+// So a bounded outer driver, which is the #289 remedy everywhere else, does NOT bound
+// this shape. The whole binary hangs and ctest reports a timeout naming no site.
+// Re-derive rather than trusting the two names above: they are illustrations of the
+// mechanism, and the mechanism is what holds -- any driver, of any shape, is inside a
+// dispatched handler when the coroutine it dispatched calls `get()`.
+// MEASURED, not read off asio: `ci/red-arms/batch19-coroutine-side-get.sh` runs both
+// shapes under a defect no yielding can fix and shows the unguarded one WEDGE.
+//
+// THE WINDOW IS PRESERVED, exactly as in `run_window_then_ready`: `window` yields are
+// issued unconditionally, so a site that used `co_await yield_n(N)` for its own
+// interleaving semantics keeps every one of those N yields. The guard adds a ready
+// check and a bounded grace after them; it never shortens the window.
+//
+// IT REPORTS ITSELF, like `run_to_exhaustion_or_report` and unlike
+// `run_window_then_ready`. The discriminator between those two is what the miss branch
+// still owes: `run_window_then_ready`'s callers owe a SITE-SPECIFIC teardown (a
+// `cancel_and_drain_or_report` with that fixture's Clock) which no primitive can supply,
+// so the report stays with them. A miss here owes nothing -- teardown belongs to the
+// outer driver, which is still holding the context -- so leaving the `ADD_FAILURE` at
+// the call would only spell the site label a second time, by hand, at every site.
+//
+// ⚠️ AND THE `ADD_FAILURE` CONDITIONS THIS FILE MANDATES DO NOT TRANSFER VERBATIM HERE,
+// so they are restated rather than inherited. `drain_or_report`'s header states them for
+// a plain function: safe while (a) it sits in a frame that may throw and (b) no enclosing
+// `catch (...)` stands between it and the frame that should receive the throw. An
+// AWAITABLE frame does not RECEIVE a throw. Under `--gtest_throw_on_failure` the
+// exception is captured by the coroutine promise, re-thrown at the caller's `co_await`,
+// propagated into the outer `use_future`, and surfaced at the test body's `f.get()` --
+// so neither this `co_return false` nor the site's `co_return;` ever runs, and the
+// FAILURE IS STILL LOUD but arrives at a different place than a reader of (a)/(b) would
+// predict. `run_to_exhaustion_or_report` is not a coroutine and does not settle this.
+//
+// THE CONDITION, stated so it does not rot into a count of today's callers:
+//     No `catch (...)` may stand between a `co_await` of this guard and the outer
+//     `use_future`. One that does converts a #289 report into an unrelated
+//     "cancellation must not throw arbitrary exceptions"-style misattribution, blaming
+//     the code under test -- the shape `tests/tls/test_load_credentials_cancellation.cpp`
+//     already paid for. Check it, do not assume it:
+//         git grep -n 'catch *(\.\.\.)' -- <the file holding the co_await>
+// It holds today at all 11 sites (none of the three `tests/sync` files contains a `try`
+// at all, and neither of the two `GTEST_FLAG_SET(throw_on_failure, ...)` setters links
+// into their binaries) -- but that is a measurement, and the condition is the thing.
+//
+// ⚠️ `site` IS REQUIRED, deliberately more than the sibling primitives require, so that
+// an UNLABELLED call cannot be written by omission -- every site is then seam-forceable
+// (`ci/red-arms/batch19-labels.txt`, 11/11 RED).
+//
+// ⚠️ IT IS NOT A COMPILE-TIME EXCLUSION, and an earlier revision of this comment claimed
+// it was. `yield_window_then_ready(fut, 8, 0)` COMPILES: a bare `0` is a null pointer
+// constant, binds to `const char*`, and yields a site that `forced_miss_here` can never
+// arm. Exactly the hazard the sibling overloads document for themselves, not a case this
+// signature removes. What it does remove is the SILENT-null report: the stream below uses
+// a visible fallback rather than `operator<<(const char*, nullptr)`, which is UB. Check
+// the tree for the shape rather than assuming it cannot occur:
+//     git grep -n 'yield_window_then_ready(' -- tests/ | grep -E ', *0 *[,)]'
+template <class Fut>
+[[nodiscard]] asio::awaitable<bool> yield_window_then_ready(Fut& fut, int window, const char* site,
+                                                            int grace = kYieldGrace) {
+    const auto ready = [&fut] {
+        return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
+    };
+    if (!forced_miss_here(site)) {
+        co_await yield_n(window);
+        if (ready()) co_return true;
+        auto ex = co_await asio::this_coro::executor;
+        for (int i = 0; i < grace; ++i) {
+            co_await asio::post(ex, asio::use_awaitable);
+            if (ready()) co_return true;
+        }
+    }
+    ADD_FAILURE() << kWindowMiss << (site != nullptr ? site : "<unlabelled>");
+    co_return false;
 }
 
 // Drain `ioc` and REPORT whether it reached quiescence. The teardown half of

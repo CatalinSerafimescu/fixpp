@@ -2376,10 +2376,18 @@ TEST(PumpWindowMiss, FeedMissDrainsWhileCallerTemporaryAlive) {
 
     // Substring, not just "a failure happened": an assertion satisfiable by any
     // error text is satisfiable by its own.
+    //
+    // ⚠️ THIS MATCHER IS BOUND TO `kWindowMiss`'S TEXT, not to its name, so a reword of
+    // that literal silently breaks it -- and one nearly did. #289 batch 19 made the
+    // literal unit-neutral and sized the change from two probes, neither of which could
+    // see this line: one keyed on a DRIVER'S VARIABLE NAME, one on the literal's TAIL
+    // while this binds its HEAD. The canonical re-derivation recipe, with the reasons
+    // every shortcut fails, lives at `kWindowMiss` in tests/support/pump_until_ready.hpp.
+    // Read it there rather than reconstructing one here.
     EXPECT_NONFATAL_FAILURE(fix->feed(make_logon("FIX.4.4", 2, "CLI", "SRV"),
                                       std::chrono::steady_clock::duration::zero(),
                                       std::chrono::steady_clock::duration::zero()),
-                            "was not ready when its preserved run window returned");
+                            "was not ready when its preserved window returned");
 }
 
 // Positive companion to the miss witness above. A zero WINDOW alone must NOT

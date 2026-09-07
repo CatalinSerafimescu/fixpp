@@ -243,6 +243,18 @@ DRIVING_METHODS: dict[str, tuple[str, ...]] = {
 # CI, every one of them correctly driven. The lesson is the enumeration, not the entry:
 # when a new pump spelling lands, `git grep -l 'DRIVING_FREE_FUNCTIONS\|GUARD = re.compile\|CALLS = (' ci/ tools/`
 # names every instrument that has to learn it.
+# ⚠️ `yield_window_then_ready` (#289 batch 19) IS DELIBERATELY ABSENT, and the enumeration
+# above is exactly why that had to be a decision rather than an omission. It is a pump
+# helper in `tests/support/pump_until_ready.hpp` and every other instrument had to learn
+# it -- but it takes NO `io_context&`. It drives by yielding the CALLING COROUTINE back
+# to its own executor, so this tool cannot resolve which context it drove, which is the
+# whole basis on which an entry here credits a caller. Adding it would make the set say
+# something the resolver cannot honour. The exclusion follows the rule two paragraphs
+# above verbatim -- "if in doubt about whether something drives, leave it OUT" -- and it
+# errs LOUD: a named closure driven only by it reads FLAG, never SAFE. There are no such
+# sites today (batch 19's eight all spawn UNNAMED lambdas, which this tool does not
+# track); the first one is a finding to read, not a false alarm to silence by adding the
+# name here. Pinned by a self-test arm below.
 DRIVING_FREE_FUNCTIONS = frozenset(
     {
         "pump_until",
@@ -1006,6 +1018,30 @@ void f() {
 }
 """,
         [("lam", "SAFE-DRIVEN")],
+    ),
+    (
+        # The coroutine-side driver (#289 batch 19). It takes NO io_context -- it drives by
+        # yielding the calling coroutine back to its own executor -- so it also straddles
+        # the "driving call must name the context" assumption the other arms share.
+        # ⚠️ THE EXPECTED VERDICT IS FLAG, AND THAT IS THE POINT. This arm pins the
+        # DELIBERATE EXCLUSION documented at DRIVING_FREE_FUNCTIONS: the helper drives by
+        # yielding the calling coroutine, names no io_context, and so cannot be resolved
+        # to one. Adding it to the set flips this arm -- which is the intended trip-wire,
+        # not a failure to fix by editing the expectation.
+        "yield_window_then_ready is NOT credited as a driver (no io_context to resolve)",
+        """
+namespace fixpp { namespace test_support {
+bool yield_window_then_ready(int&, int, const char*);
+} }
+void f() {
+  io_context ioc;
+  int fut = 0;
+  auto lam = [&]() { return 0; };
+  co_spawn(ioc, lam(), detached);
+  if (!fixpp::test_support::yield_window_then_ready(fut, 8, "S::C")) { return; }
+}
+""",
+        [("lam", "FLAG")],
     ),
     (
         "a STRAND resolves back to its io_context (co_spawn(strand,...); ioc.run())",

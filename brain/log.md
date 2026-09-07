@@ -6,6 +6,28 @@ status: stable
 
 # Log
 
+- **2026-09-07 — #289 batch 19, the `.get()` inside the coroutine.** `components/test.md` gains a
+  FOURTH `#289` shape, and it is the one where the standing remedy does not apply: the `.get()` runs
+  **on the pumping thread**, inside a handler the driver dispatched, so a bounded outer driver — a
+  5 s deadline loop, or `run_to_exhaustion_or_report`, which is already the #289 guard — is itself
+  wedged. Measured, not read: `ci/red-arms/batch19-coroutine-side-get.sh` injects a defect no
+  yielding can fix and shows the pre-batch shape WEDGE where the guarded shape REPORTS. New
+  primitive `yield_window_then_ready`, which PRESERVES the yield window and reports via
+  `kWindowMiss` — **reworded to be unit-neutral** rather than duplicated into a fourth literal or
+  shipped wrong behind a disclosure. The handover's "a fourth literal costs every driver" estimate
+  was never measured — and the reword then **broke a live `EXPECT_NONFATAL_FAILURE` matcher** that
+  three successive enumerations could not see, because each was keyed on something other than the
+  message text itself. **Enumerate a shared literal's dependants by BOTH fragments, with `grep -rn`
+  and not `git grep` (a batch's own new arm scripts are untracked), over the whole tree.** `failure-classes.md` class 1 gains "a bound outside the thing it bounds may be
+  inside it at runtime" and "a residual BUCKET is not the CLASS"; class 8 gains the harness that
+  broke when the script it relocates gained an import.
+
+  ⚠️ **`ci/mock-clock-staging-sweep.sh`'s escalation bucket was READ, and the reasons are not
+  interchangeable.** All 14 rows now name their own KIND at the site (time-stamp · no waiter exists ·
+  must fire nothing · stored-anchor rescue · armed and observed · fail-loud · vestigial). The tally
+  does not move — a disposition is not a migration — and that is stated up front rather than
+  compensated for with a metric that does.
+
 - **2026-09-07 — #289 batch 18, the lost mock-clock advance.** `components/test.md` gains a THIRD
   `#289` shape: a fixed `run_for` STAGING a mock-clock advance. No `.get()` near it, so the census
   never saw it; the terminal half was usually already migrated and correct. If the coroutine has not

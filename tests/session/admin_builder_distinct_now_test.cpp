@@ -287,6 +287,17 @@ TEST_F(AdminDistinctNowTest, HB_DistinctNow_TwoHeartbeatsHaveDistinctSendingTime
     ASSERT_FALSE(st1.empty()) << "First Heartbeat must contain SendingTime(52)";
 
     // Advance mock clock by 1 second.
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND A (time stamp).
+    // `ci/mock-clock-staging-sweep.sh` lists this as NO-PUMP-IN-SCOPE because the only
+    // pump above it is inside `feed_sync` / `drive_to_active`. It is not a staging
+    // window, because nothing here waits on a timer: what consumes this advance is a
+    // synchronous `effective_clock.now()` inside the NEXT admin builder, reached on the
+    // caller's thread by the `feed_sync` below. There is no sleeper to arm, so there is
+    // nothing for a late arm to lose.
+    // ⚠️ RE-DERIVE, DO NOT TRUST THIS: read what reads the new time. If the oracle below
+    // ever depends on a frame emitted by the LIVENESS LOOP rather than by an inbound
+    // frame's handler, this becomes KIND D and the arm-shape rule applies instead --
+    // which is exactly what separates this cell from TR_DistinctNow in the same file.
     clock->advance(1s);
 
     // Inbound TestRequest seq=3 → Session emits Heartbeat with new clock time.
@@ -330,6 +341,19 @@ TEST_F(AdminDistinctNowTest, TR_DistinctNow_TwoLivenessTestRequestsHaveDistinctS
     captured_frames.clear();
 
     // Window 1: silence past heartbt_int → liveness loop emits TR1.
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND D (stored-anchor rescue).
+    // Unlike the other AdminDistinctNow cells, a TIMER consumes this advance: the
+    // detached liveness loop emits the TestRequest. So the question is real, and the
+    // answer is the ARM SHAPE, not the window above it -- `mock_clock::sleep_until` fires
+    // immediately when `deadline <= steady`, and the liveness loop arms from a STORED
+    // ANCHOR (`last_inbound_steady_ + heartbt_int`) captured at Logon, which predates this
+    // line. A late arm therefore names an instant already passed and is rescued.
+    // The full statement of the rule, with the condition it carries, is at the equivalent
+    // site in tests/session/heartbeat_testrequest_test.cpp -- read it there, it is not
+    // unconditional.
+    // ⚠️ Deleting this advance was measured to turn the cell RED, i.e. the advance IS
+    // load-bearing here. That is why this row needs a mechanism and the KIND A rows in
+    // the same file do not.
     clock->advance(2s);
     ioc.run_for(200ms);
     ioc.restart();
@@ -438,6 +462,10 @@ TEST_F(AdminDistinctNowTest, Reject_DistinctNow_TwoRejectsHaveDistinctSendingTim
     ASSERT_EQ(sess.state(), fsm_state::Active) << "Session must remain Active after Reject";
 
     // Advance clock by 1 second.
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND A (time stamp).
+    // Same disposition, same reason and same re-derivation as the first KIND A
+    // advance in this file (HB_DistinctNow). See it there -- including the
+    // condition under which this stops being KIND A and becomes KIND D.
     clock->advance(1s);
 
     // Second inbound app MsgType "D" (seq=3, SendingTime updated by 1 s) → another Reject.
@@ -480,6 +508,12 @@ TEST_F(AdminDistinctNowTest, Logout_DistinctNow_TwoLogoutsHaveDistinctSendingTim
     }
 
     // Advance clock by 1 second.
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND B (no waiter exists).
+    // The session that could have owned a sleep was destroyed at the closing brace
+    // above; the one that reads this time has not been constructed yet. A lost advance
+    // is not merely harmless here, it is undefined -- there is nothing to lose it.
+    // ⚠️ RE-DERIVE: the reason is the SCOPE, so it holds only while the advance sits
+    // between the two blocks. Moving it inside either one makes it a different row.
     clock->advance(1s);
 
     {
@@ -545,6 +579,9 @@ TEST_F(AdminDistinctNowTest, Logon_DistinctNow_TwoInitiatorLogonsHaveDistinctSen
     }
 
     // Advance clock by 1 second.
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND B (no waiter exists).
+    // Same disposition, same reason and same re-derivation as the first KIND B
+    // advance in this file (Logout_DistinctNow). See it there.
     clock->advance(1s);
 
     {

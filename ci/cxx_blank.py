@@ -19,15 +19,18 @@ quote that idiom INSIDE explanatory comments. Matching raw text can therefore re
 COMMENT: the arm then builds unforced, the test passes, and the driver reports SILENT --
 which reads as "the migration does not report" rather than "the driver edited prose".
 
-Ported from `ci/pump-census.sh` and since DIVERGED: the backslash-CRLF splice branch exists
-only here. That divergence is deliberate and is the reason to prefer this module -- but it
-means a `diff` against the sibling is no longer expected to be empty, and the sibling still
-carries the gap. (An earlier revision of this line said "VERBATIM", which stopped being true
-the moment the CRLF branch was added.) That copy and `pump-get-sweep.sh`'s stay where
-they are for now: each is pinned by its own harness (`ci/test-pump-census.sh`), so folding
-them in is a change to a tested instrument and belongs in its own PR, not in a batch that
-merely needed to stop making copy number five. Consolidating the remaining copies onto this
-module is recorded as follow-up.
+Ported from `ci/pump-census.sh`, which then DIVERGED from it -- the backslash-CRLF splice
+branch existed only here -- and which #289 batch 19 has now folded onto this module. That
+divergence is the whole argument for one source, and it is worth recording that it was
+found by DIFFING the two bodies, not by either one failing: the census's copy was silently
+missing an arm for years and nothing could have said so, because the tree has no CRLF
+sources to reveal it.
+
+⚠️ DO NOT WRITE THE NUMBER OF REMAINING COPIES HERE. Two earlier revisions did (one said
+"VERBATIM", one said "copy number five") and both went stale without anyone touching this
+line. `ci/pump-get-sweep.sh` defines a `blank_comments` that is NOT one of these -- it
+blanks comments while KEEPING string literals, which its own controls depend on. Re-derive
+the set with the recipe at the top of this file.
 
 OFFSET-PRESERVING CONTRACT, relied on by every rewriting caller: the returned string has
 EXACTLY the same length as the input, and a newline in the input is a newline in the output.
@@ -197,6 +200,79 @@ def blank_non_code(source: str) -> str:
     return "".join(out)
 
 
+# ── Unevaluated operands ─────────────────────────────────────────────────────
+#
+# Lives here rather than in `ci/pump-get-sweep.sh`, where it was written (#289 batch
+# 18), because `ci/pump-census.sh` carries the SAME `.get()` pattern and had no
+# unevaluated blanking at all. That census was clean only because no in-tree
+# `decltype(fut.get())` happened to sit inside a `run_for` window -- a property of
+# the tree, not of the instrument. Moving it here is #289 batch 19 item 3.
+#
+# ⚠️ IT IS NOT PART OF `blank_non_code` AND MUST NOT BE FOLDED INTO IT. That one
+# blanks text that is not CODE; this blanks text that IS code and is not EVALUATED.
+# A caller wanting line-accurate comment blanking usually does NOT want a `decltype`
+# operand erased -- `ci/pump-label-uniqueness.sh` harvests string literals, and a
+# label inside a `decltype` would still be a real label. Two passes, two decisions.
+
+_DECLTYPE = re.compile(r"\bdecltype\s*\(")
+
+def blank_unevaluated(stmt):
+    """Blank `decltype(...)` operands, preserving length.
+
+    ⚠️ `using R = decltype(fut.get());` DOES NOT CALL `get()` -- the operand is
+    unevaluated -- yet it matched this sweep's `.get()` pattern and produced a row.
+    That row is worse than noise: the idiom is part of #316's SETTLED value-helper
+    recipe, so it appears at sites that are already MIGRATED, and the sweep reported
+    two of them as `CALLER-ONLY x HELPER` residue in a file whose very next line is
+    `run_window_then_ready`. Migrating a value-returning helper therefore RAISED the
+    residual, which is the one direction an instrument must never move.
+
+    It also cost two rows a second way: the `since` walk treats any statement naming
+    `<fut>.get()` as the end of that future's segment, so a `decltype` line truncated
+    the window evidence and could flip RUN-BOUNDED to HELPER.
+
+    Scope, stated so it is not read as more than it is: `decltype` is the only
+    unevaluated context this blanks. `sizeof`, `noexcept` and `requires` can hold the
+    same call and are NOT handled -- no instance exists in this tree today, and a
+    speculative widening would need controls no site justifies. The controls below
+    straddle the boundary this DOES draw.
+
+    ⚠️ THE EARLY-OUT IS NOT AN OPTIMISATION TO TASTE: on this corpus ~10^5 statements
+    reach here and a couple of DOZEN contain `decltype`, so without it the char-list copy
+    runs about ten thousand times per useful call. No exact pair is written down -- an
+    earlier revision did, and the numbers rotted inside the same PR when its own migration
+    changed the corpus. Re-derive by counting `statements()` output against
+    `'decltype' in stmt`. The early-out is exactly safe: `_DECLTYPE` requires that literal
+    substring, so no statement the regex would match can be skipped by it."""
+    if "decltype" not in stmt:
+        return stmt
+    out = list(stmt)
+    for m in _DECLTYPE.finditer(stmt):
+        # ⚠️ FIND THE CLOSING PAREN FIRST, THEN BLANK. Blanking as you walk erases to the
+        # END OF THE STRING when the operand never closes -- and that direction is
+        # FAILS-TOWARD-CLEAN: a real `.get()` after an unterminated `decltype(` would
+        # vanish from the caller's scan with no diagnostic. It cannot happen for a caller
+        # that passes SPLICED STATEMENTS (`ci/pump-get-sweep.sh`), where parens balance by
+        # construction; it is reachable for a caller that passes a single LINE
+        # (`ci/pump-census.sh`, which is line-based), where a wrapped operand closes on a
+        # later line. Leaving such an operand ALONE instead costs at worst a false row --
+        # loud, and against an EMPTY pin, so someone reads it.
+        depth, i, close = 0, m.end() - 1, None
+        while i < len(stmt):
+            if stmt[i] == "(":
+                depth += 1
+            elif stmt[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    close = i
+                    break
+            i += 1
+        if close is None:
+            continue
+        for j in range(m.end() - 1, close):
+            out[j] = " "
+    return "".join(out)
+
 # ── Self-test ────────────────────────────────────────────────────────────────
 #
 # ⚠️ EVERY CASE HERE MUST INCLUDE A POSITIVE CONTROL -- a blanker that returns all spaces
@@ -253,3 +329,41 @@ if __name__ == "__main__":
         sys.exit("\nCONTROL FAILED -- blank_non_code is not trustworthy. Fix before using it.")
     print("\nblank_non_code PROVEN: hides comments and literals, keeps real code, "
           "preserves length and newlines.")
+
+    # ── blank_unevaluated: the SAME straddle the fix shipped with, moved here with it.
+    # The operand must vanish AND a real call must survive, IN ONE fixture -- a blanket
+    # exclusion (whole statement, whole line, everything after `decltype`) passes the
+    # first half and fails the second.
+    GET = "fut.get()"
+    U_CASES = [
+        ("decltype operand vanishes",
+         "using R = decltype(fut.get());", False, None),
+        ("a real call survives",
+         "auto r = fut.get();", True, None),
+        ("BOTH in one statement",
+         "using R = decltype(fut.get()); auto r = fut.get();", True, 1),
+        ("nested parens inside the operand",
+         "using R = decltype(f(g(fut.get())));", False, None),
+        ("no decltype -> returned unchanged",
+         "auto r = fut.get();", True, 1),
+        # ⚠️ THE FAILS-TOWARD-CLEAN EDGE. A line-based caller can hand us an operand that
+        # never closes. Blanking as we walk would erase the rest of the line INCLUDING the
+        # real call; leaving it alone costs a false row instead. Both halves are checked:
+        # the trailing call must SURVIVE, and it must survive as a call, not as debris.
+        ("UNTERMINATED operand is left alone",
+         "using R = decltype(f(fut.get(); auto r = fut.get();", True, 2),
+    ]
+    u_ok = True
+    for name, src, want, want_count in U_CASES:
+        out = blank_unevaluated(src)
+        seen = GET in out
+        cnt = out.count(GET)
+        good = (seen == want) and len(out) == len(src) and (
+            want_count is None or cnt == want_count)
+        u_ok &= good
+        print(f"  {'ok   ' if good else '!!BAD!!'} {name:<32} visible={seen} count={cnt}"
+              f" len={'=' if len(out) == len(src) else 'DIFFERS'}")
+    if not u_ok:
+        sys.exit("\nCONTROL FAILED -- blank_unevaluated is not trustworthy.")
+    print("blank_unevaluated PROVEN: erases the operand, keeps the real call, "
+          "preserves length.")

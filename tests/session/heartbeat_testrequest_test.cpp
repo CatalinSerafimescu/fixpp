@@ -365,6 +365,11 @@ TEST_F(HbTrTest, HeartBtIntZeroDisablesTimers) {
     // unanswered-TR disconnect would have fired no later than 60s in.  At
     // 300s the session being Active proves all timers stayed disabled.
     for (int i = 0; i < 10; ++i) {
+        // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND C (must fire NOTHING).
+        // This is the inverse of the staging shape and a barrier here would invert the test:
+        // the oracle is that NO timer wakes. Deleting this advance was measured to leave the
+        // cell GREEN, which is the expected direction -- an advance whose whole purpose is to
+        // prove silence cannot be "lost" in any way the test would notice.
         clock->advance(30s);
         ioc.run_for(5ms);
         ioc.restart();
@@ -427,6 +432,10 @@ TEST_F(HbTrTest, UnansweredTestRequestDisconnects) {
     // Check that at the site rather than reading the table as unconditional.
     // Site-specific: the sleep here is the liveness loop's, armed from a stored anchor,
     // so the advance is rescued by `fire_now` rather than lost.
+    // (#289 batch 19 taxonomy: KIND D. `ci/mock-clock-staging-sweep.sh` lists this row
+    // under NO-PUMP-IN-SCOPE rather than FIXED-WINDOW, because the only pump above it
+    // is inside `drive_to_active`. Same disposition, different bucket -- and deleting
+    // this advance was measured to turn the cell RED, so the mechanism is load-bearing.)
     // ⚠️ RE-DERIVE, DO NOT TRUST THIS: starve the window below to `run_for(0ms)`,
     // rebuild, and run the cell. GREEN means the disposition still holds; RED means it
     // has stopped holding and this comment is the thing that is wrong.
@@ -482,6 +491,9 @@ TEST_F(HbTrTest, InboundHeartbeatKeepsSessionActive) {
 
         // Advance the clock half a HeartBtInt — keeps us inside this
         // window so no timer fires yet.
+        // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND C (must fire NOTHING).
+        // Same disposition and same measurement as the first KIND C advance in this
+        // file (HeartBtIntZeroDisablesTimers). See it there.
         clock->advance(500ms);
         ioc.run_for(20ms);
         ioc.restart();
