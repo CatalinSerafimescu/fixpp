@@ -48,6 +48,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/context_group_delim_fn.hpp"  // 384: the production delimiter oracle
 #include "support/frame_view_factory.hpp"
 #include "support/wire_test_hooks.hpp"  // 083 T056 (W-10): reserve-bound seam
 
@@ -614,7 +615,12 @@ ChainRun run_chain(table_view const& tv, std::vector<std::byte> const& buf,
         return out;
     }
     g_probe_calls = 0;
-    fixpp::wire::OffsetTable table{*fv, mr, &tv, &counting_group_member};
+    // 384: the delimiter oracle has no default any more, so name it. The chain
+    // fixture calls `set_group_first` at every level, so this is the
+    // production shape; it is also inert for this cell, which drives
+    // `group()` (the extent walk) and never reaches the splitter.
+    fixpp::wire::OffsetTable table{*fv, mr, &tv, &counting_group_member,
+                                   &fixpp_test_support::context_group_delim_fn};
     auto const gi = table.group(kChainBase);
     out.probe_calls = g_probe_calls;
     out.group_too_large =

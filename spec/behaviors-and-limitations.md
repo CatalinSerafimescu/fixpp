@@ -1748,7 +1748,7 @@ Spec: `specs/060-int128-decimal-compare/`.
 > **(a) Leg 1 — *"make the splitter nesting-aware"*: NOT DONE, DESCOPED WITH EVIDENCE.** 083 measured the target population under the POST-FIX (per-context) delimiters across all ten dictionaries: for every context with delimiter `D`, does any group nested directly inside it carry `D` as a member? **Zero, on every dictionary** (FIX40/41/42/43/44/50/50SP1/50SP2/FIXT11/Orchestra FIX Latest). And the shape is not merely absent — it is **unparseable**: two synthetic dialects built to witness the mis-split were both genuinely ambiguous on the wire (nested delimiter == outer delimiter → the validator rejects the frame outright, which is the layout 072's load guard exists to reject; nested delimiter distinct but the outer delimiter a LATER member of the nested group → the nested walk swallows the next outer instance). A tag that both opens outer instances and appears inside them has no unique parse — which is *why* no shipped dictionary carries one. Worse, implemented literally leg 1 would **break** the shape that IS reachable: where the outer delimiter is itself a nested group's count tag (485 contexts), skipping past the nested extent before testing the boundary would skip the very tag that opens each instance. Recorded in `tests/wire/typed_read_split_agreement_test.cpp` with the shapes tried.
 > **(b) Leg 2 — *"fold the redundant flat cap loop into the same traversal"*: OUTSTANDING**, unchanged, and now **tracked by fixpp#214** (filed by 083 because closing `#180` in 072 left this residual orphaned). The residual is the one flat, wire-derived instance-boundary rule at `src/wire/offset_table.cpp:586` (its cap check at `:591`, the loop at `:584-594`) — the row's `:548-558` under 072-era line numbers. Its exposure is a `max_group_entries_per_instance` false positive/negative on a defence-in-depth DoS cap, never wrong returned data.
 > **(c) This row's own claim that `consume_group_extent()` correctly computes the nesting-aware `group_end` — CORRECTED, it is FALSE.** The row was audited against the *nested-delimiter-equals-parent-delimiter* shape only. It is wrong for a **third** shape it never named: **the outer group's delimiter IS a nested group's count tag.** There the instance-opening delimiter was consumed by a bare `++k`, leaving the walk inside the nested group's instances, so the next outer instance's opening tag was never reached and the extent truncated to ONE instance — silently, through `MessageView::group<>()` and the C-ABI top-level group getter. Present in **485** contexts (FIX50SP2 240 + Orchestra 245) and made *reachable* by 083's delimiter correction. Repaired by a query-before-consume descent at the delimiter position (`src/wire/offset_table.cpp:492-499`), mirroring the pre-existing post-delimiter descent at `:510-518`, with the depth-cap early return mirrored too. Witnessed by `TypedReadSplitAgreement.ExtentWalkDescendsAtNestedGroupDelimiter_Leg{1..4}`.
-> **What 083 DID change at the splitter is not one of this row's legs:** the boundary delimiter's **SOURCE** moved from the wire (`entries_[first].tag`) to the dictionary's per-context store (`src/wire/offset_table.cpp:704-711`), so the splitter and the validator now split on the same key. The splitter is still **flat**. Pinned by `TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged`, which also asserts the extent bound, `group()`'s `group_index` and the reserve bound do **not** move.
+> **What 083 DID change at the splitter is not one of this row's legs:** the boundary delimiter's **SOURCE** moved from the wire (`entries_[first].tag`) to the dictionary's per-context store, so the splitter and the validator now split on the same key. *(The `offset_table.cpp:704-711` pin that stood here was already stale before #384 — those lines are the cached-span early return, not the delimiter resolution. Line numbers replaced by the symbol: read `OffsetTable::group_slices_status()`.)* The splitter is still **flat**. Pinned by `TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged`, which also asserts the extent bound, `group()`'s `group_index` and the reserve bound do **not** move.
 > **Neither leg is claimed as delivered by 083, and `#180` is NOT reopened** — 072 delivered what `#180` actually asked for. What 083 adds is evidence (leg (a) descoped, measured), a correction (leg (c)), and a tracking issue for the residual (leg (b)).
 > **The row's *"0 nested/parent delimiter collisions"* measurement (Fable audit 2026-07-08), re-derived on the POST-FIX basis as FR-012a/SC-014 requires:** still **0**, now across all **ten** dictionaries rather than the six group-bearing ones, and now under delimiters that 083 changed in 330 contexts. The re-derivation was necessary precisely because the original was taken against the delimiters this feature replaced.]
 > *(historical 072 bracket follows)* [PINNED + LOAD-GUARDED by 072-nested-group-hardening (2026-07-13) — `XmlLoader::load_*` now REJECTS a dialect in which any nested group's delimiter (`first_field_tag`) equals its immediate parent group's delimiter, throwing `dict::group_delimiter_collision_error` (derives `dict::xml_parse_error`, reuses inherited `code()`, discriminated by catch type — no `core::error` append). Enforced in `LoaderState::finalize()` before any `table_view` is built; `as_table_view()` stays non-throwing. A permanent all-contexts census (FR-001, `reused_tag_census_test.cpp::NestedGroupDelimiterCensus`, raw per-`<group>` walk with parent-delimiter threading + component expansion + post-expansion delimiter) pins 0 collisions across all 9 runtime dicts non-vacuously. RECORDED RESIDUALS (caller responsibility, not covered): (a) a hand-built `table_view` / non-`load_*` `Dictionary` is not re-validated (FR-005a); (b) the loader `groups_` table is global-first-seen-deduped per no_tag, so a collision only in a non-first-seen context of a reused no_tag is unguarded (FR-005b); (c) scalar-member disjointness is census-only, not load-enforced (FR-004); (d) the FR-002 scalar census recovers member sets structurally for all 9 dicts incl. FIX40/41/42 (no unpinned residual required); (e) the FR-001/FR-002 census coverage is bounded to the membership contexts the raw walk structurally reaches. The splitter itself remains flat, but is now unreachable for the collision case via the load path.] `OffsetTable::group_slices()`'s slice splitter (and its redundant flat cap loop) re-walk the group's extent FLAT, not nesting-aware — a defense-in-depth gap deferred as real-dictionary-unreachable.** `consume_group_extent()` (`src/wire/offset_table.cpp`) correctly computes the nesting-aware `group_end` for the outer group, but `group_slices()`'s instance splitter (`:596-599`) and the redundant post-extent cap loop (`:548-558`) then re-walk that extent with a **flat** "does `entries_[k].tag == delim` mark a new outer instance" test, with no notion of nesting depth. If a nested group's own delimiter tag ever equalled its enclosing group's delimiter tag, the nested group's repeated delimiter fields would be mistaken for new outer-instance boundaries and the outer slice would be split incorrectly (the extent walk would still be correct; only the splitter would err). **This configuration does not occur in any shipped FIX dictionary** (Fable audit 2026-07-08: 0 nested/parent delimiter collisions across all 6 group-bearing vendored dicts). NOTE the earlier rationale that "the wire itself would be ambiguous" is **overstated** — `consume_group_extent` decodes such a collision *correctly* via declared counts, so the wire is decidable; only the flat splitter errs. The "impossible" is therefore a **convention of the shipped XMLs**, not a structural guarantee (confirmed: every real-dict nested/parent delimiter pair censused by 063 is distinct; the real-dict guard `NestedGroupExtent.MultiEntryNestedExtentGuard` passes for exactly this reason, not by accident). Reproducing the gap requires a **hand-built, non-representative** membership forcing outer/nested delimiter collision (`tests/wire/nested_group_extent_test.cpp:511-519`'s documented synthetic scoping trick). **Unenforced for user/dialect dictionaries:** nothing in the loader, `as_table_view()`, or the public `table_view` mutators rejects a nested==parent delimiter collision, so a user-supplied dialect XML or hand-built `table_view` (both public APIs) CAN construct it and reach the splitter bug — hardening (pin + optional load-time guard) tracked in **issue #180**. **Status: genuine internal inconsistency (extent walk is nesting-aware, the splitter is not); unreachable via any SHIPPED dictionary but unenforced for user/dialect dicts — deferred as defense-in-depth, non-blocking.** **Fix (deferred follow-up):** make the splitter nesting-aware too (advance `k` via the same `consume_group_extent` recursion on a nested count before testing outer-delimiter boundaries) and fold the redundant flat cap loop into the same traversal. *(Gate B PR#176 r1, Codex finding #2, downgraded and waived at P3 by orchestrator triage (real-dict-unreachable); `src/wire/offset_table.cpp:548-558,596-599`.)*
@@ -2810,12 +2810,189 @@ Evidence: issues #346, #348, #349; new issue #351.
   **What this row does NOT claim.** Two things, both untouched here and neither implied by the
   above. (i) `group_slices_status()`'s own instance splitter remains flat — that is `L-063-4` leg 1,
   descoped with evidence by 083. (ii) That splitter still resolves the instance delimiter from the
-  WIRE when `group_delim_fn_` is null, a shape the dict-aware constructors still permit by
-  defaulting that callback — filed as **fixpp#384**, because #220 removed the only case its stated
-  justification covered. It is a materially weaker concern than this row: that delimiter is
-  membership-VALIDATED before use (`group()` proceeds only once `group_member_fn_` confirms the
-  wire's first tag after the count is a member of the group), so it is always a confirmed member of
-  the right group — the open question is whether it is the right MEMBER, which is 083's C-8.4
-  contract question, not this one.
+  WIRE when `group_delim_fn_` is null — filed as **fixpp#384**, because #220 removed the only case
+  its stated justification covered. **RESOLVED 2026-09-07 by #384: see B-384-1 / B-384-2 below.**
+  The shape survives, but it can no longer be built by omission, and its disposition is now written
+  down rather than inherited. It was always a materially weaker concern than this row: that
+  delimiter is membership-VALIDATED before use (`group()` proceeds only once `group_member_fn_`
+  confirms the wire's first tag after the count is a member of the group), so it is always a
+  confirmed member of the right group — the open question was whether it is the right MEMBER, which
+  is 083's C-8.4 contract question, not this one.
   *(#220; `tests/wire/offset_table_test.cpp` — `DictFreeGroupDeclines*`, `DictFreeGroupSlicesAreEmpty`,
   `TrailingFieldNotCountedIntoLastInstance`, `FR001_NoFlatInstanceWalkInGroup`.)*
+
+---
+
+## fixpp#384 — the group delimiter oracle is no longer optional-by-omission (2026-09-07)
+
+### Behaviors
+
+- **B-384-1 — `group_delim_fn` has NO default on any dict-aware constructor.** The four public
+  dict-aware constructors — `OffsetTable(frame, mr, dict, member_fn, delim_fn)`, its `Config`
+  sibling, and `MessageView<Index>`'s two (`include/fixpp/wire/offset_table.hpp`,
+  `include/fixpp/wire/parser.hpp`) — used to default their last parameter to `nullptr`. They no
+  longer do. **This is a source-compatibility break for any caller that omitted the argument**; the
+  fix is to name the argument. `Parser`'s dictionary constructor is unaffected — it installs
+  both callbacks as unconditional member-initialisers, so no production construction and no
+  `Parser`-mediated caller changes at all. (*"Has ALWAYS installed both"* would be false: the
+  delimiter lambda arrived with 083 T057; before that the ctor installed `classify_fn_` and
+  `group_member_fn_` only.) **RUNTIME behaviour is unchanged in both directions:**
+  a caller who threads the oracle gets exactly what it got before, and a caller who now writes
+  `nullptr` gets exactly what omission used to give. What changed is that the two are no longer
+  spelled the same way.
+  **Why this and not a decline — and a correction to the first answer that was written here.**
+  Folding `group_delim_fn_ == nullptr` into `group()`'s #220 decline does turn
+  `TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged` RED (measured: 2 cells go red in
+  total — that one, in `wire_dict_tests`, and #384's own new
+  `GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero` in `wire_pure_tests`; the second is a
+  cell this change introduced, which is not independent evidence), because that witness builds the
+  half-threaded table
+  **deliberately**, as its pre-083 oracle. ⚠️ **That measurement is NOT the reason, and offering it
+  as one was an error of exactly the kind this issue is about.** The witness passes `nullptr` only
+  as a spelling; by **B-384-2** a zero-returning oracle yields the same delimiter and the same
+  slices, so the witness could be repaired in one line and the decline would stand. A cost that a one-line fixture change
+  removes is not a design constraint.
+  **The real reason is that the decline does not do what it is for.** Its goal is to remove the
+  wire-derived split from a table that carries a dictionary. It cannot: a delimiter callback that
+  ANSWERS 0 reaches the same fallback with the pointer non-null, so `group()` never declines. Option
+  1 moves the un-informed spelling rather than removing the shape — and it pays for that with a
+  supported degrade deleted. The same limit applies to B-384-1 itself and is stated there, not
+  hidden: removing the default narrows the ACCIDENTAL spelling; the callback's answer space still
+  contains a value equivalent to absence.
+  **The deeper change, considered and deferred.** Bundling `(opaque_dict, group_member_fn,
+  group_delim_fn)` into one aggregate with a both-or-neither invariant would collapse `group()`'s
+  `opaque_dict_ == nullptr || group_member_fn_ == nullptr` disjunction to a single predicate — which
+  is the structural cure for "a disjunct loses its subject", the mechanism that produced this issue.
+  It is deferred, not rejected, on blast radius. **The radius is not enumerated here — an
+  under-counted list is how a deferral becomes permanent, and a first attempt at one here was short
+  by most of its real surface.** Re-derive it instead:
+  `git grep -n 'opaque_dict\|group_member_fn\|group_delim_fn' -- include src` names every site that
+  takes or reads the triple. Two of them decide the cost on their own: `entry_context`
+  (`include/fixpp/wire/group_view.hpp`) is a **public, trivially-copyable** struct held by every
+  generated `G_<no_tag>`, so the change reaches **codegen output**; and `Parser` carries its own
+  copies of all three plus both `parse()` overloads. Residual (a) below is the piece of it that
+  matters most.
+  *(#384. **The population is not written down here, because removing the defaults IS the
+  instrument that re-derives it: every half-threaded site is a build error.** To re-measure, delete
+  the four `= nullptr` defaults on a tree and build. That recipe cannot go stale; a file list would,
+  silently. What IS recorded is the shape of the answer at the time — **no `src/` or `include/` site
+  was affected**, which is the reachability claim #384 opened with, measured rather than asserted.
+  **Scope of that zero, so it is not read wider than it is:** the compile database covers `src/`,
+  `tests/`, `tools/` **and generated `_codegen` sources** — the last is its largest bucket by TU
+  count and the one a "delete the defaults and compile" pass would otherwise be assumed to miss; it
+  constructs only the 2-arg dict-free `MessageView`. `bench/` and `tests/fuzz/` are **outside** it —
+  `bench/` was enumerated by reading (every construction there is dict-free or default-constructed)
+  and the fuzz harness by building the fuzz preset separately. A re-derivation that omits those two
+  is incomplete. ⚠️ One class the compiler cannot see at all: a `MessageView` construction inside an
+  **uninstantiated** template. A source sweep is the only cover for that, and it was run.)*
+
+- **B-384-2 — with a delimiter oracle threaded, an answer of `0` leaves the WIRE-derived delimiter in
+  place; it does not decline.** `group_slices_status()`'s guard is `if (d != 0) { delim = d; }`.
+  083's C-8.4 row 2 asserted the opposite ("There is no wire fallback. A zero return means `no_tag`
+  is not a group at all … which the caller already handles as absent"); that text described neither
+  the code nor the state it runs in — the splitter is reached only **after** `group()`'s membership
+  check has established that `no_tag` IS a group with members in this context, so a zero cannot mean
+  "absent" there. A group with a non-empty member set and no first-field record is an **inconsistent
+  dictionary**, and declining would drop instances membership just confirmed are present.
+  **Reachability:** through the hand-built `dict::table_view` surface only (`add_group_member`
+  without `set_group_first` sets `group_bit` while leaving `group_first_` empty). A **loaded**
+  dictionary cannot reach it. ⚠️ **This row has now stated the reason WRONG TWICE, and both wrong
+  versions are kept here, because the shape of the error is the thing #384 is about.**
+  **First wrong version:** *"`as_table_view()` calls `set_group_first_ctx` before registering
+  members."* Not load-bearing — `set_group_first_ctx` calls `add_group_member_ctx` itself, so
+  ordering cannot separate the two.
+  **Second wrong version:** *"the carrier is `members.empty() → continue` plus
+  `capture_first_emission`, and the FR-023 sweep is NOT load-bearing because it never inspects
+  `delimiter`."* The first half does not reach the code and the second half is backwards.
+  `as_table_view()` never reads `capture_first_emission`'s output: it does a **store lookup**
+  (`group_ctx_delimiter_impl`) and writes whatever comes back, **including 0**, unconditionally
+  (`src/dictionary/dictionary.cpp`). The emission argument says nothing about whether that lookup
+  hits.
+  **The reason that actually holds, and it is two facts, not one:**
+  **(1)** neither loader ever STORES a record with delimiter 0 — both guard the push on
+  `captured != 0` (`src/dictionary/xml_loader.cpp`, `src/dictionary/orchestra_loader.cpp`, 083 T036 /
+  FR-006 / C-6.1). So a 0 from the lookup can only mean *no record*. **(2)** the FR-023 / C-3.4
+  completeness sweep in both loaders' `finalize()` **throws** if any context `as_table_view()` will
+  register has no record. (1) + (2) ⇒ the delimiter written is non-zero. The FR-023 sweep is
+  therefore one of the two braces, **not** a belt on top — the second wrong version above told the
+  reader to discount the very guard that carries the claim, which is precisely the failure this
+  whole row exists to document. `members.empty() → continue` still matters, but for a narrower job:
+  it is what keeps a tolerantly-skipped group out of the registered set in the first place
+  (`src/dictionary/orchestra_loader.cpp` states this in-source).
+  ⚠️ **And it was found a THIRD time, in a file the first two corrections did not reach.** After
+  both fixes above landed in this row and in `src/wire/offset_table.cpp`, a hostile review round
+  found `specs/083-group-delimiter-resolution/contracts/typed_read_splitter.md` still asserting
+  wrong version #1 verbatim in its #384 amendment — the correction had been applied where the
+  reasoning was RE-DERIVED and missed where it had merely been RESTATED. **The lesson is not "check
+  one more file": it is that a claim repeated in N places needs the fix driven from a search for the
+  CLAIM, not from the place you happened to notice it.** Re-derive with
+  `git grep -n 'set_group_first_ctx\|capture_first_emission' -- spec specs brain src include`.
+  ⚠️ Separately: `src/dictionary/orchestra_loader.cpp` carries a comment reading *"FR-023 (082) is
+  NOT implemented here"* — that is a **different** FR-023 clause (082's group-detection removal),
+  not the completeness sweep, which the same file does run in `finalize()`. The two sentences read
+  as contradictory and are not.
+  *(#384; `tests/wire/offset_table_test.cpp` —
+  `GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero`, three arms: a control arm with a
+  deliberately wrong non-zero oracle proving the callback is consulted at all, the zero arm, and an
+  explicit-`nullptr` arm proving the two spellings agree. Mutation-proven RED both ways — dropping
+  the `d != 0` guard, and short-circuiting the oracle lookup entirely.)*
+
+### Limitations
+
+- **L-384-1 — an explicitly half-threaded table still splits on the wire delimiter, and that split
+  is WRONG on a divergent context.** Passing `nullptr` for `group_delim_fn` while passing a
+  dictionary is supported and produces pre-083 behaviour. It is **not** justified as correct: on a
+  context whose per-context delimiter differs from the globally-first-seen one, the half-threaded
+  table and the fully-threaded one split the same frame DIFFERENTLY —
+  `tests/wire/typed_read_split_agreement_test.cpp` `OutOfScopeWireProbesUnchanged` asserts both
+  counts, so the figures live where something re-runs them rather than here. It is justified as **requested** — B-384-1 makes it unreachable by omission, so a caller
+  gets it only by writing the null — and as **bounded**: the wire tag is membership-validated before
+  use, so an arbitrary tag can never become the delimiter, and for a message conforming to FIX's
+  "every instance opens with the group's first field" rule the wire tag and the dictionary's answer
+  coincide. **⚠️ A zero-returning stub is NOT a threaded oracle** (B-384-2): it yields the same
+  delimiter and the same slices as `nullptr`, so "we thread the callback everywhere" is a false
+  claim if any of those callbacks answers 0. ⚠️ The equivalence is *in the split*, not in every
+  respect — the callback is still INVOKED, so a stub that counts its calls is observable at its own
+  counter while the split stays the un-informed one. Call-counting is therefore the wrong instrument
+  for "is it threaded?", not a way around this. `tests/support/context_group_delim_fn.hpp` is the real one.
+  **Two residuals this row records rather than fixes**, both examined and both deliberately left:
+  **(a)** `OffsetTable::nested_group_slices`'s 7-arg overload takes `opaque_dict` and
+  `group_member_fn` as ARGUMENTS but resolves `group_delim_fn_` from `this`. The sub-table is
+  therefore built with the CALLER's dict pointer and the PARENT's delimiter callback, and that
+  callback `static_cast`s the pointer to the dict type it expects — so a caller passing a foreign
+  dictionary gets **type confusion**, not merely a wrong split. **Not reachable today, and
+  consistent only by provenance rather than by construction:** the only production caller is the
+  4-arg convenience overload, which forwards `this`'s own `opaque_dict_` / `group_member_fn_`, and
+  `entry_context` is populated from a single `MessageView`. The pairing cannot even be *spelled*
+  correctly, because the overload has no delimiter parameter. Same mismatched-pairing family as this
+  row; **not closed by #384**, and the aggregate-parameter change described under B-384-1 is what
+  would close it. **(b)** ⚠️ **`group_slices_reserve_bound()`'s stated invariant is
+  FALSE post-083, and the consequence is a STALE SPAN, not an extra allocation** — an earlier draft
+  of this row said "one extra allocation", which understated it. The reserve exists so that
+  *"subsequent appends never reallocate, so every previously returned span stays valid"*
+  (`OffsetTable::group_slices_status`'s own comment). **TWO DIFFERENT DELIMITERS decide the two
+  halves, and only one of them is capped** — this is sharper than the first version of this row,
+  which said only "the bound sums declared counts while the loop is delimiter-driven".
+  `consume_group_extent()` walks with the **WIRE** delimiter (`entries_[first].tag`) and *does* cap
+  at `declared` (`inst < declared` in its `while`), producing `group_end`; `group_slices_status()`
+  then RE-SPLITS `[first, group_end]` with the **DICTIONARY** delimiter under a loop whose only
+  bound is `group_end` — one push per occurrence plus one at the end, **no `declared` cap at all**.
+  `group_slices_reserve_bound()` bridged the two with the inference *"each contributes ≥ its actual
+  pushes (consume_group_extent caps instances at `declared`)"*, and **that inference is the
+  defect**: the cap governs the extent walk, the pushes happen in the split loop, and they use
+  different delimiters. So on a divergent context the pushes exceed the reserve and
+  `group_slices_` reallocates — invalidating every span already handed out for an earlier `no_tag`
+  on the same table. **This is not hypothetical and not fuzz-only:**
+  `TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged` already produces **3** slices for a
+  `100=2` group through a real `XmlLoader` dictionary and a real `Parser` — reserve bound 2, three
+  pushes. What has kept it harmless so far is a caller-chosen allocator property the comment does
+  not state: under a `monotonic_buffer_resource` the abandoned block is never reused, so the stale
+  span still reads correct bytes. A resource that reuses would turn it into a use-after-free, and
+  the C-ABI does hold such spans across calls. **PRE-EXISTING since 083 and NOT introduced,
+  triggered, or fixed by #384** — recorded here because #384's review is where it was measured, and
+  a residual nobody wrote down is how #384 itself happened. **FILED as fixpp#389** — this row is
+  the disposition, not the tracking. ⚠️ **Widening the bound is NOT the obvious fix:** PR #181
+  (Tier-2 `arena_fit`) tightened it deliberately, because the old conservative `entries_.size()`
+  reserved up to `4096 * sizeof(group_slice)` out of a fixed, null-upstream parse arena — the
+  arena-exhaustion defect #181 existed to fix. #389 carries the three candidate directions.
+  *(#384 measured it, #389 tracks it; supersedes the (ii) clause of L-220-1.)*

@@ -92,6 +92,52 @@ knowing before anyone proposes "just split on the delimiter".
 a correctness fix that threads in missing information leaves the old rule standing wherever the
 information cannot reach, and a waiver written over it reads as design within one release.
 
+### The same shape, one callback over: the DELIMITER oracle (#384)
+
+`group()` answers *where the group ends*. `group_slices_status()` answers *where each instance
+begins* — a separate quantity, resolved by a separate callback (`group_delim_fn_`, added by 083), and
+it had the same leftover. Both callbacks were optional parameters of the dict-aware constructors, so
+a table could carry a dictionary and a membership predicate and **no delimiter oracle** without any
+call site saying so, and then split instances on the wire's own tag.
+
+⚠️ **What made this hard to see is not the code — it is that the code's own justification had
+migrated.** 083's C-8.4 justified the wire fallback for a guard with two disjuncts, arguing only the
+first (*"the correct answer for a table with no dictionary"*). #220 then deleted that disjunct. The
+sentence stayed, now sitting over the disjunct it was never about. **A rationale does not become
+stale the way a line number does; it becomes stale by having its subject removed from under it, and
+it still reads as current.**
+
+| Rejected | Why, and where it died |
+|---|---|
+| **Decline when `group_delim_fn_` is null** (fold it into #220's decline) | It does not remove the branch. A callback that ANSWERS `0` reaches the same fallback with the pointer non-null, so `group()` never declines — the decline moves the un-informed spelling and pays a supported degrade for it |
+| **Keep the fallback and re-argue it as correct** | It is not correct. The half-threaded and fully-threaded tables split a divergent context differently — `OutOfScopeWireProbesUnchanged` asserts both counts |
+| **Thread a stub oracle everywhere and call it done** | Same mechanism from the other side: a zero-returning stub yields the same delimiter and the same slices as `nullptr`, so "every site threads the callback" would have been a false claim. ⚠️ The equivalence is *in the split*, not in every respect — the callback IS still invoked, so a **counting** stub is observable at its own counter while the split stays un-informed. That makes call-counting the wrong instrument, not a way around this row |
+| **Bundle `(opaque_dict, group_member_fn, group_delim_fn)` into one both-or-neither aggregate** | ⭐ **DEFERRED, not rejected** — the structural cure. It collapses `group()`'s two-disjunct guard to one predicate, so no disjunct can lose its subject. Blast radius deliberately NOT enumerated — a first attempt at a list here was short by most of its surface, and an under-counted radius is how a deferral becomes permanent. Re-derive: `git grep -n 'opaque_dict\|group_member_fn\|group_delim_fn' -- include src`. Two sites set the price on their own — `entry_context` is a **public trivially-copyable struct held by every generated `G_<no_tag>`**, so it reaches codegen output, and `Parser` carries its own copies plus both `parse()` overloads |
+
+⚠️ **A measurement was offered for the first row and then withdrawn, which is the most useful thing
+in this section.** Declining *does* turn `OutOfScopeWireProbesUnchanged` RED — but that witness
+passes `nullptr` only as a spelling, and a zero-returning oracle yields the same split, so a
+one-line fixture change removes the cost. **A cost a one-line fixture change removes is not a design
+constraint.** The mechanism above is what survives.
+
+**What shipped instead** — the option class 9 did not name: make the un-informed construction
+**unspellable by omission**. Removing the `= nullptr` default from all four dict-aware constructors
+leaves runtime behaviour untouched in both directions and turns "nobody meant to build this" into a
+compile error. The affected set is then enumerated by the **compiler** rather than by a source sweep
+— which is how #384's reachability claim (*"no `src/` or `include/` site is half-threaded"*) became
+a measurement. ⚠️ **It is half a cure, and says so:** it narrows the ACCIDENTAL spelling; the
+callback's answer space still contains `0`, which is why L-384-1 exists rather than a closure.
+
+⚠️ **#384 did not close the family, and one sibling is still standing.**
+`OffsetTable::nested_group_slices`'s 7-arg overload takes `opaque_dict` and `group_member_fn` as
+**arguments** but resolves `group_delim_fn_` from `this` — so a caller who passes a dictionary other
+than the table's own pairs a foreign membership oracle with the table's delimiter oracle. That is the
+same mismatched-pairing shape one level down, it was examined and left out of scope deliberately, and
+it is recorded here so the next reader does not infer from #384's close that the class is done.
+
+Read `src/wire/offset_table.cpp`'s `group_slices_status()` for the disposition in place, and
+`spec/behaviors-and-limitations.md` **B-384-1 / B-384-2 / L-384-1** for what a caller must know.
+
 ## The seam into the session layer
 
 `wire_error_to_session_reject_reason` (`include/fixpp/wire/reject_reason_map.hpp`) maps a validator
