@@ -78,8 +78,8 @@
 # siblings) rather than using `gtest_discover_tests`, so removing a TEST inside a
 # binary moves no ctest count. Stated because "+1 -1 = 0" is the plausible wrong
 # answer here.
-linux-clang-debug     363
-linux-clang-release   363
+linux-clang-debug     364
+linux-clang-release   364
 # ⚠️ 362 -> 368, RE-RECORDED 2026-09-06 because the pin did its job and caught
 # the drift. Campaign run 33990959916 VOIDed this lane with "the passes ran [368]
 # tests against the pinned basis of 362" — correctly: a widening measured over a
@@ -94,9 +94,9 @@ linux-clang-release   363
 # Provenance, per this file's own rule that a basis is read off CI and never a
 # workstation: Tier 1 run 33995191244, `push:main` at `9e03680d`, job
 # `linux-clang-asan` — "100% tests passed, 0 tests failed out of 368".
-linux-clang-asan      368
-linux-clang-ubsan     362
-linux-clang-tsan      362
+linux-clang-asan      369
+linux-clang-ubsan     363
+linux-clang-tsan      363
 
 # `linux-gcc-release` runs a DIFFERENT workload, not no workload.  ⚠️ An earlier
 # revision of this file said it "SKIPS the minimal-tier Test step entirely, so
@@ -108,17 +108,17 @@ linux-clang-tsan      362
 # Read off TWO independent CI runs, 32007171995 and 32011816399, both `ran: 370`.
 # Shipped as `-` until then rather than guessed from `linux-clang-release`, whose
 # 362 is a `-LE packaging` count and therefore a different quantity.
-linux-gcc-release     371
+linux-gcc-release     372
 
 # Tier 3 (`.github/workflows/tier3-libcxx.yml`). These lanes run the FULL suite
 # — their Test step carries no `-LE packaging` — so the counts are lower than
 # the Tier 1 five for a different reason than a label filter: fewer tests are
 # registered under libc++. Same provenance: Tier 3 run 31737273304, `5c56a17e`.
 # Measured but NOT widened by this change; see #267 phase 3.
-linux-clang-libc++        358
-linux-clang-libc++-asan   357
-linux-clang-libc++-ubsan  357
-linux-clang-libc++-tsan   357
+linux-clang-libc++        359
+linux-clang-libc++-asan   358
+linux-clang-libc++-ubsan  358
+linux-clang-libc++-tsan   358
 
 # The coverage lane runs the FULL suite (no `-LE packaging` filter), so its
 # count is not comparable to any lane above and had never been read off a CI log
@@ -130,7 +130,7 @@ linux-clang-libc++-tsan   357
 # Read off run 32003367497 (workflow_dispatch, branch ci/266-peak-rss-instrument,
 # `Peak memory` step: `ran: 369/-`).  369 rather than 362 because this lane runs
 # the packaging tier the five filtered lanes exclude.
-linux-clang-coverage  370
+linux-clang-coverage  371
 
 # ── Tier 2, MSVC (`.github/workflows/tier2.yml`) — NEW 2026-09-06 ────────────
 #
