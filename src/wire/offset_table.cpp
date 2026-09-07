@@ -825,6 +825,16 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                 // Exactly `n_slices`, once. Throws `bad_alloc` on arena
                 // exhaustion, which the existing catch below turns into the
                 // 073 / L-065-2 `alloc_failed` degrade — unchanged semantics.
+                //
+                // ⚠️ The `n_slices == 0` arm is DEFENSIVE AND PROVABLY DEAD, the
+                // same shape as the `: 0U` ternary arm below. The enclosing
+                // guard establishes `first < group_end`, so the count loop runs
+                // at least once, and `is_boundary(group_end)` is UNCONDITIONALLY
+                // true — therefore `n_slices >= 1` here, always. Codecov reports
+                // this line as a PARTIAL branch for exactly that reason; it is
+                // not a coverage gap and MUST NOT be "fixed" by inventing a test
+                // for it. The guard is kept so a future change to the boundary
+                // rule cannot silently reach `allocate(0, …)`.
                 if (n_slices > 0) {
                     slices = static_cast<group_slice*>(
                         resource()->allocate(n_slices * sizeof(group_slice), alignof(group_slice)));
