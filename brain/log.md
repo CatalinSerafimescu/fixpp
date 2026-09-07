@@ -9,9 +9,10 @@ status: stable
 - **2026-09-07 — #289 batch 20, the axis that batch 19's bucket did not have.**
   `components/test.md` and `failure-classes.md` record the answer to the caveat batch 19 filed
   against itself. `ci/pump-get-sweep.sh` gains a third axis — **call-site scope**, `CORO` /
-  `CALLER-SIDE` — and tracking for futures held in a container. Together they moved **39
-  previously-invisible sites** into the candidate list, **2** of them the coroutine-side wedge shape,
-  in a file batch 19 never opened. Both migrated; `CORO` unguarded is now **0**.
+  `CALLER-SIDE` — and tracking for futures held in a container. Together they moved a population of
+  previously-invisible sites into the candidate list, among them the coroutine-side wedge shape in a
+  file batch 19 never opened; those were migrated. Figures move with the tree AND with the
+  instrument, so read them from `bash ci/pump-get-sweep.sh --disposition`, not from here.
 
   ⚠️ **The discriminator is the RETURN TYPE, not a keyword.** "The enclosing scope contains a
   `co_await`" is satisfied by a TEST body that merely *spawns* a coroutine, so it colours the
@@ -21,9 +22,10 @@ status: stable
 
   ⚠️ **A zero is the headline, so the arm is a known-NON-zero corpus.**
   `ci/red-arms/batch20-coroutine-axis.sh` runs the *current* sweep against `tests/` at the
-  pre-batch-19 commit: **13 there, 0 here**. Same instrument, older tree — extracting only the corpus
-  is load-bearing, since the old tree would run the old sweep and pass by construction. And the
-  sweep's classifier controls now run in tier 1, which they never had.
+  pre-batch-19 commit and requires **non-zero there, zero here** — a condition, not a count, because
+  the historical figure moves whenever the instrument changes. Same instrument, older tree —
+  extracting only the corpus is load-bearing, since the old tree would run the old sweep and pass by
+  construction. And the sweep's classifier controls now run in tier 1, which they never had.
 
   ⚠️ **The `/simplify` reuse pass caught the batch about to add a FOURTH brace-walker**, one batch
   after batch 19's headline was "lexer copies 2 → 1". `mock-clock-staging-sweep.sh` already carried

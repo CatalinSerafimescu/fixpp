@@ -120,7 +120,7 @@ done
 command -v python3 >/dev/null || fail "python3 is required"
 
 FIXPP_CI_DIR="$repo_root/ci" python3 - "$scan_root" "$sub" "$quiet" "$disposition" <<'PY'
-import bisect, os, re, sys
+import os, re, sys
 from pathlib import Path
 
 # The shared lexer, not a private copy -- see `ci/cxx_blank.py`'s header. `blank_comments`
@@ -309,6 +309,42 @@ _AWAITABLE_INTRO = re.compile(
     r"|(?:asio::)?awaitable\s*<[^;{}()]*>\s+[A-Za-z_]\w*\s*\(")  # leading return type
 
 
+def _body_open(text, start):
+    """Offset of the `{` that opens the body of the declarator beginning at `start`,
+    or None if that declarator has no body.
+
+    ⚠️ "THE NEXT `{`" IS WRONG IN BOTH DIRECTIONS, and a hostile round produced one
+    breaking input for each. Walking from the declarator's start with a PAREN DEPTH is
+    what separates them:
+
+      * `awaitable<void> f(std::vector<int> xs = {}) { ... }` -- the braced default
+        argument is the next `{`, so the real body was never coloured and the site read
+        CALLER-SIDE. **That direction FAILS TOWARD CLEAN**, which is what makes it the
+        worse of the two: it is subtracted from the very count this batch reports as 0.
+        The default's braces sit inside the parameter list, so a depth test skips them.
+      * `awaitable<void> declared_only();` -- a declaration with no body at all, whose
+        introducer then coloured the NEXT unrelated block (a following TEST body read
+        CORO). A `;` at depth 0 ends the declarator with no body.
+
+    Starting at the MATCH START rather than its end is load-bearing: the leading-return
+    spelling's regex consumes the opening paren, so measuring depth from the end would
+    begin at depth 1 for one alternative and 0 for the other.
+    """
+    depth = 0
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth <= 0:
+            if ch == "{":
+                return i
+            if ch == ";":
+                return None
+    return None
+
+
 def coroutine_line_spans(lines):
     """[(open_line_idx, close_line_idx)] for each brace block introduced by an
     `awaitable`-returning function or lambda. Line-granular on purpose: every consumer
@@ -324,24 +360,16 @@ def coroutine_line_spans(lines):
     (1.02 s -> 2.33 s over 660 files, 10.4M list appends).
     """
     text = "\n".join(lines)
-    intros = [m.end() for m in _AWAITABLE_INTRO.finditer(text)]
+    intros = [m.start() for m in _AWAITABLE_INTRO.finditer(text)]
     if not intros:
         return []
     blocks = brace_blocks(text)
     if blocks is None:      # unbalanced -- claim nothing rather than guess a scope
         return []
     offs = line_starts(lines)
-    # A `{` opens a coroutine body iff an introducer ends between the PREVIOUS `{` and
-    # this one -- i.e. the introducer belongs to this brace and not to an outer one.
-    # `opens` is sorted so `prev` is just the element before.
-    opens = sorted(o for o, _ in blocks)
-    coro_opens = set()
-    for k, o in enumerate(opens):
-        prev = opens[k - 1] if k else -1
-        if bisect.bisect_right(intros, o) > bisect.bisect_right(intros, prev):
-            coro_opens.add(o)
+    bodies = {b for b in (_body_open(text, e) for e in intros) if b is not None}
     return [(line_index_of(offs, o), line_index_of(offs, c))
-            for o, c in blocks if o in coro_opens]
+            for o, c in blocks if o in bodies]
 
 
 # A container of futures, and the loop that consumes it. Batch 19 found three live sites
@@ -430,7 +458,15 @@ def classify(text):
             if not re.search(rf'\b{re.escape(name)}\s*\.get\(\)', evaluated):
                 since[name].append(stmt)
         for gm in re.finditer(r'(?:^|[^\w.])(\w+)\.get\(\)', evaluated):
-            name = alias_cont if gm.group(1) == alias_elem else gm.group(1)
+            # ⚠️ `alias_elem not in known` IS THE SHADOW GUARD, and without it the alias
+            # is a FALSE CLEAN. A range-for element is usually a short name (`f`), and a
+            # later `auto f = asio::co_spawn(...)` in the same TEST re-uses it -- BOUNDARY
+            # does not reset at a block, only at a function/TEST. The new future's
+            # `f.get()` was then attributed to the CONTAINER, inheriting the container's
+            # guarded state, and vanished from the report. A name that is a known future
+            # in its own right is never an alias.
+            name = (alias_cont if gm.group(1) == alias_elem and alias_elem not in known
+                    else gm.group(1))
             if name not in known:
                 continue
             if guarded_state.get(name):
@@ -782,6 +818,25 @@ TEST(A, B) {
     fut.get();
 }
 """, (1, "CALLER-SIDE")),
+    # 2e/2f are the two inputs a hostile round used to break "the introducer colours the
+    # NEXT `{`". They are kept as controls because the two errors go in OPPOSITE
+    # directions, and only one of them is loud.
+    ("2e  a braced DEFAULT ARGUMENT does not steal the body  -> CORO", """
+asio::awaitable<void> f(std::vector<int> xs = {}) {
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run_for(200ms);
+    fut.get();
+}
+""", (1, "CORO")),
+    ("2f  a BODILESS declaration colours nothing            -> CALLER-SIDE", """
+asio::awaitable<void> declared_only();
+
+TEST(A, B) {
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run_for(200ms);
+    fut.get();
+}
+""", (1, "CALLER-SIDE")),
     ("3a  container + range-for is REPORTED at all", """
 TEST(A, B) {
     asio::io_context ioc;
@@ -822,6 +877,23 @@ TEST(A, B) {
     auto f = asio::co_spawn(ioc, s.open(), asio::use_future);
     ioc.run_for(200ms);
     for (auto& f : owned) use(f);
+    f.get();
+}
+""", (1, "CALLER-SIDE")),
+    # ⚠️ 3e IS THE OTHER HALF OF 3d AND IT IS THE ONE THAT FAILS TOWARD CLEAN. Here the
+    # shadowing future is declared AFTER the range-for, so the stale alias was still
+    # live: the new `f.get()` inherited the CONTAINER's guarded state and vanished from
+    # the report entirely. 3d could not catch it -- there the future is declared first.
+    ("3e  ...including one declared AFTER the loop (the alias must not outlive it)", """
+TEST(A, B) {
+    std::vector<std::future<void>> futs;
+    futs.push_back(asio::co_spawn(ioc, s.open(), asio::use_future));
+    for (auto& f : futs) {
+        if (!run_window_then_ready(ioc, f, 200ms)) return;
+        f.get();
+    }
+    auto f = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run_for(200ms);
     f.get();
 }
 """, (1, "CALLER-SIDE")),

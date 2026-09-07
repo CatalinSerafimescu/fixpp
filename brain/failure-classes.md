@@ -51,16 +51,18 @@ prints `0` for a whole syntax.
   **Closed for this instrument in #289 batch 20, and the fix is the general lesson: give the sweep
   an axis for the MECHANISM.** `ci/pump-get-sweep.sh` gained a call-site-scope axis (is the `.get()`
   inside an `awaitable`-returning function or lambda?) and container tracking. Teaching it the
-  receiver shape moved 39 previously-invisible sites into the candidate list — 2 of them the
-  coroutine-side wedge shape, in a file batch 19 never opened.
+  receiver shape moved a whole population of previously-invisible sites into the candidate list,
+  among them the coroutine-side wedge shape, in a file batch 19 never opened. Current figures:
+  `bash ci/pump-get-sweep.sh --disposition`.
   ⚠️ **The scope discriminator must be STRUCTURAL — the return type — not keyword presence.** "The
   enclosing scope contains a `co_await`" is satisfied by a TEST body that merely *spawns* a
   coroutine, so it marks the caller-side `.get()` after that lambda's closing brace as coroutine-side
   and reports nearly the whole corpus. Both readings pass a hand-check; only a control that puts one
   `.get()` inside the lambda and one immediately after it separates them.
 - ⚠️ **A NEW AXIS WHOSE HEADLINE IS A ZERO NEEDS A KNOWN-NON-ZERO CORPUS, AND THE OLD TREE IS ONE.**
-  Batch 20's axis reports 0 coroutine-side candidates; its synthetic controls prove it *can* say
-  CORO, but a broken traversal or a wrong root survives those. `ci/red-arms/batch20-coroutine-axis.sh`
+  Batch 20's axis is meant to report **zero** coroutine-side candidates, and a zero is exactly what a
+  broken traversal or a wrong root also produces; its synthetic controls prove only that the axis
+  *can* say CORO. `ci/red-arms/batch20-coroutine-axis.sh`
   runs the **current** instrument against `tests/` at the pre-batch-19 commit — where the same sites
   were unguarded — and requires non-zero. Same instrument, older corpus: a git object is immutable,
   so the pin is a fixed corpus rather than a claim that rots. Extract only the corpus; checking out

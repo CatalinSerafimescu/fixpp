@@ -285,10 +285,14 @@ bucket going to 1 as the shape being done.
 
 `ci/pump-get-sweep.sh` now carries a third axis — **call-site scope**, `CORO` or `CALLER-SIDE` —
 alongside executor class and pump shape, plus tracking for the container shape. Together they moved
-**39 previously-invisible sites** into the candidate list, of which **2** were the coroutine-side
-wedge shape in `tests/sync/test_drain_immediate_destroy_after_reap.cpp` — a file batch 19 never
-opened, whose own hang message already names `futs.get()` as a suspect. Both migrated; `CORO`
-unguarded is now **0**.
+a batch of previously-invisible sites into the candidate list, among them the coroutine-side wedge
+shape in `tests/sync/test_drain_immediate_destroy_after_reap.cpp` — a file batch 19 never opened,
+whose own hang message already names `futs.get()` as a suspect. Those were migrated.
+
+**Read the current numbers, do not read them here** — `bash ci/pump-get-sweep.sh --disposition`
+prints the scope tally, and the counts move with every batch and with every change to the
+instrument itself. What is durable is the CONDITION: `CORO` unguarded should be **0**, and
+`ci/red-arms/batch20-coroutine-axis.sh` is what makes that zero mean something.
 
 - ⚠️ **THE SCOPE DISCRIMINATOR IS THE RETURN TYPE, NOT A KEYWORD.** "The enclosing scope contains a
   `co_await`" is satisfied by a TEST body that merely *spawns* a coroutine lambda, so it marks the
@@ -299,9 +303,13 @@ unguarded is now **0**.
 - ⚠️ **A ZERO FROM A NEW AXIS NEEDS A KNOWN-NON-ZERO CORPUS.** The synthetic controls prove the axis
   *can* say `CORO`; a wrong root or a broken traversal survives them.
   `ci/red-arms/batch20-coroutine-axis.sh` runs the **current** sweep against `tests/` at the
-  pre-batch-19 commit — same instrument, older corpus — and requires non-zero. It reports **13**
-  there and **0** here. Extract only the corpus: checking out the whole old tree would run the *old*
-  sweep, which has no axis, and pass by construction.
+  pre-batch-19 commit — same instrument, older corpus — and requires **non-zero**, not a population.
+  ⚠️ It deliberately does not assert a count: the first draft of its header said "the same eleven
+  sites", the number batch 19 migrated, and the arm measures more than that, because batch 20's own
+  container tracking makes further sites visible *in that same corpus*. A population figure there
+  would have to be re-derived whenever the INSTRUMENT changes, not just the tree. Extract only the
+  corpus: checking out the whole old tree would run the *old* sweep, which has no axis, and pass by
+  construction.
 - ⚠️ **Container coverage is ONE SPELLING, not the class.** `push_back|emplace_back(co_spawn(…))`
   consumed by `for (auto& e : c) e.get()` is what is tracked. An earlier draft of that disclosure
   listed the evasions it expected — an index loop, `futs[i].get()`, a moved-from container — and a
