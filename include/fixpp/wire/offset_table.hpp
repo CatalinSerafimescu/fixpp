@@ -115,6 +115,21 @@ public:
     // flyweight_shape_test default-construct it (T028).
     OffsetTable() = default;
 
+    // 389: COPY IS DELETED, and the deletion is the INSTRUMENT as much as the
+    // fix. `group_index_` rows hold RAW `group_slice const*` into THIS table's
+    // arena, so an implicit copy would alias the SOURCE's arena and dangle when
+    // it dies -- a lifetime coupling the pre-389 `std::pmr::vector` member did
+    // not have (it carried its own buffer). No in-tree caller copies an
+    // OffsetTable (`fixpp_msg_clone` rebuilds over its own frame), and deleting
+    // the copy is what MEASURES that rather than asserting it: any future copy
+    // site is now a compile error instead of a silent dangling read.
+    // Move stays available and is explicitly defaulted, since declaring the
+    // copy operations would otherwise suppress the implicit moves.
+    OffsetTable(OffsetTable const&) = delete;
+    OffsetTable& operator=(OffsetTable const&) = delete;
+    OffsetTable(OffsetTable&&) noexcept = default;
+    OffsetTable& operator=(OffsetTable&&) noexcept = default;
+
     // Eagerly scans the frame's tag=value<SOH> stream into mr-backed
     // storage. On a DoS-cap breach the table is left empty and the breach
     // is reported by find()/build_status(). Likewise, if `mr` throws

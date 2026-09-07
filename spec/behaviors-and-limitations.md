@@ -2682,6 +2682,13 @@ Evidence: issues #346, #348, #349; new issue #351.
   Raw storage also makes `group_span` trivially copyable, so index reallocation is a memcpy and the
   move-vs-copy question disappears entirely — a `static_assert` pins both properties, because the
   next person to add a field to that row will not have read this paragraph.
+  ⚠️ **Copying an `OffsetTable` is now DELETED, and that is a consequence of this change rather
+  than tidying.** The rows hold raw pointers into *this* table's arena, so an implicit copy would
+  alias the SOURCE's arena and dangle when it dies — a lifetime coupling the old `std::pmr::vector`
+  member did not create, since it carried its own buffer. No caller copies one (`fixpp_msg_clone`
+  rebuilds over its own frame), and **deleting the copy is what measures that** instead of
+  asserting it: a future copy site is a compile error, not a silent dangling read. Move stays,
+  explicitly defaulted because declaring the copy operations would otherwise suppress it.
   *(#389; witness `tests/wire/typed_read_split_agreement_test.cpp`
   `MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices` — **mutation-proven: RED against the
   pre-#389 tree, GREEN after**. ⚠️ The witness asserts POINTER IDENTITY of the re-fetched cached
@@ -3077,8 +3084,10 @@ Evidence: issues #346, #348, #349; new issue #351.
   `entry_context` is populated from a single `MessageView`. The pairing cannot even be *spelled*
   correctly, because the overload has no delimiter parameter. Same mismatched-pairing family as this
   row; **not closed by #384**, and the aggregate-parameter change described under B-384-1 is what
-  would close it. **(b)** ⚠️ **`group_slices_reserve_bound()`'s stated invariant is
-  FALSE post-083, and the consequence is a STALE SPAN, not an extra allocation** — an earlier draft
+  would close it. **(b)** ⭐ **RESOLVED by #389 — see the disposition at the end of this row.
+  The paragraphs below diagnose the DEFECT and are written in the present tense about the
+  mechanism as it stood, not about shipped code.** ⚠️ **`group_slices_reserve_bound()`'s stated
+  invariant is FALSE post-083, and the consequence is a STALE SPAN, not an extra allocation** — an earlier draft
   of this row said "one extra allocation", which understated it. The reserve exists so that
   *"subsequent appends never reallocate, so every previously returned span stays valid"*
   (`OffsetTable::group_slices_status`'s own comment). **TWO DIFFERENT DELIMITERS decide the two
