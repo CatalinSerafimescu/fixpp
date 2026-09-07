@@ -29,6 +29,7 @@
 #include <future>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -119,11 +120,30 @@ TEST(DrainReentrantDuringActive, SecondDrainerAwaitsFirstCompletion) {
         holder = expected_t<async_lock_guard>{};
 
         // Wait for both drains to finish.
-        co_await yield_n(8);
-
+        // #289 batch 19 -- coroutine-side; see
+        // tests/sync/test_drain_predrain_holder.cpp for the mechanism. Each future
+        // gets its own guard: stopping as soon as fd1 is ready would leave fd2's
+        // `get()` blocking the pump exactly as before.
+        if (!co_await fixpp::test_support::yield_window_then_ready(
+                fd1, 8, "DrainReentrantDuringActive::SecondDrainerAwaitsFirstCompletion/drain1")) {
+            co_return;
+        }
         fd1.get();
+        if (!co_await fixpp::test_support::yield_window_then_ready(
+                fd2, 0, "DrainReentrantDuringActive::SecondDrainerAwaitsFirstCompletion/drain2")) {
+            co_return;
+        }
         fd2.get();
-        for (auto& f : futs) f.get();
+        // ⚠️ Invisible to `ci/pump-get-sweep.sh` -- a range-for variable over a
+        // container of futures is not a receiver it can trace to a `co_spawn`.
+        for (auto& fw : futs) {
+            if (!co_await fixpp::test_support::yield_window_then_ready(
+                    fw, 0,
+                    "DrainReentrantDuringActive::SecondDrainerAwaitsFirstCompletion/waiters")) {
+                co_return;
+            }
+            fw.get();
+        }
     };
 
     auto f = asio::co_spawn(ioc, main_coro(), asio::use_future);

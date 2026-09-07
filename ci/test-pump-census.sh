@@ -60,7 +60,7 @@ tmp="$(mktemp -d)" || setup_fail "mktemp -d failed"
 trap 'rm -rf "$tmp"' EXIT
 
 checks=0
-expected_checks=30
+expected_checks=32
 pass() { checks=$((checks + 1)); }
 
 run_capture() {
@@ -235,6 +235,39 @@ EOF
 # reshaped to leak a single line.
 assert_decoy_alone_yields_zero_sites "block-comment" "$comment_decoy" \
     "$(printf 'tests/decoy.cpp:2\ntests/decoy.cpp:3')"
+
+# ── an UNEVALUATED `decltype(fut.get())` is not a call (#289 batch 19) ──────
+# ⚠️ STRADDLED IN ONE FIXTURE, in both directions. A blanket exclusion -- the whole
+# statement, the whole line, everything after `decltype` -- passes the "it vanishes"
+# half and fails the "the real call four lines down is still a row" half. Checking only
+# the first half is how the fix that shipped in `ci/pump-get-sweep.sh` would have looked
+# correct while eating a live site.
+decltype_decoy="$tmp/decltype_decoy"
+mkdir -p "$decltype_decoy/tests" || setup_fail "mkdir failed: $decltype_decoy/tests"
+cat >"$decltype_decoy/tests/decoy.cpp" <<'EOF' || setup_fail "fixture write failed: $decltype_decoy/tests/decoy.cpp"
+void unevaluated_only() {
+    ioc.run_for(1ms);
+    using R = decltype(fut.get());
+}
+
+void the_real_call_still_counts() {
+    ioc.run_for(1ms);
+    using R = decltype(fut.get());
+    ioc.restart();
+    fut.get();
+}
+EOF
+decltype_pin="$tmp/decltype.pin"
+printf '%s
+' 'tests/decoy.cpp:7' >"$decltype_pin" ||
+    setup_fail "decltype pin write failed: $decltype_pin"
+run_capture bash "$script" --root "$decltype_decoy" --expected "$decltype_pin"
+[ "$status" -eq 0 ] ||
+    fail "decltype straddle fixture failed: $output"
+pass
+[ "$output" = "tests/decoy.cpp:7" ] ||
+    fail "an unevaluated decltype operand must NOT be a census row, and the real get() four lines below it MUST be: $output"
+pass
 
 string_decoy="$tmp/string_decoy"
 mkdir -p "$string_decoy/tests" || setup_fail "mkdir failed: $string_decoy/tests"
@@ -423,7 +456,14 @@ pass
 # Without this, every assertion above that now rests on "exit 0 implies the control
 # passed" would rest on a control nobody proved could fail. Mutates a COPY; the
 # repo script is untouched.
-mutant="$tmp/mutant-census.sh"
+# ⚠️ THE MUTANT MUST LIVE IN A `ci/` DIRECTORY WITH `cxx_blank.py` BESIDE IT. Since
+# #289 batch 19 the scanner IMPORTS the shared lexer, resolving it as
+# `$(dirname $0)/../ci`, so a mutant written to a bare temp directory dies with
+# `ModuleNotFoundError` -- and the arm below would then "pass" on the wrong failure.
+# It did exactly that when the import landed; this layout is the fix, not decoration.
+mkdir -p "$tmp/ci" || setup_fail "mkdir failed: $tmp/ci"
+cp "$here/cxx_blank.py" "$tmp/ci/cxx_blank.py" || setup_fail "cxx_blank.py copy failed"
+mutant="$tmp/ci/mutant-census.sh"
 sed 's/run_re = re\.compile(r"\\.run_for\\s\*\\(")/run_re = re.compile(r"\\.NEVER_MATCHES\\s*\\(")/' \
     "$script" >"$mutant" || setup_fail "mutant write failed"
 grep -Fq 'NEVER_MATCHES' "$mutant" ||

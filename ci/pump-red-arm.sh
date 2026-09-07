@@ -38,7 +38,7 @@
 # ⚠️ MATCH ON THE MESSAGE TAIL, NOT THE BARE LABEL. The drain's residual report
 # streams the SAME site label, so grepping the label alone cannot tell a
 # window-miss report from a drain-residual report and would go green on either.
-# `kWindowMiss` ends "...grace slice. Site: " -- that tail plus the label is what
+# `kWindowMiss` ends "...bounded grace that follows. Site: " -- that tail plus the label is what
 # identifies this branch and nothing else.
 #
 # A HANG IS NOT A FAILURE TO REPORT -- it is a different finding, and this script
@@ -167,7 +167,7 @@ TIMEOUT_S="${PUMP_RED_ARM_TIMEOUT:-180}"
 # one state that can leave a FORCED source and forced binaries behind for the
 # next reader to measure. Modest and finishing beats fast and killed.
 JOBS="${PUMP_RED_ARM_JOBS:-4}"
-TAIL='grace slice. Site: '
+TAIL='bounded grace that follows. Site: '
 # `kDrainResidual` from tests/support/pump_until_ready.hpp. The forced branch runs the site's
 # DRAIN as well as its report, and a drain that does not quiesce emits this immediately before
 # the window-miss report -- on the SAME output line as `Site: <label>`, since neither constant

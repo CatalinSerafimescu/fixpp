@@ -1109,6 +1109,14 @@ TEST_F(FsmMatrixWitness, LO_InboundLogout_Confirm_TransitionsToDisconnected) {
     // The confirming Logout triggered close() completion (logout_confirmed_=true);
     // collect the close future.
     if (close_fut_.valid()) {
+        // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND E (armed and observed) + F.
+        // `drive_to_logout_sent` above pumped until `state() == LogoutSent` (#289 batch 18),
+        // so any sleep this advance has to reach was armed and OBSERVED before the line, not
+        // hoped for. The advance is a belt-and-braces wake, as its own comment says.
+        // And the fallback is loud, which is the half to rely on: the guard immediately below
+        // is `run_window_then_ready` on `close_fut_`, so an advance that woke nobody surfaces
+        // as a #289 report NAMING this site rather than as a hang. Deleting the advance was
+        // measured to leave the cell GREEN.
         clock->advance(std::chrono::seconds{3});  // wake any remaining sleepers
         if (!fixpp::test_support::run_window_then_ready(ioc, close_fut_, 200ms,
                                                         "LO_InboundLogout_Confirm/close")) {

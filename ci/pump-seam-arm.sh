@@ -109,7 +109,7 @@ ANNOUNCE='#289 FORCED window miss at site: '
 # this driver deliberately does not keep (it locates labels by `strings` over binaries).
 # The check that closes it is `new-site-labels.py`'s occurrence control plus reading the
 # call; #289 batch 14 resolved all 31 of its sites that way and found no mismatch.
-REPORT_TAIL='grace slice. Site: '
+REPORT_TAIL='bounded grace that follows. Site: '
 REPORT_TAIL2='bounded-pump budget. Site: '
 REPORT_TAIL3='would have blocked forever. Site: '
 # `kDrainResidual` from tests/support/pump_until_ready.hpp -- the SAME string

@@ -194,6 +194,20 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
         };
         const asio::any_io_executor& seed_exec = sess->executor().underlying();
         auto fut = asio::co_spawn(seed_exec, std::move(seed_fn), asio::use_future);
+        // #289 batch 19 -- DISPOSITIONED, not migrated. `ci/pump-get-sweep.sh` reports
+        // this row as CALLER-ONLY x HELPER, and that executor class is wrong here: the
+        // sweep's class is decided per FILE from thread spawns it can SEE, and this
+        // file spawns none because the threads belong to the engine. `fixpp_engine_start`
+        // above started them, `wait_for_established` above proves they are running, and
+        // `seed_exec` is a strand ON that engine's io_context -- so this is the
+        // self-driving case the sweep's own note dismisses, and a bare `get()` is
+        // correct. Nothing here can pump; there is no caller-side context to pump.
+        //
+        // ⚠️ RE-DERIVE, DO NOT TRUST THIS: the reason is the ENGINE being started and
+        // still running when this line executes. If a future edit moves this block above
+        // `fixpp_engine_start`, or stops the engine first, the dismissal is void and the
+        // `get()` blocks forever. That condition is checkable by reading the ~30 lines
+        // above; it is not a property of the sweep's number.
         fut.get();  // wait for the seam to complete on the strand
     }
 

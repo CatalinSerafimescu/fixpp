@@ -37,6 +37,7 @@
 #include <future>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
 #include "sync/sync_test_support.hpp"
 
 namespace {
@@ -84,7 +85,23 @@ TEST(DrainPredrainHolder, HolderUnlocksWhileDrainYields) {
         holder_guard = expected_t<async_lock_guard>{};
         holder_ran = true;
 
-        co_await yield_n(8);
+        // ── #289 batch 19: the COROUTINE-SIDE `.get()`, and why the driver below
+        // does not bound it ──────────────────────────────────────────────────────
+        //
+        // `fd.get()` runs INSIDE this coroutine, on the very thread that is pumping
+        // `ioc`. If the drain has not finished, the block happens inside the handler
+        // that `ioc.run_for(100ms)` dispatched: that call never returns, the deadline
+        // loop below never re-tests its deadline, and `ASSERT_FALSE(timed_out)` is
+        // never reached. A bounded outer driver -- the #289 remedy at every
+        // caller-side site -- does not reach this shape at all.
+        //
+        // THE WINDOW IS PRESERVED: the 8 yields are still issued unconditionally, so
+        // the interleaving this test depends on is unchanged. The guard adds only a
+        // ready check and a bounded grace after them.
+        if (!co_await fixpp::test_support::yield_window_then_ready(
+                fd, 8, "DrainPredrainHolder::HolderUnlocksWhileDrainYields/drain")) {
+            co_return;
+        }
         fd.get();
     };
 
@@ -156,9 +173,26 @@ TEST(DrainPredrainHolder, HolderSplicesWaitersWhenUnlocking) {
         // unlock() will reap any queued waiters (or grant one then splice rest).
         // The drain's re-reap loop catches what unlock() grabs or splices.
 
-        co_await yield_n(N * 4 + 8);
+        // #289 batch 19 -- coroutine-side; see the comment at
+        // HolderUnlocksWhileDrainYields for the mechanism.
+        if (!co_await fixpp::test_support::yield_window_then_ready(
+                fd, N * 4 + 8, "DrainPredrainHolder::HolderSplicesWaitersWhenUnlocking/drain")) {
+            co_return;
+        }
         fd.get();
-        for (auto& f : futs) f.get();
+        // ⚠️ THE SWEEP CANNOT SEE THESE. `ci/pump-get-sweep.sh` anchors on a `.get()`
+        // whose receiver it can trace back to a `co_spawn`; a range-for variable over a
+        // container of futures defeats that, so these rows appear in no residual. They
+        // are the same hazard as the line above -- guarded here because they are in the
+        // same coroutine, not because an instrument asked for it. Window 0: they get no
+        // window of their own today and none is invented, only the grace.
+        for (auto& fw : futs) {
+            if (!co_await fixpp::test_support::yield_window_then_ready(
+                    fw, 0, "DrainPredrainHolder::HolderSplicesWaitersWhenUnlocking/waiters")) {
+                co_return;
+            }
+            fw.get();
+        }
     };
 
     auto f = asio::co_spawn(ioc, main_coro(), asio::use_future);
@@ -223,9 +257,19 @@ TEST(DrainPredrainHolder, StressMultipleHolders) {
             co_await yield_n(2);
             h1 = expected_t<async_lock_guard>{};  // release holder
 
-            co_await yield_n(N * 4 + 8);
+            // #289 batch 19 -- coroutine-side; see HolderUnlocksWhileDrainYields.
+            if (!co_await fixpp::test_support::yield_window_then_ready(
+                    fd, N * 4 + 8, "DrainPredrainHolder::StressMultipleHolders/drain")) {
+                co_return;
+            }
             fd.get();
-            for (auto& f : futs) f.get();
+            for (auto& fw : futs) {
+                if (!co_await fixpp::test_support::yield_window_then_ready(
+                        fw, 0, "DrainPredrainHolder::StressMultipleHolders/waiters")) {
+                    co_return;
+                }
+                fw.get();
+            }
         };
 
         auto f = asio::co_spawn(ioc, coro(), asio::use_future);
