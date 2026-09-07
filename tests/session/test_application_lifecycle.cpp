@@ -355,9 +355,20 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_GracefulClose) {
     // Start graceful close in the background.
     auto close_fut = asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful),
                                     asio::use_future);
-    // Let it run until Logout is emitted and it starts waiting for peer confirmation.
-    f.ioc.run_for(100ms);
-    f.ioc.restart();
+    // #289 STAGING BARRIER: wait until Logout is emitted and close() is PARKED on its
+    // mock-clock sleep. A fixed `run_for(100ms)` here was a wall-clock hope; if the
+    // coroutine has not parked when it expires, the advance below lands on a timer
+    // that is not yet armed and is LOST -- unrecoverable, not slow.
+    // Mechanism: `ci/mock-clock-staging-sweep.sh`.
+    if (!fixpp::test_support::pump_until(
+            f.ioc, [&sess] { return sess.state() == fixpp::session::fsm_state::LogoutSent; },
+            "OnLogoutFiresOnce_GracefulClose/stage")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "OnLogoutFiresOnce_GracefulClose/stage");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                      << "OnLogoutFiresOnce_GracefulClose/stage";
+        return;
+    }
 
     // Advance clock past the 2 s graceful-close timeout to unblock.
     f.clock->advance(std::chrono::seconds{3});

@@ -17,6 +17,8 @@
 #include <asio/use_future.hpp>
 #include <fixpp/core/sync/async_mutex.hpp>
 
+#include "support/pump_until_ready.hpp"
+
 namespace {
 
 using fixpp::sync::async_lock_guard;
@@ -24,11 +26,28 @@ using fixpp::sync::async_mutex;
 
 // ── Helper: run a coroutine synchronously on a single-threaded io_context ──
 
+// ── #289: `ioc.run(); fut.get()` is a hazard even though it opens no window ───
+//
+// `run()` returns when the context has NO WORK LEFT, which is not "the coroutine
+// finished" (`run_to_exhaustion_or_report`'s header enumerates the two ways).
+// The `get()` would then block forever — a whole-binary ctest timeout naming no
+// site.
+//
+// ⚠️ PARKED FOR THREE BATCHES on a reason that is false of THIS helper. The stated
+// blocker was a deduced return type that is `void` at one instantiation and
+// `expected_t<T>` at another, leaving a miss branch nothing honest to return. That
+// holds across the three `run_sync` helpers taken together; here every call site
+// passes an `asio::awaitable<void>` lambda, so `R` is `void` and a bare `return;`
+// is the honest miss branch. Re-derive with `git grep -n 'run_sync(' -- <this
+// file>` and read each lambda's declared return type rather than trusting this.
 template <typename Coro>
 auto run_sync(Coro&& coro) {
     asio::io_context ioc;
     auto fut = asio::co_spawn(ioc, std::forward<Coro>(coro), asio::use_future);
-    ioc.run();
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut,
+                                                          "SeamUncontendedLatency::run_sync")) {
+        return;
+    }
     return fut.get();
 }
 

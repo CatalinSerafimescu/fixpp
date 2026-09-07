@@ -256,9 +256,19 @@ TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
     // First close: starts the graceful-close sequence.
     auto fut1 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
-    // Run briefly so phase 1 starts (Logout emitted, state → LogoutSent).
-    ioc.run_for(50ms);
-    ioc.restart();
+    // #289 STAGING BARRIER. Phase 1 must be PARKED on its mock-clock sleep before the
+    // advance below, or that advance lands on a timer that is not yet armed and is
+    // LOST -- unrecoverable, not slow. `LogoutSent` is exactly "Logout emitted,
+    // parked, not complete", so bounding by it keeps this a staging window rather than
+    // turning it into a completion window. Mechanism, and why a LONGER `run_for` is
+    // not the fix: `ci/mock-clock-staging-sweep.sh`'s header.
+    if (!fixpp::test_support::pump_until(
+            ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+            "CloseIdempotent/stage")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "CloseIdempotent/stage");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "CloseIdempotent/stage";
+        return;
+    }
 
     // Second close during phase 1 (idempotent — should attach to the in-flight result).
     auto fut2 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
@@ -330,14 +340,26 @@ TEST_F(CancellationTwoPhaseTest, ChildCancellationStateIsolatesLogout) {
     // state → LogoutSent) and the sleep_until registered in mock_clock.
     auto fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
-    ioc.run_for(100ms);
-    ioc.restart();
+    // #289 STAGING BARRIER, and it REPLACES a post-hoc assertion rather than adding
+    // to one. The `EXPECT_EQ(state, LogoutSent)` that used to sit here after a blind
+    // `run_for(100ms)` observed the right thing at the wrong time: it converted a lost
+    // advance into a confusing failure instead of preventing it, and being non-fatal
+    // it let the advance below run anyway. Waiting for the same predicate makes the
+    // claim AND removes the race. See `ci/mock-clock-staging-sweep.sh`.
+    if (!fixpp::test_support::pump_until(
+            ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+            "ChildCancellationStateIsolatesLogout/stage")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "ChildCancellationStateIsolatesLogout/stage");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                      << "ChildCancellationStateIsolatesLogout/stage -- phase 1 never reached "
+                         "LogoutSent, so the advance below would be lost.";
+        return;
+    }
 
     // Phase-1 should have emitted Logout by now; root should NOT have fired yet
     // (phase-2 comes after phase-1 resolves).
     EXPECT_GE(td.sent_count(), 1u) << "Logout should be emitted in phase 1";
-    EXPECT_EQ(sess.state(), fsm_state::LogoutSent)
-        << "FSM should be in LogoutSent while waiting for peer Logout or timeout";
 
     // Advance clock past timeout (force-disconnect). Phase-1 times out,
     // run_logout_phase1 returns session_logout_timeout, then phase-2
@@ -381,13 +403,25 @@ TEST_F(CancellationTwoPhaseTest, GracefulCloseFromAlreadyClosed) {
     // sleep_until is registered (same pattern as NeverConfirmedForceDisconnect
     // in logout_exchange_test.cpp: run_for(100ms) → advance → run_for again).
     auto fut1 = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
-    // NOT migrated, deliberately. `fut1` is NOT expected to be ready here — this window exists
-    // so `run_logout_phase1` reaches its `sleep_until`, which the advance below then fires.
-    // `run_window_then_ready` here would report a miss on the one outcome the test requires.
-    // It matched the #289 census only lexically, because `fut1.get()` happened to sit within
-    // six lines; the pump that waits for `fut1` is the migrated one below.
-    ioc.run_for(100ms);  // let close() start; run_logout_phase1 registers sleep
-    ioc.restart();
+    // ⚠️ AN EARLIER REVISION LEFT THIS WINDOW BLIND ON A CORRECT PREMISE AND A WRONG
+    // CONCLUSION, and the comment is replaced rather than annotated. The premise: `fut1`
+    // is NOT expected to be ready here, so `run_window_then_ready` would report a miss
+    // on the one outcome the test requires. True, and it rules out a COMPLETION check —
+    // it does not license a blind window. The window's actual job is to get
+    // `run_logout_phase1` to its `sleep_until`, and if that has not happened when a
+    // wall-clock window expires, the advance below lands on a timer that is not yet
+    // armed and is LOST. `LogoutSent` is precisely "staged but not complete", so it
+    // bounds the window by an observation while keeping `fut1` pending, which is what
+    // the premise actually asked for. Mechanism: `ci/mock-clock-staging-sweep.sh`.
+    if (!fixpp::test_support::pump_until(
+            ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+            "GracefulCloseFromAlreadyClosed/stage")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                        "GracefulCloseFromAlreadyClosed/stage");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                      << "GracefulCloseFromAlreadyClosed/stage";
+        return;
+    }
     clock->advance(std::chrono::seconds{3});  // fire the 2s sleep
     if (!fixpp::test_support::run_window_then_ready(ioc, fut1, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(

@@ -36,15 +36,44 @@
 #include <future>
 #include <memory>
 
+#include "support/pump_until_ready.hpp"
+
 namespace fixpp::session::test {
 
 namespace {
 
 // Run a single awaitable synchronously on an io_context.
+//
+// ── #289: `ioc.run(); fut.get()` is a hazard even though it opens no window ───
+//
+// `run()` returns when the context has NO WORK LEFT, which is not "the coroutine
+// finished" — see `run_to_exhaustion_or_report`'s header for the two ways it
+// returns early. The `get()` below would then block forever, which ctest reports
+// as a whole-binary timeout naming no site.
+//
+// ⚠️ THIS HELPER WAS PARKED FOR THREE BATCHES on the reasoning that its DEDUCED
+// return type is `void` at one instantiation and `expected_t<T>` at another, so a
+// miss branch has no honest value to return. That is true ACROSS the three
+// `run_sync` helpers in this tree; it is false of THIS ONE. Every instantiation
+// in this TU awaits a `SeqnumManager` member, and every one of those returns
+// `asio::awaitable<expected_t<...>>` (`include/fixpp/session/seqnum_manager.hpp`),
+// so #316's sentinel is expressible here with no signature change. Re-derive
+// rather than trusting that: `git grep -n 'run_sync(ioc,' -- <this file>` and read
+// each awaited member's return type. If a `void`-returning awaitable is ever added
+// here, this `return` stops compiling — which is the failure mode to want.
 template <class Awaitable>
 auto run_sync(asio::io_context& ioc, Awaitable&& aw) {
     auto fut = asio::co_spawn(ioc, std::forward<Awaitable>(aw), asio::use_future);
-    ioc.run();
+    // ⚠️ `R{...}`, not a bare `return std::unexpected(...)`. Both `return`s in an
+    // `auto`-deduced function must deduce the SAME type, and `std::unexpected<E>`
+    // is not `expected_t<T>` — the bare form does not compile here. Same idiom as
+    // `test_session_dict_snapshot_provenance.cpp`.
+    using R = decltype(fut.get());
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut,
+                                                          "SeqnumManagerTest::run_sync")) {
+        ioc.restart();
+        return R{std::unexpected(fixpp::test_support::kWindowMissSentinel)};
+    }
     ioc.restart();
     return fut.get();
 }

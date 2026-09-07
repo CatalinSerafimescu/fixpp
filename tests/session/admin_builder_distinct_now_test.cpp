@@ -356,6 +356,39 @@ TEST_F(AdminDistinctNowTest, TR_DistinctNow_TwoLivenessTestRequestsHaveDistinctS
         build_frame("0", 2, kTarget, kSender, kBeginStr, "20240101-00:00:02.000", hb_extra);
     (void)feed_sync(sess, hb_reply);
 
+    // ⚠️ A `ci/mock-clock-staging-sweep.sh` CANDIDATE, READ AND DISPOSITIONED **NOT A
+    // DEFECT** -- left as a candidate on purpose, because the sweep reports rather than
+    // gates and a row it cannot suppress is better than a suppression that outlives its
+    // reason. The class statement lives in that sweep's header; what is site-specific is
+    // below.
+    //
+    // ⚠️ THE DISCRIMINATOR IS **HOW THE SLEEP IS ARMED**, not how monotonic the clock is
+    // -- an earlier revision of this note said "monotonic" and that was the wrong
+    // mechanism. `mock_clock::sleep_until` fires IMMEDIATELY when `deadline <= steady`
+    // (the `fire_now` branch, src/core/test/mock_clock.cpp), so a late arm is rescued
+    // exactly when the deadline it names is already in the past:
+    //   * armed from a STORED ANCHOR (`last_inbound_steady_ + heartbt_int`, the liveness
+    //     loop) -> a late arm still names an instant the advance has passed -> RESCUED.
+    //   * armed NOW-RELATIVE (`steady_now() + logout_disconnect_timeout_ms`,
+    //     `run_logout_phase1`) -> a late arm names a deadline in the NEW future, and
+    //     nothing advances the clock again -> LOST.
+    // This site is the first kind. The `close(graceful)` sites migrated by this batch are
+    // the second, which is why they needed the barrier and this one does not.
+    //
+    // ⚠️ AND THE RULE HAS A CONDITION ON IT, because "stored anchor" is not by itself
+    // enough: `last_inbound_steady_` is REFRESHED to `steady_now()` on inbound traffic
+    // (`src/session/session.cpp`), so an arm taken after such a refresh is now-relative
+    // again in effect. The rescued case is the one where the anchor PREDATES the advance.
+    // Check that at the site rather than reading the table as unconditional.
+    // Site-specific, and it has a SECOND reason on top of the arm shape: the window the
+    // sweep names is the TERMINAL collection window for TR1, not the staging for this
+    // advance. Starving it does turn this cell RED -- by failing to COLLECT a frame, which
+    // a later pump still recovers. A `mock_clock` waiter-count barrier was written for
+    // this site and REMOVED: it went GREEN under the same mutation, i.e. it could not fail
+    // for the class it was added for. See ci/red-arms/batch18-lost-advance.sh's header.
+    // ⚠️ RE-DERIVE, DO NOT TRUST THIS: starve the window below to `run_for(0ms)`,
+    // rebuild, and run the cell. GREEN means the disposition still holds; RED means it
+    // has stopped holding and this comment is the thing that is wrong.
     // Window 2: advance past another heartbt_int (deadline = new last_inbound +
     // heartbt_int). 2 s gives margin over the deadline + grace boundary.
     clock->advance(2s);

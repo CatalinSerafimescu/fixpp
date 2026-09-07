@@ -315,8 +315,26 @@ protected:
     bool drive_to_logout_sent(Session& sess) {
         if (!drive_to_active(sess)) return false;
         close_fut_ = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
-        ioc.run_for(50ms);
-        return sess.state() == fsm_state::LogoutSent;
+        // #289 STAGING BARRIER, and this is the CROSS-FUNCTION shape: the window lives
+        // here while the `clock->advance()` it stages for lives in
+        // `finish_graceful_close()` below, so no same-function analysis can see the
+        // pair -- `ci/mock-clock-staging-sweep.sh` reports this advance as
+        // NO-PUMP-IN-SCOPE, which is why that verdict is an escalation and not a
+        // clean bill. The blind `run_for(50ms)` plus a post-hoc return of the predicate
+        // observed the right thing at the wrong time: on a starved runner it turned a
+        // lost advance into a confusing failure rather than preventing it. Waiting on
+        // the same predicate keeps the identical contract (`false` ⟹ not staged) and
+        // removes the race.
+        if (!fixpp::test_support::pump_until(
+                ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+                "FsmMatrixWitness::drive_to_logout_sent")) {
+            fixpp::test_support::cancel_and_drain_or_report(
+                ioc, *clock, "FsmMatrixWitness::drive_to_logout_sent");
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                          << "FsmMatrixWitness::drive_to_logout_sent";
+            return false;
+        }
+        return true;
     }
 
     // Finalize the in-flight graceful close (advance clock to trigger 2s timeout).
@@ -989,8 +1007,17 @@ TEST_F(FsmMatrixWitness, Active_InitiateLogout_TransitionsToLogoutSentThenDiscon
     // Spawn close(graceful) without blocking.
     auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::graceful), asio::use_future);
 
-    // Let phase-1 emit Logout + enter LogoutSent.
-    ioc.run_for(50ms);
+    // #289 STAGING BARRIER: phase-1 must have emitted Logout and PARKED on its
+    // mock-clock sleep before the advance, or that advance lands on a timer that is
+    // not yet armed and is LOST -- unrecoverable, not slow. `LogoutSent` is exactly
+    // that state. Mechanism: `ci/mock-clock-staging-sweep.sh`.
+    if (!fixpp::test_support::pump_until(
+            ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; },
+            "Active_InitiateLogout/stage")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Active_InitiateLogout/stage");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "Active_InitiateLogout/stage";
+        return;
+    }
 
     // Advance clock by 3s to fire the sleep_until(steady_now+2s) in run_logout_phase1.
     clock->advance(std::chrono::seconds{3});
@@ -1045,7 +1072,7 @@ TEST_F(FsmMatrixWitness, LO_InboundHeartbeat_Drained_StaysLogoutSent) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_logout_sent(sess))
-        << "drive_to_logout_sent: failed to reach LogoutSent within 50 ms — "
+        << "drive_to_logout_sent: failed to reach LogoutSent within the pump budget — "
         << "FSM staging regression on the Active → LogoutSent path. "
         << "Current state: " << static_cast<int>(sess.state());
     ASSERT_EQ(sess.state(), fsm_state::LogoutSent);
@@ -1067,7 +1094,7 @@ TEST_F(FsmMatrixWitness, LO_InboundLogout_Confirm_TransitionsToDisconnected) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_logout_sent(sess))
-        << "drive_to_logout_sent: failed to reach LogoutSent within 50 ms — "
+        << "drive_to_logout_sent: failed to reach LogoutSent within the pump budget — "
         << "FSM staging regression on the Active → LogoutSent path. "
         << "Current state: " << static_cast<int>(sess.state());
     ASSERT_EQ(sess.state(), fsm_state::LogoutSent);
@@ -1101,7 +1128,7 @@ TEST_F(FsmMatrixWitness, LO_InboundOutOfScopeAdmin_Drained_StaysLogoutSent) {
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_logout_sent(sess))
-        << "drive_to_logout_sent: failed to reach LogoutSent within 50 ms — "
+        << "drive_to_logout_sent: failed to reach LogoutSent within the pump budget — "
         << "FSM staging regression on the Active → LogoutSent path. "
         << "Current state: " << static_cast<int>(sess.state());
     ASSERT_EQ(sess.state(), fsm_state::LogoutSent);
@@ -1132,7 +1159,7 @@ TEST_F(FsmMatrixWitness, LogoutSent_GracefulCloseTimeout_TransitionsToDisconnect
     auto cfg = make_initiator_cfg();
     Session sess(engine, cfg);
     ASSERT_TRUE(drive_to_logout_sent(sess))
-        << "drive_to_logout_sent: failed to reach LogoutSent within 50 ms — "
+        << "drive_to_logout_sent: failed to reach LogoutSent within the pump budget — "
         << "FSM staging regression on the Active → LogoutSent path. "
         << "Current state: " << static_cast<int>(sess.state());
     ASSERT_EQ(sess.state(), fsm_state::LogoutSent);
