@@ -345,6 +345,42 @@ callback answering 0 still reaches it. See [`components/wire`](./components/wire
 
 ---
 
+### 10. An ASSESSMENT scoped to one of a change's effects certifies a site the OTHER effect breaks
+
+**Trigger.** A contract, review clause, or spec obligation says *"feature F changes X, so its effect
+on site S must be assessed."* You run the assessment honestly, it comes back clean, and it is
+recorded as a verdict on S.
+
+**Why it fails.** The assessment is scoped to X. If F also changes **Y**, and S depends on Y, the
+clean result on X says nothing — but it *reads* as a clearance for S, and it is filed as one. The
+site is now certified by a measurement that never looked at what broke it, which is worse than
+having no assessment at all: the next reader sees a discharged obligation and stops.
+
+**Instance (fixpp#389, found two features later).** 083's C-8.0a obliged an assessment of whether the
+feature's changed **member sets** perturbed `group_slices_reserve_bound()`. They did not. Correct,
+recorded, and useless — because the same feature also changed the **split loop's delimiter**
+(C-8.2), and the estimator's bound was an inference from a differently-delimited loop. The recorded
+verdict generalised to *"the under-reserve failure mode is impossible by construction"* while the
+mode was live on the shipped path, exhibited by 083's own witness.
+
+**Procedure.**
+- **Enumerate what the change touches, then ask the assessment question once PER effect.** "We
+  assessed S" is not a claim; "we assessed S against effect X" is. Write the scope into the verdict
+  sentence — a scoped sentence cannot be over-read later.
+- ⚠️ **When retracting, retract the SENTENCE, not the leg.** #389's Leg 1 body was scoped
+  (*"unreachable through a member-set change"*) and stays TRUE; only the unscoped verdict above it
+  was false. Condemning the whole leg would have destroyed a correct argument and taught the wrong
+  lesson — and over-broad correction is class 5's own trap.
+- **A satisfied obligation is the most dangerous kind of stale record**, because it is filed under
+  "done". When a site's justification depends on an invariant, name the INVARIANT in the clause, not
+  the assessment that happened to hold that day.
+
+**Sibling.** Where class 9 is a justification that lost its SUBJECT, this is a justification that
+kept its subject and lost its SCOPE. Both are recorded on the same site pair (`#384`, `#389`) because
+083 produced one of each, in the same function, from the same one-line delimiter change.
+
+---
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:

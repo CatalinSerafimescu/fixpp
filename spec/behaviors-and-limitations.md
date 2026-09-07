@@ -1741,14 +1741,14 @@ Spec: `specs/060-int128-decimal-compare/`.
 > **Two flat instance-boundary rules SURVIVE ON PURPOSE — "leg 2 delivered" does NOT mean "no flat rules remain".** Both are named here with the reason each was kept, so the row cannot be misread as a blanket claim. *(Line numbers are as-of 085's delivered tree; each site is named by function and role first so the reference survives re-numbering.)*
 >   1. **The dict-free cap check in `OffsetTable::group()`** — the relocated loop itself, now the `else` branch's per-instance cap (`:600-610`, the comparison at `:606`). **Why kept:** it is the *entire* DoS defence for non-dictionary callers, who have no membership oracle and therefore no nesting-aware walk to fold into. Removing it would silently drop the cap on that path; 085 adds `WireOffsetTable.DictFreeDoSCapPerInstanceRejectsOversizedInstance` + `…AllowsWhenCapRaised` precisely to pin it, mutation-proven RED.
 >   2. **The instance splitter in `OffsetTable::group_slices_status()`** — its delimiter resolution and flat boundary walk (`:720-726` / `:728-749`). **Why kept:** this is L-063-4 **leg 1**, descoped with evidence by 083 and re-affirmed above; it is out of 085's scope entirely. Note `OffsetTable::group_slices()` (`:655-656`) is only the delegating wrapper — it forwards to `group_slices_status` and contains no splitting logic of its own, so the splitter must be cited at the latter.
-> **These two do NOT merely share a flat *shape* — their delimiter SOURCES differ, and that distinction is load-bearing.** `OffsetTable::group()`'s own `delim` and `consume_group_extent`'s are both read from the **wire** (`group()` at `:551`, `consume_group_extent` at `:458` — identical by construction, both `entries_[count_idx + 1U].tag`). The `group_slices_status` splitter instead resolves its delimiter from the **per-context dictionary store** via `group_delim_fn_` (`:720-726`), which is 083's change across **330** contexts. So the surviving flat rules are not two instances of one pattern awaiting one fix: folding the splitter is a *dictionary-keyed* problem (leg 1), while the dict-free cap is a *wire-keyed* one that has no dictionary to fold into. Two walks over one extent with independent delimiter sources have shipped benignly on `main` since 083 (see FR-007a / E-3) — recorded here so a future reader does not treat the residual flatness as a single outstanding item.
+> **These two do NOT merely share a flat *shape* — their delimiter SOURCES differ, and that distinction is load-bearing.** `OffsetTable::group()`'s own `delim` and `consume_group_extent`'s are both read from the **wire** (`group()` at `:551`, `consume_group_extent` at `:458` — identical by construction, both `entries_[count_idx + 1U].tag`). The `group_slices_status` splitter instead resolves its delimiter from the **per-context dictionary store** via `group_delim_fn_` (`:720-726`), which is 083's change across **330** contexts. So the surviving flat rules are not two instances of one pattern awaiting one fix: folding the splitter is a *dictionary-keyed* problem (leg 1), while the dict-free cap is a *wire-keyed* one that has no dictionary to fold into. Two walks over one extent with independent delimiter sources have shipped on `main` since 083 (see FR-007a / E-3) — recorded here so a future reader does not treat the residual flatness as a single outstanding item. ⚠️ **AMENDED 2026-09-07 (fixpp#389): the word was "benignly", and that was FALSE.** One consequence of the two independent delimiter sources was a live memory-safety defect for the whole of 083 — `group_slices_reserve_bound()` sized the shared slice vector from the WIRE-delimited, `declared`-capped extent walk while the splitter re-split that extent with the DICTIONARY delimiter under no cap, so the reserve could be exceeded and spans already handed out for other `no_tag`s dangled. Fixed by **B-389-1** (per-group exact-sized arrays; the estimator deleted). The SEMANTIC divergence described above is still real, still deliberate, and still this row's subject — what is retracted is only the claim that it had shipped harmlessly. **A "benign so far" is a measurement of attention, not of the code.**
 > *(085 T016/T017; `src/wire/offset_table.cpp` `OffsetTable::group()` dict-free `else` + `group_slices_status()` splitter; evidence `.specify/decisions/085-fold-flat-cap-loop-verify.md`.)*]
 > *(083 bracket follows, unchanged)* [RE-STATED by 083-group-delimiter-resolution (2026-08-01) with THREE dispositions.**
 > **FIRST, a correction to this row's own tracking claim — `#180` is CLOSED, and was already closed before 083 began** (2026-07-13, by **072-nested-group-hardening**). Its scope was what its title says: *"Harden dictionary census: pin nested≠parent delimiter + parent/child scalar-member disjointness"* — census pins plus a load-time guard, **both delivered by 072**. The two-leg splitter fix below is this row's own *"Fix (deferred follow-up)"* paragraph and was **never `#180`'s deliverable**. 083's task text (T071) was written on the premise that `#180` was open and that this feature had to avoid closing it; that premise was false and the tracking sentence is corrected here rather than propagated. **Consequence, stated because it is the actionable part: with `#180` closed, the deferred splitter fix below had NO tracking issue at all.** 083 files one for the remaining leg (see leg (b)).
 > **(a) Leg 1 — *"make the splitter nesting-aware"*: NOT DONE, DESCOPED WITH EVIDENCE.** 083 measured the target population under the POST-FIX (per-context) delimiters across all ten dictionaries: for every context with delimiter `D`, does any group nested directly inside it carry `D` as a member? **Zero, on every dictionary** (FIX40/41/42/43/44/50/50SP1/50SP2/FIXT11/Orchestra FIX Latest). And the shape is not merely absent — it is **unparseable**: two synthetic dialects built to witness the mis-split were both genuinely ambiguous on the wire (nested delimiter == outer delimiter → the validator rejects the frame outright, which is the layout 072's load guard exists to reject; nested delimiter distinct but the outer delimiter a LATER member of the nested group → the nested walk swallows the next outer instance). A tag that both opens outer instances and appears inside them has no unique parse — which is *why* no shipped dictionary carries one. Worse, implemented literally leg 1 would **break** the shape that IS reachable: where the outer delimiter is itself a nested group's count tag (485 contexts), skipping past the nested extent before testing the boundary would skip the very tag that opens each instance. Recorded in `tests/wire/typed_read_split_agreement_test.cpp` with the shapes tried.
 > **(b) Leg 2 — *"fold the redundant flat cap loop into the same traversal"*: OUTSTANDING**, unchanged, and now **tracked by fixpp#214** (filed by 083 because closing `#180` in 072 left this residual orphaned). The residual is the one flat, wire-derived instance-boundary rule at `src/wire/offset_table.cpp:586` (its cap check at `:591`, the loop at `:584-594`) — the row's `:548-558` under 072-era line numbers. Its exposure is a `max_group_entries_per_instance` false positive/negative on a defence-in-depth DoS cap, never wrong returned data.
 > **(c) This row's own claim that `consume_group_extent()` correctly computes the nesting-aware `group_end` — CORRECTED, it is FALSE.** The row was audited against the *nested-delimiter-equals-parent-delimiter* shape only. It is wrong for a **third** shape it never named: **the outer group's delimiter IS a nested group's count tag.** There the instance-opening delimiter was consumed by a bare `++k`, leaving the walk inside the nested group's instances, so the next outer instance's opening tag was never reached and the extent truncated to ONE instance — silently, through `MessageView::group<>()` and the C-ABI top-level group getter. Present in **485** contexts (FIX50SP2 240 + Orchestra 245) and made *reachable* by 083's delimiter correction. Repaired by a query-before-consume descent at the delimiter position (`src/wire/offset_table.cpp:492-499`), mirroring the pre-existing post-delimiter descent at `:510-518`, with the depth-cap early return mirrored too. Witnessed by `TypedReadSplitAgreement.ExtentWalkDescendsAtNestedGroupDelimiter_Leg{1..4}`.
-> **What 083 DID change at the splitter is not one of this row's legs:** the boundary delimiter's **SOURCE** moved from the wire (`entries_[first].tag`) to the dictionary's per-context store, so the splitter and the validator now split on the same key. *(The `offset_table.cpp:704-711` pin that stood here was already stale before #384 — those lines are the cached-span early return, not the delimiter resolution. Line numbers replaced by the symbol: read `OffsetTable::group_slices_status()`.)* The splitter is still **flat**. Pinned by `TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged`, which also asserts the extent bound, `group()`'s `group_index` and the reserve bound do **not** move.
+> **What 083 DID change at the splitter is not one of this row's legs:** the boundary delimiter's **SOURCE** moved from the wire (`entries_[first].tag`) to the dictionary's per-context store, so the splitter and the validator now split on the same key. *(The `offset_table.cpp:704-711` pin that stood here was already stale before #384 — those lines are the cached-span early return, not the delimiter resolution. Line numbers replaced by the symbol: read `OffsetTable::group_slices_status()`.)* The splitter is still **flat**. Pinned by `TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged`, which also asserts the extent bound and `group()`'s `group_index` do **not** move. *(⚠️ It formerly asserted the RESERVE BOUND was unmoved too — that probe is retired by #389, which deleted the estimator it read. The probe was true and the property it was read as certifying was not: see B-389-1.)*
 > **Neither leg is claimed as delivered by 083, and `#180` is NOT reopened** — 072 delivered what `#180` actually asked for. What 083 adds is evidence (leg (a) descoped, measured), a correction (leg (c)), and a tracking issue for the residual (leg (b)).
 > **The row's *"0 nested/parent delimiter collisions"* measurement (Fable audit 2026-07-08), re-derived on the POST-FIX basis as FR-012a/SC-014 requires:** still **0**, now across all **ten** dictionaries rather than the six group-bearing ones, and now under delimiters that 083 changed in 330 contexts. The re-derivation was necessary precisely because the original was taken against the delimiters this feature replaced.]
 > *(historical 072 bracket follows)* [PINNED + LOAD-GUARDED by 072-nested-group-hardening (2026-07-13) — `XmlLoader::load_*` now REJECTS a dialect in which any nested group's delimiter (`first_field_tag`) equals its immediate parent group's delimiter, throwing `dict::group_delimiter_collision_error` (derives `dict::xml_parse_error`, reuses inherited `code()`, discriminated by catch type — no `core::error` append). Enforced in `LoaderState::finalize()` before any `table_view` is built; `as_table_view()` stays non-throwing. A permanent all-contexts census (FR-001, `reused_tag_census_test.cpp::NestedGroupDelimiterCensus`, raw per-`<group>` walk with parent-delimiter threading + component expansion + post-expansion delimiter) pins 0 collisions across all 9 runtime dicts non-vacuously. RECORDED RESIDUALS (caller responsibility, not covered): (a) a hand-built `table_view` / non-`load_*` `Dictionary` is not re-validated (FR-005a); (b) the loader `groups_` table is global-first-seen-deduped per no_tag, so a collision only in a non-first-seen context of a reused no_tag is unguarded (FR-005b); (c) scalar-member disjointness is census-only, not load-enforced (FR-004); (d) the FR-002 scalar census recovers member sets structurally for all 9 dicts incl. FIX40/41/42 (no unpinned residual required); (e) the FR-001/FR-002 census coverage is bounded to the membership contexts the raw walk structurally reaches. The splitter itself remains flat, but is now unreachable for the collision case via the load path.] `OffsetTable::group_slices()`'s slice splitter (and its redundant flat cap loop) re-walk the group's extent FLAT, not nesting-aware — a defense-in-depth gap deferred as real-dictionary-unreachable.** `consume_group_extent()` (`src/wire/offset_table.cpp`) correctly computes the nesting-aware `group_end` for the outer group, but `group_slices()`'s instance splitter (`:596-599`) and the redundant post-extent cap loop (`:548-558`) then re-walk that extent with a **flat** "does `entries_[k].tag == delim` mark a new outer instance" test, with no notion of nesting depth. If a nested group's own delimiter tag ever equalled its enclosing group's delimiter tag, the nested group's repeated delimiter fields would be mistaken for new outer-instance boundaries and the outer slice would be split incorrectly (the extent walk would still be correct; only the splitter would err). **This configuration does not occur in any shipped FIX dictionary** (Fable audit 2026-07-08: 0 nested/parent delimiter collisions across all 6 group-bearing vendored dicts). NOTE the earlier rationale that "the wire itself would be ambiguous" is **overstated** — `consume_group_extent` decodes such a collision *correctly* via declared counts, so the wire is decidable; only the flat splitter errs. The "impossible" is therefore a **convention of the shipped XMLs**, not a structural guarantee (confirmed: every real-dict nested/parent delimiter pair censused by 063 is distinct; the real-dict guard `NestedGroupExtent.MultiEntryNestedExtentGuard` passes for exactly this reason, not by accident). Reproducing the gap requires a **hand-built, non-representative** membership forcing outer/nested delimiter collision (`tests/wire/nested_group_extent_test.cpp:511-519`'s documented synthetic scoping trick). **Unenforced for user/dialect dictionaries:** nothing in the loader, `as_table_view()`, or the public `table_view` mutators rejects a nested==parent delimiter collision, so a user-supplied dialect XML or hand-built `table_view` (both public APIs) CAN construct it and reach the splitter bug — hardening (pin + optional load-time guard) tracked in **issue #180**. **Status: genuine internal inconsistency (extent walk is nesting-aware, the splitter is not); unreachable via any SHIPPED dictionary but unenforced for user/dialect dicts — deferred as defense-in-depth, non-blocking.** **Fix (deferred follow-up):** make the splitter nesting-aware too (advance `k` via the same `consume_group_extent` recursion on a nested count before testing outer-delimiter boundaries) and fold the redundant flat cap loop into the same traversal. *(Gate B PR#176 r1, Codex finding #2, downgraded and waived at P3 by orchestrator triage (real-dict-unreachable); `src/wire/offset_table.cpp:548-558,596-599`.)*
@@ -2618,6 +2618,114 @@ Evidence: issues #346, #348, #349; new issue #351.
   `close_async()` (measured 11 of 40 runs wedged; 0 of 40 after). Verify at every callee that
   suspends inside the shield, not at the call site. *(#358; PR #362.)*
 
+## fixpp#389 — repeating-group slices are per-group, and the reserve estimator is gone (2026-09-07)
+
+### Behaviours
+
+- **B-389-1 — each `no_tag`'s slices live in their OWN exact-sized array; a span returned by
+  `group_slices()` is now stable for the whole table lifetime.** Previously every group's slices
+  shared one growable `group_slices_` vector, reserved once to an estimate
+  (`group_slices_reserve_bound()`). **The estimate could be exceeded**, and when it was, the shared
+  vector reallocated and every span already handed out for an EARLIER `no_tag` dangled —
+  `src/capi/message_read.cpp` stores exactly such a span in `fixpp_group::slices` and holds it
+  across C-ABI calls.
+  **The mechanism was two delimiters and one cap.** `consume_group_extent()` walks with the WIRE
+  delimiter and caps at the DECLARED count, producing `group_end`; `group_slices_status()` then
+  re-splits that extent with the DICTIONARY delimiter under no cap at all. The estimator summed
+  declared counts and bridged the two with *"each contributes ≥ its actual pushes
+  (consume_group_extent caps instances at `declared`)"* — an inference from the capped loop to the
+  uncapped one. Live on the shipped path since 083: `OutOfScopeWireProbesUnchanged` pushes 3 slices
+  for a `100=2` group against a bound of 2.
+  ⭐ **Why the estimator was DELETED rather than corrected.** The hazard was never "the bound is
+  wrong" — it was that N groups shared ONE growable array, so an estimator and a split loop in two
+  places had to agree **forever**. 083 changed the loop and left the estimator, and nothing detected
+  it for two features. A better bound restates that obligation; per-group storage removes it. There
+  is nothing left to estimate.
+  **Arena cost went DOWN where the old bound was SOUND, which is what keeps PR #181 closed.**
+  Allocation is now exactly the slice count — strictly less than the old reservation whenever
+  `declared` exceeded the actual count (the hostile `453=999`-with-one-instance frame reserved 8
+  slices and now allocates 1). ⚠️ **It is NOT ≤ the old reservation for every input, and the
+  exception is this defect itself:** where the bound was too small, allocating exactly is
+  necessarily allocating MORE than it. This PR's own witness is such an input — old estimator
+  `2 + 2 = 4`, actual pushes `5`. The old shape "fit" only by silently reallocating, which is the
+  stale span. Exactness trades a bounded increase on unsound-bound inputs for the removal of the
+  hazard; #181's constraint is about the ~3x systematic over-allocation, not about these bytes.
+  ⚠️ **That exactness depends on the COUNT PASS**, which is load-bearing rather than an
+  optimisation: pushing into an unreserved vector backed by the fixed null-upstream monotonic arena
+  strands every superseded buffer (1+2+4+…, never reused), which for a 75-instance group
+  (`ArenaFit.NearCapHeadroomProbe`) is 255×16 = 4080 B against 1200 B exact — that would re-open
+  #181. ⚠️ **That figure is libstdc++'s (2× growth). MSVC release — the platform #181 is actually
+  about — grows 1.5×, so the number there is different and was NOT measured.** The source comments
+  deliberately carry the mechanism and point here rather than repeating a platform-specific result. The count pass and the fill loop share ONE
+  `is_boundary` lambda. That is the point rather than a tidiness: two spellings of the boundary is
+  the same two-places-must-agree obligation the deleted estimator carried, one scope smaller.
+  **No API change** — `group_slices()` still returns `std::span<group_slice const>`; the C-ABI and
+  `MessageView::group<>()` are untouched. The span is now safe **by construction** against the
+  reallocation hazard rather than by the caller's allocator choice.
+  ⚠️ **The index row is a raw `(ptr, count)`, and a `static_assert` pins it at ≤ 16 B on purpose — the first shape was a
+  `std::pmr::vector` member and it was measured WRONG.** That took the row from 12 B to 40 B: a
+  `std::pmr::vector` member costs three pointers **plus** a `memory_resource*` duplicating the
+  table's own — 32 B of metadata measured on this toolchain — to hold what a raw `(ptr, count)`
+  holds in 12. It
+  matters more than it looks: `group_index_` gains a row per **distinct `no_tag` QUERIED** — the
+  negative result is memoised too, so a tag that DECLINES still mints one — and the C-ABI's
+  `fixpp_msg_get_group` takes a **caller-supplied** tag, so the row count is driven by caller
+  behaviour rather than by message content. How many distinct tags exhaust the 16 KiB arena is a
+  RESULT — it depends on the STL's vector growth factor and on what `entries_` has already taken —
+  and three different figures for it were written here and did not reconcile, so none is kept. What
+  does not rot is the ORDERING, which follows from row size alone: the shipped 16 B row admits fewer
+  distinct tags than the old 12 B one, and far more than the 40 B first attempt. To re-derive the
+  numbers, query ascending distinct `no_tag`s against a 16 KiB null-upstream arena with
+  `tests/support/pmr_allocation_tracking_resource.hpp` and record the platform. ⚠️ **The shipped row
+  does NOT restore the old headroom and this row does not claim it does.** That is the honest price of holding a `(ptr, count)` instead of two
+  `uint32` indices into a shared vector, and it is worth paying; tripling it was not.
+  Raw storage also makes `group_span` trivially copyable, so index reallocation is a memcpy and the
+  move-vs-copy question disappears entirely — a `static_assert` pins both properties, because the
+  next person to add a field to that row will not have read this paragraph.
+  ⚠️ **Copying an `OffsetTable` is now DELETED, and that is a consequence of this change rather
+  than tidying.** The rows hold raw pointers into *this* table's arena, so an implicit copy would
+  alias the SOURCE's arena and dangle when it dies — a lifetime coupling the old `std::pmr::vector`
+  member did not create, since it carried its own buffer. No caller copies one (`fixpp_msg_clone`
+  rebuilds over its own frame), and **deleting the copy is what measures that** instead of
+  asserting it: a future copy site is a compile error, not a silent dangling read. Move stays,
+  explicitly defaulted because declaring the copy operations would otherwise suppress it.
+  *(#389; witness `tests/wire/typed_read_split_agreement_test.cpp`
+  `MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices` — **mutation-proven: RED against the
+  pre-#389 tree, GREEN after**. ⚠️ The witness asserts POINTER IDENTITY of the re-fetched cached
+  span, not slice contents: reading through a moved span is UB that on the shipped path returns
+  **correct bytes**, because a `monotonic_buffer_resource` never reuses the abandoned block. A
+  contents assertion is green under both shapes — which is exactly why this survived since 083.
+  ⚠️ **Pointer identity alone is NOT sufficient**, and that is measured rather than reasoned: it
+  discriminates only the shape that shipped, whose cache-hit path recomputed the span from the
+  current base. A shared-vector variant storing the already-RESOLVED pointer compares EQUAL after a
+  reallocation, into freed memory. The companion witness
+  `ArenaConsumptionIsIndependentOfGroupMaterializationOrder` closes that gap by asserting a property
+  no shared growable buffer can have — arena consumption independent of materialization order. Under
+  an emulated shared buffer the pointer cell stayed **GREEN** and the order cell went **RED**
+  (160 B vs 176 B).)*
+
+### Amended by this issue
+
+- **083 C-8.0a is discharged by construction, and its unscoped verdict is retracted.** C-8.0a was an
+  *assessment obligation* (FR-021c: the effect of 083's changed member sets on the estimator "MUST be
+  assessed and recorded"), not a design invariant — nothing in it required the estimator to have
+  member-set-only inputs, or to exist. Its recorded verdict read *"the under-reserve failure mode is
+  impossible by construction, not merely unlikely."* **That sentence is false and #389 is its
+  counter-example.** ⚠️ Narrowly: Leg 1's own body is SCOPED — *"unreachable through a member-set
+  change"* — and stays true, because the estimator's predicate really is byte-identical to the push
+  gate. What it establishes is WHICH groups push, never HOW MANY per group; the unscoped verdict
+  above it generalised past its own argument. The retraction narrows that sentence rather than
+  condemning the leg.
+- **W-10's "UNCHANGED probe 3" is retired**, not deleted quietly. It asserted the reserve bound was
+  equal on the pre-083 and post-083 tables. ⚠️ **The probe was TRUE and the property it certified was
+  not:** the estimator really did consume member sets alone, which is precisely why it could not see
+  that 083 had changed the split loop's delimiter underneath it. Equal reservations was a fact about
+  inputs, read as evidence the reservation was *adequate*. Replaced by the positive witness above.
+- **`HostileInputHardening.InflatedGroupCountClampedToEntryCountInReserveBound`** → renamed
+  `InflatedGroupCountDoesNotInflateArenaUse` and retargeted from the estimator's return value to the
+  **bytes the arena actually hands out** (`pmr_allocation_tracking_resource`). The old cell could not
+  have caught a split loop that allocated for 999 while the bound clamped to 8; the new one can.
+
 ## fixpp#360 / #361 — close_async's recovery witness, and a resolve a deadline can end (2026-09-06)
 
 ### Behaviors
@@ -2746,7 +2854,10 @@ Evidence: issues #346, #348, #349; new issue #351.
   rather than waved past:** scalar reads, `find()`, `entries()`, `unknown_fields()` and the whole
   Iter-mode surface are unaffected, and the dictionary-backed path (`Parser{dict}` — every production
   caller) is byte-for-byte unchanged in behaviour. **One further dict-free change is NOT nothing:**
-  `group_slices_reserve_bound()` now returns `0` for a dict-free table instead of `entries_.size()`,
+  `group_slices_reserve_bound()` returned `0` for a dict-free table instead of `entries_.size()`
+  *(⚠️ the function itself was **deleted** by #389 — see B-389-1; the arena consequence below still
+  holds, now by construction rather than by a bound: a dict-free table appends no slice, so it
+  allocates none)*,
   because such a table can no longer append a slice. That lowers arena consumption (the old bound
   reserved up to `4096 * sizeof(group_slice)` for slices that cannot exist) and, as a consequence,
   makes the dict-free `alloc_failed` degrade in `group_slices_status()` unreachable — there is no
@@ -2926,7 +3037,14 @@ Evidence: issues #346, #348, #349; new issue #351.
   reasoning was RE-DERIVED and missed where it had merely been RESTATED. **The lesson is not "check
   one more file": it is that a claim repeated in N places needs the fix driven from a search for the
   CLAIM, not from the place you happened to notice it.** Re-derive with
-  `git grep -n 'set_group_first_ctx\|capture_first_emission' -- spec specs brain src include`.
+  `git grep -n 'set_group_first_ctx\|capture_first_emission' -- spec specs brain src include tests`.
+  ⚠️ **And it was found a FOURTH time, by a recipe that was itself incomplete.** The line above
+  originally omitted `tests` — the one directory holding the site it missed
+  (`tests/wire/offset_table_test.cpp`, corrected under #389). The withdrawn carrier therefore
+  SHIPPED in PR #390, in a comment block written by the same change that declared it false. **A
+  re-derivation recipe is an instrument, and an instrument that cannot search where the defect lives
+  fails toward clean** — the same class as every other instrument failure recorded here. The
+  pathspec is now the full set; prefer no pathspec at all over a guessed one.
   ⚠️ Separately: `src/dictionary/orchestra_loader.cpp` carries a comment reading *"FR-023 (082) is
   NOT implemented here"* — that is a **different** FR-023 clause (082's group-detection removal),
   not the completeness sweep, which the same file does run in `finalize()`. The two sentences read
@@ -2966,8 +3084,10 @@ Evidence: issues #346, #348, #349; new issue #351.
   `entry_context` is populated from a single `MessageView`. The pairing cannot even be *spelled*
   correctly, because the overload has no delimiter parameter. Same mismatched-pairing family as this
   row; **not closed by #384**, and the aggregate-parameter change described under B-384-1 is what
-  would close it. **(b)** ⚠️ **`group_slices_reserve_bound()`'s stated invariant is
-  FALSE post-083, and the consequence is a STALE SPAN, not an extra allocation** — an earlier draft
+  would close it. **(b)** ⭐ **RESOLVED by #389 — see the disposition at the end of this row.
+  The paragraphs below diagnose the DEFECT and are written in the present tense about the
+  mechanism as it stood, not about shipped code.** ⚠️ **`group_slices_reserve_bound()`'s stated
+  invariant is FALSE post-083, and the consequence is a STALE SPAN, not an extra allocation** — an earlier draft
   of this row said "one extra allocation", which understated it. The reserve exists so that
   *"subsequent appends never reallocate, so every previously returned span stays valid"*
   (`OffsetTable::group_slices_status`'s own comment). **TWO DIFFERENT DELIMITERS decide the two
@@ -2995,4 +3115,7 @@ Evidence: issues #346, #348, #349; new issue #351.
   (Tier-2 `arena_fit`) tightened it deliberately, because the old conservative `entries_.size()`
   reserved up to `4096 * sizeof(group_slice)` out of a fixed, null-upstream parse arena — the
   arena-exhaustion defect #181 existed to fix. #389 carries the three candidate directions.
-  *(#384 measured it, #389 tracks it; supersedes the (ii) clause of L-220-1.)*
+  ⭐ **RESOLVED 2026-09-07 by #389 — and NOT by widening the bound.** The estimator is DELETED.
+  Each `no_tag` now materializes into its **own exact-sized array**, so there is no shared vector to
+  reallocate and no second place that has to agree with the split loop. See **B-389-1**.
+  *(#384 measured it, #389 fixed it; supersedes the (ii) clause of L-220-1.)*

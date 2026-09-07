@@ -52,17 +52,27 @@ struct nested_cache_access_for_testing {
         return nullptr;
     }
 };
-// 083 T056 (W-10): TEST-ONLY read of the private `group_slices_reserve_bound()`
-// (offset_table.hpp `:597` / the `:350` declaration), gated and declared as a
-// friend exactly like the sibling above. W-10 asserts that on a divergent
-// delimiter context the reservation made in the fixed inbound arena is
-// UNCHANGED between a pre-083 table (null `group_delim_fn`) and the shipped
-// one. Never called from production code.
-struct reserve_bound_access_for_testing {
-    [[nodiscard]] static std::uint32_t get(OffsetTable const& t) noexcept {
-        return t.group_slices_reserve_bound();
-    }
-};
+// 389: `reserve_bound_access_for_testing` was DELETED here along with
+// `OffsetTable::group_slices_reserve_bound()` itself. There is no reservation
+// estimate left to read — each group allocates exactly its own slice count.
+//
+// Deleting this hook is PART of the instrument for the change, the same trick
+// #384 used with the constructor defaults: every test that read the estimator
+// becomes a COMPILE ERROR rather than something a grep has to find. It named
+// three — W-10 probe 3, the hostile-input clamp cell, and an anti-vacuity guard
+// on the bad_alloc degrade.
+//
+// ⚠️ AND IT WAS NOT THE WHOLE POPULATION, which is the more useful half.
+// `WireOffsetTable.TwoTopLevelGroupsSpanStableAcrossReads` also depended on the
+// estimator — its entire rationale and its named mutation were the reserve —
+// but it never READ the hook, only the shared-vector SHAPE. A compile error
+// cannot find a dependency on a shape. It was found by grep, and an earlier
+// version of this comment claimed the compiler "named exactly three" while a
+// fourth stood a directory away.
+//
+// The rule that generalises: removing a symbol enumerates the sites that NAME
+// it, never the sites that depend on the STRUCTURE it was part of. Use both,
+// and do not let the compiler's precision imply completeness. See B&L B-389-1.
 #endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::wire

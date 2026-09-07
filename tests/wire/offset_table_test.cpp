@@ -558,19 +558,35 @@ TEST(WireOffsetTable, GroupExtentExcludesTrailingTopLevelFields) {
         << "slice[0] must NOT include trailing 55=AAPL; content: " << sv0;
 }
 
-// Witnesses the group_slices_ reserve invariant directly (PR #181 arena_fit
-// follow-up): reading a SECOND top-level group tag must not reallocate the
-// shared group_slices_ vector that an earlier tag's span already points into.
-// The reserve-once bound (group_slices_reserve_bound()) must cover the SUM of
-// both groups' instances. If it under-provisions, the B-read reallocates
-// group_slices_ into a fresh buffer — the earlier span `a` then points at the
-// stranded old buffer while a re-fetch of the same tag returns the NEW buffer,
-// so their .data() pointers diverge. (The parse arena is a
-// monotonic_buffer_resource, which never frees, so a stale span stays readable
-// — the harm of a reallocation is the STRANDED buffer that exhausts the fixed
-// arena, i.e. the exact arena_fit failure. A pointer-stability check, not ASan,
-// is therefore the discriminating witness.) Mutation-proven: shrinking the
-// reserve to 2 makes the B-read reallocate and this test RED.
+// Reading a SECOND top-level group tag must not relocate the slices an earlier
+// tag's span already points into. The discriminator is POINTER STABILITY: the
+// parse arena is a monotonic_buffer_resource, which never frees, so a stale span
+// stays READABLE and a contents check passes under both the broken and the
+// correct shape. Comparing a held span's `.data()` against a re-fetch is what
+// actually separates them — not ASan, and not the slice values.
+//
+// ⚠️ 389 CHANGED WHAT THIS CELL WITNESSES, and the reason is worth keeping.
+// It was written (PR #181 arena_fit follow-up) to witness the `group_slices_`
+// RESERVE invariant: one shared vector, reserved once to
+// `group_slices_reserve_bound()`, which "must cover the SUM of both groups'
+// instances". Its mutation was "shrink the reserve to 2 and the B-read
+// reallocates".
+//
+// That invariant was FALSE on the shipped path for two features, and THIS CELL
+// COULD NOT SEE IT — its two groups both split on the wire delimiter, so the
+// declared-count bound was adequate here and the cell stayed green while the
+// divergent-delimiter case exceeded the bound. A witness is only as strong as
+// the fixture it runs on, and this one was chosen before the delimiter could
+// diverge (083). The case that DOES exhibit it is
+// `TypedReadSplitAgreement.MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices`,
+// which is RED against the pre-#389 tree.
+//
+// The cell is KEPT because the property it asserts is still the one that
+// matters — it is now satisfied structurally (each `no_tag` owns an exact-sized
+// array, so nothing can relocate another group's slices) rather than by a
+// reserve that had to be big enough. There is no reserve left to shrink, so the
+// old mutation is gone; the mutation that makes this RED is putting both groups
+// back into one shared growable vector.
 TEST(WireOffsetTable, TwoTopLevelGroupsSpanStableAcrossReads) {
     fixpp::dict::table_view dict;
     dict.add_valid("D", 35)
@@ -613,25 +629,35 @@ TEST(WireOffsetTable, TwoTopLevelGroupsSpanStableAcrossReads) {
     ASSERT_TRUE(mv.has_value());
     auto const& t = mv->offsets();
 
-    // Read group A and HOLD its span. a.data() is a pointer INTO group_slices_
-    // (its backing vector), captured now.
+    // Read group A and HOLD its span. Since #389, a.data() points into A's OWN
+    // exact-sized arena array; before #389 it pointed into a shared growable
+    // vector, which is what made this cell necessary.
     auto a = t.group_slices(453);
     ASSERT_EQ(a.size(), 2U);
     auto const* const a_backing_before = a.data();
 
-    // Read group B (different tag) — appends 3 instances to group_slices_. With
-    // the reserve bound = declared(453)+declared(555)=5, this must NOT reallocate.
+    // Read group B (a different tag). Pre-#389 this appended 3 more instances
+    // to the SHARED vector against a reserve bound of declared(453)+
+    // declared(555)=5; since #389 it allocates its own array and cannot touch
+    // A's.
     auto b = t.group_slices(555);
     ASSERT_EQ(b.size(), 3U);
 
-    // Re-fetch group A (cached): line 570 recomputes the span from the CURRENT
-    // group_slices_.data(). If the B-read reallocated, this points into the new
-    // buffer and diverges from the held pointer.
+    // Re-fetch group A from the cache and compare pointers.
+    //
+    // ⚠️ WHAT THIS ASSERTION DOES AND DOES NOT CATCH. It discriminates the
+    // shape that shipped, whose cache-hit path RECOMPUTED the span from the
+    // current base — so a reallocation moved it. It does NOT discriminate a
+    // shared-vector variant that stores the already-resolved pointer at push
+    // time: that compares EQUAL after a reallocation, into freed memory.
+    // Order-independence of arena consumption is the assertion that catches
+    // both; it lives with the #389 witness in
+    // tests/wire/typed_read_split_agreement_test.cpp.
     auto a2 = t.group_slices(453);
     ASSERT_EQ(a2.size(), 2U);
     EXPECT_EQ(a2.data(), a_backing_before)
-        << "reading a second top-level group reallocated group_slices_ (reserve bound too "
-           "small) — the buffer must be stable so it does not strand memory in the fixed arena";
+        << "reading a second top-level group must not relocate the first group's slices — "
+           "since #389 each group owns its array, so no read can move another's";
 
     // Content sanity: A's slices still read correctly (data pointers are into the
     // stable frame regardless).
@@ -741,9 +767,12 @@ std::string slurp(std::filesystem::path const& p) {
 // would satisfy all of them vacuously. The witness is therefore the SIBLING
 // walk that must still exist: group_slices_status()'s own instance splitter
 // (L-063-4 leg 1, deliberately still flat and out of #220's scope) declares
-// `inst_start` at 16-space and uses the POSITIVE `if (boundary) {` at
-// 20-space. Asserting those FIRST proves the matcher can see this TU and can
+// `inst_start` at 16-space and defines the POSITIVE `is_boundary` lambda at
+// 16-space. Asserting those FIRST proves the matcher can see this TU and can
 // report a non-zero count, before any zero below is believed.
+// ⚠️ 389: this paragraph said `if (boundary) {` at 20-space, which is the
+// needle the diff replaced 15 lines below — a re-anchored needle must be
+// re-stated in the prose that JUSTIFIES it, not only where it is used.
 TEST(WireOffsetTable, FR001_NoFlatInstanceWalkInGroup) {
     std::filesystem::path const src{FIXPP_SRC_DIR};
     std::string const tu = slurp(src / "wire" / "offset_table.cpp");
@@ -761,17 +790,24 @@ TEST(WireOffsetTable, FR001_NoFlatInstanceWalkInGroup) {
     // ── Non-vacuity witness: the sibling splitter in group_slices_status. ──
     std::size_t const sibling_inst_start_16space =
         count_occurrences(tu, "\n                std::size_t inst_start = first;\n");
-    std::size_t const sibling_boundary_20space =
-        count_occurrences(tu, "\n                    if (boundary) {\n");
+    // 389: this needle was `if (boundary) {` at 20-space. The splitter now
+    // computes the boundary ONCE, in an `is_boundary` lambda shared by its count
+    // pass and its fill pass, so that spelling is gone AND the call site occurs
+    // TWICE — swapping the needle alone would have broken the `== 1` below too.
+    // Anchored on the lambda's single DEFINITION instead, which is both unique
+    // and the thing the witness actually cares about: that this TU is readable
+    // and its splitter still resolves instance boundaries.
+    std::size_t const sibling_boundary_defn_16space = count_occurrences(
+        tu, "\n                auto const is_boundary = [&](std::size_t k) noexcept {\n");
 
     ASSERT_EQ(sibling_inst_start_16space, 1U)
         << "group_slices_status's sibling instance walk was not found at 16-space (found "
         << sibling_inst_start_16space
         << ") — the matcher cannot see this TU, so every 'expect 0' below would pass "
            "vacuously. Fix the matcher (or this needle) before trusting the zeros.";
-    ASSERT_EQ(sibling_boundary_20space, 1U)
-        << "group_slices_status's positive boundary guard was not found at 20-space (found "
-        << sibling_boundary_20space << ") — same vacuity risk as above.";
+    ASSERT_EQ(sibling_boundary_defn_16space, 1U)
+        << "group_slices_status's boundary predicate definition was not found at 16-space (found "
+        << sibling_boundary_defn_16space << ") — same vacuity risk as above.";
 
     // ── The assertions proper: 085's flat cap block is at neither of the
     //    indentations it has occupied. See the scope caveat in the header. ──
@@ -817,10 +853,30 @@ TEST(WireOffsetTable, FR001_NoFlatInstanceWalkInGroup) {
 // first-field record (`add_group_member` with no `set_group_first`), which
 // sets `group_bit` — so membership answers yes — while `group_first_` has no
 // row, so `group_first_field` answers 0. A loaded dictionary cannot be in this
-// state: `as_table_view()` calls `set_group_first_ctx` before registering
-// members, and a context with no Entity-2 record is rejected at load time by
-// the FR-023 / C-3.4 completeness sweep. The hand-built table_view surface can,
-// which is why this cell exists at all.
+// state — but NOT for the reason this comment gave until #389.
+//
+// ⚠️ The withdrawn carrier, kept because its shape is the point: *"as_table_view()
+// calls `set_group_first_ctx` before registering members, and a context with no
+// Entity-2 record is rejected by the FR-023 / C-3.4 sweep."* The first half
+// cannot carry anything — `set_group_first_ctx` calls `add_group_member_ctx`
+// ITSELF (`dict/table_view.hpp`), so ordering can never separate the two — and
+// `as_table_view()` writes whatever the lookup returns, INCLUDING 0, with no
+// guard. The second half was elsewhere dismissed as "not load-bearing", which
+// is backwards: it is one of the two braces.
+//
+// The reason that holds is two LOADER-side facts, not one: (1) neither loader
+// ever STORES a record with delimiter 0 — both gate the flush on
+// `captured != 0` — so a 0 from the lookup can only mean *no record*; and
+// (2) both loaders' `finalize()` THROWS if a context that will be registered
+// has no Entity-2 record. (1) + (2) ⇒ the delimiter written is non-zero.
+//
+// The hand-built table_view surface can reach it, which is why this cell exists
+// at all. See B&L B-384-2, which carries every wrong version of this on purpose.
+// ⚠️ This site is itself the lesson: the correction reached B&L, the splitter's
+// own source comment and the 083 contract, and MISSED this one, because those
+// are where the reasoning is RE-DERIVED and this is where it was RESTATED. Fix
+// such a claim by searching for the CLAIM:
+//   git grep -n 'set_group_first_ctx\|capture_first_emission' -- spec specs brain src include tests
 // ════════════════════════════════════════════════════════════════════════════
 
 // Two instances of group 453, each opening on 448 — so a correct split yields

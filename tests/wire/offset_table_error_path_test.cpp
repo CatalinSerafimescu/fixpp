@@ -185,9 +185,16 @@ TEST(OffsetTableErrorPath, GroupOnRedTableReturnsStatusErrorCoversLines165to166)
 //
 // Setting fail_on_call_n=6 allows construction to complete (5 allocs succeed),
 // then the first group_slices(453) call triggers:
-//   Call 6: group_slices_.reserve(5) → bad_alloc → catch(bad_alloc) → return {}
-// The reserve call fails before group_slices_reserved_ is set to true, so
-// the catch block is the ONLY exit from the try-block at that point (lines 231-232).
+//   Call 6: the per-group resource()->allocate(n * sizeof(group_slice))
+//           → bad_alloc → catch → return {}
+// 389: this used to read `group_slices_.reserve(5)` and argue that the failure
+// landed "before group_slices_reserved_ is set to true". Both the shared vector
+// and that one-shot flag are gone. The injection index is UNCHANGED and still
+// lands on the right call, for a simpler reason: the per-group allocation is the
+// first post-construction arena allocation on this path — the count pass that
+// sizes it only reads `entries_` and compares tags, and `group_index_` does not
+// allocate until the push that happens after. The catch block is still the ONLY
+// exit from the try-block at that point.
 // The failing_pmr_resource only fails on the exact Nth call, so subsequent calls
 // succeed — a second group_slices(453) invocation will rebuild from scratch and
 // succeed normally (verifies the noexcept catch is not a permanent degradation).
@@ -230,28 +237,34 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
             << "control: with allocation succeeding, this frame MUST materialise one slice — "
                "if it does not, the failing arm below proves nothing about the bad_alloc catch";
 
-        // SECOND anti-vacuity guard, and a distinct one: `vector::reserve(n)` is
-        // a NO-OP when n <= capacity(), so a zero reserve bound would allocate
-        // nothing and the injection index below would land on some later call —
-        // silently retargeting the test away from the reserve it names. Assert
-        // the bound is non-zero rather than assuming the dictionary made it so.
-        ASSERT_GT(fixpp::wire::reserve_bound_access_for_testing::get(ok), 0U)
-            << "the dict-aware reserve bound must be non-zero, or reserve() allocates nothing "
-               "and this cell no longer exercises the allocation it is written around";
+        // 389: a SECOND anti-vacuity guard used to stand here, asserting the
+        // reserve bound was non-zero — because `vector::reserve(n)` is a NO-OP
+        // when `n <= capacity()`, so a zero bound would allocate nothing and the
+        // injection index below would silently retarget onto a later call.
+        //
+        // It is deleted because the control ABOVE now discharges it
+        // structurally. The reserve is fed by the count pass, and the count is
+        // EXACT — so `n_slices >= 1` is the same statement as "this frame
+        // materialises at least one slice", which the control already asserts.
+        // Two guards for one condition, where one of them reads a number that no
+        // longer exists.
     }
 
     // Measure how many PMR allocations OffsetTable construction performs. This is
     // allocator-dependent (libstdc++/libc++ grow vectors 2x → 5 calls here; MSVC's
     // std::pmr grows 1.5x → a different count), so it cannot be hard-coded. We then
-    // fail the FIRST post-construction allocation — group_slices_.reserve — which
-    // exercises the bad_alloc degrade path on every platform.
+    // fail the FIRST post-construction allocation, which exercises the
+    // bad_alloc degrade path on every platform.
     //
-    // The reserve is still the first post-construction allocation on the path
-    // this cell drives: group_slices_reserve_bound()'s dictionary branch runs
-    // stored_group_context(), parse_declared_count() and the membership
-    // predicate, and all three are alloc-free (the predicate is documented so
-    // in tests/support/context_group_member_fn.hpp — group_member_tags returns
-    // a span).
+    // 389: that allocation used to be `group_slices_.reserve(...)` on the one
+    // shared vector. It is now the per-group
+    // `resource()->allocate(n_slices * sizeof(group_slice))`, and it is STILL
+    // first on the path this cell drives: the count pass that sizes it only
+    // reads `entries_` and compares tags — no allocation — and `group_index_`'s
+    // own growth happens AFTER, at the push. The membership predicate is
+    // alloc-free too (documented in tests/support/context_group_member_fn.hpp —
+    // group_member_tags returns a span), so the injection index still lands on
+    // the allocation it names.
     //
     std::size_t construction_calls = 0;
     {
@@ -264,7 +277,7 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     ASSERT_GT(construction_calls, 0U);
 
     std::pmr::monotonic_buffer_resource upstream;
-    // Fail the first allocation AFTER construction (the group_slices_.reserve).
+    // Fail the first allocation AFTER construction (the per-group slice buffer).
     failing_pmr_resource fail_mr{&upstream, /*fail_on_call_n=*/construction_calls + 1};
 
     OffsetTable t{*fv, &fail_mr, &dict, member_fn, delim_fn};

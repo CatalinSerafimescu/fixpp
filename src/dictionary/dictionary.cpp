@@ -402,8 +402,9 @@ namespace detail {
 // (src/capi/session.cpp) and from `Session::open()`, so two threads opening
 // sessions concurrently on one engine race on it. Nothing gated the increment
 // to test builds, unlike this same feature's sibling seam
-// (`reserve_bound_access_for_testing`, offset_table.hpp) which IS behind
-// FIXPP_TEST_HOOKS. Gating was not available here: the counter lives in the
+// (`reserve_bound_access_for_testing`, offset_table.hpp — since DELETED by
+// #389 along with the estimator it read) which WAS behind FIXPP_TEST_HOOKS.
+// Gating was not available here: the counter lives in the
 // library, so a gated definition would not link against a test TU that
 // defines the macro.
 //

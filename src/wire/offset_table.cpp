@@ -148,7 +148,6 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
 
       entries_(mr),
       overlay_(mr),
-      group_slices_(mr),
       group_index_(mr),
       nested_cache_(mr) {
     build(frame);
@@ -167,7 +166,6 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
       group_delim_fn_{group_delim_fn},
       entries_(mr),
       overlay_(mr),
-      group_slices_(mr),
       group_index_(mr),
       nested_cache_(mr) {
     build(frame);
@@ -183,7 +181,6 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
 
       entries_(mr),
       overlay_(mr),
-      group_slices_(mr),
       group_index_(mr),
       nested_cache_(mr) {
     build(frame);
@@ -202,7 +199,6 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
       group_delim_fn_{group_delim_fn},
       entries_(mr),
       overlay_(mr),
-      group_slices_(mr),
       group_index_(mr),
       nested_cache_(mr) {
     build(frame);
@@ -640,64 +636,23 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     return group_index{no_tag, first, group_end - first};
 }
 
-std::uint32_t OffsetTable::group_slices_reserve_bound() const noexcept {
-    // 220: a dict-free table can never append to `group_slices_`, because
-    // group() declines for it at this function's sibling guard and
-    // group_slices_status() only pushes inside `if (gi)`. The bound is
-    // therefore 0, not the old conservative `entries_.size()` — which reserved
-    // up to 4096 * sizeof(group_slice) out of the fixed, null-upstream parse
-    // arena for slices that provably cannot exist. That is the same
-    // arena-exhaustion mode this bound was introduced to fix (PR #181 Tier-2
-    // arena_fit), reappearing on the branch that lost its justification.
-    //
-    // ⚠️ PRECONDITION, not an observation: this 0 is correct only while group()
-    // declines unconditionally without a membership oracle. If that is ever
-    // relaxed, this MUST go back to `entries_.size()` — the reserve-once
-    // contract above ("subsequent appends never reallocate, so every previously
-    // returned span stays valid") is upheld here only because there are no
-    // appends at all.
-    if (opaque_dict_ == nullptr || group_member_fn_ == nullptr) {
-        return 0U;
-    }
-    // Sum the DECLARED instance count of every TOP-LEVEL group count-field,
-    // using the SAME predicate group() gates a push on: the dictionary
-    // recognises entries_[e].tag as a group (under this table's ROOT context)
-    // whose first member is the immediately following tag. So every tag that can
-    // push into group_slices_ is counted here.
-    //
-    // ⚠️ THE NEXT INFERENCE IS THE DEFECT, and it used to be stated here as
-    // fact: *"each contributes ≥ its actual pushes (consume_group_extent caps
-    // instances at `declared`)"*. That cap governs the EXTENT WALK, which uses
-    // the WIRE delimiter; `group_slices_status()`'s SPLIT LOOP re-splits the
-    // resulting extent with the DICTIONARY delimiter and is capped only by
-    // `group_end`. Two different delimiters, one cap — so the bound does not
-    // dominate the pushes on a divergent context. PRE-EXISTING since 083, NOT
-    // introduced or fixed by #384; tracked as fixpp#389. See the reserve-once
-    // contract comment in group_slices_status() and B&L L-384-1 residual (b). Nested count
-    // fields resolve under a different group_context and do not match the ROOT
-    // ctx (their instances live in nested_cache_, not group_slices_). The
-    // `parse_declared_count(e) > 0` prefilter prunes string/absent fields without
-    // a membership call.
-    group_context const ctx = stored_group_context();
-    std::uint64_t total = 0;
-    for (std::size_t e = 0; e + 1U < entries_.size(); ++e) {
-        std::uint32_t const declared = parse_declared_count(frame_base_, entries_[e]);
-        if (declared == 0U) {
-            continue;
-        }
-        std::uint16_t const delim = entries_[e + 1U].tag;
-        if (group_member_fn_(opaque_dict_, ctx, entries_[e].tag, delim)) {
-            total += declared;
-        }
-    }
-    // Clamp to entries_.size(): total instances ≤ total entries (each instance
-    // needs ≥1 entry), so this is still a valid upper bound AND never exceeds the
-    // old reserve — a huge/malicious declared count cannot inflate it.
-    if (total > entries_.size()) {
-        total = entries_.size();
-    }
-    return static_cast<std::uint32_t>(total);
-}
+// 389: `OffsetTable::group_slices_reserve_bound()` was DELETED here.
+//
+// It summed the DECLARED instance counts of the top-level group count-fields
+// (clamped to `entries_.size()`) to reserve the single shared `group_slices_`
+// vector once. Its own justification was the defect: *"each contributes >= its
+// actual pushes (consume_group_extent caps instances at `declared`)"* — but that
+// cap governs the EXTENT WALK, which uses the WIRE delimiter, while the pushes
+// happen in `group_slices_status()`'s SPLIT LOOP, which re-splits that extent
+// with the DICTIONARY delimiter under no cap. Two delimiters, one cap, and an
+// inference across them.
+//
+// It is gone rather than repaired because repairing it preserves the shape that
+// broke: an estimator and a split loop, in two places, that must agree forever.
+// 083 changed the loop and left the estimator, and nothing detected it for two
+// features. Each group now allocates exactly its own slice count, so there is
+// no second place to keep in agreement. See the `group_span` comment in
+// offset_table.hpp and B&L B-389-1.
 
 // 073 T003: public span wrapper — UNCHANGED signature, one-line delegation.
 // Every top-level caller (C-ABI top-level group getter, MessageView::group<>())
@@ -711,46 +666,28 @@ std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) con
 // each exit widened to also report `alloc_failed`.
 group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const noexcept {
     check_alive();
-    // Already materialized for this no_tag — return the stable cached span.
+    // Already materialized for this no_tag — return its own array. 389: this
+    // span is now stable for the table's whole lifetime, not merely until the
+    // next group is materialized.
     for (auto const& gs : group_index_) {
         if (gs.no_tag == no_tag) {
-            return {.slices = {group_slices_.data() + gs.start, gs.count}, .alloc_failed = false};
+            return {.slices = {gs.data, gs.count}, .alloc_failed = false};
         }
     }
     try {
-        // Reserve once to a tight upper bound (sum of top-level declared counts,
-        // clamped to entry count): subsequent appends never reallocate, so every
-        // previously returned span stays valid.
+        // 389: this group's OWN exact-sized array. Nothing here can move a span
+        // handed out for a different `no_tag` — those live in their own arrays.
         //
-        // ⚠️ THAT INVARIANT IS FALSE POST-083, and this is the sentence a reader
-        // will otherwise trust. TWO DIFFERENT DELIMITERS decide the two halves:
-        // `consume_group_extent` walks with the WIRE delimiter
-        // (`entries_[first].tag`) and DOES cap at `declared`, producing
-        // `group_end`; the split loop below then RE-SPLITS `[first, group_end]`
-        // with the DICTIONARY delimiter and has NO cap at all — it pushes once
-        // per occurrence plus once at `group_end`. So when the per-context
-        // delimiter diverges from the wire's and occurs more often than
-        // `declared` inside the extent, the pushes exceed the reserve, this
-        // vector reallocates, and every span already handed out for an EARLIER
-        // `no_tag` on this table goes stale. Measured on the shipped path, not
-        // hypothetical:
-        // `TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged` pushes 3
-        // slices for a `100=2` group against a bound of 2. What keeps it
-        // harmless today (fixpp#389) is a CALLER-CHOSEN allocator property this did
-        // not state — a monotonic_buffer_resource never reuses the abandoned
-        // block, so the stale span still reads correct bytes. A reusing resource
-        // would make it a use-after-free, and the C-ABI does hold these spans
-        // across calls. PRE-EXISTING since 083; not introduced or fixed by #384.
-        // See B&L L-384-1 residual (b) for the full disposition. The old `entries_.size()` bound
-        // over-reserved ~3x (fields, not instances) and exhausted the fixed
-        // null-upstream parse arena on MSVC-release, silently degrading large
-        // groups to empty (PR #181 Tier-2 arena_fit). See
-        // group_slices_reserve_bound().
-        if (!group_slices_reserved_) {
-            group_slices_.reserve(group_slices_reserve_bound());
-            group_slices_reserved_ = true;
-        }
-        auto const start = static_cast<std::uint32_t>(group_slices_.size());
+        // The single `allocate()` below is sized by a COUNT PASS using the same
+        // `is_boundary` the fill loop uses, so the allocation is EXACT. That is
+        // what keeps PR #181's arena constraint met: growing a vector instead —
+        // backed by the fixed null-upstream monotonic arena — strands every
+        // superseded buffer, since such a resource never reuses one. The count
+        // pass is load-bearing, not an optimization — deleting it re-opens #181.
+        // Magnitude deliberately omitted: it is a RESULT parameterized by the
+        // STL's growth factor. B&L B-389-1 carries the figure and its platform.
+        group_slice* slices = nullptr;  // arena buffer, sized by the count pass
+        std::uint32_t n_written = 0;
         auto gi = group(no_tag);
         if (gi) {
             std::size_t const first = gi->first_entry();
@@ -857,11 +794,56 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                         delim = d;
                     }
                 }
+                // ── PASS 1 (389): count boundaries, reserve EXACTLY ──
+                // ONE definition of the boundary, used by BOTH passes. An
+                // earlier draft spelled the predicate twice and defended it as
+                // "a shared lambda would hide a divergence the way the deleted
+                // estimator did". ⚠️ That argument is BACKWARDS, and it is
+                // recorded because it nearly re-created the very defect it was
+                // invoked against: the estimator failed because two DIFFERENT
+                // computations lived in two FUNCTIONS across a feature boundary
+                // with nothing forcing agreement — a sum over wire-declared
+                // counts on one side, a delimiter-driven boundary scan on the
+                // other. One expression in one scope makes divergence
+                // structurally IMPOSSIBLE; that is the opposite shape, not the
+                // same one.
+                auto const is_boundary = [&](std::size_t k) noexcept {
+                    return (k == group_end) || (k > first && entries_[k].tag == delim);
+                };
+                //
+                //
+                // The count is EXACT, not an upper bound: the pushed ranges
+                // PARTITION [first, group_end). At every push `inst_start` is
+                // the previous boundary's `k`, and boundaries strictly increase,
+                // so `inst_start < k` always holds and no push is empty.
+                std::size_t n_slices = 0;
+                for (std::size_t k = first; k <= group_end; ++k) {
+                    if (is_boundary(k)) {
+                        ++n_slices;
+                    }
+                }
+                // Exactly `n_slices`, once. Throws `bad_alloc` on arena
+                // exhaustion, which the existing catch below turns into the
+                // 073 / L-065-2 `alloc_failed` degrade — unchanged semantics.
+                //
+                // ⚠️ The `n_slices == 0` arm is DEFENSIVE AND PROVABLY DEAD, the
+                // same shape as the `: 0U` ternary arm below. The enclosing
+                // guard establishes `first < group_end`, so the count loop runs
+                // at least once, and `is_boundary(group_end)` is UNCONDITIONALLY
+                // true — therefore `n_slices >= 1` here, always. Codecov reports
+                // this line as a PARTIAL branch for exactly that reason; it is
+                // not a coverage gap and MUST NOT be "fixed" by inventing a test
+                // for it. The guard is kept so a future change to the boundary
+                // rule cannot silently reach `allocate(0, …)`.
+                if (n_slices > 0) {
+                    slices = static_cast<group_slice*>(
+                        resource()->allocate(n_slices * sizeof(group_slice), alignof(group_slice)));
+                }
+
+                // ── PASS 2: fill ──
                 std::size_t inst_start = first;
                 for (std::size_t k = first; k <= group_end; ++k) {
-                    bool const boundary =
-                        (k == group_end) || (k > first && entries_[k].tag == delim);
-                    if (boundary) {
+                    if (is_boundary(k)) {
                         // RC#2 fix: slice must begin at the delimiter's "tag="
                         // prefix, NOT at its value. Walk back from val_start to
                         // find the first digit of the tag ([2b §4.7]).
@@ -873,17 +855,29 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                         // SOH — length is exclusive of SOH by contract).
                         std::uint32_t const end_off =
                             entries_[k - 1U].offset + entries_[k - 1U].length;
+                        // The `: 0U` arm is DEFENSIVE AND PROVABLY DEAD, which
+                        // is why it shows as the one uncovered line in this
+                        // function. `inst_start` is only ever set to a previous
+                        // boundary's `k`, and boundaries strictly increase, so
+                        // `inst_start < k` at every push ⇒ `entries_[k - 1U]` is
+                        // at or after `entries_[inst_start]` ⇒ `end_off > fs`.
+                        // Kept rather than removed: it costs nothing, and the
+                        // alternative is an unchecked subtraction. Two
+                        // independent instruments agree it cannot fire — the
+                        // partition argument above, and llvm-cov measuring zero
+                        // executions across the wire and C-ABI suites.
                         std::size_t const len =
                             (end_off > fs) ? static_cast<std::size_t>(end_off - fs) : 0U;
-                        group_slices_.push_back(group_slice{.data = d, .len = len});
+                        slices[n_written++] = group_slice{.data = d, .len = len};
                         inst_start = k;
                     }
                 }
             }
         }
-        auto const count = static_cast<std::uint32_t>(group_slices_.size()) - start;
-        group_index_.push_back(group_span{.no_tag = no_tag, .start = start, .count = count});
-        return {.slices = {group_slices_.data() + start, count}, .alloc_failed = false};
+        // The row is trivially copyable, so `group_index_` reallocation memcpys
+        // it and the arena buffer it points at never moves.
+        group_index_.push_back(group_span{.data = slices, .count = n_written, .no_tag = no_tag});
+        return {.slices = {slices, n_written}, .alloc_failed = false};
     } catch (std::bad_alloc const&) {
         // 073 T003: this is the mode-(b) origin (FR-002) — the sub-table
         // built non-null but its own slice materialization exhausted the

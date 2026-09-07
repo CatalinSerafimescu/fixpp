@@ -110,6 +110,60 @@ condition assumed:
   cannot reset it. Sampling around `ctest` needs no such concession — but it also
   means the new figures are **not** comparable to a cgroup one, had any existed.
 
+#### RE-RECORD 2026-09-08 — every Linux lane had drifted by exactly +1
+
+All eleven Linux lanes rendered `DIAGNOSTIC ONLY` on `main`, each executing
+**exactly one more** test than its pin. The three Windows lanes matched and are
+untouched. So the `ctest --parallel` memory criterion was discharged on **no**
+lane at all — the acceptance had been silently degraded for at least three
+consecutive mains (`ee252dd5` batch 18, `05ce6b26` #384, `7a55c077` batch 19),
+all showing the identical `364 vs 363` on `linux-clang-debug`.
+
+⚠️ **This is the designed prompt firing, not a broken gate** — and it fired for
+three merges before anyone read it. The direction stayed safe throughout (a
+stale pin can only push a run toward "not evidence"), which is exactly why it
+went unnoticed: nothing went red, eleven acceptance claims just quietly stopped
+being made. **A gate that degrades safely still needs someone to read its
+output.**
+
+Counts read off the CI check-run annotations of runs `34160147412` (Tier 1, the
+seven tier-1 lanes) and `34160147444` (Tier 3, the four libc++ lanes), commit
+`d66b4351` (PR #392) — whose tree is identical to the squash `f999c9a8` now on
+`main`, and which reproduces `7a55c077`'s counts lane-for-lane, confirming #389
+registers no new ctest entry. Per this document's own rule the criterion closes
+on the run **after** this commit.
+
+| lane | was | now |
+|---|---:|---:|
+| `linux-clang-debug` | 363 | **364** |
+| `linux-clang-release` | 363 | **364** |
+| `linux-clang-asan` | 368 | **369** |
+| `linux-clang-ubsan` | 362 | **363** |
+| `linux-clang-tsan` | 362 | **363** |
+| `linux-gcc-release` | 371 | **372** |
+| `linux-clang-libc++` | 358 | **359** |
+| `linux-clang-libc++-asan` | 357 | **358** |
+| `linux-clang-libc++-ubsan` | 357 | **358** |
+| `linux-clang-libc++-tsan` | 357 | **358** |
+| `linux-clang-coverage` | 370 | **371** |
+
+⚠️ **Do NOT batch a re-record with a change that adds tests** — the pin would be
+invalidated by the same commit that sets it. This one is deliberately standalone
+and direct-to-`main`: a PR would cost two matrices (its own, then `push:main`),
+and the `push:main` matrix this commit arms *is* the confirmation.
+
+##### Also seen in the same runs, not acted on
+
+Two Conan binary-cache artifacts came back **DOWNLOADED BUT NOT RESTORABLE**
+(`linux-clang-release-4f4f0cdb76037288`, `linux-clang-libcxx-6e2e296d58ea7865`),
+were logged as MISS, and those legs fell back to `--build=missing`. That is the
+script's designed self-heal — it emits `hit=false` on purpose so an eligible
+publisher can reseed, because a HIT "would leave the bad artifact published
+indefinitely" — and reseeding did occur in-run. Recorded for recurrence, not
+actioned. Separately, the four libc++ legs each logged 31-42 ccache cleanups
+*during* the run (cache hitting its 1907 MiB cap and evicting while still being
+populated): that is #240's mechanism, already tracked there.
+
 #### The eligible-count basis, re-derived (#266 acceptance item 5)
 
 The old pin was `expected_eligible=350`, derived **locally** at `9e444ef5`.

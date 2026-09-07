@@ -203,6 +203,26 @@ The census above was taken during planning, against pre-implementation line numb
 
 The paragraph that follows was written as an **inference** and explicitly flagged as one (*"inferred, to be confirmed by the FR-021c task, not asserted as measured"*). It is confirmed here, with the measurement and with a structural leg the inference did not have. **Verdict: LOW, and the under-reserve failure mode is impossible by construction, not merely unlikely.**
 
+> ⚠️ **AMENDMENT 2026-09-07 (fixpp#389) — THE SENTENCE ABOVE IS RETRACTED.** The under-reserve mode
+> was NOT impossible; it was live on the shipped path for the whole of 083, and
+> `OutOfScopeWireProbesUnchanged` — a witness in this very feature — exhibits it (bound 2, three
+> pushes).
+>
+> **The retraction is narrow, and the narrowness is the point.** Leg 1's own body is SCOPED to a
+> member-set change (*"unreachable through a member-set change"*) and remains **true**: the
+> estimator's predicate really is byte-identical to `group()`'s push gate. But that argument
+> establishes only **WHICH** groups push — never **HOW MANY** pushes each one makes. The verdict
+> sentence above generalised past its own argument by dropping the scope.
+>
+> What the argument could not see is that 083 itself (C-8.2) made the SPLIT LOOP use the DICTIONARY
+> delimiter while `consume_group_extent` kept the WIRE one and the `declared` cap. Two delimiters,
+> one cap, and an inference across them — the estimator was sound against the change this assessment
+> was asked about, and blind to the change the same feature was making.
+>
+> **Disposition:** #389 DELETED `group_slices_reserve_bound()`; each group materializes into its own
+> exact-sized array. C-8.0a's obligation is discharged by construction — allocation equals the slice
+> count — so there is no estimator left to assess. See B&L **B-389-1**.
+
 **Leg 1 — the estimator's predicate is byte-identical to the push gate it sizes for.** `group_slices_reserve_bound()` (`src/wire/offset_table.cpp:599-633`) counts a top-level entry `e` iff `group_member_fn_(opaque_dict_, stored_group_context(), entries_[e].tag, entries_[e + 1U].tag)`. `group()` (`:530-566`) admits `no_tag` iff `group_member_fn_(opaque_dict_, stored_group_context(), no_tag, entries_[first].tag)` — **same callback, same context, same `no_tag`, same delimiter argument**. So a member-set change cannot move the bound and the pushes independently: whatever `e` the estimator stops counting, `group()` stops admitting, and `group_slices_status` pushes nothing for it. `total` remains an upper bound on pushes for every possible member set. **Under-reserve — the L-073-1 / L-065-2 silent-truncation mode — is therefore unreachable through a member-set change, before considering which sets actually changed.**
 
 **Leg 2 — direction.** FR-001 only ever **removes** the injected global-first-seen tag from a context member set (D-5: the injection becomes redundant; nothing is added). Membership can therefore only go true→false, so the bound can only **decrease**. The arena pressure L-073-1 documents comes from *over*-reserving in the fixed 16 KiB inbound arena (PR #181 Tier-2 `arena_fit`); a smaller reservation is strictly the safe direction.
