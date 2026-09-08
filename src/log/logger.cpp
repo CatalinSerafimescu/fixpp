@@ -229,9 +229,28 @@ struct Logger::Impl {
             // Step 1: load current write position (relaxed — we will CAS it).
             std::uint64_t w = write_sequence_.load(std::memory_order_relaxed);
 
-            // Step 2: load drain position with relaxed ordering.
-            // A stale (under-advanced) read makes the ring look fuller → early drop.
-            // Safe under drop_newest (contracts/log-core.md §Runtime obligations).
+            // Step 2: load drain position — ACQUIRE, pairing with the drain's
+            // release store to read_sequence_ after it finishes copying a slot.
+            //
+            // ⚠️ THIS MUST NOT BE WEAKENED TO RELAXED. It was, and the argument
+            // for it addressed the wrong axis (#402): "a stale (under-advanced)
+            // read makes the ring look fuller → early drop, safe under
+            // drop_newest" is true about LIVENESS and says nothing about MEMORY
+            // ORDERING. Being conservative about whether a slot is free does not
+            // supply the happens-before that REUSING it requires.
+            //
+            // Per generation the slot handshake is already correct (producer
+            // stores slot.sequence release after writing; drain loads it
+            // acquire). What needs this edge is WRAPAROUND: once the drain has
+            // copied slot i and advanced read_sequence_, a producer may claim
+            // i + capacity_ and overwrite the same RingSlot. Without the acquire
+            // here nothing orders the drain's reads of the old generation before
+            // those writes, and the drain can copy a TORN record — some fields
+            // from one log record, some from the next.
+            //
+            // Free on x86 (plain mov). Witnessed by TSan on the ring-wraparound
+            // test: relaxed → 7 data races, acquire → 0
+            // (tests/log/test_file_sink_backpressure.cpp).
             std::uint64_t r = read_sequence_.load(std::memory_order_acquire);
 
             // Step 3: overflow check BEFORE claiming a slot (R5).
