@@ -354,8 +354,15 @@ TEST(SyncCoSpawnWorkGuard, ExplicitStopReturnsRunWithTheFrameStarted) {
 // ── ARM 8 — clause S1, with its own dismissal as the control ────────────────
 // A worker that ran the context to exhaustion BEFORE anything was spawned on it has
 // returned for good; the frame queued afterwards is never dispatched. The second half is
-// the same program with the two lines in the other order, and it is the control: without
-// it, an `is_ready` wired so it could only read false would satisfy the first half.
+// the same program with the two statements in the other order, and it is the control:
+// without it, an `is_ready` wired so it could only read false would satisfy the first half.
+//
+// ⚠️ THE SENTENCE ABOVE IS AN EXACT CLAIM, AND IT WAS FALSE WHEN FIRST WRITTEN. The second
+// half also carried `asio::make_work_guard(ioc)` and a matching `reset()`. Both were
+// INERT — deleted and re-run 300 times, all green — because `co_spawn` posts the frame
+// BEFORE the thread is constructed and its own `outstanding_work.tracked` already keeps
+// `run()` fed. A control whose description does not match its code is a control a reader
+// has to adjudicate; the lines are gone, so the two halves now differ by ORDER alone.
 //
 // ⚠️ THE NEGATIVE ASSERTION IS DETERMINISTIC, NOT A SAMPLE, and the next reader will
 // assume otherwise because negatives usually need a budget. It is deterministic because
@@ -387,19 +394,17 @@ TEST(SyncCoSpawnWorkGuard, DriverThatAlreadyExhaustedDrivesNothing) {
     }
     {
         asio::io_context ioc;
-        auto keepalive = asio::make_work_guard(ioc);
 
         auto fut = asio::co_spawn(
             ioc, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
 
         std::thread worker([&ioc] { ioc.run(); });
-        keepalive.reset();
         worker.join();
 
         EXPECT_TRUE(is_ready(fut))
             << "THE DISMISSAL ITSELF: the same frame, spawned while the driver is still "
                "inside run(), IS completed without the calling thread — which is why the "
-               "35 `THREADED` rows are correct with a bare get(). If this fails, that "
+               "sweep's `THREADED` rows are correct with a bare get(). If this fails, that "
                "whole class needs re-reading and not just clause S1.";
     }
 }
@@ -432,7 +437,12 @@ TEST(SyncCoSpawnWorkGuard, DriverThatAlreadyExhaustedDrivesNothing) {
 // alive at teardown is released only by destruction, and this file must not leave
 // stranded work behind on a platform where that is not merely untidy
 // (`~io_context` is asymmetric — POSIX ignores a stranded work count, Windows does not).
-// Nothing is suspended here, so both halves tear down the same way on every lane.
+// ⚠️ THAT IS THE REASON NOTHING PARKS; IT IS NOT A CLAIM THAT THE TWO HALVES TEAR DOWN
+// IDENTICALLY, WHICH AN EARLIER DRAFT ASSERTED AND NOBODY HAD CHECKED. They do not: half 2
+// leaves a never-STARTED frame queued on a stopped pool, destroyed by `~thread_pool`,
+// where half 1 has nothing queued at all. What is measured is that neither is a leak or a
+// hang on Linux — 50 runs under ASan, clean, exit 0. MSVC is not measured here; Tier 2 is
+// what would say, and a `co_return` frame is the cheapest shape to ask it about.
 TEST(SyncCoSpawnWorkGuard, StoppedPoolLeavesTheFutureUnready) {
     {
         asio::thread_pool pool{1};
@@ -444,9 +454,11 @@ TEST(SyncCoSpawnWorkGuard, StoppedPoolLeavesTheFutureUnready) {
 
         EXPECT_TRUE(is_ready(fut))
             << "THE DISMISSAL ITSELF: a thread_pool completes a frame spawned on it "
-               "without the calling thread, which is why all 46 `POOL` rows in the sweep "
-               "are correct with a bare get(). If this fails, that whole class needs "
-               "re-reading and not just this clause.";
+               "without the calling thread, which is why the sweep's `POOL` rows are "
+               "correct with a bare get(). If this fails, that whole class needs "
+               "re-reading and not just this clause. (No count here on purpose: the "
+               "sweep's population is the parseable subset, and `--disposition` prints "
+               "today's figure.)";
     }
     {
         asio::thread_pool pool{1};

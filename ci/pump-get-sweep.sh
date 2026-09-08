@@ -1325,16 +1325,21 @@ TEST(A, B) {
     worker.join();
 }
 """, ("THREADED", "RUN-UNBOUNDED", "EXHAUSTED-NOT-CALLER-SIDE")),
-    ("4k  a caller-side run ALONGSIDE a thread one still reads EXHAUSTED", """
+    # ⚠️ THE DISCRIMINATING PARTNER OF `4j`, AND THE FIRST DRAFT WAS NOT ONE. It ran its
+    # thread on `other` -- an UNDECLARED name -- so that thread could never reach
+    # `exhausts()`, and deleting the whole line left `drive` on `EXHAUSTED`: the fixture
+    # never exercised the filter it is named for. Only `exec` moved, which is what made the
+    # assertion fail and hid it. This pair differs by ONE line, the caller-side run.
+    ("4k  a caller-side run ALONGSIDE a thread one reads EXHAUSTED", """
 TEST(A, B) {
     asio::io_context ioc;
     auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
-    std::thread worker([&] { other.run(); });
+    std::thread worker([&] { ioc.run(); });
     ioc.run();
     (void)fut.get();
     worker.join();
 }
-""", ("THREAD-IN-FILE", "RUN-UNBOUNDED", "EXHAUSTED")),
+""", ("THREADED", "RUN-UNBOUNDED", "EXHAUSTED")),
     ("L2  a run() in a declared-but-never-invoked lambda", """
 TEST(A, B) {
     asio::io_context ioc;
@@ -1380,9 +1385,14 @@ TEST(A, B) {
     (void)fut.get();
 }
 """, "LIVE"),
-    # The thread is constructed BEFORE the spawn, so its run is not in `seg` and the
-    # row has no visible drive at all -- nothing for either clause to be about.
-    ("S-e  a row with no visible drive is not covered -> n/a", """
+    # ⚠️ WHAT THIS PINS IS `ec != "POOL"`, NOT ANYTHING ABOUT THE DRIVE. An earlier
+    # comment here said the row reads `n/a` because the thread precedes the spawn so no
+    # drive is visible. That is not the operative cause: move the thread BELOW the spawn
+    # and `drive` becomes `EXHAUSTED-NOT-CALLER-SIDE` -- a visible drive -- while `sd` is
+    # still `n/a`, because the `ec != "POOL"` test short-circuits before any drive value is
+    # read. The case is kept because `n/a` is a value and a value with no case is a branch
+    # nobody has run; the claim is just narrower than it was written.
+    ("S-e  a NON-POOL row is not covered, whatever its drive -> n/a", """
 TEST(A, B) {
     asio::io_context ioc;
     std::thread th([&] { ioc.run(); });
@@ -1447,6 +1457,23 @@ TEST(A, B) {
     # (`auto& p = pool; ... p.stop();`, below), and an RAII guard whose member does NOT
     # shadow the pool's name. None is live in tests/ today, which is a statement about this
     # tree and exactly why it ships as a case.
+    # ⚠️ ASSERTS THE WRONG ANSWER, ON PURPOSE, and it is the axis's own inconsistency.
+    # `JOINED-BEFORE-GET` is a POSITIVE DISMISSAL ("it blocks until the work is done")
+    # reached by a bare lexical `join(` anywhere in `seg` -- so a join in a bail-out branch
+    # the get never shares produces it, and at the get the pool has NOT been joined. That
+    # is exactly the branch-exclusivity capability this axis's header cites as its reason
+    # for declining a different extension, shipped on the one dismissing value it did add.
+    # It survives because it misclassifies between two NON-hazards (`JOINED` and `LIVE`
+    # both say "no hazard here") and no live row carries it -- but the legend sentence is
+    # false for such a row, and the legend now says so.
+    ("S-l  KNOWN LIMIT: a join in a bail-out branch the get does not share", """
+TEST(A, B) {
+    asio::thread_pool pool{4};
+    auto fut = asio::co_spawn(pool, s.open(), asio::use_future);
+    if (bail) { pool.join(); return; }
+    (void)fut.get();
+}
+""", "JOINED-BEFORE-GET"),
     ("S-k  KNOWN LIMIT: a retirement through a REFERENCE ALIAS", """
 TEST(A, B) {
     asio::thread_pool pool{4};
@@ -1710,9 +1737,12 @@ if disposition:
     for sd_, n in selfdrive_tab.most_common():
         print(f"  {n:>4}  {sd_}")
     print("  `POOL` claims the pool completes the frame without the calling thread. That")
-    print("  holds only while the pool is still running, and these are the two shapes that")
-    print("  void it -- both MEASURED in tests/sync/test_co_spawn_work_guard_contract.cpp,")
-    print("  arms 8 and 9, every half proven RED by mutation:")
+    print("  holds only while the pool is still running, and these are the shapes that void")
+    print("  it. ⚠️ READ EACH VALUE\'S OWN NOTE FOR WHAT BACKS IT -- they are not equally")
+    print("  evidenced. The CLAUSES are measured in")
+    print("  tests/sync/test_co_spawn_work_guard_contract.cpp arms 8 and 9, every half")
+    print("  proven RED by mutation; one value\'s ORDERING deliberately has no arm and says")
+    print("  so where it is defined:")
     print("    RETIRED-BEFORE-SPAWN  a stop()/join() on the pool ABOVE the spawn (clause")
     print("                          S1). The frame is queued on a driver that is gone.")
     print("    STOPPED-BEFORE-GET    stop() between the spawn and the get (clause S2). It")
@@ -1735,6 +1765,11 @@ if disposition:
     print("                          RAII member that does not shadow reads LIVE. Case")
     print("                          `S-k` pins it. This is the direction that COSTS --")
     print("                          `S-f`/`S-j` pin the cheap one.")
+    print("  ⚠️ `JOINED-BEFORE-GET` IS A DISMISSAL REACHED BY A BARE LEXICAL `join(`, so a")
+    print("  join in a bail-out branch the get never shares produces it -- the same")
+    print("  branch-exclusivity hole this legend cites for declining the extension below.")
+    print("  It ships because it misclassifies between two NON-hazards and no live row")
+    print("  carries it; case `S-l` pins it so the inconsistency cannot go quiet.")
     print("  ⚠️ THE SCAN IS LEXICAL, SO AN ESCALATION IS A QUESTION, NOT A FINDING. A")
     print("  stop()/join() written inside a body that runs LATER -- an RAII destructor, a")
     print("  lambda -- is recorded at the position it is WRITTEN, so a guard DECLARED above")
