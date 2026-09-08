@@ -1065,7 +1065,7 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 //     auto val = fut.get();        // <- unconditional
 //
 // `run()` returns when the context has NO WORK LEFT, which is not the same as "the
-// coroutine finished". Two ways it returns early, and the second is the live one:
+// coroutine finished". Two ways it returns early:
 //
 //   (a) the frame is suspended on something this context does not drive -- an op on a
 //       different executor, an external promise -- so the work count reaches zero with the
@@ -1075,6 +1075,35 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 //       reuse one `io_context` across several `co_spawn`/`run` pairs and hand-write the
 //       `restart()` between them; a missing one is a one-line edit away and turns the
 //       `get()` below into a permanent wedge with no diagnostic at all.
+//
+// ⚠️ (a) CANNOT FIRE WHILE THE SPAWN EXECUTOR'S CONTEXT IS THE DRIVEN ONE. That is the
+// CONDITION, and it is measured rather than argued here:
+//     tests/sync/test_co_spawn_work_guard_contract.cpp
+// Arm 1 is (a)'s own case -- a frame parked on an op this context does not drive -- and
+// shows the context UNEXHAUSTED. Arm 4 is one token away, the frame spawned on a
+// DIFFERENT context, and shows the driven one exhausting at once with the frame live. So
+// (a) is what happens when the condition does not hold, and checking it is checking a
+// name, not enumerating a coroutine's suspension points.
+// ⚠️ THAT LEAVES (b) AS THE LIVE ONE OF THE TWO ABOVE. It is arm 3, and it is the reason
+// the success path below still touches no context state: see the `restart()` note further
+// down, which this does not change.
+// ⚠️ THE LIST OF TWO IS NOT EXHAUSTIVE, and calling it "the two ways" is what let (a)
+// stand unchallenged for so long. A third: someone called `ioc.stop()`, after which
+// `run()` returns with the frame parked exactly as in (b). A fourth is not about `run()`
+// at all -- exhaustion means the FRAME completed, which is not the same as the FUTURE
+// being ready when the completion token carries a foreign associated executor (arm 6).
+// Both are measured in the same file; neither has a live site under `tests/` today, and
+// that last clause is a measurement, not a property.
+// ⚠️ WHAT THIS FUNCTION BUYS AGAINST (b), STATED AT THE WIDTH IT ACTUALLY HOLDS: the
+// `run()` below is followed by a readiness check ON `fut`, so a run that dispatched
+// nothing cannot reach `return true` with `fut` unready -- it yields either an
+// already-ready `fut` or a REPORTED miss via `kRunMiss`. Loud either way, for `fut`.
+// ⚠️ IT SAYS NOTHING ABOUT ANY OTHER FUTURE. A caller that guards `fh` here and then
+// `.get()`s a DIFFERENT future needs its own argument, and an earlier draft of this
+// paragraph generalised past that -- claiming (b) "is not a wedge at a migrated site",
+// unqualified, while the body checks one future. A hostile round found the over-reach.
+// The narrow statement is the durable one; anything wider is a claim about callers, which
+// belongs in a batch record and not in a header.
 //
 // ⚠️ THE MISS BRANCH IS ONE FIXED SHAPE HERE, WHICH IS WHY IT IS INSIDE. Every other #289
 // recipe spells its miss branch at the site because the branches VARY -- `drain_or_report`

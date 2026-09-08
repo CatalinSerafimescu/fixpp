@@ -57,12 +57,13 @@ function(add_sync_test name)
     ENVIRONMENT "SYNC_FIXTURES_DIR=${SYNC_FIXTURES_DIR};SYNC_GREP_GATE_SCRIPT=${SYNC_GREP_GATE_SCRIPT}")
 endfunction()
 
-# ── 068 US2: sync_pure_tests grouped bucket (29 .cpp) ────────────────────────
+# ── 068 US2: sync_pure_tests grouped bucket ─────────────────────────────────
 # Single-threaded-coroutine seams — no std::thread/std::jthread/std::async/
-# thread_pool anywhere in these 29 files (grepped). Carries the same baseline
+# thread_pool anywhere in these files (grepped; the source list below is the
+# authoritative membership, and a count here would rot on every addition). Carries the same baseline
 # ENVIRONMENT the add_sync_test helper sets (SYNC_FIXTURES_DIR +
 # SYNC_GREP_GATE_SCRIPT) — homogeneous across the family per FR-005; almost
-# none of these 29 actually reference those env vars (only the CI-grep-gate
+# none of them actually reference those env vars (only the CI-grep-gate
 # driver does, and it stays standalone below for its own heterogeneous-ENV
 # reason), so the bucket-wide ENVIRONMENT is a harmless no-op for the rest.
 add_executable(sync_pure_tests
@@ -95,6 +96,8 @@ add_executable(sync_pure_tests
   test_async_mutex_layout_golden.cpp
   test_consumer_contract_compile.cpp
   test_atomic_shared_ptr_primitive.cpp
+  # #289 batch 21: the co_spawn work-guard contract the residual triage rests on.
+  test_co_spawn_work_guard_contract.cpp
 )
 target_link_libraries(sync_pure_tests PRIVATE
   fixpp_sync

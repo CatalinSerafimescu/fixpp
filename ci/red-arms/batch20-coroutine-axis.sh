@@ -59,8 +59,17 @@ cp -r ci "$TMP/ci" || exit 2
 # that section would have made it print nothing, `${now:-0}` would have supplied a 0, and
 # ARM 0 -- the arm asserting a zero -- would have PASSED on a parse failure. That is this
 # repo's signature defect placed inside the arm written to prevent it. Each unguarded row
-# already carries a machine-stable `x CORO]` / `x CALLER-SIDE]` tag, which is what ARM 1
-# greps two calls below; `grep -c` prints 0 rather than nothing when there is no match.
+# already carries a machine-stable scope tag, which is what ARM 1 greps two calls below;
+# `grep -c` prints 0 rather than nothing when there is no match.
+#
+# ⚠️ MATCH THE TAG BY KEY, NEVER BY POSITION -- AND ONE FORMAT IS ENOUGH, BECAUSE THIS
+# ARM SUBSTITUTES THE CORPUS, NOT THE SCRIPT: `git archive` supplies the historical
+# `tests/`, `cp -r ci` supplies TODAY's sweep, so both arms read today's tag. #289 batch
+# 21 appended a fourth field and the old positional `x CORO]` stopped matching: ARM 0 --
+# the arm ASSERTING a zero -- went vacuous, and only ARM 1 going blind at the same time
+# made the script fail at all, since tier1 does not run this arm. The tag is now
+# key-addressable, so a fifth axis costs this consumer nothing.
+_SCOPE_CORO='scope=CORO'
 #
 # ⚠️ AND IT MUST FAIL LOUDLY WHEN THE SWEEP DOES. `grep -c` prints `0` for a sweep that
 # never ran -- a bad `--root`, a python error, a syntax error in the script -- so an
@@ -85,7 +94,7 @@ coro_unguarded() {  # $1 = root. Prints the count; returns non-zero if the sweep
     # exits 1 when there is no match, and under `pipefail` that made the function report
     # failure for the ONE answer ARM 0 exists to confirm. The sweep's own status and the
     # corpus size are checked ABOVE, so by here a zero can only mean zero rows.
-    printf '%s\n' "$out" | { grep -c 'x CORO\]' || true; }
+    printf '%s\n' "$out" | { grep -cE "$_SCOPE_CORO" || true; }
 }
 
 fails=0
@@ -120,7 +129,7 @@ if ! was=$(coro_unguarded "$TMP"); then
 elif [ "$was" -gt 0 ]; then
     echo "  ok    CORO unguarded = $was at $BASE -- the axis reports non-zero on real code."
     bash "$TMP/ci/pump-get-sweep.sh" --root "$TMP" --disposition --quiet 2>/dev/null \
-        | grep -F 'x CORO]' | sed 's/^/        /' | head -20
+        | grep -E "$_SCOPE_CORO" | sed 's/^/        /' | head -20
 else
     echo "  !!BAD CORO unguarded = 0 at $BASE too. The axis cannot report non-zero on a"
     echo "        corpus where the sites are known to be unguarded, so ARM 0's zero is"

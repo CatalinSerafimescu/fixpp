@@ -101,23 +101,58 @@ else
   ok "S0 the driver ran to completion"
 fi
 
-# ⚠️ THE CALIBRATION TOLERANCE IS RELAXED HERE, AND ONLY IT. This file
-# deliberately runs a WEAKENED witness (200k iterations, 2 repeats) so 8 witness
-# calls cost a rounding error on a job that runs on every push. A weakened
-# witness has correspondingly higher variance — and judging it against a
-# tolerance calibrated for the full-strength one made this cell FLAKY, observed
-# voiding on a contended host between two otherwise identical runs. An
-# intermittent red on ci-script-pins is worse than no cell at all: it trains
+# ⚠️ EVERY VOID AXIS THAT JUDGES THE HOST IS DISABLED HERE. That is the rule,
+# and it is not three ad-hoc numbers: the verdict VOIDs a sample either because
+# the SAMPLE is inconsistent or because the HOST did not hold still. This file
+# runs on a shared GitHub runner and checks the PLUMBING — that the driver
+# writes what the verdict reads. A host that did not hold still is not a defect
+# in the plumbing, so on this invocation the host axes decide nothing:
+#
+#   --calib-tolerance-pct    the machine's own speed drifted
+#   --tolerance-pct          the two serial passes disagreed (A-vs-A')
+#   --steal-tolerance-ticks  another tenant appeared on the physical host
+#
+# The sample axes are untouched, which is what keeps the accept a judgement:
+# cell S3 below corrupts a produced field and this same invocation still
+# REJECTS it.
+#
+# ⚠️ Do not collapse the three into one cause. They are made unusable here by
+# different properties of this harness, and borrowing one's reason for another
+# is how the second one got missed for a release:
+#
+#  - calibration: this file deliberately runs a WEAKENED witness (200k
+#    iterations, 2 repeats) so 8 witness calls cost a rounding error on a job
+#    that runs on every push, and a weakened witness has correspondingly higher
+#    variance than the band calibrated for the full-strength one.
+#  - A-vs-A' (#397): NOT the witness — this axis never reads it. It is the
+#    CORPUS: these "tests" are `cmake -E sleep 0.4`, so a pass is a few seconds
+#    of sleeping with no computational content, and a band that means something
+#    across a real multi-minute campaign is measuring the runner's scheduler
+#    here. Observed RED at 5.4 % — serial A 5.1 s vs A' 4.8 s — with the
+#    plumbing entirely healthy.
+#  - steal: neither. A shared runner simply has other tenants, and the shipped
+#    default of 0 ticks VOIDs on any rise at all. Not yet observed failing here;
+#    it is the same shape as the A-vs-A' flake and is disabled for the same
+#    reason, rather than waiting to be found the hard way.
+#
+# An intermittent red on ci-script-pins is worse than no cell at all: it trains
 # everyone to re-run.
 #
-# It is the tolerance the weakened input cannot support, so it is the tolerance
-# that moves. Nothing else is relaxed, and this does not make the accept
-# vacuous: the verdict's tolerances are pinned by T1/T9/T10/T28 of
-# ci/test-parallelism-verdict.sh, where the inputs are synthetic and exact, and
-# cell S3 below proves this same invocation still REJECTS a corrupted sample.
-# What this file checks is the plumbing — that the driver writes what the
-# verdict reads — which is exactly what those synthetic cells cannot see.
-VERDICT_ARGS=(--calib-tolerance-pct 500)
+# Each value is set high enough that its axis CANNOT decide this cell, rather
+# than tuned to a drift someone once observed. A number chosen to clear today's
+# noise is a MEASUREMENT wearing a threshold's clothing, and it rots the next
+# time the runner is busier — which is exactly how #397 happened.
+#
+# None of this makes the accept vacuous: the real bands are pinned by
+# T1/T9/T10/T12/T28/T41 of ci/test-parallelism-verdict.sh, where the inputs are
+# synthetic and exact and no host is involved; S3 proves rejection still fires;
+# and S1b proves the A-vs-A' widening ANNOUNCES itself on the page.
+#
+# ⚠️ ONLY the A-vs-A' widening self-announces — the verdict prints no banner for
+# a widened calibration or steal tolerance. For those two this comment IS the
+# disclosure, which is why it names them explicitly rather than leaving them to
+# be read off the command line.
+VERDICT_ARGS=(--calib-tolerance-pct 500 --tolerance-pct 500 --steal-tolerance-ticks 1000000)
 
 # The witness files themselves, asserted directly rather than inferred from the
 # verdict's happiness: a verdict that stopped reading them would otherwise still
@@ -139,6 +174,29 @@ if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qF "VALID — this sample is ev
 else
   printf '%s\n' "$out" | sed 's/^/  | /'
   bad "S1 the verdict accepts what the driver produced — exit $rc"
+fi
+
+# S1b: THE WIDENING MUST BE VISIBLE. --tolerance-pct above disables an axis this
+# file does not check, and the only thing standing between that and a hidden
+# weakening is the verdict's own banner. T41 of ci/test-parallelism-verdict.sh
+# proves the verdict CAN emit it from a synthetic input; this cell proves THIS
+# invocation actually does — i.e. that the flag reaches the verdict at all,
+# which is the plumbing claim and the one a synthetic cell cannot make.
+#
+# It is a witness, not merely a notice: the banner is gated on
+# `args.tolerance_pct > DEFAULT_TOLERANCE_PCT` and the A-vs-A' comparison is
+# `drift > args.tolerance_pct` — the SAME variable — so a green here proves the
+# widened value reached the comparison, not just the printer.
+#
+# If the widening is ever removed (because #397 was fixed at the source), the
+# banner goes with it and this cell goes RED. That is correct: delete the flag
+# and this cell in the SAME commit. Do not keep the cell green by re-adding a
+# widening nobody wants.
+if printf '%s' "$out" | grep -qF "The A-vs-A' tolerance was WIDENED"; then
+  ok "S1b the A-vs-A' widening is disclosed on the page"
+else
+  printf '%s\n' "$out" | sed 's/^/  | /'
+  bad "S1b the A-vs-A' widening is NOT disclosed — this sample would read as one judged at the shipped band"
 fi
 
 # THE ASSERTION THIS FILE EXISTS FOR.  `--parallel 1` must have beaten the
@@ -504,7 +562,7 @@ case "$s11_in" in
     bad "S11 an --out INSIDE the source tree was accepted — the sample would dirty the tree and fail codegen-build-graph-check in every pass" ;;
 esac
 
-SEAM_DECLARED=13
+SEAM_DECLARED=14
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$SEAM_DECLARED" ]; then

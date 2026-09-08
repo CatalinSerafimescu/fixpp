@@ -137,7 +137,11 @@ disposition = sys.argv[4] == "1"
 # share the tail `then_ready` and nothing else, so a new spelling needs its own
 # alternative here and its own control below. Widening this without the control is how a
 # migration reads as unguarded and gets "migrated" a second time.
-GUARD = re.compile(r"run_window_then_ready|run_to_exhaustion_or_report|"
+# Spelled ONCE. `GUARD` and the DRIVE axis both need this name, and a rename taught to
+# only one of them leaves the sweep quietly blind in exactly one axis. No regex
+# metacharacters, so the interpolation below expands byte-identically.
+_EXHAUST_HELPER = "run_to_exhaustion_or_report"
+GUARD = re.compile(rf"run_window_then_ready|{_EXHAUST_HELPER}|"
                    r"yield_window_then_ready|"
                    r"pump_until_ready|pump_until\(|"
                    r"wait_for\([^)]*\)\s*[=!]=\s*std::future_status|"
@@ -274,6 +278,111 @@ _THREADRUN = re.compile(r"(?:std::jthread|std::thread|std::async)[^;]{0,400}?(\w
 _UNBOUNDED = re.compile(r"([\w>.\-]+)\.run\(")
 _BOUNDED = re.compile(r"\.run_for\(|\.run_until\(|\.poll\(|\.poll_one\(")
 
+# ── the DRIVE axis (batch 21) ────────────────────────────────────────────────
+# ⚠️ THIS AXIS EXISTS BECAUSE `RUN-UNBOUNDED` DOES NOT SAY *WHICH* CONTEXT RAN.
+# `unbounded(seg)` is satisfied by a `.run(` on ANY context declared in the file, and
+# the pump-shape axis then reads RUN-UNBOUNDED whether that run drove the context this
+# future was spawned on or a different one entirely. For deciding whether the run above
+# a site dominates it, that is the whole question.
+#
+# WHAT MAKES THE ANSWER STRUCTURAL RATHER THAN PER-FILE, and it is measured, not read
+# off a header: `asio::co_spawn` holds `execution::outstanding_work.tracked` on the
+# SPAWN executor for the frame's whole lifetime (`asio/impl/co_spawn.hpp`,
+# `co_spawn_work_guard` / `co_spawn_state`). A live frame is therefore outstanding work
+# on that context whatever it is parked on, so a `run()` that returned by EXHAUSTION
+# cannot have left it suspended. `tests/sync/test_co_spawn_work_guard_contract.cpp` is
+# what establishes this, including the clauses it holds under:
+#
+#   clause 1  the spawn executor's context IS the driven one   (arm 4 -- one token from
+#             arm 1 and it reads the opposite way, which is why `base` is compared)
+#   clause 2  the run is not a post-exhaustion no-op            (arm 3 -- `run()` on a
+#             stopped context dispatches NOTHING; `restart()` is the site's own to write)
+#
+# ⚠️ CLAUSE 2 IS NOT DECIDED HERE AND THIS AXIS DOES NOT CLAIM IT. Whether an earlier
+# un-restarted `run()` precedes a site is a question about state before the spawn, which
+# `seg` (statements SINCE the spawn) cannot see. So EXHAUSTED is an ANNOTATION, in the
+# same sense THREAD-IN-FILE is escalation: it says a dominating exhaustion drive on the
+# right context is present, not that the site is safe.
+# ⚠️ AND `base` IS LEXICAL. An alias, a `&`-bound reference, a strand spelled through
+# `.get_executor()` on something else, or a context reached through a fixture member this
+# regex does not resolve all read as a different name. For THOSE the error direction is
+# toward NO-VISIBLE-EXHAUSTION -- more reading, not less.
+#
+# ⚠️ THAT IS A PROPERTY OF NAME RESOLUTION, NOT OF THE AXIS, AND READING IT AS THE LATTER
+# IS THE MISTAKE. The shapes that produce a FALSE `EXHAUSTED` -- the DISMISSING direction --
+# are NOT listed here in prose. They are `LIMIT_CASES` below: real inputs, run through
+# `classify()` on every invocation, each asserting the wrong answer the axis actually gives.
+#
+# ⚠️ THAT IS DELIBERATE AND IT IS THE SECOND ATTEMPT. A prose list stood here and one of its
+# five entries -- "sibling blocks reusing a context NAME" -- DID NOT REPRODUCE: it imported
+# the guarded-state boundary limitation registered above onto THIS axis, where it does not
+# apply, because `since[]` resets at every `_AUTO_SPAWN` binding and not at a boundary. The
+# list even claimed each entry had been run. Replacing that entry with a truer one would
+# have been the same artifact one round later; a control cannot be false without going RED.
+#
+# The population these shapes are empty over is TODAY'S TREE, not a property. Re-derive:
+#     git grep -n '\.stop()' -- tests/
+#
+#   drive:  EXHAUSTED             a `<spawn-ctx>.run(` or `run_to_exhaustion_or_report(
+#                                 <spawn-ctx>, ...)` appears above the get(). ⚠️ NOT "the
+#                                 run dominates the get" -- that is the reading the list
+#                                 below falsifies, and it is the phrasing this axis's
+#                                 PRINTED summary had to have removed from it.
+#           NO-VISIBLE-EXHAUSTION it does not. READ THE SITE.
+#
+# ⚠️ ONE PREDICATE, over the SAME receiver normalisation `unbounded()` uses. An earlier
+# draft spelled `\b{base}\.run\(` inline here, which is a THIRD run-detector with a
+# THIRD receiver rule: it accepted `ioc . run(` that `_UNBOUNDED` misses and dropped the
+# `->`-qualified receivers `_UNBOUNDED` normalises, so one `run()` token could read
+# RUN-UNBOUNDED and NO-VISIBLE-EXHAUSTION at once.
+# ⚠️ IT IS DELIBERATELY *NOT* FOLDED INTO `unbounded()`. The helper spelling contains no
+# literal `.run(`, so admitting it there would move control 4c from HELPER to
+# RUN-UNBOUNDED -- silently re-interpreting an axis whose counts the batch 18/19/20
+# records quote. The axes answer different questions; they share only the normalisation.
+_EXHAUST = re.compile(rf"([\w>.\-]+)\.run\(|{_EXHAUST_HELPER}\s*\(\s*([\w>.\-]+)\s*,")
+
+
+def _last_name(tok):
+    """The receiver's final segment -- `f->ioc` and `f.ioc` both resolve to `ioc`."""
+    return tok.replace("->", ".").split(".")[-1]
+
+
+def _spawn_base(ex):
+    """The declared-context name a spawn executor expression resolves to, or "".
+
+    ⚠️ AN EXPRESSION THE CAPTURE TRUNCATED MUST RESOLVE TO NOTHING, NOT TO ITS PREFIX.
+    `_SPAWN_EXEC` stops at the first comma, so a first argument that CONTAINS one is cut
+    mid-expression -- and the prefix can still end in a name that resolves. Measured
+    counter-example, from a hostile round:
+
+        futs.push_back(asio::co_spawn((s.pool, ioc), waiter(), asio::use_future));
+
+    captures `(s.pool`, whose last segment is `pool`, which `_POOLDECL` has seen -- so the
+    row read `POOL`, a POSITIVE DISMISSAL, while the comma operator makes the real executor
+    `ioc`. Unbalanced parentheses are the tell that the capture is a fragment; a fragment
+    resolves to "", which is in no executor set and in no `ctxnames`, so the row escalates
+    and can never read EXHAUSTED. Control `4g`.
+    """
+    if ex.count("(") != ex.count(")"):
+        return ""
+    return _last_name(re.sub(r"\.get_executor\(\)$", "", ex).lstrip("*&"))
+
+
+def exhausts(seg, base, ctxnames):
+    r"""Does a run-to-EXHAUSTION on `base` appear in `seg`? Both spellings.
+
+    ⚠️ `base in ctxnames` IS EDGE 1 AGAIN, AND HERE IT GUARDS A POSITIVE DISMISSAL.
+    `_UNBOUNDED` carries the same `([\w>.\-]+)\.run\(` and `unbounded()` gates it on the
+    receiver resolving to a context DECLARED in the file -- without that, a fixture method
+    `f.run(300)` reads as a context run. In the pump-shape axis that mislabels a bucket;
+    here it would turn a BOUNDED fixture pump into `EXHAUSTED`, which is a dismissal.
+    Latent rather than live -- no candidate row's `base` is a fixture name today -- which
+    is exactly why it needs a rule and not a survey.
+    """
+    if base not in ctxnames:
+        return False
+    return any(_last_name(m.group(1) or m.group(2)) == base for m in _EXHAUST.finditer(seg))
+
 # ── the CALL-SITE-SCOPE axis (batch 20) ──────────────────────────────────────
 # ⚠️ THIS AXIS EXISTS BECAUSE BATCH 19's BUCKET WENT TO 1 AND ITS CLASS DID NOT.
 # `CALLER-ONLY x HELPER` counted 9 sites before batch 19 and 1 after, and the record
@@ -379,7 +488,18 @@ def coroutine_line_spans(lines):
 # ⚠️ IT MUST NOT ADMIT `unique_ptr::get()`. A naive get-anchored probe over the same
 # corpus returned 29 hits of which 16 were `dynamic_cast<T*>(client.get())` -- the
 # receiver has to trace back to a `co_spawn(..., use_future)` or the axis is noise.
-_PUSH_SPAWN = re.compile(r"\b(\w+)\s*\.\s*(?:push_back|emplace_back)\s*\(\s*asio::co_spawn\s*\(")
+# ⚠️ GROUP 2 IS THE SPAWN EXECUTOR, AND IT WAS MISSING UNTIL #289 BATCH 21. The batch-20
+# form captured only the container, and `execs` was then filled with the REMAINDER of the
+# push statement -- so `base` for a container row was the tail of
+# `ioc, waiter_body(), asio::use_future));`, i.e. `use_future));`. That name is in neither
+# `pools` nor `threaded`, so every container row fell through to THREAD-IN-FILE or
+# CALLER-ONLY by the value of `anythread` alone. It never produced a false CLEAN -- both
+# fallbacks are the escalating ones, and in a thread-free file CALLER-ONLY is also the
+# right answer -- but it was safe by ACCIDENT, not by measurement: a container filled from
+# a `thread_pool` would have read CALLER-ONLY rather than POOL. Control: `4c`.
+_SPAWN_EXEC = r"asio::co_spawn\s*\(\s*([^,]+?)\s*,"
+_PUSH_SPAWN = re.compile(r"\b(\w+)\s*\.\s*(?:push_back|emplace_back)\s*\(\s*" + _SPAWN_EXEC)
+_AUTO_SPAWN = re.compile(r"\bauto\s+(\w+)\s*=\s*" + _SPAWN_EXEC)
 _RANGE_FOR = re.compile(r"\bfor\s*\(\s*(?:const\s+)?auto\s*&?&?\s*(\w+)\s*:\s*(\w+)\s*\)")
 
 
@@ -424,7 +544,7 @@ def classify(text):
             name = pm.group(1)
             known.add(name)
             guarded_state.setdefault(name, False)
-            execs.setdefault(name, _PUSH_SPAWN.sub("", stmt).strip())
+            execs.setdefault(name, pm.group(2))
             since.setdefault(name, [])
         # ⚠️ THE ALIAS PERSISTS UNTIL THE NEXT RANGE-FOR OR BOUNDARY, on purpose: the
         # guard and the `.get()` are separate statements inside the loop BODY, so an
@@ -433,7 +553,7 @@ def classify(text):
         if fm:
             alias_elem, alias_cont = ((fm.group(1), fm.group(2))
                                       if fm.group(2) in known else (None, None))
-        m = re.search(r'\bauto\s+(\w+)\s*=\s*asio::co_spawn\s*\(\s*([^,]+?)\s*,', stmt)
+        m = _AUTO_SPAWN.search(stmt)
         if m and "use_future" in stmt:
             known.add(m.group(1))
             # ⚠️ ONLY AN `auto NAME = co_spawn(...)` RE-BINDING RESETS THE GUARD. A bare
@@ -476,16 +596,19 @@ def classify(text):
                 guarded.append(scope_of(start))
             else:
                 ex = execs.get(name, "?")
-                base = re.sub(r'\.get_executor\(\)$', '', ex).lstrip('*&') \
-                         .replace("->", ".").split('.')[-1]
+                base = _spawn_base(ex)
                 ec = ("POOL" if base in pools else
                       "THREADED" if base in threaded else
                       "THREAD-IN-FILE" if anythread else "CALLER-ONLY")
                 seg = " ".join(since.get(name, []))
                 pc = ("RUN-UNBOUNDED" if unbounded(seg) else
                       "RUN-BOUNDED" if _BOUNDED.search(seg) else "HELPER")
+                # Must name `base`: a run on a DIFFERENT context dominates nothing
+                # (clause 1, arm 4).
+                dv = ("EXHAUSTED" if exhausts(seg, base, ctxnames)
+                      else "NO-VISIBLE-EXHAUSTION")
                 bad.append((start + 1, lines[start].strip() or stmt[:70], ec, pc,
-                            scope_of(start)))
+                            scope_of(start), dv))
     return guarded, bad
 
 # ── SELF-TEST on SYNTHETIC fixtures ──────────────────────────────────────────
@@ -899,6 +1022,157 @@ TEST(A, B) {
 """, (1, "CALLER-SIDE")),
 ]
 
+# ── controls for the DRIVE axis and the container SPAWN EXECUTOR (batch 21) ──
+# The pair that carries this axis is 4a/4b: the SAME two statements, differing only in
+# WHICH context the bare run() names. A rule that cannot separate them is not measuring
+# domination, it is counting the word `run`.
+# `want` is (executor-class, pump-shape, drive).
+DRIVE_CASES = [
+    ("4a  bare run() on the SPAWN context           -> EXHAUSTED", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run();
+    (void)fut.get();
+}
+""", ("CALLER-ONLY", "RUN-UNBOUNDED", "EXHAUSTED")),
+    ("4b  ...the SAME run() on ANOTHER context      -> NO-VISIBLE-EXHAUSTION", """
+TEST(A, B) {
+    asio::io_context ioc;
+    asio::io_context other;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    other.run();
+    (void)fut.get();
+}
+""", ("CALLER-ONLY", "RUN-UNBOUNDED", "NO-VISIBLE-EXHAUSTION")),
+    ("4c  run_to_exhaustion_or_report naming ANOTHER future -> EXHAUSTED", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
+    std::vector<std::future<void>> futs;
+    futs.push_back(asio::co_spawn(ioc, waiter(), asio::use_future));
+    if (!run_to_exhaustion_or_report(ioc, fh, "Site")) return;
+    for (auto& f : futs) f.get();
+}
+""", ("CALLER-ONLY", "HELPER", "EXHAUSTED")),
+    ("4d  a BOUNDED run_for is not exhaustion       -> NO-VISIBLE-EXHAUSTION", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run_for(200ms);
+    (void)fut.get();
+}
+""", ("CALLER-ONLY", "RUN-BOUNDED", "NO-VISIBLE-EXHAUSTION")),
+    # ⚠️ 4e IS THE CONTROL FOR THE `_PUSH_SPAWN` EXECUTOR CAPTURE, and it is the one that
+    # would have read a POSITIVE DISMISSAL wrong rather than merely escalating: before
+    # batch 21 the container's spawn executor was never parsed, so this case read
+    # THREAD-IN-FILE (`asio::thread_pool` sets `anythread`) instead of POOL.
+    # ⚠️ 4f IS THE STRADDLE FOR THE `ctxnames` GATE, and it is the one whose failure is a
+    # DISMISSAL rather than an escalation: `f.run(300)` is a fixture method, and without the
+    # gate its receiver reads as a context run-to-exhaustion. Same edge the pump-shape axis
+    # already pays for -- restated here because this axis makes it costlier.
+    ("4f  a FIXTURE method run() is not an exhaustion -> NO-VISIBLE-EXHAUSTION", """
+struct F {
+    asio::io_context ioc;
+    auto get_executor() { return ioc.get_executor(); }
+    void run(int ms = 400) { ioc.run_for(ms); }
+};
+TEST(A, B) {
+    F f;
+    auto fut = asio::co_spawn(f.get_executor(), s.open(), asio::use_future);
+    f.run(300);
+    (void)fut.get();
+}
+""", ("CALLER-ONLY", "HELPER", "NO-VISIBLE-EXHAUSTION")),
+    # ⚠️ 4g STRADDLES THE CAPTURE'S OWN LIMIT. The first co_spawn argument contains a comma,
+    # so `_SPAWN_EXEC` truncates it -- and the fragment `(s.pool` still ends in a declared
+    # pool name. Without `_spawn_base`'s balance check this reads POOL: a self-driving
+    # DISMISSAL on a row whose executor is actually the caller's `ioc`.
+    ("4g  a TRUNCATED executor expression must escalate, not resolve", """
+struct S { asio::thread_pool pool{1}; };
+TEST(A, B) {
+    S s;
+    asio::io_context ioc;
+    std::vector<std::future<void>> futs;
+    futs.push_back(asio::co_spawn((s.pool, ioc), waiter(), asio::use_future));
+    ioc.run();
+    for (auto& f : futs) f.get();
+}
+""", ("THREAD-IN-FILE", "RUN-UNBOUNDED", "NO-VISIBLE-EXHAUSTION")),
+    ("4e  a container filled from a thread_pool     -> POOL", """
+TEST(A, B) {
+    asio::thread_pool pool{4};
+    std::vector<std::future<void>> futs;
+    futs.push_back(asio::co_spawn(pool, s.open(), asio::use_future));
+    for (auto& f : futs) f.get();
+}
+""", ("POOL", "HELPER", "NO-VISIBLE-EXHAUSTION")),
+]
+
+# ── KNOWN-LIMITATION cases for the DRIVE axis (batch 21) ─────────────────────
+# ⚠️ THESE ASSERT THE **WRONG** ANSWER, ON PURPOSE. Each is a shape where the axis says
+# `EXHAUSTED` and the run does NOT dominate the get -- the DISMISSING direction, which is
+# the one that costs. They exist so the disclosure in the DRIVE axis header cannot be false
+# without something going RED, after a prose version of this list shipped an entry that did
+# not reproduce.
+#
+# ⚠️ A RED HERE IS NOT A REGRESSION. It means the axis got SHARPER -- one of these now
+# reads NO-VISIBLE-EXHAUSTION. That is good news, and the required response is to delete
+# the case and the matching sentence in the header, together, in one commit. Fixing the
+# axis and leaving the disclosure is how a correct instrument acquires a false header.
+LIMIT_CASES = [
+    ("L1  `a.ioc` spawned, `b.ioc` run -- one name to `_last_name`", """
+struct F { asio::io_context ioc; };
+TEST(A, B) {
+    F a, b;
+    auto fut = asio::co_spawn(a.ioc, s.open(), asio::use_future);
+    b.ioc.run();
+    (void)fut.get();
+}
+"""),
+    ("L2  a run() in a declared-but-never-invoked lambda", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    auto never = [&] { ioc.run(); };
+    (void)fut.get();
+}
+"""),
+    ("L3  a run() in one arm of an `if` the get() does not share", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    if (cond) { ioc.run(); return; }
+    (void)fut.get();
+}
+"""),
+    ("L4  a run() on a SHADOWING context in a nested block", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    { asio::io_context ioc; ioc.run(); }
+    (void)fut.get();
+}
+"""),
+    ("L5  a run() inside a STRING LITERAL", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    LOG("we used to call ioc.run() here");
+    (void)fut.get();
+}
+"""),
+    ("L6  stop() before the run -- the THIRD way run() returns", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.stop();
+    ioc.run();
+    (void)fut.get();
+}
+"""),
+]
+
 ok = True
 if not quiet:
     print("=== SELF-TEST: get-anchored sweep (synthetic fixtures) ===")
@@ -922,6 +1196,22 @@ for name, src, (want_n, want_sc) in SCOPE_CASES:
     ok &= good
     if not quiet:
         print(f"  {'ok   ' if good else '!!FAIL'} scope: {name}  -> {got[0]} row(s), {got[1]}")
+for name, src, want in DRIVE_CASES:
+    rows_ = classify(src)[1]
+    got = ((rows_[0][2], rows_[0][3], rows_[0][5]) if len(rows_) == 1
+           else ("<%d rows>" % len(rows_), "", ""))
+    good = got == want
+    ok &= good
+    if not quiet:
+        print(f"  {'ok   ' if good else '!!FAIL'} drive: {name}  -> {got[0]}/{got[1]}/{got[2]}")
+for name, src in LIMIT_CASES:
+    rows_ = classify(src)[1]
+    got = rows_[0][5] if len(rows_) == 1 else "<%d rows>" % len(rows_)
+    good = got == "EXHAUSTED"
+    ok &= good
+    if not quiet:
+        note = "" if good else "   <- the axis got SHARPER; delete this case AND its header sentence"
+        print(f"  {'ok   ' if good else '!!FAIL'} known limit: {name}  -> {got}{note}")
 if not ok:
     sys.exit("\nCONTROL FAILED -- sweep output is NOT evidence. Fix before trusting a number.")
 if not quiet:
@@ -961,19 +1251,37 @@ for p in files:
 
 for rel, b in rows:
     print(f"{rel}  ({len(b)} unguarded)")
-    for ln, txt, ec, pc, sc in b:
-        tag = f"  [{ec} x {pc} x {sc}]" if disposition else ""
+    for ln, txt, ec, pc, sc, dv in b:
+        # ⚠️ THIS TAG IS A MACHINE INTERFACE, NOT DECORATION, and batch 21 broke it by
+        # appending a fourth field: `ci/red-arms/batch20-coroutine-axis.sh` matched
+        # `x CORO]`, which POSITION made true only while scope was last. Its ARM 0 --
+        # the arm ASSERTING a zero -- then passed vacuously, which is this repo's #1
+        # defect class landing inside the arm written to prevent it. Keys, so the next
+        # axis costs a consumer nothing; consumers must match `scope=CORO`, never a
+        # position. ⚠️ ONE SPELLING IS ENOUGH even for a consumer that reads a HISTORICAL
+        # corpus: `batch20-coroutine-axis.sh` substitutes the CORPUS, not the script
+        # (`git archive $BASE tests` + `cp -r ci`), so both its arms read today's tag.
+        # An earlier draft of THIS comment asserted the opposite -- that two dialects
+        # were needed "for good" -- and it was wrong; see that arm's own header.
+        tag = (f"  [exec={ec} pump={pc} scope={sc} drive={dv}]") if disposition else ""
         print(f"    {ln:5d}  {txt[:76]}{tag}")
 if disposition:
     import collections
     tab = collections.Counter()
     scope_tab = collections.Counter()
     per = collections.defaultdict(collections.Counter)
+    drive_tab = collections.Counter()
     for rel, b in rows:
-        for _, _, ec, pc, sc in b:
+        for _, _, ec, pc, sc, dv in b:
             tab[(ec, pc)] += 1
             per[(ec, pc)][str(rel)] += 1
             scope_tab[sc] += 1
+            # ⚠️ EXCLUDE THE SELF-DRIVING CLASSES, NOT "everything but CALLER-ONLY".
+            # The first draft restricted this to CALLER-ONLY while its printed reason
+            # named only POOL and THREADED -- and THREAD-IN-FILE, the LARGEST escalation
+            # class, is precisely the one whose reading this annotation orders.
+            if ec not in ("POOL", "THREADED"):
+                drive_tab[(ec, dv)] += 1
     print("\n=== DISPOSITION (executor-class x pump-shape) ===")
     for (ec, pc), n in tab.most_common():
         print(f"  {n:>4}  {ec:<15} {pc}")
@@ -988,6 +1296,21 @@ if disposition:
     print("\n  CORO means the get() is inside an `awaitable`-returning function or lambda,")
     print("  so it runs ON the pumping thread and NO outer driver bounds it -- the")
     print("  executor axis cannot express that, which is why this one exists.")
+    print("\n=== DRIVE, over the rows whose executor does NOT drive itself ===")
+    for (ec, dv), n in sorted(drive_tab.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"  {n:>4}  {ec:<15} {dv}")
+    print("  POOL and THREADED are omitted: those executors drive themselves, so whether")
+    print("  the CALLER also ran the context decides nothing.")
+    print("  EXHAUSTED = a run-to-exhaustion NAMING the spawn context appears above the")
+    print("  get(). That is a LEXICAL reading and it is NOT the claim `the run dominates")
+    print("  the get()` -- `a.ioc` and `b.ioc` are one name here, a `stop()` before the run")
+    print("  is invisible, and control flow is not modelled. Each of those reports")
+    print("  EXHAUSTED where the get() is NOT dominated: the DISMISSING direction.")
+    print("  ⚠️ SO IT IS AN ANNOTATION, NEVER A DISMISSAL. What it buys is an ordering of")
+    print("  the reading, not a verdict. The full list of shapes that fool it, and the")
+    print("  three clauses the underlying argument holds under, are at the DRIVE axis")
+    print("  comment in this file and MEASURED in:")
+    print("      tests/sync/test_co_spawn_work_guard_contract.cpp")
     print("\n  READ THE CLASSES, NOT THE TOTAL. A candidate is a defect only where the")
     print("  CALLING thread must pump. CALLER-ONLY is the only executor class that says")
     print("  so on its own; POOL and THREADED say the opposite; THREAD-IN-FILE says READ")

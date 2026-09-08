@@ -6,6 +6,19 @@ status: stable
 
 # Log
 
+- **2026-09-08 — #289 batch 21, the per-file condition that was false.**
+  `failure-classes.md` gains **class 11** (*an inherited obligation can rest on a false premise, and
+  discharging it faithfully hides that*) and a class-1 bullet (*a classification reached by FALLBACK
+  is not a measurement, even when it is right*). Batch 20 handed over ~27 container `.get()` sites
+  with a per-file suspension-point obligation; `asio::co_spawn` holds `outstanding_work.tracked` on
+  the SPAWN executor for the frame's lifetime, so the obligation collapses to a few lexical clauses,
+  and the ones nobody had named — a `run()` on an already-stopped context, a foreign
+  completion-token executor — are where the remaining risk lives.
+  Arms in `tests/sync/test_co_spawn_work_guard_contract.cpp` establish it; a DRIVE axis in
+  `ci/pump-get-sweep.sh`; hazard (a) in `tests/support/pump_until_ready.hpp` corrected by CONDITION
+  plus a pointer to the arms, per class 2. Record:
+  `decisions/speckit/pr-batch21-the-work-guard-and-the-condition-that-was-false.md`.
+
 - **2026-09-08 — #394, a promptness band that was wrong in both directions.**
   `failure-classes.md` class 1 gains the threshold bullet: a band that flakes is usually also blind,
   and the flake is the half that gets noticed. 088's `EXPECT_LT(elapsed, 100ms)` was **watchdog ÷ 10**
