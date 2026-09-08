@@ -505,6 +505,26 @@ Every `test` row reads `backlog`, and — as with `nfr` — **that is not eviden
 see [`nfr-and-tooling.md`](./nfr-and-tooling.md) for the condition and the derivation recipe. The test
 tree is large and the CI tiers are real. **Do not read this family's status column as coverage.**
 
+## The pump seam (#289) — one primitive, and the copies a census cannot see
+
+`tests/support/pump_until_ready.hpp` is the hoisted primitive six sibling helpers were meant to
+collapse onto. Two things a reader needs that the code does not state:
+
+- **`test_fifo_across_cycles.cpp`'s local `pump_until` is a DELIBERATE non-adopter, not a straggler.**
+  The shared seam is parameterised on a budget and a slice — both wall-clock — so its unit of progress
+  is TIME. That cell's is HANDLERS (`poll_one()`, one at a time), which is what makes its interleaving
+  reproducible. An iteration cap is not expressible as a duration. It becomes a genuine adopter only
+  if `pump_until` ever gains a handler-count bound.
+- **`InteropEngineFixture::run_until` is an ADAPTER, not a seventh spelling.** It delegates; the only
+  thing it adds is reviving a context stopped at entry, which the shared primitive deliberately will
+  not do. Read the disposition at the definition before treating it as un-migrated — its scope has
+  been over-estimated twice, both times from the helper's NAME rather than its body.
+
+⚠️ **The census that tracks this migration keys on DEFINITION SITES, so it cannot see a copy**
+(failure class 13). One survived that way: `first_frame_stop_test.cpp` held a copy of the helper
+`engine_firstframe_test.cpp` had already retired, and its comment cited that file for two things the
+file no longer contains. If you are about to conclude a seam helper is retired, enumerate by shape.
+
 ## Related
 
 - [`nfr-and-tooling.md`](./nfr-and-tooling.md) — the status-column caveat, and where the CI gates live.

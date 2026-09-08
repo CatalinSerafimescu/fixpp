@@ -473,6 +473,39 @@ defect is that its vocabulary is coarser than its subject.
 reports a **true** answer which two different populations both satisfy — the failure is in the
 vocabulary, not the mechanism, so no amount of proving the check can fire will surface it.
 
+### 13. An instrument keyed on an IDENTIFIER is blind to duplication of what it names
+
+A census, ratchet or audit enumerates its population by naming things — a helper, a symbol, a
+definition site. Copy the thing, and the copy is not in the population. The instrument then reports
+the original as **retired** while an instance of it is still live, and it does so truthfully: the
+name it was watching really is gone.
+
+- **Trigger:** any population defined by *where a thing is defined* or *what it is called*, over a
+  corpus where copying is normal — test helpers above all, where a distinct translation unit is a
+  standing, legitimate reason to duplicate rather than share.
+- **Procedure:** enumerate by **shape**, not by name, at least once — the body, the signature, the
+  idiom. Where that is impractical, treat every *"copied rather than shared"* comment as a census
+  entry in its own right, because it is the only record that the copy exists.
+- **Instance.** #289's sibling-helper census lists helper #5 by its definition site — the `run_until`
+  helper in `engine_firstframe_test.cpp`, *"caller-supplied budget / 50 ms slice, in-loop restart"*.
+  That file collapsed onto the shared seam and now defines no `run_until` at all, so the row read as
+  migrated — while `first_frame_stop_test.cpp` still carried a copy of it, whose own comment said it
+  had been *"copied rather than shared"* from exactly that file. ⚠️ The census cites that helper BY
+  LINE NUMBER, and the line had itself rotted — which is how the number reached this page on the
+  first draft, and why it is not repeated here (#310). The copy outlived both its
+  original and the census entry that would have counted it. Record
+  `decisions/speckit/pr-batch22-the-self-driving-clauses-and-the-annotation-that-hid-two-arguments.md` §10.
+- ⚠️ **THE COMMENT THAT RECORDS A COPY IS ALSO THE FIRST THING TO ROT**, because it cites the source
+  it was copied from and nothing updates it when that source changes. Here it made two claims about
+  the origin file and that file supported **neither**. Delete the copy and both claims go with it —
+  do not rewrite them into a fresh claim (class 2).
+- **Scanning heuristic:** grep for `copied rather than shared`, `duplicates`, `same pattern as`,
+  `mirrors`. Each is a census entry nobody registered.
+
+**Sibling.** Class 8 is the same seam from the other side: *consolidating* N copies dissolves the
+population an audit asserts over. This is *creating* one, invisibly. Both say the population is a
+moving object that the instrument's key does not track.
+
 ---
 
 ## How to query the instances
