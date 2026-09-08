@@ -309,25 +309,34 @@ _BOUNDED = re.compile(r"\.run_for\(|\.run_until\(|\.poll\(|\.poll_one\(")
 # toward NO-VISIBLE-EXHAUSTION -- more reading, not less.
 #
 # ⚠️ THAT IS A PROPERTY OF NAME RESOLUTION, NOT OF THE AXIS, AND READING IT AS THE LATTER
-# IS THE MISTAKE. Constructed inputs that produce a FALSE `EXHAUSTED` -- the dismissing
-# direction -- each fed to `classify()` directly, none live in tests/ today:
+# IS THE MISTAKE. Inputs that produce a FALSE `EXHAUSTED` -- the dismissing direction:
 #   - `a.ioc` spawned, `b.ioc` run: `_last_name` collapses both to `ioc`.
-#   - a `run()` inside a declared-but-never-invoked lambda, or in either arm of a branch
-#     the get() does not share: this is a LEXICAL scan, it does not model control flow.
+#   - a `run()` inside a declared-but-never-invoked lambda, in one arm of an `if` the
+#     get() does not share, or in a SHADOWING nested block (`{ asio::io_context ioc;
+#     ioc.run(); }` between the spawn and the get): this is a LEXICAL scan and it does not
+#     model control flow or C++ scope.
 #   - a `run()` inside a STRING LITERAL: `blank_comments` blanks comments and deliberately
 #     keeps literals, because other controls depend on that.
-#   - sibling blocks reusing a context NAME: state resets at a function/TEST boundary, not
-#     at a C++ scope (the limitation the header registers above; batch 21 is what makes it
-#     reach a positive dismissal rather than only a guard state).
 #   - `ioc.stop(); ioc.run();`: a THIRD way `run()` returns, alongside (a) and (b) in
 #     `pump_until_ready.hpp`. The frame stays parked and the future stays unready, and
 #     neither this axis nor a `restart()`-shaped sweep can see it.
-# Re-derive rather than trusting that list -- it is a set of shapes, and the population it
-# is empty over is today's tree:
+#
+# ⚠️ EVERY ENTRY ABOVE WAS RUN THROUGH `classify()`; AN EARLIER REVISION SAID THAT AND ONE
+# ENTRY WAS FALSE. It listed "sibling blocks reusing a context NAME", importing the
+# guarded-state boundary limitation registered above onto THIS axis -- where it does not
+# apply, because `since[]` is reset at every `_AUTO_SPAWN` binding, not at a boundary. All
+# three sibling constructions read NO-VISIBLE-EXHAUSTION. The shape that does reproduce is
+# the SHADOWING nested block now folded into the control-flow entry. A methodology
+# sentence is a claim like any other: re-run the list, do not inherit it.
+#
+# The population these shapes are empty over is TODAY'S TREE, not a property. Re-derive:
 #     git grep -n '\.stop()' -- tests/
 #
 #   drive:  EXHAUSTED             a `<spawn-ctx>.run(` or `run_to_exhaustion_or_report(
-#                                 <spawn-ctx>, ...)` dominates the get().
+#                                 <spawn-ctx>, ...)` appears above the get(). ⚠️ NOT "the
+#                                 run dominates the get" -- that is the reading the list
+#                                 below falsifies, and it is the phrasing this axis's
+#                                 PRINTED summary had to have removed from it.
 #           NO-VISIBLE-EXHAUSTION it does not. READ THE SITE.
 #
 # ⚠️ ONE PREDICATE, over the SAME receiver normalisation `unbounded()` uses. An earlier
@@ -1072,10 +1081,14 @@ TEST(A, B) {
     # gate its receiver reads as a context run-to-exhaustion. Same edge the pump-shape axis
     # already pays for -- restated here because this axis makes it costlier.
     ("4f  a FIXTURE method run() is not an exhaustion -> NO-VISIBLE-EXHAUSTION", """
-struct F { asio::io_context ioc; void run(int ms = 400) { ioc.run_for(ms); } };
+struct F {
+    asio::io_context ioc;
+    auto get_executor() { return ioc.get_executor(); }
+    void run(int ms = 400) { ioc.run_for(ms); }
+};
 TEST(A, B) {
     F f;
-    auto fut = asio::co_spawn(f, s.open(), asio::use_future);
+    auto fut = asio::co_spawn(f.get_executor(), s.open(), asio::use_future);
     f.run(300);
     (void)fut.get();
 }

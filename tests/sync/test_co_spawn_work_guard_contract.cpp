@@ -233,14 +233,27 @@ TEST(SyncCoSpawnWorkGuard, StrandOfTheDrivenContextIsTheDrivenContext) {
 // ── ARM 6 — the clause the first draft did not have ──────────────────────────
 // Exhaustion of the spawn context implies the FRAME completed. It does NOT imply the
 // FUTURE is ready, and the gap is the completion token's own associated executor:
-// `co_spawn_state` (asio/impl/co_spawn.hpp) holds TWO guards, `spawn_work` on the spawn
-// executor and `handler_work` on `get_associated_executor(handler)`. Bind the token to a
-// different context and the final completion is dispatched THERE, while the spawn
-// context's count drops with the frame.
+// `co_spawn_state` (asio/impl/co_spawn.hpp:81-89) holds TWO guards, `spawn_work(ex)` and
+// `handler_work(asio::get_associated_executor(handler, ex))`. The SECOND argument is the
+// whole point: it is the fallback that makes an UNBOUND token's handler executor the spawn
+// executor, so the two guards coincide and nothing is foreign. Bind the token and the
+// fallback is not taken — the final completion is dispatched to that other context while
+// the spawn context's count drops with the frame.
 //
-// ⚠️ NOT LIVE, AND THAT IS A MEASUREMENT, NOT A PROPERTY: no `co_spawn` token under
-// `tests/` is `bind_executor`-wrapped today. Re-derive rather than trusting this:
-//     git grep -n 'co_spawn' -- tests/ | grep bind_executor
+// ⚠️ NOT LIVE IN THE CORPUS THE SWEEP JUDGES, AND THAT IS A MEASUREMENT, NOT A PROPERTY.
+// The arm below IS such a token under `tests/` — five lines down — so the claim has to be
+// scoped to everything else, and an earlier revision was not: it said "no `co_spawn` token
+// under `tests/`", which its own next statement falsifies. The recipe was worse than the
+// claim: written line-oriented it matched only ITS OWN COMMENT and missed the real
+// instance, whose `co_spawn(` and `bind_executor(` sit on different lines. Re-derive with
+// one that spans the call and excludes this file:
+//     git grep -n --heading -A2 'asio::co_spawn' -- tests/ \
+//       ':!tests/sync/test_co_spawn_work_guard_contract.cpp' | grep -B2 bind_executor
+// ⚠️ AND THEN APPLY THE DISCRIMINATOR, because that recipe OVER-MATCHES and the tree
+// contains hits: `co_spawn(ex, awaitable, token)` — only a wrapper on the THIRD argument
+// is what this arm is about. `bind_executor` on the SECOND binds the executor the
+// COROUTINE runs on, which is a different thing and is foreign to nothing. A hit is a
+// question, not a finding.
 TEST(SyncCoSpawnWorkGuard, ForeignHandlerExecutorLeavesTheFutureUnready) {
     asio::io_context ioc;
     asio::io_context other;
@@ -259,6 +272,50 @@ TEST(SyncCoSpawnWorkGuard, ForeignHandlerExecutorLeavesTheFutureUnready) {
            "dismissal while the token carries no foreign executor.";
 
     other.run();
+    EXPECT_TRUE(is_ready(fut));
+}
+
+// ── ARM 7 — the THIRD way `run()` returns, and it is not (b) ─────────────────
+// `pump_until_ready.hpp` enumerates two ways `run()` returns early. A third is an
+// explicit `ioc.stop()`, and it is genuinely distinct from (b) rather than a restatement:
+// here the frame has STARTED and is parked on a real op, where (b)'s frame was never
+// dispatched at all. Both leave `run()` returning with the future unready, which is why
+// the DRIVE axis cannot treat a lexical `run()` above a get() as a dismissal.
+//
+// ⚠️ THIS ARM EXISTS BECAUSE A COMMENT CLAIMED IT ALREADY DID. A hostile round found
+// `pump_until_ready.hpp` asserting the third way was "measured in the same file" when no
+// arm constructed it — arm 3's frame never starts, so it could not stand in. The fix for
+// a claim that something is measured is to measure it.
+TEST(SyncCoSpawnWorkGuard, ExplicitStopReturnsRunWithTheFrameStarted) {
+    asio::io_context ioc;
+    asio::steady_timer t{ioc, kNever};
+    bool started = false;
+
+    auto fut = asio::co_spawn(
+        ioc,
+        [&t, &started]() -> asio::awaitable<void> {
+            started = true;
+            co_await t.async_wait(asio::use_awaitable);
+        },
+        asio::use_future);
+
+    ioc.poll();  // the frame starts here and parks on the timer
+    ASSERT_TRUE(started) << "the frame must have STARTED, or this is arm 3 again";
+    ASSERT_FALSE(ioc.stopped()) << "and it must still hold the work count";
+
+    ioc.stop();
+    ioc.run();  // returns immediately: stopped, not exhausted
+
+    EXPECT_TRUE(ioc.stopped());
+    EXPECT_FALSE(is_ready(fut))
+        << "#289: a run() that returned because the context was STOPPED leaves a started, "
+           "parked frame untouched — so `a run() appears above this get()` is not a "
+           "dismissal. This is the third return mode the DRIVE axis discloses and cannot "
+           "detect.";
+
+    ioc.restart();
+    t.expires_after(0s);
+    ioc.run();
     EXPECT_TRUE(is_ready(fut));
 }
 

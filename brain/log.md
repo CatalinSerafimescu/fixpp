@@ -11,8 +11,9 @@ status: stable
   discharging it faithfully hides that*) and a class-1 bullet (*a classification reached by FALLBACK
   is not a measurement, even when it is right*). Batch 20 handed over ~27 container `.get()` sites
   with a per-file suspension-point obligation; `asio::co_spawn` holds `outstanding_work.tracked` on
-  the SPAWN executor for the frame's lifetime, so the obligation collapses to two lexical clauses and
-  the second — a `run()` on an already-stopped context — is a hazard the instruction never named.
+  the SPAWN executor for the frame's lifetime, so the obligation collapses to a few lexical clauses,
+  and the ones nobody had named — a `run()` on an already-stopped context, a foreign
+  completion-token executor — are where the remaining risk lives.
   Arms in `tests/sync/test_co_spawn_work_guard_contract.cpp` establish it; a DRIVE axis in
   `ci/pump-get-sweep.sh`; hazard (a) in `tests/support/pump_until_ready.hpp` corrected by CONDITION
   plus a pointer to the arms, per class 2. Record:

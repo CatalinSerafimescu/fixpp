@@ -419,7 +419,7 @@ wrong reason, and the wrong reason survives into the next handover.
   *"exhaustion implies completion only while every suspension point of the awaited coroutine is an
   async op on that context."* False: `asio::co_spawn` holds `outstanding_work.tracked` on the SPAWN
   executor for the frame's lifetime, so a live frame is work **whatever it is parked on**. The 27
-  readings collapse to two lexical clauses — and clause 2 (a `run()` on an already-stopped context
+  readings collapse to a few lexical clauses — and clause 2 (a `run()` on an already-stopped context
   dispatches nothing) is a hazard the per-file instruction never mentioned and nobody had swept for.
   `tests/sync/test_co_spawn_work_guard_contract.cpp` is what measures it; record
   `decisions/speckit/pr-batch21-the-work-guard-and-the-condition-that-was-false.md`.
