@@ -616,7 +616,20 @@ def mapped_base_line(hunks, n):
     delta = 0
     for a, b, c, d in hunks:
         if d > 0 and c <= n <= c + d - 1:
-            return None           # inside changed content; the content check owns it
+            # Head line `n` is content this range WROTE. The caller must treat
+            # that as a repoint in its own right.
+            #
+            # ⚠️ This used to say "the content check owns it". It does not, and
+            # could not: the only caller reaches here having ALREADY found
+            # base[n] == head[n], i.e. having decided there is nothing to
+            # report. So the one branch that could act was the one told to defer
+            # to a branch that had already declined. Nobody covered it, and the
+            # gap is reachable with a two-line insertion whose last line happens
+            # to duplicate the cited line -- the citation then reads identically
+            # and names a different sentence. Found by adversarial review of the
+            # #336 wiring, after that gap was used as the argument for retiring
+            # check [1]'s gate.
+            return None
         new_end = c + d - 1 if d > 0 else c
         if new_end < n:
             delta += d - b
@@ -888,7 +901,18 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
                 # and the content check cannot see it. Applies to SOURCE files
                 # too, which check [1] deliberately does not cover.
                 m = mapped_base_line(cite_hunks, n)
-                if m is not None and m != n:
+                if m is None:
+                    # Byte-identical AND inside content this range wrote: the
+                    # bytes coincide, the line does not. Whatever the author
+                    # cited is elsewhere now (a pure insertion above pushed it
+                    # down; a replacement overwrote it), so this is rot even
+                    # though the content check saw no change.
+                    content_findings.append(dict(
+                        r, why=f"REPOINTED INTO NEW CONTENT: head line {n} is "
+                               "content this range added or rewrote; the text "
+                               "matches only by coincidence",
+                        before=before, after=after))
+                elif m != n:
                     content_findings.append(dict(
                         r, why=f"SILENTLY REPOINTED: head line {n} was line {m} "
                                "before; the content matches only by coincidence",
@@ -1698,6 +1722,52 @@ def shift_self_test():
                        code == 1 and len(rp) == 1 and rp[0]["n"] == 10))
         checks.append(("...and it names the base line it actually came from",
                        bool(rp) and "was line 9" in rp[0]["why"]))
+
+        # 8g-bis. THE THIRD OUTCOME, and the one that was missed. `mapped_base_line`
+        #     returns None when head line n is content the range WROTE, and its
+        #     comment said "the content check owns it" -- but the only caller
+        #     reaches there having already found base[n] == head[n], i.e. having
+        #     decided there is nothing to report. So no branch acted.
+        #
+        #     Reachable with an ordinary edit: insert a section above a citation
+        #     whose LAST line happens to repeat the cited line. The citation then
+        #     reads identically and names a different sentence. Found by
+        #     adversarial review, as the refutation of "content-changed or
+        #     silently-repointed are the only two outcomes" -- a claim used to
+        #     argue check [1]'s gate away. The claim is now TRUE because this
+        #     branch makes it true, not because it was true when asserted.
+        os.makedirs(os.path.join(d, "third"), exist_ok=True)
+        td = os.path.join(d, "third", "doc.md")
+        tbase = ["# Design", "", "intro one", "intro two", "intro three",
+                 "intro four", "intro five", "intro six", "intro seven",
+                 "## Cancellation", "post the handler to the strand", "",
+                 "more text", "end"]
+        open(td, "w").write("\n".join(tbase) + "\n")
+        open(os.path.join(d, "src", "thirdcite.cpp"), "w").write(
+            "// the strand rule is at third/doc.md:11\n")
+        _sh_commit(d, "a doc whose line 11 is a rule others cite")
+        thead = (tbase[:9] + ["## Reconnect", "post the handler to the strand"]
+                 + tbase[9:])
+        open(td, "w").write("\n".join(thead) + "\n")
+        _sh_commit(d, "insert a section whose last line DUPLICATES the cited line")
+        code, j = _sh_audit(d)
+        nc = [c for c in j["content"] if "NEW CONTENT" in c["why"]]
+        checks.append(("citation landing INSIDE inserted content is rot, and is "
+                       "reported",
+                       code == 1 and len(nc) == 1 and nc[0]["n"] == 11
+                       and nc[0]["gated"]))
+        # Its partner: the same mechanism must NOT fire when the citation really
+        # did not move. A net-zero edit above it leaves mapped_base_line == n.
+        # Without this the fix could be "report every byte-identical line", which
+        # would charge every PR that touches any cited document.
+        tl = list(thead)
+        tl = tl[:2] + ["X1", "X2", "X3"] + tl[2:6] + tl[9:]
+        open(td, "w").write("\n".join(tl) + "\n")
+        _sh_commit(d, "net-zero edit above the citation: it does not move")
+        code, j = _sh_audit(d)
+        checks.append(("...but a net-zero shift above it reports NOTHING",
+                       not any(c["target"].endswith("doc.md") and c["n"] == 11
+                               for c in j["content"])))
 
         # 8k. SCAN_DIRS REACH, for the ADDITION gate. #336 widened RE_A to `.md`
         #     and to a leading dot expressly so `.specify/...md:448` would match,
