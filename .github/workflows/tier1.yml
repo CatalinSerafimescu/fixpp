@@ -1573,13 +1573,19 @@ jobs:
   # — the single source shared with the local bindings/python/build-wheel.sh.
   #
   # ⚠️ THIS WHEEL DOES NOT WRAP THE BINARIES BUILT BY THE `linux` MATRIX. It
-  # compiles the engine from source inside the manylinux_2_28 container, and the
-  # bindings built by the six `linux` legs are a TEST VEHICLE that ships nothing.
-  # (#254: that vehicle used to be a separate `python-bindings` job; folding it
-  # into the matrix changed WHERE the bindings are built, not whether they ship.
-  # `FIXPP_INSTALL_PYTHON=OFF` on those legs is what keeps the second half of
-  # this note true — see the Configure step.) The two differ in three dimensions
-  # at once:
+  # compiles the engine from source inside the manylinux_2_28 container. The
+  # bindings built by the four NON-packaging `linux` legs are a TEST VEHICLE
+  # that ships nothing (`FIXPP_INSTALL_PYTHON=OFF`).
+  #
+  # ⚠️ #257: `linux-{clang,gcc}-release` DO ship a Python payload now, into
+  # packages-linux-*-release. That payload is a DIFFERENT artifact from this
+  # wheel — same source, different compiler, different glibc, no manylinux tag —
+  # and mixing them is not supported. This job still owns the only artifact a
+  # `pip install` user ever sees.
+  # (#254: the vehicle used to be a separate `python-bindings` job; folding it
+  # into the matrix changed WHERE the bindings are built. #257 then decided
+  # WHETHER two of those legs ship them — see the Configure step.)
+  # This wheel and the test-suite legs differ in three dimensions at once:
   #
   #            shipped wheel                 | legs running the python tests
   #   compiler gcc-toolset-14                | clang 22
@@ -1588,8 +1594,9 @@ jobs:
   #
   # So the artifact users run is exercised only by python-wheel-test's install +
   # import + functional subset. Do not read a green sanitizer leg as coverage of
-  # the shipped wheel. `packages-linux-{clang,gcc}-release` is the C++ deliverable
-  # and carries no Python. See L-056-4 in spec/behaviors-and-limitations.md.
+  # the shipped wheel, and do not read the #257 package payload as coverage of
+  # it either — that payload is never install-tested across interpreters.
+  # See L-056-4 in spec/behaviors-and-limitations.md.
   python-wheel-build:
     name: python-wheel (build cp312-abi3)
     runs-on: ubuntu-24.04
