@@ -114,6 +114,20 @@ jobs:
         # re-measure with `--shift-audit <range>` rather than trusting a number
         # written here, which nothing re-runs.
         #
+        # ⚠️ AND KNOW WHAT THE NARROWING DID NOT BUY. The sizing above is an
+        # AGGREGATE over ten merges, and CI never runs that shape -- it runs one
+        # PR. Per PR, on the eleven merges 37eb372f..bb22be26, FIVE are RED:
+        # three of them substantially (65, 45 and 25 charged findings, each a PR
+        # that edited a heavily-cited wire header) and two trivially (4 and 3).
+        # So this gate does NOT reduce to "nothing changes"; it charges roughly
+        # half of recent merges, and the expensive half is exactly the PRs that
+        # caused the rot. That is the intent, not a surprise -- but it is the
+        # number that decides whether the scope is affordable, so it is stated
+        # here rather than inferred from the aggregate. Paying it down is #310.
+        #
+        #   for c in <merges>; do
+        #     python3 tools/check_line_citations.py --shift-audit "$c~1..$c"; done
+        #
         # No continue-on-error, per this file's header: it makes an `exit 1` inert.
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
