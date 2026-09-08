@@ -234,6 +234,12 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
     // Allow 3× the flush_deadline for OS scheduling jitter before failing.
     constexpr auto k_max_return_ms = std::chrono::milliseconds{100};
 
+    // Set as the LAST act of the injected fsync, so it is false for the whole
+    // time the worker is inside the callback and true from the instant the
+    // callback returns. close()'s join obligation is then observable WITHOUT a
+    // clock — see the assertion after sink.close() below.
+    std::atomic<bool> fsync_returned{false};
+
     fixpp::log::FileSinkConfig cfg;
     cfg.directory      = tmpdir_;
     cfg.base_name      = "deadline_test";
@@ -241,8 +247,9 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
     cfg.max_keep_count = 8u;
     cfg.async_fsync    = true;
     // Inject a very slow fsync (500ms) so any synchronous implementation hangs.
-    cfg.fsync_fn = [k_fsync_sleep_ms](int) -> int {
+    cfg.fsync_fn = [k_fsync_sleep_ms, &fsync_returned](int) -> int {
         std::this_thread::sleep_for(k_fsync_sleep_ms);
+        fsync_returned.store(true, std::memory_order_release);
         return 0;
     };
 
@@ -263,18 +270,40 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
         << "flush(deadline) must implement the mandatory deadline escape "
         << "([2k §4.5] / contracts/log-sinks.md).";
 
-    // close() must return promptly — NO pre-sleep masking the lifetime bug.
-    // A correct owned-worker implementation joins the worker before fclose();
-    // close() may block briefly for the worker to finish its current fsync,
-    // but must not hang indefinitely. Allow up to k_fsync_sleep_ms + 200ms.
-    auto t_close_start = std::chrono::steady_clock::now();
+    // ── close() joins the owned fsync worker — stated CAUSALLY, no clock ──────
+    //
+    // #400. This used to be `EXPECT_LT(close_elapsed, k_fsync_sleep_ms + 200ms)`.
+    // That assertion was wrong in BOTH directions:
+    //   * 500 of its 700 ms were the deliberate sleep above, so its real budget
+    //     was a 200 ms absolute wall-clock allowance for a thread join on a
+    //     shared runner. It measured 781 ms once on windows-msvc-release and
+    //     went red on a correct implementation.
+    //   * it had no lower bound, so an implementation that DETACHED the worker
+    //     instead of joining would return in ~1 ms and PASS — the fd-reuse
+    //     lifetime bug the message itself names.
+    //
+    // The property is "close() does not return before the in-flight fsync has
+    // returned". That is causal, not temporal: assert the flag the callback
+    // sets on its way out is already visible once close() returns. No band, so
+    // no load can redden it; a detach makes it red deterministically.
+    //
+    // NON-VACUITY. The evidence is only real if the worker was still inside the
+    // callback when close() was entered. It was: flush() above returned on its
+    // 10 ms deadline while the callback still had ~490 ms of sleep left, and the
+    // only code between there and here is a duration cast and an EXPECT_LT. A
+    // deschedule long enough to invalidate that would have to be ~490 ms across
+    // two statements. Note the failure mode of losing that race is a vacuous
+    // PASS, never a spurious failure.
+    //
+    // A close() that HANGS is caught by the ctest TIMEOUT on log_file_fsync,
+    // which is the right instrument for a hang — not a per-assertion band that
+    // has to be hand-tuned against the slowest runner in the fleet.
     sink.close();
-    auto close_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - t_close_start);
-    EXPECT_LT(close_elapsed.count(), (k_fsync_sleep_ms + std::chrono::milliseconds{200}).count())
-        << "close() took " << close_elapsed.count() << "ms — should complete "
-        << "within " << (k_fsync_sleep_ms + std::chrono::milliseconds{200}).count()
-        << "ms (bounded join of the owned fsync worker)";
+    EXPECT_TRUE(fsync_returned.load(std::memory_order_acquire))
+        << "close() returned while the injected fsync was still running — the "
+        << "owned fsync worker was not joined before fclose(). A detached "
+        << "worker can land a write on a reused fd ([2k §4.5] / "
+        << "contracts/log-sinks.md §FileSink).";
 }
 
 // ── FileSink close() lifetime: no detached threads, no fd-reuse race ─────────
@@ -300,14 +329,13 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
     // the stalling fsync_fn after k_release_after_ms so the worker can exit
     // and the test fails with a time assertion rather than hanging ctest.
     constexpr auto k_flush_deadline      = std::chrono::milliseconds{1};
-    constexpr auto k_fsync_stall_ms      = std::chrono::milliseconds{400};
-    constexpr auto k_close_bound_ms      = std::chrono::milliseconds{600};  // stall + margin
     constexpr auto k_release_after_ms    = std::chrono::milliseconds{800};  // test self-deadline
 
     // Shared state for the injected fsync: stall until released.
     std::atomic<bool>   released{false};
     std::atomic<int>    fsync_call_count{0};
     std::atomic<int>    last_fsync_fd{-1};
+    std::atomic<bool>   fsync_returned{false};  // set as the callback's last act
     std::mutex          release_mu;
     std::condition_variable release_cv;
 
@@ -316,8 +344,11 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
     auto stalling_fsync = [&](int fd) -> int {
         fsync_call_count.fetch_add(1, std::memory_order_relaxed);
         last_fsync_fd.store(fd, std::memory_order_relaxed);
-        std::unique_lock<std::mutex> lk(release_mu);
-        release_cv.wait_for(lk, k_release_after_ms, [&] { return released.load(); });
+        {
+            std::unique_lock<std::mutex> lk(release_mu);
+            release_cv.wait_for(lk, k_release_after_ms, [&] { return released.load(); });
+        }
+        fsync_returned.store(true, std::memory_order_release);
         return 0;
     };
 
@@ -352,19 +383,26 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
     // close() immediately — NO pre-sleep masking. This is the key lifetime test.
     // A correct implementation joins the worker; a detached-thread impl would
     // return before the stalling fsync is done.
-    auto t0 = std::chrono::steady_clock::now();
     sink.close();
-    auto close_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - t0);
 
-    // (i) close() must return bounded — within k_close_bound_ms.
-    // For the owned-worker design: close() joins the worker which is still
-    // stalling → close() blocks until released OR times out at k_release_after_ms.
-    // We accept up to k_close_bound_ms (which is < k_release_after_ms) only if
-    // the join is correct. The self-deadline above guarantees the test finishes.
-    EXPECT_LT(close_elapsed.count(), k_release_after_ms.count() + 200LL)
-        << "close() took " << close_elapsed.count()
-        << "ms — should return bounded (worker joined before fd close)";
+    // (i) close() joined the worker — stated CAUSALLY (#400).
+    //
+    // This was `EXPECT_LT(close_elapsed, k_release_after_ms + 200ms)`: an
+    // upper-bound-only band whose real budget was 200 ms of absolute wall clock
+    // on a shared runner, and which a detach regression PASSES in ~1 ms. Both
+    // halves are fixed by asserting the flag the callback sets on its way out.
+    // No band ⇒ load cannot redden it; a detach is red deterministically.
+    //
+    // NON-VACUITY: the five flush(1 ms) calls above returned on their deadlines,
+    // so the worker was still parked inside stalling_fsync — which cannot return
+    // before `released` or the 800 ms self-deadline, neither of which has
+    // happened yet — when close() was entered.
+    //
+    // A close() that HANGS is caught by the ctest TIMEOUT on log_file_fsync.
+    EXPECT_TRUE(fsync_returned.load(std::memory_order_acquire))
+        << "close() returned while the injected fsync was still stalling — the "
+        << "owned fsync worker was not joined before fclose(), so an in-flight "
+        << "fsync can land on a reused fd";
 
     // Release the stalling fsync (so the worker can finish and let the test end).
     {
