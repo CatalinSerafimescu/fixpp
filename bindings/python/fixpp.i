@@ -91,18 +91,24 @@ static void fixpp_py_recv_trampoline_oo(const fixpp_msg_t* inbound, void* userda
 }
 static int fixpp_py_is_main_interpreter(void);
 
-/* T003 / FR-012 / SC-007 / D-3 — limited-API (Py_LIMITED_API=0x030A0000) sub-
+/* T003 / FR-012 / SC-007 / D-3 — limited-API (Py_LIMITED_API=0x030C0000) sub-
  * interpreter detection. PyInterpreterState_Main() is NOT in the limited API; the
  * MAIN interpreter is the one whose PyInterpreterState_GetID() == 0 (sub-interps
- * get 1,2,3...; verified main get_main()==0 on CPython 3.10/3.11/3.12/3.13). Both
- * PyInterpreterState_Get() and PyInterpreterState_GetID() ARE in the limited API.
+ * get 1,2,3...; verified main get_main()==0 on CPython 3.10/3.11/3.12/3.13 when
+ * the floor was cp310 — that observation is kept as the historical record and is
+ * NOT a claim about 3.14). Both PyInterpreterState_Get() and
+ * PyInterpreterState_GetID() ARE in the limited API.
  * This rejects EVERY non-main interpreter unconditionally (FR-018), independent of
  * import order — unlike a capture-at-%init scheme, which is process-global-shared
  * under single-phase init and is overwritten by a sub-interp's re-init on <3.12
  * (no import barrier there), so a sub-interp would wrongly read as "main" (the
- * 056 cp310-wheel 3.10/3.11 defect the tests/wheel/ band caught). Preserves the
- * code-1201 rejection (fixpp_oo.py:152 / test_subinterpreter.py); on 3.12+ the
- * single-phase import barrier rejects the sub-interp before this is reached. */
+ * 056 cp310-wheel 3.10/3.11 defect the tests/wheel/ band caught).
+ * ⚠️ That <3.12 hazard is now UNREACHABLE FROM THE SHIPPED WHEEL — the abi3 floor
+ * is cp312 and 3.10/3.11 are no longer built or install-tested. The detection is
+ * kept regardless: it is the in-tree build's guard too, and it is what makes the
+ * rejection independent of the import barrier rather than reliant on it.
+ * Preserves the code-1201 rejection (fixpp_oo.py:152 / test_subinterpreter.py);
+ * on 3.12+ the single-phase import barrier rejects the sub-interp first. */
 
 /* Raise the root fixpp.FixppError from an `in`-typemap conversion failure
  * (contract T-2/T-3 / FR-010). SWIG_fail is `goto fail` inside the wrapper. */

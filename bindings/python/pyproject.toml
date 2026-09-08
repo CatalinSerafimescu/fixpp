@@ -1,7 +1,7 @@
 # bindings/python/pyproject.toml — PY-005 wheel packaging (T002).
 # PEP 517 build backend (scikit-build-core) over the existing CMake
 # FIXPP_BUILD_PYTHON target. Produces ONE stable-ABI (abi3) wheel
-# fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl covering CPython 3.10–3.13+.
+# fixpp-<ver>-cp312-abi3-manylinux_2_28_x86_64.whl covering CPython 3.12+.
 # Built under cibuildwheel in manylinux_2_28 (see specs/056 quickstart.md / contracts).
 #
 # ⚠️ PROVENANCE — the wheel does NOT wrap the binaries from the CI clang/gcc
@@ -61,9 +61,14 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "fixpp"
 description = "Python binding for the fixpp C++23 FIX protocol library (over the frozen C ABI)"
-# PKG-3: abi3 cp310 floor; the single stable-ABI wheel covers 3.10–3.13 and
-# future 3.14+ (no upper cap — abi3 forward-compatibility is the point).
-requires-python = ">=3.10"
+# PKG-3: abi3 cp312 floor; the single stable-ABI wheel covers 3.12/3.13/3.14 and
+# future versions (no upper cap — abi3 forward-compatibility is the point).
+#
+# ⚠️ MUST NOT sit below `wheel.py-api` / `Py_LIMITED_API`. This key is the only
+# thing that stops pip from installing the wheel on an interpreter the extension
+# was never compiled for: an abi3 tag is forward-compatible, never backward, so a
+# cp312-abi3 wheel offered to 3.10 is an import crash rather than a clean refusal.
+requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"
 dynamic = ["version"]
 # PKG-5: NO runtime dependencies — the extension is self-contained (FR-002).
@@ -77,18 +82,24 @@ cmake.version = ">=3.28"
 # ephemeral temp that is re-created — and on a failed build, NOT cleaned — every
 # invocation; building the whole statically-linked engine there ran to ~18G and
 # filled the disk). build-dir is relative to this pyproject; "build/{wheel_tag}"
-# → bindings/python/build/cp310-abi3-... which is already gitignored (build/),
+# → bindings/python/build/cp312-abi3-... which is already gitignored (build/),
 # and {wheel_tag} keeps the single abi3 wheel in ONE reusable tree.
 build-dir = "build/{wheel_tag}"
 # Force Release: a Debug engine tree is ~11-17G of object files vs ~2-3G Release.
 # The shipped wheel is Release regardless; this also stops a stray Debug default
 # from re-exploding the build dir.
 cmake.build-type = "Release"
-# PKG-6: the AUTHORITATIVE abi3 wheel-tag driver -> cp310-abi3. The
+# PKG-6: the AUTHORITATIVE abi3 wheel-tag driver -> cp312-abi3. The
 # -DPy_LIMITED_API compile flag + SABI wiring in CMakeLists.txt is compile-only
 # and does NOT set the tag (scikit-build-core does not auto-detect the limited ABI
 # nor consume the setuptools py_limited_api kwarg).
-wheel.py-api = "cp310"
+#
+# ⚠️ THIS AND `Py_LIMITED_API` IN bindings/python/CMakeLists.txt ARE ONE DECISION
+# SPELLED TWICE, and nothing in the build cross-checks them. This key decides the
+# tag pip matches on; that flag decides which C API the code may call. Tag above
+# the compile floor ships a wheel that calls APIs its claimed interpreters may not
+# have; tag below it refuses installs that would have worked. Move both together.
+wheel.py-api = "cp312"
 # Ship ONLY the flat top-level Python modules + the _fixpp_data package (LAY-1/2).
 # The root install(DIRECTORY include/) would otherwise stage the C-ABI headers
 # into the wheel; the engine static libs have no install() rule so they do not leak.
@@ -146,12 +157,12 @@ input = "../../CMakeLists.txt"
 regex = '(?s)project\(\s*fixpp\s+VERSION\s+(?P<value>[0-9]+\.[0-9]+\.[0-9]+)'
 
 # ── cibuildwheel (T010 local / T016 CI — single source of truth) ────────────
-# Produces the ONE cp310-abi3 wheel in the pinned manylinux_2_28_x86_64 image.
+# Produces the ONE cp312-abi3 wheel in the pinned manylinux_2_28_x86_64 image.
 # Consumed identically by bindings/python/build-wheel.sh (local) and tier1.yml.
 [tool.cibuildwheel]
 # {python_tag}-{platform_tag}; abi3/2_28 are NOT selector components (D-7,
-# quickstart §1): abi3 from wheel.py-api="cp310", 2_28 from the image below.
-build = "cp310-manylinux_x86_64"
+# quickstart §1): abi3 from wheel.py-api="cp312", 2_28 from the image below.
+build = "cp312-manylinux_x86_64"
 archs = ["x86_64"]
 # ── PINNED BY DIGEST (#259) ──────────────────────────────────────────────────
 #
@@ -191,7 +202,7 @@ before-all = "bash {project}/bindings/python/cibw-before-all.sh {project}"
 # Without --only-plat, auditwheel prepends the detected-floor policy (e.g. 2_26)
 # producing a compressed tag "manylinux_2_26_x86_64.manylinux_2_28_x86_64" that
 # does NOT match the spec-mandated exact filename (FR-001).  --only-plat (≥6.7.0)
-# suppresses the compressed second tag → exactly fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl.
+# suppresses the compressed second tag → exactly fixpp-<ver>-cp312-abi3-manylinux_2_28_x86_64.whl.
 # Trade-off: the wheel won't install on glibc 2.26/2.27 hosts; consistent with the
 # manylinux_2_28 baseline mandated by FR-002/SC-004.
 repair-wheel-command = "auditwheel repair --plat manylinux_2_28_x86_64 --only-plat -w {dest_dir} {wheel}"

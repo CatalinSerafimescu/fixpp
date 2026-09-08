@@ -19,7 +19,7 @@ include(UseSWIG)
 # T005 — request the stable-ABI (SABI) development component when available so the
 # abi3 wheel links against the limited ABI (Python3::SABIModule). Optional so a
 # plain in-tree build on an older CMake/Python still configures with Development.Module.
-# scikit-build-core (wheel.py-api="cp310") drives this via SKBUILD_SABI_COMPONENT.
+# scikit-build-core (wheel.py-api="cp312") drives this via SKBUILD_SABI_COMPONENT.
 find_package(Python3 REQUIRED COMPONENTS Development.Module
              OPTIONAL_COMPONENTS Development.SABIModule)
 
@@ -56,11 +56,29 @@ target_link_libraries(fixpp_py PRIVATE
 )
 
 # T005 / PKG-6 / D-3 — compile the SWIG wrapper against the limited C API (abi3),
-# cp310 floor. COMPILE-ONLY: the wheel ABI tag is set by scikit-build-core's
-# wheel.py-api="cp310" (pyproject.toml), NOT by this flag (scikit-build-core does
-# not auto-detect the limited ABI). The reworked fixpp_py_is_main_interpreter
-# (T003) compiles clean at this floor — proven by the T004 abi3 feasibility gate.
-target_compile_definitions(fixpp_py PRIVATE Py_LIMITED_API=0x030A0000)
+# cp312 floor. COMPILE-ONLY: the wheel ABI tag is set by scikit-build-core's
+# wheel.py-api="cp312" (pyproject.toml), NOT by this flag (scikit-build-core does
+# not auto-detect the limited ABI). The two must move TOGETHER: this flag decides
+# which C API the wrapper may call, the pyproject key decides what the wheel
+# CLAIMS to run on, and a wheel tagged below its compile floor is an import crash
+# on the versions it claims.
+#
+# ⚠️ The floor was 0x030A0000 (cp310) through v1.0. It moved with the retirement
+# of the 3.10 and 3.11 install-test legs — an abi3 floor BELOW the oldest tested
+# interpreter is a claim nothing exercises.
+#
+# TO RE-VERIFY after any change to fixpp.i or a SWIG bump — the T004 feasibility
+# check, reproduced verbatim (needs python3-dev headers for the floor version):
+#
+#   swig -c++ -python -Iinclude -o /tmp/w.cxx bindings/python/fixpp.i
+#   g++ -fsyntax-only -std=c++23 -DPy_LIMITED_API=0x030C0000 \
+#       -I/usr/include/python3.12 -Iinclude /tmp/w.cxx
+#
+# ⚠️ A CLEAN result there is worth nothing until the check is shown able to fail —
+# this repo's most recurring defect is an instrument that reports clean because it
+# could not report anything else. Force it: a TU calling a NON-limited-API symbol
+# (`PyUnicode_DATA` is one) must ERROR under the -D and compile clean without it.
+target_compile_definitions(fixpp_py PRIVATE Py_LIMITED_API=0x030C0000)
 
 # ── T003 / FR-010 / research D-6 — self-contained static link ───────────────
 # Link the STATIC fixpp_capi archive (already PIC: src/capi builds it from an

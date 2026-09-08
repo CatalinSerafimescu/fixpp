@@ -934,7 +934,7 @@ assert_wheel_build_env() {
   want='{"CIBW_CONTAINER_ENGINE":"docker; create_args: -v /tmp/wheel-conan2:/host-conan2 -v ${{ env.CCACHE_DIR }}:/host-ccache","CIBW_ENVIRONMENT":"CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache CCACHE_MAXSIZE=2G CCACHE_COMPILERCHECK=content CCACHE_COMPRESSLEVEL=5"}'
   got="$(echo "$json" | jq -cS '.wheel_build_env')"
   [ "$got" = "$want" ] \
-    || fail "$case_id: python-wheel-build's 'Build the single cp310-abi3 wheel (CI-2)' step's env: is
+    || fail "$case_id: python-wheel-build's 'Build the single cp312-abi3 wheel (CI-2)' step's env: is
   got:  $got
   want: $want
 The container does not inherit the runner's environment, so CIBW_ENVIRONMENT is the only path CONAN_HOME/CCACHE_* reach it by, and both its values must equal the mount TARGETS declared in the sibling CIBW_CONTAINER_ENGINE on this same step. If this is a deliberate change (a real path or cache-tuning bump), update this golden in the same commit — do not weaken the comparison to a substring or shape check, that is the defect this pin exists to close."

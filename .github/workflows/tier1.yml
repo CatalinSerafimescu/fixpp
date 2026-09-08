@@ -47,7 +47,7 @@ on:
     branches: ["**"]
   workflow_dispatch:
   # 056 REL-1: on a published GitHub release, the python-wheel-release job below
-  # attaches the single cp310-abi3 wheel as a release asset (no PyPI — REL-2).
+  # attaches the single cp312-abi3 wheel as a release asset (no PyPI — REL-2).
   # The wheel build + full install-test matrix run first on the release commit so
   # a broken artifact cannot be attached; the C++ build/sanitizer/coverage/bench
   # lanes are SKIPPED on release (they already gated the merge commit this release
@@ -1530,8 +1530,8 @@ jobs:
   # ── Python wheel gate (PY-005 / 056) ─────────────────────────────────────
   # ADDITIVE (CI-8): this does NOT touch the python tests on the `linux` matrix
   # legs or the local-only GIL canary — it builds + install-tests the SHIPPED
-  # cp310-abi3 wheel. Build ONCE in manylinux_2_28 (python-wheel-build), then
-  # matrix-install-test the single artifact on 3.10–3.13 (python-wheel-test).
+  # cp312-abi3 wheel. Build ONCE in manylinux_2_28 (python-wheel-build), then
+  # matrix-install-test the single artifact on 3.12/3.13/3.14 (python-wheel-test).
   # All cibuildwheel config is in bindings/python/pyproject.toml [tool.cibuildwheel]
   # — the single source shared with the local bindings/python/build-wheel.sh.
   #
@@ -1554,7 +1554,7 @@ jobs:
   # the shipped wheel. `packages-linux-{clang,gcc}-release` is the C++ deliverable
   # and carries no Python. See L-056-4 in spec/behaviors-and-limitations.md.
   python-wheel-build:
-    name: python-wheel (build cp310-abi3)
+    name: python-wheel (build cp312-abi3)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1730,7 +1730,7 @@ jobs:
           restore-keys: |
             conan-wheel-manylinux228-
 
-      - name: Build the single cp310-abi3 wheel (CI-2)
+      - name: Build the single cp312-abi3 wheel (CI-2)
         id: wheel_build
         env:
           # CI-3: route the in-container Conan home to the host-mounted, cached dir.
@@ -1870,21 +1870,21 @@ jobs:
             "${{ steps.wheel_ident.outputs.lane }}" \
             "${{ steps.wheel_ident.outputs.image_ref }}"
 
-      # T011 / SC-004 / LAY-3: exactly ONE wheel, tagged cp310-abi3 + manylinux,
+      # T011 / SC-004 / LAY-3: exactly ONE wheel, tagged cp312-abi3 + manylinux,
       # external-library list EMPTY (static everything).
       - name: Verify tag + self-containment (SC-004, LAY-3)
         run: |
           set -euo pipefail
           test "$(ls wheelhouse/fixpp-*.whl | wc -l)" -eq 1
-          test "$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl | wc -l)" -eq 1
+          test "$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl | wc -l)" -eq 1
           # RC#4 regression guard: repair must emit a SINGLE 2_28 tag, not a compressed
           # manylinux_2_XX_x86_64.manylinux_2_28_x86_64 tag.  If --only-plat ever stops
           # taking effect the exact-match count above goes RED immediately; this guard
           # makes the regression class explicit (recorded shape: manylinux_2_26_x86_64.manylinux_2_28_x86_64).
-          if ls wheelhouse/fixpp-*-cp310-abi3-manylinux_*_x86_64.manylinux_2_28_x86_64.whl >/dev/null 2>&1; then
+          if ls wheelhouse/fixpp-*-cp312-abi3-manylinux_*_x86_64.manylinux_2_28_x86_64.whl >/dev/null 2>&1; then
             echo "FAIL SC-004: compressed platform tag emitted; expected single manylinux_2_28_x86_64"; exit 1
           fi
-          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl)
+          WHL=$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl)
           echo "wheel: $WHL"
           auditwheel show "$WHL"
           # FR-002: the external-library list must be EMPTY (static everything).
@@ -1911,7 +1911,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: fixpp-wheel
-          path: wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl
+          path: wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl
           if-no-files-found: error
 
   # CI-4/CI-5: install-test the ONE built wheel on each targeted interpreter —
@@ -1925,7 +1925,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11", "3.12", "3.13"]
+        python: ["3.12", "3.13", "3.14"]
     concurrency:               # CI-7
       group: tier1-${{ github.event.pull_request.number || github.ref }}-python-wheel-test-${{ matrix.python }}
       cancel-in-progress: true
@@ -1945,7 +1945,7 @@ jobs:
       - name: Install the abi3 wheel + run the functional subset (CI-4)
         run: |
           set -euo pipefail
-          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl)
+          WHL=$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl)
           python -m venv /tmp/wt
           /tmp/wt/bin/pip install -q "$WHL" pytest
           # Out-of-repo, PYTHONPATH scrubbed (quickstart §4): the dedicated
@@ -1968,10 +1968,10 @@ jobs:
       - name: Broken-wheel negative gate (SC-006)
         if: ${{ strategy.job-index == 0 }}
         run: |
-          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl)
+          WHL=$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl)
           PYTHON=python3 bash bindings/python/tests/wheel/test_broken_wheel_gate.sh "$WHL"
 
-  # REL-1/3 (T020): on a published release, attach the single cp310-abi3 wheel as
+  # REL-1/3 (T020): on a published release, attach the single cp312-abi3 wheel as
   # a release ASSET (NOT a PyPI upload — REL-2/SC-005). Only after the build +
   # full install-test matrix are green on the release commit.
   python-wheel-release:
@@ -1987,12 +1987,12 @@ jobs:
           name: fixpp-wheel
           path: wheelhouse
 
-      - name: Attach the cp310-abi3 wheel to the GitHub release (REL-1/3)
+      - name: Attach the cp312-abi3 wheel to the GitHub release (REL-1/3)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl)
+          WHL=$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl)
           echo "attaching $WHL to release ${{ github.event.release.tag_name }}"
           gh release upload "${{ github.event.release.tag_name }}" "$WHL" --clobber \
             --repo "${{ github.repository }}"

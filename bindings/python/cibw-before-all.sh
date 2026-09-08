@@ -20,7 +20,7 @@
 #   OTel     with_otel=False  (below)      | with_otel default True (conanfile.py)
 #
 # So the artifact users actually run is exercised only by python-wheel-test's
-# install + import + functional subset (3.10-3.13). The tier1 legs that run the
+# install + import + functional subset (3.12-3.14). The tier1 legs that run the
 # Python test suite — the six `linux` matrix legs since #254, previously a
 # separate `python-bindings` job — are a TEST VEHICLE, not a byte of them ships,
 # and the
@@ -35,7 +35,7 @@ PROJECT="${1:?cibw-before-all: project root argument required}"
 dnf install -y -q perl-core perl-IPC-Cmd perl-Data-Dumper perl-Time-Piece
 
 GT=/opt/rh/gcc-toolset-14/root/usr/bin   # gcc-toolset-14 toolchain binaries
-PY=/opt/python/cp310-cp310/bin           # a manylinux CPython for pip/conan
+PY=/opt/python/cp312-cp312/bin           # a manylinux CPython for pip/conan
 export PATH="$PY:$PATH"
 
 # ── ccache (#259) ────────────────────────────────────────────────────────────

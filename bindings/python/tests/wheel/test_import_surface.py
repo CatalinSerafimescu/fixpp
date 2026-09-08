@@ -2,7 +2,7 @@
 
 Guards the additive `%pythoncode` re-export (T009 locator + the 055 OO block)
 from silently DROPPING or ADDING a public name. The frozen set below is the
-exact public surface of `import fixpp` as shipped by the cp310-abi3 wheel;
+exact public surface of `import fixpp` as shipped by the cp312-abi3 wheel;
 `==` (not subset) is deliberate — a subset check passes when a symbol is
 deleted (it only catches additions) and a superset check passes when one is
 added. Exact-set equality forces *any* surface change to be a reviewed edit to
