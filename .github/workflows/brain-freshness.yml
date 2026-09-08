@@ -103,14 +103,16 @@ jobs:
         # The other 26 predate the rule. So this is close to free going forward.
         #
         # ── The ROT half (--shift-audit) is NOT close to free, and was scoped ──
-        # Measured over ten real merges before wiring (0e5225fc..b6d9ed8c): 420
-        # content findings and 17 shifting hunks. Charging all of that would stop
-        # ordinary work, so what FAILS is narrowed twice -- frozen `specs/<id>/`
-        # citers, and hunks that moved no positionable citation. Both narrowings,
-        # their measured sizes, and the blind spot the second one buys are
-        # documented at RE_FROZEN_CITER / shift_is_gated() in the tool; every
-        # finding is still printed and still lands in --json carrying `gated`.
-        # Do not re-derive the scope from this comment -- read the tool.
+        # Charging every finding would stop ordinary work, so what FAILS is
+        # narrowed: archival `specs/<id>/` citers, hunks that moved no LIVE
+        # positionable citation, and ambiguous basenames. Each narrowing, the
+        # blind spot it buys, and the range its sizing was measured on live at
+        # is_frozen_citer() / shift_is_gated() in the tool. Every finding is
+        # still printed and still lands in --json carrying `gated`.
+        #
+        # Do not re-derive the scope from this comment -- read the tool, and
+        # re-measure with `--shift-audit <range>` rather than trusting a number
+        # written here, which nothing re-runs.
         #
         # No continue-on-error, per this file's header: it makes an `exit 1` inert.
         env:
@@ -121,8 +123,9 @@ jobs:
         run: |
           set -euo pipefail
           ZERO=0000000000000000000000000000000000000000
+          IS_PR=0
           if [ -n "${PR_BASE:-}" ] && [ -n "${PR_HEAD:-}" ]; then
-            BASE="$PR_BASE"; HEAD="$PR_HEAD"
+            BASE="$PR_BASE"; HEAD="$PR_HEAD"; IS_PR=1
           elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != "$ZERO" ]; then
             BASE="$PUSH_BEFORE"; HEAD="$PUSH_AFTER"
           else
@@ -141,10 +144,22 @@ jobs:
               exit 1
             fi
           done
-          # Prefer the merge base: github.event.pull_request.base.sha is the base
-          # BRANCH TIP at event time, so main-only commits would otherwise be
-          # scored against this PR.
-          if MB="$(git merge-base "$BASE" "$HEAD" 2>/dev/null)"; then BASE="$MB"; fi
+          # Prefer the merge base -- FOR A PULL REQUEST ONLY.
+          # github.event.pull_request.base.sha is the base BRANCH TIP at event
+          # time, so main-only commits would otherwise be scored against this PR.
+          #
+          # ⚠️ Applying it to a PUSH is wrong, and silently so. A push already
+          # supplies the exact range it performed as before..after; merge-base
+          # can only shrink it. On a non-fast-forward push to main -- a force-push
+          # or reset that DISCARDS commits -- `after` is an ancestor of `before`,
+          # so merge-base(before, after) == after and the range collapses to
+          # `after..after`: empty. Both gates then report on nothing. That is the
+          # worst case to be blind on, because discarding commits can reinstate
+          # the very citations an earlier commit fixed. Verified on this repo:
+          #   git merge-base <newer> <older-ancestor>   ==   <older-ancestor>
+          if [ "$IS_PR" = 1 ] && MB="$(git merge-base "$BASE" "$HEAD" 2>/dev/null)"; then
+            BASE="$MB"
+          fi
           echo "gating $BASE..$HEAD"
 
           # BOTH DIRECTIONS, and both reports every run. --range gates GROWTH (a

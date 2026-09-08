@@ -132,39 +132,65 @@ RE_LINE_DIRECTIVE = re.compile(r"^\s*#\s*line\s")
 # ── What --shift-audit CHARGES versus what it only REPORTS ───────────────────
 #
 # Wiring the audit as a hard gate (#336) is what made this distinction load-
-# bearing: measured over ten real merges (0e5225fc..b6d9ed8c) the mode raised
-# 420 content findings and 17 shifting hunks, and a gate that stops that range
-# stops ordinary work. Both narrowings below are about WHICH findings fail the
-# build. NEITHER hides a finding: every one is still printed and still written
-# to --json, carrying `gated: false`, and the report prints both denominators.
-# A narrowing you cannot count is a blind spot; one you can is a scope.
+# bearing: over ten real merges the mode raised hundreds of content findings and
+# a dozen-odd shifting hunks, and a gate that stops that range stops ordinary
+# work. Both narrowings below are about WHICH findings fail the build. NEITHER
+# hides a finding: every one is still printed and still written to --json,
+# carrying `gated: false`, and the report prints both denominators. A narrowing
+# you cannot count is a blind spot; one you can is a scope.
+#
+# The figures quoted below are pinned to an IMMUTABLE range so they cannot rot
+# in place, and any of them is one command away rather than taken on trust:
+#
+#   python3 tools/check_line_citations.py --shift-audit 0e5225fc..b6d9ed8c
+#
+# Re-derive before citing a number here at any other commit; a scope measured on
+# one range is not a property of the tree.
 #
 # [2] FROZEN CITERS. `specs/<id>/` is a per-feature bundle -- spec, plan, tasks,
-# research, checklists, contracts. 313 of those 420 findings cite from one.
+# research, checklists, contracts. On the pinned range, 312 of the 420 findings
+# cite from one.
 # Rot there is real and worth listing, but nobody reads a shipped feature's
 # bundle to navigate today's source, and remediating them is #310's job, not a
 # merge gate's. `spec/` (singular) is the LIVE surface and is NOT frozen.
 #
-# ⚠️ WHAT THIS PREDICATE CANNOT CHECK, said plainly rather than asserted away:
-# it is a PATH SHAPE, not a lifecycle. "Frozen" is meant to mean "the feature
-# merged and nobody edits the bundle again", and `specs/<id>/` also matches the
-# bundle of the feature currently IN FLIGHT -- which is being actively written
-# by the very PR under test. Rot internal to that bundle is therefore exempt for
-# the life of its own PR. Accepted, not overlooked: `--range` still refuses to
-# let that PR ADD a line citation, and a bundle's internal cross-references are
-# the lowest-value citations in the tree. Do not read the word "frozen" as a
-# verified claim about merge state; no path regex can make one.
-def is_frozen_citer(path):
-    """Is this citing file an archival per-feature bundle rather than live?"""
-    return path.startswith("specs/")
+# "Frozen" means ARCHIVAL, and a path shape alone cannot say that: `specs/<id>/`
+# equally matches the bundle of the feature currently IN FLIGHT, which the PR
+# under test is actively writing. Exempting that one would let a PR rot its own
+# spec's citations behind a hard gate, and `--range` does not cover it (that
+# gate refuses ADDED citations, not existing ones the edit invalidates).
+#
+# So the lifecycle question is answered from the RANGE rather than asserted from
+# the path: a bundle this range touches at all is in flight and is charged; every
+# other bundle is archival and is only reported. Derived, not claimed -- and it
+# needs no notion of merge state, which nothing here could verify.
+def spec_bundle(path):
+    """`specs/<id>` for a per-feature bundle path, else None."""
+    parts = path.split("/")
+    return "/".join(parts[:2]) if len(parts) > 2 and parts[0] == "specs" else None
+
+
+def is_frozen_citer(citer, target, in_flight):
+    """Archival -- a `specs/<id>/` citation whose rot this range did not author."""
+    bundle = spec_bundle(citer)
+    if bundle is None:
+        return False                      # live surface: always charged
+    # In flight AND the rot is INTERNAL to that same bundle: the PR is writing
+    # both ends, so it owns the breakage and pays for it. A bundle citation that
+    # rots because some OTHER file moved (a spec citing src/wire/offset_table.cpp)
+    # stays archival however much of the bundle this range happens to touch --
+    # charging the whole bundle for one edited file inside it TRIPLED the gate's
+    # cost when measured (107 -> 312 charged over the same ten merges), which is
+    # not the scope this was narrowed to.
+    return not (bundle in in_flight and spec_bundle(target) == bundle)
 #
 # [1] SHIFTS THAT MOVED NOTHING. The check deliberately runs on EVERY changed
 # `.md`, including those nothing resolvably cites, because a form-B citation
 # (`at line 448`) names no file and so resolves to nothing -- see the check's
 # own header. That stays true, and every such hunk is still reported. What
 # changed is that only a hunk with at least one citation KNOWN to have moved
-# fails the build: 13 of those 17 hunks moved zero, among them `brain/log.md`
-# growing by 262 lines and a 108-line append near the end of
+# fails the build: on the pinned range 13 of the 17 hunks moved zero, among them
+# `brain/log.md` growing by 262 lines and a 108-line append near the end of
 # `spec/behaviors-and-limitations.md` -- a file nearly every PR edits, because
 # a B&L functional delta is a Gate B precondition.
 #
@@ -173,6 +199,14 @@ def is_frozen_citer(path):
 # the identical rot is exempted by [2] -- one concept enforced in one of the two
 # places it governs. So `gating_citations_below` counts only LIVE citers, while
 # `resolved_/ambiguous_citations_below` keep the full count for the report.
+#
+# It also counts only RESOLVED citers. An ambiguous basename (`spec.md:88`, three
+# candidates) may well name the file that moved -- which is why it is still
+# REPORTED, and why check [1] runs on the document regardless. But it may equally
+# name an untouched twin, and charging a build for a citation nobody can resolve
+# is a spurious HIT, not a caught defect. The report already promises this in so
+# many words: "AMBIGUOUS ... Listed, NOT counted against the exit code." Counting
+# them here would have made that sentence false.
 #
 # ⚠️ THE BLIND SPOT THIS BUYS, STATED SO IT CAN BE FOUND: a shift in a document
 # cited ONLY in form B or form C moves citations that cannot be positioned, so
@@ -668,6 +702,11 @@ def build_citation_index(root, wanted, rev):
                    "text": text.strip()}
             if len(cands) == 1:
                 if cands[0] in wanted:
+                    # The index key IS the resolved target path; carry it on the
+                    # record so a finding can be judged against BOTH ends of the
+                    # citation (is_frozen_citer needs the target, not just the
+                    # citer) without the judging code re-deriving it.
+                    rec["tpath"] = cands[0]
                     index[cands[0]].append(rec)
             elif len(cands) > 1 and any(c in wanted for c in cands):
                 rec["cands"] = cands
@@ -700,6 +739,8 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
     # BOTH sides of every row: a citation into a path that a rename or a delete
     # removed is exactly the citation most certainly rotted.
     wanted = {p for _st, old, new in rows for p in (old, new)}
+    # Which `specs/<id>` bundles this range is WRITING -- see is_frozen_citer().
+    in_flight = {b for p in wanted if (b := spec_bundle(p)) is not None}
     index, ambiguous, scanned, form_bc = build_citation_index(root, wanted, head)
 
     blobs = {}
@@ -771,8 +812,9 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
                         "resolved_citations_below": len(below),
                         "ambiguous_citations_below": len(amb_below),
                         "gating_citations_below": sum(
-                            1 for r in below + amb_below
-                            if not is_frozen_citer(r["cf"]))})
+                            1 for r in below
+                            if not is_frozen_citer(r["cf"], r["tpath"],
+                                                   in_flight))})
             if not cites and not n_amb:
                 skipped_non_target.append(new_path)
 
@@ -838,11 +880,11 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
     # ── what the gate CHARGES ────────────────────────────────────────────────
     # Tagged in place, so --json carries the verdict beside the finding and the
     # printed sections below stay one list each: everything is reported, and the
-    # tag says which ones cost you a build. See RE_FROZEN_CITER / shift_is_gated.
+    # tag says which ones cost you a build. See is_frozen_citer / shift_is_gated.
     for f in shift_findings:
         f["gated"] = shift_is_gated(f)
     for f in content_findings:
-        f["gated"] = not is_frozen_citer(f["cf"])
+        f["gated"] = not is_frozen_citer(f["cf"], f["tpath"], in_flight)
     # Counted once. Printing one denominator and deciding the verdict from a
     # second, separately-written expression of the same arithmetic is how the
     # two drift on a later edit.
@@ -1306,12 +1348,35 @@ def shift_self_test():
         open(twin, "w").write("PREPENDED\n" + _prev)
         _sh_commit(d, "prepend to the ambiguously-cited doc")
         code, j = _sh_audit(d)
-        checks.append(("ambiguously-cited .md is still shift-checked",
-                       code == 1 and any(f["file"] == "sub/twin.md"
-                                         for f in j["shift"])))
+        tw = [f for f in j["shift"] if f["file"] == "sub/twin.md"]
+        checks.append(("ambiguously-cited .md is still shift-checked", bool(tw)))
         checks.append(("...and the ambiguity is disclosed, not silently resolved",
                        any(f.get("cited_ambiguously_by", 0) > 0 for f in j["shift"])
                        and not j["content"]))
+        # ...but it does NOT fail the build. `twin.md:9` names one of two files
+        # and nothing can say which; charging a build for a citation nobody can
+        # resolve is a spurious HIT. The report already promised this in words
+        # ("AMBIGUOUS ... Listed, NOT counted against the exit code") while
+        # check [1] charged them anyway -- the promise and the behaviour now
+        # agree. 8b-bis is the non-vacuity partner: resolve the ambiguity and
+        # the identical shift fails.
+        checks.append(("ambiguous-only shift is REPORTED, not gated",
+                       code == 0 and bool(tw) and not tw[0]["gated"]
+                       and tw[0]["ambiguous_citations_below"] >= 1
+                       and tw[0]["gating_citations_below"] == 0))
+
+        # 8b-bis. Remove the decoy: `twin.md` now resolves to exactly one file,
+        #     the SAME citation becomes positionable, and the same shape fails.
+        os.unlink(os.path.join(d, "other", "twin.md"))
+        _sh_commit(d, "retire the decoy so twin.md resolves")
+        _prev = open(twin).read()
+        open(twin, "w").write("PREPENDED2\n" + _prev)
+        _sh_commit(d, "prepend again, now unambiguously cited")
+        code, j = _sh_audit(d)
+        tw = [f for f in j["shift"] if f["file"] == "sub/twin.md"]
+        checks.append(("...once resolvable, the identical shift IS gated",
+                       code == 1 and bool(tw) and tw[0]["gated"]
+                       and tw[0]["gating_citations_below"] == 1))
 
         # 8c. A citation into a file ADDED in the range has no before-value, so it
         #     is not rot -- but an out-of-range one into it still is.
@@ -1436,18 +1501,60 @@ def shift_self_test():
         # 8h-bis. With the live citer gone, the same edit must PASS the gate and
         #     still print the frozen finding -- the pass must not read as "found
         #     nothing", which is the false zero this whole tool exists to stop.
+        #     The bundle is set up in a SEPARATE commit from the mutation on
+        #     purpose: touching it inside the audited range would make it
+        #     in-flight, which 8h-ter is what tests.
         os.unlink(os.path.join(d, "spec", "live.md"))
-        _sh_commit(d, "retire the live citer")
-        tgt[4] = "T05-mutated"
-        open(ft, "w").write("\n".join(tgt) + "\n")
         open(os.path.join(d, "specs", "099-archived", "spec.md"), "a").write(
             "and the other guard is at frozen_target.cpp:5\n")
-        _sh_commit(d, "mutate a line cited ONLY from the frozen bundle")
+        _sh_commit(d, "retire the live citer; archival bundle cites line 5 too")
+        tgt[4] = "T05-mutated"
+        open(ft, "w").write("\n".join(tgt) + "\n")
+        _sh_commit(d, "mutate a line cited ONLY from the archival bundle")
         code, j = _sh_audit(d)
         fz = [c for c in j["content"] if c["cf"].startswith("specs/")]
-        checks.append(("frozen-only rot: gate PASSES", code == 0))
-        checks.append(("frozen-only rot: ...while still reporting the finding",
+        checks.append(("archival-only rot: gate PASSES", code == 0))
+        checks.append(("archival-only rot: ...while still reporting the finding",
                        len(fz) >= 1 and not any(c["gated"] for c in fz)))
+
+        # 8h-ter. THE LIFECYCLE HALF, and the reason the exemption is derived
+        #     from the range instead of asserted from the path. A PR writing its
+        #     OWN spec bundle can rot that bundle's INTERNAL citations, and a
+        #     path-shape predicate exempted exactly that -- behind a hard gate,
+        #     with --range no help (it refuses ADDED citations, not existing ones
+        #     an edit invalidates). So intra-bundle rot in a bundle this range
+        #     touches is charged: the PR is writing both ends and owns it.
+        bt = os.path.join(d, "specs", "099-archived", "bundle_target.md")
+        blines = [f"B{i:02d}" for i in range(1, 13)]
+        open(bt, "w").write("\n".join(blines) + "\n")
+        open(os.path.join(d, "specs", "099-archived", "tasks.md"), "w").write(
+            "T001 implements the rule at bundle_target.md:5\n")
+        _sh_commit(d, "a bundle that cites ITSELF by line number")
+        blines[4] = "B05-mutated"
+        open(bt, "w").write("\n".join(blines) + "\n")
+        _sh_commit(d, "the PR's own edit rots its own bundle's citation")
+        code, j = _sh_audit(d)
+        intra = [c for c in j["content"] if c["cf"].endswith("099-archived/tasks.md")]
+        checks.append(("in-flight bundle: INTRA-bundle rot IS gated",
+                       code == 1 and len(intra) == 1 and intra[0]["gated"]))
+
+        # 8h-quater. ...and the same bundle, equally in flight, still does NOT
+        #     pay for rot it did not author. Without this the rule above could be
+        #     "touching a bundle charges everything in it", which is what the
+        #     first attempt did -- it TRIPLED the charge over ten real merges.
+        blines[4] = "B05-mutated-again"   # line 5 is the CITED one; mutating any
+        open(bt, "w").write("\n".join(blines) + "\n")   # other line is not rot
+        tgt[6] = "T07-mutated"
+        open(ft, "w").write("\n".join(tgt) + "\n")
+        open(os.path.join(d, "specs", "099-archived", "spec.md"), "a").write(
+            "the third guard is at frozen_target.cpp:7\n")
+        _sh_commit(d, "same range: intra-bundle rot AND cross-bundle rot")
+        code, j = _sh_audit(d)
+        cross = [c for c in j["content"] if c["target"] == "frozen_target.cpp"]
+        checks.append(("in-flight bundle: CROSS-bundle rot stays archival",
+                       len(cross) == 1 and not cross[0]["gated"]))
+        checks.append(("...while the intra-bundle rot in the SAME range gates",
+                       code == 1))
 
         # 8i. The SAME frozen rule inside check [1]. A shifting hunk whose only
         #     moved citations come from an archival bundle must not fail, or one
