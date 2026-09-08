@@ -299,13 +299,31 @@ _UNBOUNDED = re.compile(r"([\w>.\-]+)\.run\(")
 # It gets its own value rather than being folded into LIVE because the two are reached by
 # different reasoning and a reader must not have to guess which one a row took.
 #
-# ⚠️ SCOPED TO `POOL`, DELIBERATELY, AND `THREADED` IS NOT COVERED. For a pool the driver
-# IS the base -- `pool.stop()` names it -- so the check resolves. A `THREADED` row's driver
-# is a std::thread whose variable name this file never captures, and `std::async` has no
-# name at all, so the same check would be complete for SOME spellings and silent for the
-# rest. A positive dismissal that holds on the spellings it happens to parse is worse than
-# no axis: `THREADED` rows report `n/a` and are READ. Widening this to threads means
-# capturing the driver's name, which is a different instrument, not a bigger regex.
+# ⚠️ SCOPED TO `POOL`, AND THERE ARE **TWO SEPARATE REASONS** -- one structural, one
+# empirical. They are about DIFFERENT populations and must not be read as one, because the
+# structural reason does not reach the case the empirical one is about.
+#
+# REASON 1, STRUCTURAL, and it covers `THREADED`: for a pool the driver IS the base, so
+# `pool.stop()` names it and the check resolves. A `THREADED` row's driver is a std::thread
+# whose variable name this file never captures, and `std::async` has no name at all, so the
+# same check would be complete for SOME spellings and silent for the rest. A positive
+# dismissal that holds on the spellings it happens to parse is worse than no axis.
+# `THREADED` rows report `n/a` and are READ. This reason does not rot.
+#
+# REASON 2, EMPIRICAL, and it covers only the extension to `drive=EXHAUSTED-OFF-THREAD`.
+# ⚠️ REASON 1 DOES NOT APPLY TO IT: that extension needs no driver name at all -- clause S1
+# holds structurally there (a run seen only SINCE the spawn was written by a thread
+# constructed after it) and clause S2 becomes a `stop()` on the spawn CONTEXT, whose name
+# IS known. It was implemented, it was CORRECT, and it was reverted for a property of this
+# CORPUS: these tests retire the context on a BAIL-OUT branch the get never reaches, so the
+# check escalates nearly every row it covers, and an instrument nobody can act on teaches
+# its readers to skip the fraction that mattered too. The underlying capability that is
+# missing is BRANCH EXCLUSIVITY -- the same wall #289 batch 21 hit with its clause-2 probe,
+# and not a bigger regex.
+# ⚠️ REASON 2 IS ABOUT A TREE THAT MOVES, SO RE-DERIVE IT RATHER THAN TRUSTING IT: gate
+# `sd` on `ec == 'POOL' or dv == 'EXHAUSTED-OFF-THREAD'` and compare the escalated count
+# against the off-thread total the report prints. Ship it only if that ratio has fallen,
+# which takes the corpus changing or branch exclusivity arriving -- not the check changing.
 #
 # ⚠️ THE SHAPES THAT FOOL IT ARE NOT LISTED HERE IN PROSE -- same rule as the DRIVE axis,
 # and for the same reason: a prose list shipped a false entry there. They are
@@ -1592,23 +1610,20 @@ if disposition:
     print("                          it blocks until the work is done, so it dominates the")
     print("                          get more strongly than any lexical run().")
     print("    LIVE                  neither: the ordinary shape the POOL dismissal names.")
+    print("  ⚠️ THE SCAN IS LEXICAL, SO AN ESCALATION IS A QUESTION, NOT A FINDING. A")
+    print("  stop()/join() written inside a body that runs LATER -- an RAII destructor, a")
+    print("  lambda -- is recorded at the position it is WRITTEN, so a guard DECLARED above")
+    print("  a spawn and RUN at scope exit reads RETIRED-BEFORE-SPAWN while the pool is")
+    print("  live throughout. It takes a member that SHADOWS the pool\'s own name; fixture")
+    print("  `S-f` above pins it. Read the row before believing it, and do not conclude")
+    print("  from a false escalation that the axis is not worth reading -- the value that")
+    print("  costs is a wrong LIVE, and no case of that is known.")
     print("  ⚠️ EVERY OTHER ROW REPORTS `n/a` AND IS NOT COVERED -- read them. A pool IS")
     print("  its own driver, so `pool.stop()` names it; a thread driving an io_context is")
     print("  a variable this file never captures, and `std::async` has no name at all.")
-    print("  ⚠️ EXTENDING THIS TO drive=EXHAUSTED-OFF-THREAD WAS TRIED AND MEASURED OUT.")
-    print("  It needs no driver name -- S1 holds structurally there (a run seen only SINCE")
-    print("  the spawn was written by a thread constructed after it) and S2 becomes a")
-    print("  stop() on the spawn CONTEXT, whose name is known. It is CORRECT, and it was")
-    print("  still reverted, because of a property of this CORPUS rather than of the check:")
-    print("  these tests retire the context on a BAIL-OUT branch the get never reaches, so")
-    print("  the check escalates nearly every row it covers. An instrument nobody can act")
-    print("  on teaches its readers to skip the fraction that mattered too. The missing")
-    print("  capability is branch exclusivity -- the same wall #289 batch 21 hit with its")
-    print("  clause-2 probe -- and it is not a bigger regex.")
-    print("  RE-DERIVE before re-attempting, do not trust a remembered ratio: gate `sd` on")
-    print("  `ec == \'POOL\' or dv == \'EXHAUSTED-OFF-THREAD\'` and compare the escalated")
-    print("  count against the off-thread total this run prints. It is worth shipping only")
-    print("  if that ratio has fallen, which takes the corpus changing, not the check.")
+    print("  Why this is not extended to drive=EXHAUSTED-OFF-THREAD -- which needs no")
+    print("  driver name -- is a note to whoever next edits this instrument, and lives at")
+    print("  the SELF-DRIVE axis comment in the script rather than on this report.")
     print("\n  READ THE CLASSES, NOT THE TOTAL. A candidate is a defect only where the")
     print("  CALLING thread must pump. CALLER-ONLY is the only executor class that says")
     print("  so on its own; POOL and THREADED say the opposite; THREAD-IN-FILE says READ")
