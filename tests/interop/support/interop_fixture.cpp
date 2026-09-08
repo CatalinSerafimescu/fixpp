@@ -217,6 +217,31 @@ bool InteropEngineFixture::run_until(const std::function<bool()>& ready,
     // pump_until does not revive a context already stopped at entry (a work
     // guard does not clear stopped()); this fixture's contract does. Restart
     // here, before handing off to the shared primitive.
+    //
+    // (#289 item D) THIS ADAPTER SATISFIES CONDITION (b) BY DELEGATION. The
+    // divergence #289 exists to collapse is "three different answers to keeping
+    // the context runnable across slices"; this has no answer of its own — the
+    // budget, the slice and the loop are all the shared primitive's. What is
+    // left here is one precondition, not a competing policy.
+    //
+    // WHETHER THAT PRECONDITION IS REACHABLE IS A SEPARATE QUESTION, and it is
+    // not a #289 closure condition. Two halves, deliberately kept apart:
+    //   STRUCTURAL (cannot rot): pump_until holds a work guard for its loop and
+    //   calls ioc.restart() on EVERY exit path, the forced-miss early return
+    //   included. So no run_until can hand a stopped context to the next one.
+    //   CORPUS-DEPENDENT (re-derive, do not trust): the remaining ways to stop
+    //   this context are stop_within — which pumps with no work guard and does
+    //   not restart on exit — and direct ioc() access. At the time of writing no
+    //   reachable path reaches run_until stopped: every stop_within is a test
+    //   tail, a bail-out that returns immediately, or an exclusive branch.
+    //   RECIPE: `grep -rn "ioc()" tests/interop/ | grep -v get_executor` for the
+    //   direct route, then order stop_within against run_until per test body for
+    //   the other. A dynamic count is a WEAK instrument here — most interop cells
+    //   SKIP without an external counterparty, so it surveys a small subset.
+    //
+    // The revival is therefore defensive, and is pinned directly by
+    // InteropEngineFixtureRunUntil.RevivesContextStoppedAtEntry. Do not delete it
+    // on the strength of a zero.
     if (ioc_->stopped()) {
         ioc_->restart();
     }

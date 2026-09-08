@@ -647,7 +647,7 @@ TEST(EngineFirstFrameTest, PostHandshakeRejectionDoesNotStopTheAcceptLoop) {
     // only async_accept was never reissued), but no async_accept is pending
     // to complete the mTLS handshake server-side, so this probe's own read
     // never sees a server-side close and `second.done` never flips within the
-    // bound below: `run_until` exhausts its cap with `second.closed == false`.
+    // bound below: `pump_until` exhausts its cap with `second.closed == false`.
     PostHandshakeProbe second;
     asio::co_spawn(ioc,
                    probe_post_handshake(ioc, harness->transport_fixture(), port,

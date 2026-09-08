@@ -432,6 +432,82 @@ inherited as a PREMISE — same failure viewed from the instruction side rather 
 
 ---
 
+### 12. One label can carry two arguments, and only one of them may be checked
+
+A classifier emits a value that reads as settled. The value is *correct* at every site. But the
+sentence defining it is satisfied by two different situations, which are safe for two different
+reasons — and only one of those reasons has ever been checked. Nothing fails, nothing **can** fail,
+and every reader who meets the label takes away the reason that does not apply.
+
+This is not class 1: the instrument is not failing toward clean, it is reporting truthfully. The
+defect is that its vocabulary is coarser than its subject.
+
+- **Trigger:** a classifier value whose definition contains an *or* you cannot see — most often a
+  positional or lexical predicate (*"appears above"*, *"is present in the file"*) standing in for a
+  semantic one (*"happens before"*, *"drives this"*). Ask: **for each site with this label, which
+  argument makes it safe? Is it the same argument?**
+- **Procedure:** do not widen the check. **Split the value**, so the rows resting on the unchecked
+  argument count themselves, and report the split. A count you can see is a reading you can order;
+  a count folded into a green word is one nobody will ever ask about. Keep the union stable so the
+  earlier trend is still comparable.
+- **Instance.** #289's `EXHAUSTED` meant *"a run-to-exhaustion naming the spawn context appears above
+  the get"*. Satisfied by a **caller-side** run (dismissed by the `co_spawn` work guard, measured in
+  batch 21) and by a run that is **not a bare caller-side statement** (dismissed by the self-driving
+  argument, whose clauses nothing checked). Batch 22 split off `EXHAUSTED-NOT-CALLER-SIDE`: **all 35
+  `THREADED` rows are the second kind, none the first.** Four batches had read them as dominated for
+  a reason that did not apply.
+- ⚠️ **THE SPLIT'S OWN DISCRIMINATOR IS WHERE THIS CLASS RECURS.** The first one asked *"does this
+  statement name a thread type"* — a predicate over what a statement MENTIONS, standing in for one
+  about where the code RUNS. It survived two hostile rounds, each checking whether the list of
+  spellings was complete, while it was still dismissing two live rows. Structure answered it: a
+  caller-side run is one at brace depth 0. Do not iterate on the vocabulary of a predicate that is
+  the wrong KIND of predicate. Record
+  `decisions/speckit/pr-batch22-the-self-driving-clauses-and-the-annotation-that-hid-two-arguments.md`.
+- ⚠️ **A correct check that escalates almost its whole population is not a check.** The same batch
+  extended a clause check to those rows; it was right in every particular and escalated **34 of 36**,
+  because the corpus retires the context on a bail-out branch the site never reaches. It was
+  reverted, with the measurement recorded at the check, because an instrument nobody can act on
+  teaches its readers to skip the fraction that mattered too.
+
+**Sibling.** Class 1 is an instrument that *cannot* report the bad answer. This is an instrument that
+reports a **true** answer which two different populations both satisfy — the failure is in the
+vocabulary, not the mechanism, so no amount of proving the check can fire will surface it.
+
+### 13. An instrument keyed on an IDENTIFIER is blind to duplication of what it names
+
+A census, ratchet or audit enumerates its population by naming things — a helper, a symbol, a
+definition site. Copy the thing, and the copy is not in the population. The instrument then reports
+the original as **retired** while an instance of it is still live, and it does so truthfully: the
+name it was watching really is gone.
+
+- **Trigger:** any population defined by *where a thing is defined* or *what it is called*, over a
+  corpus where copying is normal — test helpers above all, where a distinct translation unit is a
+  standing, legitimate reason to duplicate rather than share.
+- **Procedure:** enumerate by **shape**, not by name, at least once — the body, the signature, the
+  idiom. Where that is impractical, treat every *"copied rather than shared"* comment as a census
+  entry in its own right, because it is the only record that the copy exists.
+- **Instance.** #289's sibling-helper census lists helper #5 by its definition site — the `run_until`
+  helper in `engine_firstframe_test.cpp`, *"caller-supplied budget / 50 ms slice, in-loop restart"*.
+  That file collapsed onto the shared seam and now defines no `run_until` at all, so the row read as
+  migrated — while `first_frame_stop_test.cpp` still carried a copy of it, whose own comment said it
+  had been *"copied rather than shared"* from exactly that file. ⚠️ The census cites that helper BY
+  LINE NUMBER, and the line had itself rotted — which is how the number reached this page on the
+  first draft, and why it is not repeated here (#310). The copy outlived both its
+  original and the census entry that would have counted it. Record
+  `decisions/speckit/pr-batch22-the-self-driving-clauses-and-the-annotation-that-hid-two-arguments.md` §10.
+- ⚠️ **THE COMMENT THAT RECORDS A COPY IS ALSO THE FIRST THING TO ROT**, because it cites the source
+  it was copied from and nothing updates it when that source changes. Here it made two claims about
+  the origin file and that file supported **neither**. Delete the copy and both claims go with it —
+  do not rewrite them into a fresh claim (class 2).
+- **Scanning heuristic:** grep for `copied rather than shared`, `duplicates`, `same pattern as`,
+  `mirrors`. Each is a census entry nobody registered.
+
+**Sibling.** Class 8 is the same seam from the other side: *consolidating* N copies dissolves the
+population an audit asserts over. This is *creating* one, invisibly. Both say the population is a
+moving object that the instrument's key does not track.
+
+---
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:
