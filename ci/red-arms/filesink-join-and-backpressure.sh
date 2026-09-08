@@ -50,10 +50,37 @@
 #                                              that; only removing the lever and
 #                                              demanding RED does.
 #
+#   ARM 5  the fsync worker is STARVED
+#          (delayed past flush()'s deadline)  -> GREEN. ⚠️ THIS ARM GUARDS A FALSE
+#                                              RED THAT WAS REAL, not theoretical.
+#                                              flush() only POSTS a request;
+#                                              `worker_cmd_` is a single slot and
+#                                              close() -> stop_worker() OVERWRITES
+#                                              a still-pending request with
+#                                              WorkerCmd::stop, so a worker that
+#                                              had not yet woken exits WITHOUT
+#                                              ever calling fsync_fn -- and the
+#                                              causal assertion then failed on
+#                                              CORRECT production code. Measured:
+#                                              with this mutant and no wait,
+#                                              FlushDeadlineBounded FAILED in
+#                                              301 ms; with the wait it passes.
+#                                              The test now waits for the callback
+#                                              to be ENTERED before close(), which
+#                                              closes the window structurally
+#                                              rather than making it unlikely.
+#                                              Delete that wait and this arm
+#                                              reddens.
+#
 # ⚠️ ARM 1 AND ARM 4 MUST NOT BE COLLAPSED into "the tests fail when the code is
 # broken". They rule out each other's blind spot: arm 1 says the join assertion
 # is load-bearing, arm 4 says the backpressure witness is actually about the
 # sink. Either alone leaves the other's failure mode live.
+#
+# ⚠️ AND ARM 5 IS THE ONLY ARM THAT EXPECTS GREEN FROM A MUTANT. Arms 1-4 ask
+# "can the check fail when it should?"; arm 5 asks "can it PASS when it should?"
+# -- a check that reddens on correct code is as broken as one that never reddens,
+# and nothing else here would notice.
 #
 # ⚠️ WHY THE ARM-1 MUTANT HAS TWO PARTS. `join()` -> `detach()` alone leaves the
 # worker touching worker_mu_ / worker_fsync_done_ after the stack-local FileSink
@@ -247,6 +274,21 @@ then
     'FileSinkBackpressureTest.RealFileSinkDropsAccountablyUnderRotationStorm'
 else
   echo "  ARM 4: MUTATION FAILED TO APPLY"; fails=$((fails + 1))
+fi
+restore
+
+# ── ARM 5: the worker is starved past flush()'s deadline ─────────────────────
+echo "-- ARM 5: fsync worker starved (must stay GREEN -- guards a real false red)"
+if mutate "$SRC_SINK" \
+    "        fsync_worker_ = std::thread([this]() {" \
+    "        fsync_worker_ = std::thread([this]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds{300});  // MUTANT (#400 arm 5)"
+then
+  run_arm 5 GREEN log_file_fsync_test "$BIN_FSYNC" 'FileSinkFsyncTest.FlushDeadlineBounded'
+  echo "     ^ GREEN means the test tolerates a worker that has not been scheduled."
+  echo "       Remove the wait-for-entered before close() and this goes RED."
+else
+  echo "  ARM 5: MUTATION FAILED TO APPLY"; fails=$((fails + 1))
 fi
 restore
 

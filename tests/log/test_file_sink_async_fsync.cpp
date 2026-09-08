@@ -238,10 +238,11 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
     // left with nothing pointing at it.)
     constexpr auto k_max_return_ms = std::chrono::milliseconds{100};
 
-    // Set as the LAST act of the injected fsync, so it is false for the whole
-    // time the worker is inside the callback and true from the instant the
-    // callback returns. close()'s join obligation is then observable WITHOUT a
-    // clock — see the assertion after sink.close() below.
+    // `entered` is set on the way IN, `fsync_returned` on the way OUT, so
+    // between them the worker is provably inside the callback. That interval is
+    // what makes the assertion after close() both non-vacuous and immune to a
+    // starved worker — see the wait below.
+    std::atomic<bool> fsync_entered{false};
     std::atomic<bool> fsync_returned{false};
 
     fixpp::log::FileSinkConfig cfg;
@@ -251,7 +252,8 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
     cfg.max_keep_count = 8u;
     cfg.async_fsync    = true;
     // Inject a very slow fsync (500ms) so any synchronous implementation hangs.
-    cfg.fsync_fn = [k_fsync_sleep_ms, &fsync_returned](int) -> int {
+    cfg.fsync_fn = [k_fsync_sleep_ms, &fsync_entered, &fsync_returned](int) -> int {
+        fsync_entered.store(true, std::memory_order_release);
         std::this_thread::sleep_for(k_fsync_sleep_ms);
         fsync_returned.store(true, std::memory_order_release);
         return 0;
@@ -302,6 +304,23 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
     // A close() that HANGS is caught by the ctest TIMEOUT on log_file_fsync,
     // which is the right instrument for a hang — not a per-assertion band that
     // has to be hand-tuned against the slowest runner in the fleet.
+    //
+    // ⚠️ WAIT FOR THE CALLBACK TO BE ENTERED FIRST, OR THIS ASSERTION IS A
+    // FALSE RED ON CORRECT CODE. flush() only POSTS the request:
+    // `worker_cmd_` is a single slot, not a queue, and close() -> stop_worker()
+    // OVERWRITES it with WorkerCmd::stop (src/log/file_sink.cpp). So a worker
+    // that has not yet woken from worker_cv_.wait() when close() runs sees
+    // `stop`, returns without ever calling fsync_fn, and `fsync_returned` stays
+    // false — with nothing wrong. flush(10 ms) returning does NOT imply the
+    // worker got scheduled, and RUN_SERIAL does not schedule threads.
+    //
+    // Waiting on `entered` removes that window structurally rather than making
+    // it unlikely, and it is what earns the claim below: at the instant close()
+    // is entered the worker is INSIDE the callback with ~490 ms of sleep left,
+    // so the wait is not vacuous either. It terminates because the request has
+    // been posted and nothing posts `stop` until close(), which is after this.
+    while (!fsync_entered.load(std::memory_order_acquire)) std::this_thread::yield();
+
     sink.close();
     EXPECT_TRUE(fsync_returned.load(std::memory_order_acquire))
         << "close() returned before the in-flight fsync had completed — close() "
@@ -384,12 +403,26 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
 
     // (ii) At most 1 fsync should have been called so far (the worker serializes).
     // (A detach-per-flush impl would have up to k_flush_rounds calls in flight.)
+    // Still <=, not ==: the worker may not have been scheduled yet at this
+    // point, which is fine here. The wait for >=1 happens below, immediately
+    // before close(), where it is actually needed.
     EXPECT_LE(fsync_call_count.load(), 1)
         << "More than 1 fsync in-flight after " << k_flush_rounds
         << " timed-out flushes — indicates per-flush thread growth (detach bug)";
 
+    // ⚠️ Same structural wait as FlushDeadlineBounded, for the same reason: the
+    // five flush(1 ms) calls POST a request but do not prove the worker was
+    // scheduled, and close() -> stop_worker() overwrites a still-pending
+    // request with WorkerCmd::stop, so the worker could exit having never
+    // called stalling_fsync. fsync_call_count is incremented as the callback's
+    // FIRST act, so waiting on it means the worker is provably parked inside.
+    // Terminates: the request is posted and nothing posts `stop` until close().
+    while (fsync_call_count.load(std::memory_order_relaxed) < 1) std::this_thread::yield();
+
     // Record the fd the first fsync used (the fd of the live file).
     int original_fd = last_fsync_fd.load();
+    // Non-negative by construction now: the wait above guarantees the callback
+    // ran and recorded the fd, so sub-test (iii) below is never silently skipped.
 
     // close() immediately — NO pre-sleep masking. This is the key lifetime test.
     // A correct implementation joins the worker; a detached-thread impl would

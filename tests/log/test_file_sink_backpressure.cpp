@@ -97,10 +97,20 @@ ParsedLine parse_line(std::string const& line) {
     if (!all_digits(std::string_view{line}.substr(dot + 1, 6))) return fail("micros not 6 digits");
     if (line[dot + 7] != ' ') return fail("no space after the timestamp");
 
-    auto lb = line.find('[', dot + 7);
-    auto rb = line.find(']', dot + 7);
-    if (lb == std::string::npos || rb == std::string::npos || rb < lb) return fail("no [LEVEL]");
+    // ⚠️ The '[' must be EXACTLY here, not merely somewhere after the timestamp.
+    // `find('[', dot + 7)` accepted `123.456789 junk[INFO] cat=1 msg 7` -- a line
+    // torn and rejoined mid-field -- as clean. For a corruption detector a false
+    // NEGATIVE is the worst failure mode, so every field is pinned by position.
+    auto const lb = dot + 8;
+    if (lb >= line.size() || line[lb] != '[') return fail("no '[' immediately after the timestamp");
+    auto rb = line.find(']', lb);
+    if (rb == std::string::npos) return fail("no closing ']' on [LEVEL]");
     if (rb == lb + 1) return fail("empty [LEVEL]");
+    // format_line writes to_string(rec.level), which is upper-case alphabetic.
+    // Anything else between the brackets is not a level this sink produced.
+    for (auto i = lb + 1; i < rb; ++i) {
+        if (line[i] < 'A' || line[i] > 'Z') return fail("[LEVEL] is not upper-case alphabetic");
+    }
 
     constexpr std::string_view k_cat = " cat=";
     if (line.compare(rb + 1, k_cat.size(), k_cat) != 0) return fail("no ' cat=' after [LEVEL]");
@@ -446,6 +456,17 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     std::ranges::sort(all);
     EXPECT_EQ(std::ranges::adjacent_find(all), all.end())
         << "a payload appears more than once across the log files — a record was written twice";
+
+    // ⚠️ Every surviving payload must be one this test actually enqueued. Without
+    // this a well-formed line carrying a CORRUPTED number counts as a clean
+    // survivor: it parses, it is unique, and it can still sit inside a file's
+    // increasing run. Uniqueness and ordering do not bound the VALUE, and the
+    // burst wrote exactly [0, produced).
+    if (!all.empty()) {
+        EXPECT_LT(all.back(), produced)
+            << "a surviving record carries payload " << all.back() << ", but only [0, " << produced
+            << ") were ever enqueued — a line was corrupted into a well-formed but wrong value";
+    }
 
     // ── Accounting ───────────────────────────────────────────────────────────
     //
