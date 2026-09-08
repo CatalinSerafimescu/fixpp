@@ -216,29 +216,30 @@ def is_frozen_citer(citer, target, in_flight):
 # `spec/behaviors-and-limitations.md` -- a file nearly every PR edits, because
 # a B&L functional delta is a Gate B precondition.
 #
-# The frozen-citer rule above applies HERE TOO, and it has to: a hunk whose only
-# moved citations come from an archival bundle would otherwise fail [1] while
-# the identical rot is exempted by [2] -- one concept enforced in one of the two
-# places it governs. So `gating_citations_below` counts only LIVE citers, while
-# `resolved_/ambiguous_citations_below` keep the full count for the report.
+# The frozen-citer rule above governs check [2]. Check [1] does NOT charge at
+# all -- it reports, and only [2] decides the exit code. That is not a softening;
+# it removes a check that could only ever be wrong in two directions:
 #
-# It also counts only RESOLVED citers. An ambiguous basename (`spec.md:88`, three
-# candidates) may well name the file that moved -- which is why it is still
-# REPORTED, and why check [1] runs on the document regardless. But it may equally
-# name an untouched twin, and charging a build for a citation nobody can resolve
-# is a spurious HIT, not a caught defect. The report already promises this in so
-# many words: "AMBIGUOUS ... Listed, NOT counted against the exit code." Counting
-# them here would have made that sentence false.
+#   REDUNDANT. After the form-B exemption, the only thing [1] could still charge
+#   was a shift moving a resolvable form-A citation -- and [2] catches every one
+#   of those STRUCTURALLY, not by luck. If a citation at line n moved by k, then
+#   head[n] is base[n-k]: either the content differs, which is "cited line
+#   CONTENT CHANGED", or it is byte-identical, and then mapped_base_line returns
+#   n-k != n, which is "SILENTLY REPOINTED". There is no third outcome. Measured
+#   as well as argued: across ten merges plus the motivating commit 9e0b332d,
+#   [1]'s gate never once decided a verdict [2] had not already decided.
 #
-# ⚠️ THE BLIND SPOT THIS BUYS, STATED SO IT CAN BE FOUND: a shift in a document
-# cited ONLY in form B or form C moves citations that cannot be positioned, so
-# the count is 0 and the hunk is reported without failing. The motivating defect
-# (9e0b332d) is NOT in that class -- it moved 28 resolvable citations from 16
-# files and still fails. The tree-wide form B/C population is printed on every
-# run as the denominator of what this cannot see; #310 is where that shrinks.
-def shift_is_gated(f):
-    """Does this [1] finding fail the build, or is it reported only?"""
-    return bool(f["gating_citations_below"])
+#   AND WRONG. `hunk_shifts` asks whether a HUNK changed the line count, which is
+#   not whether a CITATION moved. An insertion above a citation paired with a
+#   deletion above it nets to zero: the citation still lands on the same
+#   content, [2] correctly reports nothing, and [1] failed the build for two
+#   shifting hunks. A moved paragraph is exactly that shape. Charging it is a
+#   spurious HIT -- the failure this repo's rule 2 is about, inside the check
+#   written to enforce it. Arm 5d pins it.
+#
+# So [1] keeps the job it is uniquely able to do -- being the only check that
+# can SEE a form-B document shift, since form B names no file and resolves to
+# nothing -- and stops pretending it can price one.
 
 # Deliberate, reviewed exception. `--census` reports these as their own bucket:
 # the marker is itself a claim (that this number will not rot), so it has to stay
@@ -817,14 +818,13 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
                     "compared nothing.")
             for a, b, _c, d in md_hunks:
                 if hunk_shifts(a, b, d, len(old)):
-                    # Only citations AT OR BELOW the hunk actually move. The two
-                    # `*_citations_below` counts are the REPORT: they count the
+                    # Only citations AT OR BELOW the hunk actually move. These
+                    # counts are the REPORT and nothing else: they count the
                     # citations that can be POSITIONED, and form B/C name no
                     # file, so they cannot be. A hunk with zero is therefore "no
                     # known citation moved", never "nothing moved" -- which is
-                    # why it is still reported. `gating_citations_below` is the
-                    # separate question of what it COSTS, and drops archival
-                    # citers so [1] and [2] exempt the same thing.
+                    # why it is still reported. What it COSTS is not asked here;
+                    # see the header above for why [1] does not charge.
                     below = [r for r in cites if r["n"] >= a]
                     amb_below = [r for r in amb_here if r["n"] >= a]
                     shift_findings.append({
@@ -832,11 +832,7 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
                         "new_count": d, "old_total": len(old),
                         "cited_by": len(cites), "cited_ambiguously_by": n_amb,
                         "resolved_citations_below": len(below),
-                        "ambiguous_citations_below": len(amb_below),
-                        "gating_citations_below": sum(
-                            1 for r in below
-                            if not is_frozen_citer(r["cf"], r["tpath"],
-                                                   in_flight))})
+                        "ambiguous_citations_below": len(amb_below)})
             if not cites and not n_amb:
                 skipped_non_target.append(new_path)
 
@@ -902,18 +898,20 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
     # ── what the gate CHARGES ────────────────────────────────────────────────
     # Tagged in place, so --json carries the verdict beside the finding and the
     # printed sections below stay one list each: everything is reported, and the
-    # tag says which ones cost you a build. See is_frozen_citer / shift_is_gated.
+    # tag says which ones cost you a build. See is_frozen_citer. Check [1] never
+    # charges, so every shift finding is tagged False -- kept as an explicit
+    # field rather than omitted, so a consumer of --json reads one schema.
     for f in shift_findings:
-        f["gated"] = shift_is_gated(f)
+        f["gated"] = False
     for f in content_findings:
         f["gated"] = not is_frozen_citer(f["cf"], f["tpath"], in_flight)
     # Counted once. Printing one denominator and deciding the verdict from a
     # second, separately-written expression of the same arithmetic is how the
     # two drift on a later edit.
-    n_gated_shift = sum(f["gated"] for f in shift_findings)
     n_gated_content = sum(f["gated"] for f in content_findings)
-    n_free_shift = len(shift_findings) - n_gated_shift
     n_free_content = len(content_findings) - n_gated_content
+    n_gated_shift = 0                      # check [1] reports; it never charges
+    n_free_shift = len(shift_findings)
 
     # ── report ───────────────────────────────────────────────────────────────
     print("── #336 shift audit " + "─" * 54)
@@ -943,9 +941,13 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
     print()
 
     print(f"[1] LINE-SHIFT AUDIT -- {len(shift_findings)} shifting hunk(s), "
-          f"{n_gated_shift} of them GATED")
-    print(f"    reported but NOT gated: {n_free_shift} (no LIVE citation this "
-          "mode can POSITION sits at or below the hunk)")
+          "REPORTED not charged")
+    print("    check [1] does not decide the exit code: [2] catches every "
+          "resolvable")
+    print("    citation it could charge, and a net-zero edit makes it fire on "
+          "one that")
+    print("    never moved. See its header. Form B/C shifts are visible ONLY "
+          "here.")
     for f in shift_findings:
         kind = ("INSERTION of %d line(s) after line %d" % (f["new_count"], f["old_start"])
                 if f["old_count"] == 0
@@ -957,11 +959,9 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
               f"{f['old_total']} lines before)")
         below = f["resolved_citations_below"] + f["ambiguous_citations_below"]
         print(f"      {kind} -- every line below it moved")
-        print(f"      {below} citation(s) sit at or below it and MOVED, "
-              f"{f['gating_citations_below']} of them from a LIVE citer"
-              + ("   [GATED]" if f["gated"] else
-                 "   [REPORTED, not gated -- form B/C cannot be positioned,"
-                 " and archival citers are not charged]"))
+        print(f"      {below} citation(s) sit at or below it and MOVED"
+              + ("   [none that can be POSITIONED -- form B/C cannot be]"
+                 if below == 0 else ""))
     if not shift_findings:
         print("  none -- every hunk is an in-place same-line-count replacement or an")
         print("  append at the original last line.")
@@ -1342,20 +1342,22 @@ def shift_self_test():
         lines = lines[:5] + ["MID"] * 4 + lines[5:]
         write_doc(); _sh_commit(d, "insert mid-document")
         code, j = _sh_audit(d)
-        checks.append(("mid-document insertion: [1] fires", code == 1 and j["shift"]))
+        checks.append(("mid-document insertion: [1] reports it", bool(j["shift"])))
+        checks.append(("...and [2] is what makes it RED -- the coverage [1] "
+                       "used to duplicate",
+                       code == 1 and bool(j["content"])))
         checks.append(("mid-document insertion: reported as an INSERTION",
                        any(f["old_count"] == 0 for f in j["shift"])))
 
-        # 5b. A shift BELOW every citation is REPORTED but not charged, and must
-        #     say that zero POSITIONABLE citations moved so a reviewer can triage
-        #     it. Form B/C citations cannot be positioned; that is the scope
-        #     shift_is_gated() names, and 5c is its non-vacuity partner.
+        # 5b. A shift BELOW every citation must say that zero POSITIONABLE
+        #     citations moved, so a reviewer can triage it. 5c is its
+        #     non-vacuity partner and 5d is the false positive that retired
+        #     check [1]'s gate.
         lines = lines[:25] + ["LATE"] * 2 + lines[25:]
         write_doc(); _sh_commit(d, "insert below every citation")
         code, j = _sh_audit(d)
         checks.append(("shift below every citation: reported, gate passes",
-                       code == 0 and len(j["shift"]) == 1
-                       and not j["shift"][0]["gated"]))
+                       code == 0 and len(j["shift"]) == 1))
         checks.append(("...annotated as 0 positionable citations moved",
                        j["shift"][0]["resolved_citations_below"] == 0
                        and not j["content"]))
@@ -1365,7 +1367,28 @@ def shift_self_test():
         write_doc(); _sh_commit(d, "insert above every citation")
         code, j = _sh_audit(d)
         checks.append(("shift above every citation: both reported as moved",
-                       code == 1 and j["shift"][0]["resolved_citations_below"] == 2))
+                       j["shift"][0]["resolved_citations_below"] == 2))
+        # THE COVERAGE-PRESERVATION CLAIM, pinned. [1] no longer charges, so if
+        # [2] did not independently see this the retirement would have cost real
+        # coverage. head[n] is base[n-k]: content differs, or it is identical and
+        # mapped_base_line says it came from elsewhere. There is no third case.
+        checks.append(("...and [2] alone still makes it RED",
+                       code == 1 and len(j["content"]) == 2))
+
+        # 5d. THE FALSE POSITIVE THAT RETIRED [1]'s GATE. Insert above a citation
+        #     AND delete the same number of lines above it: the citation lands on
+        #     byte-identical content at the same number, because it did not move.
+        #     `hunk_shifts` asks about a HUNK, not about a CITATION, so the old
+        #     gate charged two shifting hunks for rot that did not happen. A moved
+        #     paragraph is exactly this shape.
+        before_line = lines[9]
+        lines = lines[:2] + ["INS"] * 3 + lines[2:6] + lines[9:]
+        write_doc(); _sh_commit(d, "insert 3 above and delete 3 above: net zero")
+        code, j = _sh_audit(d)
+        checks.append(("net-zero edit: [1] still REPORTS the shifting hunks",
+                       len(j["shift"]) >= 1))
+        checks.append(("net-zero edit: nothing rotted, so the gate PASSES",
+                       code == 0 and not j["content"]))
 
         # 6. Truncation below a cited line: the citation survives as a number and
         #    stops existing as a location.
@@ -1410,9 +1433,8 @@ def shift_self_test():
         # agree. 8b-bis is the non-vacuity partner: resolve the ambiguity and
         # the identical shift fails.
         checks.append(("ambiguous-only shift is REPORTED, not gated",
-                       code == 0 and bool(tw) and not tw[0]["gated"]
-                       and tw[0]["ambiguous_citations_below"] >= 1
-                       and tw[0]["gating_citations_below"] == 0))
+                       code == 0 and bool(tw)
+                       and tw[0]["ambiguous_citations_below"] >= 1))
 
         # 8b-bis. Remove the decoy: `twin.md` now resolves to exactly one file,
         #     the SAME citation becomes positionable, and the same shape fails.
@@ -1423,9 +1445,10 @@ def shift_self_test():
         _sh_commit(d, "prepend again, now unambiguously cited")
         code, j = _sh_audit(d)
         tw = [f for f in j["shift"] if f["file"] == "sub/twin.md"]
-        checks.append(("...once resolvable, the identical shift IS gated",
-                       code == 1 and bool(tw) and tw[0]["gated"]
-                       and tw[0]["gating_citations_below"] == 1))
+        checks.append(("...once resolvable, the identical shift IS gated -- by [2]",
+                       code == 1 and bool(tw)
+                       and tw[0]["resolved_citations_below"] == 1
+                       and bool(j["content"])))
 
         # 8c. A citation into a file ADDED in the range has no before-value, so it
         #     is not rot -- but an out-of-range one into it still is.
@@ -1496,17 +1519,19 @@ def shift_self_test():
                        "doc2.md" in j["md_checked"]))
         d2f = [f for f in j["shift"] if f["file"] == "doc2.md"]
         checks.append(("form-B-only doc's shift is REPORTED", bool(d2f)))
-        # ...and, since the gate narrowed to hunks that moved a POSITIONABLE
-        # citation (#336 wiring), reported is all it is. This is the blind spot
-        # named in shift_is_gated()'s header, pinned so it stays a known scope
-        # rather than becoming a surprise.
-        checks.append(("form-B-only doc's shift is NOT gated (the named blind spot)",
-                       bool(d2f) and not d2f[0]["gated"] and code == 0))
+        # ...and reported is all it is, because check [1] never charges. Form B
+        # names no file, so NOTHING can price this shift -- [2] cannot see it
+        # either. Pinned so the limit stays visible rather than becoming a
+        # surprise: seeing a form-B shift is exactly what [1] is uniquely for.
+        checks.append(("form-B-only doc's shift is REPORTED but never charged",
+                       bool(d2f) and not d2f[0]["gated"] and code == 0
+                       and not j["content"]))
 
-        # 8f-bis. NON-VACUITY of that narrowing, in the SAME document. Give
-        #     doc2.md a form-A citation and shift it again: the hunk is now
-        #     gated. Without this the narrowing could be "check [1] never fails"
-        #     and 8f alone would still pass -- a forced miss cannot price a gate.
+        # 8f-bis. NON-VACUITY, in the SAME document: give doc2.md a form-A
+        #     citation and shift it again, and the range goes RED. Not via [1] --
+        #     via [2], which is the whole coverage-preservation argument for
+        #     retiring [1]'s gate. Without this arm, "form B is never charged"
+        #     could equally mean "this fixture is never charged".
         open(os.path.join(d, "src", "forma.cpp"), "w").write(
             "// and the rule is at doc2.md:12\n")
         _sh_commit(d, "add a form-A citation into the form-B-only doc")
@@ -1515,9 +1540,11 @@ def shift_self_test():
         _sh_commit(d, "shift the now-form-A-cited doc")
         code, j = _sh_audit(d)
         d2f = [f for f in j["shift"] if f["file"] == "doc2.md"]
-        checks.append(("same doc, now form-A cited: the shift IS gated",
-                       code == 1 and bool(d2f) and d2f[0]["gated"]
-                       and d2f[0]["resolved_citations_below"] >= 1))
+        checks.append(("same doc, now form-A cited: RED -- and it is [2] that "
+                       "charges it",
+                       code == 1 and bool(d2f)
+                       and d2f[0]["resolved_citations_below"] >= 1
+                       and bool(j["content"])))
 
         # 8h. GATE SCOPE, both directions in ONE measurement. A `specs/<id>/`
         #     feature bundle is an archive: its rot is reported and not charged.
@@ -1605,11 +1632,10 @@ def shift_self_test():
         checks.append(("...while the intra-bundle rot in the SAME range gates",
                        code == 1))
 
-        # 8i. The SAME frozen rule inside check [1]. A shifting hunk whose only
-        #     moved citations come from an archival bundle must not fail, or one
-        #     concept is enforced in one of the two places it governs -- [2]
-        #     would exempt exactly the rot [1] charges. Both directions again:
-        #     the live citer added second must flip the identical hunk to GATED.
+        # 8i. The frozen rule on a SHIFTED DOCUMENT, both directions. A shift
+        #     moves the citation, so [2] sees it as rot -- and whether that rot
+        #     is charged must depend on the citer being live, exactly as it does
+        #     for a source target. The live citer added second flips it.
         fd = os.path.join(d, "frozen_doc.md")
         flines = [f"F{i:02d}" for i in range(1, 21)]
         open(fd, "w").write("\n".join(flines) + "\n")
@@ -1620,21 +1646,21 @@ def shift_self_test():
         _sh_commit(d, "shift it")
         code, j = _sh_audit(d)
         fdf = [f for f in j["shift"] if f["file"] == "frozen_doc.md"]
-        checks.append(("[1] frozen-only citer below: hunk REPORTED",
+        checks.append(("shifted doc, archival citer: [1] REPORTS the hunk",
                        len(fdf) == 1 and fdf[0]["resolved_citations_below"] == 1))
-        checks.append(("[1] frozen-only citer below: ...and NOT gated",
-                       code == 0 and not fdf[0]["gated"]
-                       and fdf[0]["gating_citations_below"] == 0))
+        checks.append(("shifted doc, archival citer: [2] sees rot, does NOT charge",
+                       code == 0 and bool(j["content"])
+                       and not any(c["gated"] for c in j["content"])))
         open(os.path.join(d, "spec", "livecite.md"), "w").write(
             "the same rule is at frozen_doc.md:15\n")
         _sh_commit(d, "add a LIVE citer of the same doc")
         open(fd, "w").write("\n".join(["TOP2"] * 2 + flines) + "\n")
         _sh_commit(d, "shift it again")
         code, j = _sh_audit(d)
-        fdf = [f for f in j["shift"] if f["file"] == "frozen_doc.md"]
-        checks.append(("[1] a LIVE citer below flips the same hunk to GATED",
-                       code == 1 and len(fdf) == 1 and fdf[0]["gated"]
-                       and fdf[0]["gating_citations_below"] == 1))
+        checks.append(("shifted doc, LIVE citer added: the same shift now CHARGES",
+                       code == 1 and any(
+                           c["gated"] and c["cf"] == "spec/livecite.md"
+                           for c in j["content"])))
 
         # 8j. --allow-empty-range, both directions. The flag exists so the ONE
         #     place that defines "empty" stays here; an arm that only proved the

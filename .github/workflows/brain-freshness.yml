@@ -103,12 +103,13 @@ jobs:
         # The other 26 predate the rule. So this is close to free going forward.
         #
         # ── The ROT half (--shift-audit) is NOT close to free, and was scoped ──
-        # Charging every finding would stop ordinary work, so what FAILS is
-        # narrowed: archival `specs/<id>/` citers, hunks that moved no LIVE
-        # positionable citation, and ambiguous basenames. Each narrowing, the
-        # blind spot it buys, and the range its sizing was measured on live at
-        # is_frozen_citer() / shift_is_gated() in the tool. Every finding is
-        # still printed and still lands in --json carrying `gated`.
+        # Charging every finding would stop ordinary work, so the exit code is
+        # decided by check [2] alone -- rot in a resolvable citation from a LIVE
+        # citer. Check [1] (line-shift) REPORTS and never charges: [2] catches
+        # every citation [1] could price, structurally, and a net-zero edit made
+        # [1] fire on a citation that had not moved. Its header carries the
+        # argument and the measurements. Every finding from both checks is still
+        # printed and still lands in --json carrying `gated`.
         #
         # Do not re-derive the scope from this comment -- read the tool, and
         # re-measure with `--shift-audit <range>` rather than trusting a number
