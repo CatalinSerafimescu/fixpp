@@ -296,6 +296,16 @@ endif()
 option(FIXPP_INSTALL_PYTHON
        "Install the Python binding artifacts (module, pure-Python modules, _fixpp_data)" ON)
 
+# ⚠️ PROMOTED OUT OF DIRECTORY SCOPE (#257). tests/packaging/ is a SIBLING
+# directory, not a child, so a plain set() here is invisible to it — and the
+# packaging witness needs this exact path to anchor its "the payload must not
+# duplicate the bundled XMLs" search. INTERNAL rather than a user-facing cache
+# entry: it is derived from FIXPP_PY_INSTALL_LAYOUT above, and a user who
+# overrode it directly would silently desynchronise the install rules from the
+# witness that checks them.
+set(FIXPP_PY_INSTALL_DIR "${FIXPP_PY_INSTALL_DIR}" CACHE INTERNAL
+    "Resolved destination for the Python payload (derived; do not set directly)" FORCE)
+
 # Report the resolved destination on every configure. FIXPP_PY_INSTALL_DIR has
 # three reachable outcomes and they fail in different directions: "." pollutes
 # the install-prefix root; an absolute writable SITEARCH makes `cmake --install

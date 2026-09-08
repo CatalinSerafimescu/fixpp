@@ -23,7 +23,8 @@
 # unset and the if(... IN_LIST ...) form is a hard error rather than a fallback.
 cmake_minimum_required(VERSION 3.28)
 
-foreach(_var FIXPP_MAIN_BUILD_DIR FIXPP_WORK_DIR FIXPP_SOURCE_DIR FIXPP_PROJECT_VERSION)
+foreach(_var FIXPP_MAIN_BUILD_DIR FIXPP_WORK_DIR FIXPP_SOURCE_DIR FIXPP_PROJECT_VERSION
+             FIXPP_PY_EXPECTED_PAYLOAD FIXPP_PY_PAYLOAD_DIR)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "run_package_contents_witness.cmake: -D${_var}=... is required")
   endif()
@@ -146,6 +147,86 @@ execute_process(COMMAND "${CMAKE_COMMAND}" -E tar xf "${_tgz}"
                 WORKING_DIRECTORY "${_x}" RESULT_VARIABLE _rc)
 if(NOT _rc EQUAL 0)
   message(FATAL_ERROR "T058: failed to extract ${_tgz}")
+endif()
+
+# ── #257 — the PYTHON PAYLOAD, actually looked for ───────────────────────────
+#
+# ⚠️ THIS GATE WAS STRUCTURALLY BLIND TO IT AND RETURNED 9/9 GREEN WHILE THE
+# PAYLOAD WAS PRESENT (#254, and #257 names it). Everything else here checks the
+# archive-format set and an archive count DERIVED FROM THE PACKAGE'S OWN EXPORT
+# — both of which are unchanged by adding or removing arbitrary root-level
+# files. A count derived from the thing under test cannot notice an addition to
+# it.
+#
+# Two-sided, and the sides are not symmetric restatements:
+#   ON  — the payload must be at the pinned destination, AND the four bundled
+#         XMLs must NOT be beside it (they ship once, under share/), AND the
+#         datadir copy they were dropped in favour of must actually be there.
+#   OFF — no python-shaped file anywhere in the extracted tree.
+#
+# ⚠️ Only the ON side runs in CI today: the packaging tier is gated on
+# linux-gcc-release (084 FR-026a), which is a packaging leg, so no lane exercises
+# OFF. The OFF branch is therefore reachable but unwitnessed here — it is the
+# `absent` mode of bindings/python/run_python_install_witness.cmake, which DOES
+# run on the four non-packaging legs, that covers that direction.
+set(_py_hits "")
+foreach(_pat "_fixpp*.so" "_fixpp*.pyd" "fixpp.py" "fixpp_oo.py" "fixpp_dict_data.py")
+  file(GLOB_RECURSE _found "${_x}/${_pat}" "${_x}/*/${_pat}")
+  list(APPEND _py_hits ${_found})
+endforeach()
+list(REMOVE_DUPLICATES _py_hits)
+
+if(FIXPP_PY_EXPECTED_PAYLOAD)
+  if(_py_hits STREQUAL "")
+    message(FATAL_ERROR
+      "T058/#257: FIXPP_INSTALL_PYTHON is ON, so packages-linux-*-release must SHIP the Python\n"
+      "payload — and the extracted package contains NONE of _fixpp*.so, fixpp.py, fixpp_oo.py or\n"
+      "fixpp_dict_data.py anywhere.\n\n"
+      "This is the failure the old version of this gate could not see: it checks archive FORMATS\n"
+      "and a count derived from the package's own export, neither of which moves when the payload\n"
+      "disappears. Do not relax it — #257 decided the packages carry Python, and an empty payload\n"
+      "makes L-056-4 false while every other check here stays green.")
+  endif()
+
+  # The four XMLs must not be duplicated into the payload. They exist under
+  # share/fixpp/dictionaries in the same package, so the search is ANCHORED at
+  # the payload directory — an unanchored one would fire on the copy that is
+  # supposed to be there.
+  set(_dup_xmls "")
+  foreach(_d IN ITEMS FIX42 FIX44 FIX50SP2 FIXT11)
+    file(GLOB_RECURSE _f "${_x}/*/${FIXPP_PY_PAYLOAD_DIR}/_fixpp_data/${_d}.xml")
+    list(APPEND _dup_xmls ${_f})
+  endforeach()
+  if(NOT _dup_xmls STREQUAL "")
+    string(REPLACE ";" "\n  " _pretty "${_dup_xmls}")
+    message(FATAL_ERROR
+      "T058/#257: the payload duplicates the bundled dictionaries:\n  ${_pretty}\n\n"
+      "The package already ships all of dictionaries/ under share/fixpp/dictionaries, so this is\n"
+      "1.9 MB of the same four files twice in one archive with no stated precedence. The payload\n"
+      "is supposed to reach them through the generated _fixpp_data/__init__.py instead.")
+  endif()
+
+  # ...and the copy they were dropped in favour of must exist, or the exclusion
+  # traded a duplicate for a dangling locator.
+  file(GLOB_RECURSE _datadir_dicts "${_x}/*/share/fixpp/dictionaries/FIX44.xml")
+  if(_datadir_dicts STREQUAL "")
+    message(FATAL_ERROR
+      "T058/#257: the payload excludes the bundled XMLs on the promise that the package ships them\n"
+      "under share/fixpp/dictionaries — and it does NOT. A consumer would get a locator resolving\n"
+      "to nothing. Either restore the C++ dictionaries install rule or stop excluding them.")
+  endif()
+
+  list(LENGTH _py_hits _py_n)
+  message(STATUS "T058/#257: python payload present (${_py_n} module/module-adjacent file(s)), "
+                 "bundled XMLs correctly NOT duplicated, share/fixpp/dictionaries present")
+else()
+  if(NOT _py_hits STREQUAL "")
+    string(REPLACE ";" "\n  " _pretty "${_py_hits}")
+    message(FATAL_ERROR
+      "T058/#257: FIXPP_INSTALL_PYTHON is OFF, so this package must contain no Python — found:\n"
+      "  ${_pretty}")
+  endif()
+  message(STATUS "T058/#257: python payload correctly ABSENT (FIXPP_INSTALL_PYTHON=OFF)")
 endif()
 
 file(GLOB_RECURSE _shipped_targets "${_x}/*/fixppTargets.cmake")

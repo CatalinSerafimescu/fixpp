@@ -18,7 +18,7 @@
 # Both legs are asserted here instead, in order, with the exit code first.
 
 foreach(_var FIXPP_WITNESS_SCRIPT FIXPP_MAIN_BUILD_DIR FIXPP_WORK_DIR FIXPP_SOURCE_DIR
-             FIXPP_PROJECT_VERSION)
+             FIXPP_PROJECT_VERSION FIXPP_PY_EXPECTED_PAYLOAD FIXPP_PY_PAYLOAD_DIR)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "run_package_contents_gate.cmake: -D${_var}=... is required")
   endif()
@@ -30,6 +30,8 @@ execute_process(
     "-DFIXPP_WORK_DIR=${FIXPP_WORK_DIR}"
     "-DFIXPP_SOURCE_DIR=${FIXPP_SOURCE_DIR}"
     "-DFIXPP_PROJECT_VERSION=${FIXPP_PROJECT_VERSION}"
+    "-DFIXPP_PY_EXPECTED_PAYLOAD=${FIXPP_PY_EXPECTED_PAYLOAD}"
+    "-DFIXPP_PY_PAYLOAD_DIR=${FIXPP_PY_PAYLOAD_DIR}"
     -P "${FIXPP_WITNESS_SCRIPT}"
   RESULT_VARIABLE _rc
   OUTPUT_VARIABLE _out

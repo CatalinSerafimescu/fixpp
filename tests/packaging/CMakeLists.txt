@@ -62,6 +62,25 @@ set_tests_properties(fixpp::packaging::clean-env PROPERTIES
 # printed for DEB masked a FATAL_ERROR raised for RPM or TGZ.
 #
 # run_package_contents_gate.cmake asserts the exit code FIRST, then the token.
+# ── #257 — the payload disposition this package is expected to have ─────────
+#
+# ⚠️ THREE configurations reach here, not two, and the third is the one that
+# breaks a naive `${FIXPP_INSTALL_PYTHON}`: when FIXPP_BUILD_PYTHON is OFF the
+# bindings subdirectory is never added, so NEITHER FIXPP_INSTALL_PYTHON nor
+# FIXPP_PY_INSTALL_DIR exists — and passing an empty value would make the
+# witness's required-variable guard fail an otherwise fine build that simply
+# has no bindings. No bindings built means no payload to ship, so: expect none.
+if(FIXPP_BUILD_PYTHON AND FIXPP_INSTALL_PYTHON)
+  set(_fixpp_pkg_py_expected ON)
+  set(_fixpp_pkg_py_dir "${FIXPP_PY_INSTALL_DIR}")
+else()
+  set(_fixpp_pkg_py_expected OFF)
+  # Never dereferenced on the OFF side (the witness only anchors the duplicate
+  # search under ON), but passed non-empty so the required-variable guard means
+  # "the caller decided" rather than "the caller forgot".
+  set(_fixpp_pkg_py_dir "<no-payload>")
+endif()
+
 add_test(
   NAME fixpp::packaging::contents
   COMMAND "${CMAKE_COMMAND}"
@@ -70,6 +89,12 @@ add_test(
     "-DFIXPP_WORK_DIR=${_fixpp_pkg_work}/contents"
     "-DFIXPP_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
     "-DFIXPP_PROJECT_VERSION=${PROJECT_VERSION}"
+    # ── #257 — what the package is EXPECTED to carry ────────────────────────
+    # Passed rather than re-derived: this is the same decision the Configure
+    # flags made, and a witness that guessed it would be asserting its own
+    # assumption. Both values are consumed two-sidedly by the witness.
+    "-DFIXPP_PY_EXPECTED_PAYLOAD=${_fixpp_pkg_py_expected}"
+    "-DFIXPP_PY_PAYLOAD_DIR=${_fixpp_pkg_py_dir}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/run_package_contents_gate.cmake"
 )
 set_tests_properties(fixpp::packaging::contents PROPERTIES
