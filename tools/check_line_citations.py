@@ -56,9 +56,25 @@ import tempfile
 # hold binary blobs that git emits raw into a diff when they contain no NUL in
 # the first 8000 bytes -- decoding that as strict UTF-8 throws, which would
 # abort a commit that merely added a corpus seed.
+# ⚠️ The doc trees are here because #336 WIDENED RE_A to `.md` and to a leading
+# dot -- expressly so `.specify/2d-threading.md:448` would match -- and then left
+# the ADDITION gate unable to reach a single one of them. `--staged`/`--range`
+# diff `-- SCAN_DIRS`, so the widening was inert for them: measured, one commit
+# adding the IDENTICAL citation to src/, specs/, brain/, spec/ and .specify/ was
+# reported for src/ ALONE. A regex widened for a directory the gate cannot see is
+# the same false zero as any other -- the pattern matched, and nothing fed it.
+#
+# --shift-audit was never affected: it builds its index from `all_tracked`, which
+# is the whole tree. So the two halves of #336 disagreed about what "the tree" is,
+# and only the growth half was short.
+#
+# Cost of the widening, measured over the eleven merges 37eb372f..bb22be26 before
+# taking it: 3 of them newly report, 2-3 citations each, all in `spec/*.md` or a
+# checklist. Re-derive rather than trust that -- `--range <merge>~1..<merge>`.
 SCAN_DIRS = [
     "tests/", "src/", "include/",
     "tools/", "bench/", "bindings/", "cmake/", ":(glob,top)*.md",
+    "specs/", "spec/", "brain/", ".specify/",
     ":(exclude)tests/fuzz/corpus/",
     ":(exclude)tests/abi/baseline/",
 ]
@@ -77,6 +93,10 @@ SCAN_DIRS = [
 # `.specify/2d-threading.md:448` matches NOTHING -- not at the dot (wrong class),
 # not one character in (the lookbehind rejects it) -- and `.specify/` is where
 # this repo's line-cited design docs live.
+#
+# ⚠️ A pattern only decides what it is FED. This widening sat inert in the
+# addition gate until SCAN_DIRS was widened to match it; see the note there
+# before assuming a regex change here reaches `--staged`/`--range` at all.
 #
 # `[0-9]`, not `\d`: `\d` also matches Unicode decimal digits, which --shift-audit's
 # ASCII `git grep` prefilter drops. A decider that out-matches its own prefilter
@@ -1623,6 +1643,37 @@ def shift_self_test():
                        code == 1 and len(rp) == 1 and rp[0]["n"] == 10))
         checks.append(("...and it names the base line it actually came from",
                        bool(rp) and "was line 9" in rp[0]["why"]))
+
+        # 8k. SCAN_DIRS REACH, for the ADDITION gate. #336 widened RE_A to `.md`
+        #     and to a leading dot expressly so `.specify/...md:448` would match,
+        #     and the gate could not see `.specify/` at all -- a pattern only
+        #     decides what it is FED. One commit puts the IDENTICAL citation on
+        #     every surface; the arm fails if ANY is missed, so narrowing
+        #     SCAN_DIRS again cannot pass quietly. Driven through the CLI, since
+        #     the pathspec is what is under test and calling gate() directly
+        #     would not exercise it.
+        reach_root = os.path.join(d, "reach")
+        for sub in ("src", "specs/099-feat", "spec", "brain", ".specify"):
+            os.makedirs(os.path.join(reach_root, sub), exist_ok=True)
+        open(os.path.join(reach_root, "src", "target.cpp"), "w").write("a\nb\nc\n")
+        _sh_run(reach_root, "init", "-q")
+        _sh_run(reach_root, "config", "user.email", "t@t")
+        _sh_run(reach_root, "config", "user.name", "t")
+        _sh_commit(reach_root, "base")
+        surfaces = ["src/x.cpp", "specs/099-feat/spec.md", "spec/live.md",
+                    "brain/index.md", ".specify/2d.md"]
+        for f in surfaces:
+            open(os.path.join(reach_root, f), "w").write("see src/target.cpp:2\n")
+        _sh_commit(reach_root, "the same new citation on every surface")
+        r = subprocess.run([sys.executable, os.path.abspath(__file__),
+                            "--range", "HEAD~1..HEAD", "--root", reach_root],
+                           capture_output=True, text=True)
+        blob = r.stdout + r.stderr
+        missed = [f for f in surfaces if f not in blob]
+        checks.append(("addition gate REACHES every doc tree, not just src/",
+                       r.returncode == 1 and not missed))
+        checks.append(("...and says so for all five surfaces",
+                       sum(f in blob for f in surfaces) == len(surfaces)))
 
         checks += prefilter_recall_check(d)
 
