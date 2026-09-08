@@ -84,6 +84,9 @@ target_link_libraries(log_file_rotation_test PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
+target_include_directories(log_file_rotation_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"  # support/temp_dir.hpp (#404)
+)
 add_test(NAME log_file_rotation COMMAND log_file_rotation_test)
 
 # ── Slice 3c: T018 (TS-5) — FileSink fsync on drain thread ───────────────────
@@ -92,6 +95,9 @@ target_link_libraries(log_file_fsync_test PRIVATE
   fixpp_log
   GTest::gtest
   GTest::gtest_main
+)
+target_include_directories(log_file_fsync_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"  # support/temp_dir.hpp (#404)
 )
 add_test(NAME log_file_fsync COMMAND log_file_fsync_test)
 # Gate B PR #227 F-1 / #400. CONDITION, not a census: some assertions in this
@@ -121,6 +127,9 @@ target_link_libraries(log_file_backpressure_test PRIVATE
   fixpp_log
   GTest::gtest
   GTest::gtest_main
+)
+target_include_directories(log_file_backpressure_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"  # support/temp_dir.hpp (#404)
 )
 add_test(NAME log_file_backpressure COMMAND log_file_backpressure_test)
 # RUN_SERIAL for two independent reasons, both structural rather than measured:

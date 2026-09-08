@@ -2,81 +2,42 @@
 //
 // tests/session/_fixtures_/store_temp_dir.hpp
 //
-// unique_store_dir — per-test temporary directory helper for 008-message-store tests.
+// MIGRATION SHIM — the helper itself now lives at tests/support/temp_dir.hpp
+// in namespace `fixpp::test_support`, because tests/log needed it too and a
+// tests/log file including a fixture out of tests/session is a layering
+// inversion (#404).
 //
-// Each call returns a unique path under the system's temp directory,
-// identified by tag + PID + a per-process atomic counter.  Directories are
-// created on construction; cleanup is the caller's responsibility (typically
-// std::filesystem::remove_all at end of test).
+// This header exists so the ~127 existing `fixpp::store_test::unique_store_dir`
+// / `remove_store_dir` call sites across 16 tests/session files keep compiling
+// without a mechanical rename riding along inside a Windows-correctness change.
 //
-// Usage:
-//   auto dir = unique_store_dir("crash_survival");
-//   // ... test body ...
-//   std::filesystem::remove_all(dir);
+// ⚠️ REMOVAL CONDITION — this is a migration seam, NOT a compatibility layer,
+// and it has a defined end:
+//
+//     DELETE THIS FILE once the tests/session call sites are switched to
+//     `#include "support/temp_dir.hpp"` and `fixpp::test_support::unique_temp_dir`
+//     / `remove_temp_dir`.
+//
+// Nothing new should include this header. `fixpp::store_test` itself stays —
+// it is shared with store_factories.hpp and test_double_fsm.hpp and is NOT
+// being retired; only these two names are moving out of it.
 #pragma once
 
-#ifdef _WIN32
-#include <process.h>  // _getpid()
-#else
-#include <unistd.h>  // getpid()
-#endif
-
-#include <atomic>
-#include <chrono>
-#include <cstdlib>
-#include <filesystem>
-#include <string>
-#include <string_view>
-#include <thread>
+#include "support/temp_dir.hpp"
 
 namespace fixpp::store_test {
 
-// Portable current-process id (for cross-process temp-dir uniqueness under
-// parallel ctest): getpid() on POSIX, _getpid() on Windows.
-inline unsigned current_pid() noexcept {
-#ifdef _WIN32
-    return static_cast<unsigned>(::_getpid());
-#else
-    return static_cast<unsigned>(::getpid());
-#endif
-}
+using fixpp::test_support::current_pid;
+using fixpp::test_support::remove_temp_dir;
+using fixpp::test_support::unique_temp_dir;
 
-/// Returns a new temporary directory path: /tmp/fixpp_test_<tag>_<pid>_<N>/
-/// Creates the directory; caller must remove it.
+// The old spellings, kept only for the call sites named in the removal
+// condition above.
 inline std::filesystem::path unique_store_dir(std::string_view tag) {
-    static std::atomic<unsigned> ctr{0};
-    const auto seq = ctr.fetch_add(1, std::memory_order_relaxed);
-    auto p = std::filesystem::temp_directory_path() /
-             (std::string("fixpp_test_") + std::string(tag) + "_" +
-              std::to_string(current_pid()) + "_" + std::to_string(seq));
-    std::filesystem::create_directories(p);
-    return p;
+    return fixpp::test_support::unique_temp_dir(tag);
 }
-
-/// Robustly remove a store temp directory.
-///
-/// POSIX allows removing a directory whose files are still open (unlink-while-
-/// open), so plain remove_all suffices. Windows does NOT: a live FileStore log
-/// handle blocks removal outright unless opened FILE_SHARE_DELETE, and even
-/// with it the OS keeps a delete-pending directory entry until the LAST handle
-/// closes — so removal can transiently fail right after the owning FileStore is
-/// destroyed.
-///
-/// CONTRACT: callers MUST destroy/close every FileStore over `p` before calling
-/// this (scope the store, or reset its owning pointer). This helper only
-/// absorbs the brief post-close delete-pending lag — it cannot remove a dir
-/// whose store is still alive. Retries on Windows, then a final throwing
-/// attempt surfaces a clear error if something is genuinely still holding it.
 inline void remove_store_dir(const std::filesystem::path& p) {
-#ifdef _WIN32
-    for (int attempt = 0; attempt < 100; ++attempt) {
-        std::error_code ec;
-        std::filesystem::remove_all(p, ec);
-        if (!ec && !std::filesystem::exists(p)) return;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-#endif
-    std::filesystem::remove_all(p);  // POSIX: one shot; Windows: final (throwing) attempt
+    fixpp::test_support::remove_temp_dir(p);
 }
 
 }  // namespace fixpp::store_test

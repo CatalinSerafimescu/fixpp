@@ -33,6 +33,8 @@
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
 
+#include "support/temp_dir.hpp"  // fixpp::test_support::unique_temp_dir (#404)
+
 namespace {
 
 // ── MockFsyncSink ─────────────────────────────────────────────────────────────
@@ -63,16 +65,21 @@ class FileSinkFsyncTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        tmpdir_ = std::filesystem::temp_directory_path() /
-                  ("fixpp_fsync_test_" + std::to_string(
-                      std::chrono::steady_clock::now().time_since_epoch().count()));
-        std::filesystem::create_directories(tmpdir_);
+        // Shared helper (#404): pid + per-process counter, and a teardown that
+        // does not silently swallow a failed removal. See support/temp_dir.hpp.
+        tmpdir_ = fixpp::test_support::unique_temp_dir("log_fsync");
     }
 
     void TearDown() override
     {
-        std::error_code ec;
-        std::filesystem::remove_all(tmpdir_, ec);
+        // ⚠️ NOT remove_all(tmpdir_, ec). Discarding `ec` is what #404 is about:
+        // on Windows a just-closed FileSink leaves a delete-pending entry, the
+        // removal transiently fails, and the directory leaks with nothing saying
+        // so. This absorbs that lag and then surfaces a genuine holder.
+        // CONTRACT: every FileSink over tmpdir_ must already be destroyed --
+        // they are locals in the test bodies, and tmpdir_ is this fixture's
+        // only member, so nothing here outlives the test.
+        fixpp::test_support::remove_temp_dir(tmpdir_);
     }
 
     std::filesystem::path tmpdir_;
