@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# CI-side: derive the Python-bindings sanitizer identity from a CMake preset.
+# CI-side: derive the Python-bindings LEG POLICY from a CMake preset.
+#
+# ⚠️ THE FILENAME IS NARROWER THAN THE JOB, deliberately. #257 added the install
+# polarity (`install_python`) here rather than in a sibling script, because the
+# mapping it needs is the SAME preset->facts mapping: which legs build a
+# `-release` package. A second script would be a second census of the matrix to
+# keep in sync, which this file's own closing note rules out ("a hardcoded list
+# here would be a second census"). Renaming was rejected as churn across
+# tier1.yml and ci/test-tier1-python-policy.sh's 58 pinned arms.
 #
 # #254 folds the `python-bindings` job into the six `linux` matrix legs. That
 # job carried its own `strategy.matrix.include`, which spelled the sanitizer
@@ -29,6 +37,22 @@
 #                                      → the libclang_rt basename to LD_PRELOAD
 #   san_opts=<''|ASAN_OPTIONS=…|UBSAN_OPTIONS=…|TSAN_OPTIONS=…>
 #                                      → prefixed to the pytest invocation
+#   install_python=<ON|OFF>            → -DFIXPP_INSTALL_PYTHON, and the
+#                                        discriminant for the two Configure-time
+#                                        L-056-4 assertions (#257)
+#   py_witness=<absent|package>        → the ctest name those assertions expect
+#   py_layout=<sitearch|package>       → -DFIXPP_PY_INSTALL_LAYOUT
+#
+# ⚠️ py_layout is NOT py_witness. They coincide on the packaging legs and
+# DIVERGE everywhere else: the witness is `absent` when nothing is installed,
+# but `absent` is not a layout — feeding it to FIXPP_PY_INSTALL_LAYOUT is a
+# configure-time FATAL_ERROR (that variable fails closed on an unknown value
+# rather than defaulting). Hence two outputs, not one reused.
+#
+# ⚠️ `install_python` and `py_witness` are ONE fact emitted twice, and they are
+# emitted together so they cannot drift. The workflow asserts the witness NAME
+# rather than a count, because `-L python` matches exactly one test in every
+# configuration — a count alone cannot tell the OFF witness from the ON one.
 #
 # Exit 0 on a known preset. On anything else: `::error::` on stderr, exit 1.
 #
@@ -77,11 +101,36 @@ set -euo pipefail
 
 PRESET="${1:?usage: derive-python-sanitizer.sh <preset>}"
 
+# Default polarity: OFF everywhere. Only the packaging legs opt IN, below.
+# Defaulting to OFF is the fail-safe direction -- a new preset that forgets to
+# choose ships nothing, rather than silently adding a payload to an artifact.
+INSTALL_PYTHON=OFF
+PY_WITNESS=absent
+PY_LAYOUT=sitearch
+
 case "$PRESET" in
-  linux-clang-debug|linux-clang-release|linux-gcc-release)
+  linux-clang-debug)
     SANITIZER=none
     RT_BASE=''
     SAN_OPTS=''
+    ;;
+  # ── #257 — the two legs that build `fixpp-package` ───────────────────────
+  # These, and only these, SHIP the python payload: their `fixpp-package`
+  # output becomes packages-linux-{clang,gcc}-release. Every other leg keeps
+  # FIXPP_INSTALL_PYTHON=OFF, so the payload cannot reach an artifact nobody
+  # decided to put it in.
+  #
+  # ⚠️ Do NOT rewrite this as `contains(preset, 'release')` in the workflow.
+  # That is the same mapping spelled a second time under another name (the
+  # trap property 3 below names for the sanitizer axis), and it would also
+  # match a future non-packaging preset with 'release' in its name.
+  linux-clang-release|linux-gcc-release)
+    SANITIZER=none
+    RT_BASE=''
+    SAN_OPTS=''
+    INSTALL_PYTHON=ON
+    PY_WITNESS=package
+    PY_LAYOUT=package
     ;;
   linux-clang-asan)
     SANITIZER=asan
@@ -116,3 +165,6 @@ esac
 echo "sanitizer=$SANITIZER"
 echo "rt_base=$RT_BASE"
 echo "san_opts=$SAN_OPTS"
+echo "install_python=$INSTALL_PYTHON"
+echo "py_witness=$PY_WITNESS"
+echo "py_layout=$PY_LAYOUT"

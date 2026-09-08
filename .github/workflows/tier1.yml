@@ -689,17 +689,24 @@ jobs:
         # a local WSL mount; on a runner it has to be inside the workspace for
         # upload-artifact to reach it. Harmless on the non-packaging lanes.
         #
-        # ⚠️ FIXPP_INSTALL_PYTHON=OFF is NOT optional and NOT symmetry with the
-        # line above it (#254). FIXPP_BUILD_PYTHON=ON fires four install() rules
-        # (bindings/python/CMakeLists.txt). Two of these legs
-        # (linux-{clang,gcc}-release) build `fixpp-package`, and the consumer
-        # install-witness stage-installs on ALL SIX — so without this flag the
-        # Python payload enters packages-linux-{clang,gcc}-release and falsifies
-        # L-056-4 ("the C++ consumer deliverable contains no Python"), shipping
-        # by accident exactly what was descoped from #254. Whether the packages
-        # SHOULD carry Python is #257's call. The option defaults ON so feature
-        # 056's LAY-1 in-tree `cmake --install` keeps working everywhere else;
-        # only these six legs turn it off.
+        # ⚠️ THE INSTALL POLARITY IS NOW PER-LEG, AND DERIVED — #257 answered
+        # the question #254 deferred. `linux-{clang,gcc}-release` build
+        # `fixpp-package`, so those two now ship the Python payload
+        # DELIBERATELY, at a pinned prefix-relative destination
+        # (FIXPP_PY_INSTALL_LAYOUT=package). The other four still pass OFF: the
+        # consumer install-witness stage-installs on ALL SIX, and a payload in
+        # an artifact nobody decided to put it in is the #254 accident.
+        #
+        # ⚠️ The polarity comes from ci/derive-python-sanitizer.sh, NOT from a
+        # `contains(matrix.preset, 'release')` guard here. That guard would be
+        # the preset->packaging mapping spelled a second time under another
+        # name, and it would also match a future non-packaging preset with
+        # 'release' in it. The script fails closed on an unknown preset, and
+        # ci/test-tier1-python-policy.sh drives it over this job's exact preset
+        # set — so a new leg cannot silently default into shipping a payload.
+        #
+        # The option still defaults ON so 056's LAY-1 in-tree `cmake --install`
+        # keeps working everywhere outside CI.
         #
         # No -B and no CMAKE_TOOLCHAIN_FILE override: the preset's binaryDir is
         # build/<preset> and its CMAKE_TOOLCHAIN_FILE already points at
@@ -710,7 +717,8 @@ jobs:
           cmake --preset ${{ matrix.preset }}
           -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts
           -DFIXPP_BUILD_PYTHON=ON
-          -DFIXPP_INSTALL_PYTHON=OFF
+          -DFIXPP_INSTALL_PYTHON=${{ steps.pysan.outputs.install_python }}
+          -DFIXPP_PY_INSTALL_LAYOUT=${{ steps.pysan.outputs.py_layout }}
           -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
 
       # ── #254 / L-056-4 — the OFF side, asserted at Configure time ────────────
@@ -726,7 +734,9 @@ jobs:
       # directives with the rules unguarded, 0 with FIXPP_INSTALL_PYTHON=OFF.
       # The existence check comes FIRST so a 0 can never come from the file
       # having silently stopped being generated.
-      - name: Assert the Python install rules are OFF (#254 / L-056-4)
+      - name: Assert the Python install rules match the leg's polarity (#257 / L-056-4)
+        env:
+          WANT: ${{ steps.pysan.outputs.install_python }}
         run: |
           set -euo pipefail
           f="build/${{ matrix.preset }}/bindings/python/cmake_install.cmake"
@@ -735,11 +745,27 @@ jobs:
             exit 1
           fi
           n=$(grep -c '^[[:space:]]*file(INSTALL' "$f" || true)
-          echo "python install directives in $f: $n (expected 0)"
-          if [ "$n" != "0" ]; then
-            echo "::error::FIXPP_INSTALL_PYTHON=OFF but $n install directive(s) remain."
-            echo "::error::These would enter fixpp-package and the packages-linux-* artifacts, falsifying L-056-4."
-            exit 1
+          echo "python install directives in $f: $n (FIXPP_INSTALL_PYTHON=$WANT)"
+          # ⚠️ TWO-SIDED, and that is the whole point. The OFF legs assert ZERO;
+          # the two packaging legs assert NON-ZERO. A one-sided check would pass
+          # on a release leg whose payload silently stopped being installed —
+          # i.e. it would certify the #257 decision as delivered while shipping
+          # nothing. The instrument is proven on both sides by construction:
+          # the same tree yields 0 with OFF and >0 with ON.
+          if [ "$WANT" = "OFF" ]; then
+            if [ "$n" != "0" ]; then
+              echo "::error::FIXPP_INSTALL_PYTHON=OFF but $n install directive(s) remain."
+              echo "::error::These would enter fixpp-package and the packages-linux-* artifacts on a leg"
+              echo "::error::that did NOT decide to ship them — the #254 accident."
+              exit 1
+            fi
+          else
+            if [ "$n" = "0" ]; then
+              echo "::error::FIXPP_INSTALL_PYTHON=ON but ZERO install directives were generated."
+              echo "::error::packages-linux-*-release would ship no Python payload at all, while L-056-4"
+              echo "::error::and #257 say it does. Refusing to report this lane green on an empty install."
+              exit 1
+            fi
           fi
           df -h "$GITHUB_WORKSPACE" | tail -1
 
@@ -819,17 +845,23 @@ jobs:
       # The name is asserted, not just the count: `-L python` matches exactly
       # one test in either configuration, so a count alone cannot tell the OFF
       # witness from the ON one.
-      - name: Assert the Python install witness is the OFF one (#254 / L-056-4)
+      - name: Assert the Python install witness is the leg's own (#257 / L-056-4)
+        env:
+          WANT: fixpp::python::install-${{ steps.pysan.outputs.py_witness }}-witness
         run: |
           set -euo pipefail
           names=$(ctest --preset ${{ matrix.preset }} -L python -N \
                     | sed -n 's/^ *Test *#[0-9]*: //p')
-          echo "registered python install witnesses: ${names:-<none>}"
-          if [ "$names" != "fixpp::python::install-absent-witness" ]; then
-            echo "::error::expected exactly 'fixpp::python::install-absent-witness', got '${names:-<none>}'."
-            echo "::error::Either -DFIXPP_INSTALL_PYTHON=OFF is missing from Configure (in which case the"
-            echo "::error::ON-side witness registered and the Python payload WILL enter fixpp-package), or the"
-            echo "::error::witness stopped being registered at all. Refusing to report this lane green either way."
+          echo "registered python install witnesses: ${names:-<none>} (expected $WANT)"
+          # The NAME is asserted, not the count: `-L python` matches exactly one
+          # test in EVERY configuration, so a count cannot tell the three modes
+          # apart. Getting the wrong name here means the Configure flags and the
+          # witness disagree — and the witness is what actually opens the tree.
+          if [ "$names" != "$WANT" ]; then
+            echo "::error::expected exactly '$WANT', got '${names:-<none>}'."
+            echo "::error::Either the Configure flags did not reach CMake (so the wrong witness registered"
+            echo "::error::and the payload disposition is not the one this leg decided), or the witness"
+            echo "::error::stopped being registered at all. Refusing to report this lane green either way."
             exit 1
           fi
 

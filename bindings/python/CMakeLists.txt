@@ -224,10 +224,52 @@ set_target_properties(fixpp_py PROPERTIES
 # uses the real Python3_SITEARCH when known (the Development.Module component does
 # not always populate it without Interpreter); fall back to "." otherwise (in-tree
 # runs use PYTHONPATH=lib via the POST_BUILD staging above, not this install).
-if(DEFINED SKBUILD OR NOT Python3_SITEARCH)
-  set(FIXPP_PY_INSTALL_DIR ".")
+# ── #257 — the THIRD layout: a prefix-relative destination for the packages ──
+#
+# The two branches below answer "where does an interpreter expect to import
+# from". That is the right question for an in-tree `cmake --install` and the
+# wrong one for a RELOCATABLE C++ package, which is what #257 decided to ship:
+#
+#   sitearch (default) - 056 LAY-1 / D-4 / T006. A plain in-tree install lands on
+#                        the real interpreter (or "." when SITEARCH is unknown,
+#                        and under SKBUILD where the wheel platlib root IS ".").
+#                        UNCHANGED — this is a delivered requirement, not an
+#                        incidental behaviour, so #257 must not repoint it.
+#   package            - the `-release` packaging legs. Prefix-relative, so
+#                        --prefix / DESTDIR / CPack staging all work.
+#
+# ⚠️ WHY "." WAS NOT SIMPLY REUSED for the packages, which is what CI resolves
+# today. Measured on tier1 run 34216189194, linux-gcc-release: `Python3_SITEARCH
+# is EMPTY on the matrix legs`, so the existing code already yields ".". That
+# would scatter _fixpp.so, three .py modules and _fixpp_data/ across the package
+# PREFIX ROOT, beside include/ and lib/ — and it would be INHERITED rather than
+# chosen, which is precisely what #257 says not to do ("Any shipping decision
+# must pin the destination, not inherit it"). It is also fragile in the
+# direction that fails silently: a leg that ever DID resolve SITEARCH would
+# install to an absolute path, which `cmake --install --prefix X` IGNORES.
+set(FIXPP_PY_INSTALL_LAYOUT "sitearch" CACHE STRING
+    "Where FIXPP_INSTALL_PYTHON puts the payload: sitearch|package")
+set_property(CACHE FIXPP_PY_INSTALL_LAYOUT PROPERTY STRINGS sitearch package)
+
+# The C++ install already puts the dictionaries here (CMakeLists.txt, T033 /
+# FR-018a). Named once, consumed by both the relative-path computation and the
+# generated marker's docstring.
+set(FIXPP_PY_DICT_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/fixpp/dictionaries")
+
+if(FIXPP_PY_INSTALL_LAYOUT STREQUAL "package")
+  set(FIXPP_PY_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/fixpp/python")
+elseif(FIXPP_PY_INSTALL_LAYOUT STREQUAL "sitearch")
+  if(DEFINED SKBUILD OR NOT Python3_SITEARCH)
+    set(FIXPP_PY_INSTALL_DIR ".")
+  else()
+    set(FIXPP_PY_INSTALL_DIR "${Python3_SITEARCH}")
+  endif()
 else()
-  set(FIXPP_PY_INSTALL_DIR "${Python3_SITEARCH}")
+  # Fail closed. A typo must not silently fall through to a layout the caller
+  # did not ask for — that is how a payload lands somewhere nobody inspects.
+  message(FATAL_ERROR
+    "FIXPP_PY_INSTALL_LAYOUT must be 'sitearch' or 'package', got "
+    "'${FIXPP_PY_INSTALL_LAYOUT}'.")
 endif()
 
 # ── #254 — separate BUILDING the bindings from INSTALLING them ───────────────
@@ -287,15 +329,48 @@ install(
 # _fixpp_data/__init__.py + the four XMLs staged from the submodule dictionaries/
 # (single source of truth; never hand-duplicated). The locator resolves them via
 # importlib.resources.files("_fixpp_data").
-install(
-  FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/_fixpp_data/__init__.py"
-    "${CMAKE_SOURCE_DIR}/dictionaries/FIX42.xml"
-    "${CMAKE_SOURCE_DIR}/dictionaries/FIX44.xml"
-    "${CMAKE_SOURCE_DIR}/dictionaries/FIX50SP2.xml"
-    "${CMAKE_SOURCE_DIR}/dictionaries/FIXT11.xml"
-  DESTINATION "${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
-)
+#
+# ── #257 — the package layout ships the marker WITHOUT the XMLs ──────────────
+# The C++ install already puts all of dictionaries/ under
+# ${FIXPP_PY_DICT_INSTALL_DIR}, so bundling the same four files here would ship
+# 1.9 MB twice in one archive, in two locations, with no stated precedence.
+# Instead a GENERATED __init__.py carries DICTIONARY_DIR (computed relative to
+# itself, so the package stays relocatable) and fixpp_dict_data's locator falls
+# back to it.
+#
+# ⚠️ THAT FALLBACK IS A BRANCH THE WHEEL NEVER EXECUTES, which is exactly the
+# shape that ships untested. It is witnessed by FIXPP_PY_WITNESS_MODE=package,
+# which resolves a real dictionary through the real locator against a staged
+# tree — not by asserting the file exists.
+if(FIXPP_PY_INSTALL_LAYOUT STREQUAL "package")
+  # The relative hop between the two install destinations. Both are made
+  # absolute with a leading "/" purely so file(RELATIVE_PATH) can subtract
+  # them; the RESULT is prefix-independent, which is the point.
+  file(RELATIVE_PATH FIXPP_PY_DICT_RELPATH
+       "/${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
+       "/${FIXPP_PY_DICT_INSTALL_DIR}")
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/_fixpp_data/package_init.py.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/package_layout/_fixpp_data/__init__.py"
+    @ONLY)
+  message(STATUS "fixpp: python payload -> '${FIXPP_PY_INSTALL_DIR}'; "
+                 "dictionaries NOT duplicated, reached via "
+                 "'${FIXPP_PY_DICT_RELPATH}'")
+  install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/package_layout/_fixpp_data/__init__.py"
+    DESTINATION "${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
+  )
+else()
+  install(
+    FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/_fixpp_data/__init__.py"
+      "${CMAKE_SOURCE_DIR}/dictionaries/FIX42.xml"
+      "${CMAKE_SOURCE_DIR}/dictionaries/FIX44.xml"
+      "${CMAKE_SOURCE_DIR}/dictionaries/FIX50SP2.xml"
+      "${CMAKE_SOURCE_DIR}/dictionaries/FIXT11.xml"
+    DESTINATION "${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
+  )
+endif()
 
 endif()  # FIXPP_INSTALL_PYTHON — see the option() block above (#254 / L-056-4)
 
@@ -327,10 +402,23 @@ endif()  # FIXPP_INSTALL_PYTHON — see the option() block above (#254 / L-056-4
 # question R2-P2-2 asks is specifically about the NON-SKBUILD in-tree path that
 # `python-wheel-test` cannot see.
 if(FIXPP_BUILD_TESTS AND UNIX AND NOT DEFINED SKBUILD)
-  if(FIXPP_INSTALL_PYTHON)
-    set(_fixpp_py_witness_mode "present")
-  else()
+  # #257 adds a THIRD mode. The three are jointly exhaustive and mutually
+  # exclusive over every non-SKBUILD build that has the bindings:
+  #
+  #   OFF                        -> absent   (four `linux` matrix legs)
+  #   ON  + layout=sitearch      -> present  (default; 056 LAY-1 in-tree)
+  #   ON  + layout=package       -> package  (the two `-release` packaging legs)
+  #
+  # `package` is NOT a relaxation of `present`. It asserts a DIFFERENT tree:
+  # the payload beside the module at a prefix-relative destination, the four
+  # XMLs deliberately ABSENT, and — the part no file-existence check can reach —
+  # the locator actually resolving a dictionary through the datadir fallback.
+  if(NOT FIXPP_INSTALL_PYTHON)
     set(_fixpp_py_witness_mode "absent")
+  elseif(FIXPP_PY_INSTALL_LAYOUT STREQUAL "package")
+    set(_fixpp_py_witness_mode "package")
+  else()
+    set(_fixpp_py_witness_mode "present")
   endif()
 
   add_test(

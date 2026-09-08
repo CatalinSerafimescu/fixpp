@@ -469,19 +469,30 @@ PYEOF
 # the consumer is `env <opts> pytest` inside a `run:` block, which expands it
 # there — exactly what the matrix scalar it replaces did. Single-quoted for that
 # reason; do not "fix" it.
+# ⚠️ FIELD ORDER CHANGED WITH #257, and the new fields go BEFORE san_opts on
+# purpose: san_opts is read with `cut -f7-` (rest-of-line) because it is the one
+# value that may legitimately contain further separators. Appending after it
+# would have made those fields unreachable.
+#
+#   preset | install_python | py_witness | py_layout | sanitizer | rt_base | san_opts
+#
+# The install columns encode #257's decision: ONLY the two legs that build
+# `fixpp-package` ship the payload. That is the same preset->packaging mapping
+# the workflow must not re-spell, so it is pinned here in exactly one place.
 EXPECTED_DERIVE=(
-  "linux-clang-debug|none||"
-  "linux-clang-release|none||"
-  "linux-clang-asan|asan|asan|ASAN_OPTIONS=detect_leaks=0:halt_on_error=1"
-  'linux-clang-ubsan|ubsan|ubsan_standalone|UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1'
-  'linux-clang-tsan|tsan|tsan|TSAN_OPTIONS=suppressions=$GITHUB_WORKSPACE/bindings/python/tests/tsan_suppressions.txt:halt_on_error=1'
-  "linux-gcc-release|none||"
+  "linux-clang-debug|OFF|absent|sitearch|none||"
+  "linux-clang-release|ON|package|package|none||"
+  "linux-clang-asan|OFF|absent|sitearch|asan|asan|ASAN_OPTIONS=detect_leaks=0:halt_on_error=1"
+  'linux-clang-ubsan|OFF|absent|sitearch|ubsan|ubsan_standalone|UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1'
+  'linux-clang-tsan|OFF|absent|sitearch|tsan|tsan|TSAN_OPTIONS=suppressions=$GITHUB_WORKSPACE/bindings/python/tests/tsan_suppressions.txt:halt_on_error=1'
+  "linux-gcc-release|ON|package|package|none||"
 )
 
 assert_derive_script() {
   local json="$1" case_id="$2" derive="$3"
   local got_presets expected_presets entry preset out
   local e_san e_rt e_opts g_san g_rt g_opts
+  local e_inst e_wit e_lay g_inst g_wit g_lay
 
   got_presets="$(echo "$json" | jq -r '.linux_presets[]' | sort | tr '\n' ',')"
   expected_presets="$(printf '%s\n' "${EXPECTED_DERIVE[@]}" | cut -d'|' -f1 | sort | tr '\n' ',')"
@@ -492,9 +503,12 @@ assert_derive_script() {
 
   for entry in "${EXPECTED_DERIVE[@]}"; do
     preset="$(echo "$entry" | cut -d'|' -f1)"
-    e_san="$(echo "$entry"  | cut -d'|' -f2)"
-    e_rt="$(echo "$entry"   | cut -d'|' -f3)"
-    e_opts="$(echo "$entry" | cut -d'|' -f4-)"
+    e_inst="$(echo "$entry" | cut -d'|' -f2)"
+    e_wit="$(echo "$entry"  | cut -d'|' -f3)"
+    e_lay="$(echo "$entry"  | cut -d'|' -f4)"
+    e_san="$(echo "$entry"  | cut -d'|' -f5)"
+    e_rt="$(echo "$entry"   | cut -d'|' -f6)"
+    e_opts="$(echo "$entry" | cut -d'|' -f7-)"
 
     # A preset in the matrix that the script REJECTS is an exhaustiveness
     # failure, and it is reported as one — distinct from a value mismatch, so a
@@ -506,6 +520,9 @@ assert_derive_script() {
     g_san="$(echo  "$out" | sed -n 's/^sanitizer=//p')"
     g_rt="$(echo   "$out" | sed -n 's/^rt_base=//p')"
     g_opts="$(echo "$out" | sed -n 's/^san_opts=//p')"
+    g_inst="$(echo "$out" | sed -n 's/^install_python=//p')"
+    g_wit="$(echo  "$out" | sed -n 's/^py_witness=//p')"
+    g_lay="$(echo  "$out" | sed -n 's/^py_layout=//p')"
 
     [ "$g_san" = "$e_san" ] \
       || fail "$case_id: derive mismatch for '$preset' field 'sanitizer': expected '$e_san', got '$g_san'"
@@ -513,6 +530,22 @@ assert_derive_script() {
       || fail "$case_id: derive mismatch for '$preset' field 'rt_base': expected '$e_rt', got '$g_rt'"
     [ "$g_opts" = "$e_opts" ] \
       || fail "$case_id: derive mismatch for '$preset' field 'san_opts': expected '$e_opts', got '$g_opts'"
+    [ "$g_inst" = "$e_inst" ] \
+      || fail "$case_id: derive mismatch for '$preset' field 'install_python': expected '$e_inst', got '$g_inst'. This decides whether packages-linux-*-release ship the Python payload (#257)."
+    [ "$g_wit" = "$e_wit" ] \
+      || fail "$case_id: derive mismatch for '$preset' field 'py_witness': expected '$e_wit', got '$g_wit'"
+    [ "$g_lay" = "$e_lay" ] \
+      || fail "$case_id: derive mismatch for '$preset' field 'py_layout': expected '$e_lay', got '$g_lay'"
+
+    # ⚠️ The three install fields are ONE decision emitted three times, so pin
+    # their CONSISTENCY as well as their values. A row that says ON/absent, or
+    # OFF/package, would configure a leg whose Configure flags and whose ctest
+    # expectation disagree — and the workflow would then red for a reason that
+    # reads like a build failure rather than a bad table.
+    case "$g_inst/$g_wit/$g_lay" in
+      OFF/absent/sitearch|ON/package/package) ;;
+      *) fail "$case_id: derive emitted an INCOHERENT install triple for '$preset': install_python=$g_inst py_witness=$g_wit py_layout=$g_lay" ;;
+    esac
   done
 
   # Fail-closed on an unknown preset. A defaulted `none` on a future sanitizer
@@ -584,7 +617,7 @@ assert_derive_script() {
 # Trailing newlines are normalized away on both sides; nothing else is.
 EXPECTED_DERIVE_RUN='ci/derive-python-sanitizer.sh "${{ matrix.preset }}" >> "$GITHUB_OUTPUT"'
 
-EXPECTED_CONFIGURE_RUN='cmake --preset ${{ matrix.preset }} -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts -DFIXPP_BUILD_PYTHON=ON -DFIXPP_INSTALL_PYTHON=OFF -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}'
+EXPECTED_CONFIGURE_RUN='cmake --preset ${{ matrix.preset }} -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts -DFIXPP_BUILD_PYTHON=ON -DFIXPP_INSTALL_PYTHON=${{ steps.pysan.outputs.install_python }} -DFIXPP_PY_INSTALL_LAYOUT=${{ steps.pysan.outputs.py_layout }} -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}'
 
 EXPECTED_PYTEST_NONE_RUN='pytest bindings/python/tests/ -v'
 
@@ -1331,7 +1364,7 @@ run_full_pin() {
 
 # ── Real workflow: must pass all four assertions ────────────────────────────
 run_full_pin "$WORKFLOW" "tier1.yml"
-echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE case table + tier1-required needs — $WORKFLOW"
+echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_RE case table + tier1-required needs — $WORKFLOW"
 
 # ── Mutant witnesses: each must be shown RED before this pin is trusted ─────
 # (feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree —
@@ -1416,8 +1449,8 @@ PYEOF2
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "  linux-clang-debug|linux-clang-release|linux-gcc-release)\n"
-new = "  linux-clang-debug|linux-clang-release)\n"
+old = "  linux-clang-release|linux-gcc-release)\n"
+new = "  linux-clang-release)\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 PYEOF2
@@ -1518,29 +1551,35 @@ PYEOF2
   echo "RED (expected): M4 (coverage dropped from tier1-required needs) — $(scrub_wf_cmds "$(cat "$m4_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
-  # M5: remove -DFIXPP_INSTALL_PYTHON=OFF from the Configure line. The payload
-  # then enters packages-linux-{clang,gcc}-release and falsifies L-056-4 — and
-  # note that ctest would stay GREEN, because the ON-side witness registers
-  # instead of the OFF-side one.
+  # M5: hardcode the install polarity back to OFF instead of deriving it.
+  #
+  # ⚠️ THE FAILURE THIS PINS INVERTED WITH #257. It used to be "the payload
+  # LEAKS into the release packages". It is now "the payload silently STOPS
+  # being shipped": with a literal OFF, both -release legs configure without the
+  # install rules, packages-linux-*-release go back to carrying no Python, and
+  # L-056-4's new shape becomes false — while ctest stays GREEN, because the
+  # `absent` witness registers and passes. The direction changed; the property
+  # that a hardcoded polarity must red did not.
   local m5="$mut_dir/tier1-m5.yml"
   local m5_out="$mut_dir/m5_out"
   python3 - "$WORKFLOW" "$m5" <<'PYEOF2'
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "          -DFIXPP_INSTALL_PYTHON=OFF\n"
+old = "          -DFIXPP_INSTALL_PYTHON=${{ steps.pysan.outputs.install_python }}\n"
+new = "          -DFIXPP_INSTALL_PYTHON=OFF\n"
 assert t.count(old) == 1, t.count(old)
-open(dst, "w").write(t.replace(old, ""))
+open(dst, "w").write(t.replace(old, new))
 PYEOF2
   if cmp -s "$WORKFLOW" "$m5"; then
     fail "M5: python literal-replace produced no change — mutant not applied"
   fi
   if ( run_full_pin "$m5" "M5" ) >"$m5_out" 2>&1; then
-    fail "M5 (FIXPP_INSTALL_PYTHON=OFF removed) did NOT fail the pin"
+    fail "M5 (install polarity hardcoded to OFF) did NOT fail the pin"
   fi
-  grep -q "FIXPP_INSTALL_PYTHON=OFF" "$m5_out" \
+  grep -q "FIXPP_INSTALL_PYTHON" "$m5_out" \
     || fail "M5 failed the pin for the WRONG reason: $(scrub_wf_cmds "$(cat "$m5_out")")"
-  echo "RED (expected): M5 (FIXPP_INSTALL_PYTHON=OFF removed) — $(scrub_wf_cmds "$(cat "$m5_out")")"
+  echo "RED (expected): M5 (install polarity hardcoded to OFF) — $(scrub_wf_cmds "$(cat "$m5_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # M6: the derive step stops invoking the script. The script is still tested
@@ -1981,7 +2020,7 @@ t = open(src).read()
 # the write happened too late to poison anything. They were unshadowed and RED,
 # and they proved the census detects TEXT rather than the hazard justifying it.
 # Step 14 is before both.
-old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
+old = "      - name: Assert the Python install rules match the leg\x27s polarity (#257 / L-056-4)\n        env:\n          WANT: ${{ steps.pysan.outputs.install_python }}\n        run: |\n          set -euo pipefail\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, old + "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n"))
 '
@@ -1997,7 +2036,7 @@ import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 # Before the pytest steps, and UNNAMED. See the M34 note above.
-old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
+old = "      - name: Assert the Python install rules match the leg\x27s polarity (#257 / L-056-4)\n        env:\n          WANT: ${{ steps.pysan.outputs.install_python }}\n        run: |\n          set -euo pipefail\n"
 assert t.count(old) == 1, t.count(old)
 new = ("      -\n        run: |\n          set -euo pipefail\n"
        "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n")
@@ -2012,7 +2051,7 @@ import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 # Before the pytest steps. See the M34 note above.
-old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
+old = "      - name: Assert the Python install rules match the leg\x27s polarity (#257 / L-056-4)\n        env:\n          WANT: ${{ steps.pysan.outputs.install_python }}\n        run: |\n          set -euo pipefail\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, old + "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"${{ github.env }}\"\n"))
 '
@@ -2118,7 +2157,7 @@ open(dst, "w").write(t.replace(old, new))
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
+old = "      - name: Assert the Python install rules match the leg\x27s polarity (#257 / L-056-4)\n        env:\n          WANT: ${{ steps.pysan.outputs.install_python }}\n        run: |\n          set -euo pipefail\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, old + "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"${{ github[\x27env\x27] }}\"\n"))
 '
@@ -2163,7 +2202,7 @@ open(dst, "w").write(t.replace(old, new))
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
+old = "      - name: Assert the Python install rules match the leg\x27s polarity (#257 / L-056-4)\n        env:\n          WANT: ${{ steps.pysan.outputs.install_python }}\n        run: |\n          set -euo pipefail\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, old + "          cp /etc/hostname \"$GITHUB_ENV\"\n"))
 '
@@ -2188,14 +2227,15 @@ old = """        run: >
           cmake --preset ${{ matrix.preset }}
           -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts
           -DFIXPP_BUILD_PYTHON=ON
-          -DFIXPP_INSTALL_PYTHON=OFF
+          -DFIXPP_INSTALL_PYTHON=${{ steps.pysan.outputs.install_python }}
+          -DFIXPP_PY_INSTALL_LAYOUT=${{ steps.pysan.outputs.py_layout }}
           -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
 """
 # Same flags, same order, different line breaks. Folded => identical value.
 new = """        run: >
           cmake --preset ${{ matrix.preset }} -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts
-          -DFIXPP_BUILD_PYTHON=ON -DFIXPP_INSTALL_PYTHON=OFF
-          -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
+          -DFIXPP_BUILD_PYTHON=ON -DFIXPP_INSTALL_PYTHON=${{ steps.pysan.outputs.install_python }}
+          -DFIXPP_PY_INSTALL_LAYOUT=${{ steps.pysan.outputs.py_layout }} -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
 """
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))

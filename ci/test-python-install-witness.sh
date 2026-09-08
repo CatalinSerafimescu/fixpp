@@ -24,8 +24,9 @@
 #
 # HOW. Each cell builds a throwaway `project(NONE)` fixture whose install() rules
 # stage a chosen layout out of `file(TOUCH)`-style stub files, then drives the
-# REAL witness over it. No compiler, no SWIG, no Python, no network — cmake and
-# coreutils only, ~1 s for all eight cells. Nothing is faked inside the witness:
+# REAL witness over it. No compiler, no SWIG, no network — cmake and coreutils,
+# plus python3 for the #257 package cells (the witness itself fails closed
+# without it rather than skipping, so a missing interpreter cannot read green). Nothing is faked inside the witness:
 # it runs its own `cmake -E env DESTDIR=... cmake --install`, globs its own
 # staging root and reaches its own verdict, exactly as it does under ctest.
 #
@@ -46,13 +47,26 @@ WITNESS="${1:-$repo_root/bindings/python/run_python_install_witness.cmake}"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
+# ⚠️ CMake RE-WRAPS message(FATAL_ERROR) text at its own width, so a needle of
+# more than a few words is split across lines and a plain `grep -F` misses it —
+# which reads as "RED, but not for its own reason" and looks exactly like a
+# broken instrument. Match against a whitespace-NORMALISED copy instead, so a
+# needle is matched on words rather than on CMake's chosen line breaks.
+# (Normalisation only ever makes a match MORE likely, so it cannot turn a
+# genuinely-absent positive needle into a pass; the negative-needle cells below
+# are the ones that would notice if it over-matched, and they do run.)
+grep_norm() {  # <needle> <file>
+  tr '\n' ' ' < "$2" | tr -s ' ' | grep -qF -- "$1"
+}
+
 command -v cmake >/dev/null || fail "cmake is required"
 [ -f "$WITNESS" ] || fail "witness script not found: $WITNESS"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-CELLS_DECLARED=9   # good soabi w1 w2 w3 w5 w6 absent-clean absent-stray
+CELLS_DECLARED=13  # good soabi w1 w2 w3 w5 w6 absent-clean absent-stray
+                   # + package-{good,xml-leak,bad-relpath,wheel-marker}  (#257)
 cells_run=0
 
 # ── fixture ──────────────────────────────────────────────────────────────────
@@ -89,6 +103,29 @@ make_fixture() {
   ln -sf fixpp_oo.py "$src/link/fixpp.py"
   echo "stub" > "$src/cpp/libfixpp.a"
   echo "// stub" > "$src/cpp/fixpp.hpp"
+
+  # ── #257 package-layout markers ────────────────────────────────────────────
+  # The generated _fixpp_data/__init__.py, in a correct and a broken variant.
+  # PYDIR is lib/python and the dictionaries stage to share/fixpp/dictionaries,
+  # so the correct hop out of lib/python/_fixpp_data is ../../../share/...
+  mkdir -p "$src/pkgmarker_good" "$src/pkgmarker_bad"
+  cat > "$src/pkgmarker_good/__init__.py" <<'MARKER'
+import os
+DICTIONARY_DIR = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "../../../share/fixpp/dictionaries"))
+MARKER
+  # ⚠️ THE ARM THAT PRICES THE ROUND-TRIP. Everything is staged correctly except
+  # the relative hop, which is the exact failure a changed CMAKE_INSTALL_LIBDIR
+  # or a moved payload destination produces. A file-existence check cannot see
+  # it — __init__.py is present and importable — so if this cell ever goes GREEN
+  # the locator probe has stopped doing anything.
+  cat > "$src/pkgmarker_bad/__init__.py" <<'MARKER'
+import os
+DICTIONARY_DIR = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "../../../share/fixpp/WRONG"))
+MARKER
+  # The REAL locator, so the probe exercises shipped code rather than a stand-in.
+  cp "$repo_root/bindings/python/fixpp_dict_data.py" "$src/real_fixpp_dict_data.py"
 
   # The module's staged basename is the only thing that varies between the
   # module cells, so it is a variable rather than three near-identical layouts.
@@ -153,6 +190,30 @@ make_fixture() {
         echo 'install(FILES "${S}/fixpp.py" "${S}/fixpp_oo.py" "${S}/fixpp_dict_data.py" DESTINATION ${PYDIR})'
         echo 'install(DIRECTORY "${S}/_fixpp_data/" DESTINATION ${PYDIR}/_fixpp_data)'
         ;;
+      # ── #257 package layout: the payload WITHOUT the four bundled XMLs ──────
+      # fixpp_dict_data.py is the REAL locator here (not the stub the present-
+      # mode layouts use), because these cells drive it for real.
+      package-good|package-bad-relpath|package-wheel-marker|package-xml-leak)
+        echo "install(FILES \"\${S}/$module\" DESTINATION \${PYDIR})"
+        echo 'install(FILES "${S}/fixpp.py" "${S}/fixpp_oo.py" DESTINATION ${PYDIR})'
+        echo 'install(FILES "${S}/real_fixpp_dict_data.py" DESTINATION ${PYDIR} RENAME fixpp_dict_data.py)'
+        case "$layout" in
+          package-good|package-xml-leak)
+            echo 'install(FILES "${S}/pkgmarker_good/__init__.py" DESTINATION ${PYDIR}/_fixpp_data)' ;;
+          package-bad-relpath)
+            echo 'install(FILES "${S}/pkgmarker_bad/__init__.py" DESTINATION ${PYDIR}/_fixpp_data)' ;;
+          package-wheel-marker)
+            # The WHEEL marker (no DICTIONARY_DIR) shipped into a package tree:
+            # the exclusion took effect but the generated twin did not, so the
+            # locator has nothing to fall back to.
+            echo 'install(FILES "${S}/_fixpp_data/__init__.py" DESTINATION ${PYDIR}/_fixpp_data)' ;;
+        esac
+        if [ "$layout" = "package-xml-leak" ]; then
+          # The exclusion silently stopped working: 1.9 MB of the same four
+          # files, twice in one archive.
+          echo 'install(FILES "${S}/_fixpp_data/FIX42.xml" "${S}/_fixpp_data/FIX44.xml" "${S}/_fixpp_data/FIX50SP2.xml" "${S}/_fixpp_data/FIXT11.xml" DESTINATION ${PYDIR}/_fixpp_data)'
+        fi
+        ;;
       *) fail "make_fixture: unknown layout '$layout'" ;;
     esac
   } > "$src/CMakeLists.txt"
@@ -182,7 +243,7 @@ cell_green() {
   out="$TMP/$name/witness.log"
   run_witness "$mode" "$bld" "$out" \
     || { cat "$out" >&2; fail "cell $name [$mode/$layout]: expected PASS, the witness FAILED"; }
-  grep -qF -- "$needle" "$out" \
+  grep_norm "$needle" "$out" \
     || { cat "$out" >&2; fail "cell $name [$mode/$layout]: exited 0 without printing '$needle'"; }
   cells_run=$((cells_run + 1))
   echo "  ok  $name [$mode/$layout] — PASS as expected"
@@ -206,9 +267,9 @@ cell_red() {
   run_witness "$mode" "$bld" "$out" || rc=$?
   [ "$rc" != "0" ] \
     || { cat "$out" >&2; fail "cell $name [$mode/$layout]: expected RED, the witness PASSED — this layout is certified as a working install"; }
-  grep -qF -- "$needle" "$out" \
+  grep_norm "$needle" "$out" \
     || { cat "$out" >&2; fail "cell $name [$mode/$layout]: RED, but not for its own reason — '$needle' is absent from the failure"; }
-  if [ -n "$not_needle" ] && grep -qF -- "$not_needle" "$out"; then
+  if [ -n "$not_needle" ] && grep_norm "$not_needle" "$out"; then
     cat "$out" >&2
     fail "cell $name [$mode/$layout]: RED, but OVER-BROAD — it also reports '$not_needle', which this layout stages CORRECTLY. The witness is failing for more than the seeded defect, so this cell is not evidence that it detects that defect."
   fi
@@ -239,7 +300,25 @@ cell_red w6 present w6 "fixpp.py (expected at"              "fixpp_oo.py (expect
 cell_green absent-clean absent absent-clean "PASS — 0 payload entries"
 cell_red   absent-stray absent absent-stray "fixpp_helpers.py"
 
+# ── #257 package mode: the payload the -release artifacts actually ship ──────
+#
+# ⚠️ package-good is the ONLY place in this repo that executes the datadir
+# fallback in fixpp_dict_data._resource(). The wheel cannot reach that branch by
+# construction (it bundles the XMLs, so the first branch always returns), so
+# without this cell the branch ships untested.
+cell_green package-good package package-good \
+  "4 XMLs correctly ABSENT"
+
+# The three ways the package layout breaks, each staged correctly in every
+# respect but one.
+cell_red package-xml-leak package package-xml-leak \
+  "must NOT duplicate the bundled dictionaries" "resolve the bundled dictionaries"
+cell_red package-bad-relpath package package-bad-relpath \
+  "could NOT resolve the bundled dictionaries" "must NOT duplicate"
+cell_red package-wheel-marker package package-wheel-marker \
+  "could NOT resolve the bundled dictionaries" "must NOT duplicate"
+
 [ "$cells_run" = "$CELLS_DECLARED" ] \
   || fail "declared $CELLS_DECLARED cells, ran $cells_run"
 
-echo "PASS: ci/test-python-install-witness.sh — $cells_run/$CELLS_DECLARED cells, 5 present-mode escapes and 1 absent-mode leak proven RED for their own reason"
+echo "PASS: ci/test-python-install-witness.sh — $cells_run/$CELLS_DECLARED cells, 5 present-mode escapes, 1 absent-mode leak and 3 package-mode defects proven RED for their own reason"
