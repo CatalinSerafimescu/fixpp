@@ -442,10 +442,23 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // shared runner into a red -- precisely the failure mode #400 is about, and
     // shipping it in the PR that fixes #400 would be an odd way to spend the
     // lesson.
-    EXPECT_LE(surviving + drops + timeouts, produced)
-        << "surviving(" << surviving << ") + drops(" << drops << ") + timeouts(" << timeouts
-        << ") exceeds the " << produced << " records enqueued — the drop accounting "
-        << "over-counts, or a record was written more than once";
+    // ⚠️ `timeout_drop_count()` IS NOT A RECORD COUNT and must not be added to
+    // one. Despite the name, Logger::shutdown does `timeout_drop_count_
+    // .fetch_add(1)` ONCE per timed-out shutdown call (src/log/logger.cpp) — it
+    // counts timeout EVENTS, not the records abandoned by them. An earlier
+    // revision of this test folded it into the sum and read 40001 <= 40000 on a
+    // run where the drain timed out. Caught on MSVC, where a stale mutant binary
+    // made shutdown time out; the arithmetic defect was mine either way and
+    // would have fired on any genuinely slow runner.
+    //
+    // The two real record counts are `surviving` and `drops`. `<=` rather than
+    // `==` because a timed-out shutdown legitimately abandons records still in
+    // the ring, and because of the uncounted sink-side loss paths described
+    // below. `timeouts` appears only as a gate and in diagnostics.
+    EXPECT_LE(surviving + drops, produced)
+        << "surviving(" << surviving << ") + drops(" << drops << ") exceeds the " << produced
+        << " records enqueued — the drop accounting over-counts, or a record was "
+        << "written more than once";
 
     // The exact equality IS asserted, but only behind a witness that the silent
     // loss paths above did not fire: one rotation produces exactly one archive
@@ -458,9 +471,13 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // nonsense in exactly the message someone reads when something went wrong.
     auto const archives = files.empty() ? 0u : files.size() - 1;  // minus the live file
     if (archives == rotations && shutdown_result.has_value()) {
-        EXPECT_EQ(surviving + drops + timeouts, produced)
+        // shutdown_result.has_value() is what makes the EQUALITY sound: a clean
+        // shutdown means the ring was fully drained, so every enqueued record
+        // either reached the file or was counted as dropped. On a timed-out
+        // shutdown records can still be sitting in the ring, and only `<=` holds.
+        EXPECT_EQ(surviving + drops, produced)
             << "drop accounting does not balance: surviving(" << surviving << ") + drops(" << drops
-            << ") + timeouts(" << timeouts << ") != " << produced;
+            << ") != " << produced;
     } else {
         GTEST_LOG_(WARNING) << "accounting equality not checked this run: archives=" << archives
                             << " rotations=" << rotations
