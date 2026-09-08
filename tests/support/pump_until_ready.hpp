@@ -1076,19 +1076,14 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 //       `restart()` between them; a missing one is a one-line edit away and turns the
 //       `get()` below into a permanent wedge with no diagnostic at all.
 //
-// ⚠️ (a) IS UNREACHABLE FOR A `co_spawn`'d FUTURE ON THE CONTEXT BEING DRIVEN, which is
-// the shape every caller of this helper has. `asio::co_spawn` holds
-// `execution::outstanding_work.tracked` on the SPAWN executor for the frame's whole
-// lifetime (`asio/impl/co_spawn.hpp`, `co_spawn_work_guard` / `co_spawn_state`), so a live
-// frame is outstanding work on that context WHATEVER it is parked on -- a foreign
-// executor's op included. This paragraph deliberately does not replace (a) with a new
-// claim about what `run()` can do; it states the CONDITION under which (a) cannot fire,
-// and names the arms that measure it rather than asserting the mechanism a second time:
+// ⚠️ (a) CANNOT FIRE WHILE THE SPAWN EXECUTOR'S CONTEXT IS THE DRIVEN ONE. That is the
+// CONDITION, and it is measured rather than argued here:
 //     tests/sync/test_co_spawn_work_guard_contract.cpp
-// Arm 1 is (a)'s own case and shows the context UNEXHAUSTED; arm 4 is one token away --
-// the frame spawned on a DIFFERENT context -- and shows the driven one exhausting at once
-// with the frame live. So the condition is "the spawn executor's context is the driven
-// one", and (a) is what happens when it does not hold.
+// Arm 1 is (a)'s own case -- a frame parked on an op this context does not drive -- and
+// shows the context UNEXHAUSTED. Arm 4 is one token away, the frame spawned on a
+// DIFFERENT context, and shows the driven one exhausting at once with the frame live. So
+// (a) is what happens when the condition does not hold, and checking it is checking a
+// name, not enumerating a coroutine's suspension points.
 // ⚠️ THAT LEAVES (b) AS THE LIVE HAZARD IN THE SHAPE ABOVE, not one of two. It is arm 3,
 // and it is the reason the success path below still touches no context state: see the
 // `restart()` note further down, which this does not change.

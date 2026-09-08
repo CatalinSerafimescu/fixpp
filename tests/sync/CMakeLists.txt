@@ -63,7 +63,7 @@ endfunction()
 # authoritative membership, and a count here would rot on every addition). Carries the same baseline
 # ENVIRONMENT the add_sync_test helper sets (SYNC_FIXTURES_DIR +
 # SYNC_GREP_GATE_SCRIPT) — homogeneous across the family per FR-005; almost
-# none of these 29 actually reference those env vars (only the CI-grep-gate
+# none of them actually reference those env vars (only the CI-grep-gate
 # driver does, and it stays standalone below for its own heterogeneous-ENV
 # reason), so the bucket-wide ENVIRONMENT is a harmless no-op for the rest.
 add_executable(sync_pure_tests

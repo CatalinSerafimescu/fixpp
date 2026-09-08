@@ -14,35 +14,33 @@
 // whole lifetime (`asio/impl/co_spawn.hpp`, `co_spawn_work_guard` /
 // `co_spawn_state`), so a live frame is outstanding work whatever it is parked
 // on. That converts a per-file question about suspension points into a
-// STRUCTURAL property — but only under two clauses, and this file is the four
-// arms that establish both, so the argument is measured rather than read off a
-// header.
+// STRUCTURAL property — but only under two clauses, and the arms below establish
+// both, so the argument is measured rather than read off a header.
 //
 //   clause 1  the spawn executor's context IS the driven context   (arm 4)
 //   clause 2  the run is not a post-exhaustion no-op               (arm 3)
 //
-// ⚠️ ARM 2 IS THE POSITIVE CONTROL AND IT IS NOT OPTIONAL. Arms 1, 3 and 4 all
-// assert about `stopped()`; an instrument wired so that `stopped()` could only
-// read one way would pass three of them while measuring nothing. Arm 2 is the
-// case that must read the OTHER way.
+// ⚠️ ARM 2 IS THE POSITIVE CONTROL AND IT IS NOT OPTIONAL. Every other arm asserts
+// about `stopped()`; an instrument wired so that `stopped()` could only read one
+// way would pass all of them while measuring nothing. Arm 2 is the case that must
+// read the OTHER way.
 //
-// THE INSTRUMENT: `run_for(budget)` then `ioc.stopped()`. `run_for` does not
-// stop a context — it returns either because the budget elapsed or because the
-// context ran out of work — so `stopped()` afterwards means exactly "work was
-// exhausted", which is the quantity every arm is about.
+// THE INSTRUMENT: `ioc.poll()` then `ioc.stopped()`. `poll()` runs whatever is
+// ready and returns; it does not stop a context, so `stopped()` afterwards means
+// exactly "work was exhausted", which is the quantity every arm is about.
 //
-// ⚠️ THE BUDGET IS NOT A TIMING BAND AND MUST NOT BE READ AS ONE. Where an arm
-// expects `!stopped()` the outstanding work is a one-hour timer on a context
-// nobody drives, so the context can never exhaust at ANY budget; where an arm
-// expects `stopped()` there is no work at all, so it exhausts immediately at any
-// budget. No arm's verdict moves with the budget, which is why a slow sanitiser
-// lane cannot flake this file. The value below only bounds how long a genuine
-// regression takes to report. [#394 is the adjacent lesson: a threshold derived
-// as a ratio to another timeout is wrong in both directions.]
+// ⚠️ THERE IS DELIBERATELY NO TIME BUDGET HERE, so there is no band a slow
+// sanitiser lane can blow. An earlier draft used `run_for(200ms)` and paid that
+// 200 ms ON THE PASSING PATH ONLY: an arm expecting `!stopped()` can never exhaust
+// at any budget, so the wait bought nothing, while a real regression would have
+// returned EARLY. `poll()` measures the same quantity at zero cost. [#394 is the
+// adjacent lesson — a threshold derived as a ratio to another timeout is wrong in
+// both directions; the cheapest way not to have that problem is not to introduce a
+// threshold.]
 //
 // NO `GTEST_SKIP()` PATH EXISTS HERE, deliberately: a skipped cell also exits 0
 // and ctest reports it as `Passed`, so a green tier is what a skip looks like.
-// These arms exercise `asio::co_spawn` only, so every platform runs all four —
+// These arms exercise `asio::co_spawn` only, so every platform runs all of them —
 // which is the point, since the guard lives in `co_spawn` and not in the
 // backend, and Tier 2 (IOCP) is what turns that from a claim into a reading.
 
@@ -50,8 +48,8 @@
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
-#include <asio/strand.hpp>
 #include <asio/steady_timer.hpp>
+#include <asio/strand.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
@@ -60,10 +58,6 @@
 namespace {
 
 using namespace std::chrono_literals;
-
-// Long enough that a real regression is not mistaken for the budget expiring,
-// short enough to cost nothing. No arm's verdict depends on it — see the header.
-constexpr auto kBudget = 200ms;
 
 // A duration no test run reaches, so the op it belongs to never completes on its
 // own. `1h` rather than `hours::max()`: the latter overflows some steady_clock
@@ -78,9 +72,7 @@ constexpr auto kBudget = 200ms;
 // releases the frame whether or not it has started.
 constexpr auto kNever = 1h;
 
-bool is_ready(std::future<void>& f) {
-    return f.wait_for(0s) == std::future_status::ready;
-}
+bool is_ready(std::future<void>& f) { return f.wait_for(0s) == std::future_status::ready; }
 
 // ── ARM 1 — the claim ────────────────────────────────────────────────────────
 // A live frame spawned on `ioc` but parked on an op `ioc` does not drive still
@@ -92,11 +84,10 @@ TEST(SyncCoSpawnWorkGuard, LiveFrameParkedOnForeignOpKeepsContextUnexhausted) {
     asio::steady_timer t{other, kNever};
 
     auto fut = asio::co_spawn(
-        ioc,
-        [&t]() -> asio::awaitable<void> { co_await t.async_wait(asio::use_awaitable); },
+        ioc, [&t]() -> asio::awaitable<void> { co_await t.async_wait(asio::use_awaitable); },
         asio::use_future);
 
-    ioc.run_for(kBudget);
+    ioc.poll();
 
     EXPECT_FALSE(ioc.stopped())
         << "#289: a live co_spawn'd frame must keep its SPAWN context's work count "
@@ -113,8 +104,7 @@ TEST(SyncCoSpawnWorkGuard, LiveFrameParkedOnForeignOpKeepsContextUnexhausted) {
     // stopped context has not started and so has no pending wait to cancel.
     t.expires_after(0s);
     other.run();
-    ioc.restart();
-    ioc.run();
+    ioc.run();  // no restart(): `poll()` above left the context running
     EXPECT_TRUE(is_ready(fut));
 }
 
@@ -123,15 +113,14 @@ TEST(SyncCoSpawnWorkGuard, LiveFrameParkedOnForeignOpKeepsContextUnexhausted) {
 TEST(SyncCoSpawnWorkGuard, CompletedFrameLetsContextExhaust) {
     asio::io_context ioc;
 
-    auto fut = asio::co_spawn(
-        ioc, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
+    auto fut = asio::co_spawn(ioc, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
 
-    ioc.run_for(kBudget);
+    ioc.poll();
 
     EXPECT_TRUE(ioc.stopped())
         << "POSITIVE CONTROL: with the frame complete there is no work left, so the "
            "context must exhaust. A failure here means stopped() is not measuring what "
-           "the other three arms assume, and their passes are worth nothing.";
+           "the other arms assume, and their passes are worth nothing.";
     EXPECT_TRUE(is_ready(fut));
 }
 
@@ -152,14 +141,12 @@ TEST(SyncCoSpawnWorkGuard, SecondRunWithoutRestartDispatchesNothing) {
     ASSERT_TRUE(ioc.stopped());
 
     auto second = asio::co_spawn(
-        ioc,
-        [&t]() -> asio::awaitable<void> { co_await t.async_wait(asio::use_awaitable); },
+        ioc, [&t]() -> asio::awaitable<void> { co_await t.async_wait(asio::use_awaitable); },
         asio::use_future);
 
-    ioc.run_for(kBudget);  // NO restart() — this is the defect being modelled
+    ioc.poll();  // NO restart() — this is the defect being modelled
 
-    EXPECT_TRUE(ioc.stopped())
-        << "a stopped context must stay stopped without restart()";
+    EXPECT_TRUE(ioc.stopped()) << "a stopped context must stay stopped without restart()";
     EXPECT_FALSE(is_ready(second))
         << "#289 clause 2: a run() on an already-stopped context dispatches NOTHING, so "
            "the frame spawned after the previous run is untouched and a get() on its "
@@ -182,11 +169,10 @@ TEST(SyncCoSpawnWorkGuard, GuardIsOnTheSpawnExecutorNotTheDrivenOne) {
     asio::steady_timer t{other, kNever};
 
     auto fut = asio::co_spawn(
-        other,
-        [&t]() -> asio::awaitable<void> { co_await t.async_wait(asio::use_awaitable); },
+        other, [&t]() -> asio::awaitable<void> { co_await t.async_wait(asio::use_awaitable); },
         asio::use_future);
 
-    ioc.run_for(kBudget);
+    ioc.poll();
 
     EXPECT_TRUE(ioc.stopped())
         << "#289 clause 1: co_spawn's work guard is held on the SPAWN executor, so "
@@ -211,8 +197,7 @@ TEST(SyncCoSpawnWorkGuard, StrandOfTheDrivenContextIsTheDrivenContext) {
     asio::io_context ioc;
 
     auto fut = asio::co_spawn(
-        asio::make_strand(ioc), []() -> asio::awaitable<void> { co_return; },
-        asio::use_future);
+        asio::make_strand(ioc), []() -> asio::awaitable<void> { co_return; }, asio::use_future);
 
     ioc.run();
 
