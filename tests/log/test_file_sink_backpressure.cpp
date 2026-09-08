@@ -51,6 +51,7 @@
 #include <memory_resource>
 #include <ranges>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -114,6 +115,13 @@ ParsedLine parse_line(std::string const& line) {
 
     auto tail = std::string_view{line}.substr(body + k_body.size());
     if (!all_digits(tail)) return fail("payload not numeric");
+    // ⚠️ all_digits is NOT enough to make std::stoull safe. A torn line that
+    // merges " msg 42" with a following record's timestamp yields a 20+ digit
+    // run that passes all_digits and then throws out_of_range -- so the one
+    // input this parser exists to describe would ABORT the test instead of
+    // being reported as malformed. An integrity check that crashes rather than
+    // reports is the wrong failure mode for a corruption detector.
+    if (tail.size() > 19) return fail("payload implausibly long (torn/merged line?)");
 
     return ParsedLine{.ok = true, .payload = std::stoull(std::string{tail}), .why = {}};
 }
@@ -290,6 +298,28 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
         if (!rotation_seen) {
             // > 1 file means the live file PLUS at least one archive, i.e. a
             // rotation completed.
+            //
+            // ⚠️ YIELD-AND-POLL before producing another chunk. The drain needs
+            // only a few records of progress to rotate, but on a starved runner
+            // it might not get them within the record bound, and then
+            // `rotation_seen` stays false and the ASSERT below fires on a
+            // CORRECT implementation -- the exact flake class this PR exists to
+            // remove, reintroduced by the test that ships with the fix. Waiting
+            // costs nothing: this chunk's drops are already banked, so the
+            // concurrency claim below is unweakened.
+            //
+            // ⚠️ AND THE WAIT MUST BE BOUNDED, or red arm 4 HANGS INSTEAD OF
+            // FAILING. That arm removes the storm lever, so no rotation is ever
+            // possible and an unbounded poll would spin forever -- an arm that
+            // hangs grades nothing. The budget is a yield COUNT, not a duration:
+            // it says "give the scheduler this many chances", which does not
+            // rot the way a millisecond ceiling does. Exhausting it is not a
+            // failure; it falls through to produce another chunk, and only the
+            // record bound above ends the loop.
+            constexpr int k_yields = 100000;
+            for (int y = 0; y < k_yields && log_file_count() <= 1; ++y) {
+                std::this_thread::yield();
+            }
             if (log_file_count() > 1) {
                 rotation_seen           = true;
                 drops_at_first_rotation = logger->drop_count();
@@ -423,7 +453,10 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // succeeded and every live file was preserved. When it does not hold, say so
     // loudly instead of failing the equality — that is a diagnosis, not a defect
     // in the accounting under test.
-    auto const archives = files.size() - 1;  // minus the live file
+    // Guard the subtraction: read_all_logs returns empty if open() ever failed,
+    // and an unsigned underflow would print SIZE_MAX in the diagnosis below --
+    // nonsense in exactly the message someone reads when something went wrong.
+    auto const archives = files.empty() ? 0u : files.size() - 1;  // minus the live file
     if (archives == rotations && shutdown_result.has_value()) {
         EXPECT_EQ(surviving + drops + timeouts, produced)
             << "drop accounting does not balance: surviving(" << surviving << ") + drops(" << drops
