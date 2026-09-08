@@ -586,11 +586,20 @@ asserted bound and the *intended* path:
 | session / interop stop watchdogs | 1.5–5 s | prompt | wide |
 
 ⚠️ **Two `log_file_fsync` close rows were removed here, not merely re-pointed.** They recorded
-700 ms and 1000 ms ceilings with an absolute 200 ms of slack — the two tightest margins in the
-suite, and the stated reason this test is pinned `RUN_SERIAL`. **#400 deleted both**: those
-`close()` bands are now CAUSAL assertions (a flag the injected `fsync_fn` sets, checked after
-`close()` returns), so there is no wall-clock ceiling left to be tight. `RUN_SERIAL` is kept in
-`tests/log/CMakeLists.txt` for the two bounds that remain above.
+700 ms and 1000 ms ceilings whose slack was **an absolute 200 ms rather than a multiple** — which
+is the property that made them fragile, and the stated reason this test is pinned `RUN_SERIAL`.
+**#400 deleted both**: those `close()` bands are now CAUSAL assertions (a flag the injected
+`fsync_fn` sets, checked after `close()` returns), so neither ceiling exists any more.
+
+⚠️ **Do not read the table above as a census of what is left.** `tests/log/CMakeLists.txt` states
+the rule for this exact file — *"CONDITION, not a census … do not trust a list written here, it
+goes stale silently"* — and gives the recipe. Use it rather than a count written here:
+
+```
+grep -n 'EXPECT_LT\|EXPECT_GT' tests/log/test_file_sink_async_fsync.cpp
+```
+
+`RUN_SERIAL` is kept for whatever that recipe still returns.
 
 ⚠️ **Cite these by TEST NAME, not by line.** The four rows here were `file:NNN` citations and every
 one of them rotted the moment the file was edited — two into assertions that no longer exist at

@@ -65,7 +65,10 @@
 // without the alloc counting (so it passes trivially — the mallocnesia run
 // is the real gate).
 #include "support/alloc_guard_markers.hpp"
-#include "support/temp_dir.hpp"  // was a byte-identical local copy (#404)
+#include "support/temp_dir.hpp"  // replaced a local copy of this helper (#404).
+// NOT byte-identical, and the difference is on disk: the local one prefixed
+// "fixpp_perf_", the shared one prefixes "fixpp_test_" -- only current_pid()
+// was identical. The tag below carries "perf_" so the name stays greppable.
 #include "support/pump_until_ready.hpp"
 
 namespace {
