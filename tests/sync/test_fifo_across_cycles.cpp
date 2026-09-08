@@ -91,6 +91,19 @@ asio::awaitable<void> wait_gate(const bool& gate) {
 
 // Pumps `ioc` up to `max_iters` times or until `pred()` is true, whichever
 // comes first. Returns pred()'s final value so callers can ASSERT on it.
+//
+// (#289) A DELIBERATE NON-ADOPTER of tests/support/pump_until_ready.hpp, and the
+// reason is structural rather than historical. The shared seam is parameterised
+// on a BUDGET and a SLICE — both wall-clock — so its unit of progress is TIME.
+// This cell's unit of progress is HANDLERS: `poll_one()` dispatches at most one
+// ready handler, and that one-handler granularity is what makes "arrivals
+// interleaved between unlocks" reproducible without yield-count guesswork (see
+// wait_gate above). An iteration cap cannot be expressed as a duration, so the
+// shared primitive cannot express this cell's contract — it is not a divergent
+// answer to the same question, it is a different question.
+//
+// Read that off the two signatures, not off this comment: if pump_until ever
+// gains a handler-count bound, this helper becomes a genuine adopter.
 template <typename Pred>
 bool pump_until(asio::io_context& ioc, Pred&& pred, int max_iters) {
     for (int i = 0; i < max_iters && !pred(); ++i) ioc.poll_one();
