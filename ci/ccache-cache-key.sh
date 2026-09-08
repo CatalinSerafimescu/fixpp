@@ -148,10 +148,22 @@ ccache_cache_key() {
 # routes to the matching minter and rejects any lane/argument-shape mismatch)
 # and by the matcher further down (ccache_tag_regex), because those two must
 # never disagree about which grammar a lane uses.
+# ⚠️ BOTH FORMS ARE ACCEPTED, AND THE BARE ONE IS NOT LEGACY CRUFT.
+#
+# The live lane carries the wheel's ABI tag (`wheel-manylinux228-cp312`) because
+# that tag is part of the build path and therefore part of the cache identity —
+# see ci/wheel-ccache-ident.sh for the measurement that forced it.
+#
+# The bare `wheel-manylinux228` stays enumerated so the PRUNER still recognises
+# tags minted before the ABI tag was folded in. Dropping it would not delete
+# those tags; it would make them unrecognisable, so they would accumulate
+# forever with no `prune: PENDING` and no error — the silent-skip failure this
+# enumeration exists to prevent. Remove it only once the old tags are reaped.
 ccache_lane_is_container() {
   case "$1" in
-    wheel-manylinux228) return 0 ;;
-    *)                  return 1 ;;
+    wheel-manylinux228)          return 0 ;;  # pre-ABI-tag; kept reapable
+    wheel-manylinux228-cp[0-9]*) return 0 ;;
+    *)                           return 1 ;;
   esac
 }
 
