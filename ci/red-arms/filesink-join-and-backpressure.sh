@@ -72,10 +72,32 @@
 #                                              Delete that wait and this arm
 #                                              reddens.
 #
+#   ARM 6  read_sequence_ acquire -> relaxed
+#          (TSan presets only)               -> PAIRED. The mutant must produce
+#                                              >0 ThreadSanitizer reports and the
+#                                              restored tree exactly 0. This is
+#                                              the ONLY arm that touches the one
+#                                              production line this PR changes
+#                                              (#402), and the only one graded on
+#                                              sanitizer output rather than exit
+#                                              code. SKIPPED, loudly and without
+#                                              counting as a pass, on any non-TSan
+#                                              preset.
+#
 # ⚠️ ARM 1 AND ARM 4 MUST NOT BE COLLAPSED into "the tests fail when the code is
 # broken". They rule out each other's blind spot: arm 1 says the join assertion
-# is load-bearing, arm 4 says the backpressure witness is actually about the
-# sink. Either alone leaves the other's failure mode live.
+# is load-bearing, arm 4 says the backpressure test reaches the real sink at
+# all. Either alone leaves the other's failure mode live.
+#
+# ⚠️ AND ARM 4 GRADES ASSERT_TRUE(rotation_seen), NOT THE DROP-RISE CHECK. That
+# ASSERT is fatal and sits above EXPECT_GT(drops, drops_at_first_rotation), so
+# removing the storm lever returns from the test before the drop check is ever
+# evaluated. This matters because the drop check is NOT sink-coupled -- any
+# unpaced producer against any sink satisfies it (see the comment on it). The
+# sink-coupling this arm proves lives entirely in "an archive appeared", which
+# only a real FileSink can produce. Do not re-describe arm 4 as grading the
+# backpressure assertion; an earlier revision of this header did, and it was
+# wrong.
 #
 # ⚠️ AND ARM 5 IS THE ONLY ARM THAT EXPECTS GREEN FROM A MUTANT. Arms 1-4 ask
 # "can the check fail when it should?"; arm 5 asks "can it PASS when it should?"
@@ -110,19 +132,25 @@ BUILD="build/${PRESET}"
 SRC_SINK="src/log/file_sink.cpp"
 SRC_FSYNC="tests/log/test_file_sink_async_fsync.cpp"
 SRC_BP="tests/log/test_file_sink_backpressure.cpp"
+# ⚠️ PRODUCTION FILE, mutated by arm 6. It is in the save/restore set for that
+# reason: an arm that dies between mutate and restore must not leave the ring's
+# memory ordering weakened in the working tree.
+SRC_LOGGER="src/log/logger.cpp"
 
 BIN_FSYNC="$BUILD/bin/log_file_fsync_test"
 BIN_BP="$BUILD/bin/log_file_backpressure_test"
 
 SAVE="$(mktemp -d)"
-cp "$SRC_SINK"  "$SAVE/file_sink.cpp"
-cp "$SRC_FSYNC" "$SAVE/test_fsync.cpp"
-cp "$SRC_BP"    "$SAVE/test_bp.cpp"
+cp "$SRC_SINK"   "$SAVE/file_sink.cpp"
+cp "$SRC_FSYNC"  "$SAVE/test_fsync.cpp"
+cp "$SRC_BP"     "$SAVE/test_bp.cpp"
+cp "$SRC_LOGGER" "$SAVE/logger.cpp"
 
 restore() {
   cp "$SAVE/file_sink.cpp" "$SRC_SINK"
   cp "$SAVE/test_fsync.cpp" "$SRC_FSYNC"
   cp "$SAVE/test_bp.cpp"    "$SRC_BP"
+  cp "$SAVE/logger.cpp"     "$SRC_LOGGER"
 }
 trap 'restore; rm -rf "$SAVE"' EXIT
 
@@ -290,6 +318,65 @@ then
 else
   echo "  ARM 5: MUTATION FAILED TO APPLY"; fails=$((fails + 1))
 fi
+restore
+
+# ── ARM 6: the #402 acquire on read_sequence_ ────────────────────────────────
+#
+# ⚠️ THE ONLY PRODUCTION LINE IN THIS PR HAD NO ARM UNTIL THIS ONE. Arms 0-5 all
+# mutate file_sink.cpp or a test; the relaxed->acquire change was justified
+# entirely by prose. This arm makes it reproducible.
+#
+# It cannot be graded by exit code like the others: a TSan report is not a gtest
+# failure, so the grader COUNTS "WARNING: ThreadSanitizer" lines instead. It is
+# PAIRED on purpose -- the mutant must report non-zero AND the restored tree must
+# report zero. The zero alone would be worthless: an instrument that cannot
+# report anything reports clean, which is this repo's most recurring defect.
+#
+# ⚠️ THE RED HALF IS PROBABILISTIC, AND THAT IS RECORDED RATHER THAN TUNED. TSan
+# must still hold a shadow cell for the slot's previous generation when the
+# reusing write lands; that is a property of its shadow-memory eviction under
+# this corpus, not a structural guarantee. If it ever stops firing, the correct
+# response is to say so here -- NOT to enlarge the corpus until it fires again,
+# which is tuning an instrument until it returns the wanted answer.
+tsan_reports() {  # tsan_reports <binary> <filter>
+  "$1" --gtest_filter="$2" 2>&1 | grep -c 'WARNING: ThreadSanitizer' || true
+}
+
+echo "-- ARM 6: #402 acquire on read_sequence_ (paired: mutant reports, fix does not)"
+case "$PRESET" in
+  *tsan*)
+    ARM6_FILTER='FileSinkBackpressureTest.RealFileSinkDropsAccountablyUnderRotationStorm'
+    if mutate "$SRC_LOGGER" \
+        "            std::uint64_t r = read_sequence_.load(std::memory_order_acquire);" \
+        "            std::uint64_t r = read_sequence_.load(std::memory_order_relaxed);  // MUTANT (#402 arm 6)"
+    then
+      if build_target log_file_backpressure_test; then
+        mutant_n="$(tsan_reports "$BIN_BP" "$ARM6_FILTER")"
+      else
+        echo "  ARM 6: BUILD FAILED (mutant)"; tail -15 "$SAVE/build.log"; mutant_n="build-failed"
+      fi
+    else
+      echo "  ARM 6: MUTATION FAILED TO APPLY"; mutant_n="mutate-failed"
+    fi
+    restore
+    if build_target log_file_backpressure_test; then
+      fixed_n="$(tsan_reports "$BIN_BP" "$ARM6_FILTER")"
+    else
+      echo "  ARM 6: BUILD FAILED (restored)"; fixed_n="build-failed"
+    fi
+    if [ "$mutant_n" -gt 0 ] 2>/dev/null && [ "$fixed_n" -eq 0 ] 2>/dev/null; then
+      echo "  ARM 6: GRADED (relaxed -> $mutant_n ThreadSanitizer report(s); acquire -> $fixed_n)"
+    else
+      echo "  ARM 6: DID NOT GRADE (relaxed -> $mutant_n, acquire -> $fixed_n; want >0 then 0)"
+      fails=$((fails + 1))
+    fi
+    ;;
+  *)
+    echo "  ARM 6: SKIPPED -- needs a TSan preset; got '$PRESET'."
+    echo "         This arm is NOT counted as passing. Re-run as:"
+    echo "         ci/red-arms/filesink-join-and-backpressure.sh linux-clang-tsan"
+    ;;
+esac
 restore
 
 # Rebuild clean so the tree is not left holding mutant binaries.

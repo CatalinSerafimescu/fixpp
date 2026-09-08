@@ -395,9 +395,9 @@ namespace fixpp::log {
 enum class overflow_policy : std::uint8_t {
     // drop_newest: producer detects a full ring and drops the record it was
     // about to enqueue. Increments drop_count_. Zero overhead on consumer path.
-    // read_sequence_ is std::atomic<uint64_t>; producers load with ACQUIRE (#402)
-    // read_sequence_ -- was relaxed; see src/log/logger.cpp ring-protocol header
-    // ordering (a stale read can only cause an early drop — safe under drop_newest).
+    // read_sequence_ is std::atomic<uint64_t>; producers load it with ACQUIRE,
+    // pairing with the drain's release store (#402). The argument lives in the
+    // MPSC ring protocol header of src/log/logger.cpp — cite that, not this line.
     //
     // Semantic note: in a FIFO ring, dropping the newest-produced record
     // preserves the oldest in-flight records. This satisfies [const §XIII.2]'s

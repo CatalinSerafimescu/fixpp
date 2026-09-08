@@ -165,7 +165,17 @@ std::vector<FileRecords> read_all_logs(std::filesystem::path const& dir) {
         int           lineno = 0;
         while (std::getline(in, line)) {
             ++lineno;
-            if (line.empty()) continue;
+            // A blank line is NOT nothing. std::getline yields no trailing empty
+            // element at EOF, so an empty line here means the file genuinely
+            // contains "\n\n" -- the signature of a record whose payload was
+            // lost while its terminator survived, which is exactly the torn
+            // write this test exists to detect. Skipping it would count a
+            // corrupted run as clean.
+            if (line.empty()) {
+                fr.malformed.push_back(fr.path.filename().string() + ":" +
+                                       std::to_string(lineno) + ": blank line (lost payload?)");
+                continue;
+            }
             auto parsed = parse_line(line);
             if (parsed.ok) {
                 fr.payloads.push_back(parsed.payload);
@@ -260,6 +270,20 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(lcfg), std::move(sinks));
 
+    // ⚠️ sink_raw DANGLES IF open() FAILED. The Logger ctor calls open() on each
+    // sink and, on failure, DESTROYS it (sinks_[i].reset(), src/log/logger.cpp)
+    // while still returning a usable Logger. shutdown() would then succeed, so
+    // the rotation_count() read further down -- reached via sink_raw, which the
+    // reset does not clear -- would be a use-after-free, and every accounting
+    // assertion below would pass over a run in which nothing was ever written.
+    //
+    // Checked HERE, immediately after construction, and not later: the same
+    // counter is also bumped on the emit path, where a genuine write failure is
+    // the subject of other arms rather than a setup error.
+    ASSERT_EQ(logger->sink_error_count(0), 0u)
+        << "the FileSink failed to open, so the Logger silently disabled it and this run "
+        << "exercises no sink at all";
+
     // ── Produce until backpressure and the rotation storm are OBSERVED to
     //    coexist ────────────────────────────────────────────────────────────
     //
@@ -339,14 +363,28 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
                                << " records — rotate() never completed on the drain thread, so "
                                << "nothing here exercises the real FileSink write path";
 
-    // ── Backpressure, stated WITHOUT a clock ─────────────────────────────────
+    // ── The loop's other exit path — NOT the sink-coupled assertion ──────────
     //
-    // Records were dropped AFTER the sink had begun rotating. A producer that
-    // had waited for the drain would have found room for every record and
-    // dropped none; a rise here is proof it ran ahead and discarded instead,
-    // while the real sink was busy in rotate(). This deliberately replaces "the
-    // burst took < N ms", which would be one more absolute wall-clock ceiling on
-    // a shared runner (#400).
+    // ⚠️ THIS DOES NOT WITNESS BACKPRESSURE AGAINST THE SINK. An earlier
+    // revision of this comment claimed it did, which was the overclaim this
+    // test was rewritten to remove -- restated one level up. By the time
+    // drops_at_first_rotation is sampled, chunk 1 has already banked nearly
+    // all of its records as drops (a k_chunk burst into the far smaller ring
+    // configured above), and the loop then produces at least one more full
+    // chunk. Any unpaced producer against ANY sink -- an in-memory mock
+    // included -- makes this number rise. It witnesses that the ring was still
+    // overflowing after a rotation had completed; it says nothing about the
+    // drain having been inside rotate() while those drops accrued.
+    //
+    // The sink-coupled assertion is the ASSERT_TRUE(rotation_seen) above: only
+    // a real FileSink produces an archive, and red arm 4 (storm lever removed)
+    // grades exactly that one. Being FATAL, it returns before this line is
+    // ever reached, so arm 4 says nothing about the check below.
+    //
+    // What this check is for: the loop has a second exit -- reaching
+    // k_max_records with drops never rising -- and that exit would otherwise
+    // reach the accounting below with no overflow to account for.
+    //
     // Read once and reused for the accounting below: drop_count_ is incremented
     // only inside enqueue() (src/log/logger.cpp), the producer loop has ended,
     // and shutdown() enqueues nothing — so a second read after shutdown would be
@@ -354,10 +392,10 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // the accounting messages below would only LOOK like they might disagree.
     auto const drops = logger->drop_count();
     EXPECT_GT(drops, drops_at_first_rotation)
-        << "no record was dropped after the first rotation completed (drops were "
+        << "the ring stopped overflowing after the first rotation completed (drops were "
         << drops_at_first_rotation << " then and " << drops << " after producing "
-        << produced << " records) — the ring stopped overflowing once the storm started, so this "
-        << "run does not witness backpressure against a rotating FileSink";
+        << produced << " records), so the accounting below has no overflow to account for. "
+        << "This is the producer outrunning the ring, not a statement about the sink";
 
     // A drain timeout here is a real outcome, not a test bug: it is reported
     // through timeout_drop_count() and folded into the accounting below rather
@@ -562,6 +600,12 @@ TEST_F(FileSinkBackpressureTest, EveryRecordSurvivesWhenTheRingCannotFill) {
     lcfg.drain_timeout = std::chrono::seconds{60};
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(lcfg), std::move(sinks));
+
+    // Same setup guard as the storm test: a sink that failed to open is
+    // DESTROYED by the Logger ctor and the run would witness nothing.
+    ASSERT_EQ(logger->sink_error_count(0), 0u)
+        << "the FileSink failed to open, so the Logger silently disabled it and this run "
+        << "exercises no sink at all";
 
     burst(*logger, 0, k_control_records);
     auto const shutdown_result = logger->shutdown(std::chrono::seconds{60});

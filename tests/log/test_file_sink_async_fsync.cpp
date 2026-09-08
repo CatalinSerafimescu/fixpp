@@ -331,6 +331,37 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
         << "itself prove a join, since a wait-then-detach would also satisfy it. "
         << "Thread lifetime is pinned by sub-assertions (ii)/(iii) of "
         << "CloseJoinsWorkerAndPreventsReusedFdWrite.";
+
+    // THE FRAME MUST NOT POP WHILE THE CALLBACK IS STILL RUNNING. On correct code
+    // close() has joined and this loop exits on its first read. Under red arm 1's
+    // DETACH mutant it does not: the worker is still mid-sleep, holding
+    // references to these stack atomics AND executing inside cfg.fsync_fn, which
+    // `sink`'s destructor is about to free. Returning here is a write into a
+    // popped frame plus a call into a destroyed std::function -- real UB, and the
+    // wait removes it. The EXPECT above has already been evaluated, so waiting
+    // cannot mask the defect it detects.
+    //
+    // ⚠️ WHAT THIS DOES *NOT* FIX, MEASURED RATHER THAN ASSUMED. This wait was
+    // added on the reasoning that without it the arm would abort under a
+    // sanitizer preset and mis-grade arm 2 (which expects GREEN from this same
+    // mutant). THAT DOES NOT HAPPEN. Forced both ways under linux-clang-asan --
+    // this wait deleted AND the detach mutant applied -- ASan reported ZERO
+    // findings, both for the single filtered test (the process exits ~13 ms in,
+    // while the worker still has ~490 ms of sleep left, so the store never runs)
+    // and for the full binary over 10 s (detect_stack_use_after_return is off by
+    // default, and the popped frame is reused and unpoisoned before the write
+    // lands). So the arm was never at risk; the justification for this wait is
+    // that the UB is real, not that anything observed it.
+    //
+    // Bounded, because an arm that HANGS grades nothing, and the budget is
+    // derived from the competing stall rather than picked: the callback cannot
+    // take longer than its own sleep, so a generous multiple of it is an
+    // expiry that only a wedged worker reaches.
+    auto const drain_deadline = std::chrono::steady_clock::now() + 10 * k_fsync_sleep_ms;
+    while (!fsync_returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < drain_deadline) {
+        std::this_thread::yield();
+    }
 }
 
 // ── FileSink close() lifetime: no detached threads, no fd-reuse race ─────────
@@ -454,6 +485,18 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
         released.store(true);
     }
     release_cv.notify_all();
+
+    // Same frame-lifetime guard as FlushDeadlineBounded above, and the same
+    // caveat: under the detach mutant the worker is still inside stalling_fsync,
+    // which captures this frame's mutex and condition_variable BY REFERENCE, so
+    // returning here is real UB -- but no sanitizer here reports it (see the
+    // measurement in FlushDeadlineBounded). It has just been released, so on
+    // every path this is short; the bound exists so the arm fails rather than hangs.
+    auto const drain_deadline = std::chrono::steady_clock::now() + 10 * k_release_after_ms;
+    while (!fsync_returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < drain_deadline) {
+        std::this_thread::yield();
+    }
 
     // (iii) No late fsync on a reused fd: open a new FileSink reusing the same
     // path (the OS may reuse the same fd integer). The original stalling fsync

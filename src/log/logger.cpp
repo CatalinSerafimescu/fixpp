@@ -55,6 +55,23 @@
 //   the ring through sustained WRAPAROUND against a live drain, which is the
 //   shape this edge protects; weakening the load reports races on the ring slot,
 //   restoring the acquire reports none.
+// - ⚠️ STEP 1's `w` IS RELAXED AND IS READ BEFORE `r`, so with MULTIPLE producers
+//   the two can be mutually inconsistent: another producer may advance
+//   write_sequence_, and the drain may then advance read_sequence_ past the `w`
+//   this thread already loaded. `w - r` is unsigned, so step 3 underflows to a
+//   huge value and reports "full" for a ring that is not — returning false
+//   BEFORE the step-4 CAS that would have caught the stale `w`.
+//   The direction is safe: it can only over-drop, never overwrite an unread
+//   slot, and the drop is counted, so drop_count() remains exact in the sense
+//   that every dropped record is accounted for. A QoS effect, not a correctness
+//   one, PRE-EXISTING, and deliberately NOT changed by #402 — which is about
+//   slot reuse and a torn record, a different hazard on a different axis.
+//   Unreachable from either test in tests/log/test_file_sink_backpressure.cpp:
+//   both are SINGLE-producer, so `r` can never pass `w`. Written down because
+//   #402 deleted the old step-2 rationale, which was the only text in this file
+//   that hinted a stale read could affect the fullness check at all. This is the
+//   CONDITION, not a claim about how often it fires — nothing here has measured
+//   that.
 // - The per-slot sequence atomic prevents the drain from reading a partially-written
 //   slot: the producer stores sequence = w+1 AFTER writing the Record (release),
 //   the drain reads with acquire semantics, so the full Record write is visible.
