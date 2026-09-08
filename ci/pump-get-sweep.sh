@@ -305,8 +305,26 @@ _BOUNDED = re.compile(r"\.run_for\(|\.run_until\(|\.poll\(|\.poll_one\(")
 # right context is present, not that the site is safe.
 # ⚠️ AND `base` IS LEXICAL. An alias, a `&`-bound reference, a strand spelled through
 # `.get_executor()` on something else, or a context reached through a fixture member this
-# regex does not resolve all read as a different name. The error direction is toward
-# NO-VISIBLE-EXHAUSTION -- more reading, not less.
+# regex does not resolve all read as a different name. For THOSE the error direction is
+# toward NO-VISIBLE-EXHAUSTION -- more reading, not less.
+#
+# ⚠️ THAT IS A PROPERTY OF NAME RESOLUTION, NOT OF THE AXIS, AND READING IT AS THE LATTER
+# IS THE MISTAKE. Constructed inputs that produce a FALSE `EXHAUSTED` -- the dismissing
+# direction -- each fed to `classify()` directly, none live in tests/ today:
+#   - `a.ioc` spawned, `b.ioc` run: `_last_name` collapses both to `ioc`.
+#   - a `run()` inside a declared-but-never-invoked lambda, or in either arm of a branch
+#     the get() does not share: this is a LEXICAL scan, it does not model control flow.
+#   - a `run()` inside a STRING LITERAL: `blank_comments` blanks comments and deliberately
+#     keeps literals, because other controls depend on that.
+#   - sibling blocks reusing a context NAME: state resets at a function/TEST boundary, not
+#     at a C++ scope (the limitation the header registers above; batch 21 is what makes it
+#     reach a positive dismissal rather than only a guard state).
+#   - `ioc.stop(); ioc.run();`: a THIRD way `run()` returns, alongside (a) and (b) in
+#     `pump_until_ready.hpp`. The frame stays parked and the future stays unready, and
+#     neither this axis nor a `restart()`-shaped sweep can see it.
+# Re-derive rather than trusting that list -- it is a set of shapes, and the population it
+# is empty over is today's tree:
+#     git grep -n '\.stop()' -- tests/
 #
 #   drive:  EXHAUSTED             a `<spawn-ctx>.run(` or `run_to_exhaustion_or_report(
 #                                 <spawn-ctx>, ...)` dominates the get().
@@ -329,8 +347,19 @@ def _last_name(tok):
     return tok.replace("->", ".").split(".")[-1]
 
 
-def exhausts(seg, base):
-    """Does a run-to-EXHAUSTION on `base` appear in `seg`? Both spellings."""
+def exhausts(seg, base, ctxnames):
+    """Does a run-to-EXHAUSTION on `base` appear in `seg`? Both spellings.
+
+    ⚠️ `base in ctxnames` IS EDGE 1 AGAIN, AND HERE IT GUARDS A POSITIVE DISMISSAL.
+    `_UNBOUNDED` carries the same `([\w>.\-]+)\.run\(` and `unbounded()` gates it on the
+    receiver resolving to a context DECLARED in the file -- without that, a fixture method
+    `f.run(300)` reads as a context run. In the pump-shape axis that mislabels a bucket;
+    here it would turn a BOUNDED fixture pump into `EXHAUSTED`, which is a dismissal.
+    Latent rather than live -- no candidate row's `base` is a fixture name today -- which
+    is exactly why it needs a rule and not a survey.
+    """
+    if base not in ctxnames:
+        return False
     return any(_last_name(m.group(1) or m.group(2)) == base for m in _EXHAUST.finditer(seg))
 
 # ── the CALL-SITE-SCOPE axis (batch 20) ──────────────────────────────────────
@@ -555,7 +584,8 @@ def classify(text):
                       "RUN-BOUNDED" if _BOUNDED.search(seg) else "HELPER")
                 # Must name `base`: a run on a DIFFERENT context dominates nothing
                 # (clause 1, arm 4).
-                dv = "EXHAUSTED" if exhausts(seg, base) else "NO-VISIBLE-EXHAUSTION"
+                dv = ("EXHAUSTED" if exhausts(seg, base, ctxnames)
+                      else "NO-VISIBLE-EXHAUSTION")
                 bad.append((start + 1, lines[start].strip() or stmt[:70], ec, pc,
                             scope_of(start), dv))
     return guarded, bad
@@ -1016,6 +1046,19 @@ TEST(A, B) {
     # would have read a POSITIVE DISMISSAL wrong rather than merely escalating: before
     # batch 21 the container's spawn executor was never parsed, so this case read
     # THREAD-IN-FILE (`asio::thread_pool` sets `anythread`) instead of POOL.
+    # ⚠️ 4f IS THE STRADDLE FOR THE `ctxnames` GATE, and it is the one whose failure is a
+    # DISMISSAL rather than an escalation: `f.run(300)` is a fixture method, and without the
+    # gate its receiver reads as a context run-to-exhaustion. Same edge the pump-shape axis
+    # already pays for -- restated here because this axis makes it costlier.
+    ("4f  a FIXTURE method run() is not an exhaustion -> NO-VISIBLE-EXHAUSTION", """
+struct F { asio::io_context ioc; void run(int ms = 400) { ioc.run_for(ms); } };
+TEST(A, B) {
+    F f;
+    auto fut = asio::co_spawn(f, s.open(), asio::use_future);
+    f.run(300);
+    (void)fut.get();
+}
+""", ("CALLER-ONLY", "HELPER", "NO-VISIBLE-EXHAUSTION")),
     ("4e  a container filled from a thread_pool     -> POOL", """
 TEST(A, B) {
     asio::thread_pool pool{4};
@@ -1103,9 +1146,11 @@ for rel, b in rows:
         # the arm ASSERTING a zero -- then passed vacuously, which is this repo's #1
         # defect class landing inside the arm written to prevent it. Keys, so the next
         # axis costs a consumer nothing; consumers must match `scope=CORO`, never a
-        # position. ⚠️ A consumer that also reads a HISTORICAL sweep (ARM 1 runs the
-        # sweep FROM the old checkout) has to accept both spellings for good -- that is
-        # a permanent property of comparing two script versions, not a migration.
+        # position. ⚠️ ONE SPELLING IS ENOUGH even for a consumer that reads a HISTORICAL
+        # corpus: `batch20-coroutine-axis.sh` substitutes the CORPUS, not the script
+        # (`git archive $BASE tests` + `cp -r ci`), so both its arms read today's tag.
+        # An earlier draft of THIS comment asserted the opposite -- that two dialects
+        # were needed "for good" -- and it was wrong; see that arm's own header.
         tag = (f"  [exec={ec} pump={pc} scope={sc} drive={dv}]") if disposition else ""
         print(f"    {ln:5d}  {txt[:76]}{tag}")
 if disposition:

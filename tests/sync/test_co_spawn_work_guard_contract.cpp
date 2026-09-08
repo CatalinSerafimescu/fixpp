@@ -19,6 +19,11 @@
 //
 //   clause 1  the spawn executor's context IS the driven context   (arm 4)
 //   clause 2  the run is not a post-exhaustion no-op               (arm 3)
+//   clause 3  the completion token carries no FOREIGN executor     (arm 6)
+//
+// ⚠️ CLAUSE 3 WAS MISSING FROM THE FIRST DRAFT, and it separates two statements this
+// file had been conflating: exhaustion implies the FRAME completed, NOT that the future
+// is ready. A hostile round measured the difference. See arm 6.
 //
 // ⚠️ ARM 2 IS THE POSITIVE CONTROL AND IT IS NOT OPTIONAL. Every other arm asserts
 // about `stopped()`; an instrument wired so that `stopped()` could only read one
@@ -46,6 +51,7 @@
 
 #include <gtest/gtest.h>
 
+#include <asio/bind_executor.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/steady_timer.hpp>
@@ -190,23 +196,70 @@ TEST(SyncCoSpawnWorkGuard, GuardIsOnTheSpawnExecutorNotTheDrivenOne) {
 // ── ARM 5 — the spelling the tree actually uses ──────────────────────────────
 // `tests/sync/test_cross_strand_acquire.cpp` spawns onto `asio::make_strand(ioc)`, and
 // the sweep's DRIVE axis cannot resolve that name back to `ioc` — it escalates the site
-// for a human to read. This arm is what that reader would otherwise have to reason
-// about: a strand forwards work tracking to its underlying context, so `ioc.run()`
-// exhausting still implies the frame completed.
+// for a human to read. This arm is what that reader would otherwise reason about: a
+// strand forwards work tracking to its underlying context.
+//
+// ⚠️ THE FRAME MUST PARK, AND THE FIRST VERSION OF THIS ARM DID NOT. It used a bare
+// `co_return`, which never suspends — the queued frame-start handler alone keeps
+// `ioc.run()` alive and completes the future, so the arm passed WITHOUT ever exercising
+// work-tracking propagation through the strand. It was green for a reason that had
+// nothing to do with its own comment. Parking on an op `ioc` does not drive is what makes
+// the propagation load-bearing: only the strand's guard can hold the count then.
 TEST(SyncCoSpawnWorkGuard, StrandOfTheDrivenContextIsTheDrivenContext) {
     asio::io_context ioc;
+    asio::io_context other;
+    asio::steady_timer t{other, kNever};
 
     auto fut = asio::co_spawn(
-        asio::make_strand(ioc), []() -> asio::awaitable<void> { co_return; }, asio::use_future);
+        asio::make_strand(ioc),
+        [&t]() -> asio::awaitable<void> { co_await t.async_wait(asio::use_awaitable); },
+        asio::use_future);
+
+    ioc.poll();
+
+    EXPECT_FALSE(ioc.stopped())
+        << "#289: a frame spawned on a STRAND of `ioc`, parked on an op `ioc` does not "
+           "drive, must still hold `ioc`'s work count — the strand forwards work tracking "
+           "to its underlying context. If this fails, the sites the DRIVE axis escalates "
+           "for a strand spelling need a different argument than batch 21 recorded.";
+    EXPECT_FALSE(is_ready(fut)) << "the frame must still be parked, or nothing is measured";
+
+    t.expires_after(0s);
+    other.run();
+    ioc.run();
+    EXPECT_TRUE(is_ready(fut));
+}
+
+// ── ARM 6 — the clause the first draft did not have ──────────────────────────
+// Exhaustion of the spawn context implies the FRAME completed. It does NOT imply the
+// FUTURE is ready, and the gap is the completion token's own associated executor:
+// `co_spawn_state` (asio/impl/co_spawn.hpp) holds TWO guards, `spawn_work` on the spawn
+// executor and `handler_work` on `get_associated_executor(handler)`. Bind the token to a
+// different context and the final completion is dispatched THERE, while the spawn
+// context's count drops with the frame.
+//
+// ⚠️ NOT LIVE, AND THAT IS A MEASUREMENT, NOT A PROPERTY: no `co_spawn` token under
+// `tests/` is `bind_executor`-wrapped today. Re-derive rather than trusting this:
+//     git grep -n 'co_spawn' -- tests/ | grep bind_executor
+TEST(SyncCoSpawnWorkGuard, ForeignHandlerExecutorLeavesTheFutureUnready) {
+    asio::io_context ioc;
+    asio::io_context other;
+
+    auto fut = asio::co_spawn(
+        ioc, []() -> asio::awaitable<void> { co_return; },
+        asio::bind_executor(other.get_executor(), asio::use_future));
 
     ioc.run();
 
-    EXPECT_TRUE(ioc.stopped());
-    EXPECT_TRUE(is_ready(fut))
-        << "#289: a frame spawned on a STRAND of `ioc` holds `ioc`'s work count, so an "
-           "exhausting run() on `ioc` implies it completed. If this ever fails, the "
-           "sites the DRIVE axis escalates for a strand spelling need a different "
-           "argument than the one recorded for batch 21.";
+    EXPECT_TRUE(ioc.stopped()) << "the frame completes, so the spawn context DOES exhaust";
+    EXPECT_FALSE(is_ready(fut))
+        << "#289 clause 3: the completion is dispatched to the token's associated "
+           "executor, so exhausting the SPAWN context does not make the future ready and "
+           "a get() here would still block. An `EXHAUSTED` annotation is only a "
+           "dismissal while the token carries no foreign executor.";
+
+    other.run();
+    EXPECT_TRUE(is_ready(fut));
 }
 
 }  // namespace

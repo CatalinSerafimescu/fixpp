@@ -1084,20 +1084,26 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
 // DIFFERENT context, and shows the driven one exhausting at once with the frame live. So
 // (a) is what happens when the condition does not hold, and checking it is checking a
 // name, not enumerating a coroutine's suspension points.
-// ⚠️ THAT LEAVES (b) AS THE LIVE HAZARD IN THE SHAPE ABOVE, not one of two. It is arm 3,
-// and it is the reason the success path below still touches no context state: see the
-// `restart()` note further down, which this does not change.
-// ⚠️ AND (b) IS NOT A WEDGE AT A *MIGRATED* SITE, which is a property of the four lines of
-// this function's body rather than a survey of callers: the `run()` is followed by a
-// readiness check, so a run that dispatched nothing yields either an already-ready future
-// (the previous exhaustion completed it — correct, and silent) or a REPORTED miss via
-// `kRunMiss`. Loud either way. #289 batch 21 read EVERY tree site where one run() on a
-// context follows another with no `restart()` between, and found no wedge: each was a
-// helper pair like that, or a pair of mutually exclusive branches. No count is written
-// here -- a count rots and a mechanism does not. The mechanism is that the readiness
-// check turns (b) into a diagnosis; the population is in that batch's record, and the
-// recipe for re-deriving it is there too, because a lexical scan for this shape cannot
-// see branch exclusivity and reported false on every site it found.
+// ⚠️ THAT LEAVES (b) AS THE LIVE ONE OF THE TWO ABOVE. It is arm 3, and it is the reason
+// the success path below still touches no context state: see the `restart()` note further
+// down, which this does not change.
+// ⚠️ THE LIST OF TWO IS NOT EXHAUSTIVE, and calling it "the two ways" is what let (a)
+// stand unchallenged for so long. A third: someone called `ioc.stop()`, after which
+// `run()` returns with the frame parked exactly as in (b). A fourth is not about `run()`
+// at all -- exhaustion means the FRAME completed, which is not the same as the FUTURE
+// being ready when the completion token carries a foreign associated executor (arm 6).
+// Both are measured in the same file; neither has a live site under `tests/` today, and
+// that last clause is a measurement, not a property.
+// ⚠️ WHAT THIS FUNCTION BUYS AGAINST (b), STATED AT THE WIDTH IT ACTUALLY HOLDS: the
+// `run()` below is followed by a readiness check ON `fut`, so a run that dispatched
+// nothing cannot reach `return true` with `fut` unready -- it yields either an
+// already-ready `fut` or a REPORTED miss via `kRunMiss`. Loud either way, for `fut`.
+// ⚠️ IT SAYS NOTHING ABOUT ANY OTHER FUTURE. A caller that guards `fh` here and then
+// `.get()`s a DIFFERENT future needs its own argument, and an earlier draft of this
+// paragraph generalised past that -- claiming (b) "is not a wedge at a migrated site",
+// unqualified, while the body checks one future. A hostile round found the over-reach.
+// The narrow statement is the durable one; anything wider is a claim about callers, which
+// belongs in a batch record and not in a header.
 //
 // ⚠️ THE MISS BRANCH IS ONE FIXED SHAPE HERE, WHICH IS WHY IT IS INSIDE. Every other #289
 // recipe spells its miss branch at the site because the branches VARY -- `drain_or_report`
