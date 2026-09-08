@@ -129,6 +129,44 @@ CITE_PREFILTER = [
 # pattern matches its line number.
 RE_LINE_DIRECTIVE = re.compile(r"^\s*#\s*line\s")
 
+# ── What --shift-audit CHARGES versus what it only REPORTS ───────────────────
+#
+# Wiring the audit as a hard gate (#336) is what made this distinction load-
+# bearing: measured over ten real merges (0e5225fc..b6d9ed8c) the mode raised
+# 420 content findings and 17 shifting hunks, and a gate that stops that range
+# stops ordinary work. Both narrowings below are about WHICH findings fail the
+# build. NEITHER hides a finding: every one is still printed and still written
+# to --json, carrying `gated: false`, and the report prints both denominators.
+# A narrowing you cannot count is a blind spot; one you can is a scope.
+#
+# [2] FROZEN CITERS. `specs/<id>/` is a per-feature bundle -- spec, plan, tasks,
+# research, checklists, contracts -- written during a feature and not edited
+# again once it merges. 313 of those 420 findings cite from one. Rot there is
+# real and worth listing, but it is rot in an archive: nobody reads those
+# documents to navigate today's source, and remediating them is #310's job, not
+# a merge gate's. `spec/` (singular) is the LIVE surface and is NOT frozen.
+RE_FROZEN_CITER = re.compile(r"^specs/")
+#
+# [1] SHIFTS THAT MOVED NOTHING. The check deliberately runs on EVERY changed
+# `.md`, including those nothing resolvably cites, because a form-B citation
+# (`at line 448`) names no file and so resolves to nothing -- see the check's
+# own header. That stays true, and every such hunk is still reported. What
+# changed is that only a hunk with at least one citation KNOWN to have moved
+# fails the build: 13 of those 17 hunks moved zero, among them `brain/log.md`
+# growing by 262 lines and a 108-line append near the end of
+# `spec/behaviors-and-limitations.md` -- a file nearly every PR edits, because
+# a B&L functional delta is a Gate B precondition.
+#
+# ⚠️ THE BLIND SPOT THIS BUYS, STATED SO IT CAN BE FOUND: a shift in a document
+# cited ONLY in form B or form C moves citations that cannot be positioned, so
+# `below` is 0 and the hunk is reported without failing. The motivating defect
+# (9e0b332d) is NOT in that class -- it moved 28 resolvable citations from 16
+# files and still fails. The tree-wide form B/C population is printed on every
+# run as the denominator of what this cannot see; #310 is where that shrinks.
+def shift_is_gated(f):
+    """Does this [1] finding fail the build, or is it reported only?"""
+    return bool(f["resolved_citations_below"] + f["ambiguous_citations_below"])
+
 # Deliberate, reviewed exception. `--census` reports these as their own bucket:
 # the marker is itself a claim (that this number will not rot), so it has to stay
 # countable rather than vanish from the instrument built to audit it.
@@ -761,6 +799,17 @@ def shift_audit(root, spec, json_out=None):
                         before=old[m - 1] if 1 <= m <= len(old) else None,
                         after=after))
 
+    # ── what the gate CHARGES ────────────────────────────────────────────────
+    # Tagged in place, so --json carries the verdict beside the finding and the
+    # printed sections below stay one list each: everything is reported, and the
+    # tag says which ones cost you a build. See RE_FROZEN_CITER / shift_is_gated.
+    for f in shift_findings:
+        f["gated"] = shift_is_gated(f)
+    for f in content_findings:
+        f["gated"] = not RE_FROZEN_CITER.match(f["cf"])
+    gated_shift = [f for f in shift_findings if f["gated"]]
+    gated_content = [f for f in content_findings if f["gated"]]
+
     # ── report ───────────────────────────────────────────────────────────────
     print("── #336 shift audit " + "─" * 54)
     print(f"range                    : {base[:12]}..{head[:12]}  ({spec})")
@@ -788,7 +837,10 @@ def shift_audit(root, spec, json_out=None):
           "discipline, not a source one]")
     print()
 
-    print(f"[1] LINE-SHIFT AUDIT -- {len(shift_findings)} shifting hunk(s)")
+    print(f"[1] LINE-SHIFT AUDIT -- {len(shift_findings)} shifting hunk(s), "
+          f"{len(gated_shift)} of them GATED")
+    print(f"    reported but NOT gated: {len(shift_findings) - len(gated_shift)} "
+          "(no citation this mode can POSITION sits at or below the hunk)")
     for f in shift_findings:
         kind = ("INSERTION of %d line(s) after line %d" % (f["new_count"], f["old_start"])
                 if f["old_count"] == 0
@@ -801,16 +853,21 @@ def shift_audit(root, spec, json_out=None):
         below = f["resolved_citations_below"] + f["ambiguous_citations_below"]
         print(f"      {kind} -- every line below it moved")
         print(f"      {below} citation(s) sit at or below it and MOVED"
-              + ("   [none that can be POSITIONED -- form B/C cannot be]"
-                 if below == 0 else ""))
+              + ("   [none that can be POSITIONED -- form B/C cannot be;"
+                 " REPORTED, not gated]" if below == 0 else "   [GATED]"))
     if not shift_findings:
         print("  none -- every hunk is an in-place same-line-count replacement or an")
         print("  append at the original last line.")
     print()
 
-    print(f"[2] CITED-LINE CONTENT CHECK -- {len(content_findings)} rotted citation(s)")
+    print(f"[2] CITED-LINE CONTENT CHECK -- {len(content_findings)} rotted "
+          f"citation(s), {len(gated_content)} of them GATED")
+    print(f"    reported but NOT gated: "
+          f"{len(content_findings) - len(gated_content)} (cited from a frozen "
+          "specs/<id>/ feature bundle)")
     for f in content_findings:
-        print(f"  {f['cf']}:{f['cl']}  ->  {f['target']}:{f['n']}   {f['why']}")
+        tag = "" if f["gated"] else "   [frozen bundle -- REPORTED, not gated]"
+        print(f"  {f['cf']}:{f['cl']}  ->  {f['target']}:{f['n']}   {f['why']}{tag}")
         if f.get("before") is not None:
             print(f"      before: {f['before'].strip()[:110]}")
         if f.get("after") is not None:
@@ -839,7 +896,7 @@ def shift_audit(root, spec, json_out=None):
                        "form_bc_tree_wide": form_bc}, f, indent=1)
         print(f"audit table -> {json_out}")
 
-    if shift_findings or content_findings:
+    if gated_shift or gated_content:
         print("A line number is a claim about a file that keeps moving. Do NOT "
               "renumber the", file=sys.stderr)
         print("citations -- that produces N fresh claims that rot on the next edit. "
@@ -852,10 +909,21 @@ def shift_audit(root, spec, json_out=None):
               "document that", file=sys.stderr)
         print("is cited BY LINE NUMBER')", file=sys.stderr)
         return 1
-    print("check-line-citations: shift audit clean for the citations it could "
-          "RESOLVE. See")
-    print("the denominators above -- form B/C citations name no file and cannot be "
-          "checked.")
+    ungated = ((len(shift_findings) - len(gated_shift))
+               + (len(content_findings) - len(gated_content)))
+    if ungated:
+        # Passing is not the same as finding nothing, and saying "clean" here
+        # would be the false zero this whole tool exists to prevent.
+        print(f"check-line-citations: shift audit GATE PASSED with {ungated} "
+              "finding(s) reported")
+        print("and not charged (frozen specs/<id>/ citers; hunks that moved no "
+              "positionable")
+        print("citation). They are real -- see the [GATED] tags above and #310.")
+    else:
+        print("check-line-citations: shift audit clean for the citations it could "
+              "RESOLVE. See")
+        print("the denominators above -- form B/C citations name no file and cannot "
+              "be checked.")
     return 0
 
 
@@ -1146,14 +1214,16 @@ def shift_self_test():
         checks.append(("mid-document insertion: reported as an INSERTION",
                        any(f["old_count"] == 0 for f in j["shift"])))
 
-        # 5b. A shift BELOW every citation still fails -- but must say that zero
-        #     POSITIONABLE citations moved, so a reviewer can triage it. Form B/C
-        #     citations cannot be positioned, which is why it is not filtered out.
+        # 5b. A shift BELOW every citation is REPORTED but not charged, and must
+        #     say that zero POSITIONABLE citations moved so a reviewer can triage
+        #     it. Form B/C citations cannot be positioned; that is the scope
+        #     shift_is_gated() names, and 5c is its non-vacuity partner.
         lines = lines[:25] + ["LATE"] * 2 + lines[25:]
         write_doc(); _sh_commit(d, "insert below every citation")
         code, j = _sh_audit(d)
-        checks.append(("shift below every citation: still fails",
-                       code == 1 and len(j["shift"]) == 1))
+        checks.append(("shift below every citation: reported, gate passes",
+                       code == 0 and len(j["shift"]) == 1
+                       and not j["shift"][0]["gated"]))
         checks.append(("...annotated as 0 positionable citations moved",
                        j["shift"][0]["resolved_citations_below"] == 0
                        and not j["content"]))
@@ -1269,8 +1339,74 @@ def shift_self_test():
         code, j = _sh_audit(d)
         checks.append(("form-B-only doc IS shift-checked (not 'cited by NOTHING')",
                        "doc2.md" in j["md_checked"]))
-        checks.append(("form-B-only doc's shift is REPORTED",
-                       code == 1 and any(f["file"] == "doc2.md" for f in j["shift"])))
+        d2f = [f for f in j["shift"] if f["file"] == "doc2.md"]
+        checks.append(("form-B-only doc's shift is REPORTED", bool(d2f)))
+        # ...and, since the gate narrowed to hunks that moved a POSITIONABLE
+        # citation (#336 wiring), reported is all it is. This is the blind spot
+        # named in shift_is_gated()'s header, pinned so it stays a known scope
+        # rather than becoming a surprise.
+        checks.append(("form-B-only doc's shift is NOT gated (the named blind spot)",
+                       bool(d2f) and not d2f[0]["gated"] and code == 0))
+
+        # 8f-bis. NON-VACUITY of that narrowing, in the SAME document. Give
+        #     doc2.md a form-A citation and shift it again: the hunk is now
+        #     gated. Without this the narrowing could be "check [1] never fails"
+        #     and 8f alone would still pass -- a forced miss cannot price a gate.
+        open(os.path.join(d, "src", "forma.cpp"), "w").write(
+            "// and the rule is at doc2.md:12\n")
+        _sh_commit(d, "add a form-A citation into the form-B-only doc")
+        _prev = open(d2).read()
+        open(d2, "w").write("PRE2\n" * 3 + _prev)
+        _sh_commit(d, "shift the now-form-A-cited doc")
+        code, j = _sh_audit(d)
+        d2f = [f for f in j["shift"] if f["file"] == "doc2.md"]
+        checks.append(("same doc, now form-A cited: the shift IS gated",
+                       code == 1 and bool(d2f) and d2f[0]["gated"]
+                       and d2f[0]["resolved_citations_below"] >= 1))
+
+        # 8h. GATE SCOPE, both directions in ONE measurement. A `specs/<id>/`
+        #     feature bundle is an archive: its rot is reported and not charged.
+        #     The IDENTICAL rot cited from a live path IS charged. Asserting only
+        #     the frozen half would let the scope widen to everything -- or
+        #     collapse to nothing -- with no arm noticing.
+        ft = os.path.join(d, "src", "frozen_target.cpp")
+        tgt = [f"T{i:02d}" for i in range(1, 9)]
+        open(ft, "w").write("\n".join(tgt) + "\n")
+        os.makedirs(os.path.join(d, "specs", "099-archived"), exist_ok=True)
+        os.makedirs(os.path.join(d, "spec"), exist_ok=True)
+        open(os.path.join(d, "specs", "099-archived", "spec.md"), "w").write(
+            "the guard is at frozen_target.cpp:3\n")
+        open(os.path.join(d, "spec", "live.md"), "w").write(
+            "the same guard is at frozen_target.cpp:3\n")
+        _sh_commit(d, "one frozen citer and one live citer, same target line")
+        tgt[2] = "T03-mutated"          # same line count: isolates check [2]
+        open(ft, "w").write("\n".join(tgt) + "\n")
+        _sh_commit(d, "mutate the cited line")
+        code, j = _sh_audit(d)
+        fz = [c for c in j["content"] if c["cf"].startswith("specs/")]
+        lv = [c for c in j["content"] if c["cf"].startswith("spec/")]
+        checks.append(("frozen specs/<id>/ citer: rot is REPORTED",
+                       len(fz) == 1 and "CONTENT CHANGED" in fz[0]["why"]))
+        checks.append(("frozen specs/<id>/ citer: ...and NOT gated",
+                       len(fz) == 1 and not fz[0]["gated"]))
+        checks.append(("live spec/ citer: the IDENTICAL rot IS gated",
+                       code == 1 and len(lv) == 1 and lv[0]["gated"]))
+
+        # 8h-bis. With the live citer gone, the same edit must PASS the gate and
+        #     still print the frozen finding -- the pass must not read as "found
+        #     nothing", which is the false zero this whole tool exists to stop.
+        os.unlink(os.path.join(d, "spec", "live.md"))
+        _sh_commit(d, "retire the live citer")
+        tgt[4] = "T05-mutated"
+        open(ft, "w").write("\n".join(tgt) + "\n")
+        open(os.path.join(d, "specs", "099-archived", "spec.md"), "a").write(
+            "and the other guard is at frozen_target.cpp:5\n")
+        _sh_commit(d, "mutate a line cited ONLY from the frozen bundle")
+        code, j = _sh_audit(d)
+        fz = [c for c in j["content"] if c["cf"].startswith("specs/")]
+        checks.append(("frozen-only rot: gate PASSES", code == 0))
+        checks.append(("frozen-only rot: ...while still reporting the finding",
+                       len(fz) >= 1 and not any(c["gated"] for c in fz)))
 
         # 8g. Codex P1-2: a SOURCE citation that repoints while the content stays
         #     byte-identical. Two identical `}` lines; inserting one line above

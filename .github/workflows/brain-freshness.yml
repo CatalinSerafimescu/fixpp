@@ -89,7 +89,7 @@ jobs:
         # instrument is proven on exactly those commits.
         run: python3 tools/check_line_citations.py --self-test
 
-      - name: "Line-citation gate — no NEW file:NNN citations in this change (#310, #336)"
+      - name: "Line-citation gate — no NEW file:NNN citations, and none ROTTED (#310, #336)"
         # WHY THIS EXISTS. The gate shipped in #326 as a LOCAL pre-commit hook
         # only. Nothing in .github/ invokes pre-commit, and `.git/hooks/` is not
         # tracked by git -- a hook cannot be committed, so it is absent from any
@@ -101,6 +101,16 @@ jobs:
         # Measured before wiring, over the last 150 commits: exactly ONE would
         # fail since the gate landed (c9f962ec, #326) -- 77900be0, already fixed.
         # The other 26 predate the rule. So this is close to free going forward.
+        #
+        # ── The ROT half (--shift-audit) is NOT close to free, and was scoped ──
+        # Measured over ten real merges before wiring (0e5225fc..b6d9ed8c): 420
+        # content findings and 17 shifting hunks. Charging all of that would stop
+        # ordinary work, so what FAILS is narrowed twice -- frozen `specs/<id>/`
+        # citers, and hunks that moved no positionable citation. Both narrowings,
+        # their measured sizes, and the blind spot the second one buys are
+        # documented at RE_FROZEN_CITER / shift_is_gated() in the tool; every
+        # finding is still printed and still lands in --json carrying `gated`.
+        # Do not re-derive the scope from this comment -- read the tool.
         #
         # No continue-on-error, per this file's header: it makes an `exit 1` inert.
         env:
@@ -136,4 +146,20 @@ jobs:
           # scored against this PR.
           if MB="$(git merge-base "$BASE" "$HEAD" 2>/dev/null)"; then BASE="$MB"; fi
           echo "gating $BASE..$HEAD"
-          python3 tools/check_line_citations.py --range "$BASE..$HEAD"
+
+          # BOTH DIRECTIONS, and both reports every run. --range gates GROWTH (a
+          # change that ADDS a citation); --shift-audit gates ROT (a change that
+          # INVALIDATES existing ones) -- #336's whole point being that an edit
+          # which rots a citation adds none, so --range passes it clean.
+          #
+          # `set -e` would stop at the first failure and hide the second report,
+          # which is the wrong trade here: a contributor who has to fix both
+          # should be told both in one run, not made to re-push to discover the
+          # second. So each is run with its status captured, both reports are
+          # printed, and the step fails if EITHER did. Never `|| true` on its own
+          # -- that is how an `exit 1` goes inert.
+          rc=0
+          python3 tools/check_line_citations.py --range "$BASE..$HEAD" || rc=1
+          echo
+          python3 tools/check_line_citations.py --shift-audit "$BASE..$HEAD" || rc=1
+          exit "$rc"
