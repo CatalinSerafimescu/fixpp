@@ -1,0 +1,33 @@
+"""Bundled FIX dictionary data package — C++-PACKAGE LAYOUT variant (#257).
+
+⚠️ GENERATED FROM ``_fixpp_data/package_init.py.in`` by CMake. Do not edit the
+installed copy; edit the template.
+
+This is the ``FIXPP_PY_INSTALL_LAYOUT=package`` twin of the source
+``_fixpp_data/__init__.py`` that the wheel ships. The difference is what sits
+beside it: the wheel bundles the four FIX dictionary XMLs inside this package,
+while the C++ ``-release`` packages already install ``dictionaries/`` once under
+``@FIXPP_PY_DICT_INSTALL_DIR@`` — so duplicating 1.9 MB of identical XML into the
+payload would ship the same four files twice, in two places, with no stated
+precedence.
+
+``DICTIONARY_DIR`` is therefore the pointer the ``fixpp_dict_data`` locator falls
+back to when ``importlib.resources`` finds no XML inside this package.
+
+⚠️ IT IS COMPUTED RELATIVE TO THIS FILE, NEVER BAKED ABSOLUTE. The relative hop
+is fixed by the two install destinations and is substituted at configure time;
+resolving it against ``__file__`` at import time is what keeps the package
+RELOCATABLE — a CPack tarball unpacked anywhere, or a ``--prefix``/``DESTDIR``
+staging root, still resolves. An absolute path baked here would point at the
+build host and would violate LOC-5 the same way a repo-relative path does.
+"""
+
+import os
+
+#: Absolute path to the C++ package's shared dictionary directory, derived at
+#: import time from this file's own location. The literal below is the
+#: configure-time relative hop from ``@FIXPP_PY_INSTALL_DIR@/_fixpp_data`` to
+#: ``@FIXPP_PY_DICT_INSTALL_DIR@``.
+DICTIONARY_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "@FIXPP_PY_DICT_RELPATH@")
+)

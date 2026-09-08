@@ -47,7 +47,7 @@ on:
     branches: ["**"]
   workflow_dispatch:
   # 056 REL-1: on a published GitHub release, the python-wheel-release job below
-  # attaches the single cp310-abi3 wheel as a release asset (no PyPI — REL-2).
+  # attaches the single cp312-abi3 wheel as a release asset (no PyPI — REL-2).
   # The wheel build + full install-test matrix run first on the release commit so
   # a broken artifact cannot be attached; the C++ build/sanitizer/coverage/bench
   # lanes are SKIPPED on release (they already gated the merge commit this release
@@ -445,9 +445,14 @@ jobs:
           sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
           clang++ --version
           # swig + python3-dev (#254): every leg now builds the Python bindings,
-          # so `find_package(SWIG 4.2...<4.5 REQUIRED)` (bindings/python/CMakeLists.txt,
-          # #296 temporary cap) must resolve here — the distro's unbounded `swig`
-          # package must currently land inside that range or configure fails.
+          # so `find_package(SWIG 4.2 REQUIRED)` (bindings/python/CMakeLists.txt,
+          # #296 cap now LIFTED) must resolve here — only the >=4.2 floor
+          # applies, so the distro's unbounded `swig` package satisfies it.
+          # ⚠️ Note this is apt's swig (4.2.0 on ubuntu-24.04), NOT the wheel's:
+          # the wheel build takes swig from PyPI via pyproject's build-system
+          # requires. Lifting the cap therefore moves the WHEEL lane's SWIG and
+          # leaves these six legs where they were — which is the point, since
+          # #296 was only ever observed on the wheel lane.
           # Both packages are carried over VERBATIM from the deleted
           # `python-bindings` job's apt line — that is the configuration CI has
           # proven green, and python3-dev additionally decides which
@@ -684,17 +689,24 @@ jobs:
         # a local WSL mount; on a runner it has to be inside the workspace for
         # upload-artifact to reach it. Harmless on the non-packaging lanes.
         #
-        # ⚠️ FIXPP_INSTALL_PYTHON=OFF is NOT optional and NOT symmetry with the
-        # line above it (#254). FIXPP_BUILD_PYTHON=ON fires four install() rules
-        # (bindings/python/CMakeLists.txt). Two of these legs
-        # (linux-{clang,gcc}-release) build `fixpp-package`, and the consumer
-        # install-witness stage-installs on ALL SIX — so without this flag the
-        # Python payload enters packages-linux-{clang,gcc}-release and falsifies
-        # L-056-4 ("the C++ consumer deliverable contains no Python"), shipping
-        # by accident exactly what was descoped from #254. Whether the packages
-        # SHOULD carry Python is #257's call. The option defaults ON so feature
-        # 056's LAY-1 in-tree `cmake --install` keeps working everywhere else;
-        # only these six legs turn it off.
+        # ⚠️ THE INSTALL POLARITY IS NOW PER-LEG, AND DERIVED — #257 answered
+        # the question #254 deferred. `linux-{clang,gcc}-release` build
+        # `fixpp-package`, so those two now ship the Python payload
+        # DELIBERATELY, at a pinned prefix-relative destination
+        # (FIXPP_PY_INSTALL_LAYOUT=package). The other four still pass OFF: the
+        # consumer install-witness stage-installs on ALL SIX, and a payload in
+        # an artifact nobody decided to put it in is the #254 accident.
+        #
+        # ⚠️ The polarity comes from ci/derive-python-sanitizer.sh, NOT from a
+        # `contains(matrix.preset, 'release')` guard here. That guard would be
+        # the preset->packaging mapping spelled a second time under another
+        # name, and it would also match a future non-packaging preset with
+        # 'release' in it. The script fails closed on an unknown preset, and
+        # ci/test-tier1-python-policy.sh drives it over this job's exact preset
+        # set — so a new leg cannot silently default into shipping a payload.
+        #
+        # The option still defaults ON so 056's LAY-1 in-tree `cmake --install`
+        # keeps working everywhere outside CI.
         #
         # No -B and no CMAKE_TOOLCHAIN_FILE override: the preset's binaryDir is
         # build/<preset> and its CMAKE_TOOLCHAIN_FILE already points at
@@ -705,7 +717,8 @@ jobs:
           cmake --preset ${{ matrix.preset }}
           -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts
           -DFIXPP_BUILD_PYTHON=ON
-          -DFIXPP_INSTALL_PYTHON=OFF
+          -DFIXPP_INSTALL_PYTHON=${{ steps.pysan.outputs.install_python }}
+          -DFIXPP_PY_INSTALL_LAYOUT=${{ steps.pysan.outputs.py_layout }}
           -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
 
       # ── #254 / L-056-4 — the OFF side, asserted at Configure time ────────────
@@ -721,7 +734,9 @@ jobs:
       # directives with the rules unguarded, 0 with FIXPP_INSTALL_PYTHON=OFF.
       # The existence check comes FIRST so a 0 can never come from the file
       # having silently stopped being generated.
-      - name: Assert the Python install rules are OFF (#254 / L-056-4)
+      - name: Assert the Python install rules match the leg's polarity (#257 / L-056-4)
+        env:
+          WANT: ${{ steps.pysan.outputs.install_python }}
         run: |
           set -euo pipefail
           f="build/${{ matrix.preset }}/bindings/python/cmake_install.cmake"
@@ -730,11 +745,27 @@ jobs:
             exit 1
           fi
           n=$(grep -c '^[[:space:]]*file(INSTALL' "$f" || true)
-          echo "python install directives in $f: $n (expected 0)"
-          if [ "$n" != "0" ]; then
-            echo "::error::FIXPP_INSTALL_PYTHON=OFF but $n install directive(s) remain."
-            echo "::error::These would enter fixpp-package and the packages-linux-* artifacts, falsifying L-056-4."
-            exit 1
+          echo "python install directives in $f: $n (FIXPP_INSTALL_PYTHON=$WANT)"
+          # ⚠️ TWO-SIDED, and that is the whole point. The OFF legs assert ZERO;
+          # the two packaging legs assert NON-ZERO. A one-sided check would pass
+          # on a release leg whose payload silently stopped being installed —
+          # i.e. it would certify the #257 decision as delivered while shipping
+          # nothing. The instrument is proven on both sides by construction:
+          # the same tree yields 0 with OFF and >0 with ON.
+          if [ "$WANT" = "OFF" ]; then
+            if [ "$n" != "0" ]; then
+              echo "::error::FIXPP_INSTALL_PYTHON=OFF but $n install directive(s) remain."
+              echo "::error::These would enter fixpp-package and the packages-linux-* artifacts on a leg"
+              echo "::error::that did NOT decide to ship them — the #254 accident."
+              exit 1
+            fi
+          else
+            if [ "$n" = "0" ]; then
+              echo "::error::FIXPP_INSTALL_PYTHON=ON but ZERO install directives were generated."
+              echo "::error::packages-linux-*-release would ship no Python payload at all, while L-056-4"
+              echo "::error::and #257 say it does. Refusing to report this lane green on an empty install."
+              exit 1
+            fi
           fi
           df -h "$GITHUB_WORKSPACE" | tail -1
 
@@ -814,17 +845,23 @@ jobs:
       # The name is asserted, not just the count: `-L python` matches exactly
       # one test in either configuration, so a count alone cannot tell the OFF
       # witness from the ON one.
-      - name: Assert the Python install witness is the OFF one (#254 / L-056-4)
+      - name: Assert the Python install witness is the leg's own (#257 / L-056-4)
+        env:
+          WANT: fixpp::python::install-${{ steps.pysan.outputs.py_witness }}-witness
         run: |
           set -euo pipefail
           names=$(ctest --preset ${{ matrix.preset }} -L python -N \
                     | sed -n 's/^ *Test *#[0-9]*: //p')
-          echo "registered python install witnesses: ${names:-<none>}"
-          if [ "$names" != "fixpp::python::install-absent-witness" ]; then
-            echo "::error::expected exactly 'fixpp::python::install-absent-witness', got '${names:-<none>}'."
-            echo "::error::Either -DFIXPP_INSTALL_PYTHON=OFF is missing from Configure (in which case the"
-            echo "::error::ON-side witness registered and the Python payload WILL enter fixpp-package), or the"
-            echo "::error::witness stopped being registered at all. Refusing to report this lane green either way."
+          echo "registered python install witnesses: ${names:-<none>} (expected $WANT)"
+          # The NAME is asserted, not the count: `-L python` matches exactly one
+          # test in EVERY configuration, so a count cannot tell the three modes
+          # apart. Getting the wrong name here means the Configure flags and the
+          # witness disagree — and the witness is what actually opens the tree.
+          if [ "$names" != "$WANT" ]; then
+            echo "::error::expected exactly '$WANT', got '${names:-<none>}'."
+            echo "::error::Either the Configure flags did not reach CMake (so the wrong witness registered"
+            echo "::error::and the payload disposition is not the one this leg decided), or the witness"
+            echo "::error::stopped being registered at all. Refusing to report this lane green either way."
             exit 1
           fi
 
@@ -1530,19 +1567,25 @@ jobs:
   # ── Python wheel gate (PY-005 / 056) ─────────────────────────────────────
   # ADDITIVE (CI-8): this does NOT touch the python tests on the `linux` matrix
   # legs or the local-only GIL canary — it builds + install-tests the SHIPPED
-  # cp310-abi3 wheel. Build ONCE in manylinux_2_28 (python-wheel-build), then
-  # matrix-install-test the single artifact on 3.10–3.13 (python-wheel-test).
+  # cp312-abi3 wheel. Build ONCE in manylinux_2_28 (python-wheel-build), then
+  # matrix-install-test the single artifact on 3.12/3.13/3.14 (python-wheel-test).
   # All cibuildwheel config is in bindings/python/pyproject.toml [tool.cibuildwheel]
   # — the single source shared with the local bindings/python/build-wheel.sh.
   #
   # ⚠️ THIS WHEEL DOES NOT WRAP THE BINARIES BUILT BY THE `linux` MATRIX. It
-  # compiles the engine from source inside the manylinux_2_28 container, and the
-  # bindings built by the six `linux` legs are a TEST VEHICLE that ships nothing.
-  # (#254: that vehicle used to be a separate `python-bindings` job; folding it
-  # into the matrix changed WHERE the bindings are built, not whether they ship.
-  # `FIXPP_INSTALL_PYTHON=OFF` on those legs is what keeps the second half of
-  # this note true — see the Configure step.) The two differ in three dimensions
-  # at once:
+  # compiles the engine from source inside the manylinux_2_28 container. The
+  # bindings built by the four NON-packaging `linux` legs are a TEST VEHICLE
+  # that ships nothing (`FIXPP_INSTALL_PYTHON=OFF`).
+  #
+  # ⚠️ #257: `linux-{clang,gcc}-release` DO ship a Python payload now, into
+  # packages-linux-*-release. That payload is a DIFFERENT artifact from this
+  # wheel — same source, different compiler, different glibc, no manylinux tag —
+  # and mixing them is not supported. This job still owns the only artifact a
+  # `pip install` user ever sees.
+  # (#254: the vehicle used to be a separate `python-bindings` job; folding it
+  # into the matrix changed WHERE the bindings are built. #257 then decided
+  # WHETHER two of those legs ship them — see the Configure step.)
+  # This wheel and the test-suite legs differ in three dimensions at once:
   #
   #            shipped wheel                 | legs running the python tests
   #   compiler gcc-toolset-14                | clang 22
@@ -1551,10 +1594,11 @@ jobs:
   #
   # So the artifact users run is exercised only by python-wheel-test's install +
   # import + functional subset. Do not read a green sanitizer leg as coverage of
-  # the shipped wheel. `packages-linux-{clang,gcc}-release` is the C++ deliverable
-  # and carries no Python. See L-056-4 in spec/behaviors-and-limitations.md.
+  # the shipped wheel, and do not read the #257 package payload as coverage of
+  # it either — that payload is never install-tested across interpreters.
+  # See L-056-4 in spec/behaviors-and-limitations.md.
   python-wheel-build:
-    name: python-wheel (build cp310-abi3)
+    name: python-wheel (build cp312-abi3)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1730,7 +1774,7 @@ jobs:
           restore-keys: |
             conan-wheel-manylinux228-
 
-      - name: Build the single cp310-abi3 wheel (CI-2)
+      - name: Build the single cp312-abi3 wheel (CI-2)
         id: wheel_build
         env:
           # CI-3: route the in-container Conan home to the host-mounted, cached dir.
@@ -1870,21 +1914,21 @@ jobs:
             "${{ steps.wheel_ident.outputs.lane }}" \
             "${{ steps.wheel_ident.outputs.image_ref }}"
 
-      # T011 / SC-004 / LAY-3: exactly ONE wheel, tagged cp310-abi3 + manylinux,
+      # T011 / SC-004 / LAY-3: exactly ONE wheel, tagged cp312-abi3 + manylinux,
       # external-library list EMPTY (static everything).
       - name: Verify tag + self-containment (SC-004, LAY-3)
         run: |
           set -euo pipefail
           test "$(ls wheelhouse/fixpp-*.whl | wc -l)" -eq 1
-          test "$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl | wc -l)" -eq 1
+          test "$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl | wc -l)" -eq 1
           # RC#4 regression guard: repair must emit a SINGLE 2_28 tag, not a compressed
           # manylinux_2_XX_x86_64.manylinux_2_28_x86_64 tag.  If --only-plat ever stops
           # taking effect the exact-match count above goes RED immediately; this guard
           # makes the regression class explicit (recorded shape: manylinux_2_26_x86_64.manylinux_2_28_x86_64).
-          if ls wheelhouse/fixpp-*-cp310-abi3-manylinux_*_x86_64.manylinux_2_28_x86_64.whl >/dev/null 2>&1; then
+          if ls wheelhouse/fixpp-*-cp312-abi3-manylinux_*_x86_64.manylinux_2_28_x86_64.whl >/dev/null 2>&1; then
             echo "FAIL SC-004: compressed platform tag emitted; expected single manylinux_2_28_x86_64"; exit 1
           fi
-          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl)
+          WHL=$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl)
           echo "wheel: $WHL"
           auditwheel show "$WHL"
           # FR-002: the external-library list must be EMPTY (static everything).
@@ -1911,7 +1955,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: fixpp-wheel
-          path: wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl
+          path: wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl
           if-no-files-found: error
 
   # CI-4/CI-5: install-test the ONE built wheel on each targeted interpreter —
@@ -1925,7 +1969,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11", "3.12", "3.13"]
+        python: ["3.12", "3.13", "3.14"]
     concurrency:               # CI-7
       group: tier1-${{ github.event.pull_request.number || github.ref }}-python-wheel-test-${{ matrix.python }}
       cancel-in-progress: true
@@ -1945,7 +1989,7 @@ jobs:
       - name: Install the abi3 wheel + run the functional subset (CI-4)
         run: |
           set -euo pipefail
-          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl)
+          WHL=$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl)
           python -m venv /tmp/wt
           /tmp/wt/bin/pip install -q "$WHL" pytest
           # Out-of-repo, PYTHONPATH scrubbed (quickstart §4): the dedicated
@@ -1968,10 +2012,10 @@ jobs:
       - name: Broken-wheel negative gate (SC-006)
         if: ${{ strategy.job-index == 0 }}
         run: |
-          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl)
+          WHL=$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl)
           PYTHON=python3 bash bindings/python/tests/wheel/test_broken_wheel_gate.sh "$WHL"
 
-  # REL-1/3 (T020): on a published release, attach the single cp310-abi3 wheel as
+  # REL-1/3 (T020): on a published release, attach the single cp312-abi3 wheel as
   # a release ASSET (NOT a PyPI upload — REL-2/SC-005). Only after the build +
   # full install-test matrix are green on the release commit.
   python-wheel-release:
@@ -1987,12 +2031,12 @@ jobs:
           name: fixpp-wheel
           path: wheelhouse
 
-      - name: Attach the cp310-abi3 wheel to the GitHub release (REL-1/3)
+      - name: Attach the cp312-abi3 wheel to the GitHub release (REL-1/3)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl)
+          WHL=$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl)
           echo "attaching $WHL to release ${{ github.event.release.tag_name }}"
           gh release upload "${{ github.event.release.tag_name }}" "$WHL" --clobber \
             --repo "${{ github.repository }}"

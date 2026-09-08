@@ -20,14 +20,14 @@
 2. Lock the **per-call GIL discipline** per `[arch §4.12]`: every blocking C-ABI call **releases** the GIL at the SWIG boundary (`SWIG_PYTHON_THREAD_BEGIN_ALLOW`); every callback the engine fires into Python **acquires** the GIL via PyGILState_Ensure → director call → PyGILState_Release. Callbacks dispatch on the engine's session strand per `[2d §7.6]`; the SWIG director adapter is the bridge. PY-002.
 3. Lock the **exception translation map** from `fixpp_error_t` ranges (per `[2i §4.3]` numeric blocks) to a `fixpp.FixppError` Python exception hierarchy with stable subclass enum values. PY-003. The mapping is bidirectional: a Python exception raised inside a Python `Application` callback is captured by the SWIG director, the traceback is printed to Python's `sys.stderr` via `PyErr_PrintEx(0)` (the engine logger is **not** callable from `bindings/python/` in v1.0 per `[2k §2]` non-goal #7), and the failure is translated back to a new C-ABI code `FIXPP_ERR_BINDING_PYTHON_CALLBACK_RAISED` (numeric `1200` per the `[2i §1.1]` `[1200, 1299]` reserved block — Appendix D §D.1 carries the byte-faithful 2i drop-in). The engine observes only the `1200` return code; no Python traceback string crosses `extern "C"`.
 4. Lock the **lifetime / ownership** rule per `[arch §4.12]` / `[2i §4.2]` / `[2i §6.3]`: every Python object that wraps a non-owning C-ABI handle holds a strong reference (`Py_INCREF`) to the owning Python object that holds the producing handle, so a Python `Session` cannot be GC'd while a `Message` derived from its inbound dispatch is still alive. PY-004.
-5. Lock the **wheel-build pipeline**: the v1.0 mandatory wheel per `[const §IV.3]` is `fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl` per `[arch §7.1]`. The wheel is built via `cibuildwheel` on Tier 1 CI; `auditwheel repair` post-processes for manylinux compliance; the engine binary is bundled into the wheel as a flat top-level `_fixpp.so` that **statically** links the engine + OpenSSL (self-contained — `auditwheel show` external list empty, no vendored shared libs). PY-005.
+5. Lock the **wheel-build pipeline**: the v1.0 mandatory wheel per `[const §IV.3]` is `fixpp-<ver>-cp312-abi3-manylinux_2_28_x86_64.whl` per `[arch §7.1]`. The wheel is built via `cibuildwheel` on Tier 1 CI; `auditwheel repair` post-processes for manylinux compliance; the engine binary is bundled into the wheel as a flat top-level `_fixpp.so` that **statically** links the engine + OpenSSL (self-contained — `auditwheel show` external list empty, no vendored shared libs). PY-005.
 6. Lock the **inbound message lifetime contract**: the Python `Message` object delivered to `fromApp` aliases the engine's per-message arena (the `fixpp_msg_t*` is a non-owning observer of a `wire::MessageView` per `[2i §4.2.1]`). Capturing the `Message` past `fromApp` return is undefined behaviour at the C ABI per `[2b §6.4]`; the Python idiom for safe handoff is `msg.clone()` which calls `fixpp_msg_clone` per `[2i §4.7]` / `[2i §6.3]` and returns a Python-owner-controlled copy.
 7. Lock the **§6.4 async callback handoff** decision (the `[SYN §3.5 #18]` open question): v1.0 ships **synchronous reacquire-and-call** on the engine strand thread. Asyncio adapters and producer-consumer queue handoffs are explicitly **future work** (see §10).
 8. Pin the **AGPL boundary** structurally per `[arch §8]` / `[const §V.1]`: the SWIG `.i` files include only `<fix/c_api.h>`-tree headers; the CMake target `fixpp-python` per `[arch §7.4]` depends on `fixpp::capi` (the C-ABI consumer target) and the SWIG-generated wrapper, never on `fixpp` (the C++ umbrella) and never on any `<fixpp/...>` header.
 
 ### §1.1 Magnitude domain — what ships in the v1.0 wheel
 
-**Python version range.** v1.0 ships a **single abi3 (stable-ABI) wheel** covering CPython 3.10–3.13+ (the `cp310-abi3` tag: `cp310` = the `Py_LIMITED_API` floor). Per-version `cp3XX-cp3XX` wheels are retired to a documented fallback used only if the runtime cross-version import proves flaky (FR-010). PyPy is **out** of v1.0 scope — see §2 non-goal #2.
+**Python version range.** v1.0 shipped a **single abi3 (stable-ABI) wheel** covering CPython 3.10–3.13+ (the `cp310-abi3` tag: `cp310` = the `Py_LIMITED_API` floor). ⚠️ **SUPERSEDED after v1.0: the floor is now `cp312`** (`cp312-abi3`, `requires-python >= 3.12`), raised together with the retirement of the 3.10/3.11 install-test legs and the addition of a 3.14 leg — an abi3 floor below the oldest tested interpreter is a claim nothing exercises. The single-wheel DECISION below is unchanged; only the floor moved. See B-056-1. Per-version `cp3XX-cp3XX` wheels are retired to a documented fallback used only if the runtime cross-version import proves flaky (FR-010). PyPy is **out** of v1.0 scope — see §2 non-goal #2.
 
 **Platform matrix.**
 
@@ -146,9 +146,9 @@ Source: `library/.specify/architecture.md:351–362`.
 ### §3.2 From `[arch §7.1]` — Build outputs
 
 > Python extension: `_fixpp.so` (SWIG-generated) / `_fixpp.pyd` (Windows).
-> Python wheel: `fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl` (mandatory) / Windows best-effort.
+> Python wheel: `fixpp-<ver>-cp312-abi3-manylinux_2_28_x86_64.whl` (mandatory) / Windows best-effort.
 
-Source: `library/.specify/architecture.md:459–460`. The `cp310-abi3` stable-ABI tag locks the v1.0 wheel (one wheel covers 3.10–3.13+).
+Source: `library/.specify/architecture.md` § 7.1 "Build outputs" (cited by SECTION, not line: the previous `:459–460` was already stale). The `cp312-abi3` stable-ABI tag locks the wheel (one wheel covers 3.12+); it read `cp310-abi3` / 3.10–3.13+ through v1.0.
 
 ### §3.3 From `[arch §7.4]` — CMake target
 
@@ -953,7 +953,7 @@ class LogConfig:
 
 **Validation.** Configuration is validated at construction (Python dataclass `__post_init__`) AND at `fixpp_engine_create` / `fixpp_session_open` time (engine-side). Python-side validation catches type errors and obvious shape errors (a `pinset_paths` empty list when `security_profile == MTLS_PINNED` raises `ValueError`); engine-side validation per `[2j §3.10]` / `[2i §6.5]` row 8 catches deeper config errors (TLS file readability, dictionary parse failure) and surfaces them as `FixppError` subclasses.
 
-**TOML loader.** `SessionConfig.from_toml(path)` uses Python 3.10's stdlib `tomllib` (3.10 is the wheel's mandatory ABI tag, so no extra dep). The TOML schema is documented in the user-facing docs; lives outside this design doc.
+**TOML loader.** `SessionConfig.from_toml(path)` uses the stdlib `tomllib` (added in 3.11; the wheel's ABI floor is 3.12, so it is always present and needs no extra dep). The TOML schema is documented in the user-facing docs; lives outside this design doc.
 
 **QuickFIX CFG loader.** `SessionConfig.from_quickfix_cfg(path)` parses the QuickFIX `[DEFAULT]` / `[SESSION]` CFG format per `[const §XV.16]` mandate. Implemented as a Python parser over the file (no SWIG / C-ABI wrapping needed; the format is line-oriented INI-like).
 

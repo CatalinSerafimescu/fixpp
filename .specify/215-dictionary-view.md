@@ -211,7 +211,7 @@ domains and group boundaries all follow B.
 
 That is **silent protocol misvalidation** — valid traffic rejected, invalid traffic accepted — not
 merely reduced diagnosability. It is recorded as `L-215-1`
-(`spec/behaviors-and-limitations.md:2001`), documented and unenforced.
+(`spec/behaviors-and-limitations.md`, cited by ID — the row moves), documented and unenforced.
 
 **No cheap fingerprint exists on the current types.** `table_view` carries no token back to its
 source; `Dictionary`'s public surface exposes no id, version or hash usable as provenance
@@ -1577,7 +1577,7 @@ on a legitimate move.
 - **Items 2–5 of PR #262.** Covered by the accepted waiver; the Gate B triage found four of five
   mechanically derived from already-approved contracts (T052, FR-006a) with no new design decision.
 - **The `find_context_without_delim_record` clamp-direction defect** recorded under `B-215-1`
-  (`spec/behaviors-and-limitations.md:1997`): pre-existing 083 T041 code, untouched by #215,
+  (`spec/behaviors-and-limitations.md`, cited by ID): pre-existing 083 T041 code, untouched by #215,
   blocks any depth-≥-17 fixture. Unrelated to this field's shape; still awaiting separate triage.
 - **`table_view`'s public mutation surface** (Option B's target). Left open. If it is ever
   privatized, that is a module-scale change touching 27 test TUs and needs its own gate; Option C
@@ -1662,7 +1662,7 @@ been burned by.
 **Inherited design contracts** (not FIX-normative, listed so a reader can tell them apart): 083
 T049's `as_table_view_call_count()` seam (`src/dictionary/dictionary.cpp:420-428`, bumped at `:449`),
 which seam 3 measures against; 083 T052 / `FR-006a`, the group-context commit rule recorded under
-`B-215-1` (`spec/behaviors-and-limitations.md:1985`) and out of scope here; and **SC-007**, the
+`B-215-1` (`spec/behaviors-and-limitations.md`, cited by ID) and out of scope here; and **SC-007**, the
 frozen *"no virtual edge"* design point that keeps `dictionary_driven_validator`'s `table_view`
 by value (`include/fixpp/wire/validator.hpp:112`) and is the reason `L-215-2` stays.
 

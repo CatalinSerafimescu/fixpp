@@ -1,7 +1,7 @@
 # bindings/python/pyproject.toml — PY-005 wheel packaging (T002).
 # PEP 517 build backend (scikit-build-core) over the existing CMake
 # FIXPP_BUILD_PYTHON target. Produces ONE stable-ABI (abi3) wheel
-# fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl covering CPython 3.10–3.13+.
+# fixpp-<ver>-cp312-abi3-manylinux_2_28_x86_64.whl covering CPython 3.12+.
 # Built under cibuildwheel in manylinux_2_28 (see specs/056 quickstart.md / contracts).
 #
 # ⚠️ PROVENANCE — the wheel does NOT wrap the binaries from the CI clang/gcc
@@ -9,18 +9,21 @@
 # gcc-toolset-14 / Release / with_otel=False (cibw-before-all.sh), while the
 # Tier 1 legs that run the Python test suite use clang 22 / Debug+sanitizers /
 # with_otel=True. (#254: those legs are now the six `linux` matrix legs, not a
-# separate `python-bindings` job.) Those legs are a TEST VEHICLE and ship
-# nothing — held true by construction, via FIXPP_INSTALL_PYTHON=OFF; the
-# packages-linux-{clang,gcc}-release artifacts are the C++ deliverable and carry
-# no Python. A Python consumer needs ONLY this wheel — no fixpp C++ package, no
-# compiler, no Conan. See L-056-4 in spec/behaviors-and-limitations.md.
+# separate `python-bindings` job.) The four NON-packaging legs are a TEST
+# VEHICLE and ship nothing (FIXPP_INSTALL_PYTHON=OFF).
+#
+# ⚠️ #257 CHANGED THE OTHER HALF OF THIS NOTE. `packages-linux-{clang,gcc}-release`
+# now DO carry a Python payload, deliberately, at lib/fixpp/python. It is NOT
+# this wheel and is not interchangeable with it: different compiler, different
+# glibc, no manylinux tag, and the dictionaries reached through the C++ datadir
+# rather than bundled. A Python consumer still needs ONLY this wheel — no fixpp
+# C++ package, no compiler, no Conan. See L-056-4 in
+# spec/behaviors-and-limitations.md for the precedence rule.
 
 [build-system]
-# PKG-1: scikit-build-core backend. TARGET POLICY (to be restored once #296
-#   closes — see the #296 note below for the requirement actually IN FORCE
-#   today): swig>=4.2 with NO upper bound (builds with the latest SWIG, 4.4.1
-#   at the time this policy was written). Lower bound (>=4.2): a 4.0 runner
-#   silently regresses the limited-API/abi3 mode (research D-3).
+# PKG-1: scikit-build-core backend. POLICY, now IN FORCE again: swig>=4.2 with
+#   NO upper bound. Lower bound (>=4.2): a 4.0 runner silently regresses the
+#   limited-API/abi3 mode (research D-3).
 #   SWIG-version-agnostic argout: SWIG 4.3.0 gave SWIG_Python_AppendOutput an
 #   `is_void` arg and now keeps a Py_None primary result for a NON-void fn unless
 #   is_void=1 — which would make our "consume the fixpp_error_t return, surface
@@ -30,40 +33,48 @@
 #   `if (!result) result = obj` first branch is identical on every SWIG, so the
 #   bare out-param is returned on 4.2 AND 4.3+. Verified at the generated-code
 #   level on 4.4.1 and behaviourally on SWIG 4.2 (in-tree sanitizer matrix) +
-#   4.4.1 (the shipped wheel) via the tests/wheel/ subset (T012).
-#   Exact published at implement (2026-06-30): scikit-build-core 0.12.2, swig
-#   4.4.1 (latest); 4.2.0 local.
+#   4.4.1 (the shipped wheel) via the tests/wheel/ subset (T012). Absorbing a
+#   SWIG behaviour change in the typemaps, rather than pinning, is the design.
 #
-#   ⚠️ #296 TEMPORARY CAP layered on top of the policy above — it does not
-#   replace it. An intermittent 3.11 GC segfault was observed under SWIG 4.5.0
-#   whose cause is still not established. The open-ended, version-agnostic
-#   policy above (absorb a SWIG behaviour change in the typemaps, per the 4.3
-#   is_void note, rather than pin) remains this project's target state; the cap
-#   below is a bounded safety measure, not a reversal. It was previously
-#   rejected on the grounds that capping would hide two real latent bugs SWIG
-#   4.5.0 had exposed — both are now found and fixed on their own merits (the
-#   #295 fixes to bindings/python/tests/test_reentrancy.py and fixpp.i) and
-#   stay fixed regardless of which SWIG builds this. What remains open is #296
-#   itself. 4.4.1 is the known-good version, not an arbitrary one: it is what the last
-#   fully green wheel run resolved to (run 32509172828 on 3ce0b6da,
-#   2026-08-21), where cibuildwheel resolved to 4.2.0 and scikit-build-core to
-#   1.0.3 — the SAME versions cibuildwheel and scikit-build-core resolve to
-#   today. Neither is pinned (cibuildwheel is installed with no version
-#   specifier in tier1.yml; scikit-build-core's own requirement here is
-#   `>=0.11`, see below), so that repeat resolution is an OBSERVATION about
-#   what PyPI currently serves, not a guarantee — a future cibuildwheel or
-#   scikit-build-core release could resolve differently on the next run.
-#   EXIT CONDITION: drop the `<4.5` upper bound once #296 is root-caused — this
-#   cap is not the permanent policy.
-requires = ["scikit-build-core>=0.11", "swig>=4.2,<4.5"]
+#   ⚠️ THE #296 `<4.5` CAP IS LIFTED — and NOT because #296 was root-caused.
+#   It was not; #296 stays OPEN. It is lifted because the cap had made the
+#   question unfalsifiable. The crash was observed on SWIG 4.5.0 × CPython 3.11
+#   (roughly 1-in-2 on that pairing); with `<4.5` in force every CI run resolved
+#   4.4.1, so no run could produce evidence either way and every green wheel
+#   lane was green for an unrelated reason. Dropping the 3.10/3.11 legs removes
+#   the other axis of that same pair, so lifting the cap is what keeps ANY of
+#   this bearing on #296.
+#
+#   ⚠️ A RED WHEEL LANE HERE IS THE FINDING, NOT NOISE. The #296 signature is a
+#   SEGFAULT during garbage collection that emits NO `FAILED` line at all — the
+#   interpreter dies before pytest reports — so grepping that leg for test names
+#   returns empty and reads as healthy. Check the raw log for `Fatal Python
+#   error: Segmentation fault` and report to #296 rather than re-capping.
+#
+#   The two latent bugs SWIG 4.5.0 exposed were fixed on their own merits (#295:
+#   bindings/python/tests/test_reentrancy.py and fixpp.i) and stay fixed
+#   whichever SWIG builds this — so lifting the cap does not re-open them.
+#
+#   ⚠️ NOTHING HERE IS PINNED, so what actually gets built is an OBSERVATION per
+#   run, not a guarantee: cibuildwheel is installed with no version specifier in
+#   tier1.yml, and scikit-build-core's requirement below is `>=0.11`. The last
+#   fully green capped run (32509172828 on 3ce0b6da, 2026-08-21) resolved swig
+#   4.2.0 / scikit-build-core 1.0.3. With the cap gone, PyPI's current swig is
+#   what builds — read the build log to learn which, do not assume.
+requires = ["scikit-build-core>=0.11", "swig>=4.2"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "fixpp"
 description = "Python binding for the fixpp C++23 FIX protocol library (over the frozen C ABI)"
-# PKG-3: abi3 cp310 floor; the single stable-ABI wheel covers 3.10–3.13 and
-# future 3.14+ (no upper cap — abi3 forward-compatibility is the point).
-requires-python = ">=3.10"
+# PKG-3: abi3 cp312 floor; the single stable-ABI wheel covers 3.12/3.13/3.14 and
+# future versions (no upper cap — abi3 forward-compatibility is the point).
+#
+# ⚠️ MUST NOT sit below `wheel.py-api` / `Py_LIMITED_API`. This key is the only
+# thing that stops pip from installing the wheel on an interpreter the extension
+# was never compiled for: an abi3 tag is forward-compatible, never backward, so a
+# cp312-abi3 wheel offered to 3.10 is an import crash rather than a clean refusal.
+requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"
 dynamic = ["version"]
 # PKG-5: NO runtime dependencies — the extension is self-contained (FR-002).
@@ -77,18 +88,24 @@ cmake.version = ">=3.28"
 # ephemeral temp that is re-created — and on a failed build, NOT cleaned — every
 # invocation; building the whole statically-linked engine there ran to ~18G and
 # filled the disk). build-dir is relative to this pyproject; "build/{wheel_tag}"
-# → bindings/python/build/cp310-abi3-... which is already gitignored (build/),
+# → bindings/python/build/cp312-abi3-... which is already gitignored (build/),
 # and {wheel_tag} keeps the single abi3 wheel in ONE reusable tree.
 build-dir = "build/{wheel_tag}"
 # Force Release: a Debug engine tree is ~11-17G of object files vs ~2-3G Release.
 # The shipped wheel is Release regardless; this also stops a stray Debug default
 # from re-exploding the build dir.
 cmake.build-type = "Release"
-# PKG-6: the AUTHORITATIVE abi3 wheel-tag driver -> cp310-abi3. The
+# PKG-6: the AUTHORITATIVE abi3 wheel-tag driver -> cp312-abi3. The
 # -DPy_LIMITED_API compile flag + SABI wiring in CMakeLists.txt is compile-only
 # and does NOT set the tag (scikit-build-core does not auto-detect the limited ABI
 # nor consume the setuptools py_limited_api kwarg).
-wheel.py-api = "cp310"
+#
+# ⚠️ THIS AND `Py_LIMITED_API` IN bindings/python/CMakeLists.txt ARE ONE DECISION
+# SPELLED TWICE, and nothing in the build cross-checks them. This key decides the
+# tag pip matches on; that flag decides which C API the code may call. Tag above
+# the compile floor ships a wheel that calls APIs its claimed interpreters may not
+# have; tag below it refuses installs that would have worked. Move both together.
+wheel.py-api = "cp312"
 # Ship ONLY the flat top-level Python modules + the _fixpp_data package (LAY-1/2).
 # The root install(DIRECTORY include/) would otherwise stage the C-ABI headers
 # into the wheel; the engine static libs have no install() rule so they do not leak.
@@ -146,12 +163,12 @@ input = "../../CMakeLists.txt"
 regex = '(?s)project\(\s*fixpp\s+VERSION\s+(?P<value>[0-9]+\.[0-9]+\.[0-9]+)'
 
 # ── cibuildwheel (T010 local / T016 CI — single source of truth) ────────────
-# Produces the ONE cp310-abi3 wheel in the pinned manylinux_2_28_x86_64 image.
+# Produces the ONE cp312-abi3 wheel in the pinned manylinux_2_28_x86_64 image.
 # Consumed identically by bindings/python/build-wheel.sh (local) and tier1.yml.
 [tool.cibuildwheel]
 # {python_tag}-{platform_tag}; abi3/2_28 are NOT selector components (D-7,
-# quickstart §1): abi3 from wheel.py-api="cp310", 2_28 from the image below.
-build = "cp310-manylinux_x86_64"
+# quickstart §1): abi3 from wheel.py-api="cp312", 2_28 from the image below.
+build = "cp312-manylinux_x86_64"
 archs = ["x86_64"]
 # ── PINNED BY DIGEST (#259) ──────────────────────────────────────────────────
 #
@@ -191,7 +208,7 @@ before-all = "bash {project}/bindings/python/cibw-before-all.sh {project}"
 # Without --only-plat, auditwheel prepends the detected-floor policy (e.g. 2_26)
 # producing a compressed tag "manylinux_2_26_x86_64.manylinux_2_28_x86_64" that
 # does NOT match the spec-mandated exact filename (FR-001).  --only-plat (≥6.7.0)
-# suppresses the compressed second tag → exactly fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl.
+# suppresses the compressed second tag → exactly fixpp-<ver>-cp312-abi3-manylinux_2_28_x86_64.whl.
 # Trade-off: the wheel won't install on glibc 2.26/2.27 hosts; consistent with the
 # manylinux_2_28 baseline mandated by FR-002/SC-004.
 repair-wheel-command = "auditwheel repair --plat manylinux_2_28_x86_64 --only-plat -w {dest_dir} {wheel}"

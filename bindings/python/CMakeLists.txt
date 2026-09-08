@@ -6,20 +6,31 @@
 # T005 / PKG-1 / D-3 — SWIG 4.2 minimum: a 4.0 runner silently regresses the
 # limited-API (abi3) heap-type mode.
 #
-# ⚠️ #296 TEMPORARY UPPER BOUND — mirrors the `swig>=4.2,<4.5` cap in
-# bindings/python/pyproject.toml (see that file for the root cause: an
-# intermittent 3.11 GC segfault observed under SWIG 4.5.0, still not
-# root-caused). Without this, a direct/in-tree CMake build is unconstrained
-# and can pick up a system SWIG 4.5 even though the wheel build excludes it.
-# Both bounds are TEMPORARY and must be lifted TOGETHER once #296 is
-# root-caused; do not drop one without the other.
-find_package(SWIG 4.2...<4.5 REQUIRED)
+# ⚠️ THE #296 `<4.5` UPPER BOUND IS LIFTED HERE, together with its twin in
+# bindings/python/pyproject.toml — the two were documented as liftable only as a
+# pair, and that is how they moved.
+#
+# It is NOT lifted because #296 was root-caused. It was not. It is lifted because
+# capping had made #296 UNFALSIFIABLE: the crash was seen on SWIG 4.5.0 × CPython
+# 3.11, and with the cap in force CI built 4.4.1 — so no run could produce
+# evidence either way, and every green wheel lane was green for a reason
+# unrelated to the question. Retiring the 3.10/3.11 legs alone would not have
+# fixed that; it removes the OTHER axis of the same reproducing pair.
+#
+# ⚠️ SO A RED WHEEL LANE HERE IS A RESULT, NOT A FLAKE. Read it before re-capping:
+# the #296 signature is a SEGFAULT during garbage collection with no `FAILED`
+# line at all (the interpreter dies before pytest reports), which is why grepping
+# for test names on that leg returns empty and looks fine.
+#
+# 4.2 minimum stays: a 4.0 runner silently regresses the limited-API (abi3)
+# heap-type mode (T005 / PKG-1 / D-3).
+find_package(SWIG 4.2 REQUIRED)
 include(UseSWIG)
 
 # T005 — request the stable-ABI (SABI) development component when available so the
 # abi3 wheel links against the limited ABI (Python3::SABIModule). Optional so a
 # plain in-tree build on an older CMake/Python still configures with Development.Module.
-# scikit-build-core (wheel.py-api="cp310") drives this via SKBUILD_SABI_COMPONENT.
+# scikit-build-core (wheel.py-api="cp312") drives this via SKBUILD_SABI_COMPONENT.
 find_package(Python3 REQUIRED COMPONENTS Development.Module
              OPTIONAL_COMPONENTS Development.SABIModule)
 
@@ -56,11 +67,29 @@ target_link_libraries(fixpp_py PRIVATE
 )
 
 # T005 / PKG-6 / D-3 — compile the SWIG wrapper against the limited C API (abi3),
-# cp310 floor. COMPILE-ONLY: the wheel ABI tag is set by scikit-build-core's
-# wheel.py-api="cp310" (pyproject.toml), NOT by this flag (scikit-build-core does
-# not auto-detect the limited ABI). The reworked fixpp_py_is_main_interpreter
-# (T003) compiles clean at this floor — proven by the T004 abi3 feasibility gate.
-target_compile_definitions(fixpp_py PRIVATE Py_LIMITED_API=0x030A0000)
+# cp312 floor. COMPILE-ONLY: the wheel ABI tag is set by scikit-build-core's
+# wheel.py-api="cp312" (pyproject.toml), NOT by this flag (scikit-build-core does
+# not auto-detect the limited ABI). The two must move TOGETHER: this flag decides
+# which C API the wrapper may call, the pyproject key decides what the wheel
+# CLAIMS to run on, and a wheel tagged below its compile floor is an import crash
+# on the versions it claims.
+#
+# ⚠️ The floor was 0x030A0000 (cp310) through v1.0. It moved with the retirement
+# of the 3.10 and 3.11 install-test legs — an abi3 floor BELOW the oldest tested
+# interpreter is a claim nothing exercises.
+#
+# TO RE-VERIFY after any change to fixpp.i or a SWIG bump — the T004 feasibility
+# check, reproduced verbatim (needs python3-dev headers for the floor version):
+#
+#   swig -c++ -python -Iinclude -o /tmp/w.cxx bindings/python/fixpp.i
+#   g++ -fsyntax-only -std=c++23 -DPy_LIMITED_API=0x030C0000 \
+#       -I/usr/include/python3.12 -Iinclude /tmp/w.cxx
+#
+# ⚠️ A CLEAN result there is worth nothing until the check is shown able to fail —
+# this repo's most recurring defect is an instrument that reports clean because it
+# could not report anything else. Force it: a TU calling a NON-limited-API symbol
+# (`PyUnicode_DATA` is one) must ERROR under the -D and compile clean without it.
+target_compile_definitions(fixpp_py PRIVATE Py_LIMITED_API=0x030C0000)
 
 # ── T003 / FR-010 / research D-6 — self-contained static link ───────────────
 # Link the STATIC fixpp_capi archive (already PIC: src/capi builds it from an
@@ -195,10 +224,52 @@ set_target_properties(fixpp_py PROPERTIES
 # uses the real Python3_SITEARCH when known (the Development.Module component does
 # not always populate it without Interpreter); fall back to "." otherwise (in-tree
 # runs use PYTHONPATH=lib via the POST_BUILD staging above, not this install).
-if(DEFINED SKBUILD OR NOT Python3_SITEARCH)
-  set(FIXPP_PY_INSTALL_DIR ".")
+# ── #257 — the THIRD layout: a prefix-relative destination for the packages ──
+#
+# The two branches below answer "where does an interpreter expect to import
+# from". That is the right question for an in-tree `cmake --install` and the
+# wrong one for a RELOCATABLE C++ package, which is what #257 decided to ship:
+#
+#   sitearch (default) - 056 LAY-1 / D-4 / T006. A plain in-tree install lands on
+#                        the real interpreter (or "." when SITEARCH is unknown,
+#                        and under SKBUILD where the wheel platlib root IS ".").
+#                        UNCHANGED — this is a delivered requirement, not an
+#                        incidental behaviour, so #257 must not repoint it.
+#   package            - the `-release` packaging legs. Prefix-relative, so
+#                        --prefix / DESTDIR / CPack staging all work.
+#
+# ⚠️ WHY "." WAS NOT SIMPLY REUSED for the packages, which is what CI resolves
+# today. Measured on tier1 run 34216189194, linux-gcc-release: `Python3_SITEARCH
+# is EMPTY on the matrix legs`, so the existing code already yields ".". That
+# would scatter _fixpp.so, three .py modules and _fixpp_data/ across the package
+# PREFIX ROOT, beside include/ and lib/ — and it would be INHERITED rather than
+# chosen, which is precisely what #257 says not to do ("Any shipping decision
+# must pin the destination, not inherit it"). It is also fragile in the
+# direction that fails silently: a leg that ever DID resolve SITEARCH would
+# install to an absolute path, which `cmake --install --prefix X` IGNORES.
+set(FIXPP_PY_INSTALL_LAYOUT "sitearch" CACHE STRING
+    "Where FIXPP_INSTALL_PYTHON puts the payload: sitearch|package")
+set_property(CACHE FIXPP_PY_INSTALL_LAYOUT PROPERTY STRINGS sitearch package)
+
+# The C++ install already puts the dictionaries here (CMakeLists.txt, T033 /
+# FR-018a). Named once, consumed by both the relative-path computation and the
+# generated marker's docstring.
+set(FIXPP_PY_DICT_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/fixpp/dictionaries")
+
+if(FIXPP_PY_INSTALL_LAYOUT STREQUAL "package")
+  set(FIXPP_PY_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/fixpp/python")
+elseif(FIXPP_PY_INSTALL_LAYOUT STREQUAL "sitearch")
+  if(DEFINED SKBUILD OR NOT Python3_SITEARCH)
+    set(FIXPP_PY_INSTALL_DIR ".")
+  else()
+    set(FIXPP_PY_INSTALL_DIR "${Python3_SITEARCH}")
+  endif()
 else()
-  set(FIXPP_PY_INSTALL_DIR "${Python3_SITEARCH}")
+  # Fail closed. A typo must not silently fall through to a layout the caller
+  # did not ask for — that is how a payload lands somewhere nobody inspects.
+  message(FATAL_ERROR
+    "FIXPP_PY_INSTALL_LAYOUT must be 'sitearch' or 'package', got "
+    "'${FIXPP_PY_INSTALL_LAYOUT}'.")
 endif()
 
 # ── #254 — separate BUILDING the bindings from INSTALLING them ───────────────
@@ -224,6 +295,16 @@ endif()
 # install(). See the comment at the top of this block.
 option(FIXPP_INSTALL_PYTHON
        "Install the Python binding artifacts (module, pure-Python modules, _fixpp_data)" ON)
+
+# ⚠️ PROMOTED OUT OF DIRECTORY SCOPE (#257). tests/packaging/ is a SIBLING
+# directory, not a child, so a plain set() here is invisible to it — and the
+# packaging witness needs this exact path to anchor its "the payload must not
+# duplicate the bundled XMLs" search. INTERNAL rather than a user-facing cache
+# entry: it is derived from FIXPP_PY_INSTALL_LAYOUT above, and a user who
+# overrode it directly would silently desynchronise the install rules from the
+# witness that checks them.
+set(FIXPP_PY_INSTALL_DIR "${FIXPP_PY_INSTALL_DIR}" CACHE INTERNAL
+    "Resolved destination for the Python payload (derived; do not set directly)" FORCE)
 
 # Report the resolved destination on every configure. FIXPP_PY_INSTALL_DIR has
 # three reachable outcomes and they fail in different directions: "." pollutes
@@ -258,15 +339,48 @@ install(
 # _fixpp_data/__init__.py + the four XMLs staged from the submodule dictionaries/
 # (single source of truth; never hand-duplicated). The locator resolves them via
 # importlib.resources.files("_fixpp_data").
-install(
-  FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/_fixpp_data/__init__.py"
-    "${CMAKE_SOURCE_DIR}/dictionaries/FIX42.xml"
-    "${CMAKE_SOURCE_DIR}/dictionaries/FIX44.xml"
-    "${CMAKE_SOURCE_DIR}/dictionaries/FIX50SP2.xml"
-    "${CMAKE_SOURCE_DIR}/dictionaries/FIXT11.xml"
-  DESTINATION "${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
-)
+#
+# ── #257 — the package layout ships the marker WITHOUT the XMLs ──────────────
+# The C++ install already puts all of dictionaries/ under
+# ${FIXPP_PY_DICT_INSTALL_DIR}, so bundling the same four files here would ship
+# 1.9 MB twice in one archive, in two locations, with no stated precedence.
+# Instead a GENERATED __init__.py carries DICTIONARY_DIR (computed relative to
+# itself, so the package stays relocatable) and fixpp_dict_data's locator falls
+# back to it.
+#
+# ⚠️ THAT FALLBACK IS A BRANCH THE WHEEL NEVER EXECUTES, which is exactly the
+# shape that ships untested. It is witnessed by FIXPP_PY_WITNESS_MODE=package,
+# which resolves a real dictionary through the real locator against a staged
+# tree — not by asserting the file exists.
+if(FIXPP_PY_INSTALL_LAYOUT STREQUAL "package")
+  # The relative hop between the two install destinations. Both are made
+  # absolute with a leading "/" purely so file(RELATIVE_PATH) can subtract
+  # them; the RESULT is prefix-independent, which is the point.
+  file(RELATIVE_PATH FIXPP_PY_DICT_RELPATH
+       "/${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
+       "/${FIXPP_PY_DICT_INSTALL_DIR}")
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/_fixpp_data/package_init.py.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/package_layout/_fixpp_data/__init__.py"
+    @ONLY)
+  message(STATUS "fixpp: python payload -> '${FIXPP_PY_INSTALL_DIR}'; "
+                 "dictionaries NOT duplicated, reached via "
+                 "'${FIXPP_PY_DICT_RELPATH}'")
+  install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/package_layout/_fixpp_data/__init__.py"
+    DESTINATION "${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
+  )
+else()
+  install(
+    FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/_fixpp_data/__init__.py"
+      "${CMAKE_SOURCE_DIR}/dictionaries/FIX42.xml"
+      "${CMAKE_SOURCE_DIR}/dictionaries/FIX44.xml"
+      "${CMAKE_SOURCE_DIR}/dictionaries/FIX50SP2.xml"
+      "${CMAKE_SOURCE_DIR}/dictionaries/FIXT11.xml"
+    DESTINATION "${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
+  )
+endif()
 
 endif()  # FIXPP_INSTALL_PYTHON — see the option() block above (#254 / L-056-4)
 
@@ -298,10 +412,23 @@ endif()  # FIXPP_INSTALL_PYTHON — see the option() block above (#254 / L-056-4
 # question R2-P2-2 asks is specifically about the NON-SKBUILD in-tree path that
 # `python-wheel-test` cannot see.
 if(FIXPP_BUILD_TESTS AND UNIX AND NOT DEFINED SKBUILD)
-  if(FIXPP_INSTALL_PYTHON)
-    set(_fixpp_py_witness_mode "present")
-  else()
+  # #257 adds a THIRD mode. The three are jointly exhaustive and mutually
+  # exclusive over every non-SKBUILD build that has the bindings:
+  #
+  #   OFF                        -> absent   (four `linux` matrix legs)
+  #   ON  + layout=sitearch      -> present  (default; 056 LAY-1 in-tree)
+  #   ON  + layout=package       -> package  (the two `-release` packaging legs)
+  #
+  # `package` is NOT a relaxation of `present`. It asserts a DIFFERENT tree:
+  # the payload beside the module at a prefix-relative destination, the four
+  # XMLs deliberately ABSENT, and — the part no file-existence check can reach —
+  # the locator actually resolving a dictionary through the datadir fallback.
+  if(NOT FIXPP_INSTALL_PYTHON)
     set(_fixpp_py_witness_mode "absent")
+  elseif(FIXPP_PY_INSTALL_LAYOUT STREQUAL "package")
+    set(_fixpp_py_witness_mode "package")
+  else()
+    set(_fixpp_py_witness_mode "present")
   endif()
 
   add_test(

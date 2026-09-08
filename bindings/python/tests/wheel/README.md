@@ -1,7 +1,7 @@
 # `tests/wheel/` — functional install-verification subset (T012 / D-8 / E-6)
 
 The dedicated, **locator-using** test suite run against the *installed* abi3 wheel
-on each of CPython 3.10/3.11/3.12/3.13 (T013 / CI-4). It imports **only installed
+on each of CPython 3.12/3.13/3.14 (T013 / CI-4). It imports **only installed
 modules** and resolves every dictionary through `fixpp.dictionary_path(...)` via the
 shared `_wheeldict.resolve(...)` helper — never a repo-relative `dictionaries/`
 path — so it is valid with the repo absent (LOC-5).
@@ -67,13 +67,19 @@ its in-tree source is its dict helper (`_dict_path` /
 in-tree source uses `importorskip("_xxsubinterpreters")` on every Python
 version, so an absent module skips the whole test, and it tolerates a
 `RunFailedError` only when the message contains the CPython import-barrier text
-(`bindings/python/tests/test_subinterpreter.py`). The wheel twin instead makes
-`_xxsubinterpreters` **mandatory** below 3.12 (treating an absent module as a
-broken runner, not a skip) and, below 3.12, **rejects every**
-`RunFailedError`. On 3.12+ the two files behave identically: both
-`importorskip`, and both tolerate only the import-barrier message. This is a
-known discrepancy, not an intended design; do not treat the wheel twin's
-stricter 3.10/3.11 behaviour as the documented contract.
+(`bindings/python/tests/test_subinterpreter.py`). The wheel twin *used to* make
+`_xxsubinterpreters` **mandatory** below 3.12 and reject every `RunFailedError`
+there. ⚠️ **That band is gone**: the abi3 floor is cp312 and the install-test
+matrix is 3.12/3.13/3.14, so the wheel twin's `<3.12` arms were unreachable and
+were removed with the legs. The two files now differ only in the in-tree twin's
+own surviving `<3.12` handling, which the wheel's floor no longer reaches.
+
+⚠️ **What the removal COSTS, stated rather than absorbed:** 3.13 renamed the
+module to `_interpreters`, so `importorskip` skips on 3.13 and 3.14 — this
+witness now executes on the **3.12 leg alone**. A green 3.13/3.14 leg says
+nothing about subinterpreter rejection there. Porting it to `_interpreters`
+(whose run-failure exception type also changed) is a behaviour change to the
+witness, not a rename, and is deliberately not folded in here.
 
 > ⛔ **THIS ROW IS THE ONE THING THE PARITY GATE DOES NOT ENFORCE, AND THAT IS
 > STATED HERE SO THE EXEMPTION IS NOT MISTAKEN FOR A SANCTION.**
@@ -81,9 +87,12 @@ stricter 3.10/3.11 behaviour as the documented contract.
 > (they still carry enumeration, no-dangling and test-name parity). So the
 > behavioural divergence above survives a green gate. **`diverges` is not a
 > general escape hatch — this is its only current member, and a second one
-> should be argued for rather than added.** Reconciling the 3.10/3.11 behaviour
-> is real Python-version semantics work and was deliberately NOT folded into
-> the #298 parity pass; it remains open on its own merits. Adding a `diverges`
+> should be argued for rather than added.** Reconciling the `<3.12` behaviour was
+> real Python-version semantics work, deliberately NOT folded into the #298
+> parity pass. The cp312 floor removed the wheel side of it by retiring the band;
+> ⚠️ the row itself is **kept**, because the in-tree twin still carries its own
+> `<3.12` handling and the exemption is still doing work. Retiring the row is a
+> separate argument, and shrinking a divergence is not the same as closing it. Adding a `diverges`
 > row to dodge a gate failure would be the exact substitution this gate exists
 > to prevent: an unenforced convention replaced by a falsely enforced one.
 
