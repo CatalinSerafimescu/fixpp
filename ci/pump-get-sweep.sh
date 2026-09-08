@@ -271,8 +271,15 @@ def statements(lines):
 # member. It is to read the site when a dismissal matters.
 _CTXDECL = re.compile(r"asio::(?:io_context|thread_pool)\s*&?\s*(\w+)")
 _POOLDECL = re.compile(r"asio::thread_pool\s+(\w+)")
-_THREADTOK = re.compile(r"std::jthread|std::thread|std::async|asio::thread_pool")
-_THREADRUN = re.compile(r"(?:std::jthread|std::thread|std::async)[^;]{0,400}?(\w+)\s*\.run\(", re.S)
+# ⚠️ ONE LIST OF THREAD SPELLINGS, three consumers. `_THREADTOK` (the deliberately
+# broad escalation input for `anythread`) also counts `asio::thread_pool`, which starts
+# no thread of its own; `_THREADRUN` and the caller-side filter must NOT. Spelled once so
+# a new thread type cannot be taught to one of them and not the others -- the failure
+# `_EXHAUST`'s header below already legislates against for run-detectors.
+_THREAD_CTOR = r"std::jthread|std::thread|std::async"
+_THREAD_CTOR_RE = re.compile(_THREAD_CTOR)
+_THREADTOK = re.compile(_THREAD_CTOR + r"|asio::thread_pool")
+_THREADRUN = re.compile(rf"(?:{_THREAD_CTOR})[^;]{{0,400}}?(\w+)\s*\.run\(", re.S)
 # ⚠️ ANY arguments, not empty parens -- edge 2. `run_for(`/`run_until(`/`run_one(`
 # cannot match this: none of them contains the literal `.run(`.
 _UNBOUNDED = re.compile(r"([\w>.\-]+)\.run\(")
@@ -305,11 +312,16 @@ _UNBOUNDED = re.compile(r"([\w>.\-]+)\.run\(")
 # `SELFDRIVE_CASES` below, run on every invocation, each asserting the answer the axis
 # actually gives. The live one (`S-f`) is an RAII destructor whose member SHADOWS the
 # pool's name, and it errs toward MORE reading, never toward a dismissal.
-_RETIRE = re.compile(r"\b(\w+)\s*\.\s*(?:stop|join)\s*\(")
+# ⚠️ ONE PREDICATE, and the verb is CAPTURED so the per-verb query reuses it rather than
+# rebuilding a second regex. An earlier draft spelled `\b{base}\.{verb}\(` inline in
+# `_retires`, which made clause S1 (which reads `_RETIRE`) and clause S2 (which read the
+# inline one) disagree about which spellings retire a pool the moment either was widened --
+# silently, with `LIVE`, the DISMISSING value, among the possible splits.
+_RETIRE = re.compile(r"\b(\w+)\s*\.\s*(stop|join)\s*\(")
 
 
 def _retires(seg, base, verb):
-    return re.search(rf"\b{re.escape(base)}\s*\.\s*{verb}\s*\(", seg) is not None
+    return any(m.group(1) == base and m.group(2) == verb for m in _RETIRE.finditer(seg))
 
 
 def _exec_class(base, pools, threaded, anythread):
@@ -635,7 +647,13 @@ def classify(text):
                 since[name].append(stmt)
         # After the spawns above, so a `pool.stop()` in the SAME statement as a spawn
         # does not retroactively retire it for that spawn's own snapshot.
-        retired.update(rm.group(1) for rm in _RETIRE.finditer(evaluated))
+        # ⚠️ GATED ON `pools`, AND THE GATE IS EXACT RATHER THAN AN APPROXIMATION: a row
+        # reads `POOL` iff its base is in `pools`, and only a `POOL` row ever consults
+        # `retired`. With no pool declared in the file there is nothing this scan can
+        # change, and it would otherwise run a regex over every statement of every file
+        # to serve a minority of them.
+        if pools:
+            retired.update(rm.group(1) for rm in _RETIRE.finditer(evaluated))
         for gm in re.finditer(r'(?:^|[^\w.])(\w+)\.get\(\)', evaluated):
             # ⚠️ `alias_elem not in known` IS THE SHADOW GUARD, and without it the alias
             # is a FALSE CLEAN. A range-for element is usually a short name (`f`), and a
@@ -654,7 +672,16 @@ def classify(text):
                 # once every coroutine-side site is migrated.
                 guarded.append(scope_of(start))
             else:
-                bases = [_spawn_base(e) for e in (execs.get(name) or ["?"])]
+                # ⚠️ THE COMBINATION RULE, ONCE, because a row can carry N spawns and every
+                # axis below needs one: a value that DISMISSES must hold for EVERY base; a
+                # value that ESCALATES fires on ANY. Getting it backwards produces a silent
+                # dismissal, which is the defect class this axis exists to remove. That is
+                # why `dv` is `all(...)`, `STOPPED-BEFORE-GET` is `any(...)`, and
+                # `JOINED-BEFORE-GET` -- a dismissal, not a hazard -- is `all(...)`.
+                # A SET: multiplicity and order are never read, and a container pushed 30
+                # times on one context would otherwise carry 30 identical entries through
+                # every predicate below.
+                bases = {_spawn_base(e) for e in (execs.get(name) or ["?"])}
                 classes = {_exec_class(b, pools, threaded, anythread) for b in bases}
                 # ⚠️ ESCALATE ON DISAGREEMENT, never pick one. A container whose pushes
                 # land on executors of different classes has no single answer, and every
@@ -672,18 +699,18 @@ def classify(text):
                 # UNCHECKED argument are counted rather than hidden inside a green word.
                 # Live: tests/sync/test_cancellation_mid_wait.cpp's 11 rows read
                 # `EXHAUSTED` purely from `std::thread thread_a([&] { ioc_a.run(); });`.
-                caller_seg = " ".join(t for t in seg_stmts if not _THREADTOK.search(t))
+                caller_seg = " ".join(t for t in seg_stmts if not _THREAD_CTOR_RE.search(t))
+
+                def all_exhaust(text):
+                    return all(exhausts(text, b, ctxnames) for b in bases)
                 pc = ("RUN-UNBOUNDED" if unbounded(seg) else
                       "RUN-BOUNDED" if _BOUNDED.search(seg) else "HELPER")
                 # Must name `base`: a run on a DIFFERENT context dominates nothing
                 # (clause 1, arm 4). EVERY base, not any: a container is dominated only
                 # if the run covers all of them.
-                if all(exhausts(caller_seg, b, ctxnames) for b in bases):
-                    dv = "EXHAUSTED"
-                elif all(exhausts(seg, b, ctxnames) for b in bases):
-                    dv = "EXHAUSTED-OFF-THREAD"
-                else:
-                    dv = "NO-VISIBLE-EXHAUSTION"
+                dv = ("EXHAUSTED" if all_exhaust(caller_seg) else
+                      "EXHAUSTED-OFF-THREAD" if all_exhaust(seg) else
+                      "NO-VISIBLE-EXHAUSTION")
                 if ec != "POOL":
                     sd = "n/a"
                 elif any(b in retired_at.get(name, set()) for b in bases):
@@ -1524,7 +1551,7 @@ if disposition:
     print("\n  CORO means the get() is inside an `awaitable`-returning function or lambda,")
     print("  so it runs ON the pumping thread and NO outer driver bounds it -- the")
     print("  executor axis cannot express that, which is why this one exists.")
-    print("\n=== DRIVE, over the rows whose executor does NOT drive itself ===")
+    print("\n=== DRIVE, over every row except POOL ===")
     for (ec, dv), n in sorted(drive_tab.items(), key=lambda kv: (-kv[1], kv[0])):
         print(f"  {n:>4}  {ec:<15} {dv}")
     print("  POOL is omitted: the SELF-DRIVE axis below answers the same question there")
@@ -1568,16 +1595,20 @@ if disposition:
     print("  ⚠️ EVERY OTHER ROW REPORTS `n/a` AND IS NOT COVERED -- read them. A pool IS")
     print("  its own driver, so `pool.stop()` names it; a thread driving an io_context is")
     print("  a variable this file never captures, and `std::async` has no name at all.")
-    print("  ⚠️ EXTENDING THIS TO drive=EXHAUSTED-OFF-THREAD WAS TRIED AND MEASURED OUT,")
-    print("  which is recorded so it is not re-attempted blindly. The extension needs no")
-    print("  driver name -- S1 holds structurally there (a run seen only SINCE the spawn")
-    print("  was written by a thread constructed after it) and S2 becomes a stop() on the")
-    print("  spawn CONTEXT, whose name is known. It is correct, and it escalated 34 of 36")
-    print("  rows, because these tests all stop the context on a BAIL-OUT branch the get")
-    print("  never reaches. A check that escalates 94 % of its population orders no")
-    print("  reading and teaches the next reader to skip it. The missing capability is")
-    print("  branch exclusivity -- the same wall #289 batch 21 hit with its clause-2")
-    print("  probe -- and it is not a bigger regex.")
+    print("  ⚠️ EXTENDING THIS TO drive=EXHAUSTED-OFF-THREAD WAS TRIED AND MEASURED OUT.")
+    print("  It needs no driver name -- S1 holds structurally there (a run seen only SINCE")
+    print("  the spawn was written by a thread constructed after it) and S2 becomes a")
+    print("  stop() on the spawn CONTEXT, whose name is known. It is CORRECT, and it was")
+    print("  still reverted, because of a property of this CORPUS rather than of the check:")
+    print("  these tests retire the context on a BAIL-OUT branch the get never reaches, so")
+    print("  the check escalates nearly every row it covers. An instrument nobody can act")
+    print("  on teaches its readers to skip the fraction that mattered too. The missing")
+    print("  capability is branch exclusivity -- the same wall #289 batch 21 hit with its")
+    print("  clause-2 probe -- and it is not a bigger regex.")
+    print("  RE-DERIVE before re-attempting, do not trust a remembered ratio: gate `sd` on")
+    print("  `ec == \'POOL\' or dv == \'EXHAUSTED-OFF-THREAD\'` and compare the escalated")
+    print("  count against the off-thread total this run prints. It is worth shipping only")
+    print("  if that ratio has fallen, which takes the corpus changing, not the check.")
     print("\n  READ THE CLASSES, NOT THE TOTAL. A candidate is a defect only where the")
     print("  CALLING thread must pump. CALLER-ONLY is the only executor class that says")
     print("  so on its own; POOL and THREADED say the opposite; THREAD-IN-FILE says READ")
