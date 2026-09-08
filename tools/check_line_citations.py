@@ -1136,7 +1136,15 @@ FORM_CASES = [
 HUNK_CASES = [
     # (old_start, old_count, new_count, old_total) -> shifts?
     ((1515, 0, 41, 1515), False, "append at the original last line"),
-    ((12,   0, 47, 1620), True,  "47-line note inserted near the top (9e0b332d)"),
+    # The motivating commit, and the numbers are ITS numbers, so they are
+    # checkable rather than remembered:
+    #   git diff -U0 9e0b332d~1 9e0b332d -- .specify/2d-threading.md
+    #   git show 9e0b332d~1:.specify/2d-threading.md | wc -l
+    # gives `@@ -15,0 +16,45 @@` over 1620 lines. It previously read (12, 0, 47),
+    # which is a valid predicate input but not this commit -- a pasted result
+    # that had drifted from the thing it named, found while auditing exactly
+    # that class.
+    ((15,   0, 45, 1620), True,  "45-line note inserted near the top (9e0b332d)"),
     ((0,    0,  5,   20), True,  "insertion before line 1"),
     ((0,    0,  5,    0), False, "first content into an EMPTY file: nothing below"),
     ((500,  0,  3, 1515), True,  "insertion mid-document"),
@@ -1513,6 +1521,17 @@ def shift_self_test():
         #     index and prints "no new line-number citations ... OK". A clean
         #     verdict FROM ANOTHER MODE. Pinned through the CLI, because calling
         #     shift_audit() directly cannot see a dispatch bug.
+        # An option that belongs to one mode must be REFUSED in the others, not
+        # ignored there. `--census --allow-empty-range` used to look accepted and
+        # do nothing, which reads to the caller as "the empty range is handled".
+        for mode in ("--census", "--staged"):
+            r = subprocess.run([sys.executable, os.path.abspath(__file__),
+                                mode, "--allow-empty-range", "--root", d],
+                               capture_output=True, text=True)
+            checks.append((f"CLI: {mode} REFUSES --allow-empty-range",
+                           r.returncode != 0
+                           and "--shift-audit only" in (r.stdout + r.stderr)))
+
         for flag in ("--shift-audit", "--range"):
             r = subprocess.run([sys.executable, os.path.abspath(__file__),
                                 flag, "", "--root", d],
@@ -1982,6 +2001,11 @@ def main():
     ap.add_argument("--json", metavar="OUT", help="write the adjudication table")
     ap.add_argument("--root", default=None, help="repo root (default: git toplevel)")
     args = ap.parse_args()
+    # argparse cannot express "this option belongs to that one", and an option
+    # silently ignored is an instruction silently ignored: `--census
+    # --allow-empty-range` looked accepted and did nothing.
+    if args.allow_empty_range and args.shift_audit is None:
+        ap.error("--allow-empty-range applies to --shift-audit only")
 
     if args.self_test:
         return self_test()
