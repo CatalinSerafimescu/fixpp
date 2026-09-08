@@ -424,29 +424,38 @@ cell "T19 an inflated summed test time is called out on a VALID sample" 0 \
 # ── T23/T24: is it the LANE's workload, or some other workload? ──────────────
 #
 # Three passes agreeing with each other says nothing about agreeing with
-# PRODUCTION. `linux-clang-asan` is pinned at 369 in ci/expected-eligible-tests
-# .txt; a job that configures the tree differently measures a suite that does
-# not ship. The disposition is the probe document's own designed one for a basis
-# mismatch — DIAGNOSTIC ONLY, i.e. toward "not evidence", never toward a false
-# acceptance.
-cell "T23 a count that disagrees with the lane's pinned basis VOIDs the sample" 3 \
-  "NOT THE LANE'S PRODUCTION WORKLOAD" --preset linux-clang-asan --ran 300,300,300
-# ⚠️ 369 TRACKS `ci/expected-eligible-tests.txt` AND MOVES WITH IT. This is a
-# deliberate coupling, not a leak: the cell asserts that a MATCHING count is
-# confirmed, so it has to state a number the pin actually holds. When a pin is
-# re-recorded, this line is re-recorded in the same commit — that file's header
-# says a mismatch is the designed prompt, and this is the same prompt one level
-# up. It fired exactly that way when `linux-clang-asan` went 362 -> 368.
+# PRODUCTION. A job that configures the tree differently measures a suite that
+# does not ship. The disposition is the probe document's own designed one for a
+# basis mismatch — DIAGNOSTIC ONLY, i.e. toward "not evidence", never toward a
+# false acceptance.
 #
-# ⚠️ AND IT FIRED AGAIN at 368 -> 369 (2026-09-08), which is why this paragraph
-# is no longer only history. That re-record RED-ed `ci-script-pins` on `main`
-# and therefore `tier1-required`, because the pin was moved and this line was
-# not — the exact miss this comment was written to prevent. Reading a comment
-# is not a step anyone performs; the pin file now carries a POINTER BACK to
-# this cell, so the coupling is discoverable from the file you are editing
-# rather than only from the file that breaks.
+# ⚠️ THESE TWO CELLS DERIVE THE PIN; THEY DO NOT RESTATE IT. Both need a number
+# `ci/expected-eligible-tests.txt` actually holds — T24 one that MATCHES, T23
+# one that does not — so a hardcoded literal here is a copy of that file which
+# nothing keeps in step. It was a copy for three re-records (362 -> 368,
+# 368 -> 369, 369 -> 370) and went stale on all three, RED-ing `ci-script-pins`
+# and `tier1-required`; the third arrived one commit after the second's fix,
+# which was itself a comment asking the next editor to remember. Prose asking
+# for a step is not a step. Reading the pin is.
+ASAN_PIN="$(awk '$1=="linux-clang-asan" && $2 ~ /^[0-9]+$/ {print $2; exit}' \
+              "$HERE/expected-eligible-tests.txt")"
+# The guard is load-bearing, not defensive: an empty ASAN_PIN yields `--ran ,,`,
+# and a cell that voids for a malformed argument is indistinguishable from one
+# that voids for the reason it names. Refuse to run rather than report on it.
+if [[ ! "$ASAN_PIN" =~ ^[0-9]+$ ]]; then
+  echo "  FAIL  T23/T24 setup: no numeric linux-clang-asan pin in ci/expected-eligible-tests.txt"
+  exit 1
+fi
+# T23's count must merely DIFFER from the pin. Derived rather than a literal for
+# the same reason: a fixed number is correct only until the lane pins at it, and
+# that day the cell goes green for the wrong reason instead of red.
+ASAN_MISS=$((ASAN_PIN - 1))
+cell "T23 a count that disagrees with the lane's pinned basis VOIDs the sample" 3 \
+  "NOT THE LANE'S PRODUCTION WORKLOAD" --preset linux-clang-asan \
+  --ran "$ASAN_MISS,$ASAN_MISS,$ASAN_MISS"
 cell "T24 a count matching the pinned basis is confirmed on the page" 0 \
-  "matching \`ci/expected-eligible-tests.txt\`" --preset linux-clang-asan --ran 369,369,369
+  "matching \`ci/expected-eligible-tests.txt\`" --preset linux-clang-asan \
+  --ran "$ASAN_PIN,$ASAN_PIN,$ASAN_PIN"
 # A preset with no pin line must NOT void — inventing an expectation for an
 # unpinned lane would void every sample it ever took.
 #

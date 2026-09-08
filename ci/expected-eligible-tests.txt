@@ -22,8 +22,10 @@
 #
 # Editing a line here can break them, and it has:
 #
-#   T24 states a count that MATCHES a pin, so it names a number this file holds.
-#       Re-record a pin, re-record T24 in the same commit.
+#   T23/T24 need a count that a pin holds (T24 one that matches, T23 one that
+#       does not). ✅ NO LONGER YOUR PROBLEM: they now `awk` the
+#       `linux-clang-asan` line out of this file at run time, and refuse to run
+#       if it is missing or non-numeric. Re-recording a pin cannot stale them.
 #   T25 needs a preset with NO pin at all. It used `windows-msvc-asan` until
 #       that lane got its first line below — at which point the cell silently
 #       stopped exercising the no-pin path. It now uses `linux-gcc-debug`, the
@@ -33,12 +35,14 @@
 # Named here because this is the file someone edits, and the coupling is
 # invisible from it otherwise.
 #
-# ⚠️ THIS PARAGRAPH EXISTED AND WAS NOT READ, 2026-09-08. The `368 -> 369`
-# re-record moved the asan pin without moving T24, RED-ing `ci-script-pins` and
-# `tier1-required` on `main`. The pointer above was already here, correct, and
-# one screen up from the line being edited — it failed because the edit was made
-# programmatically and the header was never opened. **A pointer only works on a
-# reader.** So, the step that does NOT depend on anyone reading anything:
+# ⚠️ T24 WAS A HARDCODED COPY OF THE ASAN PIN, AND ASKING THE NEXT EDITOR TO
+# KEEP IT IN STEP DID NOT WORK — three times (362 -> 368, 368 -> 369, 369 ->
+# 370), the third landing one commit after the second's fix, which was itself a
+# paragraph asking the next editor to remember. The cells now read this file, so
+# that particular break cannot recur. **A prose pointer only works on a reader,
+# and a step that must be remembered is not a step.** Where a coupling can be
+# made mechanical, make it mechanical; where it cannot — T25 above, which needs
+# a preset this file does NOT list — say what it is and expect it to fire.
 #
 #   AFTER EDITING ANY LINE IN THIS FILE, RUN:
 #       bash ci/test-parallelism-verdict.sh      # 57 cells; T23/T24 read this file
