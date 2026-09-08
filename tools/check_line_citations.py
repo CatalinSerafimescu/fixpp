@@ -56,9 +56,25 @@ import tempfile
 # hold binary blobs that git emits raw into a diff when they contain no NUL in
 # the first 8000 bytes -- decoding that as strict UTF-8 throws, which would
 # abort a commit that merely added a corpus seed.
+# ⚠️ The doc trees are here because #336 WIDENED RE_A to `.md` and to a leading
+# dot -- expressly so `.specify/2d-threading.md:448` would match -- and then left
+# the ADDITION gate unable to reach a single one of them. `--staged`/`--range`
+# diff `-- SCAN_DIRS`, so the widening was inert for them: measured, one commit
+# adding the IDENTICAL citation to src/, specs/, brain/, spec/ and .specify/ was
+# reported for src/ ALONE. A regex widened for a directory the gate cannot see is
+# the same false zero as any other -- the pattern matched, and nothing fed it.
+#
+# --shift-audit was never affected: it builds its index from `all_tracked`, which
+# is the whole tree. So the two halves of #336 disagreed about what "the tree" is,
+# and only the growth half was short.
+#
+# Cost of the widening, measured over the eleven merges 37eb372f..bb22be26 before
+# taking it: 3 of them newly report, 2-3 citations each, all in `spec/*.md` or a
+# checklist. Re-derive rather than trust that -- `--range <merge>~1..<merge>`.
 SCAN_DIRS = [
     "tests/", "src/", "include/",
     "tools/", "bench/", "bindings/", "cmake/", ":(glob,top)*.md",
+    "specs/", "spec/", "brain/", ".specify/",
     ":(exclude)tests/fuzz/corpus/",
     ":(exclude)tests/abi/baseline/",
 ]
@@ -77,6 +93,10 @@ SCAN_DIRS = [
 # `.specify/2d-threading.md:448` matches NOTHING -- not at the dot (wrong class),
 # not one character in (the lookbehind rejects it) -- and `.specify/` is where
 # this repo's line-cited design docs live.
+#
+# ⚠️ A pattern only decides what it is FED. This widening sat inert in the
+# addition gate until SCAN_DIRS was widened to match it; see the note there
+# before assuming a regex change here reaches `--staged`/`--range` at all.
 #
 # `[0-9]`, not `\d`: `\d` also matches Unicode decimal digits, which --shift-audit's
 # ASCII `git grep` prefilter drops. A decider that out-matches its own prefilter
@@ -128,6 +148,98 @@ CITE_PREFILTER = [
 # A `#line` preprocessor directive is not a citation -- form B's {2,}-digit
 # pattern matches its line number.
 RE_LINE_DIRECTIVE = re.compile(r"^\s*#\s*line\s")
+
+# ── What --shift-audit CHARGES versus what it only REPORTS ───────────────────
+#
+# Wiring the audit as a hard gate (#336) is what made this distinction load-
+# bearing: over ten real merges the mode raised hundreds of content findings and
+# a dozen-odd shifting hunks, and a gate that stops that range stops ordinary
+# work. Both narrowings below are about WHICH findings fail the build. NEITHER
+# hides a finding: every one is still printed and still written to --json,
+# carrying `gated: false`, and the report prints both denominators. A narrowing
+# you cannot count is a blind spot; one you can is a scope.
+#
+# The figures quoted below are pinned to an IMMUTABLE range so they cannot rot
+# in place, and any of them is one command away rather than taken on trust:
+#
+#   python3 tools/check_line_citations.py --shift-audit 0e5225fc..b6d9ed8c
+#
+# Re-derive before citing a number here at any other commit; a scope measured on
+# one range is not a property of the tree.
+#
+# [2] FROZEN CITERS. `specs/<id>/` is a per-feature bundle -- spec, plan, tasks,
+# research, checklists, contracts. On the pinned range, 312 of the 420 findings
+# cite from one.
+# Rot there is real and worth listing, but nobody reads a shipped feature's
+# bundle to navigate today's source, and remediating them is #310's job, not a
+# merge gate's. `spec/` (singular) is the LIVE surface and is NOT frozen.
+#
+# "Frozen" means ARCHIVAL, and a path shape alone cannot say that: `specs/<id>/`
+# equally matches the bundle of the feature currently IN FLIGHT, which the PR
+# under test is actively writing. Exempting that one would let a PR rot its own
+# spec's citations behind a hard gate, and `--range` does not cover it (that
+# gate refuses ADDED citations, not existing ones the edit invalidates).
+#
+# So the lifecycle question is answered from the RANGE rather than asserted from
+# the path: a bundle this range touches at all is in flight and is charged; every
+# other bundle is archival and is only reported. Derived, not claimed -- and it
+# needs no notion of merge state, which nothing here could verify.
+def spec_bundle(path):
+    """`specs/<id>` for a per-feature bundle path, else None."""
+    parts = path.split("/")
+    return "/".join(parts[:2]) if len(parts) > 2 and parts[0] == "specs" else None
+
+
+def is_frozen_citer(citer, target, in_flight):
+    """Archival -- a `specs/<id>/` citation whose rot this range did not author."""
+    bundle = spec_bundle(citer)
+    if bundle is None:
+        return False                      # live surface: always charged
+    # In flight AND the rot is INTERNAL to that same bundle: the PR is writing
+    # both ends, so it owns the breakage and pays for it. A bundle citation that
+    # rots because some OTHER file moved (a spec citing src/wire/offset_table.cpp)
+    # stays archival however much of the bundle this range happens to touch --
+    # charging the whole bundle for one edited file inside it TRIPLED the gate's
+    # cost when measured (107 -> 312 charged over the same ten merges), which is
+    # not the scope this was narrowed to.
+    return not (bundle in in_flight and spec_bundle(target) == bundle)
+#
+# [1] SHIFTS THAT MOVED NOTHING. The check deliberately runs on EVERY changed
+# `.md`, including those nothing resolvably cites, because a form-B citation
+# (`at line 448`) names no file and so resolves to nothing -- see the check's
+# own header. That stays true, and every such hunk is still reported. What
+# changed is that only a hunk with at least one citation KNOWN to have moved
+# fails the build: on the pinned range 12 of the 17 hunks moved NOTHING at all
+# (13 go ungated -- the extra one moved only an archival citer, so the two
+# denominators are not the same number and must not be quoted as one), among them
+# `brain/log.md` growing by 262 lines and a 108-line append near the end of
+# `spec/behaviors-and-limitations.md` -- a file nearly every PR edits, because
+# a B&L functional delta is a Gate B precondition.
+#
+# The frozen-citer rule above governs check [2]. Check [1] does NOT charge at
+# all -- it reports, and only [2] decides the exit code. That is not a softening;
+# it removes a check that could only ever be wrong in two directions:
+#
+#   REDUNDANT. After the form-B exemption, the only thing [1] could still charge
+#   was a shift moving a resolvable form-A citation -- and [2] catches every one
+#   of those STRUCTURALLY, not by luck. If a citation at line n moved by k, then
+#   head[n] is base[n-k]: either the content differs, which is "cited line
+#   CONTENT CHANGED", or it is byte-identical, and then mapped_base_line returns
+#   n-k != n, which is "SILENTLY REPOINTED". There is no third outcome. Measured
+#   as well as argued: across ten merges plus the motivating commit 9e0b332d,
+#   [1]'s gate never once decided a verdict [2] had not already decided.
+#
+#   AND WRONG. `hunk_shifts` asks whether a HUNK changed the line count, which is
+#   not whether a CITATION moved. An insertion above a citation paired with a
+#   deletion above it nets to zero: the citation still lands on the same
+#   content, [2] correctly reports nothing, and [1] failed the build for two
+#   shifting hunks. A moved paragraph is exactly that shape. Charging it is a
+#   spurious HIT -- the failure this repo's rule 2 is about, inside the check
+#   written to enforce it. Arm 5d pins it.
+#
+# So [1] keeps the job it is uniquely able to do -- being the only check that
+# can SEE a form-B document shift, since form B names no file and resolves to
+# nothing -- and stops pretending it can price one.
 
 # Deliberate, reviewed exception. `--census` reports these as their own bucket:
 # the marker is itself a claim (that this number will not rot), so it has to stay
@@ -504,7 +616,20 @@ def mapped_base_line(hunks, n):
     delta = 0
     for a, b, c, d in hunks:
         if d > 0 and c <= n <= c + d - 1:
-            return None           # inside changed content; the content check owns it
+            # Head line `n` is content this range WROTE. The caller must treat
+            # that as a repoint in its own right.
+            #
+            # ⚠️ This used to say "the content check owns it". It does not, and
+            # could not: the only caller reaches here having ALREADY found
+            # base[n] == head[n], i.e. having decided there is nothing to
+            # report. So the one branch that could act was the one told to defer
+            # to a branch that had already declined. Nobody covered it, and the
+            # gap is reachable with a two-line insertion whose last line happens
+            # to duplicate the cited line -- the citation then reads identically
+            # and names a different sentence. Found by adversarial review of the
+            # #336 wiring, after that gap was used as the argument for retiring
+            # check [1]'s gate.
+            return None
         new_end = c + d - 1 if d > 0 else c
         if new_end < n:
             delta += d - b
@@ -613,6 +738,11 @@ def build_citation_index(root, wanted, rev):
                    "text": text.strip()}
             if len(cands) == 1:
                 if cands[0] in wanted:
+                    # The index key IS the resolved target path; carry it on the
+                    # record so a finding can be judged against BOTH ends of the
+                    # citation (is_frozen_citer needs the target, not just the
+                    # citer) without the judging code re-deriving it.
+                    rec["tpath"] = cands[0]
                     index[cands[0]].append(rec)
             elif len(cands) > 1 and any(c in wanted for c in cands):
                 rec["cands"] = cands
@@ -620,18 +750,33 @@ def build_citation_index(root, wanted, rev):
     return index, ambiguous, len(seen_files), form_bc
 
 
-def shift_audit(root, spec, json_out=None):
+def shift_audit(root, spec, json_out=None, allow_empty=False):
     base, head = range_endpoints(root, spec)
     rows = changed_in_range(root, base, head)
     if not rows:
-        raise SystemExit(
-            f"check-line-citations: --shift-audit {spec} names a range with ZERO "
-            "changed files. Refusing to interpret an empty measurement as a "
-            "clean audit -- check the range.")
+        # Default is to REFUSE: an empty measurement must not read as a clean
+        # audit, and a mistyped range is the usual way to get one. But a caller
+        # that KNOWS the range came from a real event -- a PR force-pushed back
+        # onto its base, a branch-pointer move -- also knows nothing changed and
+        # so nothing can have rotted. That caller says so with --allow-empty-
+        # range, and the decision stays HERE, where "empty" is defined, rather
+        # than being re-derived by a second `git diff` in the caller that can
+        # drift out of step with changed_in_range().
+        if not allow_empty:
+            raise SystemExit(
+                f"check-line-citations: --shift-audit {spec} names a range with "
+                "ZERO changed files. Refusing to interpret an empty measurement "
+                "as a clean audit -- check the range, or pass "
+                "--allow-empty-range if you know the range is real.")
+        print(f"check-line-citations: {spec} changes no file -- nothing can have "
+              "rotted. (--allow-empty-range)")
+        return 0
 
     # BOTH sides of every row: a citation into a path that a rename or a delete
     # removed is exactly the citation most certainly rotted.
     wanted = {p for _st, old, new in rows for p in (old, new)}
+    # Which `specs/<id>` bundles this range is WRITING -- see is_frozen_citer().
+    in_flight = {b for p in wanted if (b := spec_bundle(p)) is not None}
     index, ambiguous, scanned, form_bc = build_citation_index(root, wanted, head)
 
     blobs = {}
@@ -671,7 +816,7 @@ def shift_audit(root, spec, json_out=None):
                     f"has no blob at {base[:8]}. Refusing to audit from a "
                     "measurement that failed.")
             md_targets_checked.append(new_path)
-            amb_lines = [r["n"] for r in ambiguous if new_path in r["cands"]]
+            amb_here = [r for r in ambiguous if new_path in r["cands"]]
             md_hunks = hunks_for(root, base, head, new_path)
             # C. A modified file that yields NO parsed hunk is a failed
             # measurement, not a shift-free edit: `git diff -U0` prints "Binary
@@ -686,19 +831,21 @@ def shift_audit(root, spec, json_out=None):
                     "compared nothing.")
             for a, b, _c, d in md_hunks:
                 if hunk_shifts(a, b, d, len(old)):
-                    # Only citations AT OR BELOW the hunk actually move. This is
-                    # a triage aid, NOT a filter: it counts the citations that
-                    # can be POSITIONED, and form B/C name no file, so they
-                    # cannot be. A hunk with `below == 0` is therefore "no known
-                    # citation moved", never "nothing moved" -- which is why it
-                    # is still reported and still fails.
-                    below = sum(1 for r in cites if r["n"] >= a)
+                    # Only citations AT OR BELOW the hunk actually move. These
+                    # counts are the REPORT and nothing else: they count the
+                    # citations that can be POSITIONED, and form B/C name no
+                    # file, so they cannot be. A hunk with zero is therefore "no
+                    # known citation moved", never "nothing moved" -- which is
+                    # why it is still reported. What it COSTS is not asked here;
+                    # see the header above for why [1] does not charge.
+                    below = [r for r in cites if r["n"] >= a]
+                    amb_below = [r for r in amb_here if r["n"] >= a]
                     shift_findings.append({
                         "file": new_path, "old_start": a, "old_count": b,
                         "new_count": d, "old_total": len(old),
                         "cited_by": len(cites), "cited_ambiguously_by": n_amb,
-                        "resolved_citations_below": below,
-                        "ambiguous_citations_below": sum(1 for n in amb_lines if n >= a)})
+                        "resolved_citations_below": len(below),
+                        "ambiguous_citations_below": len(amb_below)})
             if not cites and not n_amb:
                 skipped_non_target.append(new_path)
 
@@ -754,12 +901,41 @@ def shift_audit(root, spec, json_out=None):
                 # and the content check cannot see it. Applies to SOURCE files
                 # too, which check [1] deliberately does not cover.
                 m = mapped_base_line(cite_hunks, n)
-                if m is not None and m != n:
+                if m is None:
+                    # Byte-identical AND inside content this range wrote: the
+                    # bytes coincide, the line does not. Whatever the author
+                    # cited is elsewhere now (a pure insertion above pushed it
+                    # down; a replacement overwrote it), so this is rot even
+                    # though the content check saw no change.
+                    content_findings.append(dict(
+                        r, why=f"REPOINTED INTO NEW CONTENT: head line {n} is "
+                               "content this range added or rewrote; the text "
+                               "matches only by coincidence",
+                        before=before, after=after))
+                elif m != n:
                     content_findings.append(dict(
                         r, why=f"SILENTLY REPOINTED: head line {n} was line {m} "
                                "before; the content matches only by coincidence",
                         before=old[m - 1] if 1 <= m <= len(old) else None,
                         after=after))
+
+    # ── what the gate CHARGES ────────────────────────────────────────────────
+    # Tagged in place, so --json carries the verdict beside the finding and the
+    # printed sections below stay one list each: everything is reported, and the
+    # tag says which ones cost you a build. See is_frozen_citer. Check [1] never
+    # charges, so every shift finding is tagged False -- kept as an explicit
+    # field rather than omitted, so a consumer of --json reads one schema.
+    for f in shift_findings:
+        f["gated"] = False
+    for f in content_findings:
+        f["gated"] = not is_frozen_citer(f["cf"], f["tpath"], in_flight)
+    # Counted once. Printing one denominator and deciding the verdict from a
+    # second, separately-written expression of the same arithmetic is how the
+    # two drift on a later edit.
+    n_gated_content = sum(f["gated"] for f in content_findings)
+    n_free_content = len(content_findings) - n_gated_content
+    n_gated_shift = 0                      # check [1] reports; it never charges
+    n_free_shift = len(shift_findings)
 
     # ── report ───────────────────────────────────────────────────────────────
     print("── #336 shift audit " + "─" * 54)
@@ -788,7 +964,14 @@ def shift_audit(root, spec, json_out=None):
           "discipline, not a source one]")
     print()
 
-    print(f"[1] LINE-SHIFT AUDIT -- {len(shift_findings)} shifting hunk(s)")
+    print(f"[1] LINE-SHIFT AUDIT -- {len(shift_findings)} shifting hunk(s), "
+          "REPORTED not charged")
+    print("    check [1] does not decide the exit code: [2] catches every "
+          "resolvable")
+    print("    citation it could charge, and a net-zero edit makes it fire on "
+          "one that")
+    print("    never moved. See its header. Form B/C shifts are visible ONLY "
+          "here.")
     for f in shift_findings:
         kind = ("INSERTION of %d line(s) after line %d" % (f["new_count"], f["old_start"])
                 if f["old_count"] == 0
@@ -808,9 +991,13 @@ def shift_audit(root, spec, json_out=None):
         print("  append at the original last line.")
     print()
 
-    print(f"[2] CITED-LINE CONTENT CHECK -- {len(content_findings)} rotted citation(s)")
+    print(f"[2] CITED-LINE CONTENT CHECK -- {len(content_findings)} rotted "
+          f"citation(s), {n_gated_content} of them GATED")
+    print(f"    reported but NOT gated: {n_free_content} (cited from an "
+          "archival specs/<id>/ feature bundle)")
     for f in content_findings:
-        print(f"  {f['cf']}:{f['cl']}  ->  {f['target']}:{f['n']}   {f['why']}")
+        tag = "" if f["gated"] else "   [frozen bundle -- REPORTED, not gated]"
+        print(f"  {f['cf']}:{f['cl']}  ->  {f['target']}:{f['n']}   {f['why']}{tag}")
         if f.get("before") is not None:
             print(f"      before: {f['before'].strip()[:110]}")
         if f.get("after") is not None:
@@ -839,23 +1026,60 @@ def shift_audit(root, spec, json_out=None):
                        "form_bc_tree_wide": form_bc}, f, indent=1)
         print(f"audit table -> {json_out}")
 
-    if shift_findings or content_findings:
+    if n_gated_shift or n_gated_content:
         print("A line number is a claim about a file that keeps moving. Do NOT "
               "renumber the", file=sys.stderr)
-        print("citations -- that produces N fresh claims that rot on the next edit. "
-              "Reshape", file=sys.stderr)
-        print("the EDIT instead: append narrative at the END of the file, make every "
-              "in-body", file=sys.stderr)
-        print("edit an in-place same-line-count replacement, fold or pad a comment "
-              "block back", file=sys.stderr)
-        print("to its original count. (issue #336; brain/index.md, 'Amending a "
-              "document that", file=sys.stderr)
-        print("is cited BY LINE NUMBER')", file=sys.stderr)
+        print("citations -- that produces N fresh claims that rot on the next "
+              "edit.", file=sys.stderr)
+        print("", file=sys.stderr)
+        # Two remedies, because the two checks gate two different populations
+        # and only one of them is a document. Printing the document advice alone
+        # left the [2] case -- which is most of what this gate actually charges
+        # -- with instructions nobody could follow: you cannot keep
+        # `offset_table.cpp` line-count-neutral, and the file that has to change
+        # is usually one the PR never opened.
+        if n_gated_shift:
+            print("[1] YOUR EDIT MOVED LINES in a document others cite. Reshape "
+                  "the EDIT:", file=sys.stderr)
+            print("    append narrative at the END of the file; make every "
+                  "in-body edit an", file=sys.stderr)
+            print("    in-place same-line-count replacement; fold or pad a "
+                  "comment block back", file=sys.stderr)
+            print("    to its original count. (brain/index.md, 'Amending a "
+                  "document that is", file=sys.stderr)
+            print("    cited BY LINE NUMBER')", file=sys.stderr)
+        if n_gated_content:
+            print("[2] YOUR EDIT INVALIDATED citations INTO the files you "
+                  "changed. Those are", file=sys.stderr)
+            print("    source files as often as documents, and keeping a .cpp "
+                  "line-count-neutral", file=sys.stderr)
+            print("    is not a remedy -- so fix the CITING side, listed as "
+                  "`citer:line ->` above.", file=sys.stderr)
+            print("    Most sit in files this PR never opened (commonly under "
+                  "tests/ and spec/).", file=sys.stderr)
+            print("    DELETE the number there: cite a function or struct name "
+                  "plus a short", file=sys.stderr)
+            print("    quoted phrase from the target, which survives arbitrary "
+                  "line motion.", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Worked example and the `citation-ok` escape: CONTRIBUTING.md, "
+              "'The line-number", file=sys.stderr)
+        print("citation gate'. (issues #310, #336)", file=sys.stderr)
         return 1
-    print("check-line-citations: shift audit clean for the citations it could "
-          "RESOLVE. See")
-    print("the denominators above -- form B/C citations name no file and cannot be "
-          "checked.")
+    ungated = n_free_shift + n_free_content
+    if ungated:
+        # Passing is not the same as finding nothing, and saying "clean" here
+        # would be the false zero this whole tool exists to prevent.
+        print(f"check-line-citations: shift audit GATE PASSED with {ungated} "
+              "finding(s) reported")
+        print("and not charged (frozen specs/<id>/ citers; hunks that moved no "
+              "positionable")
+        print("citation). They are real -- see the [GATED] tags above and #310.")
+    else:
+        print("check-line-citations: shift audit clean for the citations it could "
+              "RESOLVE. See")
+        print("the denominators above -- form B/C citations name no file and cannot "
+              "be checked.")
     return 0
 
 
@@ -912,7 +1136,15 @@ FORM_CASES = [
 HUNK_CASES = [
     # (old_start, old_count, new_count, old_total) -> shifts?
     ((1515, 0, 41, 1515), False, "append at the original last line"),
-    ((12,   0, 47, 1620), True,  "47-line note inserted near the top (9e0b332d)"),
+    # The motivating commit, and the numbers are ITS numbers, so they are
+    # checkable rather than remembered:
+    #   git diff -U0 9e0b332d~1 9e0b332d -- .specify/2d-threading.md
+    #   git show 9e0b332d~1:.specify/2d-threading.md | wc -l
+    # gives `@@ -15,0 +16,45 @@` over 1620 lines. It previously read (12, 0, 47),
+    # which is a valid predicate input but not this commit -- a pasted result
+    # that had drifted from the thing it named, found while auditing exactly
+    # that class.
+    ((15,   0, 45, 1620), True,  "45-line note inserted near the top (9e0b332d)"),
     ((0,    0,  5,   20), True,  "insertion before line 1"),
     ((0,    0,  5,    0), False, "first content into an EMPTY file: nothing below"),
     ((500,  0,  3, 1515), True,  "insertion mid-document"),
@@ -1142,18 +1374,22 @@ def shift_self_test():
         lines = lines[:5] + ["MID"] * 4 + lines[5:]
         write_doc(); _sh_commit(d, "insert mid-document")
         code, j = _sh_audit(d)
-        checks.append(("mid-document insertion: [1] fires", code == 1 and j["shift"]))
+        checks.append(("mid-document insertion: [1] reports it", bool(j["shift"])))
+        checks.append(("...and [2] is what makes it RED -- the coverage [1] "
+                       "used to duplicate",
+                       code == 1 and bool(j["content"])))
         checks.append(("mid-document insertion: reported as an INSERTION",
                        any(f["old_count"] == 0 for f in j["shift"])))
 
-        # 5b. A shift BELOW every citation still fails -- but must say that zero
-        #     POSITIONABLE citations moved, so a reviewer can triage it. Form B/C
-        #     citations cannot be positioned, which is why it is not filtered out.
+        # 5b. A shift BELOW every citation must say that zero POSITIONABLE
+        #     citations moved, so a reviewer can triage it. 5c is its
+        #     non-vacuity partner and 5d is the false positive that retired
+        #     check [1]'s gate.
         lines = lines[:25] + ["LATE"] * 2 + lines[25:]
         write_doc(); _sh_commit(d, "insert below every citation")
         code, j = _sh_audit(d)
-        checks.append(("shift below every citation: still fails",
-                       code == 1 and len(j["shift"]) == 1))
+        checks.append(("shift below every citation: reported, gate passes",
+                       code == 0 and len(j["shift"]) == 1))
         checks.append(("...annotated as 0 positionable citations moved",
                        j["shift"][0]["resolved_citations_below"] == 0
                        and not j["content"]))
@@ -1163,7 +1399,28 @@ def shift_self_test():
         write_doc(); _sh_commit(d, "insert above every citation")
         code, j = _sh_audit(d)
         checks.append(("shift above every citation: both reported as moved",
-                       code == 1 and j["shift"][0]["resolved_citations_below"] == 2))
+                       j["shift"][0]["resolved_citations_below"] == 2))
+        # THE COVERAGE-PRESERVATION CLAIM, pinned. [1] no longer charges, so if
+        # [2] did not independently see this the retirement would have cost real
+        # coverage. head[n] is base[n-k]: content differs, or it is identical and
+        # mapped_base_line says it came from elsewhere. There is no third case.
+        checks.append(("...and [2] alone still makes it RED",
+                       code == 1 and len(j["content"]) == 2))
+
+        # 5d. THE FALSE POSITIVE THAT RETIRED [1]'s GATE. Insert above a citation
+        #     AND delete the same number of lines above it: the citation lands on
+        #     byte-identical content at the same number, because it did not move.
+        #     `hunk_shifts` asks about a HUNK, not about a CITATION, so the old
+        #     gate charged two shifting hunks for rot that did not happen. A moved
+        #     paragraph is exactly this shape.
+        before_line = lines[9]
+        lines = lines[:2] + ["INS"] * 3 + lines[2:6] + lines[9:]
+        write_doc(); _sh_commit(d, "insert 3 above and delete 3 above: net zero")
+        code, j = _sh_audit(d)
+        checks.append(("net-zero edit: [1] still REPORTS the shifting hunks",
+                       len(j["shift"]) >= 1))
+        checks.append(("net-zero edit: nothing rotted, so the gate PASSES",
+                       code == 0 and not j["content"]))
 
         # 6. Truncation below a cited line: the citation survives as a number and
         #    stops existing as a location.
@@ -1195,12 +1452,35 @@ def shift_self_test():
         open(twin, "w").write("PREPENDED\n" + _prev)
         _sh_commit(d, "prepend to the ambiguously-cited doc")
         code, j = _sh_audit(d)
-        checks.append(("ambiguously-cited .md is still shift-checked",
-                       code == 1 and any(f["file"] == "sub/twin.md"
-                                         for f in j["shift"])))
+        tw = [f for f in j["shift"] if f["file"] == "sub/twin.md"]
+        checks.append(("ambiguously-cited .md is still shift-checked", bool(tw)))
         checks.append(("...and the ambiguity is disclosed, not silently resolved",
                        any(f.get("cited_ambiguously_by", 0) > 0 for f in j["shift"])
                        and not j["content"]))
+        # ...but it does NOT fail the build. `twin.md:9` names one of two files
+        # and nothing can say which; charging a build for a citation nobody can
+        # resolve is a spurious HIT. The report already promised this in words
+        # ("AMBIGUOUS ... Listed, NOT counted against the exit code") while
+        # check [1] charged them anyway -- the promise and the behaviour now
+        # agree. 8b-bis is the non-vacuity partner: resolve the ambiguity and
+        # the identical shift fails.
+        checks.append(("ambiguous-only shift is REPORTED, not gated",
+                       code == 0 and bool(tw)
+                       and tw[0]["ambiguous_citations_below"] >= 1))
+
+        # 8b-bis. Remove the decoy: `twin.md` now resolves to exactly one file,
+        #     the SAME citation becomes positionable, and the same shape fails.
+        os.unlink(os.path.join(d, "other", "twin.md"))
+        _sh_commit(d, "retire the decoy so twin.md resolves")
+        _prev = open(twin).read()
+        open(twin, "w").write("PREPENDED2\n" + _prev)
+        _sh_commit(d, "prepend again, now unambiguously cited")
+        code, j = _sh_audit(d)
+        tw = [f for f in j["shift"] if f["file"] == "sub/twin.md"]
+        checks.append(("...once resolvable, the identical shift IS gated -- by [2]",
+                       code == 1 and bool(tw)
+                       and tw[0]["resolved_citations_below"] == 1
+                       and bool(j["content"])))
 
         # 8c. A citation into a file ADDED in the range has no before-value, so it
         #     is not rot -- but an out-of-range one into it still is.
@@ -1241,6 +1521,17 @@ def shift_self_test():
         #     index and prints "no new line-number citations ... OK". A clean
         #     verdict FROM ANOTHER MODE. Pinned through the CLI, because calling
         #     shift_audit() directly cannot see a dispatch bug.
+        # An option that belongs to one mode must be REFUSED in the others, not
+        # ignored there. `--census --allow-empty-range` used to look accepted and
+        # do nothing, which reads to the caller as "the empty range is handled".
+        for mode in ("--census", "--staged"):
+            r = subprocess.run([sys.executable, os.path.abspath(__file__),
+                                mode, "--allow-empty-range", "--root", d],
+                               capture_output=True, text=True)
+            checks.append((f"CLI: {mode} REFUSES --allow-empty-range",
+                           r.returncode != 0
+                           and "--shift-audit only" in (r.stdout + r.stderr)))
+
         for flag in ("--shift-audit", "--range"):
             r = subprocess.run([sys.executable, os.path.abspath(__file__),
                                 flag, "", "--root", d],
@@ -1269,8 +1560,167 @@ def shift_self_test():
         code, j = _sh_audit(d)
         checks.append(("form-B-only doc IS shift-checked (not 'cited by NOTHING')",
                        "doc2.md" in j["md_checked"]))
-        checks.append(("form-B-only doc's shift is REPORTED",
-                       code == 1 and any(f["file"] == "doc2.md" for f in j["shift"])))
+        d2f = [f for f in j["shift"] if f["file"] == "doc2.md"]
+        checks.append(("form-B-only doc's shift is REPORTED", bool(d2f)))
+        # ...and reported is all it is, because check [1] never charges. Form B
+        # names no file, so NOTHING can price this shift -- [2] cannot see it
+        # either. Pinned so the limit stays visible rather than becoming a
+        # surprise: seeing a form-B shift is exactly what [1] is uniquely for.
+        checks.append(("form-B-only doc's shift is REPORTED but never charged",
+                       bool(d2f) and not d2f[0]["gated"] and code == 0
+                       and not j["content"]))
+
+        # 8f-bis. NON-VACUITY, in the SAME document: give doc2.md a form-A
+        #     citation and shift it again, and the range goes RED. Not via [1] --
+        #     via [2], which is the whole coverage-preservation argument for
+        #     retiring [1]'s gate. Without this arm, "form B is never charged"
+        #     could equally mean "this fixture is never charged".
+        open(os.path.join(d, "src", "forma.cpp"), "w").write(
+            "// and the rule is at doc2.md:12\n")
+        _sh_commit(d, "add a form-A citation into the form-B-only doc")
+        _prev = open(d2).read()
+        open(d2, "w").write("PRE2\n" * 3 + _prev)
+        _sh_commit(d, "shift the now-form-A-cited doc")
+        code, j = _sh_audit(d)
+        d2f = [f for f in j["shift"] if f["file"] == "doc2.md"]
+        checks.append(("same doc, now form-A cited: RED -- and it is [2] that "
+                       "charges it",
+                       code == 1 and bool(d2f)
+                       and d2f[0]["resolved_citations_below"] >= 1
+                       and bool(j["content"])))
+
+        # 8h. GATE SCOPE, both directions in ONE measurement. A `specs/<id>/`
+        #     feature bundle is an archive: its rot is reported and not charged.
+        #     The IDENTICAL rot cited from a live path IS charged. Asserting only
+        #     the frozen half would let the scope widen to everything -- or
+        #     collapse to nothing -- with no arm noticing.
+        ft = os.path.join(d, "src", "frozen_target.cpp")
+        tgt = [f"T{i:02d}" for i in range(1, 9)]
+        open(ft, "w").write("\n".join(tgt) + "\n")
+        os.makedirs(os.path.join(d, "specs", "099-archived"), exist_ok=True)
+        os.makedirs(os.path.join(d, "spec"), exist_ok=True)
+        open(os.path.join(d, "specs", "099-archived", "spec.md"), "w").write(
+            "the guard is at frozen_target.cpp:3\n")
+        open(os.path.join(d, "spec", "live.md"), "w").write(
+            "the same guard is at frozen_target.cpp:3\n")
+        _sh_commit(d, "one frozen citer and one live citer, same target line")
+        tgt[2] = "T03-mutated"          # same line count: isolates check [2]
+        open(ft, "w").write("\n".join(tgt) + "\n")
+        _sh_commit(d, "mutate the cited line")
+        code, j = _sh_audit(d)
+        fz = [c for c in j["content"] if c["cf"].startswith("specs/")]
+        lv = [c for c in j["content"] if c["cf"].startswith("spec/")]
+        checks.append(("frozen specs/<id>/ citer: rot is REPORTED",
+                       len(fz) == 1 and "CONTENT CHANGED" in fz[0]["why"]))
+        checks.append(("frozen specs/<id>/ citer: ...and NOT gated",
+                       len(fz) == 1 and not fz[0]["gated"]))
+        checks.append(("live spec/ citer: the IDENTICAL rot IS gated",
+                       code == 1 and len(lv) == 1 and lv[0]["gated"]))
+
+        # 8h-bis. With the live citer gone, the same edit must PASS the gate and
+        #     still print the frozen finding -- the pass must not read as "found
+        #     nothing", which is the false zero this whole tool exists to stop.
+        #     The bundle is set up in a SEPARATE commit from the mutation on
+        #     purpose: touching it inside the audited range would make it
+        #     in-flight, which 8h-ter is what tests.
+        os.unlink(os.path.join(d, "spec", "live.md"))
+        open(os.path.join(d, "specs", "099-archived", "spec.md"), "a").write(
+            "and the other guard is at frozen_target.cpp:5\n")
+        _sh_commit(d, "retire the live citer; archival bundle cites line 5 too")
+        tgt[4] = "T05-mutated"
+        open(ft, "w").write("\n".join(tgt) + "\n")
+        _sh_commit(d, "mutate a line cited ONLY from the archival bundle")
+        code, j = _sh_audit(d)
+        fz = [c for c in j["content"] if c["cf"].startswith("specs/")]
+        checks.append(("archival-only rot: gate PASSES", code == 0))
+        checks.append(("archival-only rot: ...while still reporting the finding",
+                       len(fz) >= 1 and not any(c["gated"] for c in fz)))
+
+        # 8h-ter. THE LIFECYCLE HALF, and the reason the exemption is derived
+        #     from the range instead of asserted from the path. A PR writing its
+        #     OWN spec bundle can rot that bundle's INTERNAL citations, and a
+        #     path-shape predicate exempted exactly that -- behind a hard gate,
+        #     with --range no help (it refuses ADDED citations, not existing ones
+        #     an edit invalidates). So intra-bundle rot in a bundle this range
+        #     touches is charged: the PR is writing both ends and owns it.
+        bt = os.path.join(d, "specs", "099-archived", "bundle_target.md")
+        blines = [f"B{i:02d}" for i in range(1, 13)]
+        open(bt, "w").write("\n".join(blines) + "\n")
+        open(os.path.join(d, "specs", "099-archived", "tasks.md"), "w").write(
+            "T001 implements the rule at bundle_target.md:5\n")
+        _sh_commit(d, "a bundle that cites ITSELF by line number")
+        blines[4] = "B05-mutated"
+        open(bt, "w").write("\n".join(blines) + "\n")
+        _sh_commit(d, "the PR's own edit rots its own bundle's citation")
+        code, j = _sh_audit(d)
+        intra = [c for c in j["content"] if c["cf"].endswith("099-archived/tasks.md")]
+        checks.append(("in-flight bundle: INTRA-bundle rot IS gated",
+                       code == 1 and len(intra) == 1 and intra[0]["gated"]))
+
+        # 8h-quater. ...and the same bundle, equally in flight, still does NOT
+        #     pay for rot it did not author. Without this the rule above could be
+        #     "touching a bundle charges everything in it", which is what the
+        #     first attempt did -- it TRIPLED the charge over ten real merges.
+        blines[4] = "B05-mutated-again"   # line 5 is the CITED one; mutating any
+        open(bt, "w").write("\n".join(blines) + "\n")   # other line is not rot
+        tgt[6] = "T07-mutated"
+        open(ft, "w").write("\n".join(tgt) + "\n")
+        open(os.path.join(d, "specs", "099-archived", "spec.md"), "a").write(
+            "the third guard is at frozen_target.cpp:7\n")
+        _sh_commit(d, "same range: intra-bundle rot AND cross-bundle rot")
+        code, j = _sh_audit(d)
+        cross = [c for c in j["content"] if c["target"] == "frozen_target.cpp"]
+        checks.append(("in-flight bundle: CROSS-bundle rot stays archival",
+                       len(cross) == 1 and not cross[0]["gated"]))
+        checks.append(("...while the intra-bundle rot in the SAME range gates",
+                       code == 1))
+
+        # 8i. The frozen rule on a SHIFTED DOCUMENT, both directions. A shift
+        #     moves the citation, so [2] sees it as rot -- and whether that rot
+        #     is charged must depend on the citer being live, exactly as it does
+        #     for a source target. The live citer added second flips it.
+        fd = os.path.join(d, "frozen_doc.md")
+        flines = [f"F{i:02d}" for i in range(1, 21)]
+        open(fd, "w").write("\n".join(flines) + "\n")
+        open(os.path.join(d, "specs", "099-archived", "plan.md"), "w").write(
+            "the rule is at frozen_doc.md:15\n")
+        _sh_commit(d, "a doc cited ONLY from an archival bundle")
+        open(fd, "w").write("\n".join(["TOP"] * 3 + flines) + "\n")
+        _sh_commit(d, "shift it")
+        code, j = _sh_audit(d)
+        fdf = [f for f in j["shift"] if f["file"] == "frozen_doc.md"]
+        checks.append(("shifted doc, archival citer: [1] REPORTS the hunk",
+                       len(fdf) == 1 and fdf[0]["resolved_citations_below"] == 1))
+        checks.append(("shifted doc, archival citer: [2] sees rot, does NOT charge",
+                       code == 0 and bool(j["content"])
+                       and not any(c["gated"] for c in j["content"])))
+        open(os.path.join(d, "spec", "livecite.md"), "w").write(
+            "the same rule is at frozen_doc.md:15\n")
+        _sh_commit(d, "add a LIVE citer of the same doc")
+        open(fd, "w").write("\n".join(["TOP2"] * 2 + flines) + "\n")
+        _sh_commit(d, "shift it again")
+        code, j = _sh_audit(d)
+        checks.append(("shifted doc, LIVE citer added: the same shift now CHARGES",
+                       code == 1 and any(
+                           c["gated"] and c["cf"] == "spec/livecite.md"
+                           for c in j["content"])))
+
+        # 8j. --allow-empty-range, both directions. The flag exists so the ONE
+        #     place that defines "empty" stays here; an arm that only proved the
+        #     pass would let the default refusal be deleted unnoticed.
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                shift_audit(d, "HEAD..HEAD", None, False)
+            ok = False
+        except SystemExit as e:
+            ok = "ZERO changed files" in str(e)
+        checks.append(("empty range still REFUSES without --allow-empty-range", ok))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = shift_audit(d, "HEAD..HEAD", None, True)
+        checks.append(("--allow-empty-range turns that refusal into a PASS",
+                       code == 0 and "changes no file" in buf.getvalue()))
 
         # 8g. Codex P1-2: a SOURCE citation that repoints while the content stays
         #     byte-identical. Two identical `}` lines; inserting one line above
@@ -1291,6 +1741,83 @@ def shift_self_test():
                        code == 1 and len(rp) == 1 and rp[0]["n"] == 10))
         checks.append(("...and it names the base line it actually came from",
                        bool(rp) and "was line 9" in rp[0]["why"]))
+
+        # 8g-bis. THE THIRD OUTCOME, and the one that was missed. `mapped_base_line`
+        #     returns None when head line n is content the range WROTE, and its
+        #     comment said "the content check owns it" -- but the only caller
+        #     reaches there having already found base[n] == head[n], i.e. having
+        #     decided there is nothing to report. So no branch acted.
+        #
+        #     Reachable with an ordinary edit: insert a section above a citation
+        #     whose LAST line happens to repeat the cited line. The citation then
+        #     reads identically and names a different sentence. Found by
+        #     adversarial review, as the refutation of "content-changed or
+        #     silently-repointed are the only two outcomes" -- a claim used to
+        #     argue check [1]'s gate away. The claim is now TRUE because this
+        #     branch makes it true, not because it was true when asserted.
+        os.makedirs(os.path.join(d, "third"), exist_ok=True)
+        td = os.path.join(d, "third", "doc.md")
+        tbase = ["# Design", "", "intro one", "intro two", "intro three",
+                 "intro four", "intro five", "intro six", "intro seven",
+                 "## Cancellation", "post the handler to the strand", "",
+                 "more text", "end"]
+        open(td, "w").write("\n".join(tbase) + "\n")
+        open(os.path.join(d, "src", "thirdcite.cpp"), "w").write(
+            "// the strand rule is at third/doc.md:11\n")
+        _sh_commit(d, "a doc whose line 11 is a rule others cite")
+        thead = (tbase[:9] + ["## Reconnect", "post the handler to the strand"]
+                 + tbase[9:])
+        open(td, "w").write("\n".join(thead) + "\n")
+        _sh_commit(d, "insert a section whose last line DUPLICATES the cited line")
+        code, j = _sh_audit(d)
+        nc = [c for c in j["content"] if "NEW CONTENT" in c["why"]]
+        checks.append(("citation landing INSIDE inserted content is rot, and is "
+                       "reported",
+                       code == 1 and len(nc) == 1 and nc[0]["n"] == 11
+                       and nc[0]["gated"]))
+        # Its partner: the same mechanism must NOT fire when the citation really
+        # did not move. A net-zero edit above it leaves mapped_base_line == n.
+        # Without this the fix could be "report every byte-identical line", which
+        # would charge every PR that touches any cited document.
+        tl = list(thead)
+        tl = tl[:2] + ["X1", "X2", "X3"] + tl[2:6] + tl[9:]
+        open(td, "w").write("\n".join(tl) + "\n")
+        _sh_commit(d, "net-zero edit above the citation: it does not move")
+        code, j = _sh_audit(d)
+        checks.append(("...but a net-zero shift above it reports NOTHING",
+                       not any(c["target"].endswith("doc.md") and c["n"] == 11
+                               for c in j["content"])))
+
+        # 8k. SCAN_DIRS REACH, for the ADDITION gate. #336 widened RE_A to `.md`
+        #     and to a leading dot expressly so `.specify/...md:448` would match,
+        #     and the gate could not see `.specify/` at all -- a pattern only
+        #     decides what it is FED. One commit puts the IDENTICAL citation on
+        #     every surface; the arm fails if ANY is missed, so narrowing
+        #     SCAN_DIRS again cannot pass quietly. Driven through the CLI, since
+        #     the pathspec is what is under test and calling gate() directly
+        #     would not exercise it.
+        reach_root = os.path.join(d, "reach")
+        for sub in ("src", "specs/099-feat", "spec", "brain", ".specify"):
+            os.makedirs(os.path.join(reach_root, sub), exist_ok=True)
+        open(os.path.join(reach_root, "src", "target.cpp"), "w").write("a\nb\nc\n")
+        _sh_run(reach_root, "init", "-q")
+        _sh_run(reach_root, "config", "user.email", "t@t")
+        _sh_run(reach_root, "config", "user.name", "t")
+        _sh_commit(reach_root, "base")
+        surfaces = ["src/x.cpp", "specs/099-feat/spec.md", "spec/live.md",
+                    "brain/index.md", ".specify/2d.md"]
+        for f in surfaces:
+            open(os.path.join(reach_root, f), "w").write("see src/target.cpp:2\n")
+        _sh_commit(reach_root, "the same new citation on every surface")
+        r = subprocess.run([sys.executable, os.path.abspath(__file__),
+                            "--range", "HEAD~1..HEAD", "--root", reach_root],
+                           capture_output=True, text=True)
+        blob = r.stdout + r.stderr
+        missed = [f for f in surfaces if f not in blob]
+        checks.append(("addition gate REACHES every doc tree, not just src/",
+                       r.returncode == 1 and not missed))
+        checks.append(("...and says so for all five surfaces",
+                       sum(f in blob for f in surfaces) == len(surfaces)))
 
         checks += prefilter_recall_check(d)
 
@@ -1467,9 +1994,18 @@ def main():
                         "line-number citations (#336)")
     g.add_argument("--self-test", action="store_true",
                    help="prove the detector reports non-zero on known positives")
+    ap.add_argument("--allow-empty-range", action="store_true",
+                    help="--shift-audit only: a range that changes no file is a "
+                         "pass, not a refusal (for a caller that knows the range "
+                         "came from a real event)")
     ap.add_argument("--json", metavar="OUT", help="write the adjudication table")
     ap.add_argument("--root", default=None, help="repo root (default: git toplevel)")
     args = ap.parse_args()
+    # argparse cannot express "this option belongs to that one", and an option
+    # silently ignored is an instruction silently ignored: `--census
+    # --allow-empty-range` looked accepted and did nothing.
+    if args.allow_empty_range and args.shift_audit is None:
+        ap.error("--allow-empty-range applies to --shift-audit only")
 
     if args.self_test:
         return self_test()
@@ -1483,7 +2019,8 @@ def main():
     # mistyped invocation would report clean FROM ANOTHER MODE. `--range ""` had
     # the same shape and is fixed with it.
     if args.shift_audit is not None:
-        return shift_audit(root, args.shift_audit, args.json)
+        return shift_audit(root, args.shift_audit, args.json,
+                           args.allow_empty_range)
     return gate(root, args)
 
 

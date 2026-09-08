@@ -1716,14 +1716,52 @@ citation into this document — a defect this very amendment exists to stop repe
 > and borrowing is exactly how it went stale without anyone editing this file (same class as the
 > `[const §XII.5]` fossil in `2g-tls.md`).
 >
-> ⚠️ **§6.3's cross-strand handoff budget is now UNVERIFIED, not verified-clean.** The `≤ 100 µs p99`
-> idle / `≤ 5 ms p99` loaded figures were derived when the target session strand hosted no accept
-> work. It now hosts an accept loop whose handshake leg is bounded at `tls_handshake_timeout`
-> (`1500 ms` at `src/session/engine.cpp`) plus a bounded first-frame read. This is **not** a
-> statement that the budget is wrong — an ASIO strand is released across every `co_await`, so a
-> queued dispatch waits only for the current contiguous run, not for a whole handshake. It is a
-> statement that the **premise the number was derived under no longer holds and the number was never
-> re-derived.** Re-measure before citing it.
+> ⚠️ **§6.3's cross-strand handoff budget was flagged UNVERIFIED when feature 023 (T010) put the
+> accept loop on the per-session strand. RE-DERIVED 2026-09-08 (#335); the premise change does not
+> invalidate it.** Three corrections came out of the re-derivation, and each was wrong in a way that
+> would have sent the next reader somewhere useless.
+>
+> **1. The budget attaches to a shape this document names by a construct that does not exist in code.**
+> `FIXPP_REQUIRES_SESSION_LOCK` is a *documented reentrancy class*, never a compiled construct — it
+> occurs only in prose, including doc comments in `include/fix/c_api/message.h`. The shape actually
+> budgeted is `fixpp_session_close`'s: `co_spawn` onto the session strand's **underlying** executor
+> with `use_future`, then a **blocking `.get()` from a foreign thread**. That is NOT
+> `cancellable_dispatch`, which is what `bench/threading/bench_threading.cpp` measures and which has
+> zero callers in `src/capi/`. Benching `cancellable_dispatch` would measure the wrong mechanism.
+>
+> **2. The question is the longest CONTIGUOUS block, not the handshake.** A strand is released across
+> every `co_await`, so a coroutine spawned onto it waits only for the current uninterrupted run. In
+> `src/session/engine.cpp:run_accept_loop` every expensive leg suspends: `async_accept`,
+> `async_handshake`, `read_first_frame_bounded`, `Session::open`, the awaited publication onto the
+> control strand, and `run_read_pump` (awaited inline). **The longest contiguous non-suspending run is
+> Steps 4–6** — parse CompIDs, resolve the reversed-CompID registry id, and construct the `Session` —
+> ending at the `open()` suspension. All three are cheap by construction: `Session`'s constructor is
+> member-initialisation only (no loops, no table building), `resolve_reconnect_policy` either copies
+> an optional or builds a small defaults struct, and `reversed_from_logon` assembles a `SessionId`
+> from string views. **The `1500 ms` handshake bound never lands on a queued dispatch.**
+>
+> **3. Nothing gates this number, so the flag's stake was overstated.** `[const §VIII.2]`'s ±5% budget
+> was said to run against `bench/baselines/control_plane/`. That directory does not exist, no
+> control-plane bench exists, and `control_plane` appears nowhere in `bench/`, `ci/`, `.github/` or
+> `tools/`. There is no green here that means less than it appears; there is no green at all.
+>
+> ⚠️ **This document still asserts the retired claim in §9's bench-seam row** — *"CI fails on > 5%
+> regression vs `bench/baselines/control_plane/`"*. That is NOT a new finding and is deliberately
+> **not** fixed here: the constitution's own inventory under *"±5%-vs-bench/baselines, the comparand
+> this amendment retires"* already lists this document among the sites carrying it, alongside
+> `2f-async-mutex.phase4-tests.md`, `2l-tap.md`, `2k-log-otel.md`, `2g-tls.md`, `2m-pybind.md`,
+> `2i-capi.md`, `bench/README.md`, `bench/REPORT.md` and several `CMakeLists.txt`. Correcting one
+> entry of a multi-site inventory is how a partial sweep comes to look like a finished one — the
+> inventory is the unit of work, not this row. Read it there.
+>
+> **WHAT THIS IS AND IS NOT.** This is a STRUCTURAL re-derivation: the premise changed, and the change
+> does not reach the budget, because the work 023 added to the strand is entirely behind suspension
+> points. It is **not** a measurement — no p99 was taken, and taking one needs a Release build with
+> `FIXPP_BUILD_BENCH=ON` (no build tree in the repo has benches enabled) plus a bench written against
+> the `co_spawn` + `use_future` shape rather than the existing `cancellable_dispatch` rows. If a
+> number is ever needed, measure it **differentially in one binary and one run** — idle strand versus
+> a strand concurrently running the accept loop — and not as an absolute band; #394 records why an
+> absolute wall-clock threshold on a scheduler-bound quantity both flakes and goes blind.
 
 ### Cross-reference — Appendix D drop-in blocks (added 2026-08-29)
 
