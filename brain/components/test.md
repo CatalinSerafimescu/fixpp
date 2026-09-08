@@ -327,21 +327,33 @@ run-to-exhaustion naming the spawn context appears above the get"*, which is sat
 **caller-side** run (lexical "above" is the calling thread's program order ⇒ batch 21's work-guard
 argument applies) and by a run written **inside a thread construct** (a drive on another thread ⇒
 "above" is not program order at all, and the row is dismissed by the SELF-DRIVING argument instead).
-The value now splits into `EXHAUSTED` / `EXHAUSTED-OFF-THREAD`, and **all 35 `THREADED` rows are the
-second kind** — read as dominated for four batches by an argument that did not apply to them. See
+The value now splits into `EXHAUSTED` / `EXHAUSTED-NOT-CALLER-SIDE`, and **all 35 `THREADED` rows are
+the second kind** — read as dominated for four batches by an argument that did not apply to them. See
 [`../failure-classes.md`](../failure-classes.md) class 12; the union is unchanged, so the batch
 18-21 trend is still comparable.
 
+⚠️ **THE DISCRIMINATOR HAD TO BE STRUCTURAL, AND A TOKEN TEST SURVIVED TWO HOSTILE ROUNDS BEFORE THAT
+WAS NOTICED.** Asking *"does this statement name a thread type"* is not the same question as *"is the
+run on the calling thread"*, and while it stood, two live rows were still being credited to the
+caller-side argument. What ships tests **brace depth** — a caller-side run is a bare statement, and
+every off-thread spelling puts its run inside a lambda body. It reddened five disclosed limits at
+once, because "inside a lambda", "inside an unshared `if` arm" and "inside a nested block" are one
+property; they are controls now, not limits. Both earlier rounds had been checking whether the LIST
+OF SPELLINGS was complete, and the list was never the problem.
+
 ⚠️ **A POSITIVE DISMISSAL NEEDS A CLAUSE CHECK, AND `POOL` NOW HAS ONE.** The `SELF-DRIVE` axis
 reports `RETIRED-BEFORE-SPAWN` / `STOPPED-BEFORE-GET` / `JOINED-BEFORE-GET` / `LIVE` over `POOL`
-rows. `join()` is deliberately its own value rather than folded into `LIVE`: it is the *opposite* of
+rows. ⚠️ **`LIVE` is its only CERTIFYING value, so disclose the side that COSTS** — the check matches
+the pool's own name, so a retirement through a helper, a reference alias or a non-shadowing RAII
+member reads `LIVE`. Cases `S-f`/`S-j` pin where it escalates too readily; `S-k` pins where it
+escalates too little, which is the direction that matters. `join()` is deliberately its own value rather than folded into `LIVE`: it is the *opposite* of
 a hazard, blocking until the queued work is done, so it dominates a get more strongly than any
 lexical `run()`. The clauses are measured in
 `tests/sync/test_co_spawn_work_guard_contract.cpp` arms 8-9, each carrying its own dismissal as the
 control half in the same cell.
 
 ⚠️ **THE AXIS IS SCOPED TO `POOL` AND THE EXTENSION WAS MEASURED OUT, NOT OVERLOOKED.** Extending it
-to `EXHAUSTED-OFF-THREAD` rows needs no driver name — clause S1 holds structurally there (a run seen
+to `EXHAUSTED-NOT-CALLER-SIDE` rows needs no driver name — clause S1 holds structurally there (a run seen
 only *since* the spawn was written by a thread constructed after it) and S2 becomes a `stop()` on the
 spawn context. It is correct, and it escalated **34 of 36** rows, because these tests all retire the
 context on a bail-out branch the get never reaches. Reverted; the measurement lives in the axis

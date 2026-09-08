@@ -8,9 +8,11 @@ status: stable
 
 - **2026-09-08 — #289 batch 22, the annotation that hid two arguments.**
   `failure-classes.md` gains **class 12** (*one label can carry two arguments, and only one of them
-  may be checked*). `ci/pump-get-sweep.sh`'s `EXHAUSTED` splits off `EXHAUSTED-OFF-THREAD`: a
-  caller-side run and a run written inside a thread construct are dismissed by DIFFERENT arguments,
-  and **all 35 `THREADED` rows are the second kind**. A SELF-DRIVE axis checks the self-driving
+  may be checked*). `ci/pump-get-sweep.sh`'s `EXHAUSTED` splits off `EXHAUSTED-NOT-CALLER-SIDE`: a
+  caller-side run and one that is not are dismissed by DIFFERENT arguments, and **all 35 `THREADED`
+  rows are the second kind**. ⚠️ The discriminator had to be STRUCTURAL — a token test over the
+  statement's text survived two hostile rounds while still dismissing two live rows; brace depth is
+  what answers it, and it reddened five disclosed limits at once, which promoted them to controls. A SELF-DRIVE axis checks the self-driving
   clauses over `POOL` rows (44 LIVE / 2 escalated); arms 8-9 in
   `tests/sync/test_co_spawn_work_guard_contract.cpp` measure them, each carrying its own dismissal as
   the control half. Also: `since` resets per container push (a live false DISMISSAL, no live

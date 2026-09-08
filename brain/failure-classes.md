@@ -452,10 +452,16 @@ defect is that its vocabulary is coarser than its subject.
   earlier trend is still comparable.
 - **Instance.** #289's `EXHAUSTED` meant *"a run-to-exhaustion naming the spawn context appears above
   the get"*. Satisfied by a **caller-side** run (dismissed by the `co_spawn` work guard, measured in
-  batch 21) and by a run written **inside a thread construct** (dismissed by the self-driving
-  argument, whose clauses nothing checked). Batch 22 split off `EXHAUSTED-OFF-THREAD`: **all 35
+  batch 21) and by a run that is **not a bare caller-side statement** (dismissed by the self-driving
+  argument, whose clauses nothing checked). Batch 22 split off `EXHAUSTED-NOT-CALLER-SIDE`: **all 35
   `THREADED` rows are the second kind, none the first.** Four batches had read them as dominated for
-  a reason that did not apply. Record
+  a reason that did not apply.
+- ⚠️ **THE SPLIT'S OWN DISCRIMINATOR IS WHERE THIS CLASS RECURS.** The first one asked *"does this
+  statement name a thread type"* — a predicate over what a statement MENTIONS, standing in for one
+  about where the code RUNS. It survived two hostile rounds, each checking whether the list of
+  spellings was complete, while it was still dismissing two live rows. Structure answered it: a
+  caller-side run is one at brace depth 0. Do not iterate on the vocabulary of a predicate that is
+  the wrong KIND of predicate. Record
   `decisions/speckit/pr-batch22-the-self-driving-clauses-and-the-annotation-that-hid-two-arguments.md`.
 - ⚠️ **A correct check that escalates almost its whole population is not a check.** The same batch
   extended a clause check to those rows; it was right in every particular and escalated **34 of 36**,
