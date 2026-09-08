@@ -513,8 +513,22 @@ ok "the wheel build keeps C++20 module scanning OFF (the cache is a no-op withou
 # and the mangled ref reaches restore and seed — a permanent MISS, which is
 # indistinguishable from "ccache didn't help".
 ident_with() {  # $1 = the manylinux-x86_64-image value, verbatim
+                # $2 = OPTIONAL wheel.py-api value, verbatim; omit for the
+                #      default well-formed one, pass '' to omit the KEY entirely.
   local tmp="$sandbox/pp-$RANDOM.toml"
-  { echo '[tool.cibuildwheel]'; echo "manylinux-x86_64-image = $1"; } > "$tmp"
+  local pyapi="${2-\"cp312\"}"
+  {
+    echo '[tool.cibuildwheel]'
+    echo "manylinux-x86_64-image = $1"
+    # wheel.py-api is part of the lane identity (it drives build-dir, which is
+    # on every -I and therefore in every ccache command line). These fixtures
+    # exist to exercise the IMAGE grammar, so they carry a valid ABI tag unless
+    # a case is deliberately probing that key.
+    if [ -n "$pyapi" ]; then
+      echo '[tool.scikit-build]'
+      echo "wheel.py-api = $pyapi"
+    fi
+  } > "$tmp"
   run "$CI_DIR/wheel-ccache-ident.sh" "$tmp"
 }
 
@@ -527,10 +541,46 @@ ident_with '"quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50"'
 want_status 1 "ident/short-digest"
 ok "ident refuses a truncated digest that a substring check would accept"
 
-ident_with '"quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be"'
+GOOD_REF='"quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be"'
+
+ident_with "$GOOD_REF"
 want_status 0 "ident/well-formed"
 want_out '@sha256:012f4a50' "ident/well-formed"
 ok "ident accepts a well-formed digest-pinned reference"
+
+# ── the ABI tag is part of the lane identity (PR #399) ───────────────────────
+#
+# The lane was `wheel-manylinux228`, following the manylinux image and nothing
+# else. scikit-build-core builds into `build/{wheel_tag}`, so the ABI tag is in
+# the build PATH and therefore on every `-I` of every compile — raising the
+# floor cp310 -> cp312 produced a restore HIT with a 7% hit rate, which
+# ci/ccache-stats.sh's 70% floor correctly reds. These three cells pin the fix.
+
+# 1. The ABI tag REACHES the lane. Without this the whole change is inert: the
+#    script would still emit the old lane and the stale cache would be restored
+#    under a tag that cannot match it.
+want_out 'lane=wheel-manylinux228-cp312' "ident/abi-tag-in-lane"
+ok "ident folds the wheel ABI tag into the lane name"
+
+# 2. A DIFFERENT ABI tag yields a DIFFERENT lane — the property that makes a
+#    floor bump a MISS (exempt by construction) instead of a stale HIT.
+#    ⚠️ Asserting only cell 1 would pass an implementation that hardcoded
+#    `-cp312`, which is the same bug one rename later.
+ident_with "$GOOD_REF" '"cp310"'
+want_status 0 "ident/abi-tag-varies"
+want_out 'lane=wheel-manylinux228-cp310' "ident/abi-tag-varies"
+ok "a different ABI tag yields a different lane, so a floor bump cannot restore the old cache"
+
+# 3. Fail CLOSED when the key is absent or malformed. A script that fell back to
+#    the bare stem would silently re-open the breach, and the pruner would not
+#    notice either.
+ident_with "$GOOD_REF" ''
+want_status 1 "ident/abi-tag-missing"
+ok "ident refuses a pyproject with no wheel.py-api rather than defaulting the lane"
+
+ident_with "$GOOD_REF" '"py3"'
+want_status 1 "ident/abi-tag-malformed"
+ok "ident refuses an ABI tag that is not cpNN/cpNNN"
 
 # ── ci/assert-wheel-image.sh — driven through BOTH outcomes ──────────────────
 #
@@ -543,7 +593,7 @@ WI_LOG="$sandbox/cibw.log"
 cat > "$WI_LOG" <<EOF
 info: something before
 Starting container image $IDENT_REF...
-info: This container will host the build for cp310-manylinux_x86_64...
+info: This container will host the build for cp312-manylinux_x86_64...
 EOF
 run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF"
 want_status 0 "assert-wheel-image/match"

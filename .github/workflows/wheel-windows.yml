@@ -12,7 +12,7 @@ name: Windows wheel (best-effort, on-demand)
 # for the deferral rationale.
 #
 # STATUS: SCAFFOLD. The Linux pipeline (cibuildwheel + scikit-build-core +
-# auditwheel, abi3 via wheel.py-api="cp310") is the proven v1.0 deliverable. The
+# auditwheel, abi3 via wheel.py-api="cp312") is the proven v1.0 deliverable. The
 # Windows port still needs: an MSVC-flavoured before-all (Conan profile with
 # compiler=msvc + static OpenSSL, no gcc-toolset), `delvewheel` (not auditwheel)
 # for the runtime-DLL repair, and validation of the SABI/-DPy_LIMITED_API link
@@ -55,8 +55,8 @@ jobs:
     env:
       CONAN_HOME: C:\Users\runneradmin\.conan2
       # Reuse the shared cibuildwheel config in pyproject [tool.cibuildwheel]; the
-      # build selector is the same cp310 (abi3) tag — only the platform differs.
-      CIBW_BUILD: "cp310-win_amd64"
+      # build selector is the same cp312 (abi3) tag — only the platform differs.
+      CIBW_BUILD: "cp312-win_amd64"
       CIBW_ARCHS_WINDOWS: "AMD64"
 
     steps:
@@ -83,7 +83,7 @@ jobs:
 
       - name: Install-test the Windows wheel (best-effort)
         run: |
-          $whl = Get-ChildItem wheelhouse\fixpp-*-cp310-abi3-win_amd64.whl | Select-Object -First 1
+          $whl = Get-ChildItem wheelhouse\fixpp-*-cp312-abi3-win_amd64.whl | Select-Object -First 1
           python -m venv $env:TEMP\wt
           & $env:TEMP\wt\Scripts\pip.exe install -q $whl.FullName pytest
           $env:PYTHONPATH = ""

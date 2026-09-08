@@ -4,12 +4,23 @@
 # `cmake --install` into a throwaway staging root and inspects what actually
 # landed there. Two modes, mutually exclusive by construction:
 #
-#   FIXPP_PY_WITNESS_MODE=absent   the OFF side (the six tier-1 `linux` legs).
-#                                  Rejects the Python payload ANYWHERE in the
-#                                  staged tree. Guards L-056-4.
+#   FIXPP_PY_WITNESS_MODE=absent   the OFF side (the four non-release tier-1
+#                                  `linux` legs). Rejects the Python payload
+#                                  ANYWHERE in the staged tree.
 #   FIXPP_PY_WITNESS_MODE=present  the ON side (every ordinary in-tree build).
-#                                  Requires the full payload. Guards feature
-#                                  056's LAY-1 / D-4 / T006 in-tree install.
+#                                  Requires the full payload, XMLs included.
+#                                  Guards 056's LAY-1 / D-4 / T006.
+#   FIXPP_PY_WITNESS_MODE=package  #257 — the two `-release` packaging legs.
+#                                  Requires the payload at a prefix-relative
+#                                  destination, requires the four bundled XMLs
+#                                  to be ABSENT (they ship once in the C++
+#                                  datadir), and RESOLVES all four through the
+#                                  real locator. Guards L-056-4's new shape.
+#
+# ⚠️ `package` is not a weaker `present`. Its XML clause runs in the OPPOSITE
+# direction — presence is the failure — and its locator round-trip is the only
+# cover the datadir-fallback branch has anywhere in the repo, because the wheel
+# cannot reach that branch by construction.
 #
 # ── Why this exists when tier1.yml already greps cmake_install.cmake ─────────
 #
@@ -55,8 +66,8 @@ foreach(_v FIXPP_MAIN_BUILD_DIR FIXPP_PY_WITNESS_MODE FIXPP_PY_WITNESS_WORK_DIR)
   endif()
 endforeach()
 
-if(NOT FIXPP_PY_WITNESS_MODE STREQUAL "absent" AND NOT FIXPP_PY_WITNESS_MODE STREQUAL "present")
-  message(FATAL_ERROR "run_python_install_witness.cmake: FIXPP_PY_WITNESS_MODE must be 'absent' or 'present', got '${FIXPP_PY_WITNESS_MODE}'.")
+if(NOT FIXPP_PY_WITNESS_MODE MATCHES "^(absent|present|package)$")
+  message(FATAL_ERROR "run_python_install_witness.cmake: FIXPP_PY_WITNESS_MODE must be 'absent', 'present' or 'package', got '${FIXPP_PY_WITNESS_MODE}'.")
 endif()
 
 set(_stage "${FIXPP_PY_WITNESS_WORK_DIR}")
@@ -167,20 +178,34 @@ if(FIXPP_PY_WITNESS_MODE STREQUAL "absent")
   return()
 endif()
 
-# ── present ──────────────────────────────────────────────────────────────────
+# ── present / package ────────────────────────────────────────────────────────
 # The install rules are OPTIONAL for fixpp.py only; this witness requires it
 # anyway. That is deliberate and it is the point of the mode: 056's LAY-1 says a
 # plain in-tree `cmake --install` installs a WORKING binding, and a silently
 # skipped fixpp.py ships a module nobody can import.
+#
+# ⚠️ #257: the two modes differ in the FOUR XMLs, in OPPOSITE directions — the
+# package layout does not duplicate them (they ship once in the C++ datadir), so
+# `package` REQUIRES THEIR ABSENCE. Requiring absence is not pedantry: their
+# presence would mean the exclusion silently stopped working and the archive
+# grew a second 1.9 MB copy, which is the accident #257 exists to avoid, and
+# nothing else in the build would notice.
 set(_required
   "fixpp.py"
   "fixpp_oo.py"
   "fixpp_dict_data.py"
-  "_fixpp_data/__init__.py"
+  "_fixpp_data/__init__.py")
+set(_forbidden "")
+set(_bundled_xmls
   "_fixpp_data/FIX42.xml"
   "_fixpp_data/FIX44.xml"
   "_fixpp_data/FIX50SP2.xml"
   "_fixpp_data/FIXT11.xml")
+if(FIXPP_PY_WITNESS_MODE STREQUAL "package")
+  set(_forbidden ${_bundled_xmls})
+else()
+  list(APPEND _required ${_bundled_xmls})
+endif()
 
 # ── The module is the ANCHOR, and it is found FIRST ──────────────────────────
 #
@@ -277,6 +302,85 @@ if(_missing)
     "--- staged tree ---\n  ${_all}")
 endif()
 
-message(STATUS "python-install-witness [present]: PASS — module at ${_module_path}, with 3 .py + "
-               "_fixpp_data/{__init__.py,4 XMLs} co-located beside it.")
+# ── #257 — what must NOT be there (package mode) ─────────────────────────────
+# Anchored at the discovered module dir for the same reason the requirements
+# are: the four XMLs exist in the C++ install too, so an unanchored name search
+# would fire on the copy that is SUPPOSED to be there.
+set(_present_forbidden "")
+foreach(_f IN LISTS _forbidden)
+  if(EXISTS "${_module_dir}/${_f}")
+    list(APPEND _present_forbidden "${_f}")
+  endif()
+endforeach()
+if(_present_forbidden)
+  string(REPLACE ";" "\n  " _pretty "${_present_forbidden}")
+  message(FATAL_ERROR
+    "python-install-witness [${FIXPP_PY_WITNESS_MODE}]: the package layout must NOT duplicate the\n"
+    "bundled dictionaries — the C++ install already ships all of dictionaries/ under\n"
+    "share/fixpp/dictionaries, and a second copy inside the payload is 1.9 MB of the same four\n"
+    "files in one archive with no stated precedence (#257). Found:\n  ${_pretty}\n\n"
+    "This means the FIXPP_PY_INSTALL_LAYOUT=package exclusion stopped taking effect.")
+endif()
+
+# ── #257 — the locator ROUND-TRIP, not a file-existence check ────────────────
+#
+# ⚠️ THIS IS THE ONLY THING THAT TESTS THE DATADIR FALLBACK. That branch of
+# fixpp_dict_data._resource() is unreachable from the wheel by construction (the
+# wheel bundles the XMLs, so the first branch always returns), so no amount of
+# python-wheel-test coverage touches it. Asserting that __init__.py EXISTS would
+# certify nothing: a marker with a wrong DICTIONARY_DIR, a relative hop broken by
+# a changed CMAKE_INSTALL_LIBDIR, or a locator that never consults it all leave
+# the file exactly where this check would look.
+#
+# It resolves ALL FOUR names through the real locator against the real staged
+# tree, and reads bytes back.
+if(FIXPP_PY_WITNESS_MODE STREQUAL "package")
+  find_program(_fixpp_py_witness_python NAMES python3 python)
+  if(NOT _fixpp_py_witness_python)
+    # FAIL CLOSED. A skipped functional check reports the same green as a passing
+    # one, and this is the only cover the fallback has.
+    message(FATAL_ERROR
+      "python-install-witness [package]: no python3 on PATH, so the locator round-trip\n"
+      "could not run. Refusing to report PASS on an unrun check — the datadir fallback\n"
+      "has no other cover.")
+  endif()
+  file(WRITE "${_stage}.probe.py"
+"import os, sys\n"
+"sys.path.insert(0, sys.argv[1])\n"
+"import fixpp_dict_data as d\n"
+"import _fixpp_data\n"
+"if not hasattr(_fixpp_data, 'DICTIONARY_DIR'):\n"
+"    raise SystemExit('the staged _fixpp_data is the WHEEL marker, not the generated package one')\n"
+"for name in sorted(d.BUNDLED_DICTIONARIES):\n"
+"    blob = d.dictionary_bytes(name)\n"
+"    if not blob.lstrip().startswith(b'<'):\n"
+"        raise SystemExit('%s resolved to something that is not XML' % name)\n"
+"    with d.dictionary_path(name) as p:\n"
+"        if not os.path.isfile(p):\n"
+"            raise SystemExit('%s yielded a non-existent path %s' % (name, p))\n"
+"print('LOCATOR_OK via', _fixpp_data.DICTIONARY_DIR)\n")
+  execute_process(
+    COMMAND "${_fixpp_py_witness_python}" "${_stage}.probe.py" "${_module_dir}"
+    RESULT_VARIABLE _probe_rc
+    OUTPUT_VARIABLE _probe_out
+    ERROR_VARIABLE  _probe_err)
+  file(REMOVE "${_stage}.probe.py")
+  if(NOT _probe_rc EQUAL 0)
+    message(FATAL_ERROR
+      "python-install-witness [package]: the locator could NOT resolve the bundled dictionaries\n"
+      "through the datadir fallback (rc=${_probe_rc}).\n\n"
+      "The payload excludes the four XMLs on the promise that fixpp_dict_data reaches them in\n"
+      "the C++ datadir via _fixpp_data.DICTIONARY_DIR. That promise is what just failed — a\n"
+      "consumer of packages-linux-*-release would get a locator that resolves to nothing.\n"
+      "Check the relative hop between FIXPP_PY_INSTALL_DIR and share/fixpp/dictionaries.\n"
+      "--- stdout ---\n${_probe_out}\n--- stderr ---\n${_probe_err}")
+  endif()
+  string(STRIP "${_probe_out}" _probe_out)
+  message(STATUS "python-install-witness [package]: PASS — module at ${_module_path}, 3 .py + "
+                 "generated _fixpp_data/__init__.py beside it, 4 XMLs correctly ABSENT, "
+                 "and all 4 resolved through the locator (${_probe_out}).")
+else()
+  message(STATUS "python-install-witness [present]: PASS — module at ${_module_path}, with 3 .py + "
+                 "_fixpp_data/{__init__.py,4 XMLs} co-located beside it.")
+endif()
 file(REMOVE_RECURSE "${_stage}")

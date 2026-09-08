@@ -1,20 +1,22 @@
 """Subinterpreter rejection witness for PY-004 Phase 3 (055 / US1)."""
 
-import sys
 import textwrap
 
 import pytest
 
 
-if sys.version_info < (3, 12):
-    # On the owed band (3.10/3.11) the CPython import barrier does not fire;
-    # a missing _xxsubinterpreters module is a broken runner, not a skip.
-    # Gate B owes a real 1201 witness on this band — make it mandatory.
-    import _xxsubinterpreters as xx
-else:
-    # 3.12+: the CPython import barrier covers the owed check.
-    # 3.13 renamed the module to _interpreters, so tolerate a skip here.
-    xx = pytest.importorskip("_xxsubinterpreters")
+# The wheel's floor is 3.12 (requires-python / wheel.py-api), so the mandatory
+# <3.12 arm this file used to carry is unreachable and has been removed with the
+# 3.10/3.11 install-test legs. On 3.12+ the CPython import barrier covers the
+# owed 1201 check.
+#
+# ⚠️ COVERAGE THIS SKIP COSTS, stated rather than absorbed: 3.13 renamed the
+# module to `_interpreters`, so `importorskip` SKIPS on 3.13 and 3.14 and this
+# witness now executes on the 3.12 leg ALONE. A green 3.13/3.14 leg is not
+# evidence the subinterpreter rejection still works there. Making it run on the
+# newer legs means porting to `_interpreters` (whose run-failure exception type
+# also changed), which is a behaviour change to the witness, not a rename.
+xx = pytest.importorskip("_xxsubinterpreters")
 
 
 def test_engine_constructor_rejects_subinterpreter():
@@ -51,11 +53,11 @@ def test_engine_constructor_rejects_subinterpreter():
                 ),
             )
         except xx.RunFailedError as exc:
-            # The import-barrier text is a 3.12+ CPython message.  On 3.10/3.11 it
-            # never appears, so tolerate it ONLY on >=3.12 — on the owed 3.10/3.11
-            # band ANY RunFailedError must fail the test (RC#5, Gate B r2).
+            # The import-barrier text is a 3.12+ CPython message, and 3.12 is now
+            # the wheel's floor — so the barrier is the ONLY RunFailedError this
+            # test tolerates. Any other one is a real failure (RC#5, Gate B r2).
             barrier = "module _fixpp does not support loading in subinterpreters"
-            if sys.version_info < (3, 12) or barrier not in str(exc):
+            if barrier not in str(exc):
                 raise
     finally:
         xx.destroy(interp)

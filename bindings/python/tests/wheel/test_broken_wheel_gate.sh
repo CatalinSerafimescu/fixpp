@@ -17,7 +17,7 @@
 # run can point it at a `uv`-managed CPython.
 set -euo pipefail
 
-WHEEL="${1:?usage: test_broken_wheel_gate.sh <path-to-built-cp310-abi3-wheel>}"
+WHEEL="${1:?usage: test_broken_wheel_gate.sh <path-to-built-cp312-abi3-wheel>}"
 PYTHON="${PYTHON:-python3}"
 
 [ -f "$WHEEL" ] || { echo "::error::wheel not found: $WHEEL"; exit 2; }
