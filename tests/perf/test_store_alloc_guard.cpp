@@ -48,7 +48,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
@@ -367,6 +366,12 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
     const long long after = mr.allocate_count();
     EXPECT_GE(after, baseline) << "allocator count went backwards — PMR accounting is broken";
 
+    // ⚠️ RELEASE THE STORE FIRST. `minted` owns the FileStore and is not destroyed
+    // until this function returns, so removing the directory here would violate the
+    // contract stated in support/temp_dir.hpp -- the one this change is about. It is
+    // invisible on this test (it is POSIX-only, and POSIX permits unlink-while-open),
+    // which is exactly why the contract has to be honoured rather than observed.
+    minted.value().reset();
     fixpp::test_support::remove_temp_dir(dir);
 }
 #endif  // !_WIN32}

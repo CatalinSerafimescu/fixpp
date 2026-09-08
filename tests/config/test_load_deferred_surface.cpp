@@ -324,8 +324,7 @@ TEST(LoadDeferredSurface, T020_TypoDistinction) {
 //   (c) engine.logger is non-null
 //
 // The file-sink directory is created in the system temp dir to avoid source-tree
-// pollution; it is removed at the end of the test (there is no RAII guard here --
-// an earlier version of this comment said there was).
+// pollution; it is removed at the end of the test.
 
 TEST(LoadDeferredSurface, T020_LoggerNotDeferred) {
     // Pre-create a temp directory for the file sink.
@@ -408,8 +407,8 @@ TEST(LoadDeferredSurface, T020_LoggerNotDeferred) {
     //
     // ⚠️ shutdown() above DRAINS but does not CLOSE the sink: the FileSink keeps
     // its handle until the Logger is destroyed, so removing the tree here used to
-    // fail on Windows and be swallowed with `ec` (#404 -- measured: this directory
-    // was one of six left behind by a Windows run).
+    // fail on Windows and be swallowed with `ec` (#404 -- this directory leaked on
+    // Windows).
     result->engine.logger.reset();
     for (auto& sess : result->sessions) sess.config.logger_override.reset();
     fixpp::test_support::remove_temp_dir(tmp_base);

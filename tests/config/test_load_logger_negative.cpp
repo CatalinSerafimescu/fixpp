@@ -37,7 +37,6 @@
 
 #include <gtest/gtest.h>
 
-#include "support/temp_dir.hpp"  // fixpp::test_support::try_remove_temp_dir (#404)
 
 #include "support/temp_dir.hpp"  // fixpp::test_support::try_remove_temp_dir (#404)
 
