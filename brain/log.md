@@ -13,7 +13,7 @@ status: stable
   with a per-file suspension-point obligation; `asio::co_spawn` holds `outstanding_work.tracked` on
   the SPAWN executor for the frame's lifetime, so the obligation collapses to two lexical clauses and
   the second — a `run()` on an already-stopped context — is a hazard the instruction never named.
-  Five arms in `tests/sync/test_co_spawn_work_guard_contract.cpp`; a DRIVE axis in
+  Arms in `tests/sync/test_co_spawn_work_guard_contract.cpp` establish it; a DRIVE axis in
   `ci/pump-get-sweep.sh`; hazard (a) in `tests/support/pump_until_ready.hpp` corrected by CONDITION
   plus a pointer to the arms, per class 2. Record:
   `decisions/speckit/pr-batch21-the-work-guard-and-the-condition-that-was-false.md`.

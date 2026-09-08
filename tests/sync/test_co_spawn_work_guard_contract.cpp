@@ -14,8 +14,8 @@
 // whole lifetime (`asio/impl/co_spawn.hpp`, `co_spawn_work_guard` /
 // `co_spawn_state`), so a live frame is outstanding work whatever it is parked
 // on. That converts a per-file question about suspension points into a
-// STRUCTURAL property — but only under two clauses, and the arms below establish
-// both, so the argument is measured rather than read off a header.
+// STRUCTURAL property — but only under the clauses below, and the arms establish
+// each of them, so the argument is measured rather than read off a header.
 //
 //   clause 1  the spawn executor's context IS the driven context   (arm 4)
 //   clause 2  the run is not a post-exhaustion no-op               (arm 3)

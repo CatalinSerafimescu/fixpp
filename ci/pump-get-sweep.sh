@@ -291,7 +291,7 @@ _BOUNDED = re.compile(r"\.run_for\(|\.run_until\(|\.poll\(|\.poll_one\(")
 # `co_spawn_work_guard` / `co_spawn_state`). A live frame is therefore outstanding work
 # on that context whatever it is parked on, so a `run()` that returned by EXHAUSTION
 # cannot have left it suspended. `tests/sync/test_co_spawn_work_guard_contract.cpp` is
-# what establishes this, including the two clauses it holds under:
+# what establishes this, including the clauses it holds under:
 #
 #   clause 1  the spawn executor's context IS the driven one   (arm 4 -- one token from
 #             arm 1 and it reads the opposite way, which is why `base` is compared)
@@ -347,8 +347,29 @@ def _last_name(tok):
     return tok.replace("->", ".").split(".")[-1]
 
 
+def _spawn_base(ex):
+    """The declared-context name a spawn executor expression resolves to, or "".
+
+    ⚠️ AN EXPRESSION THE CAPTURE TRUNCATED MUST RESOLVE TO NOTHING, NOT TO ITS PREFIX.
+    `_SPAWN_EXEC` stops at the first comma, so a first argument that CONTAINS one is cut
+    mid-expression -- and the prefix can still end in a name that resolves. Measured
+    counter-example, from a hostile round:
+
+        futs.push_back(asio::co_spawn((s.pool, ioc), waiter(), asio::use_future));
+
+    captures `(s.pool`, whose last segment is `pool`, which `_POOLDECL` has seen -- so the
+    row read `POOL`, a POSITIVE DISMISSAL, while the comma operator makes the real executor
+    `ioc`. Unbalanced parentheses are the tell that the capture is a fragment; a fragment
+    resolves to "", which is in no executor set and in no `ctxnames`, so the row escalates
+    and can never read EXHAUSTED. Control `4g`.
+    """
+    if ex.count("(") != ex.count(")"):
+        return ""
+    return _last_name(re.sub(r"\.get_executor\(\)$", "", ex).lstrip("*&"))
+
+
 def exhausts(seg, base, ctxnames):
-    """Does a run-to-EXHAUSTION on `base` appear in `seg`? Both spellings.
+    r"""Does a run-to-EXHAUSTION on `base` appear in `seg`? Both spellings.
 
     ⚠️ `base in ctxnames` IS EDGE 1 AGAIN, AND HERE IT GUARDS A POSITIVE DISMISSAL.
     `_UNBOUNDED` carries the same `([\w>.\-]+)\.run\(` and `unbounded()` gates it on the
@@ -575,7 +596,7 @@ def classify(text):
                 guarded.append(scope_of(start))
             else:
                 ex = execs.get(name, "?")
-                base = _last_name(re.sub(r'\.get_executor\(\)$', '', ex).lstrip('*&'))
+                base = _spawn_base(ex)
                 ec = ("POOL" if base in pools else
                       "THREADED" if base in threaded else
                       "THREAD-IN-FILE" if anythread else "CALLER-ONLY")
@@ -1059,6 +1080,21 @@ TEST(A, B) {
     (void)fut.get();
 }
 """, ("CALLER-ONLY", "HELPER", "NO-VISIBLE-EXHAUSTION")),
+    # ⚠️ 4g STRADDLES THE CAPTURE'S OWN LIMIT. The first co_spawn argument contains a comma,
+    # so `_SPAWN_EXEC` truncates it -- and the fragment `(s.pool` still ends in a declared
+    # pool name. Without `_spawn_base`'s balance check this reads POOL: a self-driving
+    # DISMISSAL on a row whose executor is actually the caller's `ioc`.
+    ("4g  a TRUNCATED executor expression must escalate, not resolve", """
+struct S { asio::thread_pool pool{1}; };
+TEST(A, B) {
+    S s;
+    asio::io_context ioc;
+    std::vector<std::future<void>> futs;
+    futs.push_back(asio::co_spawn((s.pool, ioc), waiter(), asio::use_future));
+    ioc.run();
+    for (auto& f : futs) f.get();
+}
+""", ("THREAD-IN-FILE", "RUN-UNBOUNDED", "NO-VISIBLE-EXHAUSTION")),
     ("4e  a container filled from a thread_pool     -> POOL", """
 TEST(A, B) {
     asio::thread_pool pool{4};
@@ -1189,10 +1225,16 @@ if disposition:
         print(f"  {n:>4}  {ec:<15} {dv}")
     print("  POOL and THREADED are omitted: those executors drive themselves, so whether")
     print("  the CALLER also ran the context decides nothing.")
-    print("  EXHAUSTED = a run-to-exhaustion on the SPAWN context dominates the get().")
-    print("  Why that settles anything, and the two clauses it holds under, are MEASURED:")
+    print("  EXHAUSTED = a run-to-exhaustion NAMING the spawn context appears above the")
+    print("  get(). That is a LEXICAL reading and it is NOT the claim `the run dominates")
+    print("  the get()` -- `a.ioc` and `b.ioc` are one name here, a `stop()` before the run")
+    print("  is invisible, and control flow is not modelled. Each of those reports")
+    print("  EXHAUSTED where the get() is NOT dominated: the DISMISSING direction.")
+    print("  ⚠️ SO IT IS AN ANNOTATION, NEVER A DISMISSAL. What it buys is an ordering of")
+    print("  the reading, not a verdict. The full list of shapes that fool it, and the")
+    print("  three clauses the underlying argument holds under, are at the DRIVE axis")
+    print("  comment in this file and MEASURED in:")
     print("      tests/sync/test_co_spawn_work_guard_contract.cpp")
-    print("  ⚠️ IT IS AN ANNOTATION, NOT A DISMISSAL -- it does not decide clause 2.")
     print("\n  READ THE CLASSES, NOT THE TOTAL. A candidate is a defect only where the")
     print("  CALLING thread must pump. CALLER-ONLY is the only executor class that says")
     print("  so on its own; POOL and THREADED say the opposite; THREAD-IN-FILE says READ")
