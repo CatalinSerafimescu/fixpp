@@ -232,7 +232,7 @@ struct Logger::Impl {
             // Step 2: load drain position with relaxed ordering.
             // A stale (under-advanced) read makes the ring look fuller → early drop.
             // Safe under drop_newest (contracts/log-core.md §Runtime obligations).
-            std::uint64_t r = read_sequence_.load(std::memory_order_relaxed);
+            std::uint64_t r = read_sequence_.load(std::memory_order_acquire);
 
             // Step 3: overflow check BEFORE claiming a slot (R5).
             if (w - r >= capacity_) {
