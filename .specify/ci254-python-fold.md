@@ -478,7 +478,7 @@ v0.1 enumerated **four** comment sites and §9 asserted a **two-file** blast rad
 | `bindings/python/tests/conftest.py:6` | ⚠️ **SUPERSEDED by Appendix D P3(3) → RE-POINT** (moved to table A as row 20). Round 2 was right: this does not merely *incidentally* name the matrix, it describes the **current CI vehicle**, and after the fold that description is false |
 | `bindings/python/tests/test_gil_release_canary.py:16` | ⚠️ **SUPERSEDED by Appendix D P3(3) → RE-POINT** (table A row 21). It is *also* already stale on its own terms — it says the matrix is none/asan/tsan and the ubsan lane landed at #159 — so the re-point fixes two things; say which is which in the diff so the pre-existing staleness is not read as introduced here |
 | `CMakeLists.txt:303` | **LEAVE** — an MSVC `/bigobj` comment mentioning the matrix as context |
-| `spec/coverage-index.md:656,658` · `spec/feature-catalogue.md:274–275` · `spec/behaviors-and-limitations-closed.md:138–142` · `spec/behaviors-and-limitations.md:1849` | **LEAVE — historical.** These record what the PY-001/002/003 features delivered *at the time*, keyed to closed L-rows. Rewriting them would falsify a record |
+| `spec/coverage-index.md:656,658` · `spec/feature-catalogue.md:274–275` · `spec/behaviors-and-limitations-closed.md:138–142` · `spec/behaviors-and-limitations.md` (`B-075-5`, cited by ID) | **LEAVE — historical.** These record what the PY-001/002/003 features delivered *at the time*, keyed to closed L-rows. Rewriting them would falsify a record |
 | `CLAUDE.md:10,12` · `CLAUDE-history.md:40` | **LEAVE — historical.** Merged-PR narratives for #251/#247/#159 |
 | `specs/<frozen>/**` | **LEAVE — frozen bundles**, out of scope by rule |
 
