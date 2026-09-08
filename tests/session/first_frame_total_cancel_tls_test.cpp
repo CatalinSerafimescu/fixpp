@@ -112,6 +112,31 @@ bool is_cancellation_attributable(expected_t<std::size_t> const& r) {
            r.error() == error::transport_handshake_timeout;
 }
 
+// ── A4's promptness bound, in SCHEDULER TURNS rather than wall clock (#394) ──
+//
+// PROMPT means "resolved in a bounded number of io_context dispatches", not
+// "resolved fast". Both legs count the `ioc.run_one()` calls it takes for the
+// emitted `total` to land as a completed read; that count is a property of the
+// cancellation PATH, so sanitizer or CI-lane instrumentation — which slows each
+// handler without adding handlers — cannot move it.
+//
+// It replaces an `EXPECT_LT(elapsed, 100ms)` band derived as watchdog/10 rather
+// than measured, which was wrong in BOTH directions:
+//   - it rejected by LOAD — 356ms on an instrumented TSan lane against 0ms here,
+//     a flake with no defect behind it;
+//   - it was BLIND to the class it names. A cancellation that resolves only
+//     after a long uncancellable cleanup chain (mutation: 50 `asio::post`s after
+//     a `disable_cancellation` reset in async_read_some's operation_aborted arm)
+//     costs 0ms of wall clock, so the band stayed GREEN while promptness was
+//     plainly gone.
+//
+// To re-derive the bound: instrument both loops to print their turn count and
+// run this binary. Measured 2 (leg A) / 1 (leg B), stable across runs; the
+// mutation above reads 52 / 51, so the bound below separates them with room on
+// each side. This is a CEILING, not the measurement — do not tighten it onto
+// the observed value, and re-derive rather than trusting this paragraph.
+constexpr int kMaxPromptTurns = 8;
+
 // ── Shared setup: real loopback mTLS pair, client goes silent post-handshake ─
 //
 // Client connects + completes the handshake, then sends nothing and does not
@@ -239,7 +264,9 @@ TEST(FirstFrameTotalCancelTls, LegA_JoinedHelper_CancellationAttributable) {
     auto const t_emit = std::chrono::steady_clock::now();
     signal.emit(asio::cancellation_type::total);
 
+    int turns = 0;
     while (!result.has_value()) {
+        ++turns;
         ASSERT_GT(ioc.run_one(), 0u) << "io_context ran out of work before the read completed — "
                                      << "a broken cell (mis-wired watchdog/timers), not a RED "
                                      << "proof (D-6.13b).";
@@ -273,12 +300,14 @@ TEST(FirstFrameTotalCancelTls, LegA_JoinedHelper_CancellationAttributable) {
         << "T6 leg A (SC-018): expected a cancellation-attributable outcome (transport_read_"
         << "cancelled or transport_handshake_timeout), got " << describe(*result);
 
-    // A4 — promptness, normative (D-6.10's 10x watchdog / 50x deadline margins).
-    EXPECT_LT(elapsed, 100ms)
-        << "T6 leg A (SC-018/FR-015 on TLS): expected completion within "
-        << "100ms of the total emit (got "
-        << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
-        << "ms) — cancellation must be PROMPT, not merely eventual.";
+    // A4 — promptness, normative (D-6.10), measured in scheduler turns; see
+    // kMaxPromptTurns for why not wall clock (#394).
+    EXPECT_LE(turns, kMaxPromptTurns)
+        << "T6 leg A (SC-018/FR-015 on TLS): the emitted `total` resolved only after " << turns
+        << " io_context dispatches (bound " << kMaxPromptTurns
+        << ") — cancellation must be PROMPT, not merely eventual. Wall clock is diagnostic "
+        << "only here, and does not carry the verdict: "
+        << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << "ms.";
 }
 
 // ── Leg B (raw async_read_some, no join) ──────────────────────────────────────
@@ -323,7 +352,9 @@ TEST(FirstFrameTotalCancelTls, LegB_DirectRead_ExactCancelled) {
     auto const t_emit = std::chrono::steady_clock::now();
     signal.emit(asio::cancellation_type::total);
 
+    int turns = 0;
     while (!result.has_value()) {
+        ++turns;
         ASSERT_GT(ioc.run_one(), 0u) << "io_context ran out of work before the read completed — "
                                      << "a broken cell (mis-wired watchdog/timers), not a RED "
                                      << "proof (D-6.13b).";
@@ -350,8 +381,10 @@ TEST(FirstFrameTotalCancelTls, LegB_DirectRead_ExactCancelled) {
         << "T6 leg B (SC-018): expected EXACTLY transport_read_cancelled (no join, no ordering "
         << "premise), got " << describe(*result);
 
-    EXPECT_LT(elapsed, 100ms)
-        << "T6 leg B (SC-018/FR-015 on TLS): expected completion within "
-        << "100ms of the total emit (got "
-        << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << "ms).";
+    // Promptness in scheduler turns — see kMaxPromptTurns (#394).
+    EXPECT_LE(turns, kMaxPromptTurns)
+        << "T6 leg B (SC-018/FR-015 on TLS): the emitted `total` resolved only after " << turns
+        << " io_context dispatches (bound " << kMaxPromptTurns
+        << "). Wall clock is diagnostic only here: "
+        << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << "ms.";
 }

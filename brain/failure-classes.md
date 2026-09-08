@@ -37,6 +37,17 @@ prints `0` for a whole syntax.
   no match. Assert how many files the sweep actually examined, and check whether any root is a link.
 - ⚠️ **A self-test written from the implementation certifies the implementation**, bug included. Build
   fixtures from the real artefact, verbatim.
+- ⚠️ **A THRESHOLD THAT FLAKES IS USUALLY ALSO BLIND, AND THE FLAKE IS THE HALF YOU NOTICE.** A
+  wall-clock band derived as a *ratio to some other timeout* rather than measured against the
+  behaviour rejects by machine load — the visible symptom, which gets an issue filed. Ask the other
+  question: **what defect would this assertion let through?** #394's `EXPECT_LT(elapsed, 100ms)` on
+  *"cancellation must be PROMPT, not merely eventual"* stayed **green** under a cancellation that
+  resolved only after 50 extra scheduler dispatches — 0 ms of wall clock, the exact class it names —
+  while going red at 357 ms on an instrumented lane with no defect at all. **Procedure:** find the
+  load-invariant quantity and assert on that. Instrumentation slows each handler; it does not add
+  handlers, so a count of `io_context` turns held at 2/1 across 27 runs spanning debug, TSan, idle
+  and 4× oversubscription. ⚠️ Fixing only the false-RED leaves an assertion that still cannot fail,
+  and makes it look repaired.
 - ⚠️ **A BOUND THAT IS LEXICALLY OUTSIDE THE THING IT BOUNDS MAY BE INSIDE IT AT RUNTIME.** A bounded
   driver around a blocking call bounds nothing if the blocking call ends up executing *on the driving
   thread*, inside a handler that driver dispatched: the driver never gets another turn, and the bound
