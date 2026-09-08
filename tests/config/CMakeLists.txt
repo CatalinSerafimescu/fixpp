@@ -104,6 +104,7 @@ target_compile_definitions(config_045_tests PRIVATE
 # a test binary, not a library).
 target_include_directories(config_045_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/src/config"
+    "${CMAKE_SOURCE_DIR}/tests"  # support/temp_dir.hpp (#404)
 )
 target_link_libraries(config_045_tests PRIVATE
     fixpp::config_toml

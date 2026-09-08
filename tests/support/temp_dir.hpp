@@ -53,6 +53,32 @@ inline std::filesystem::path unique_temp_dir(std::string_view tag) {
     return p;
 }
 
+/// Same retry, but NEVER THROWS. Returns true iff the directory is gone.
+///
+/// ⚠️ USE THIS ONE FROM A DESTRUCTOR. Destructors are implicitly noexcept, so the
+/// throwing final attempt in remove_temp_dir() would call std::terminate() rather
+/// than report anything -- turning a leaked temp directory into a crashed test
+/// run. Several RAII `Cleanup` guards (tests/config) are exactly that shape.
+///
+/// The RETRY is what fixes the Windows leak; the throw is only the diagnostic
+/// half. This keeps the fix and drops the half a destructor cannot use. A caller
+/// that can act on the failure should prefer remove_temp_dir() and get the error.
+inline bool try_remove_temp_dir(const std::filesystem::path& p) noexcept {
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        std::error_code ec;
+        std::filesystem::remove_all(p, ec);
+        if (!ec && !std::filesystem::exists(p, ec)) return true;
+#ifndef _WIN32
+        // POSIX allows unlink-while-open, so a first failure is a real error
+        // (permissions, a non-empty mount) that retrying will not clear.
+        break;
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+#endif
+    }
+    return false;
+}
+
 /// Robustly remove a temp directory created by unique_temp_dir().
 ///
 /// POSIX allows removing a directory whose files are still open (unlink-while-
@@ -68,15 +94,9 @@ inline std::filesystem::path unique_temp_dir(std::string_view tag) {
 /// whose store is still alive. Retries on Windows, then a final throwing
 /// attempt surfaces a clear error if something is genuinely still holding it.
 inline void remove_temp_dir(const std::filesystem::path& p) {
-#ifdef _WIN32
-    for (int attempt = 0; attempt < 100; ++attempt) {
-        std::error_code ec;
-        std::filesystem::remove_all(p, ec);
-        if (!ec && !std::filesystem::exists(p)) return;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-#endif
+    if (try_remove_temp_dir(p)) return;
     std::filesystem::remove_all(p);  // POSIX: one shot; Windows: final (throwing) attempt
 }
+
 
 }  // namespace fixpp::test_support

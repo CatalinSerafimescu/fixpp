@@ -56,6 +56,8 @@
 
 #include <gtest/gtest.h>
 
+#include "support/temp_dir.hpp"  // fixpp::test_support::remove_temp_dir (#404)
+
 #include <asio/io_context.hpp>
 #include <chrono>
 #include <filesystem>
@@ -308,6 +310,14 @@ TEST(LoadLogger, T008_DuplicateFileSinkFanout) {
     EXPECT_TRUE(has_file_with_prefix(sink_dir_b, "fanout_b"))
         << "Expected a log file 'fanout_b*' in sink_dir_b (" << sink_dir_b
         << "); sink_dir_b did not receive a log record — fan-out broken";
+
+    // #404: this test used to rely on the next run's start-of-test reset, which
+    // leaves the directories behind in between -- measured on Windows. Drop the
+    // Logger first so the FileSink handles are closed.
+    result->engine.logger.reset();
+    for (auto& sess : result->sessions) sess.config.logger_override.reset();
+    fixpp::test_support::remove_temp_dir(sink_dir_a);
+    fixpp::test_support::remove_temp_dir(sink_dir_b);
 }
 
 // ── T008_EquivalenceOtlpSink (build-conditional) ────────────────────────────
@@ -429,6 +439,11 @@ TEST(LoadLogger, T008_EquivalenceOtlpSink) {
     EXPECT_TRUE(found)
         << "Expected a log file 't008_otlp*' in " << log_dir
         << "; file sink did not produce a file — wrong resolved logger configuration";
+
+    // #404: see T008_DuplicateFileSinkFanout.
+    result->engine.logger.reset();
+    for (auto& sess : result->sessions) sess.config.logger_override.reset();
+    fixpp::test_support::remove_temp_dir(log_dir);
 }
 
 #endif  // FIXPP_CONFIG_HAS_OTLP
@@ -534,6 +549,12 @@ TEST(LoadLogger, T008_OtlpSinkCountAndOrder) {
     // ORDER + TYPE: sinks[1] is OtlpLogSink
     EXPECT_NE(dynamic_cast<fixpp::log::OtlpLogSink*>(pending.engine->sinks[1].get()), nullptr)
         << "sinks[1] must be an OtlpLogSink; order or type is wrong";
+
+    // #404: no Logger was constructed here -- the sinks are owned by `pending`,
+    // so release THAT before removing the directory they opened files in.
+    pending.engine.reset();
+    pending.sessions.clear();
+    fixpp::test_support::remove_temp_dir(log_dir);
 }
 
 #endif  // FIXPP_CONFIG_HAS_OTLP (OtlpSinkCountAndOrder)
@@ -630,6 +651,10 @@ TEST(LoadLogger, T008_OtlpSinkResolvedNegative) {
     EXPECT_TRUE(found)
         << "expected missing_required on endpoint for the otlp sink; diagnostics:\n"
         << diag_string(result.error());
+
+    // #404: the load FAILED here, so no Logger exists and nothing ever opened a
+    // file in log_dir -- no owner to release, just the directory to remove.
+    fixpp::test_support::remove_temp_dir(log_dir);
 }
 
 #endif  // FIXPP_CONFIG_HAS_OTLP
@@ -798,11 +823,14 @@ TEST(LoadLogger, T027_QuickstartLoad) {
         if (result->sessions[0].config.logger_override)
             [[maybe_unused]] auto r2 = result->sessions[0].config.logger_override->shutdown();
     }
-    {
-        std::error_code ec;
-        std::filesystem::remove_all(log_dir, ec);
-        std::filesystem::remove_all(acme_dir, ec);
-    }
+    // ⚠️ shutdown() DRAINS; it does not CLOSE the sink. The FileSink still holds an
+    // open handle in log_dir until the Logger is destroyed, and removing a directory
+    // out from under a live handle is exactly what fails on Windows (#404). Release
+    // the owners first, then remove and let a genuine failure speak.
+    result->engine.logger.reset();
+    for (auto& sess : result->sessions) sess.config.logger_override.reset();
+    fixpp::test_support::remove_temp_dir(log_dir);
+    fixpp::test_support::remove_temp_dir(acme_dir);
 }
 
 // =============================================================================
@@ -1002,8 +1030,9 @@ TEST(LoadLogger, T026_FileSinkRotationParamsBehavioral) {
     EXPECT_TRUE(live_present)
         << "the live file \"" << live_name << "\" must exist in " << sink_dir;
 
-    {
-        std::error_code ec;
-        std::filesystem::remove_all(sink_dir, ec);
-    }
+    // Same as T027 above: drop the Logger so the FileSink's handle is closed before
+    // the directory goes (#404).
+    result->engine.logger.reset();
+    for (auto& sess : result->sessions) sess.config.logger_override.reset();
+    fixpp::test_support::remove_temp_dir(sink_dir);
 }
