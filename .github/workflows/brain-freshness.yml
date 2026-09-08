@@ -161,17 +161,14 @@ jobs:
           rc=0
           python3 tools/check_line_citations.py --range "$BASE..$HEAD" || rc=1
           echo
-          # --shift-audit REFUSES a range with zero changed files, on the sound
-          # ground that an empty measurement must not read as a clean audit. A
-          # real event can still produce one (a PR force-pushed back onto its
-          # base, a branch-pointer move), and there a hard failure would be
-          # noise: nothing changed, so nothing can have rotted. Distinguished
-          # HERE, where the range is known to be real, rather than by softening
-          # the tool -- and announced, never silently skipped.
-          if [ -z "$(git diff --name-only "$BASE" "$HEAD")" ]; then
-            echo "$BASE..$HEAD changes no file -- nothing can have rotted."
-            echo "(the addition gate above still ran; the self-test proved the instrument)"
-          else
-            python3 tools/check_line_citations.py --shift-audit "$BASE..$HEAD" || rc=1
-          fi
+          # --allow-empty-range: --shift-audit otherwise REFUSES a zero-file
+          # range, rightly, since an empty measurement must not read as a clean
+          # audit. A real event can still produce one (a PR force-pushed back
+          # onto its base, a branch-pointer move); the range above came from
+          # such an event and was checked to exist, so here an empty range means
+          # nothing changed and nothing can have rotted. The tool still decides
+          # what "empty" IS -- re-deriving that with a second `git diff` here
+          # would be a fact in two places, and they drift.
+          python3 tools/check_line_citations.py --shift-audit "$BASE..$HEAD" \
+            --allow-empty-range || rc=1
           exit "$rc"
