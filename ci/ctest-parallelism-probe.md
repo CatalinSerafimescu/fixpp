@@ -601,11 +601,12 @@ grep -n 'EXPECT_LT\|EXPECT_GT' tests/log/test_file_sink_async_fsync.cpp
 
 `RUN_SERIAL` is kept for whatever that recipe still returns.
 
+Everything else has enough headroom that 2× CPU contention should not reach it; that expectation is
+what acceptance criterion 3 exists to falsify.
+
 ⚠️ **Cite these by TEST NAME, not by line.** The four rows here were `file:NNN` citations and every
 one of them rotted the moment the file was edited — two into assertions that no longer exist at
-all. A test name survives an edit; a line number does not. Everything else has enough headroom that
-2× CPU contention should not reach it; that expectation is what acceptance criterion 3 exists to
-falsify.
+all. A test name survives an edit; a line number does not.
 
 The same sweeps found **no** cross-test fixed path, fixed listening port, Unix socket, or
 process-global env/cwd writer; every listener binds `127.0.0.1:0`; `codegen_determinism_test` uses

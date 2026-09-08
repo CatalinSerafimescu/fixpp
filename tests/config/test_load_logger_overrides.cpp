@@ -45,6 +45,9 @@
 
 #include <gtest/gtest.h>
 
+#include "support/temp_dir.hpp"           // fixpp::test_support::remove_temp_dir (#404)
+#include "logger_owner_release.hpp"      // fixpp::config_test::release_log_owners
+
 #include <asio/io_context.hpp>
 #include <chrono>
 #include <filesystem>
@@ -197,6 +200,15 @@ TEST(LoadLoggerOverrides, T018_MultiSessionOverride) {
     {
         [[maybe_unused]] auto res = result->engine.logger->shutdown();
     }
+    // #404: this test had no end-of-test cleanup, so both directories were left
+    // behind -- and these live under FIXPP_CONFIG_FIXTURE_DIR, i.e. in the SOURCE
+    // TREE, not %TEMP%. That is why the temp-dir leak measurement could not see
+    // them. shutdown() above does not close the sinks; release_log_owners does.
+    {
+        fixpp::config_test::release_log_owners(*result);
+        fixpp::test_support::remove_temp_dir(engine_log_dir);
+        fixpp::test_support::remove_temp_dir(session0_log_dir);
+    }
 
     // ── Assertion (c): session[1] has NO logger override ─────────────────────
     //
@@ -290,5 +302,11 @@ TEST(LoadLoggerOverrides, DefaultLoggerMergedToSessions) {
         [[maybe_unused]] auto r0 = s0_override->shutdown();
         [[maybe_unused]] auto r1 = s1_override->shutdown();
         [[maybe_unused]] auto re = result->engine.logger->shutdown();
+    }
+    {
+        // #404: as above -- source-tree fixture dirs with no end-of-test cleanup.
+        fixpp::config_test::release_log_owners(*result);
+        fixpp::test_support::remove_temp_dir(engine_dir);
+        fixpp::test_support::remove_temp_dir(default_dir);
     }
 }

@@ -51,6 +51,7 @@
 #include <gtest/gtest.h>
 
 #include "support/temp_dir.hpp"  // fixpp::test_support::remove_temp_dir (#404)
+#include "logger_owner_release.hpp"  // fixpp::config_test::release_log_owners
 
 #include <asio/io_context.hpp>
 #include <filesystem>
@@ -409,7 +410,6 @@ TEST(LoadDeferredSurface, T020_LoggerNotDeferred) {
     // its handle until the Logger is destroyed, so removing the tree here used to
     // fail on Windows and be swallowed with `ec` (#404 -- this directory leaked on
     // Windows).
-    result->engine.logger.reset();
-    for (auto& sess : result->sessions) sess.config.logger_override.reset();
+    fixpp::config_test::release_log_owners(*result);
     fixpp::test_support::remove_temp_dir(tmp_base);
 }

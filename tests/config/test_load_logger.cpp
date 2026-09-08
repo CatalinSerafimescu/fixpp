@@ -57,6 +57,7 @@
 #include <gtest/gtest.h>
 
 #include "support/temp_dir.hpp"  // fixpp::test_support::remove_temp_dir (#404)
+#include "logger_owner_release.hpp"  // fixpp::config_test::release_log_owners
 
 #include <asio/io_context.hpp>
 #include <chrono>
@@ -119,21 +120,6 @@ std::filesystem::path fixture_dir() {
     return std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}};
 }
 
-
-// ⚠️ shutdown() DRAINS BUT DOES NOT CLOSE. Logger::shutdown() signals and joins
-// the drain thread; sink->close() happens only in Logger::Impl::~Impl(). So a
-// test that has merely shut a logger down still holds an open handle inside its
-// log directory, and removing that directory is the Windows failure #404 fixes.
-//
-// Releasing every owner the loader assigns is therefore a PRECONDITION of
-// remove_temp_dir(), not tidiness. Defined once so the set of owning fields has
-// a single home: a new logger-holding field on the bundle would otherwise have
-// to be remembered at each call site independently.
-template <typename Bundle>
-void release_log_owners(Bundle& bundle) {
-    bundle.engine.logger.reset();
-    for (auto& sess : bundle.sessions) sess.config.logger_override.reset();
-}
 
 }  // namespace
 
@@ -213,6 +199,13 @@ TEST(LoadLogger, T008_EquivalenceFileSink) {
     EXPECT_TRUE(found)
         << "Expected a log file starting with 'fixpp_t008' in " << log_dir
         << "; file not found — wrong directory or base_name in resolved logger";
+
+    // #404: no end-of-test cleanup existed here either, and this directory is
+    // under FIXPP_CONFIG_FIXTURE_DIR -- the SOURCE TREE (gitignored via
+    // fixtures/.gitignore `logs/`), not %TEMP%. The temp-dir leak count could not
+    // see it, which is why it survived the first pass of this change.
+    fixpp::config_test::release_log_owners(*result);
+    fixpp::test_support::remove_temp_dir(log_dir);
 }
 
 // ── T008_DuplicateFileSinkFanout ─────────────────────────────────────────────
@@ -329,7 +322,7 @@ TEST(LoadLogger, T008_DuplicateFileSinkFanout) {
 
     // #404: this test had no end-of-test cleanup at all -- it relied on the NEXT
     // run's start-of-test reset, which leaves the directories behind in between.
-    release_log_owners(*result);
+    fixpp::config_test::release_log_owners(*result);
     fixpp::test_support::remove_temp_dir(sink_dir_a);
     fixpp::test_support::remove_temp_dir(sink_dir_b);
 }
@@ -455,7 +448,7 @@ TEST(LoadLogger, T008_EquivalenceOtlpSink) {
         << "; file sink did not produce a file — wrong resolved logger configuration";
 
     // #404: as above -- no end-of-test cleanup existed here either.
-    release_log_owners(*result);
+    fixpp::config_test::release_log_owners(*result);
     fixpp::test_support::remove_temp_dir(log_dir);
 }
 
@@ -837,7 +830,7 @@ TEST(LoadLogger, T027_QuickstartLoad) {
             [[maybe_unused]] auto r2 = result->sessions[0].config.logger_override->shutdown();
     }
     // #404: the shutdown() above is not enough on its own -- see release_log_owners.
-    release_log_owners(*result);
+    fixpp::config_test::release_log_owners(*result);
     fixpp::test_support::remove_temp_dir(log_dir);
     fixpp::test_support::remove_temp_dir(acme_dir);
 }
@@ -1040,6 +1033,6 @@ TEST(LoadLogger, T026_FileSinkRotationParamsBehavioral) {
         << "the live file \"" << live_name << "\" must exist in " << sink_dir;
 
     // #404: see release_log_owners -- shutdown() alone leaves the handle open.
-    release_log_owners(*result);
+    fixpp::config_test::release_log_owners(*result);
     fixpp::test_support::remove_temp_dir(sink_dir);
 }
