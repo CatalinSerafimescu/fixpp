@@ -274,6 +274,41 @@ _THREADRUN = re.compile(r"(?:std::jthread|std::thread|std::async)[^;]{0,400}?(\w
 _UNBOUNDED = re.compile(r"([\w>.\-]+)\.run\(")
 _BOUNDED = re.compile(r"\.run_for\(|\.run_until\(|\.poll\(|\.poll_one\(")
 
+# ── the DRIVE axis (batch 21) ────────────────────────────────────────────────
+# ⚠️ THIS AXIS EXISTS BECAUSE `RUN-UNBOUNDED` DOES NOT SAY *WHICH* CONTEXT RAN.
+# `unbounded(seg)` is satisfied by a `.run(` on ANY context declared in the file, and
+# the pump-shape axis then reads RUN-UNBOUNDED whether that run drove the context this
+# future was spawned on or a different one entirely. For deciding whether the run above
+# a site dominates it, that is the whole question.
+#
+# WHAT MAKES THE ANSWER STRUCTURAL RATHER THAN PER-FILE, and it is measured, not read
+# off a header: `asio::co_spawn` holds `execution::outstanding_work.tracked` on the
+# SPAWN executor for the frame's whole lifetime (`asio/impl/co_spawn.hpp`,
+# `co_spawn_work_guard` / `co_spawn_state`). A live frame is therefore outstanding work
+# on that context whatever it is parked on, so a `run()` that returned by EXHAUSTION
+# cannot have left it suspended. `tests/sync/test_co_spawn_work_guard_contract.cpp` is
+# the four arms that establish this, including the two clauses it holds under:
+#
+#   clause 1  the spawn executor's context IS the driven one   (arm 4 -- one token from
+#             arm 1 and it reads the opposite way, which is why `base` is compared)
+#   clause 2  the run is not a post-exhaustion no-op            (arm 3 -- `run()` on a
+#             stopped context dispatches NOTHING; `restart()` is the site's own to write)
+#
+# ⚠️ CLAUSE 2 IS NOT DECIDED HERE AND THIS AXIS DOES NOT CLAIM IT. Whether an earlier
+# un-restarted `run()` precedes a site is a question about state before the spawn, which
+# `seg` (statements SINCE the spawn) cannot see. So EXHAUSTED is an ANNOTATION, in the
+# same sense THREAD-IN-FILE is escalation: it says a dominating exhaustion drive on the
+# right context is present, not that the site is safe.
+# ⚠️ AND `base` IS LEXICAL. An alias, a `&`-bound reference, a strand spelled through
+# `.get_executor()` on something else, or a context reached through a fixture member this
+# regex does not resolve all read as a different name. The error direction is toward
+# NO-VISIBLE-EXHAUSTION -- more reading, not less.
+#
+#   drive:  EXHAUSTED             a `<spawn-ctx>.run(` or `run_to_exhaustion_or_report(
+#                                 <spawn-ctx>, ...)` dominates the get().
+#           NO-VISIBLE-EXHAUSTION it does not. READ THE SITE.
+_EXHAUST_HELPER = "run_to_exhaustion_or_report"
+
 # ── the CALL-SITE-SCOPE axis (batch 20) ──────────────────────────────────────
 # ⚠️ THIS AXIS EXISTS BECAUSE BATCH 19's BUCKET WENT TO 1 AND ITS CLASS DID NOT.
 # `CALLER-ONLY x HELPER` counted 9 sites before batch 19 and 1 after, and the record
@@ -379,7 +414,16 @@ def coroutine_line_spans(lines):
 # ⚠️ IT MUST NOT ADMIT `unique_ptr::get()`. A naive get-anchored probe over the same
 # corpus returned 29 hits of which 16 were `dynamic_cast<T*>(client.get())` -- the
 # receiver has to trace back to a `co_spawn(..., use_future)` or the axis is noise.
-_PUSH_SPAWN = re.compile(r"\b(\w+)\s*\.\s*(?:push_back|emplace_back)\s*\(\s*asio::co_spawn\s*\(")
+# ⚠️ GROUP 2 IS THE SPAWN EXECUTOR, AND IT WAS MISSING UNTIL #289 BATCH 21. The batch-20
+# form captured only the container, and `execs` was then filled with the REMAINDER of the
+# push statement -- so `base` for a container row was the tail of
+# `ioc, waiter_body(), asio::use_future));`, i.e. `use_future));`. That name is in neither
+# `pools` nor `threaded`, so every container row fell through to THREAD-IN-FILE or
+# CALLER-ONLY by the value of `anythread` alone. It never produced a false CLEAN -- both
+# fallbacks are the escalating ones, and in a thread-free file CALLER-ONLY is also the
+# right answer -- but it was safe by ACCIDENT, not by measurement: a container filled from
+# a `thread_pool` would have read CALLER-ONLY rather than POOL. Control: `4c`.
+_PUSH_SPAWN = re.compile(r"\b(\w+)\s*\.\s*(?:push_back|emplace_back)\s*\(\s*asio::co_spawn\s*\(\s*([^,]+?)\s*,")
 _RANGE_FOR = re.compile(r"\bfor\s*\(\s*(?:const\s+)?auto\s*&?&?\s*(\w+)\s*:\s*(\w+)\s*\)")
 
 
@@ -424,7 +468,7 @@ def classify(text):
             name = pm.group(1)
             known.add(name)
             guarded_state.setdefault(name, False)
-            execs.setdefault(name, _PUSH_SPAWN.sub("", stmt).strip())
+            execs.setdefault(name, pm.group(2))
             since.setdefault(name, [])
         # ⚠️ THE ALIAS PERSISTS UNTIL THE NEXT RANGE-FOR OR BOUNDARY, on purpose: the
         # guard and the `.get()` are separate statements inside the loop BODY, so an
@@ -484,8 +528,15 @@ def classify(text):
                 seg = " ".join(since.get(name, []))
                 pc = ("RUN-UNBOUNDED" if unbounded(seg) else
                       "RUN-BOUNDED" if _BOUNDED.search(seg) else "HELPER")
+                # Both spellings that run to EXHAUSTION, and both must name `base` --
+                # a run on a different context dominates nothing (clause 1, arm 4).
+                dv = ("EXHAUSTED"
+                      if base and (re.search(rf'\b{re.escape(base)}\s*\.\s*run\(', seg) or
+                                   re.search(rf'{_EXHAUST_HELPER}\s*\(\s*[\w>.\-]*\b'
+                                             rf'{re.escape(base)}\s*,', seg))
+                      else "NO-VISIBLE-EXHAUSTION")
                 bad.append((start + 1, lines[start].strip() or stmt[:70], ec, pc,
-                            scope_of(start)))
+                            scope_of(start), dv))
     return guarded, bad
 
 # ── SELF-TEST on SYNTHETIC fixtures ──────────────────────────────────────────
@@ -899,6 +950,61 @@ TEST(A, B) {
 """, (1, "CALLER-SIDE")),
 ]
 
+# ── controls for the DRIVE axis and the container SPAWN EXECUTOR (batch 21) ──
+# The pair that carries this axis is 4a/4b: the SAME two statements, differing only in
+# WHICH context the bare run() names. A rule that cannot separate them is not measuring
+# domination, it is counting the word `run`.
+# `want` is (executor-class, pump-shape, drive).
+DRIVE_CASES = [
+    ("4a  bare run() on the SPAWN context           -> EXHAUSTED", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run();
+    (void)fut.get();
+}
+""", ("CALLER-ONLY", "RUN-UNBOUNDED", "EXHAUSTED")),
+    ("4b  ...the SAME run() on ANOTHER context      -> NO-VISIBLE-EXHAUSTION", """
+TEST(A, B) {
+    asio::io_context ioc;
+    asio::io_context other;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    other.run();
+    (void)fut.get();
+}
+""", ("CALLER-ONLY", "RUN-UNBOUNDED", "NO-VISIBLE-EXHAUSTION")),
+    ("4c  run_to_exhaustion_or_report naming ANOTHER future -> EXHAUSTED", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
+    std::vector<std::future<void>> futs;
+    futs.push_back(asio::co_spawn(ioc, waiter(), asio::use_future));
+    if (!run_to_exhaustion_or_report(ioc, fh, "Site")) return;
+    for (auto& f : futs) f.get();
+}
+""", ("CALLER-ONLY", "HELPER", "EXHAUSTED")),
+    ("4d  a BOUNDED run_for is not exhaustion       -> NO-VISIBLE-EXHAUSTION", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run_for(200ms);
+    (void)fut.get();
+}
+""", ("CALLER-ONLY", "RUN-BOUNDED", "NO-VISIBLE-EXHAUSTION")),
+    # ⚠️ 4e IS THE CONTROL FOR THE `_PUSH_SPAWN` EXECUTOR CAPTURE, and it is the one that
+    # would have read a POSITIVE DISMISSAL wrong rather than merely escalating: before
+    # batch 21 the container's spawn executor was never parsed, so this case read
+    # THREAD-IN-FILE (`asio::thread_pool` sets `anythread`) instead of POOL.
+    ("4e  a container filled from a thread_pool     -> POOL", """
+TEST(A, B) {
+    asio::thread_pool pool{4};
+    std::vector<std::future<void>> futs;
+    futs.push_back(asio::co_spawn(pool, s.open(), asio::use_future));
+    for (auto& f : futs) f.get();
+}
+""", ("POOL", "HELPER", "NO-VISIBLE-EXHAUSTION")),
+]
+
 ok = True
 if not quiet:
     print("=== SELF-TEST: get-anchored sweep (synthetic fixtures) ===")
@@ -922,6 +1028,14 @@ for name, src, (want_n, want_sc) in SCOPE_CASES:
     ok &= good
     if not quiet:
         print(f"  {'ok   ' if good else '!!FAIL'} scope: {name}  -> {got[0]} row(s), {got[1]}")
+for name, src, want in DRIVE_CASES:
+    rows_ = classify(src)[1]
+    got = ((rows_[0][2], rows_[0][3], rows_[0][5]) if len(rows_) == 1
+           else ("<%d rows>" % len(rows_), "", ""))
+    good = got == want
+    ok &= good
+    if not quiet:
+        print(f"  {'ok   ' if good else '!!FAIL'} drive: {name}  -> {got[0]}/{got[1]}/{got[2]}")
 if not ok:
     sys.exit("\nCONTROL FAILED -- sweep output is NOT evidence. Fix before trusting a number.")
 if not quiet:
@@ -961,19 +1075,22 @@ for p in files:
 
 for rel, b in rows:
     print(f"{rel}  ({len(b)} unguarded)")
-    for ln, txt, ec, pc, sc in b:
-        tag = f"  [{ec} x {pc} x {sc}]" if disposition else ""
+    for ln, txt, ec, pc, sc, dv in b:
+        tag = f"  [{ec} x {pc} x {sc} x {dv}]" if disposition else ""
         print(f"    {ln:5d}  {txt[:76]}{tag}")
 if disposition:
     import collections
     tab = collections.Counter()
     scope_tab = collections.Counter()
     per = collections.defaultdict(collections.Counter)
+    drive_tab = collections.Counter()
     for rel, b in rows:
-        for _, _, ec, pc, sc in b:
+        for _, _, ec, pc, sc, dv in b:
             tab[(ec, pc)] += 1
             per[(ec, pc)][str(rel)] += 1
             scope_tab[sc] += 1
+            if ec == "CALLER-ONLY":
+                drive_tab[dv] += 1
     print("\n=== DISPOSITION (executor-class x pump-shape) ===")
     for (ec, pc), n in tab.most_common():
         print(f"  {n:>4}  {ec:<15} {pc}")
@@ -988,6 +1105,19 @@ if disposition:
     print("\n  CORO means the get() is inside an `awaitable`-returning function or lambda,")
     print("  so it runs ON the pumping thread and NO outer driver bounds it -- the")
     print("  executor axis cannot express that, which is why this one exists.")
+    print("\n=== DRIVE, over the CALLER-ONLY rows only (the axis batch 20 could not compute) ===")
+    for dv, n in drive_tab.most_common():
+        print(f"  {n:>4}  {dv}")
+    print("  Restricted to CALLER-ONLY on purpose: for POOL and THREADED the executor")
+    print("  drives itself, so whether the CALLER also ran it decides nothing.")
+    print("\n  EXHAUSTED means a run-to-exhaustion on the SPAWN context dominates the")
+    print("  get(). asio::co_spawn holds outstanding work on the spawn executor for the")
+    print("  frame's lifetime, so such a run cannot have returned with the frame parked --")
+    print("  whatever it was parked ON. That is a STRUCTURAL argument, not a per-file one,")
+    print("  and tests/sync/test_co_spawn_work_guard_contract.cpp is what measures it.")
+    print("  ⚠️ IT IS AN ANNOTATION, NOT A DISMISSAL. It does not decide clause 2 -- a")
+    print("  run() on an already-STOPPED context dispatches nothing, and whether one")
+    print("  precedes the spawn is invisible to this axis.")
     print("\n  READ THE CLASSES, NOT THE TOTAL. A candidate is a defect only where the")
     print("  CALLING thread must pump. CALLER-ONLY is the only executor class that says")
     print("  so on its own; POOL and THREADED say the opposite; THREAD-IN-FILE says READ")
