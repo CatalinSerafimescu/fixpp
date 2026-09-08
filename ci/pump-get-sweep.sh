@@ -309,25 +309,16 @@ _BOUNDED = re.compile(r"\.run_for\(|\.run_until\(|\.poll\(|\.poll_one\(")
 # toward NO-VISIBLE-EXHAUSTION -- more reading, not less.
 #
 # ⚠️ THAT IS A PROPERTY OF NAME RESOLUTION, NOT OF THE AXIS, AND READING IT AS THE LATTER
-# IS THE MISTAKE. Inputs that produce a FALSE `EXHAUSTED` -- the dismissing direction:
-#   - `a.ioc` spawned, `b.ioc` run: `_last_name` collapses both to `ioc`.
-#   - a `run()` inside a declared-but-never-invoked lambda, in one arm of an `if` the
-#     get() does not share, or in a SHADOWING nested block (`{ asio::io_context ioc;
-#     ioc.run(); }` between the spawn and the get): this is a LEXICAL scan and it does not
-#     model control flow or C++ scope.
-#   - a `run()` inside a STRING LITERAL: `blank_comments` blanks comments and deliberately
-#     keeps literals, because other controls depend on that.
-#   - `ioc.stop(); ioc.run();`: a THIRD way `run()` returns, alongside (a) and (b) in
-#     `pump_until_ready.hpp`. The frame stays parked and the future stays unready, and
-#     neither this axis nor a `restart()`-shaped sweep can see it.
+# IS THE MISTAKE. The shapes that produce a FALSE `EXHAUSTED` -- the DISMISSING direction --
+# are NOT listed here in prose. They are `LIMIT_CASES` below: real inputs, run through
+# `classify()` on every invocation, each asserting the wrong answer the axis actually gives.
 #
-# ⚠️ EVERY ENTRY ABOVE WAS RUN THROUGH `classify()`; AN EARLIER REVISION SAID THAT AND ONE
-# ENTRY WAS FALSE. It listed "sibling blocks reusing a context NAME", importing the
-# guarded-state boundary limitation registered above onto THIS axis -- where it does not
-# apply, because `since[]` is reset at every `_AUTO_SPAWN` binding, not at a boundary. All
-# three sibling constructions read NO-VISIBLE-EXHAUSTION. The shape that does reproduce is
-# the SHADOWING nested block now folded into the control-flow entry. A methodology
-# sentence is a claim like any other: re-run the list, do not inherit it.
+# ⚠️ THAT IS DELIBERATE AND IT IS THE SECOND ATTEMPT. A prose list stood here and one of its
+# five entries -- "sibling blocks reusing a context NAME" -- DID NOT REPRODUCE: it imported
+# the guarded-state boundary limitation registered above onto THIS axis, where it does not
+# apply, because `since[]` resets at every `_AUTO_SPAWN` binding and not at a boundary. The
+# list even claimed each entry had been run. Replacing that entry with a truer one would
+# have been the same artifact one round later; a control cannot be false without going RED.
 #
 # The population these shapes are empty over is TODAY'S TREE, not a property. Re-derive:
 #     git grep -n '\.stop()' -- tests/
@@ -1118,6 +1109,70 @@ TEST(A, B) {
 """, ("POOL", "HELPER", "NO-VISIBLE-EXHAUSTION")),
 ]
 
+# ── KNOWN-LIMITATION cases for the DRIVE axis (batch 21) ─────────────────────
+# ⚠️ THESE ASSERT THE **WRONG** ANSWER, ON PURPOSE. Each is a shape where the axis says
+# `EXHAUSTED` and the run does NOT dominate the get -- the DISMISSING direction, which is
+# the one that costs. They exist so the disclosure in the DRIVE axis header cannot be false
+# without something going RED, after a prose version of this list shipped an entry that did
+# not reproduce.
+#
+# ⚠️ A RED HERE IS NOT A REGRESSION. It means the axis got SHARPER -- one of these now
+# reads NO-VISIBLE-EXHAUSTION. That is good news, and the required response is to delete
+# the case and the matching sentence in the header, together, in one commit. Fixing the
+# axis and leaving the disclosure is how a correct instrument acquires a false header.
+LIMIT_CASES = [
+    ("L1  `a.ioc` spawned, `b.ioc` run -- one name to `_last_name`", """
+struct F { asio::io_context ioc; };
+TEST(A, B) {
+    F a, b;
+    auto fut = asio::co_spawn(a.ioc, s.open(), asio::use_future);
+    b.ioc.run();
+    (void)fut.get();
+}
+"""),
+    ("L2  a run() in a declared-but-never-invoked lambda", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    auto never = [&] { ioc.run(); };
+    (void)fut.get();
+}
+"""),
+    ("L3  a run() in one arm of an `if` the get() does not share", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    if (cond) { ioc.run(); return; }
+    (void)fut.get();
+}
+"""),
+    ("L4  a run() on a SHADOWING context in a nested block", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    { asio::io_context ioc; ioc.run(); }
+    (void)fut.get();
+}
+"""),
+    ("L5  a run() inside a STRING LITERAL", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    LOG("we used to call ioc.run() here");
+    (void)fut.get();
+}
+"""),
+    ("L6  stop() before the run -- the THIRD way run() returns", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.stop();
+    ioc.run();
+    (void)fut.get();
+}
+"""),
+]
+
 ok = True
 if not quiet:
     print("=== SELF-TEST: get-anchored sweep (synthetic fixtures) ===")
@@ -1149,6 +1204,14 @@ for name, src, want in DRIVE_CASES:
     ok &= good
     if not quiet:
         print(f"  {'ok   ' if good else '!!FAIL'} drive: {name}  -> {got[0]}/{got[1]}/{got[2]}")
+for name, src in LIMIT_CASES:
+    rows_ = classify(src)[1]
+    got = rows_[0][5] if len(rows_) == 1 else "<%d rows>" % len(rows_)
+    good = got == "EXHAUSTED"
+    ok &= good
+    if not quiet:
+        note = "" if good else "   <- the axis got SHARPER; delete this case AND its header sentence"
+        print(f"  {'ok   ' if good else '!!FAIL'} known limit: {name}  -> {got}{note}")
 if not ok:
     sys.exit("\nCONTROL FAILED -- sweep output is NOT evidence. Fix before trusting a number.")
 if not quiet:
