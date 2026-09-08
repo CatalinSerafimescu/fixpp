@@ -209,7 +209,9 @@ def is_frozen_citer(citer, target, in_flight):
 # (`at line 448`) names no file and so resolves to nothing -- see the check's
 # own header. That stays true, and every such hunk is still reported. What
 # changed is that only a hunk with at least one citation KNOWN to have moved
-# fails the build: on the pinned range 13 of the 17 hunks moved zero, among them
+# fails the build: on the pinned range 12 of the 17 hunks moved NOTHING at all
+# (13 go ungated -- the extra one moved only an archival citer, so the two
+# denominators are not the same number and must not be quoted as one), among them
 # `brain/log.md` growing by 262 lines and a 108-line append near the end of
 # `spec/behaviors-and-limitations.md` -- a file nearly every PR edits, because
 # a B&L functional delta is a Gate B precondition.
@@ -1003,15 +1005,42 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
     if n_gated_shift or n_gated_content:
         print("A line number is a claim about a file that keeps moving. Do NOT "
               "renumber the", file=sys.stderr)
-        print("citations -- that produces N fresh claims that rot on the next edit. "
-              "Reshape", file=sys.stderr)
-        print("the EDIT instead: append narrative at the END of the file, make every "
-              "in-body", file=sys.stderr)
-        print("edit an in-place same-line-count replacement, fold or pad a comment "
-              "block back", file=sys.stderr)
-        print("to its original count. (issue #336; brain/index.md, 'Amending a "
-              "document that", file=sys.stderr)
-        print("is cited BY LINE NUMBER')", file=sys.stderr)
+        print("citations -- that produces N fresh claims that rot on the next "
+              "edit.", file=sys.stderr)
+        print("", file=sys.stderr)
+        # Two remedies, because the two checks gate two different populations
+        # and only one of them is a document. Printing the document advice alone
+        # left the [2] case -- which is most of what this gate actually charges
+        # -- with instructions nobody could follow: you cannot keep
+        # `offset_table.cpp` line-count-neutral, and the file that has to change
+        # is usually one the PR never opened.
+        if n_gated_shift:
+            print("[1] YOUR EDIT MOVED LINES in a document others cite. Reshape "
+                  "the EDIT:", file=sys.stderr)
+            print("    append narrative at the END of the file; make every "
+                  "in-body edit an", file=sys.stderr)
+            print("    in-place same-line-count replacement; fold or pad a "
+                  "comment block back", file=sys.stderr)
+            print("    to its original count. (brain/index.md, 'Amending a "
+                  "document that is", file=sys.stderr)
+            print("    cited BY LINE NUMBER')", file=sys.stderr)
+        if n_gated_content:
+            print("[2] YOUR EDIT INVALIDATED citations INTO the files you "
+                  "changed. Those are", file=sys.stderr)
+            print("    source files as often as documents, and keeping a .cpp "
+                  "line-count-neutral", file=sys.stderr)
+            print("    is not a remedy -- so fix the CITING side, listed as "
+                  "`citer:line ->` above.", file=sys.stderr)
+            print("    Most sit in files this PR never opened (commonly under "
+                  "tests/ and spec/).", file=sys.stderr)
+            print("    DELETE the number there: cite a function or struct name "
+                  "plus a short", file=sys.stderr)
+            print("    quoted phrase from the target, which survives arbitrary "
+                  "line motion.", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Worked example and the `citation-ok` escape: CONTRIBUTING.md, "
+              "'The line-number", file=sys.stderr)
+        print("citation gate'. (issues #310, #336)", file=sys.stderr)
         return 1
     ungated = n_free_shift + n_free_content
     if ungated:
