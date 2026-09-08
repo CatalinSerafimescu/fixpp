@@ -1288,9 +1288,10 @@ TEST(A, B) {
     # named the member `p`, so `retired` gained `p` and the row read LIVE, i.e. the case
     # written to pin a false escalation did not produce one. The member must SHADOW the
     # pool's own name, which is exactly what the live instance does:
-    # tests/session/test_test_request_id_cross_session_race.cpp:1593 declares
-    # `stop_pool_on_exit { asio::thread_pool& pool; ... }` above the spawn, and both its
-    # rows escalate though the pool is running throughout.
+    # tests/session/test_test_request_id_cross_session_race.cpp declares
+    # `struct stop_pool_on_exit { asio::thread_pool& pool; ... }` above a spawn, and both
+    # its rows escalate though the pool is running throughout. No line number on purpose --
+    # the gate in tools/check_line_citations.py exists because that number rots unread.
     # Costs reading, never a dismissal -- which is why it is disclosed rather than fixed.
     # A RED here means the axis learned to see the body: delete this case and the sentence
     # in the axis header, in one commit.

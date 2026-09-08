@@ -18,8 +18,8 @@ status: stable
   ⚠️ Two things were built, measured, and REMOVED — arm 10 (its forced defect stayed green: the
   window it claimed to observe is microseconds) and the axis extension to off-thread rows (correct,
   and it escalated 34 of 36). Both removals are recorded where the code would have been. The `.get()`
-  residual is now fully dispositioned: 160 rows, one open candidate
-  (`tests/fuzz/fuzz_message_store.cpp:137`, in a target no lane builds — #213). Record:
+  residual is now fully dispositioned: 160 rows, one open candidate — the `(void)fut.get()` at the
+  end of `run_coro` in `tests/fuzz/fuzz_message_store.cpp`, in a target no lane builds (#213). Record:
   `decisions/speckit/pr-batch22-the-self-driving-clauses-and-the-annotation-that-hid-two-arguments.md`.
 
 - **2026-09-08 — #289 batch 21, the per-file condition that was false.**
