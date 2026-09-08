@@ -6,14 +6,25 @@
 # T005 / PKG-1 / D-3 — SWIG 4.2 minimum: a 4.0 runner silently regresses the
 # limited-API (abi3) heap-type mode.
 #
-# ⚠️ #296 TEMPORARY UPPER BOUND — mirrors the `swig>=4.2,<4.5` cap in
-# bindings/python/pyproject.toml (see that file for the root cause: an
-# intermittent 3.11 GC segfault observed under SWIG 4.5.0, still not
-# root-caused). Without this, a direct/in-tree CMake build is unconstrained
-# and can pick up a system SWIG 4.5 even though the wheel build excludes it.
-# Both bounds are TEMPORARY and must be lifted TOGETHER once #296 is
-# root-caused; do not drop one without the other.
-find_package(SWIG 4.2...<4.5 REQUIRED)
+# ⚠️ THE #296 `<4.5` UPPER BOUND IS LIFTED HERE, together with its twin in
+# bindings/python/pyproject.toml — the two were documented as liftable only as a
+# pair, and that is how they moved.
+#
+# It is NOT lifted because #296 was root-caused. It was not. It is lifted because
+# capping had made #296 UNFALSIFIABLE: the crash was seen on SWIG 4.5.0 × CPython
+# 3.11, and with the cap in force CI built 4.4.1 — so no run could produce
+# evidence either way, and every green wheel lane was green for a reason
+# unrelated to the question. Retiring the 3.10/3.11 legs alone would not have
+# fixed that; it removes the OTHER axis of the same reproducing pair.
+#
+# ⚠️ SO A RED WHEEL LANE HERE IS A RESULT, NOT A FLAKE. Read it before re-capping:
+# the #296 signature is a SEGFAULT during garbage collection with no `FAILED`
+# line at all (the interpreter dies before pytest reports), which is why grepping
+# for test names on that leg returns empty and looks fine.
+#
+# 4.2 minimum stays: a 4.0 runner silently regresses the limited-API (abi3)
+# heap-type mode (T005 / PKG-1 / D-3).
+find_package(SWIG 4.2 REQUIRED)
 include(UseSWIG)
 
 # T005 — request the stable-ABI (SABI) development component when available so the

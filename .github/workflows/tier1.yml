@@ -445,9 +445,14 @@ jobs:
           sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
           clang++ --version
           # swig + python3-dev (#254): every leg now builds the Python bindings,
-          # so `find_package(SWIG 4.2...<4.5 REQUIRED)` (bindings/python/CMakeLists.txt,
-          # #296 temporary cap) must resolve here — the distro's unbounded `swig`
-          # package must currently land inside that range or configure fails.
+          # so `find_package(SWIG 4.2 REQUIRED)` (bindings/python/CMakeLists.txt,
+          # #296 cap now LIFTED) must resolve here — only the >=4.2 floor
+          # applies, so the distro's unbounded `swig` package satisfies it.
+          # ⚠️ Note this is apt's swig (4.2.0 on ubuntu-24.04), NOT the wheel's:
+          # the wheel build takes swig from PyPI via pyproject's build-system
+          # requires. Lifting the cap therefore moves the WHEEL lane's SWIG and
+          # leaves these six legs where they were — which is the point, since
+          # #296 was only ever observed on the wheel lane.
           # Both packages are carried over VERBATIM from the deleted
           # `python-bindings` job's apt line — that is the configuration CI has
           # proven green, and python3-dev additionally decides which

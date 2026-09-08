@@ -16,11 +16,9 @@
 # compiler, no Conan. See L-056-4 in spec/behaviors-and-limitations.md.
 
 [build-system]
-# PKG-1: scikit-build-core backend. TARGET POLICY (to be restored once #296
-#   closes — see the #296 note below for the requirement actually IN FORCE
-#   today): swig>=4.2 with NO upper bound (builds with the latest SWIG, 4.4.1
-#   at the time this policy was written). Lower bound (>=4.2): a 4.0 runner
-#   silently regresses the limited-API/abi3 mode (research D-3).
+# PKG-1: scikit-build-core backend. POLICY, now IN FORCE again: swig>=4.2 with
+#   NO upper bound. Lower bound (>=4.2): a 4.0 runner silently regresses the
+#   limited-API/abi3 mode (research D-3).
 #   SWIG-version-agnostic argout: SWIG 4.3.0 gave SWIG_Python_AppendOutput an
 #   `is_void` arg and now keeps a Py_None primary result for a NON-void fn unless
 #   is_void=1 — which would make our "consume the fixpp_error_t return, surface
@@ -30,32 +28,35 @@
 #   `if (!result) result = obj` first branch is identical on every SWIG, so the
 #   bare out-param is returned on 4.2 AND 4.3+. Verified at the generated-code
 #   level on 4.4.1 and behaviourally on SWIG 4.2 (in-tree sanitizer matrix) +
-#   4.4.1 (the shipped wheel) via the tests/wheel/ subset (T012).
-#   Exact published at implement (2026-06-30): scikit-build-core 0.12.2, swig
-#   4.4.1 (latest); 4.2.0 local.
+#   4.4.1 (the shipped wheel) via the tests/wheel/ subset (T012). Absorbing a
+#   SWIG behaviour change in the typemaps, rather than pinning, is the design.
 #
-#   ⚠️ #296 TEMPORARY CAP layered on top of the policy above — it does not
-#   replace it. An intermittent 3.11 GC segfault was observed under SWIG 4.5.0
-#   whose cause is still not established. The open-ended, version-agnostic
-#   policy above (absorb a SWIG behaviour change in the typemaps, per the 4.3
-#   is_void note, rather than pin) remains this project's target state; the cap
-#   below is a bounded safety measure, not a reversal. It was previously
-#   rejected on the grounds that capping would hide two real latent bugs SWIG
-#   4.5.0 had exposed — both are now found and fixed on their own merits (the
-#   #295 fixes to bindings/python/tests/test_reentrancy.py and fixpp.i) and
-#   stay fixed regardless of which SWIG builds this. What remains open is #296
-#   itself. 4.4.1 is the known-good version, not an arbitrary one: it is what the last
-#   fully green wheel run resolved to (run 32509172828 on 3ce0b6da,
-#   2026-08-21), where cibuildwheel resolved to 4.2.0 and scikit-build-core to
-#   1.0.3 — the SAME versions cibuildwheel and scikit-build-core resolve to
-#   today. Neither is pinned (cibuildwheel is installed with no version
-#   specifier in tier1.yml; scikit-build-core's own requirement here is
-#   `>=0.11`, see below), so that repeat resolution is an OBSERVATION about
-#   what PyPI currently serves, not a guarantee — a future cibuildwheel or
-#   scikit-build-core release could resolve differently on the next run.
-#   EXIT CONDITION: drop the `<4.5` upper bound once #296 is root-caused — this
-#   cap is not the permanent policy.
-requires = ["scikit-build-core>=0.11", "swig>=4.2,<4.5"]
+#   ⚠️ THE #296 `<4.5` CAP IS LIFTED — and NOT because #296 was root-caused.
+#   It was not; #296 stays OPEN. It is lifted because the cap had made the
+#   question unfalsifiable. The crash was observed on SWIG 4.5.0 × CPython 3.11
+#   (roughly 1-in-2 on that pairing); with `<4.5` in force every CI run resolved
+#   4.4.1, so no run could produce evidence either way and every green wheel
+#   lane was green for an unrelated reason. Dropping the 3.10/3.11 legs removes
+#   the other axis of that same pair, so lifting the cap is what keeps ANY of
+#   this bearing on #296.
+#
+#   ⚠️ A RED WHEEL LANE HERE IS THE FINDING, NOT NOISE. The #296 signature is a
+#   SEGFAULT during garbage collection that emits NO `FAILED` line at all — the
+#   interpreter dies before pytest reports — so grepping that leg for test names
+#   returns empty and reads as healthy. Check the raw log for `Fatal Python
+#   error: Segmentation fault` and report to #296 rather than re-capping.
+#
+#   The two latent bugs SWIG 4.5.0 exposed were fixed on their own merits (#295:
+#   bindings/python/tests/test_reentrancy.py and fixpp.i) and stay fixed
+#   whichever SWIG builds this — so lifting the cap does not re-open them.
+#
+#   ⚠️ NOTHING HERE IS PINNED, so what actually gets built is an OBSERVATION per
+#   run, not a guarantee: cibuildwheel is installed with no version specifier in
+#   tier1.yml, and scikit-build-core's requirement below is `>=0.11`. The last
+#   fully green capped run (32509172828 on 3ce0b6da, 2026-08-21) resolved swig
+#   4.2.0 / scikit-build-core 1.0.3. With the cap gone, PyPI's current swig is
+#   what builds — read the build log to learn which, do not assume.
+requires = ["scikit-build-core>=0.11", "swig>=4.2"]
 build-backend = "scikit_build_core.build"
 
 [project]
