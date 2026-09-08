@@ -431,7 +431,10 @@ cell "T19 an inflated summed test time is called out on a VALID sample" 0 \
 # acceptance.
 cell "T23 a count that disagrees with the lane's pinned basis VOIDs the sample" 3 \
   "NOT THE LANE'S PRODUCTION WORKLOAD" --preset linux-clang-asan --ran 300,300,300
-# ⚠️ 369 TRACKS `ci/expected-eligible-tests.txt` AND MOVES WITH IT. This is a
+# ⚠️ THIS CELL'S COUNT TRACKS `ci/expected-eligible-tests.txt` AND MOVES WITH IT.
+# (The number is deliberately not repeated here: it lives in the cell below, and a
+# comment that restates it is a RESULT that goes stale — it already had, at 369,
+# while the pin and the cell had both moved on.) This is a
 # deliberate coupling, not a leak: the cell asserts that a MATCHING count is
 # confirmed, so it has to state a number the pin actually holds. When a pin is
 # re-recorded, this line is re-recorded in the same commit — that file's header

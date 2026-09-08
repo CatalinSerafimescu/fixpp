@@ -355,10 +355,24 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     auto const shutdown_result = logger->shutdown(std::chrono::seconds{60});
 
     // timeouts MUST be read after shutdown(): timeout_drop_count_ is bumped
-    // inside Logger::shutdown itself.
-    auto const timeouts   = logger->timeout_drop_count();
-    auto const filtered   = logger->filter_count();
-    auto const rotations  = sink_raw->rotation_count();
+    // inside Logger::shutdown itself. drop/timeout/filter counts are atomics and
+    // safe to read whatever shutdown did.
+    auto const timeouts = logger->timeout_drop_count();
+    auto const filtered = logger->filter_count();
+
+    // ⚠️ rotation_count() IS NOT SAFE TO READ AFTER A TIMED-OUT SHUTDOWN.
+    // rotation_count_ is a plain uint64 mutated by the DRAIN thread, and
+    // Logger::shutdown reaches its join only on the SUCCESS path -- the timeout
+    // path bumps timeout_drop_count_ and returns `unexpected(log_drain_timeout)`
+    // with the drain still running (src/log/logger.cpp). Reading the counter
+    // there is a genuine data race, not a pedantic one.
+    //
+    // So it is read only when shutdown reported success. Nothing is lost: every
+    // claim that must hold on a timed-out run is made from the FILESYSTEM
+    // instead, which carries no such hazard, and the equality branch this feeds
+    // already requires a clean shutdown for an independent reason.
+    bool const          rotations_valid = shutdown_result.has_value();
+    std::uint64_t const rotations       = rotations_valid ? sink_raw->rotation_count() : 0;
 
     // Destroy the logger BEFORE reading: ~Logger closes the sink, which fcloses
     // the live file. Reading it while still open would race the stdio buffer.
@@ -366,11 +380,15 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
 
     // ── The lever actually engaged ───────────────────────────────────────────
     //
-    // Without this, a green run cannot distinguish "the real sink was slow" from
-    // "the producer was simply faster than a fast sink" — and the test would no
-    // longer be about FileSink at all.
-    EXPECT_GT(rotations, 0u) << "no rotation happened — the stall lever did not engage, so this "
-                                "run says nothing about the real FileSink write path";
+    // The race-free half of this is the ASSERT_TRUE(rotation_seen) above, which
+    // is derived from the directory. This is the sink's own counter agreeing --
+    // an independent instrument, not a restatement -- and it is checked only
+    // when it is safe to read (see rotations_valid above).
+    if (rotations_valid) {
+        EXPECT_GT(rotations, 0u)
+            << "the sink reports no rotation although an archive appeared on disk — the two "
+               "instruments disagree";
+    }
 
     EXPECT_EQ(filtered, 0u) << "no category filter is configured; a nonzero filter_count means "
                                "records went missing down a path this accounting does not model";
@@ -469,7 +487,7 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // and an unsigned underflow would print SIZE_MAX in the diagnosis below --
     // nonsense in exactly the message someone reads when something went wrong.
     auto const archives = files.empty() ? 0u : files.size() - 1;  // minus the live file
-    if (archives == rotations && shutdown_result.has_value()) {
+    if (rotations_valid && archives == rotations) {
         // shutdown_result.has_value() is what makes the EQUALITY sound: a clean
         // shutdown means the ring was fully drained, so every enqueued record
         // either reached the file or was counted as dropped. On a timed-out
@@ -479,8 +497,9 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
             << ") != " << produced;
     } else {
         GTEST_LOG_(WARNING) << "accounting equality not checked this run: archives=" << archives
-                            << " rotations=" << rotations
-                            << " shutdown_ok=" << shutdown_result.has_value()
+                            << " rotations=" << (rotations_valid ? std::to_string(rotations)
+                                                                 : std::string{"<unread: timeout>"})
+                            << " shutdown_ok=" << rotations_valid
                             << " — a sink-side loss path may have fired (see comment above)";
     }
 }

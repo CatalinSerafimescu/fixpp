@@ -48,9 +48,13 @@
 //   drop. Safe because drop_newest is the defined behaviour; no corruption
 //   possible." That argument is about LIVENESS and was the wrong axis — being
 //   conservative about whether a slot is free says nothing about the ordering
-//   that reusing it requires. Do not restore it. Zero cost on x86-64 (identical
-//   instructions emitted); witnessed by TSan on the ring-wraparound test,
-//   relaxed → 7 data races, acquire → 0.
+//   that reusing it requires. Do not restore it. Zero cost on x86-64 (relaxed
+//   and acquire emit the same instruction).
+//   RE-DERIVATION, not a recorded count: build tests/log/test_file_sink_backpressure
+//   .cpp under linux-clang-tsan and run it. It is the only test here that drives
+//   the ring through sustained WRAPAROUND against a live drain, which is the
+//   shape this edge protects; weakening the load reports races on the ring slot,
+//   restoring the acquire reports none.
 // - The per-slot sequence atomic prevents the drain from reading a partially-written
 //   slot: the producer stores sequence = w+1 AFTER writing the Record (release),
 //   the drain reads with acquire semantics, so the full Record write is visible.
@@ -112,7 +116,9 @@ struct Logger::Impl {
     // ── Sequence counters — each on its own cache line ───────────────────
     // Producer: CAS acq_rel/relaxed.  Drain: reads relaxed for slot index.
     alignas(64) std::atomic<std::uint64_t> write_sequence_{0};
-    // Drain: release store after consuming.  Producer: relaxed load (overflow check).
+    // Drain: release store after consuming.  Producer: ACQUIRE load (overflow
+    // check) — the pair that makes slot reuse on wraparound safe; see the MPSC
+    // ring protocol header (#402).
     alignas(64) std::atomic<std::uint64_t> read_sequence_{0};
 
     // ── Filter mask ───────────────────────────────────────────────────────

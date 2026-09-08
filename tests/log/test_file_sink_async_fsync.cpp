@@ -304,10 +304,14 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
     // has to be hand-tuned against the slowest runner in the fleet.
     sink.close();
     EXPECT_TRUE(fsync_returned.load(std::memory_order_acquire))
-        << "close() returned while the injected fsync was still running — the "
-        << "owned fsync worker was not joined before fclose(). A detached "
-        << "worker can land a write on a reused fd ([2k §4.5] / "
-        << "contracts/log-sinks.md §FileSink).";
+        << "close() returned before the in-flight fsync had completed — close() "
+        << "did not wait for the owned fsync worker, so a write can still land on "
+        << "the fd it is about to fclose() ([2k §4.5] / contracts/log-sinks.md "
+        << "§FileSink). NOTE what this flag does and does not show: it proves the "
+        << "callback had not returned, which a detach reproduces; it does not by "
+        << "itself prove a join, since a wait-then-detach would also satisfy it. "
+        << "Thread lifetime is pinned by sub-assertions (ii)/(iii) of "
+        << "CloseJoinsWorkerAndPreventsReusedFdWrite.";
 }
 
 // ── FileSink close() lifetime: no detached threads, no fd-reuse race ─────────
