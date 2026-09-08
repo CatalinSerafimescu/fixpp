@@ -580,9 +580,9 @@ asserted bound and the *intended* path:
 |---|---|---|---|
 | `log_file_fsync` enqueue (`ProducerDoesNotBlockOnFsync`) | 40 ms | ~0 | tight, no lower bound |
 | `log_file_fsync` flush return (`FlushDeadlineBounded`) | 100 ms | 10 ms deadline | 10× |
-| `otel_exporters` teardown (`tests/otel/test_engine_close_teardown.cpp:311`) | 400 ms | ~50 ms | 8× |
-| plain-transport close (`tests/transport/test_asio_plain_transport_config.cpp:242`) | 500 ms | immediate (wrong path is 2 s) | wide |
-| C-API close (`tests/capi/lifecycle_test.cpp:~310`) | 1 s | immediate | wide |
+| `otel_exporters` teardown (`EngineCloseTeardown.E2_EngineTeardownHonorsDrainTimeout`) | 400 ms | ~50 ms | 8× |
+| plain-transport close (`AsioPlainTransportConfig.CloseIsPromptNoTlsCloseNotify`) | 500 ms | immediate (wrong path is 2 s) | wide |
+| C-API close (`CapiLifecycle.Sc007CloseBreaksBlockedIdleReadPromptly`) | 1 s | immediate | wide |
 | session / interop stop watchdogs | 1.5–5 s | prompt | wide |
 
 ⚠️ **Two `log_file_fsync` close rows were removed here, not merely re-pointed.** They recorded
@@ -607,6 +607,12 @@ what acceptance criterion 3 exists to falsify.
 ⚠️ **Cite these by TEST NAME, not by line.** The four rows here were `file:NNN` citations and every
 one of them rotted the moment the file was edited — two into assertions that no longer exist at
 all. A test name survives an edit; a line number does not.
+
+⚠️ **The other three rows have been converted too, because leaving them would have made
+this warning contradict the table it sits under.** They had rotted by varying amounts —
+`test_asio_plain_transport_config.cpp:242` was **280 lines** off its assertion (really
+`EXPECT_LT(close_ms, 500)` at `:522`); the other two landed inside the right test but not
+on the bound. Verified by opening each, not by trusting the row.
 
 The same sweeps found **no** cross-test fixed path, fixed listening port, Unix socket, or
 process-global env/cwd writer; every listener binds `127.0.0.1:0`; `codegen_determinism_test` uses
