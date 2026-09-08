@@ -320,6 +320,44 @@ instrument itself. What is durable is the CONDITION: `CORO` unguarded should be 
   its classifier controls at all, so a regression in them would have surfaced only as a number
   nobody could tell was wrong.
 
+#### Batch 22 split a VALUE, not an axis — and that is where the residual was hiding
+
+⚠️ **`EXHAUSTED` ANSWERED TWO QUESTIONS AND ONLY ONE HAD BEEN CHECKED.** It means *"a
+run-to-exhaustion naming the spawn context appears above the get"*, which is satisfied by a
+**caller-side** run (lexical "above" is the calling thread's program order ⇒ batch 21's work-guard
+argument applies) and by a run written **inside a thread construct** (a drive on another thread ⇒
+"above" is not program order at all, and the row is dismissed by the SELF-DRIVING argument instead).
+The value now splits into `EXHAUSTED` / `EXHAUSTED-OFF-THREAD`, and **all 35 `THREADED` rows are the
+second kind** — read as dominated for four batches by an argument that did not apply to them. See
+[`../failure-classes.md`](../failure-classes.md) class 12; the union is unchanged, so the batch
+18-21 trend is still comparable.
+
+⚠️ **A POSITIVE DISMISSAL NEEDS A CLAUSE CHECK, AND `POOL` NOW HAS ONE.** The `SELF-DRIVE` axis
+reports `RETIRED-BEFORE-SPAWN` / `STOPPED-BEFORE-GET` / `JOINED-BEFORE-GET` / `LIVE` over `POOL`
+rows. `join()` is deliberately its own value rather than folded into `LIVE`: it is the *opposite* of
+a hazard, blocking until the queued work is done, so it dominates a get more strongly than any
+lexical `run()`. The clauses are measured in
+`tests/sync/test_co_spawn_work_guard_contract.cpp` arms 8-9, each carrying its own dismissal as the
+control half in the same cell.
+
+⚠️ **THE AXIS IS SCOPED TO `POOL` AND THE EXTENSION WAS MEASURED OUT, NOT OVERLOOKED.** Extending it
+to `EXHAUSTED-OFF-THREAD` rows needs no driver name — clause S1 holds structurally there (a run seen
+only *since* the spawn was written by a thread constructed after it) and S2 becomes a `stop()` on the
+spawn context. It is correct, and it escalated **34 of 36** rows, because these tests all retire the
+context on a bail-out branch the get never reaches. Reverted; the measurement lives in the axis
+header. The missing capability is **branch exclusivity** — the same wall batch 21's clause-2 probe
+hit, now confirmed from a second direction.
+
+⚠️ **AN ARM WHOSE FORCED DEFECT STAYS GREEN IS MEASURING ITS OWN SETUP.** A multi-driver arm was
+written, passed, and was **deleted**: a driver mutated to return early did not redden it, because the
+frame's parked window is microseconds, and widening it needs a timing band that file refuses. A note
+where the arm would have been carries the reframing — `outstanding_work` is counted on the CONTEXT,
+not per thread, so arms 1 and 5 already measure what every driver of it observes.
+
+⚠️ **`t.expires_after(0s)` CANCELS the pending wait**, so a frame resumes by *throwing*
+`operation_aborted`. Arms 1 and 5 never noticed, because they assert only that the future became
+READY — which an exception satisfies. Any arm measuring something after the `co_await` must catch.
+
 ### ⚠️⚠️ A state assertion after a helper call is NOT a masking barrier
 
 When designing forced-miss (RED) arms, the natural model is that a helper's miss-branch `return` will

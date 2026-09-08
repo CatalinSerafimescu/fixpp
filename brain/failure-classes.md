@@ -432,6 +432,43 @@ inherited as a PREMISE — same failure viewed from the instruction side rather 
 
 ---
 
+### 12. One label can carry two arguments, and only one of them may be checked
+
+A classifier emits a value that reads as settled. The value is *correct* at every site. But the
+sentence defining it is satisfied by two different situations, which are safe for two different
+reasons — and only one of those reasons has ever been checked. Nothing fails, nothing **can** fail,
+and every reader who meets the label takes away the reason that does not apply.
+
+This is not class 1: the instrument is not failing toward clean, it is reporting truthfully. The
+defect is that its vocabulary is coarser than its subject.
+
+- **Trigger:** a classifier value whose definition contains an *or* you cannot see — most often a
+  positional or lexical predicate (*"appears above"*, *"is present in the file"*) standing in for a
+  semantic one (*"happens before"*, *"drives this"*). Ask: **for each site with this label, which
+  argument makes it safe? Is it the same argument?**
+- **Procedure:** do not widen the check. **Split the value**, so the rows resting on the unchecked
+  argument count themselves, and report the split. A count you can see is a reading you can order;
+  a count folded into a green word is one nobody will ever ask about. Keep the union stable so the
+  earlier trend is still comparable.
+- **Instance.** #289's `EXHAUSTED` meant *"a run-to-exhaustion naming the spawn context appears above
+  the get"*. Satisfied by a **caller-side** run (dismissed by the `co_spawn` work guard, measured in
+  batch 21) and by a run written **inside a thread construct** (dismissed by the self-driving
+  argument, whose clauses nothing checked). Batch 22 split off `EXHAUSTED-OFF-THREAD`: **all 35
+  `THREADED` rows are the second kind, none the first.** Four batches had read them as dominated for
+  a reason that did not apply. Record
+  `decisions/speckit/pr-batch22-the-self-driving-clauses-and-the-annotation-that-hid-two-arguments.md`.
+- ⚠️ **A correct check that escalates almost its whole population is not a check.** The same batch
+  extended a clause check to those rows; it was right in every particular and escalated **34 of 36**,
+  because the corpus retires the context on a bail-out branch the site never reaches. It was
+  reverted, with the measurement recorded at the check, because an instrument nobody can act on
+  teaches its readers to skip the fraction that mattered too.
+
+**Sibling.** Class 1 is an instrument that *cannot* report the bad answer. This is an instrument that
+reports a **true** answer which two different populations both satisfy — the failure is in the
+vocabulary, not the mechanism, so no amount of proving the check can fire will surface it.
+
+---
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:

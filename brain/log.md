@@ -6,6 +6,22 @@ status: stable
 
 # Log
 
+- **2026-09-08 — #289 batch 22, the annotation that hid two arguments.**
+  `failure-classes.md` gains **class 12** (*one label can carry two arguments, and only one of them
+  may be checked*). `ci/pump-get-sweep.sh`'s `EXHAUSTED` splits off `EXHAUSTED-OFF-THREAD`: a
+  caller-side run and a run written inside a thread construct are dismissed by DIFFERENT arguments,
+  and **all 35 `THREADED` rows are the second kind**. A SELF-DRIVE axis checks the self-driving
+  clauses over `POOL` rows (44 LIVE / 2 escalated); arms 8-9 in
+  `tests/sync/test_co_spawn_work_guard_contract.cpp` measure them, each carrying its own dismissal as
+  the control half. Also: `since` resets per container push (a live false DISMISSAL, no live
+  instance), and per-container executors escalate to `MIXED-EXEC` instead of first-push-wins.
+  ⚠️ Two things were built, measured, and REMOVED — arm 10 (its forced defect stayed green: the
+  window it claimed to observe is microseconds) and the axis extension to off-thread rows (correct,
+  and it escalated 34 of 36). Both removals are recorded where the code would have been. The `.get()`
+  residual is now fully dispositioned: 160 rows, one open candidate
+  (`tests/fuzz/fuzz_message_store.cpp:137`, in a target no lane builds — #213). Record:
+  `decisions/speckit/pr-batch22-the-self-driving-clauses-and-the-annotation-that-hid-two-arguments.md`.
+
 - **2026-09-08 — #289 batch 21, the per-file condition that was false.**
   `failure-classes.md` gains **class 11** (*an inherited obligation can rest on a false premise, and
   discharging it faithfully hides that*) and a class-1 bullet (*a classification reached by FALLBACK
