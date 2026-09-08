@@ -89,7 +89,7 @@ jobs:
         # instrument is proven on exactly those commits.
         run: python3 tools/check_line_citations.py --self-test
 
-      - name: "Line-citation gate — no NEW file:NNN citations in this change (#310, #336)"
+      - name: "Line-citation gate — no NEW file:NNN citations, and none ROTTED (#310, #336)"
         # WHY THIS EXISTS. The gate shipped in #326 as a LOCAL pre-commit hook
         # only. Nothing in .github/ invokes pre-commit, and `.git/hooks/` is not
         # tracked by git -- a hook cannot be committed, so it is absent from any
@@ -102,6 +102,33 @@ jobs:
         # fail since the gate landed (c9f962ec, #326) -- 77900be0, already fixed.
         # The other 26 predate the rule. So this is close to free going forward.
         #
+        # ── The ROT half (--shift-audit) is NOT close to free, and was scoped ──
+        # Charging every finding would stop ordinary work, so the exit code is
+        # decided by check [2] alone -- rot in a resolvable citation from a LIVE
+        # citer. Check [1] (line-shift) REPORTS and never charges: [2] catches
+        # every citation [1] could price, structurally, and a net-zero edit made
+        # [1] fire on a citation that had not moved. Its header carries the
+        # argument and the measurements. Every finding from both checks is still
+        # printed and still lands in --json carrying `gated`.
+        #
+        # Do not re-derive the scope from this comment -- read the tool, and
+        # re-measure with `--shift-audit <range>` rather than trusting a number
+        # written here, which nothing re-runs.
+        #
+        # ⚠️ AND KNOW WHAT THE NARROWING DID NOT BUY. The sizing above is an
+        # AGGREGATE over ten merges, and CI never runs that shape -- it runs one
+        # PR. Per PR, on the eleven merges 37eb372f..bb22be26, FIVE are RED:
+        # three of them substantially (65, 45 and 25 charged findings, each a PR
+        # that edited a heavily-cited wire header) and two trivially (4 and 3).
+        # So this gate does NOT reduce to "nothing changes"; it charges roughly
+        # half of recent merges, and the expensive half is exactly the PRs that
+        # caused the rot. That is the intent, not a surprise -- but it is the
+        # number that decides whether the scope is affordable, so it is stated
+        # here rather than inferred from the aggregate. Paying it down is #310.
+        #
+        #   for c in <merges>; do
+        #     python3 tools/check_line_citations.py --shift-audit "$c~1..$c"; done
+        #
         # No continue-on-error, per this file's header: it makes an `exit 1` inert.
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
@@ -111,8 +138,9 @@ jobs:
         run: |
           set -euo pipefail
           ZERO=0000000000000000000000000000000000000000
+          IS_PR=0
           if [ -n "${PR_BASE:-}" ] && [ -n "${PR_HEAD:-}" ]; then
-            BASE="$PR_BASE"; HEAD="$PR_HEAD"
+            BASE="$PR_BASE"; HEAD="$PR_HEAD"; IS_PR=1
           elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != "$ZERO" ]; then
             BASE="$PUSH_BEFORE"; HEAD="$PUSH_AFTER"
           else
@@ -131,9 +159,46 @@ jobs:
               exit 1
             fi
           done
-          # Prefer the merge base: github.event.pull_request.base.sha is the base
-          # BRANCH TIP at event time, so main-only commits would otherwise be
-          # scored against this PR.
-          if MB="$(git merge-base "$BASE" "$HEAD" 2>/dev/null)"; then BASE="$MB"; fi
+          # Prefer the merge base -- FOR A PULL REQUEST ONLY.
+          # github.event.pull_request.base.sha is the base BRANCH TIP at event
+          # time, so main-only commits would otherwise be scored against this PR.
+          #
+          # ⚠️ Applying it to a PUSH is wrong, and silently so. A push already
+          # supplies the exact range it performed as before..after; merge-base
+          # can only shrink it. On a non-fast-forward push to main -- a force-push
+          # or reset that DISCARDS commits -- `after` is an ancestor of `before`,
+          # so merge-base(before, after) == after and the range collapses to
+          # `after..after`: empty. Both gates then report on nothing. That is the
+          # worst case to be blind on, because discarding commits can reinstate
+          # the very citations an earlier commit fixed. Verified on this repo:
+          #   git merge-base <newer> <older-ancestor>   ==   <older-ancestor>
+          if [ "$IS_PR" = 1 ] && MB="$(git merge-base "$BASE" "$HEAD" 2>/dev/null)"; then
+            BASE="$MB"
+          fi
           echo "gating $BASE..$HEAD"
-          python3 tools/check_line_citations.py --range "$BASE..$HEAD"
+
+          # BOTH DIRECTIONS, and both reports every run. --range gates GROWTH (a
+          # change that ADDS a citation); --shift-audit gates ROT (a change that
+          # INVALIDATES existing ones) -- #336's whole point being that an edit
+          # which rots a citation adds none, so --range passes it clean.
+          #
+          # `set -e` would stop at the first failure and hide the second report,
+          # which is the wrong trade here: a contributor who has to fix both
+          # should be told both in one run, not made to re-push to discover the
+          # second. So each is run with its status captured, both reports are
+          # printed, and the step fails if EITHER did. Never `|| true` on its own
+          # -- that is how an `exit 1` goes inert.
+          rc=0
+          python3 tools/check_line_citations.py --range "$BASE..$HEAD" || rc=1
+          echo
+          # --allow-empty-range: --shift-audit otherwise REFUSES a zero-file
+          # range, rightly, since an empty measurement must not read as a clean
+          # audit. A real event can still produce one (a PR force-pushed back
+          # onto its base, a branch-pointer move); the range above came from
+          # such an event and was checked to exist, so here an empty range means
+          # nothing changed and nothing can have rotted. The tool still decides
+          # what "empty" IS -- re-deriving that with a second `git diff` here
+          # would be a fact in two places, and they drift.
+          python3 tools/check_line_citations.py --shift-audit "$BASE..$HEAD" \
+            --allow-empty-range || rc=1
+          exit "$rc"
