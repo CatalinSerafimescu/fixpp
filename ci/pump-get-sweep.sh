@@ -342,6 +342,19 @@ def _retires(seg, base, verb):
     return any(m.group(1) == base and m.group(2) == verb for m in _RETIRE.finditer(seg))
 
 
+def _retired_before(stmt, pos):
+    """Names retired EARLIER IN THIS STATEMENT than the spawn at `pos`.
+
+    ⚠️ `statements()` splits on physical lines, NOT on semicolons, so
+    `pool.join(); auto fut = asio::co_spawn(pool, ...);` written on ONE line is a single
+    statement. Without this, the spawn snapshot was taken before that statement's retires
+    were recorded, the statement then landed in `seg`, and the row read
+    `JOINED-BEFORE-GET` -- a DISMISSAL -- for a pool whose driver was already gone.
+    Control `S-i`. The whole-statement scan afterwards still runs; this only decides which
+    side of the spawn each retire falls on."""
+    return {m.group(1) for m in _RETIRE.finditer(stmt[:pos])}
+
+
 def _exec_class(base, pools, threaded, anythread):
     return ("POOL" if base in pools else
             "THREADED" if base in threaded else
@@ -630,7 +643,7 @@ def classify(text):
             # nothing that push 2 queued. With `setdefault` that run stayed in `seg` and
             # the row read `EXHAUSTED`: the DISMISSING direction. Control: `4h`.
             since[name] = []
-            retired_at[name] = set(retired)
+            retired_at[name] = retired | _retired_before(stmt, pm.start())
         # ⚠️ THE ALIAS PERSISTS UNTIL THE NEXT RANGE-FOR OR BOUNDARY, on purpose: the
         # guard and the `.get()` are separate statements inside the loop BODY, so an
         # alias scoped to the `for` statement alone would see neither together.
@@ -650,7 +663,7 @@ def classify(text):
             guarded_state[m.group(1)] = False
             execs[m.group(1)] = [m.group(2)]
             since[m.group(1)] = []
-            retired_at[m.group(1)] = set(retired)
+            retired_at[m.group(1)] = retired | _retired_before(stmt, m.start())
             # NO `continue` here: the same statement may also consume the future.
         if GUARD.search(stmt):
             for name in known:
@@ -1354,6 +1367,25 @@ TEST(A, B) {
     (void)fut.get();
 }
 """, "RETIRED-BEFORE-SPAWN"),
+    ("S-i  a retire and the spawn on ONE physical line", """
+TEST(A, B) {
+    asio::thread_pool pool{4};
+    pool.join(); auto fut = asio::co_spawn(pool, s.open(), asio::use_future);
+    (void)fut.get();
+}
+""", "RETIRED-BEFORE-SPAWN"),
+    # ⚠️ ASSERTS THE WRONG ANSWER, ON PURPOSE, in the ESCALATING direction -- the same
+    # family as `S-f`: `retired` holds NAMES, and a name is not an object. An unrelated
+    # `std::thread` that shadows the pool's name retires the pool as far as this axis is
+    # concerned. Costs reading, never a dismissal.
+    ("S-j  KNOWN LIMIT: an unrelated object SHADOWING the pool's name", """
+TEST(A, B) {
+    asio::thread_pool pool{4};
+    { std::thread pool([]{}); pool.join(); }
+    auto fut = asio::co_spawn(pool, s.open(), asio::use_future);
+    (void)fut.get();
+}
+""", "RETIRED-BEFORE-SPAWN"),
 ]
 
 # ── KNOWN-LIMITATION cases for the DRIVE axis (batch 21) ─────────────────────
@@ -1406,6 +1438,15 @@ TEST(A, B) {
     asio::io_context ioc;
     auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
     LOG("we used to call ioc.run() here");
+    (void)fut.get();
+}
+"""),
+    ("L8  a thread constructed through a TYPE ALIAS", """
+using Thread = std::thread;
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    Thread worker([&] { ioc.run(); });
     (void)fut.get();
 }
 """),
@@ -1605,7 +1646,14 @@ if disposition:
     print("                          S1). The frame is queued on a driver that is gone.")
     print("    STOPPED-BEFORE-GET    stop() between the spawn and the get (clause S2). It")
     print("                          ABANDONS the queued work; a later join() returns with")
-    print("                          the frame never started.")
+    print("                          the frame never started. ⚠️ A QUESTION ABOUT A RACE,")
+    print("                          NOT A FINDING: whether anything is left to abandon")
+    print("                          depends on the pool not having dispatched the frame")
+    print("                          yet, and the pool normally wins. Measured: with 50 ms")
+    print("                          between the spawn and the stop(), the future was")
+    print("                          already ready 200 runs out of 200. Arm 9 measures the")
+    print("                          VERB distinction with the stop BEFORE the spawn; no")
+    print("                          arm backs this value\'s ordering, deliberately.")
     print("    JOINED-BEFORE-GET     join() between the spawn and the get. NOT a hazard --")
     print("                          it blocks until the work is done, so it dominates the")
     print("                          get more strongly than any lexical run().")

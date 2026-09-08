@@ -342,8 +342,8 @@ TEST(SyncCoSpawnWorkGuard, ExplicitStopReturnsRunWithTheFrameStarted) {
 //
 //   clause S1  the driver must still be LIVE at the spawn. A driver that already
 //              returned by exhaustion drives nothing afterwards.        (arm 8)
-//   clause S2  the driver must not be RETIRED before the frame completes —
-//              `stop()` discards the queued work; `join()` alone does not.  (arm 9)
+//   clause S2  the two retirement VERBS are not interchangeable — `stop()` abandons
+//              queued work, `join()` waits for it.                          (arm 9)
 //
 // Each arm carries its own dismissal as the control half, in the SAME cell: the clause
 // and the case it voids differ by one line, so a `is_ready` that could read only one way
@@ -412,7 +412,21 @@ TEST(SyncCoSpawnWorkGuard, DriverThatAlreadyExhaustedDrivesNothing) {
 // waits for the queued work, so it is the STRONGEST form of domination — stronger than
 // any lexical `run()` above a get(). `stop()` abandons that work and lets `join()` return
 // with the frame never dispatched, which is arm 7's third return mode wearing a
-// thread_pool's clothes.
+// thread_pool's clothes. THE VERB DISTINCTION IS WHAT THIS ARM MEASURES.
+//
+// ⚠️ READ WHAT IT DOES **NOT** MEASURE, BECAUSE A HOSTILE ROUND READ IT THE OTHER WAY.
+// The `stop()` below is placed BEFORE the spawn, so the shape on the page is the sweep's
+// `RETIRED-BEFORE-SPAWN`, not its `STOPPED-BEFORE-GET`. That was deliberate — a frame
+// left suspended on a dead pool is released only by destruction, and this file must not
+// strand asio work on a platform where that is not merely untidy — but it means this arm
+// is NOT evidence for a `stop()` written AFTER the spawn.
+//
+// And that shape cannot be turned into an arm here, which is the more useful half:
+// whether a later `stop()` abandons anything is a RACE with the pool's own workers, and
+// the pool normally wins. Measured by the review that raised this: with a 50 ms delay
+// between the spawn and the `stop()`, the future was already READY 200 times out of 200.
+// So the axis's `STOPPED-BEFORE-GET` is a question about a race, never a finding — the
+// axis legend says so, and this arm does not pretend otherwise.
 //
 // The frames here `co_return` rather than parking, deliberately: a suspended frame left
 // alive at teardown is released only by destruction, and this file must not leave
@@ -444,10 +458,11 @@ TEST(SyncCoSpawnWorkGuard, StoppedPoolLeavesTheFutureUnready) {
         pool.join();
 
         EXPECT_FALSE(is_ready(fut))
-            << "#289 clause S2: a STOPPED pool dispatches nothing, so join() returns with "
-               "the frame never started and a get() here blocks forever. `POOL` is a "
-               "dismissal only while nothing retires the pool first — which is what the "
-               "sweep's SELF-DRIVE axis is looking for.";
+            << "#289 clause S2: `stop()` and `join()` are not interchangeable. The half "
+               "above differs from this one by exactly this stop(), and it reads ready — "
+               "so a STOPPED pool dispatches nothing, join() returns with the frame never "
+               "started, and a get() here blocks forever. `POOL` is a dismissal only while "
+               "nothing retires the pool, which is what the SELF-DRIVE axis looks for.";
     }
 }
 
