@@ -147,7 +147,21 @@ set_target_properties(fuzz_file_cert_source PROPERTIES
 # both MemoryStore and FileStore. Runs under ASan + UBSan.
 # TSan build: build separately with linux-clang-tsan preset + FIXPP_BUILD_FUZZ.
 add_executable(fuzz_message_store fuzz_message_store.cpp)
-target_link_libraries(fuzz_message_store PRIVATE fixpp_session fixpp_core)
+target_link_libraries(fuzz_message_store PRIVATE
+  fixpp_session
+  fixpp_core
+  # support/pump_until_ready.hpp includes <gtest/gtest.h> UNCONDITIONALLY. This TU
+  # uses only `run_window_then_ready`, which is gtest-free -- see the rationale at
+  # `run_coro` for why nothing here reports through gtest -- but the header still
+  # needs gtest's include path to compile. Same reason, same fix as
+  # fuzz_session_recovery_admin_parse below.
+  #
+  # ⚠️ A MACHINE WITH gtest INSTALLED SYSTEM-WIDE COMPILES THIS TU WITHOUT THE
+  # DEPENDENCY, so a green local build does not prove the link line is complete:
+  # <gtest/gtest.h> resolves from a default search path that the CI runner has no
+  # equivalent of, and the omission surfaces only on a clean checkout. Verify with
+  # `-H` and read which gtest.h was opened, rather than trusting that it built.
+  GTest::gtest)
 target_compile_options(fuzz_message_store PRIVATE -fsanitize=fuzzer,address,undefined)
 target_link_options(fuzz_message_store PRIVATE -fsanitize=fuzzer,address,undefined)
 target_include_directories(fuzz_message_store PRIVATE

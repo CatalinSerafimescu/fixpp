@@ -110,7 +110,25 @@ linux-clang-release   364
 # Provenance, per this file's own rule that a basis is read off CI and never a
 # workstation: Tier 1 run 34160147412 at commit `d66b4351` (PR #392), job
 # `linux-clang-asan` — annotation "the executed test count (369)".
-linux-clang-asan      369
+#
+# ⚠️ 369 -> 370, #405/PR #407. LANE-LOCAL and DELIBERATE: this change adds
+# `tests/fuzz/corpus/message_store/`, and tests/fuzz/CMakeLists.txt registers one
+# `fuzz_replay_<name>` ctest per corpus DIRECTORY, so exactly one registration
+# appears. It lands on this lane and nowhere else because the whole `tests/fuzz`
+# subdirectory sits behind `if(FIXPP_BUILD_FUZZ)` in the root CMakeLists, and this
+# is the only lane that sets it — the same reason the 362 -> 368 drift above was
+# lane-local, and the opposite of the uniform +1 the note above retracts.
+#
+# ⚠️ PROVENANCE IS WEAKER HERE THAN THIS FILE'S OWN RULE WANTS, AND SAYING SO IS
+# THE POINT. The rule is that a basis is read off CI and never a workstation. 370
+# is NOT read off CI: it is 369 (CI-read, run 34160147412) plus one, derived from
+# the registration mechanism above. It is a PREDICTION, and it is deliberately
+# recorded as one rather than dressed as a measurement. The confirming basis is
+# this PR's own `linux-clang-asan` run — and a wrong prediction cannot pass
+# quietly, because the gate compares the executed count against this line and
+# fails loudly on any mismatch. If it does fail, correct the number here and
+# re-record the provenance to that run; do not widen the check.
+linux-clang-asan      370
 linux-clang-ubsan     363
 linux-clang-tsan      363
 

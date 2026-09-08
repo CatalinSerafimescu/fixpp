@@ -129,10 +129,24 @@ book/
 .claude/skills/speckit-tasks/*
 !.claude/skills/speckit-tasks/SKILL.md
 
-# libFuzzer corpus (regenerated on each fuzz run; not source of truth)
-tests/fuzz/corpus/message_store/
+# libFuzzer corpus.
+#
+# ⚠️ THE RATIONALE THAT USED TO BE HERE -- "regenerated on each fuzz run; not source
+# of truth" -- WAS TRUE WHEN WRITTEN (feature 008, 2026-05-21) AND IS NOW FALSE.
+# #213 wired `tests/fuzz/corpus/<name>/` to auto-register a `fuzz_replay_<name>`
+# ctest, so a committed corpus IS source of truth: it is the regression evidence
+# that harness replays in CI. The six corpora tracked today survive these patterns
+# only because they were added BEFORE them -- .gitignore does not apply to files
+# already tracked -- so the rules read as if corpora are untracked while the
+# repository says otherwise.
+#
+# What these patterns are still for: keeping AD-HOC local fuzz output (a scratch
+# `-runs=...` corpus dir) from being committed by accident. A corpus that is meant
+# to ship must therefore be negated explicitly below, which makes adding one a
+# deliberate line someone wrote rather than a side effect of running the fuzzer.
 tests/fuzz/corpus/*
 tests/config/fuzz/corpus/*
+!tests/fuzz/corpus/message_store/
 
 # Python wheel build output (cibuildwheel / build-wheel.sh)
 wheelhouse/
