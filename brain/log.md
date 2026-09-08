@@ -6,6 +6,36 @@ status: stable
 
 # Log
 
+- **2026-09-07 — #289 batch 20, the axis that batch 19's bucket did not have.**
+  `components/test.md` and `failure-classes.md` record the answer to the caveat batch 19 filed
+  against itself. `ci/pump-get-sweep.sh` gains a third axis — **call-site scope**, `CORO` /
+  `CALLER-SIDE` — and tracking for futures held in a container. Together they moved a population of
+  previously-invisible sites into the candidate list, among them the coroutine-side wedge shape in a
+  file batch 19 never opened; those were migrated. Figures move with the tree AND with the
+  instrument, so read them from `bash ci/pump-get-sweep.sh --disposition`, not from here.
+
+  ⚠️ **The discriminator is the RETURN TYPE, not a keyword.** "The enclosing scope contains a
+  `co_await`" is satisfied by a TEST body that merely *spawns* a coroutine, so it colours the
+  caller-side `.get()` after that lambda's closing brace and reports nearly the whole corpus — a
+  survey wearing an axis's clothes. Both readings pass a hand-check; only a control with one `.get()`
+  inside the lambda and one immediately after it separates them.
+
+  ⚠️ **A zero is the headline, so the arm is a known-NON-zero corpus.**
+  `ci/red-arms/batch20-coroutine-axis.sh` runs the *current* sweep against `tests/` at the
+  pre-batch-19 commit and requires **non-zero there, zero here** — a condition, not a count, because
+  the historical figure moves whenever the instrument changes. Same instrument, older tree —
+  extracting only the corpus is load-bearing, since the old tree would run the old sweep and pass by
+  construction. And the sweep's classifier controls now run in tier 1, which they never had.
+
+  ⚠️ **The `/simplify` reuse pass caught the batch about to add a FOURTH brace-walker**, one batch
+  after batch 19's headline was "lexer copies 2 → 1". `mock-clock-staging-sweep.sh` already carried
+  two near-identical ones. `brace_blocks` / `line_starts` / `line_index_of` now live in
+  `ci/cxx_blank.py` with their own controls, and all three callers sit on them — **4 → 1**, proven by
+  mutating the shared primitive and watching every caller go red. It was also the efficiency fix: the
+  draft walked every character twice (10.4M list appends) and had **doubled** the sweep, 1.02 s →
+  2.33 s, in a step just added to tier 1; brace-only `finditer` + `bisect` brings it to 1.63 s with
+  output proven identical over 660 files / 768 spans.
+
 - **2026-09-07 — #389: an assessment can be SATISFIED while the code it certifies is broken.**
   `components/wire.md` gains the reserve-estimator section; `failure-classes.md` gains a NEW
   **class 10** (an assessment scoped to one of a change's effects certifies a site the OTHER effect

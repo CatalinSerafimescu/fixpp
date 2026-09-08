@@ -43,6 +43,7 @@ string it passed in -- which `ci/pump-red-arm.sh` does. A caller that seeks into
 byte offset, or re-reads it as bytes, will land in the wrong place on any file containing
 non-ASCII, and this repo's sources are full of non-ASCII comment glyphs.
 """
+import bisect
 import re
 
 # Compiled once and matched AT AN OFFSET; see the note at its use site for why the offset
@@ -273,6 +274,61 @@ def blank_unevaluated(stmt):
             out[j] = " "
     return "".join(out)
 
+
+# ── Brace blocks ─────────────────────────────────────────────────────────────
+#
+# ⚠️ THIS LIVES HERE FOR THE REASON THE COMMENT-BLANKER DOES: the sweeps kept
+# re-deriving it. `ci/mock-clock-staging-sweep.sh` carried TWO near-identical copies
+# (`enclosing_spans` and `enclosing_span`, differing only in whether they keep the whole
+# chain or the innermost), and #289 batch 20 was about to add a THIRD for a different
+# question ("which blocks are introduced by an `awaitable`-returning head?"). The three
+# questions differ only in how the block list is FILTERED, so the walk is the primitive
+# and the filter belongs to the caller.
+#
+# ⚠️ IT WALKS BRACES, NOT CHARACTERS, AND THAT IS A MEASUREMENT NOT A STYLE CHOICE. The
+# batch-20 draft iterated every character of every file to build an offset->line table
+# and then iterated them all again to find the braces: 10.4M `list.append` calls over
+# tests/, and it more than DOUBLED `ci/pump-get-sweep.sh` (1.02 s -> 2.33 s) in a step
+# that had just been added to tier 1. `re.finditer(r"[{}]")` plus `bisect` over
+# line-start offsets does the same work on the ~1% of characters that are braces.
+#
+# Callers pass text that has been through `blank_non_code`, so a `{` inside a comment,
+# a string or a raw string cannot open a block.
+
+
+def brace_blocks(blanked):
+    """[(open_offset, close_offset)] for every balanced brace block, or None.
+
+    ⚠️ None means UNBALANCED, and every caller has to decide what that means rather than
+    reading it as "no blocks". `mock-clock-staging-sweep.sh` deliberately cannot tell an
+    unbalanced file from a site with no enclosing block and reports UNPARSED for both --
+    the alternative is a site that silently vanishes.
+    """
+    stack, blocks = [], []
+    for m in re.finditer(r"[{}]", blanked):
+        if m.group() == "{":
+            stack.append(m.start())
+        else:
+            if not stack:
+                return None
+            blocks.append((stack.pop(), m.start()))
+    return blocks
+
+
+def line_starts(lines):
+    """Char offset of each line, for `line_index_of` below."""
+    offs, pos = [], 0
+    for l in lines:
+        offs.append(pos)
+        pos += len(l) + 1
+    return offs
+
+
+def line_index_of(offs, pos):
+    """0-based line index holding char offset `pos`. O(log n), not O(n)."""
+    return bisect.bisect_right(offs, pos) - 1
+
+
 # ── Self-test ────────────────────────────────────────────────────────────────
 #
 # ⚠️ EVERY CASE HERE MUST INCLUDE A POSITIVE CONTROL -- a blanker that returns all spaces
@@ -367,3 +423,49 @@ if __name__ == "__main__":
         sys.exit("\nCONTROL FAILED -- blank_unevaluated is not trustworthy.")
     print("blank_unevaluated PROVEN: erases the operand, keeps the real call, "
           "preserves length.")
+
+    # ── brace_blocks / line_index_of ─────────────────────────────────────────
+    # ⚠️ THE NESTING CASE IS THE ONE THAT MATTERS, because every caller uses these
+    # blocks to answer "is offset X inside a block introduced by Y?", and a walk that
+    # loses the pairing answers "yes" for the whole rest of the file.
+    B_CASES = [
+        ("flat pair",              "{ }",                       [(0, 2)]),
+        ("nested: inner FIRST",    "{ { } }",                   [(2, 4), (0, 6)]),
+        ("two siblings pair up",   "{ } { }",                   [(0, 2), (4, 6)]),
+        ("unbalanced close",       "} {",                       None),
+        ("unclosed open is DROPPED, not fatal", "{ { }",         [(2, 4)]),
+        ("no braces",              "int x;",                    []),
+    ]
+    b_ok = True
+    for name, src, want in B_CASES:
+        got = brace_blocks(src)
+        good = got == want
+        b_ok &= good
+        print(f"  {'ok   ' if good else '!!BAD!!'} brace_blocks: {name:<38} -> {got}")
+    # A block introduced by a marker must NOT extend past its own closing brace -- the
+    # exact claim `ci/pump-get-sweep.sh`'s scope axis rests on.
+    src = "TEST(A,B){\n  auto f=[]() -> awaitable<void> {\n    x;\n  };\n  y;\n}\n"
+    lines = src.split("\n")
+    offs = line_starts(lines)
+    blocks = brace_blocks(src)
+    intro = src.index("awaitable<void>")
+    inner = min((b for b in blocks if b[0] > intro), key=lambda b: b[0])
+    x_line = line_index_of(offs, src.index("    x;"))
+    y_line = line_index_of(offs, src.index("  y;"))
+    in_x = inner[0] < offs[x_line] < inner[1]
+    in_y = inner[0] < offs[y_line] < inner[1]
+    good = in_x and not in_y
+    b_ok &= good
+    print(f"  {'ok   ' if good else '!!BAD!!'} brace_blocks: a marked block ENDS at its "
+          f"own brace (inside={in_x} after={in_y})")
+    # line_index_of must agree with a naive count -- it is the O(log n) replacement for
+    # the `sum(1 for o in offs if o <= pos) - 1` the sweeps used to run per site.
+    naive_ok = all(line_index_of(offs, p) == sum(1 for o in offs if o <= p) - 1
+                   for p in range(len(src)))
+    b_ok &= naive_ok
+    print(f"  {'ok   ' if naive_ok else '!!BAD!!'} line_index_of agrees with the naive "
+          f"count at every offset")
+    if not b_ok:
+        sys.exit("\nCONTROL FAILED -- brace_blocks/line_index_of are not trustworthy.")
+    print("brace_blocks PROVEN: pairs nested braces innermost-first, refuses an "
+          "unbalanced file, and a marked block ends at its own brace.")

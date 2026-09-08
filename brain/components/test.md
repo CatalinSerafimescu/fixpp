@@ -281,6 +281,45 @@ does classify: three live sites of this exact shape were `for (auto& f : futs) f
 range-for variable is not a receiver the sweep can trace back to a `co_spawn`. Do not read the
 bucket going to 1 as the shape being done.
 
+#### Batch 20 answered that with an AXIS, and the axis found two more sites
+
+`ci/pump-get-sweep.sh` now carries a third axis — **call-site scope**, `CORO` or `CALLER-SIDE` —
+alongside executor class and pump shape, plus tracking for the container shape. Together they moved
+a batch of previously-invisible sites into the candidate list, among them the coroutine-side wedge
+shape in `tests/sync/test_drain_immediate_destroy_after_reap.cpp` — a file batch 19 never opened,
+whose own hang message already names `futs.get()` as a suspect. Those were migrated.
+
+**Read the current numbers, do not read them here** — `bash ci/pump-get-sweep.sh --disposition`
+prints the scope tally, and the counts move with every batch and with every change to the
+instrument itself. What is durable is the CONDITION: `CORO` unguarded should be **0**, and
+`ci/red-arms/batch20-coroutine-axis.sh` is what makes that zero mean something.
+
+- ⚠️ **THE SCOPE DISCRIMINATOR IS THE RETURN TYPE, NOT A KEYWORD.** "The enclosing scope contains a
+  `co_await`" is satisfied by a TEST body that merely *spawns* a coroutine lambda, so it marks the
+  caller-side `.get()` **after that lambda's closing brace** as coroutine-side and reports nearly the
+  whole corpus. A block introduced by a function or lambda returning `asio::awaitable<…>` cannot be
+  entered from outside. The two controls that separate the readings put one `.get()` inside such a
+  lambda and one immediately after it, and both die under a mutation of their own rule.
+- ⚠️ **A ZERO FROM A NEW AXIS NEEDS A KNOWN-NON-ZERO CORPUS.** The synthetic controls prove the axis
+  *can* say `CORO`; a wrong root or a broken traversal survives them.
+  `ci/red-arms/batch20-coroutine-axis.sh` runs the **current** sweep against `tests/` at the
+  pre-batch-19 commit — same instrument, older corpus — and requires **non-zero**, not a population.
+  ⚠️ It deliberately does not assert a count: the first draft of its header said "the same eleven
+  sites", the number batch 19 migrated, and the arm measures more than that, because batch 20's own
+  container tracking makes further sites visible *in that same corpus*. A population figure there
+  would have to be re-derived whenever the INSTRUMENT changes, not just the tree. Extract only the
+  corpus: checking out the whole old tree would run the *old* sweep, which has no axis, and pass by
+  construction.
+- ⚠️ **Container coverage is ONE SPELLING, not the class.** `push_back|emplace_back(co_spawn(…))`
+  consumed by `for (auto& e : c) e.get()` is what is tracked. An earlier draft of that disclosure
+  listed the evasions it expected — an index loop, `futs[i].get()`, a moved-from container — and a
+  check found **none of them** in the tree. The condition and the re-derivation recipe ship; the
+  hypothetical enumeration does not.
+- The sweep's controls now run in **tier 1** (`bash ci/pump-get-sweep.sh --disposition`). It still
+  does not gate the candidate list — that list is not pinnable — but until this batch nothing ran
+  its classifier controls at all, so a regression in them would have surfaced only as a number
+  nobody could tell was wrong.
+
 ### ⚠️⚠️ A state assertion after a helper call is NOT a masking barrier
 
 When designing forced-miss (RED) arms, the natural model is that a helper's miss-branch `return` will

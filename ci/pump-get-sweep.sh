@@ -21,11 +21,17 @@
 # Do not read a clean file as proof. Known limitations, each with a control or a
 # named population, because an undisclosed limitation is how this class recurs:
 #
-#   - Futures held in CONTAINERS are invisible. It recognises `auto NAME =
-#     asio::co_spawn(...)`; `futs.push_back(asio::co_spawn(...))` consumed by
-#     `for (auto& f : futs) f.get()` registers nothing. Real population exists in
-#     tests/sync and the perf harnesses; re-derive with
-#     `git grep -n 'push_back(asio::co_spawn\|emplace_back(asio::co_spawn'`.
+#   - Futures held in CONTAINERS were invisible until #289 batch 20. Exactly ONE
+#     spelling is tracked now -- `NAME.push_back|emplace_back(asio::co_spawn(...))`
+#     consumed by `for (auto& elem : NAME) elem.get()`. That is the CONDITION, and it
+#     is narrower than "containers are covered": any other way of reaching the element
+#     registers nothing. Re-derive rather than assume, in BOTH directions -- which
+#     containers exist, and which of them this spelling actually reaches:
+#       git grep -n 'push_back(asio::co_spawn\|emplace_back(asio::co_spawn'
+#     ⚠️ No population figure is written here on purpose. An earlier draft of this very
+#     line listed the evasions it expected (an index loop, `futs[i].get()`, a moved-from
+#     container) -- and a check found NONE of them in the tree. A hypothetical
+#     enumeration reads as a finding and is worth less than the recipe above.
 #   - No aliasing, no `decltype(auto)`, no futures returned from a function.
 #   - State resets at each function/TEST boundary, not at each C++ scope, so two
 #     sibling blocks in one function share a future's guarded state.
@@ -121,7 +127,8 @@ from pathlib import Path
 # below is still local because this sweep needs comment blanking WITHOUT literal blanking
 # (its controls quote the idiom inside strings); `blank_unevaluated` has no such split.
 sys.path.insert(0, os.environ["FIXPP_CI_DIR"])
-from cxx_blank import blank_unevaluated
+from cxx_blank import (blank_unevaluated, brace_blocks, line_starts,
+                       line_index_of)
 
 root, sub, quiet = Path(sys.argv[1]), sys.argv[2], sys.argv[3] == "1"
 disposition = sys.argv[4] == "1"
@@ -267,6 +274,114 @@ _THREADRUN = re.compile(r"(?:std::jthread|std::thread|std::async)[^;]{0,400}?(\w
 _UNBOUNDED = re.compile(r"([\w>.\-]+)\.run\(")
 _BOUNDED = re.compile(r"\.run_for\(|\.run_until\(|\.poll\(|\.poll_one\(")
 
+# ── the CALL-SITE-SCOPE axis (batch 20) ──────────────────────────────────────
+# ⚠️ THIS AXIS EXISTS BECAUSE BATCH 19's BUCKET WENT TO 1 AND ITS CLASS DID NOT.
+# `CALLER-ONLY x HELPER` counted 9 sites before batch 19 and 1 after, and the record
+# said plainly that this was a BUCKET moving, not the class: neither existing axis
+# encodes whether the `.get()` runs INSIDE a coroutine. That distinction is not a
+# refinement of the other two -- it changes what the outer driver is worth. A blocking
+# wait on the io_context's own pumping thread, inside a handler that driver dispatched,
+# wedges the driver too, so a bounded outer pump bounds nothing.
+#
+#   scope:  CORO         the get() lies inside the brace block of a function or lambda
+#                        whose return type is `asio::awaitable<...>`.
+#           CALLER-SIDE  it does not.
+#
+# ⚠️ THE DISCRIMINATOR IS STRUCTURAL -- THE RETURN TYPE -- NOT KEYWORD PRESENCE, and
+# that is deliberate. "The enclosing scope contains a `co_await`" is satisfied by a TEST
+# body that merely SPAWNS a coroutine lambda, so it marks the caller-side get() after
+# that lambda's closing brace as CORO. That over-match reads exactly like a survey: it
+# reports nearly the whole corpus and discriminates nothing. A return type cannot be
+# satisfied from the outside.
+#
+# ⚠️ NESTING IS THE WHOLE DIFFICULTY, so it is measured by two controls that straddle
+# it, not by inspection: a get() INSIDE such a lambda is CORO, and a get() after that
+# same lambda's closing brace -- one line later, same TEST -- is CALLER-SIDE.
+#
+# ⚠️ THE AXIS IS COMPUTED FOR GUARDED ROWS TOO, and that is the only reason a zero here
+# is worth anything. Every coroutine-side site is migrated, so they are all guarded and
+# would vanish from the candidate list; counting them is what lets a reader see the
+# instrument reporting non-zero on real code rather than on a fixture.
+# `ci/red-arms/batch20-coroutine-axis.sh` makes that a measurement: it runs THIS sweep
+# against the pre-batch-19 corpus, where the same code was unguarded.
+_AWAITABLE_INTRO = re.compile(
+    r"->\s*(?:asio::)?awaitable\s*<"                       # trailing return (lambdas and fns)
+    r"|(?:asio::)?awaitable\s*<[^;{}()]*>\s+[A-Za-z_]\w*\s*\(")  # leading return type
+
+
+def _body_open(text, start):
+    """Offset of the `{` that opens the body of the declarator beginning at `start`,
+    or None if that declarator has no body.
+
+    ⚠️ "THE NEXT `{`" IS WRONG IN BOTH DIRECTIONS, and a hostile round produced one
+    breaking input for each. Walking from the declarator's start with a PAREN DEPTH is
+    what separates them:
+
+      * `awaitable<void> f(std::vector<int> xs = {}) { ... }` -- the braced default
+        argument is the next `{`, so the real body was never coloured and the site read
+        CALLER-SIDE. **That direction FAILS TOWARD CLEAN**, which is what makes it the
+        worse of the two: it is subtracted from the very count this batch reports as 0.
+        The default's braces sit inside the parameter list, so a depth test skips them.
+      * `awaitable<void> declared_only();` -- a declaration with no body at all, whose
+        introducer then coloured the NEXT unrelated block (a following TEST body read
+        CORO). A `;` at depth 0 ends the declarator with no body.
+
+    Starting at the MATCH START rather than its end is load-bearing: the leading-return
+    spelling's regex consumes the opening paren, so measuring depth from the end would
+    begin at depth 1 for one alternative and 0 for the other.
+    """
+    depth = 0
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth <= 0:
+            if ch == "{":
+                return i
+            if ch == ";":
+                return None
+    return None
+
+
+def coroutine_line_spans(lines):
+    """[(open_line_idx, close_line_idx)] for each brace block introduced by an
+    `awaitable`-returning function or lambda. Line-granular on purpose: every consumer
+    here anchors on a line index, and a finer resolution would buy nothing it can use.
+
+    A block ends at its own closing brace, so a get() BELOW one is outside it -- the
+    nesting case controls 2a/2b pin. That property belongs to `brace_blocks`, which
+    carries its own control for it.
+
+    ⚠️ THE EARLY-OUT IS THE POINT, NOT A MICRO-OPTIMISATION. Only ~23 % of files under
+    tests/ contain `awaitable<` at all, and this sweep is now a tier-1 gate. The first
+    draft walked every character of every file twice; it more than doubled the sweep
+    (1.02 s -> 2.33 s over 660 files, 10.4M list appends).
+    """
+    text = "\n".join(lines)
+    intros = [m.start() for m in _AWAITABLE_INTRO.finditer(text)]
+    if not intros:
+        return []
+    blocks = brace_blocks(text)
+    if blocks is None:      # unbalanced -- claim nothing rather than guess a scope
+        return []
+    offs = line_starts(lines)
+    bodies = {b for b in (_body_open(text, e) for e in intros) if b is not None}
+    return [(line_index_of(offs, o), line_index_of(offs, c))
+            for o, c in blocks if o in bodies]
+
+
+# A container of futures, and the loop that consumes it. Batch 19 found three live sites
+# of this shape and could not report one of them: `for (auto& f : futs) f.get();` binds
+# the receiver to a range-for variable, which the single-binding tracer cannot resolve to
+# a `co_spawn`. The alias below is what makes those sites visible.
+# ⚠️ IT MUST NOT ADMIT `unique_ptr::get()`. A naive get-anchored probe over the same
+# corpus returned 29 hits of which 16 were `dynamic_cast<T*>(client.get())` -- the
+# receiver has to trace back to a `co_spawn(..., use_future)` or the axis is noise.
+_PUSH_SPAWN = re.compile(r"\b(\w+)\s*\.\s*(?:push_back|emplace_back)\s*\(\s*asio::co_spawn\s*\(")
+_RANGE_FOR = re.compile(r"\bfor\s*\(\s*(?:const\s+)?auto\s*&?&?\s*(\w+)\s*:\s*(\w+)\s*\)")
+
 
 def classify(text):
     """-> (guarded, unguarded_rows). Anchored on the get(), and IDENTITY-CHECKED.
@@ -281,6 +396,11 @@ def classify(text):
          -> the declaration branch now falls through to the get() scan"""
     blanked = blank_comments(text)
     lines = blanked.splitlines()
+    spans = coroutine_line_spans(lines)
+
+    def scope_of(line_idx):
+        return "CORO" if any(o <= line_idx <= c for o, c in spans) else "CALLER-SIDE"
+
     ctxnames = set(_CTXDECL.findall(blanked))
     pools = set(_POOLDECL.findall(blanked))
     threaded = set(_THREADRUN.findall(blanked))
@@ -291,10 +411,28 @@ def classify(text):
                    for m in _UNBOUNDED.finditer(txt))
 
     guarded_state, known, execs, since = {}, set(), {}, {}
-    guarded, bad = 0, []
+    alias_elem = alias_cont = None
+    guarded, bad = [], []
     for start, stmt in statements(lines):
         if BOUNDARY.match(stmt):
             guarded_state, known, execs, since = {}, set(), {}, {}
+            alias_elem = alias_cont = None
+        # A container filled from `co_spawn(..., use_future)` is tracked under the
+        # CONTAINER's name; the range-for below aliases its element onto it.
+        pm = _PUSH_SPAWN.search(stmt)
+        if pm and "use_future" in stmt:
+            name = pm.group(1)
+            known.add(name)
+            guarded_state.setdefault(name, False)
+            execs.setdefault(name, _PUSH_SPAWN.sub("", stmt).strip())
+            since.setdefault(name, [])
+        # ⚠️ THE ALIAS PERSISTS UNTIL THE NEXT RANGE-FOR OR BOUNDARY, on purpose: the
+        # guard and the `.get()` are separate statements inside the loop BODY, so an
+        # alias scoped to the `for` statement alone would see neither together.
+        fm = _RANGE_FOR.search(stmt)
+        if fm:
+            alias_elem, alias_cont = ((fm.group(1), fm.group(2))
+                                      if fm.group(2) in known else (None, None))
         m = re.search(r'\bauto\s+(\w+)\s*=\s*asio::co_spawn\s*\(\s*([^,]+?)\s*,', stmt)
         if m and "use_future" in stmt:
             known.add(m.group(1))
@@ -312,17 +450,30 @@ def classify(text):
             for name in known:
                 if re.search(rf'\b{re.escape(name)}\b', stmt):
                     guarded_state[name] = True
+            if alias_elem and re.search(rf'\b{re.escape(alias_elem)}\b', stmt):
+                guarded_state[alias_cont] = True
         # Only the CALL sites matter from here down; an unevaluated operand is not one.
         evaluated = blank_unevaluated(stmt)
         for name in list(since):
             if not re.search(rf'\b{re.escape(name)}\s*\.get\(\)', evaluated):
                 since[name].append(stmt)
         for gm in re.finditer(r'(?:^|[^\w.])(\w+)\.get\(\)', evaluated):
-            name = gm.group(1)
+            # ⚠️ `alias_elem not in known` IS THE SHADOW GUARD, and without it the alias
+            # is a FALSE CLEAN. A range-for element is usually a short name (`f`), and a
+            # later `auto f = asio::co_spawn(...)` in the same TEST re-uses it -- BOUNDARY
+            # does not reset at a block, only at a function/TEST. The new future's
+            # `f.get()` was then attributed to the CONTAINER, inheriting the container's
+            # guarded state, and vanished from the report. A name that is a known future
+            # in its own right is never an alias.
+            name = (alias_cont if gm.group(1) == alias_elem and alias_elem not in known
+                    else gm.group(1))
             if name not in known:
                 continue
             if guarded_state.get(name):
-                guarded += 1
+                # The SCOPE of a guarded site is kept, not just its count: it is the
+                # only way a reader can see this axis reporting non-zero on real code
+                # once every coroutine-side site is migrated.
+                guarded.append(scope_of(start))
             else:
                 ex = execs.get(name, "?")
                 base = re.sub(r'\.get_executor\(\)$', '', ex).lstrip('*&') \
@@ -333,7 +484,8 @@ def classify(text):
                 seg = " ".join(since.get(name, []))
                 pc = ("RUN-UNBOUNDED" if unbounded(seg) else
                       "RUN-BOUNDED" if _BOUNDED.search(seg) else "HELPER")
-                bad.append((start + 1, lines[start].strip() or stmt[:70], ec, pc))
+                bad.append((start + 1, lines[start].strip() or stmt[:70], ec, pc,
+                            scope_of(start)))
     return guarded, bad
 
 # ── SELF-TEST on SYNTHETIC fixtures ──────────────────────────────────────────
@@ -621,15 +773,141 @@ TEST(A, B) {
 """, ("CALLER-ONLY", "HELPER")),
 ]
 
+# ── controls for the CALL-SITE-SCOPE axis and the container shape (batch 20) ──
+# Each case pins ONE claim, and the pair that matters is 2a/2b: the SAME lambda, one
+# get() inside its braces and one after them. A scope rule that cannot separate those
+# two lines reports the whole corpus CORO and discriminates nothing.
+# `want` is (row_count, scope_of_first_row_or_None).
+SCOPE_CASES = [
+    ("2a  get INSIDE an awaitable lambda            -> CORO", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto body = [&]() -> asio::awaitable<void> {
+        auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+        co_await yield_n(4);
+        fut.get();
+    };
+    asio::co_spawn(ioc, body(), asio::detached);
+    ioc.run();
+}
+""", (1, "CORO")),
+    ("2b  get AFTER that same lambda's closing brace -> CALLER-SIDE", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto body = [&]() -> asio::awaitable<void> {
+        co_await yield_n(4);
+    };
+    auto fut = asio::co_spawn(ioc, body(), asio::use_future);
+    ioc.run_for(200ms);
+    fut.get();
+}
+""", (1, "CALLER-SIDE")),
+    ("2c  leading return type is the same coroutine  -> CORO", """
+asio::awaitable<void> drive(asio::io_context& ioc) {
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    co_await yield_n(4);
+    fut.get();
+}
+""", (1, "CORO")),
+    ("2d  a coroutine ELSEWHERE in the file does not colour a caller-side get", """
+asio::awaitable<void> helper() { co_return; }
+TEST(A, B) {
+    asio::io_context ioc;
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run_for(200ms);
+    fut.get();
+}
+""", (1, "CALLER-SIDE")),
+    # 2e/2f are the two inputs a hostile round used to break "the introducer colours the
+    # NEXT `{`". They are kept as controls because the two errors go in OPPOSITE
+    # directions, and only one of them is loud.
+    ("2e  a braced DEFAULT ARGUMENT does not steal the body  -> CORO", """
+asio::awaitable<void> f(std::vector<int> xs = {}) {
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run_for(200ms);
+    fut.get();
+}
+""", (1, "CORO")),
+    ("2f  a BODILESS declaration colours nothing            -> CALLER-SIDE", """
+asio::awaitable<void> declared_only();
+
+TEST(A, B) {
+    auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run_for(200ms);
+    fut.get();
+}
+""", (1, "CALLER-SIDE")),
+    ("3a  container + range-for is REPORTED at all", """
+TEST(A, B) {
+    asio::io_context ioc;
+    std::vector<std::future<void>> futs;
+    futs.push_back(asio::co_spawn(ioc, s.open(), asio::use_future));
+    ioc.run_for(200ms);
+    for (auto& f : futs) f.get();
+}
+""", (1, "CALLER-SIDE")),
+    ("3b  ...and a GUARDED one is not", """
+TEST(A, B) {
+    asio::io_context ioc;
+    std::vector<std::future<void>> futs;
+    futs.emplace_back(asio::co_spawn(ioc, s.open(), asio::use_future));
+    for (auto& f : futs) {
+        if (!fixpp::test_support::run_window_then_ready(ioc, f, 200ms)) return;
+        f.get();
+    }
+}
+""", (0, None)),
+    ("3c  `unique_ptr::get()` inside a coroutine is NOT a future", """
+asio::awaitable<void> drive(asio::io_context& ioc) {
+    auto client = make_transport();
+    auto* tls = dynamic_cast<TlsTransport*>(client.get());
+    co_return;
+}
+""", (0, None)),
+    # ⚠️ A CONTROL FOR "a range-for over an UNKNOWN container aliases nothing" WAS
+    # WRITTEN HERE AND DELETED, because a mutation arm proved it could not fail: remove
+    # the `fm.group(2) in known` test and it still reports 0 rows, since the alias then
+    # names a container that fails the `name not in known` check one step later. It read
+    # as a control and tested nothing this batch added. The claim that test actually
+    # carries is SHADOWING, which is what 3d below pins -- and 3d DOES go red under
+    # exactly that mutation.
+    ("3d  a range-for element must not SHADOW a known future of the same name", """
+TEST(A, B) {
+    asio::io_context ioc;
+    auto f = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run_for(200ms);
+    for (auto& f : owned) use(f);
+    f.get();
+}
+""", (1, "CALLER-SIDE")),
+    # ⚠️ 3e IS THE OTHER HALF OF 3d AND IT IS THE ONE THAT FAILS TOWARD CLEAN. Here the
+    # shadowing future is declared AFTER the range-for, so the stale alias was still
+    # live: the new `f.get()` inherited the CONTAINER's guarded state and vanished from
+    # the report entirely. 3d could not catch it -- there the future is declared first.
+    ("3e  ...including one declared AFTER the loop (the alias must not outlive it)", """
+TEST(A, B) {
+    std::vector<std::future<void>> futs;
+    futs.push_back(asio::co_spawn(ioc, s.open(), asio::use_future));
+    for (auto& f : futs) {
+        if (!run_window_then_ready(ioc, f, 200ms)) return;
+        f.get();
+    }
+    auto f = asio::co_spawn(ioc, s.open(), asio::use_future);
+    ioc.run_for(200ms);
+    f.get();
+}
+""", (1, "CALLER-SIDE")),
+]
+
 ok = True
 if not quiet:
     print("=== SELF-TEST: get-anchored sweep (synthetic fixtures) ===")
 for name, src, want_g, want_b in CONTROLS:
     g, b = classify(src)
-    good = (g == want_g and len(b) == want_b)
+    good = (len(g) == want_g and len(b) == want_b)
     ok &= good
     if not quiet:
-        print(f"  {'ok   ' if good else '!!FAIL'} {name}  (guarded={g} unguarded={len(b)})")
+        print(f"  {'ok   ' if good else '!!FAIL'} {name}  (guarded={len(g)} unguarded={len(b)})")
 for name, src, want in DISPO_CASES:
     rows_ = classify(src)[1]
     got = (rows_[0][2], rows_[0][3]) if len(rows_) == 1 else ("<%d rows>" % len(rows_), "")
@@ -637,6 +915,13 @@ for name, src, want in DISPO_CASES:
     ok &= good
     if not quiet:
         print(f"  {'ok   ' if good else '!!FAIL'} disposition: {name}  -> {got[0]}/{got[1]}")
+for name, src, (want_n, want_sc) in SCOPE_CASES:
+    rows_ = classify(src)[1]
+    got = (len(rows_), rows_[0][4] if rows_ else None)
+    good = got == (want_n, want_sc)
+    ok &= good
+    if not quiet:
+        print(f"  {'ok   ' if good else '!!FAIL'} scope: {name}  -> {got[0]} row(s), {got[1]}")
 if not ok:
     sys.exit("\nCONTROL FAILED -- sweep output is NOT evidence. Fix before trusting a number.")
 if not quiet:
@@ -663,33 +948,46 @@ if not files:
           file=sys.stderr)
     print("never opened. Check the scan root.", file=sys.stderr)
     sys.exit(2)
-tot_g = tot_b = 0
+tot_g = tot_b = tot_gc = 0
 rows = []
 for p in files:
     try:
         g, b = classify(p.read_text(errors="replace"))
     except OSError:
         continue
-    tot_g += g; tot_b += len(b)
+    tot_g += len(g); tot_b += len(b); tot_gc += g.count("CORO")
     if b:
         rows.append((p.relative_to(root), b))
 
 for rel, b in rows:
     print(f"{rel}  ({len(b)} unguarded)")
-    for ln, txt, ec, pc in b:
-        tag = f"  [{ec} x {pc}]" if disposition else ""
+    for ln, txt, ec, pc, sc in b:
+        tag = f"  [{ec} x {pc} x {sc}]" if disposition else ""
         print(f"    {ln:5d}  {txt[:76]}{tag}")
 if disposition:
     import collections
     tab = collections.Counter()
+    scope_tab = collections.Counter()
     per = collections.defaultdict(collections.Counter)
     for rel, b in rows:
-        for _, _, ec, pc in b:
+        for _, _, ec, pc, sc in b:
             tab[(ec, pc)] += 1
             per[(ec, pc)][str(rel)] += 1
+            scope_tab[sc] += 1
     print("\n=== DISPOSITION (executor-class x pump-shape) ===")
     for (ec, pc), n in tab.most_common():
         print(f"  {n:>4}  {ec:<15} {pc}")
+    print("\n=== CALL-SITE SCOPE (the axis batch 19's bucket did not have) ===")
+    for sc, n in scope_tab.most_common():
+        print(f"  {n:>4}  {sc}")
+    print(f"  {tot_gc:>4}  CORO, already GUARDED  <- not a candidate; printed because a")
+    print("        zero above is only worth something if this instrument can report")
+    print("        non-zero on real code. `ci/red-arms/batch20-coroutine-axis.sh`")
+    print("        runs this same sweep against the pre-batch-19 corpus, where the")
+    print("        same sites were unguarded, and requires a non-zero there.")
+    print("\n  CORO means the get() is inside an `awaitable`-returning function or lambda,")
+    print("  so it runs ON the pumping thread and NO outer driver bounds it -- the")
+    print("  executor axis cannot express that, which is why this one exists.")
     print("\n  READ THE CLASSES, NOT THE TOTAL. A candidate is a defect only where the")
     print("  CALLING thread must pump. CALLER-ONLY is the only executor class that says")
     print("  so on its own; POOL and THREADED say the opposite; THREAD-IN-FILE says READ")

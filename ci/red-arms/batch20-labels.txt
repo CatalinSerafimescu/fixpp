@@ -1,0 +1,10 @@
+# ci/red-arms/batch20-labels.txt -- the site labels #289 batch 20 added.
+#
+# Two sites, both the CONTAINER shape: a `.get()` on a range-for variable over a vector
+# of `co_spawn(..., use_future)` futures, inside a coroutine. `ci/pump-get-sweep.sh`
+# could not trace that receiver back to its spawn until this batch, which is why these
+# two outlived batch 19's eleven siblings in the same directory.
+#
+# Graded by:  bash ci/pump-seam-arm.sh linux-clang-debug ci/red-arms/batch20-labels.txt
+DrainImmediateDestroyAfterReap::AllCallbacksCompletedBeforeDrainReturns/waiters
+DrainImmediateDestroyAfterReap::RepeatedDestroyIsClean/waiters
