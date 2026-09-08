@@ -231,7 +231,11 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
 {
     constexpr auto k_fsync_sleep_ms = std::chrono::milliseconds{500};
     constexpr auto k_flush_deadline = std::chrono::milliseconds{10};
-    // Allow 3× the flush_deadline for OS scheduling jitter before failing.
+    // Allow 10× the flush_deadline for OS scheduling jitter before failing.
+    // (Said "3×" until #400. The tests/log/CMakeLists.txt note that tracked the
+    // discrepancy was deleted in the same change — it recorded a RESULT, with
+    // line numbers this edit invalidates — so the nit is fixed here rather than
+    // left with nothing pointing at it.)
     constexpr auto k_max_return_ms = std::chrono::milliseconds{100};
 
     // Set as the LAST act of the injected fsync, so it is false for the whole
@@ -325,9 +329,12 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
 // a buggy detach-per-flush impl would skip the close join entirely).
 TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
 {
-    // Internal self-deadline: if something hangs, the test itself unblocks
-    // the stalling fsync_fn after k_release_after_ms so the worker can exit
-    // and the test fails with a time assertion rather than hanging ctest.
+    // Internal self-deadline: if something hangs, the test itself unblocks the
+    // stalling fsync_fn after k_release_after_ms so the worker can always exit.
+    // (This used to add "and the test fails with a time assertion rather than
+    // hanging ctest" — #400 deleted that assertion. The hang instrument is now
+    // the ctest TIMEOUT on log_file_fsync; this release only keeps the worker
+    // from being stuck forever.)
     constexpr auto k_flush_deadline      = std::chrono::milliseconds{1};
     constexpr auto k_release_after_ms    = std::chrono::milliseconds{800};  // test self-deadline
 

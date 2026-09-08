@@ -16,7 +16,7 @@
 // ── MPSC ring protocol (§4.3 P1-2 fix implemented) ──────────────────────────
 //
 // write_sequence_ (producers CAS acq_rel/relaxed) — tracks the NEXT slot to claim.
-// read_sequence_  (drain release store; producers relaxed load) — tracks the
+// read_sequence_  (drain release store; producers ACQUIRE load) — tracks the
 //                  NEXT slot the drain will consume.
 //
 // Each ring slot has an `alignas(64) std::atomic<uint64_t> sequence` beside the
@@ -27,7 +27,7 @@
 //
 // Overflow check (load-check-CAS, R5 — never overwrites an unread slot):
 //   1. Load w = write_sequence_.load(relaxed).
-//   2. Load r = read_sequence_.load(relaxed).
+//   2. Load r = read_sequence_.load(ACQUIRE).
 //   3. If w - r >= capacity → overflow: drop (increment drop_count_); return.
 //   4. CAS write_sequence_(w → w+1, acq_rel/relaxed).
 //   5. CAS fail → retry from step 1.
@@ -37,9 +37,20 @@
 // Key correctness properties:
 // - Step 3 checks BEFORE claiming a slot.  write_sequence_ is never advanced
 //   on overflow so the drain never waits on a slot that was claimed-but-not-written.
-// - Relaxed load of read_sequence_ in step 2: a stale (under-advanced) read makes
-//   the ring look fuller than it is → at worst causes an early drop_newest drop.
-//   Safe because drop_newest is the defined behaviour; no corruption possible.
+// - ACQUIRE load of read_sequence_ in step 2 (#402): it pairs with the drain's
+//   release store at the end of a slot copy, and that pair is what makes SLOT
+//   REUSE on wraparound safe — once the drain has copied slot i and advanced,
+//   a producer may claim i + capacity and overwrite the same RingSlot, and
+//   without this edge the drain's reads of the old generation are unordered
+//   against those writes (a TORN record, not a lost one).
+//   ⚠️ This step said `relaxed` and justified it as: "a stale (under-advanced)
+//   read makes the ring look fuller than it is → at worst an early drop_newest
+//   drop. Safe because drop_newest is the defined behaviour; no corruption
+//   possible." That argument is about LIVENESS and was the wrong axis — being
+//   conservative about whether a slot is free says nothing about the ordering
+//   that reusing it requires. Do not restore it. Zero cost on x86-64 (identical
+//   instructions emitted); witnessed by TSan on the ring-wraparound test,
+//   relaxed → 7 data races, acquire → 0.
 // - The per-slot sequence atomic prevents the drain from reading a partially-written
 //   slot: the producer stores sequence = w+1 AFTER writing the Record (release),
 //   the drain reads with acquire semantics, so the full Record write is visible.
@@ -230,27 +241,13 @@ struct Logger::Impl {
             std::uint64_t w = write_sequence_.load(std::memory_order_relaxed);
 
             // Step 2: load drain position — ACQUIRE, pairing with the drain's
-            // release store to read_sequence_ after it finishes copying a slot.
+            // release store to read_sequence_ after a slot copy. This is what
+            // makes SLOT REUSE on wraparound safe.
             //
-            // ⚠️ THIS MUST NOT BE WEAKENED TO RELAXED. It was, and the argument
-            // for it addressed the wrong axis (#402): "a stale (under-advanced)
-            // read makes the ring look fuller → early drop, safe under
-            // drop_newest" is true about LIVENESS and says nothing about MEMORY
-            // ORDERING. Being conservative about whether a slot is free does not
-            // supply the happens-before that REUSING it requires.
-            //
-            // Per generation the slot handshake is already correct (producer
-            // stores slot.sequence release after writing; drain loads it
-            // acquire). What needs this edge is WRAPAROUND: once the drain has
-            // copied slot i and advanced read_sequence_, a producer may claim
-            // i + capacity_ and overwrite the same RingSlot. Without the acquire
-            // here nothing orders the drain's reads of the old generation before
-            // those writes, and the drain can copy a TORN record — some fields
-            // from one log record, some from the next.
-            //
-            // Free on x86 (plain mov). Witnessed by TSan on the ring-wraparound
-            // test: relaxed → 7 data races, acquire → 0
-            // (tests/log/test_file_sink_backpressure.cpp).
+            // ⚠️ MUST NOT BE WEAKENED TO RELAXED (#402). The full argument, and
+            // the wrong-axis one it replaced, are in this file's MPSC ring
+            // protocol header — kept in ONE place deliberately, so the two
+            // cannot drift into disagreeing about the memory model.
             std::uint64_t r = read_sequence_.load(std::memory_order_acquire);
 
             // Step 3: overflow check BEFORE claiming a slot (R5).

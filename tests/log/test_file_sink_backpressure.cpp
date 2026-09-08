@@ -219,10 +219,6 @@ protected:
     std::filesystem::path tmpdir_;
 };
 
-// Producer burst size, shared by the witness and the calibration test so the two
-// describe the same workload.
-constexpr std::uint64_t k_control_records = 4000;
-
 }  // namespace
 
 // ── #211: the witness ─────────────────────────────────────────────────────────
@@ -341,10 +337,15 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // while the real sink was busy in rotate(). This deliberately replaces "the
     // burst took < N ms", which would be one more absolute wall-clock ceiling on
     // a shared runner (#400).
-    auto const drops_at_burst_end = logger->drop_count();
-    EXPECT_GT(drops_at_burst_end, drops_at_first_rotation)
+    // Read once and reused for the accounting below: drop_count_ is incremented
+    // only inside enqueue() (src/log/logger.cpp), the producer loop has ended,
+    // and shutdown() enqueues nothing — so a second read after shutdown would be
+    // the same number under a different name, and the assertion message here and
+    // the accounting messages below would only LOOK like they might disagree.
+    auto const drops = logger->drop_count();
+    EXPECT_GT(drops, drops_at_first_rotation)
         << "no record was dropped after the first rotation completed (drops were "
-        << drops_at_first_rotation << " then and " << drops_at_burst_end << " after producing "
+        << drops_at_first_rotation << " then and " << drops << " after producing "
         << produced << " records) — the ring stopped overflowing once the storm started, so this "
         << "run does not witness backpressure against a rotating FileSink";
 
@@ -353,7 +354,8 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // than being asserted away.
     auto const shutdown_result = logger->shutdown(std::chrono::seconds{60});
 
-    auto const drops      = logger->drop_count();
+    // timeouts MUST be read after shutdown(): timeout_drop_count_ is bumped
+    // inside Logger::shutdown itself.
     auto const timeouts   = logger->timeout_drop_count();
     auto const filtered   = logger->filter_count();
     auto const rotations  = sink_raw->rotation_count();
@@ -420,12 +422,9 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
             << "were interleaved into another";
     }
 
-    std::size_t surviving = 0;
-    for (auto const& f : files) surviving += f.payloads.size();
-
     std::vector<std::uint64_t> all;
-    all.reserve(surviving);
-    for (auto const& f : files) all.insert(all.end(), f.payloads.begin(), f.payloads.end());
+    for (auto const& fr : files) all.insert(all.end(), fr.payloads.begin(), fr.payloads.end());
+    std::size_t const surviving = all.size();
     std::ranges::sort(all);
     EXPECT_EQ(std::ranges::adjacent_find(all), all.end())
         << "a payload appears more than once across the log files — a record was written twice";
@@ -498,6 +497,11 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
 // (so it can never be full), and max_file_bytes is large enough that rotate()
 // never fires. Every record must then come back, exactly once, in order.
 TEST_F(FileSinkBackpressureTest, EveryRecordSurvivesWhenTheRingCannotFill) {
+    // Local: the witness above paces itself by chunks and does not share this
+    // number. (It was at namespace scope with a comment claiming both tests used
+    // it — they never did.)
+    constexpr std::uint64_t k_control_records = 4000;
+
     fixpp::log::FileSinkConfig cfg;
     cfg.directory      = tmpdir_;
     cfg.base_name      = "calibration";

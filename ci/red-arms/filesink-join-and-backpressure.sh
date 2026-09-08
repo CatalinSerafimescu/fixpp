@@ -120,6 +120,23 @@ build_target() {  # build_target <target>
   cmake --build "$BUILD" --target "$1" -j "${J:-6}" >"$SAVE/build.log" 2>&1
 }
 
+# mutate <file> <anchor> <replacement> -- single-site textual mutation.
+# The count-must-be-1 assertion is the point: a drifted anchor matches zero or
+# many, and a silent no-op mutation would leave the arm grading an UNMUTATED
+# tree. Arms 3 and 4 each carried their own copy of this; one copy cannot drift
+# from the other. NOT used for the arm-1 detach mutant: that one has a 6-line
+# C++ anchor whose exact leading whitespace is load-bearing, and its failure
+# branch also has to charge arm 2, so the inline heredoc is the right shape there.
+mutate() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+a, b = sys.argv[2], sys.argv[3]
+assert s.count(a) == 1, f"anchor count = {s.count(a)} (expected 1)"
+p.write_text(s.replace(a, b))
+PY
+}
+
 # run_arm <name> <expect: RED|GREEN> <target> <binary> <gtest filter>
 run_arm() {
   local name="$1" expect="$2" target="$3" bin="$4" filter="$5"
@@ -210,14 +227,9 @@ restore
 
 # ── ARM 3: emit() short-writes ───────────────────────────────────────────────
 echo "-- ARM 3: emit() short-writes every line (uncounted loss / torn line)"
-if python3 - "$SRC_SINK" <<'PY'
-import sys, pathlib
-p = pathlib.Path(sys.argv[1]); s = p.read_text()
-a = "        auto written = std::fwrite(line.data(), 1, line.size(), stream_);"
-assert s.count(a) == 1, f"fwrite site count = {s.count(a)}"
-s = s.replace(a, "        auto written = std::fwrite(line.data(), 1, line.size() - 5, stream_);  // MUTANT (#211 arm)")
-p.write_text(s)
-PY
+if mutate "$SRC_SINK" \
+    "        auto written = std::fwrite(line.data(), 1, line.size(), stream_);" \
+    "        auto written = std::fwrite(line.data(), 1, line.size() - 5, stream_);  // MUTANT (#211 arm)"
 then
   run_arm 3 RED log_file_backpressure_test "$BIN_BP" 'FileSinkBackpressureTest.*'
 else
@@ -227,14 +239,9 @@ restore
 
 # ── ARM 4: the stall lever removed ───────────────────────────────────────────
 echo "-- ARM 4: rotation storm removed from the test's own config"
-if python3 - "$SRC_BP" <<'PY'
-import sys, pathlib
-p = pathlib.Path(sys.argv[1]); s = p.read_text()
-a = "    cfg.max_file_bytes = 200u;"
-assert s.count(a) == 1, f"lever site count = {s.count(a)}"
-s = s.replace(a, "    cfg.max_file_bytes = 256u * 1024u * 1024u;  // MUTANT (#211 arm): no storm")
-p.write_text(s)
-PY
+if mutate "$SRC_BP" \
+    "    cfg.max_file_bytes = 200u;" \
+    "    cfg.max_file_bytes = 256u * 1024u * 1024u;  // MUTANT (#211 arm): no storm"
 then
   run_arm 4 RED log_file_backpressure_test "$BIN_BP" \
     'FileSinkBackpressureTest.RealFileSinkDropsAccountablyUnderRotationStorm'
