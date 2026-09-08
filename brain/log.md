@@ -6,6 +6,14 @@ status: stable
 
 # Log
 
+- **2026-09-08 — #394, a promptness band that was wrong in both directions.**
+  `failure-classes.md` class 1 gains the threshold bullet: a band that flakes is usually also blind,
+  and the flake is the half that gets noticed. 088's `EXPECT_LT(elapsed, 100ms)` was **watchdog ÷ 10**
+  by its own comment — it went red at 357 ms on a TSan lane with no defect, and stayed **green**
+  under a mutation that made cancellation take 50 extra dispatches at 0 ms wall clock. Replaced by a
+  bound on `io_context` turns, measured 2/1 across 27 runs and RED at 53/51 against that mutant.
+  Record: `decisions/speckit/394-promptness-in-scheduler-turns.md`.
+
 - **2026-09-07 — #289 batch 20, the axis that batch 19's bucket did not have.**
   `components/test.md` and `failure-classes.md` record the answer to the caveat batch 19 filed
   against itself. `ci/pump-get-sweep.sh` gains a third axis — **call-site scope**, `CORO` /
