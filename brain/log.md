@@ -6,6 +6,24 @@ status: stable
 
 # Log
 
+- **2026-09-08 — #289 batch 22, the annotation that hid two arguments.**
+  `failure-classes.md` gains **class 12** (*one label can carry two arguments, and only one of them
+  may be checked*). `ci/pump-get-sweep.sh`'s `EXHAUSTED` splits off `EXHAUSTED-NOT-CALLER-SIDE`: a
+  caller-side run and one that is not are dismissed by DIFFERENT arguments, and **all 35 `THREADED`
+  rows are the second kind**. ⚠️ The discriminator had to be STRUCTURAL — a token test over the
+  statement's text survived two hostile rounds while still dismissing two live rows; brace depth is
+  what answers it, and it reddened five disclosed limits at once, which promoted them to controls. A SELF-DRIVE axis checks the self-driving
+  clauses over `POOL` rows (44 LIVE / 2 escalated); arms 8-9 in
+  `tests/sync/test_co_spawn_work_guard_contract.cpp` measure them, each carrying its own dismissal as
+  the control half. Also: `since` resets per container push (a live false DISMISSAL, no live
+  instance), and per-container executors escalate to `MIXED-EXEC` instead of first-push-wins.
+  ⚠️ Two things were built, measured, and REMOVED — arm 10 (its forced defect stayed green: the
+  window it claimed to observe is microseconds) and the axis extension to off-thread rows (correct,
+  and it escalated 34 of 36). Both removals are recorded where the code would have been. The `.get()`
+  residual is now fully dispositioned: 160 rows, one open candidate — the `(void)fut.get()` at the
+  end of `run_coro` in `tests/fuzz/fuzz_message_store.cpp`, in a target no lane builds (#213). Record:
+  `decisions/speckit/pr-batch22-the-self-driving-clauses-and-the-annotation-that-hid-two-arguments.md`.
+
 - **2026-09-08 — #289 batch 21, the per-file condition that was false.**
   `failure-classes.md` gains **class 11** (*an inherited obligation can rest on a false premise, and
   discharging it faithfully hides that*) and a class-1 bullet (*a classification reached by FALLBACK
@@ -416,3 +434,24 @@ status: stable
   to *instruments fail toward clean* but distinct and needs its own name: **there, a tool ran and was
   broken; here no tool ran at all.** An absence is the one claim that cannot be checked by reading,
   because reading is what produced it. Attach the grep or do not make the claim.
+
+- ⭐ **AN INSTRUMENT KEYED ON AN IDENTIFIER IS BLIND TO DUPLICATION OF WHAT IT NAMES** (#289 item D,
+  batch 22; **class 13**). #289's sibling-helper census enumerates its population by DEFINITION SITE.
+  Helper #5's file collapsed onto the shared seam, so the row read as retired — while a **copy** of
+  that helper was still live in `first_frame_stop_test.cpp`, whose own comment said it had been
+  *"copied rather than shared"* from precisely that file. The census was not broken and did not fail
+  toward clean; the name it watched really was gone. ⚠️ **This is the third payment on one lesson.**
+  Batch 21: an inherited obligation rested on a false premise. Batch 22: an item-D scope estimate came
+  from a grep for a helper's NAME, and the name had survived a collapse that already happened. The fix
+  first written down — *"open the definition before costing the work"* — was **too narrow**. The
+  invariant is that **any population keyed on an identifier does not track copies of the thing the
+  identifier names**, so enumerate by SHAPE at least once, and treat every *"copied rather than
+  shared"* comment as the unregistered census entry it is.
+
+- ⭐ **A GREEN RESULT DID NOT DISCRIMINATE, SO A COMPARISON WAS USED INSTEAD** (#289 item D). Migrating
+  that copy onto the shared seam swaps an unguarded poll for a work-guarded pump. The cell's surviving
+  assertion is on a *different* flag than the pump's predicate, so a predicate that silently stopped
+  flipping would burn the full 5 s cap and **still pass**. Timing was the discriminator: 72/72/72 ms
+  after against 70/71/72 ms before. An explicit 50 ms slice cost **exactly one slice** (+50 ms) —
+  visible only because the before-figures existed. Take the baseline BEFORE the edit; it cannot be
+  reconstructed afterwards.

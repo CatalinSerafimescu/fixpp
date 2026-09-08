@@ -74,6 +74,7 @@
 #include <span>
 
 #include "engine_loopback_harness.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::test_support::EngineLoopbackHarness;
@@ -162,20 +163,6 @@ private:
 std::shared_ptr<counting_clock> make_counting_clock(asio::any_io_executor const& exec) {
     return std::make_shared<counting_clock>(
         std::make_shared<fixpp::core::system_clock_source>(exec));
-}
-
-// Drive `ioc` in slices until `done` flips or `cap` elapses. Same pattern as
-// engine_firstframe_test.cpp's run_until — copied rather than shared because
-// this is a distinct translation unit/executable (precedent:
-// first_frame_total_cancel_tls_test.cpp duplicates EstablishedPair rather
-// than including engine_firstframe_test.cpp's anonymous-namespace helpers).
-void run_until(asio::io_context& ioc, std::atomic<bool> const& done,
-               std::chrono::steady_clock::duration cap) {
-    auto const limit = std::chrono::steady_clock::now() + cap;
-    while (!done.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < limit) {
-        ioc.run_for(50ms);
-        ioc.restart();
-    }
 }
 
 // ── #357: the promptness barrier — HANDLERS, not wall clock ──────────────────
@@ -439,7 +426,20 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
 
     // Accept-slot reclaim: the peer's post-handshake read must observe a
     // server-initiated close once stop() has run.
-    run_until(ioc, probe.done, 5s);
+    // (#289) The shared seam, not a seventh local spelling. This cell used to
+    // carry a private `run_until` whose keep-alive answer was an in-loop
+    // restart() with no work guard — one of the three divergent answers #289
+    // exists to collapse. Its own comment cited engine_firstframe_test.cpp as
+    // the original it was "copied rather than shared" from; that file had since
+    // collapsed onto pump_until, so the copy outlived both its original and the
+    // census entry that would have counted it.
+    //
+    // The result is DISCARDED deliberately: the assertion below is on
+    // probe.closed, not probe.done. Asserting the pump's own return here would
+    // add a claim this cell never made.
+    (void)fixpp::test_support::pump_until(
+        ioc, [&probe] { return probe.done.load(std::memory_order_acquire); }, 5s,
+        fixpp::test_support::kPumpSlice, "first_frame_stop/accept_slot_reclaim");
     EXPECT_TRUE(probe.closed.load(std::memory_order_acquire))
         << "T2b (SC-015 accept-slot leg): the accept slot was not reclaimed — the peer's "
         << "post-handshake read never observed a close after Engine::stop().";

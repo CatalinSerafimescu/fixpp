@@ -21,6 +21,11 @@
 //   clause 2  the run is not a post-exhaustion no-op               (arm 3)
 //   clause 3  the completion token carries no FOREIGN executor     (arm 6)
 //
+// Batch 22 adds the mirror-image population — the sites where the CALLER does not pump
+// because a `thread_pool` or a `std::thread` does. Read the clause list at arm 8; it is
+// the same shape of argument (a dismissal plus the clauses that void it) and the same
+// reason for being a test: `POOL` and `THREADED` are positive dismissals over 81 sites.
+//
 // ⚠️ CLAUSE 3 WAS MISSING FROM THE FIRST DRAFT, and it separates two statements this
 // file had been conflating: exhaustion implies the FRAME completed, NOT that the future
 // is ready. A hostile round measured the difference. See arm 6.
@@ -53,13 +58,16 @@
 
 #include <asio/bind_executor.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/strand.hpp>
+#include <asio/thread_pool.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <future>
+#include <thread>
 
 namespace {
 
@@ -318,5 +326,179 @@ TEST(SyncCoSpawnWorkGuard, ExplicitStopReturnsRunWithTheFrameStarted) {
     ioc.run();
     EXPECT_TRUE(is_ready(fut));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ARMS 8–9 — the SELF-DRIVING executors (#289 batch 22)
+// ─────────────────────────────────────────────────────────────────────────────
+// Arms 1–7 are about a context the CALLING thread drives. The sweep's other two
+// large classes are the opposite shape: `POOL` (spawned on an `asio::thread_pool`)
+// and `THREADED` (a `std::thread` in the file runs the spawn context), where a bare
+// `.get()` is correct because something ELSE completes the frame. Both are POSITIVE
+// DISMISSALS, so the argument behind them has to be measured, not asserted — a
+// dismissal that is wrong is the direction that costs.
+//
+// The dismissal is "a self-driving executor completes the frame without the calling
+// thread". Two clauses bound it, and each has an arm:
+//
+//   clause S1  the driver must still be LIVE at the spawn. A driver that already
+//              returned by exhaustion drives nothing afterwards.        (arm 8)
+//   clause S2  the two retirement VERBS are not interchangeable — `stop()` abandons
+//              queued work, `join()` waits for it.                          (arm 9)
+//
+// Each arm carries its own dismissal as the control half, in the SAME cell: the clause
+// and the case it voids differ by one line, so a `is_ready` that could read only one way
+// fails one of the two. All four halves are proven RED by mutation, each killing exactly
+// its own cell. The third question a threaded file raises — whether a concurrent driver
+// changes any of this — is answered at the note where arm 10 would have been.
+
+// ── ARM 8 — clause S1, with its own dismissal as the control ────────────────
+// A worker that ran the context to exhaustion BEFORE anything was spawned on it has
+// returned for good; the frame queued afterwards is never dispatched. The second half is
+// the same program with the two statements in the other order, and it is the control:
+// without it, an `is_ready` wired so it could only read false would satisfy the first half.
+//
+// ⚠️ THE SENTENCE ABOVE IS AN EXACT CLAIM, AND IT WAS FALSE WHEN FIRST WRITTEN. The second
+// half also carried `asio::make_work_guard(ioc)` and a matching `reset()`. Both were
+// INERT — deleted and re-run 300 times, all green — because `co_spawn` posts the frame
+// BEFORE the thread is constructed and its own `outstanding_work.tracked` already keeps
+// `run()` fed. A control whose description does not match its code is a control a reader
+// has to adjudicate; the lines are gone, so the two halves now differ by ORDER alone.
+//
+// ⚠️ THE NEGATIVE ASSERTION IS DETERMINISTIC, NOT A SAMPLE, and the next reader will
+// assume otherwise because negatives usually need a budget. It is deterministic because
+// the worker is JOINED first: after `worker.join()` the driver has provably returned, so
+// "nothing drives `ioc`" is a fact about the program at that point rather than a state we
+// happened to catch. No band, and nothing for a slow lane to blow.
+TEST(SyncCoSpawnWorkGuard, DriverThatAlreadyExhaustedDrivesNothing) {
+    {
+        asio::io_context ioc;
+
+        // Exhausts at once: `ioc` has no work yet, and join() makes that a fact.
+        std::thread worker([&ioc] { ioc.run(); });
+        worker.join();
+
+        auto fut = asio::co_spawn(
+            ioc, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
+
+        EXPECT_FALSE(is_ready(fut))
+            << "#289 clause S1: a thread that already ran this context to exhaustion is "
+               "gone, so a frame spawned afterwards is never dispatched and a bare get() "
+               "here blocks forever. `THREADED` dismisses a site because a thread in the "
+               "file drives the context — that is a dismissal only while the thread is "
+               "still inside run() at the spawn.";
+
+        // Teardown: drive it by hand so nothing is left queued on a dead context.
+        ioc.restart();
+        ioc.run();
+        EXPECT_TRUE(is_ready(fut));
+    }
+    {
+        asio::io_context ioc;
+
+        auto fut = asio::co_spawn(
+            ioc, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
+
+        std::thread worker([&ioc] { ioc.run(); });
+        worker.join();
+
+        EXPECT_TRUE(is_ready(fut))
+            << "THE DISMISSAL ITSELF: the same frame, spawned while the driver is still "
+               "inside run(), IS completed without the calling thread — which is why the "
+               "sweep's `THREADED` rows are correct with a bare get(). If this fails, that "
+               "whole class needs re-reading and not just clause S1.";
+    }
+}
+
+// ── ARM 9 — clause S2, with its own dismissal as the control ────────────────
+// The `POOL` dismissal and the clause that voids it, in one arm, because measuring them
+// apart is what lets one of them rot: the second half is the first half's control.
+//
+// ⚠️ `stop()` IS NOT `join()`, AND THE SWEEP'S AXIS SPLITS THEM FOR THIS REASON. `join()`
+// waits for the queued work, so it is the STRONGEST form of domination — stronger than
+// any lexical `run()` above a get(). `stop()` abandons that work and lets `join()` return
+// with the frame never dispatched, which is arm 7's third return mode wearing a
+// thread_pool's clothes. THE VERB DISTINCTION IS WHAT THIS ARM MEASURES.
+//
+// ⚠️ READ WHAT IT DOES **NOT** MEASURE, BECAUSE A HOSTILE ROUND READ IT THE OTHER WAY.
+// The `stop()` below is placed BEFORE the spawn, so the shape on the page is the sweep's
+// `RETIRED-BEFORE-SPAWN`, not its `STOPPED-BEFORE-GET`. That was deliberate — a frame
+// left suspended on a dead pool is released only by destruction, and this file must not
+// strand asio work on a platform where that is not merely untidy — but it means this arm
+// is NOT evidence for a `stop()` written AFTER the spawn.
+//
+// And that shape cannot be turned into an arm here, which is the more useful half:
+// whether a later `stop()` abandons anything is a RACE with the pool's own workers, and
+// the pool normally wins. Measured by the review that raised this: with a 50 ms delay
+// between the spawn and the `stop()`, the future was already READY 200 times out of 200.
+// So the axis's `STOPPED-BEFORE-GET` is a question about a race, never a finding — the
+// axis legend says so, and this arm does not pretend otherwise.
+//
+// The frames here `co_return` rather than parking, deliberately: a suspended frame left
+// alive at teardown is released only by destruction, and this file must not leave
+// stranded work behind on a platform where that is not merely untidy
+// (`~io_context` is asymmetric — POSIX ignores a stranded work count, Windows does not).
+// ⚠️ THAT IS THE REASON NOTHING PARKS; IT IS NOT A CLAIM THAT THE TWO HALVES TEAR DOWN
+// IDENTICALLY, WHICH AN EARLIER DRAFT ASSERTED AND NOBODY HAD CHECKED. They do not: half 2
+// leaves a never-STARTED frame queued on a stopped pool, destroyed by `~thread_pool`,
+// where half 1 has nothing queued at all. What is measured is that neither is a leak or a
+// hang on Linux — 50 runs under ASan, clean, exit 0. MSVC is not measured here; Tier 2 is
+// what would say, and a `co_return` frame is the cheapest shape to ask it about.
+TEST(SyncCoSpawnWorkGuard, StoppedPoolLeavesTheFutureUnready) {
+    {
+        asio::thread_pool pool{1};
+
+        auto fut = asio::co_spawn(
+            pool, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
+
+        pool.join();
+
+        EXPECT_TRUE(is_ready(fut))
+            << "THE DISMISSAL ITSELF: a thread_pool completes a frame spawned on it "
+               "without the calling thread, which is why the sweep's `POOL` rows are "
+               "correct with a bare get(). If this fails, that whole class needs "
+               "re-reading and not just this clause. (No count here on purpose: the "
+               "sweep's population is the parseable subset, and `--disposition` prints "
+               "today's figure.)";
+    }
+    {
+        asio::thread_pool pool{1};
+        pool.stop();
+
+        auto fut = asio::co_spawn(
+            pool, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
+
+        pool.join();
+
+        EXPECT_FALSE(is_ready(fut))
+            << "#289 clause S2: `stop()` and `join()` are not interchangeable. The half "
+               "above differs from this one by exactly this stop(), and it reads ready — "
+               "so a STOPPED pool dispatches nothing, join() returns with the frame never "
+               "started, and a get() here blocks forever. `POOL` is a dismissal only while "
+               "nothing retires the pool, which is what the SELF-DRIVE axis looks for.";
+    }
+}
+
+// ── ARM 10 WAS ATTEMPTED AND IS NOT HERE — the claim, and why it is not a test ──
+// `THREAD-IN-FILE` and `THREADED` sites sit in files that start threads, so the obvious
+// next arm is "with two threads inside run() on the same context, neither returns while a
+// frame is live". It was written, it passed, and it was DELETED because its forced-defect
+// arm stayed GREEN: a driver mutated to `run_for(5ms)` — returning early by construction —
+// did not move the measurement, because the frame's parked window is microseconds. An arm
+// whose defect injection cannot redden it is measuring the shape of its own setup.
+//
+// ⚠️ AND THE WINDOW CANNOT BE WIDENED WITHOUT A TIMING BAND, which is the one thing this
+// file refuses (see the header). The work guard only becomes OBSERVABLE while the queue is
+// empty and a frame is live — that is a DURATION, not an event, so any arm that makes it
+// visible is a `sleep` wearing an assertion's clothes, and #394 is the adjacent lesson
+// about what such a band costs on a loaded sanitiser lane.
+//
+// WHAT REPLACES IT IS A REFRAMING, not a weaker test. A concurrent driver does not
+// threaten the work-guard premise at all: `outstanding_work` is counted on the CONTEXT,
+// not per thread, so arms 1 and 5 already measure the quantity every driver of that
+// context observes. What a threaded file changes is the OTHER premise — whether a `run()`
+// appearing lexically above a `get()` is a HAPPENS-BEFORE when the run is on another
+// thread. That is a property of the SITE, not of asio, so it is read at the site and
+// cannot be pinned here. `ci/pump-get-sweep.sh` escalates those rows for exactly that
+// reason, and #289 batch 22's record carries the readings.
 
 }  // namespace
