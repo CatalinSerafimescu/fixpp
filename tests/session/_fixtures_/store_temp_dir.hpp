@@ -18,7 +18,9 @@
 //     call sites use `#include "support/temp_dir.hpp"` and
 //     `fixpp::test_support::unique_temp_dir` / `remove_temp_dir` directly.
 //     Re-derive who is left with:
-//         grep -rl '_fixtures_/store_temp_dir.hpp' tests/
+//         grep -rln --include='*.cpp' '#include "_fixtures_/store_temp_dir.hpp"' tests/
+//     (matching the INCLUDE, not the path: a bare path grep also matches this
+//      file's own banner and this recipe line, so it can never read empty.)
 //
 // Nothing new should include this header. `fixpp::store_test` itself stays — it
 // is shared with store_factories.hpp and test_double_fsm.hpp and is NOT being

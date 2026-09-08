@@ -604,15 +604,21 @@ grep -n 'EXPECT_LT\|EXPECT_GT' tests/log/test_file_sink_async_fsync.cpp
 Everything else has enough headroom that 2× CPU contention should not reach it; that expectation is
 what acceptance criterion 3 exists to falsify.
 
-⚠️ **Cite these by TEST NAME, not by line.** The four rows here were `file:NNN` citations and every
-one of them rotted the moment the file was edited — two into assertions that no longer exist at
-all. A test name survives an edit; a line number does not.
+⚠️ **Cite these by TEST NAME, not by line.** Every row here was a `file:NNN` citation, and the
+CONDITION that matters is that a line number cannot survive an edit of the file it points into
+while a test name can. Two of them had decayed all the way to assertions that no longer exist.
+
+⚠️ **An earlier version of this warning said "every one of them rotted". That was a tally about a
+moving file, and it was false** — the old `:212` still landed exactly on
+`EXPECT_LT(enqueue_elapsed_ms, 40LL)`. Stating how many had rotted was the same mistake the
+warning is about, one paragraph down from the warning.
 
 ⚠️ **The other three rows have been converted too, because leaving them would have made
 this warning contradict the table it sits under.** They had rotted by varying amounts —
 `test_asio_plain_transport_config.cpp:242` was **280 lines** off its assertion (really
 `EXPECT_LT(close_ms, 500)` at `:522`); the other two landed inside the right test but not
-on the bound. Verified by opening each, not by trusting the row.
+on the bound. Verified by opening each, not by trusting the row — and re-derive rather than
+trusting this paragraph either.
 
 The same sweeps found **no** cross-test fixed path, fixed listening port, Unix socket, or
 process-global env/cwd writer; every listener binds `127.0.0.1:0`; `codegen_determinism_test` uses

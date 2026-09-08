@@ -24,6 +24,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <system_error>  // std::error_code, used in both branches
 #include <string>
 #include <string_view>
 
@@ -131,10 +132,16 @@ inline void remove_temp_dir(const std::filesystem::path& p) {
     // Absorb the delete-pending lag before spending a throw on it.
     if (try_remove_temp_dir(p)) return;
 #endif
-    // ⚠️ POSIX reaches this as its ONLY removal attempt, deliberately. Routing it
-    // through try_ first would remove-then-remove: the first call can partially
-    // delete a tree and leave this one reporting a different error than the
-    // original single-shot did.
+    // ⚠️ POSIX reaches this as its ONLY removal attempt, deliberately: it must stay
+    // byte-for-byte the behaviour of the single throwing remove_all this helper
+    // replaced, so adopting the helper cannot change what a POSIX failure reports.
+    //
+    // NOT because remove-then-remove is inherently unsafe — an earlier version of
+    // this comment said that, and it does not survive its own logic: the Windows
+    // branch above does exactly remove-then-remove, up to 50 times, before the
+    // throwing attempt below whose message is the entire diagnostic. Windows
+    // accepts that trade because there retrying IS the fix; POSIX gains nothing
+    // from it and so keeps the original single shot.
     std::filesystem::remove_all(p);
 }
 
