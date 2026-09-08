@@ -164,6 +164,18 @@ prints `0` for a whole syntax.
   no-result path exits 0 and yields a value, the value is wrong and confident. **Fail closed**, then
   mutate the tool to confirm the closed path is reachable.
 
+- ⚠️ **A CLASSIFICATION REACHED BY FALLBACK IS NOT A MEASUREMENT, EVEN WHEN IT IS RIGHT.**
+  `ci/pump-get-sweep.sh`'s container path never parsed the spawn executor: `_PUSH_SPAWN` captured
+  only the container name, so `base` was the tail of the push statement (`use_future));`). That name
+  is in no executor set, so every container row fell through to `THREAD-IN-FILE` or `CALLER-ONLY` by
+  one boolean — for a whole batch, on a corpus where those answers happened to be correct. It never
+  failed toward clean **only because both fallbacks are the escalating ones**; the same defect on a
+  `thread_pool`-filled container is a *positive dismissal*. **The tell is not a wrong output, it is
+  an output that does not depend on the input** — mutate the extractor and check that some row moves.
+  ⚠️ And when the fix converts escalations into positive dismissals (7 rows, `THREAD-IN-FILE` →
+  `THREADED`), read every one by hand: correcting an instrument in the *safe* direction is still a
+  change in the *unsafe* direction for the rows it reclassifies. (#289 batch 21.)
+
 ### 2. A fix that replaces a wrong claim with a NEW claim reproduces the defect
 
 Rounds of review converge only when a claim is **deleted**, not refreshed. A corrected claim is still a
@@ -389,6 +401,34 @@ mode was live on the shipped path, exhibited by 083's own witness.
 **Sibling.** Where class 9 is a justification that lost its SUBJECT, this is a justification that
 kept its subject and lost its SCOPE. Both are recorded on the same site pair (`#384`, `#389`) because
 083 produced one of each, in the same function, from the same one-line delimiter change.
+
+### 11. An inherited obligation can rest on a false premise, and discharging it faithfully hides that
+
+A handover, a spec, or a previous batch hands you *"check X per file"*. Doing it is the honest
+reading of the instruction. But a per-item obligation is a **claim about why the check is needed**,
+and that claim can be wrong — in which case every faithful reading reaches the right verdict for the
+wrong reason, and the wrong reason survives into the next handover.
+
+- **Trigger:** an obligation whose cost scales with a population, especially one inherited rather
+  than derived. *"Confirm that per file rather than inheriting this paragraph."*
+- **Procedure:** before discharging it, ask what makes the check necessary, and try to **measure the
+  premise once** instead of applying it N times. Where the premise turns out to hold, you have lost
+  little; where it does not, you have replaced N judgements with a structural argument **and** found
+  the conditions under which it fails — which is the part nobody was looking for.
+- **Instance.** #289 batch 20 handed over ~27 container `.get()` sites with the condition
+  *"exhaustion implies completion only while every suspension point of the awaited coroutine is an
+  async op on that context."* False: `asio::co_spawn` holds `outstanding_work.tracked` on the SPAWN
+  executor for the frame's lifetime, so a live frame is work **whatever it is parked on**. The 27
+  readings collapse to two lexical clauses — and clause 2 (a `run()` on an already-stopped context
+  dispatches nothing) is a hazard the per-file instruction never mentioned and nobody had swept for.
+  `tests/sync/test_co_spawn_work_guard_contract.cpp` is the five arms; record
+  `decisions/speckit/pr-batch21-the-work-guard-and-the-condition-that-was-false.md`.
+- ⚠️ **The corollary, and it is the usable half: the reason a survey is expensive is sometimes that
+  its premise is wrong.** N readings that each conclude "safe" are N chances to conclude it for the
+  wrong reason. Batch 20's own first pass over these sites did exactly that.
+
+**Sibling.** Class 3 says a document may not record a RESULT. This says an obligation may not be
+inherited as a PREMISE — same failure viewed from the instruction side rather than the record side.
 
 ---
 
