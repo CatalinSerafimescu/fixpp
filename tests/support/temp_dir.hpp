@@ -86,7 +86,7 @@ inline bool try_remove_temp_dir(const std::filesystem::path& p) noexcept {
             if (!ec) return true;
             if (attempt + 1 == 50) break;  // no sleep after the final attempt
             std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-            if (delay_ms < 20) delay_ms *= 2;
+            delay_ms = (delay_ms * 2 > 20) ? 20 : delay_ms * 2;  // cap, not "stop doubling"
         }
         return false;
 #else
