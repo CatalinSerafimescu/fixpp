@@ -64,9 +64,19 @@ inline std::filesystem::path unique_temp_dir(std::string_view tag) {
 /// than report anything — turning a leaked temp directory into a crashed test
 /// run. Several RAII `Cleanup` guards (tests/config) are exactly that shape.
 ///
-/// The RETRY is what fixes the Windows leak; the throw is only the diagnostic
-/// half. This keeps the fix and drops the half a destructor cannot use. A caller
-/// that can act on the failure should prefer remove_temp_dir() and get the error.
+/// It keeps the retry and drops the throw — the half a destructor cannot use. A
+/// caller that can act on the failure should prefer remove_temp_dir().
+///
+/// ⚠️ THE RETRY IS NOT ALWAYS THE THING THAT FIXES THE LEAK, and an earlier
+/// version of this comment said it was. The two mechanisms are load-bearing at
+/// DISJOINT sites:
+///   - Where the sink is a local already destroyed before removal (the tests/log
+///     fixtures), the retry IS the fix: it absorbs the post-close lag.
+///   - Where an owner still holds the sink (the tests/config sites, which reset a
+///     shared_ptr<Logger> first), the RESET is the fix and the retry is only
+///     insurance. Retrying cannot outlast a handle held for the rest of the test
+///     — it would just spend the whole budget and then throw.
+/// Which one applies is a property of the call site, not of this helper.
 ///
 /// ⚠️ The catch-all is not defensive padding: `noexcept` here is a PROMISE, and
 /// the error_code overloads below still throw on allocation failure. Without the
