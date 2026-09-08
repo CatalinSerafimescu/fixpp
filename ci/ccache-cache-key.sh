@@ -154,11 +154,24 @@ ccache_cache_key() {
 # that tag is part of the build path and therefore part of the cache identity —
 # see ci/wheel-ccache-ident.sh for the measurement that forced it.
 #
-# The bare `wheel-manylinux228` stays enumerated so the PRUNER still recognises
-# tags minted before the ABI tag was folded in. Dropping it would not delete
+# The bare `wheel-manylinux228` stays enumerated so a prune CAN still be built
+# for tags minted before the ABI tag was folded in. Dropping it would not delete
 # those tags; it would make them unrecognisable, so they would accumulate
 # forever with no `prune: PENDING` and no error — the silent-skip failure this
 # enumeration exists to prevent. Remove it only once the old tags are reaped.
+#
+# ⚠️ THIS ENABLES A MANUAL PRUNE; IT DOES NOT MAKE ONE HAPPEN. Do not read the
+# line above as "the old tags will be cleaned up". The workflow prunes exactly
+# the lane it just SEEDED, and `ccache_tag_regex` is per-lane and anchored, so
+# `^ccache-wheel-manylinux228-cp312-[0-9a-f]{8}$` does not match
+# `ccache-wheel-manylinux228-012f4a50`. Nothing automatic will ever look at the
+# pre-ABI-tag versions again. Reaping them is a deliberate act:
+#
+#     DRY_RUN=1 ci/prune-ccache.sh wheel-manylinux228 ''   # list, delete nothing
+#     ci/prune-ccache.sh wheel-manylinux228 ''             # needs delete:packages
+#
+# (an empty current-tag means "keep none of them"). Do it AFTER the cp312 lane
+# has landed on main — until then the old cache is still the one main restores.
 ccache_lane_is_container() {
   case "$1" in
     wheel-manylinux228)          return 0 ;;  # pre-ABI-tag; kept reapable
