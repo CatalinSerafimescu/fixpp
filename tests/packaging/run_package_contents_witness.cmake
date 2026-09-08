@@ -169,10 +169,25 @@ endif()
 # OFF. The OFF branch is therefore reachable but unwitnessed here — it is the
 # `absent` mode of bindings/python/run_python_install_witness.cmake, which DOES
 # run on the four non-packaging legs, that covers that direction.
+# ⚠️ EVERY PATH TEST BELOW IS DEPTH- AND PREFIX-AGNOSTIC, and that is a measured
+# correction rather than caution. The first version globbed `${_x}/*/share/...`,
+# assuming the archive is `<pkgname>/share/...`. It is not: CPack applies
+# CPACK_PACKAGING_INSTALL_PREFIX, so the real layout is
+# `<pkgname>/usr/share/...` — one level deeper — and the check reported the
+# dictionaries MISSING from a package that ships them. A false RED that reads
+# like a real finding is the worst kind, so the layout is now discovered rather
+# than assumed: glob the tree ONCE, then match on the path TAIL.
+file(GLOB_RECURSE _all_staged "${_x}/*")
+
 set(_py_hits "")
-foreach(_pat "_fixpp*.so" "_fixpp*.pyd" "fixpp.py" "fixpp_oo.py" "fixpp_dict_data.py")
-  file(GLOB_RECURSE _found "${_x}/${_pat}" "${_x}/*/${_pat}")
-  list(APPEND _py_hits ${_found})
+foreach(_f IN LISTS _all_staged)
+  get_filename_component(_bn "${_f}" NAME)
+  if(_bn MATCHES "^_fixpp.*\\.(so|pyd)$"
+     OR _bn STREQUAL "fixpp.py"
+     OR _bn STREQUAL "fixpp_oo.py"
+     OR _bn STREQUAL "fixpp_dict_data.py")
+    list(APPEND _py_hits "${_f}")
+  endif()
 endforeach()
 list(REMOVE_DUPLICATES _py_hits)
 
@@ -193,9 +208,10 @@ if(FIXPP_PY_EXPECTED_PAYLOAD)
   # the payload directory — an unanchored one would fire on the copy that is
   # supposed to be there.
   set(_dup_xmls "")
-  foreach(_d IN ITEMS FIX42 FIX44 FIX50SP2 FIXT11)
-    file(GLOB_RECURSE _f "${_x}/*/${FIXPP_PY_PAYLOAD_DIR}/_fixpp_data/${_d}.xml")
-    list(APPEND _dup_xmls ${_f})
+  foreach(_f IN LISTS _all_staged)
+    if(_f MATCHES "/${FIXPP_PY_PAYLOAD_DIR}/_fixpp_data/(FIX42|FIX44|FIX50SP2|FIXT11)\\.xml$")
+      list(APPEND _dup_xmls "${_f}")
+    endif()
   endforeach()
   if(NOT _dup_xmls STREQUAL "")
     string(REPLACE ";" "\n  " _pretty "${_dup_xmls}")
@@ -208,7 +224,12 @@ if(FIXPP_PY_EXPECTED_PAYLOAD)
 
   # ...and the copy they were dropped in favour of must exist, or the exclusion
   # traded a duplicate for a dangling locator.
-  file(GLOB_RECURSE _datadir_dicts "${_x}/*/share/fixpp/dictionaries/FIX44.xml")
+  set(_datadir_dicts "")
+  foreach(_f IN LISTS _all_staged)
+    if(_f MATCHES "/share/fixpp/dictionaries/FIX44\\.xml$")
+      list(APPEND _datadir_dicts "${_f}")
+    endif()
+  endforeach()
   if(_datadir_dicts STREQUAL "")
     message(FATAL_ERROR
       "T058/#257: the payload excludes the bundled XMLs on the promise that the package ships them\n"
