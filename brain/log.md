@@ -6,6 +6,27 @@ status: stable
 
 # Log
 
+- **2026-09-09 — #408, the harnesses CI compiled and never ran.**
+  `components/test.md` gains the fuzz replay set: `tests/fuzz/CMakeLists.txt` registers one
+  `fuzz_replay_<name>` ctest **per corpus DIRECTORY**, so eight harnesses with no corpus registered
+  nothing, were built anyway by `FIXPP_BUILD_FUZZ=ON`, and reported green having executed **not one
+  input**. That is how #405's real hang in `fuzz_message_store` survived. ⚠️ **The issue's own
+  enumerated population was already stale in BOTH directions when read** — PR #407 had since seeded
+  `message_store`, and `orchestra_loader` had appeared and was never listed — which is the standing
+  reason to re-derive a population rather than trust an enumeration, even a careful one written to be
+  re-derived. ⭐ **The first draft tested the wrong thing and the review caught it:** it asked
+  `IS_DIRECTORY corpus/<name>/`, a **proxy** for the property that matters, and one true for only one
+  of the two fuzz suites — `tests/config/fuzz/` names its inputs `crashes/`. Keying the check on what
+  `fixpp_add_fuzz_replay()` actually registered removed the coupling to any naming convention, let the
+  same check cover both suites, and closed the identical latent gap one directory over. ⚠️ **The
+  inline version was silently GREEN for a harness appended BELOW it** — `BUILDSYSTEM_TARGETS` reports
+  only what is defined so far — and that was found by a forced arm, not by reading; the fix is
+  `cmake_language(DEFER CALL ...)`. ⚠️ **A RED arm that fires on any input proves the BINARY RAN, not
+  that the seeds were delivered**, because `-runs=0` also executes libFuzzer's implicit empty input;
+  the arms were gated on `size > 0` for that reason. ⚠️ And a reverted **source** is not a rebuilt
+  **binary**: a replay went RED on a stale mutant after the mutation had been reverted, which reads
+  exactly like a real defect until you notice the fault column matches the injected line.
+
 - **2026-09-09 — #255, the wheel that shipped a C++ install tree and the licence in no artifact.**
   `components/python-api.md` gains the packaging boundary: **the wheel takes the CMake install tree
   VERBATIM**, so its contents are not a curated list but *whatever the root `install()` rules produce*
