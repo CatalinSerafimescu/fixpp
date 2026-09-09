@@ -49,25 +49,56 @@
 # many callers it has: `InteropEngineFixture::run_until` (tests/interop/support/
 # interop_fixture.cpp) forwards to `pump_until`, and its ~two dozen `fx.run_until(...)`
 # callers are not seam calls at all -- the single `pump_until(` inside the wrapper is.
-# ⚠️ THE DUPLICATE VERDICT SURVIVES THAT, and the reason is structural rather than
-# lucky: a wrapper can only introduce a label if it TAKES one, and one that takes one
-# is itself a labelled call this gate reads. What the wrapper does distort is the
-# UNLABELLED figure, which is a count of lexical call sites and not of reaching paths.
+# ⚠️ THE ARGUMENT THAT USED TO STAND HERE IS FALSE. It read: "the duplicate verdict
+# survives that, and the reason is structural rather than lucky -- a wrapper can only
+# introduce a label if it TAKES one, and one that takes one is itself a labelled call this
+# gate reads." #405 refuted it by writing the counterexample. A wrapper that takes a
+# `const char* site` and FORWARDS it to the seam leaves a NON-LITERAL in the seam call's
+# extent: the wrapper reads as one UNLABELLED site, and every label its callers pass is
+# invisible here. Taking a label and being readable as labelled are different properties,
+# and the old sentence conflated them.
 #
-# ⚠️ A SECOND SHAPE THE GATE CANNOT SEE: a label passed as a NON-LITERAL
+# ⚠️ SO THE SHAPE THIS GATE CANNOT SEE IS REACHABLE, not hypothetical. A label that is a
+# non-literal AT THE SEAM CALL -- a named constant
 # (`static constexpr const char* kSite = "..."; run_window_then_ready(ioc, fut, w, kSite)`)
-# reaches the seam but has no string literal in the call's extent, so it is recorded as
-# UNLABELLED rather than rejected. No migrated site uses that shape today. Deliberately
-# NOT "fixed" by chasing the constant: resolving an identifier needs a symbol table, and
-# a detector that resolves the spellings its author thought of is the failure mode
-# ci/pump-get-sweep.sh's header already warns against. Disclosed instead.
+# or a forwarded parameter -- is recorded as UNLABELLED rather than rejected.
+#
+# ⚠️ NO COUNT OF SUCH SITES IS WRITTEN HERE, ON PURPOSE. The previous revision said "no
+# migrated site uses that shape today" and one commit falsified it. RE-DERIVE instead:
+#
+#     bash ci/pump-label-uniqueness.sh --list-unlabelled
+#
+# and read each hit -- a seam call with no label literal in its extent is either genuinely
+# unlabelled or a FORWARDER whose labels live at ITS callers, and this scanner cannot tell
+# the two apart. Use the flag rather than a hand-written grep: a line-oriented
+# `grep ... | grep -v '"'` calls every labelled MULTI-LINE call unlabelled, because the
+# literal sits on a following line. That over-count was measured before the flag existed
+# and it was not marginal -- it was most of the file population.
+#
+# WHAT THAT COSTS, stated plainly: for a forwarder, uniqueness of the caller-side labels is
+# NOT gated here. It has to be checked where the forwarder lives, and the check to prefer is
+# the RUNTIME one, not a grep -- force each label with FIXPP_FORCE_WINDOW_MISS and assert
+# that no OTHER label fires. That tests the behaviour; a grep tests the spelling.
+#
+# Deliberately NOT "fixed" by chasing the constant: resolving an identifier needs a symbol
+# table, and a detector that resolves the spellings its author thought of is the failure
+# mode ci/pump-get-sweep.sh's header already warns against. Disclosed instead.
+#
+# What a wrapper distorts either way is the UNLABELLED figure, which is a count of lexical
+# call sites and not of reaching paths.
 #
 # An UNLABELLED call (`run_window_then_ready(ioc, fut, 100ms)`) is legal -- it is a
 # site the forcing seam cannot reach. Those are counted and reported, never failed:
 # adopting the seam at them is a separate axis of #289.
 #
-# Usage:  bash ci/pump-label-uniqueness.sh [--root DIR]
+# Usage:  bash ci/pump-label-uniqueness.sh [--root DIR] [--list-unlabelled]
 # Exit 1 on a duplicate label, or on a failed self-test control.
+#
+# --list-unlabelled prints every seam call this scanner could not read a label from, as
+# `file:line`. That is the enumeration the "re-derive it" note above calls for; it uses the
+# scanner's own extent and comment/string blanking, so it does NOT have the failure mode of
+# a hand-written `grep ... | grep -v '\"'`, which reports a labelled MULTI-LINE call as
+# unlabelled because the literal sits on the next line.
 
 set -euo pipefail
 
@@ -75,9 +106,11 @@ fail() { echo "pump-label-uniqueness: error: $*" >&2; exit 1; }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scan_root="$repo_root"
+list_unlabelled=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --root) [ "$#" -ge 2 ] || fail "--root requires an argument"; scan_root="$2"; shift 2 ;;
+        --list-unlabelled) list_unlabelled=1; shift ;;
         -h|--help) awk 'NR==1 || /^#/ {print; next} {exit}' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) fail "unknown argument: $1" ;;
     esac
@@ -85,7 +118,7 @@ done
 
 command -v python3 >/dev/null || fail "python3 is required"
 
-FIXPP_CI_DIR="$repo_root/ci" python3 - "$scan_root" <<'PY'
+FIXPP_CI_DIR="$repo_root/ci" python3 - "$scan_root" "$list_unlabelled" <<'PY'
 import os, re, sys
 from pathlib import Path
 
@@ -349,13 +382,16 @@ for name, src, want in _CASES:
 def tally(items):
     """-> (seen, unlabelled, files) over an iterable of (display_name, source).
 
-    `seen` maps label -> [where...]; a label with more than one entry is a duplicate."""
-    seen, unlabelled, files = {}, 0, 0
+    `seen` maps label -> [where...]; a label with more than one entry is a duplicate.
+    `unlabelled` is a LIST of `file:line`, not a count -- `--list-unlabelled` prints it,
+    because "re-derive the population yourself" is only honest advice if the population
+    can actually be enumerated with this scanner rather than with a hand-rolled grep."""
+    seen, unlabelled, files = {}, [], 0
     for name, src in items:
         files += 1
         for ln, lab in calls(src):
             if lab is None:
-                unlabelled += 1
+                unlabelled.append(f"{name}:{ln}")
             else:
                 seen.setdefault(lab, []).append(f"{name}:{ln}")
     return seen, unlabelled, files
@@ -403,9 +439,16 @@ if labelled == 0:
              f"found {labelled} labelled seam site(s) -- a gate whose population is empty "
              "cannot report clean")
 
+if sys.argv[2] == "1":
+    print("\nUNLABELLED seam sites (no label literal in the call's extent) --")
+    print("a hit here is EITHER a genuinely unlabelled call OR a FORWARDER whose labels")
+    print("live at its own callers; this scanner cannot tell them apart, read each one:")
+    for where in unlabelled:
+        print(f"  {where}")
+
 print(f"\nscanned {files} file(s) under tests/")
 print(f"  LABELLED   seam sites : {labelled}  ({len(seen)} distinct label(s))")
-print(f"  UNLABELLED seam sites : {unlabelled}"
+print(f"  UNLABELLED seam sites : {len(unlabelled)}"
       "   <- reachable by no seam arm; a separate #289 axis, not a failure")
 print("  ⚠️ the UNLABELLED figure is an UPPER BOUND: `pump_until(` is matched by spelling,")
 print("     and tests/sync/test_fifo_across_cycles.cpp defines a LOCAL `pump_until` of its")
