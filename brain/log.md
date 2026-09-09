@@ -6,6 +6,55 @@ status: stable
 
 # Log
 
+- **2026-09-09 — #255, the wheel that shipped a C++ install tree and the licence in no artifact.**
+  `components/python-api.md` gains the packaging boundary: **the wheel takes the CMake install tree
+  VERBATIM**, so its contents are not a curated list but *whatever the root `install()` rules produce*
+  minus `wheel.exclude`. That deny-list had only ever excluded `include/**`, so archives, loose
+  objects, `lib/cmake/` and a second **unreachable** copy of the dictionaries shipped inside the
+  wheel — unreachable because the locator resolves through `importlib.resources` against the
+  `_fixpp_data` *package* and `share/` is not one. ⚠️ Every gate was green: the neighbouring CI
+  checks all interrogate the **extension module** (tag, `NEEDED`, abi3) and none reads the archive's
+  file list. Separately the project's own AGPL `LICENSE` shipped in **no** artifact —
+  `CPACK_RESOURCE_FILE_LICENSE` is read by interactive installers, not by the TGZ/DEB/RPM
+  generators. #255 itself was CLOSED, not planned: the release-leg wheel it proposed is a second way
+  to get the same module with no precedence rule, and #257's payload already serves that consumer.
+
+- ⭐ **A MINIMAL REPRODUCTION THAT OMITS THE PROPERTY UNDER TEST IS A FALSE GREEN** (#255; **class 1**).
+  Asked whether the loose `.o` could leave the package, a repro was built in which
+  `PRIVATE "$<BUILD_INTERFACE:objs>"` dropped the objects, kept the archive intact and stripped the
+  export requirement — three green cells, and the conclusion was reported as verified. It was wrong.
+  The object library in the repro had **no dependencies**, while the real `fixpp_capi_objects` links
+  the whole engine `PUBLIC` — so that `$<LINK_ONLY:>` edge is *how a C-ABI consumer transitively
+  acquires the engine archives*, and removing it yields `undefined reference` for every consumer.
+  ⚠️ The tell was available and ignored: the repro had no CONSUMER at all, so nothing in it could
+  have failed the way the real thing fails. **A repro earns a conclusion only once it reproduces the
+  relationship the conclusion is about** — here, a dependency and someone linking it. The corrected
+  harness proves itself by having the *current* arrangement PASS in it.
+
+- ⭐ **A REGEX USED AS A PRE-FILTER DROPS WHAT IT CANNOT PARSE; USED AS A VALIDATOR IT REFUSES**
+  (#255; **class 1**, and the fix is one keyword apart from the defect). A licence set shared by two
+  witnesses was read with `file(STRINGS ... REGEX "^[A-Za-z0-9_.-]+$")`. A row that fails the regex
+  is not reported — it is **silently absent**, so `QUICKFIX LICENSE.txt` (one space) would leave the
+  list non-empty and the witness would simply stop asserting that file, staying green. Read every
+  non-comment row and **fatal on any that does not match** instead. ⚠️ Two further traps in the same
+  ten lines: `file(STRINGS)` **splits a line at a non-ASCII byte**, so an em dash in a *comment*
+  yields fragments that parse as members — an early draft read **10 members out of 4** — and the two
+  parsers (CMake and Python) held *different* grammars, so each could accept a name the other
+  dropped with nothing to say so. Validating rather than filtering also enforces the ASCII rule for
+  free, which is why it replaced the convention that was merely written down.
+
+- ⭐ **AN ALLOW-LIST IS ONLY AS TIGHT AS ITS EXEMPTIONS, AND AN EXEMPTION IS A SUBTREE** (#255).
+  The wheel witness was rewritten from "probe three known-bad roots" to "assert the permitted
+  top-level set" — the right shape, since the leak class is *a new install() rule*, and a check that
+  names only what leaked once must be remembered to be extended. But the exemptions were written as
+  `top.endswith(".dist-info")` and `top.startswith("_fixpp") and top.endswith(".so")`, and `top` is a
+  **root segment**: both therefore exempt an entire subtree beneath any directory *named* that way.
+  Codex reproduced `fixpp-0.dist-info/lib/libfixpp_core.a` and `_fixpp_payload.so/lib/libfixpp_core.a`
+  passing as clean. ⚠️ Tightening the two exemptions is necessary and **not sufficient**, because the
+  next hole is a root nobody predicted again: pair the root allow-list with an assertion keyed on
+  **shape rather than location** — no `.a`/`.o`/`.lib`/`Config.cmake` anywhere at any depth — so that
+  no root exemption can answer for it.
+
 - **2026-09-08 — #289 batch 22, the annotation that hid two arguments.**
   `failure-classes.md` gains **class 12** (*one label can carry two arguments, and only one of them
   may be checked*). `ci/pump-get-sweep.sh`'s `EXHAUSTED` splits off `EXHAUSTED-NOT-CALLER-SIDE`: a

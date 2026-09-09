@@ -459,10 +459,76 @@ foreach(_artifact IN LISTS _artifacts)
       "lib/cmake/fixpp/fixppConfig.cmake"
       "lib/cmake/fixpp/fixppConfigVersion.cmake"
       "lib/cmake/fixpp/fixppTargets.cmake"
-      "share/doc/fixpp/NOTICE"
-      "share/doc/fixpp/QUICKFIX_LICENSE.txt"
+      # ⚠️ The licence/attribution set is NOT listed here. It is shared with
+      # ci/check-wheel-payload.sh — which asserts the same obligation for the
+      # wheel — and is read from ci/expected-shipped-doc-files.txt below, so a
+      # file added to that set cannot reach one artifact and miss the other.
+      # fixpp-package-provenance.txt stays local: it is a CPack artifact and is
+      # correctly absent from the wheel.
       "share/doc/fixpp/fixpp-package-provenance.txt"
       "share/fixpp/dictionaries/FIX44.xml")
+    if(NOT _required IN_LIST _files)
+      list(APPEND _missing "${_required}")
+    endif()
+  endforeach()
+
+  # ── #255: the shared licence/attribution set ────────────────────────────────
+  # Read, never restated. Fails CLOSED on a missing or empty list: a check that
+  # silently skips its own inputs reports clean because it could not report
+  # anything else, which is this repository's most recurring defect.
+  set(_docs_list "${CMAKE_CURRENT_LIST_DIR}/../../ci/expected-shipped-doc-files.txt")
+  if(NOT EXISTS "${_docs_list}")
+    message(FATAL_ERROR
+      "#255: ${_docs_list} is missing — the licence set cannot be checked. This "
+      "list is shared with ci/check-wheel-payload.sh; restore it rather than "
+      "re-spelling the members here.")
+  endif()
+  # ⚠️ THE GRAMMAR IS VALIDATED, NOT USED AS A PRE-FILTER — and the difference is
+  # the whole point. `file(STRINGS ... REGEX "^[A-Za-z0-9_.-]+$")` looks
+  # equivalent and is not: a regex there DROPS non-matching rows silently, so a
+  # row like `QUICKFIX LICENSE.txt` (a space) would leave `_doc_members`
+  # non-empty and this witness would simply stop asserting that file, staying
+  # green. Fail-toward-clean, inside the check written against exactly that.
+  #
+  # So: read EVERY non-comment row, then FATAL on any that does not match. Two
+  # consequences worth knowing before editing the list:
+  #   * a filename with a space or a non-ASCII byte is a HARD ERROR here, not a
+  #     silent omission. If one is ever legitimately needed, both parsers must
+  #     change together (ci/check-wheel-payload.sh holds the twin grammar).
+  #   * this also ENFORCES the list file's ASCII-only rule for free.
+  #     file(STRINGS) splits a line at a non-ASCII byte, so an em dash in a
+  #     COMMENT yields fragments; the first still starts with '#', the rest do
+  #     not and land here as malformed rows. Measured: an earlier draft with
+  #     typographic punctuation parsed 10 members out of 4.
+  file(STRINGS "${_docs_list}" _doc_lines)
+  set(_doc_members "")
+  set(_doc_bad "")
+  foreach(_line IN LISTS _doc_lines)
+    string(STRIP "${_line}" _line)
+    if(_line STREQUAL "" OR _line MATCHES "^#")
+      continue()
+    endif()
+    if(_line MATCHES "^[A-Za-z0-9_.-]+$")
+      list(APPEND _doc_members "share/doc/fixpp/${_line}")
+    else()
+      list(APPEND _doc_bad "${_line}")
+    endif()
+  endforeach()
+  if(NOT _doc_bad STREQUAL "")
+    string(REPLACE ";" "\n  " _doc_bad_pretty "${_doc_bad}")
+    message(FATAL_ERROR
+      "#255: ${_docs_list} has row(s) that are neither a comment nor a valid "
+      "filename:\n  ${_doc_bad_pretty}\n"
+      "Refusing to continue: dropping them would silently narrow the licence "
+      "set this witness asserts. Keep the file ASCII and the names free of "
+      "spaces, or change BOTH parsers (see ci/check-wheel-payload.sh).")
+  endif()
+  if(_doc_members STREQUAL "")
+    message(FATAL_ERROR
+      "#255: ${_docs_list} parsed to NO entries, which would make the licence "
+      "half of this witness vacuously pass.")
+  endif()
+  foreach(_required IN LISTS _doc_members)
     if(NOT _required IN_LIST _files)
       list(APPEND _missing "${_required}")
     endif()

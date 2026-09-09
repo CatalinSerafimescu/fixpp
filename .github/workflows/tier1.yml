@@ -181,7 +181,38 @@ jobs:
           # today, so there is no shared base file this anchor would miss —
           # if one is added under `conan/profiles/`, the filter must widen
           # to cover it.
-          PY_RE='^(bindings/python/|include/fix/c_api|\.github/workflows/tier1\.yml$|conan/profiles/linux-clang-(debug|asan|tsan|ubsan)$|conanfile\.py$|.*\.i$)'
+          # ⚠️ #255 ADDED THREE TERMS, and the warrant is the tier1.yml one above
+          # applied consistently: "the wheel jobs' BUILD RECIPE lives here".
+          #
+          #   ci/check-wheel-payload.sh          part of the recipe MOVED OUT of
+          #   ci/expected-shipped-doc-files.txt  this file into ci/ by #255. Left
+          #                                      unlisted, an edit to the payload
+          #                                      gate itself would ship with zero
+          #                                      pre-merge signal — the exact
+          #                                      failure the tier1.yml term exists
+          #                                      to prevent.
+          #   CMakeLists.txt (ROOT only)         THE WHEEL'S CONTENTS ARE ITS
+          #                                      install() RULES. scikit-build-core
+          #                                      stages the install tree verbatim,
+          #                                      so a rule added here changes what
+          #                                      the wheel ships. Failing scenario
+          #                                      this closes: a PR adds
+          #                                      install(... DESTINATION bin) and
+          #                                      touches no bindings/python/ file
+          #                                      -> wheel job skipped -> the wheel
+          #                                      silently gains bin/ -> merges green.
+          #
+          # ROOT-ANCHORED deliberately: `^CMakeLists\.txt$` and not
+          # `.*CMakeLists\.txt$`, which would launch the ~387-runner-minute python
+          # fleet on nearly every C++ change. ⚠️ THE RESIDUAL IS REAL AND STATED
+          # RATHER THAN PAPERED OVER: a subdirectory CMakeLists can also add an
+          # install() rule and will NOT match here. Those install into the export
+          # set's `lib/`, which `wheel.exclude` drops wholesale, so the plausible
+          # blast radius is small — but it is not zero, and the backstop for it is
+          # push:main, which builds everything unconditionally. Pre-merge coverage
+          # of the wheel payload is therefore GOOD, not TOTAL; do not write
+          # "cannot reach main" anywhere on the strength of this line.
+          PY_RE='^(bindings/python/|include/fix/c_api|\.github/workflows/tier1\.yml$|ci/check-wheel-payload\.sh$|ci/expected-shipped-doc-files\.txt$|CMakeLists\.txt$|conan/profiles/linux-clang-(debug|asan|tsan|ubsan)$|conanfile\.py$|.*\.i$)'
           PYTHON_TOUCHED=false
           EV="${{ github.event_name }}"
           if [ "$EV" = "pull_request" ]; then
@@ -1952,6 +1983,19 @@ jobs:
           rm -rf "$WHL_TMP"
           abi3audit --strict "$WHL"
 
+      # #255: the step above verifies properties of the EXTENSION (tag, NEEDED
+      # set, abi3 conformance). None of them reads the wheel's file list, which
+      # is how the entire C++ install tree — archives, loose objects, the CMake
+      # package config, a second unreachable copy of every dictionary — shipped
+      # inside the wheel while all of the above stayed green. This asserts the
+      # payload itself, in both directions; see the script header for the two
+      # mutations that force each half RED.
+      - name: Verify wheel payload (#255)
+        run: |
+          set -euo pipefail
+          WHL=$(ls wheelhouse/fixpp-*-cp312-abi3-manylinux_2_28_x86_64.whl)
+          ci/check-wheel-payload.sh "$WHL"
+
       - uses: actions/upload-artifact@v7
         with:
           name: fixpp-wheel
@@ -2103,6 +2147,21 @@ jobs:
       # dependency this step adds.
       - name: Regression pin — python install witness escapes (#254)
         run: bash ci/test-python-install-witness.sh
+
+      # ci/check-wheel-payload.sh gates what the shipped wheel CONTAINS, and it
+      # runs only inside python-wheel-build — behind `proceed`, behind the PY_RE
+      # path filter, and after a manylinux container build. Its own header could
+      # therefore offer only one way to prove it can report non-zero: "rebuild
+      # the wheel", tens of minutes, which nobody will ever run. That is the
+      # instrument-with-no-affordable-proof shape, so the arms live here instead
+      # as zip fixtures: bash + python3, no build, no network, ~1 s.
+      #
+      # ⚠️ Every RED cell asserts its OWN diagnostic, not merely a non-zero exit.
+      # That distinction was not cosmetic here: two cells initially reddened via
+      # a DIFFERENT check than the one they were written for, and stayed green
+      # under a mutation that reverted the rule they were supposed to pin.
+      - name: Regression pin — wheel payload witness escapes (#255)
+        run: bash ci/test-check-wheel-payload.sh
 
       - uses: actions/setup-python@v6
         with:

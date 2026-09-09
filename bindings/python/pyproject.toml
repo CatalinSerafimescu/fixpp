@@ -106,10 +106,111 @@ cmake.build-type = "Release"
 # the compile floor ships a wheel that calls APIs its claimed interpreters may not
 # have; tag below it refuses installs that would have worked. Move both together.
 wheel.py-api = "cp312"
-# Ship ONLY the flat top-level Python modules + the _fixpp_data package (LAY-1/2).
-# The root install(DIRECTORY include/) would otherwise stage the C-ABI headers
-# into the wheel; the engine static libs have no install() rule so they do not leak.
-wheel.exclude = ["include/**"]
+# Ship ONLY the flat top-level Python modules + the _fixpp_data package (LAY-1/2),
+# plus the licence/attribution set under share/doc/fixpp/.
+#
+# ⚠️ THE LINE THAT USED TO BE HERE CLAIMED "the engine static libs have no
+# install() rule so they do not leak". THAT WAS FALSE, and false in the
+# direction that ships: `wheel.exclude` had only ever excluded headers, so
+# EVERY OTHER install() RULE IN THE ROOT CMakeLists LANDED IN THE WHEEL —
+# archives, loose objects, the CMake package config, and a second copy of the
+# whole dictionaries/ tree. `Root-Is-Purelib: false` means those arrive as
+# site-packages/lib/... and site-packages/share/..., top-level directories
+# inside site-packages, which is a collision surface against any other
+# distribution as well as dead weight.
+#
+# ⚠️ That is stated as a CONDITION, not as the byte table it was measured from.
+# The table rots on the next dictionary or archive change and nothing re-runs a
+# comment. To re-derive it at any time:
+#
+#     ci/check-wheel-payload.sh <wheel.whl>     # prints entries + total bytes
+#
+# and to see the failure it was written against, drop a root from the list
+# below and rebuild — the script's header names both forcing mutations.
+#
+# ⚠️ THIS IS A DENY-LIST, AND THAT IS A KNOWN LIMITATION, NOT AN OVERSIGHT.
+# The wheel's contents are whatever the root CMakeLists installs, so a NEW
+# install() rule lands here again unless someone remembers to exclude it —
+# the same shape as the defect above.
+#
+# The deeper fix exists and was deliberately deferred: tag the wheel-payload
+# rules `COMPONENT python` and set `install.components = ["python"]` here, which
+# makes wheel membership OPT-IN. It is viable — CPack in this repo has no
+# `CPACK_COMPONENT*` wiring at all, so it installs every component regardless,
+# and `cmake --install` without `--component` is what the C++ packaging path
+# uses — but it could not be verified end-to-end without building in the
+# manylinux container, and an unverified packaging change is how this defect
+# arrived. Left for its own change, with that verification.
+#
+# What narrows the gap MEANWHILE is the witness, not this list:
+# `ci/check-wheel-payload.sh` asserts the PERMITTED top-level set rather than
+# probing known-bad roots, so a rule landing under `bin/`, `etc/` or a new
+# `share/<x>/` is rejected even though nothing here names it. Its arms are
+# pinned in `ci/test-check-wheel-payload.sh` (ungated, buildless), so the proof
+# is re-run per PR rather than asserted here.
+#
+# ⚠️ "NARROWS", NOT "CLOSES", AND THE REMAINDER IS PRE-MERGE REACH, NOT LOGIC.
+# The witness lives in `python-wheel-build`, which on a PR is path-gated by
+# `PY_RE` in tier1.yml. That filter now names the root `CMakeLists.txt` and this
+# file, but NOT a subdirectory CMakeLists — so an install() rule added there and
+# nowhere else is first seen on `push:main`, after the gate. Do not upgrade this
+# to "cannot reach main".
+#
+# ⚠️ DO NOT widen this to `share/**`. The three exclusions are not one class:
+#
+#   include/**      C-ABI headers. A Python consumer links nothing.
+#   lib/**          archives, loose objects, the CMake package config. All of it
+#                   is for a C++ consumer running find_package(fixpp); the wheel
+#                   carries a fully-linked _fixpp.so and cannot use any of it.
+#                   ⚠️ Scoped to the WHEEL only. The loose .o remain in the C++
+#                   packages under the standing decision recorded at
+#                   tests/packaging/run_package_contents_witness.cmake's
+#                   `_have_objects` block — read it there, and note that
+#                   removing them from the PACKAGES is a redesign of
+#                   fixpp::capi's exported link interface rather than a filter
+#                   change, tracked as its own issue.
+#   share/fixpp/**  a SECOND copy of the dictionaries that nothing can reach:
+#                   fixpp_dict_data resolves through importlib.resources against
+#                   the `_fixpp_data` PACKAGE, and share/ is not a package. The
+#                   wheel's own _fixpp_data/__init__.py is the plain marker (the
+#                   sitearch branch), so it carries no DICTIONARY_DIR fallback
+#                   either. Unreachable by construction, not by omission.
+#
+# `share/doc/fixpp/**` is deliberately NOT excluded, and that is load-bearing
+# rather than incidental: it is the wheel's ONLY copy of QUICKFIX_LICENSE.txt
+# and NOTICE, and the wheel redistributes the four QuickFIX-derived XMLs in
+# _fixpp_data/ — which is exactly the material clauses 1-3 attach to. It is also
+# how the AGPL LICENSE reaches the wheel (root CMakeLists, the #255 rule beside
+# the FR-018b one). Excluding it ships attribution-less third-party data.
+#
+# ⚠️ THIS KEEPS A TOP-LEVEL site-packages/share/, THE SHAPE CONDEMNED ABOVE —
+# knowingly, and the distinction is namespacing, not size. What made the old
+# `share/fixpp/` and `lib/` leak a collision surface is that they are GENERIC
+# roots several distributions could each claim. `share/doc/fixpp/` is qualified
+# by project name at its second segment, and RECORD makes uninstall exact. The
+# alternative that avoids the root entirely — installing the licences INTO the
+# `_fixpp_data` package under SKBUILD — was considered and rejected: it would
+# put the wheel's licences on a wheel-specific mechanism and re-open the drift
+# between the two artifact families that one docdir rule exists to prevent.
+#
+# ⚠️ PEP 639 CANNOT REACH THESE FILES, and the reason is structural rather than
+# a version's behaviour: every PEP 639 route resolves its patterns RELATIVE TO
+# THE PROJECT DIRECTORY, which here is bindings/python/, while LICENSE, NOTICE
+# and QUICKFIX_LICENSE.txt live two levels above it. Nothing that resolves
+# relative to the project dir can name them.
+#
+# ⚠️ AND THE ROUTES DO NOT ALL SAY SO. `[project] license-files` rejects a
+# `../..` pattern with an explicit error ("must match files within the project
+# directory"), but `wheel.license-files` and `wheel.force-include` were both
+# observed BUILDING CLEAN AND SHIPPING NOTHING — a silent no-op. Treat the
+# silence as the hazard to plan against; which of them is silent in any given
+# run is a property of the resolved scikit-build-core, and NOTHING HERE IS
+# PINNED (see the `requires` note above — read the build log, do not assume).
+#
+# A symlink inside bindings/python/ does work and was rejected: it puts the
+# wheel's licences on a different mechanism from the C++ packages' for no gain
+# over one docdir install rule that already reaches both.
+wheel.exclude = ["include/**", "lib/**", "share/fixpp/**"]
 
 [tool.scikit-build.cmake.define]
 # PKG-4: drive the existing bindings target. OpenSSL staticness is a Conan
