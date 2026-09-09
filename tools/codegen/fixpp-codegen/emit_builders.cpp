@@ -90,8 +90,8 @@ namespace {
 
 // research.md R6 — the exact 33-element OFFICIAL MsgType set (v44).
 constexpr std::array<std::string_view, 33> kOfficial33 = {
-    "D", "E", "F", "G", "H", "8", "9", "q", "r", "AF", "AC", "t", "u", "V", "W", "X", "Y", "c",
-    "d", "e", "f", "g", "h", "i", "b", "S", "R", "AG", "Z", "a", "J", "P", "AS"};
+    "D", "E", "F", "G", "H", "8", "9", "q", "r", "AF", "AC", "t", "u", "V", "W", "X", "Y",
+    "c", "d", "e", "f", "g", "h", "i", "b", "S", "R",  "AG", "Z", "a", "J", "P", "AS"};
 
 bool is_official(std::string_view msg_type) {
     return std::find(kOfficial33.begin(), kOfficial33.end(), msg_type) != kOfficial33.end();
@@ -111,9 +111,8 @@ constexpr std::array<std::string_view, 5> kN002N003Excluded = {"BE", "BF", "BW",
 // session-FSM-dispatch class there, so v50sp2/vlatest emit their full
 // `is_application` set unfiltered.
 bool is_n002_n003_excluded(std::string_view ns, std::string_view msg_type) {
-    return ns == "v44" &&
-           std::find(kN002N003Excluded.begin(), kN002N003Excluded.end(), msg_type) !=
-               kN002N003Excluded.end();
+    return ns == "v44" && std::find(kN002N003Excluded.begin(), kN002N003Excluded.end(), msg_type) !=
+                              kN002N003Excluded.end();
 }
 
 // Defensive floor: the 8-tag framer envelope — BeginString(8), BodyLength(9),
@@ -249,8 +248,8 @@ public:
     // byte-identical members, since accessor names derive deterministically
     // from tag -> field name within one version); otherwise appends a new
     // plan and returns its (newly last) index.
-    std::size_t intern(std::uint16_t no_tag, std::uint16_t delimiter_tag,
-                       std::string signature, LevelPlan members) {
+    std::size_t intern(std::uint16_t no_tag, std::uint16_t delimiter_tag, std::string signature,
+                       LevelPlan members) {
         std::string key = std::to_string(no_tag) + ":" + signature;
         auto const it = key_to_index_.find(key);
         if (it != key_to_index_.end()) {
@@ -436,10 +435,9 @@ void emit_level_body(TemplateWriter& w, LevelPlan const& plan, std::string const
                 w.line("        if (!r_data) return ::std::unexpected(r_data.error());");
             } else {
                 std::string const call =
-                    top_level
-                        ? std::string{"bb.field("}
-                        : (owner_expr + "." +
-                           std::string{entry_set_name(builder_call_kind(item.kind))} + "(");
+                    top_level ? std::string{"bb.field("}
+                              : (owner_expr + "." +
+                                 std::string{entry_set_name(builder_call_kind(item.kind))} + "(");
                 w.raw("        auto r = ");
                 w.raw(call);
                 w.num(item.tag);
@@ -700,7 +698,7 @@ LevelPlan resolve_level(MessageIR const& m,
             // scope — not compounded with `level_required` (immediate-
             // enclosing gating, D-3/D-4).
             LevelPlan child_members = resolve_level(m, field_by_tag, child_path, nested->members,
-                                                     intern, /*level_required=*/own_required);
+                                                    intern, /*level_required=*/own_required);
             std::string const signature =
                 compute_signature(nested->delimiter_tag, child_members, intern);
             std::size_t const plan_id =
@@ -843,10 +841,8 @@ void emit_writer_traits_for_level(TemplateWriter& w, std::string const& qtype,
         }
     }
 
-    std::size_t const n_required =
-        static_cast<std::size_t>(std::count_if(plan.begin(), plan.end(), [](LevelItem const& it) {
-            return !it.is_group && it.required;
-        }));
+    std::size_t const n_required = static_cast<std::size_t>(std::count_if(
+        plan.begin(), plan.end(), [](LevelItem const& it) { return !it.is_group && it.required; }));
     std::size_t const n_groups = static_cast<std::size_t>(
         std::count_if(plan.begin(), plan.end(), [](LevelItem const& it) { return it.is_group; }));
 
@@ -1027,7 +1023,8 @@ void emit_groups_hpp(TemplateWriter& w, std::string const& ns, PlanIntern const&
 // Entity 1b -- validators/traits.hpp: the SHARED group-plan writer_traits<T>
 // specializations (`intern.plans`, once each), included only by the
 // validator surface, never by the builder surface (R2/SC-003).
-void emit_validators_traits_hpp(TemplateWriter& w, std::string const& ns, PlanIntern const& intern) {
+void emit_validators_traits_hpp(TemplateWriter& w, std::string const& ns,
+                                PlanIntern const& intern) {
     emit_generated_banner(w, ns, "validators/traits.hpp",
                           "shared group-plan writer_traits<T> specializations (data-model.md "
                           "Entity 1b); validator-surface only, never included by the builder "
@@ -1133,13 +1130,13 @@ void emit_msg_hpp(TemplateWriter& w, std::string const& ns, std::string const& m
 // fixpp_builders_<ver>). Same body either way (SC-004), differing only in
 // linkage -- parameterized on as_inline like emit_build_fn_def one level down.
 void emit_msg_builder(TemplateWriter& w, std::string const& ns, std::string const& msg_id,
-                      std::string const& msg_type, LevelPlan const& plan,
-                      PlanIntern const& intern, bool as_inline) {
+                      std::string const& msg_type, LevelPlan const& plan, PlanIntern const& intern,
+                      bool as_inline) {
     std::string const ext = as_inline ? ".inl" : ".cpp";
-    std::string_view const desc = as_inline
-        ? "inline build_ body (data-model.md Entity 3); no validator symbol (SC-003)."
-        : "external-linkage build_ definition (data-model.md Entity 4), compiled only "
-          "into fixpp_builders_<ver>; no validator symbol (SC-003).";
+    std::string_view const desc =
+        as_inline ? "inline build_ body (data-model.md Entity 3); no validator symbol (SC-003)."
+                  : "external-linkage build_ definition (data-model.md Entity 4), compiled only "
+                    "into fixpp_builders_<ver>; no validator symbol (SC-003).";
     emit_generated_banner(w, ns, "messages/" + msg_id + ".builder" + ext, desc);
     if (as_inline) {
         w.line("#pragma once");
@@ -1167,11 +1164,11 @@ void emit_msg_builder(TemplateWriter& w, std::string const& ns, std::string cons
 void emit_msg_validator(TemplateWriter& w, std::string const& ns, std::string const& msg_id,
                         LevelPlan const& plan, bool as_inline) {
     std::string const ext = as_inline ? ".inl" : ".cpp";
-    std::string_view const desc = as_inline
-        ? "inline validate_ body + this message's own top-level traits "
-          "(data-model.md Entity 3)."
-        : "external-linkage validate_ definition + this message's own top-level traits "
-          "(data-model.md Entity 4), compiled only into fixpp_validators_<ver>.";
+    std::string_view const desc =
+        as_inline ? "inline validate_ body + this message's own top-level traits "
+                    "(data-model.md Entity 3)."
+                  : "external-linkage validate_ definition + this message's own top-level traits "
+                    "(data-model.md Entity 4), compiled only into fixpp_validators_<ver>.";
     emit_generated_banner(w, ns, "messages/" + msg_id + ".validator" + ext, desc);
     if (as_inline) {
         w.line("#pragma once");
@@ -1247,10 +1244,9 @@ void emit_all_hpp(TemplateWriter& w, std::string const& ns,
 void assert_builder_surface_validator_free(std::vector<EmittedFile> const& files) {
     for (auto const& f : files) {
         std::string const rel = f.rel.generic_string();
-        bool const is_builder_surface = rel == "groups.hpp" ||
-                                        (rel.starts_with("groups/") && rel.ends_with(".hpp")) ||
-                                        rel.ends_with(".builder.inl") ||
-                                        rel.ends_with(".builder.cpp");
+        bool const is_builder_surface =
+            rel == "groups.hpp" || (rel.starts_with("groups/") && rel.ends_with(".hpp")) ||
+            rel.ends_with(".builder.inl") || rel.ends_with(".builder.cpp");
         if (!is_builder_surface) {
             continue;
         }

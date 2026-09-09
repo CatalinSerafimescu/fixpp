@@ -125,8 +125,7 @@ std::string_view datatype_token(fixpp::dict::field_data_type dt) {
         case fixpp::dict::field_data_type::DialectExtension:
             return "dialect_extension";
     }
-    throw std::logic_error(
-        "fixpp-codegen: emit_manifest — unhandled field_data_type enumerator");
+    throw std::logic_error("fixpp-codegen: emit_manifest — unhandled field_data_type enumerator");
 }
 
 void write_group_path(TemplateWriter& w, std::vector<std::uint16_t> const& path) {
@@ -171,9 +170,8 @@ std::string emit_manifest(VersionIR const& ir) {
     for (auto const& m : ir.messages) {
         msgs.push_back(&m);
     }
-    std::sort(msgs.begin(), msgs.end(), [](MessageIR const* a, MessageIR const* b) {
-        return a->msg_type < b->msg_type;
-    });
+    std::sort(msgs.begin(), msgs.end(),
+              [](MessageIR const* a, MessageIR const* b) { return a->msg_type < b->msg_type; });
 
     TemplateWriter w;
     w.raw("# fixpp-codegen census manifest -- fixpp::");
