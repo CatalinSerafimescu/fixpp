@@ -557,6 +557,51 @@ at all** — they leak on Linux too — and a second class leaked into the **sou
 `FIXPP_CONFIG_FIXTURE_DIR`, which a `%TEMP%` census cannot see by construction. Before believing a
 temp-dir count, enumerate the directories a fixture can create, not the ones one directory holds.
 
+## The fuzz replay set (#408) — being BUILT is not being RUN
+
+`tests/fuzz/CMakeLists.txt` registers one `fuzz_replay_<name>` ctest per **corpus
+directory**, not per harness. A harness with no `corpus/<name>/` therefore registers nothing — and it
+is still compiled, because `FIXPP_BUILD_FUZZ=ON` on `linux-clang-asan` builds every target in the
+directory. It then reports green forever without executing a single input. Nothing is missing,
+nothing errors, no job goes red: the loop simply has nothing to find.
+
+⚠️ **This is not a hypothetical.** #405 was a genuine hang in `fuzz_message_store`, and it survived
+because CI had never executed that harness. #213 closed the neighbouring gap — seeds that existed
+but were replayed by nothing — and its title reads as though it covers this one, which is how PR
+#407's first draft came to defer the work to a closed issue.
+
+**The invariant is "a replay exists", not "a corpus directory exists".** The first draft of the guard
+tested `IS_DIRECTORY corpus/<name>/`, which is a *proxy* — and one that is true for only one of the
+two fuzz suites, since `tests/config/fuzz/` names its inputs `crashes/` and registers
+`fuzz_replay_toml_crashes` against `fuzz_toml_loader`. `fixpp_add_fuzz_replay()` now records what it
+registered, and `fixpp_assert_every_fuzz_harness_replays()` reads that record, so the same check
+serves both suites and survives either renaming its inputs. Widening a directory-shaped check across
+both trees instead **miscounts while looking authoritative** — the error #408 records.
+
+⚠️ **The check must be called DEFERRED** (`cmake_language(DEFER CALL ...)`). `BUILDSYSTEM_TARGETS`
+reports only the targets defined *so far*, and appending an `add_executable` to the end of a
+CMakeLists is the most natural way to add a harness. Called inline the check is silently GREEN for
+anything declared below it — proved by a forced arm against the inline draft, not reasoned about.
+
+⚠️ **Enumerate from the buildsystem, never from a second hand-written list.** A list of harness names
+maintained beside the `add_executable` calls is derived from the same source it is meant to check, so
+it cannot disagree with them: a tautology that reports PASS because it cannot report anything else.
+
+**On the exemption list:** it escalates nothing on the tree as shipped, because every harness is
+either replayed or named in it with a reason. That is the property to preserve — a check that
+escalates most of its population conveys as little as one that escalates none. It is checked in both
+directions, so a name that no longer names a harness, or one that has since gained a replay, is
+fatal rather than a stale claim reading as a live decision.
+
+⚠️ **A `fuzz_replay_*` grades on EXIT CODE under `-runs=0`, and the harnesses do not all fail the
+same way.** Some trap on their own invariant (`fuzz_decimal_parse`'s `__builtin_trap`,
+`fuzz_session_cancellation`'s `std::abort`), some rethrow to `terminate` (the XML loaders), and some
+tolerate every typed error and so grade **only** on a sanitizer finding (`fuzz_file_cert_source`,
+`fuzz_transport_read_path`, `fuzz_wire_nested_slice`). A logic-error mutant leaves that last group
+green. Also note `-runs=0` executes libFuzzer's implicit **empty** input, so a RED arm that fires on
+any input proves the binary ran, *not* that your seeds were delivered — gate the mutant on
+`size > 0` if that is the claim you need.
+
 ## Related
 
 - [`nfr-and-tooling.md`](./nfr-and-tooling.md) — the status-column caveat, and where the CI gates live.

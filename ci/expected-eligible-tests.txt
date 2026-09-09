@@ -157,10 +157,23 @@ linux-clang-release   365
 # ⚠️ Whenever two branches both re-record a pin, the merged value is NOT either
 # branch's value: re-derive it from the mechanisms, do not resolve the conflict.
 #
-# ⚠️ 371 IS A PREDICTION AGAIN, and saying so is the point. Run 34277938132 measured
-# the branch alone; #406's run measured `main` alone; NOTHING has yet executed the
-# merged tree. The confirming basis is this branch's first CI run after this merge
-# commit.
+# ✅ 371 WAS A PREDICTION AND IS NOW MEASURED. It was recorded as base+1+1 arithmetic
+# over two branches that had never been executed together; that prediction has since
+# been CONFIRMED by reading the number off a log, per this block's own closing rule:
+#
+#   run 34330131218, job `linux-clang-asan`, head `f83563ea`
+#   log line: `100% tests passed, 0 tests failed out of 371`
+#
+# ⚠️ THAT HEAD IS NOT AN ANCESTOR OF `main`, so the reading does not transfer for
+# free. `f83563ea` is the #255 branch head; #255 was SQUASH-merged, so `main`'s
+# `a5212a46` is a different commit with a different tree (the two differ by ~941
+# lines). The number is carried forward only because the delta between them changes
+# no test REGISTRATION -- verified in both directions, not assumed:
+#
+#   git diff f83563ea a5212a46 | grep -E '^[+-].*(add_test|fixpp_add_fuzz_replay|gtest_discover)'
+#
+# which is empty. Re-run that before reusing 371 as a basis for anything else; a
+# later commit can falsify it.
 #
 # ⚠️ AND THAT RUN WILL NOT TELL YOU BY FAILING. An earlier revision of this very
 # block claimed "a wrong prediction cannot pass quietly -- the gate compares the
@@ -179,7 +192,32 @@ linux-clang-release   365
 #   The lane's log carries `100% tests passed ... out of <N>` and the peak-memory
 #   annotation's `[ran: <N>/<pin>]`. If N != the pin, correct this line and re-record
 #   provenance to that run; do not widen the check.
-linux-clang-asan      371
+# ⚠️ 371 -> 378, #408. Seven fuzz harnesses were COMPILED by this lane and never
+# executed, because tests/fuzz/CMakeLists.txt registers one replay per corpus
+# DIRECTORY and they had none. This change seeds a corpus for each, so each now
+# registers a `fuzz_replay_<name>` ctest:
+#
+#   decimal_parse  dict_xml_loader  file_cert_source  orchestra_loader
+#   session_cancellation  transport_read_path  wire_nested_slice
+#
+#   371  CI-read basis (run 34330131218, `f83563ea`, carried to `main` above)
+#   +7   this change, one per newly-seeded corpus
+#   ---
+#   378  this line
+#
+# ⚠️ THE +7 IS A MEASURED DELTA, NOT A COUNT OF THE DIRECTORIES ADDED. Counting what
+# you added assumes every corpus registers exactly one test and that nothing else in
+# the change moves the total -- the same assumption that made 371 wrong twice. It was
+# measured by configuring the asan preset with and without this change and diffing
+# `ctest -N`: 378 -> 385 on a workstation. The ABSOLUTE local number is meaningless
+# here (this file's header measures a workstation adrift of a runner, and 378 local
+# is a coincidence, not this pin); only the DELTA transfers, and it is +7.
+#
+# `fuzz_transport_handshake` is deliberately NOT seeded and so contributes nothing:
+# it is exempted in tests/fuzz/CMakeLists.txt with its reason (its body is a stub
+# awaiting 2h US4 T041). That exemption is itself checked in both directions, so it
+# cannot quietly become a permanent omission.
+linux-clang-asan      378
 linux-clang-ubsan     364
 linux-clang-tsan      364
 

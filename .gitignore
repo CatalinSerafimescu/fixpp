@@ -147,6 +147,20 @@ book/
 tests/fuzz/corpus/*
 tests/config/fuzz/corpus/*
 !tests/fuzz/corpus/message_store/
+!tests/fuzz/corpus/decimal_parse/
+!tests/fuzz/corpus/dict_xml_loader/
+!tests/fuzz/corpus/file_cert_source/
+!tests/fuzz/corpus/orchestra_loader/
+!tests/fuzz/corpus/session_cancellation/
+!tests/fuzz/corpus/transport_read_path/
+!tests/fuzz/corpus/wire_nested_slice/
+# ⚠️ ONE LINE PER SHIPPED CORPUS, and tests/fuzz/CMakeLists.txt now FATALs on a
+# harness with no corpus (#408) -- so a seed left ignored here does not fail
+# quietly: file(GLOB) finds nothing on the runner and the empty-corpus
+# FATAL_ERROR reddens the asan lane. Verify a new corpus with
+# `git check-ignore -v tests/fuzz/corpus/<name>/<seed>` BEFORE pushing --
+# locally the untracked-but-present dir configures fine, so this is a
+# CI-only red if it is wrong.
 
 # Python wheel build output (cibuildwheel / build-wheel.sh)
 wheelhouse/
