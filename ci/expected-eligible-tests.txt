@@ -160,9 +160,25 @@ linux-clang-release   365
 # ⚠️ 371 IS A PREDICTION AGAIN, and saying so is the point. Run 34277938132 measured
 # the branch alone; #406's run measured `main` alone; NOTHING has yet executed the
 # merged tree. The confirming basis is this branch's first CI run after this merge
-# commit. A wrong prediction cannot pass quietly -- the gate compares the executed
-# count against this line and fails loudly -- so if it does fail, correct the number
-# here and re-record provenance to that run; do not widen the check.
+# commit.
+#
+# ⚠️ AND THAT RUN WILL NOT TELL YOU BY FAILING. An earlier revision of this very
+# block claimed "a wrong prediction cannot pass quietly -- the gate compares the
+# executed count against this line and fails loudly". THAT WAS FALSE, and it was
+# written here by the same change that introduced the prediction, as the reason the
+# prediction was safe to ship. Read `ci/peak-memory-report.sh`: on a count mismatch
+# it emits `::warning::`, titles the section DIAGNOSTIC ONLY, and EXITS 0. It exits
+# 1 for exactly one reason -- an UNEXPLAINED sanitizer report. A lane with a wrong
+# pin is GREEN.
+#
+# That is still the safe direction, and the header above says so correctly: a stale
+# pin can only WITHHOLD acceptance, never manufacture it. But "safe" is not "loud",
+# and conflating them is how a prediction becomes a permanent fiction. So:
+#
+#   TO CONFIRM A PREDICTED PIN, READ THE NUMBER, DO NOT INFER IT FROM A GREEN CHECK.
+#   The lane's log carries `100% tests passed ... out of <N>` and the peak-memory
+#   annotation's `[ran: <N>/<pin>]`. If N != the pin, correct this line and re-record
+#   provenance to that run; do not widen the check.
 linux-clang-asan      371
 linux-clang-ubsan     364
 linux-clang-tsan      364
