@@ -40,12 +40,6 @@
 //       --gtest_filter='*Mallocnesia*'
 
 #include <gtest/gtest.h>
-#ifdef _WIN32
-#include <process.h>  // _getpid()
-#else
-#include <unistd.h>  // getpid()
-#endif
-
 #include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
@@ -54,7 +48,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
@@ -72,6 +65,10 @@
 // without the alloc counting (so it passes trivially — the mallocnesia run
 // is the real gate).
 #include "support/alloc_guard_markers.hpp"
+#include "support/temp_dir.hpp"  // replaced a local copy of this helper (#404).
+// NOT byte-identical, and the difference is on disk: the local one prefixed
+// "fixpp_perf_", the shared one prefixes "fixpp_test_" -- only current_pid()
+// was identical. The tag below carries "perf_" so the name stays greppable.
 #include "support/pump_until_ready.hpp"
 
 namespace {
@@ -138,25 +135,6 @@ private:
     std::pmr::memory_resource* upstream_;
     mutable std::atomic<long long> count_{0};
 };
-
-// ── Temp-dir helper for the FileStore alloc-guard test ─────────────────────────
-inline unsigned current_pid() noexcept {
-#ifdef _WIN32
-    return static_cast<unsigned>(::_getpid());
-#else
-    return static_cast<unsigned>(::getpid());
-#endif
-}
-
-inline std::filesystem::path perf_temp_dir(std::string_view tag) {
-    static std::atomic<unsigned> ctr{0};
-    const auto seq = ctr.fetch_add(1, std::memory_order_relaxed);
-    auto p = std::filesystem::temp_directory_path() /
-             (std::string("fixpp_perf_") + std::string(tag) + "_" +
-              std::to_string(current_pid()) + "_" + std::to_string(seq));
-    std::filesystem::create_directories(p);
-    return p;
-}
 
 // ── Counting visitor for retrieve() verification ──────────────────────────────
 class counting_visitor final : public fixpp::session::retrieve_visitor {
@@ -304,7 +282,7 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
     constexpr std::size_t kMaxFrame = 1024;
 
     // ── Setup (outside guard window) ─────────────────────────────────────────
-    auto dir = perf_temp_dir("filestore_retrieve");
+    auto dir = fixpp::test_support::unique_temp_dir("perf_filestore_retrieve");
 
     counting_resource mr;
 
@@ -391,6 +369,12 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
     const long long after = mr.allocate_count();
     EXPECT_GE(after, baseline) << "allocator count went backwards — PMR accounting is broken";
 
-    std::filesystem::remove_all(dir);
+    // ⚠️ RELEASE THE STORE FIRST. `minted` owns the FileStore and is not destroyed
+    // until this function returns, so removing the directory here would violate the
+    // contract stated in support/temp_dir.hpp -- the one this change is about. It is
+    // invisible on this test (it is POSIX-only, and POSIX permits unlink-while-open),
+    // which is exactly why the contract has to be honoured rather than observed.
+    minted.value().reset();
+    fixpp::test_support::remove_temp_dir(dir);
 }
 #endif  // !_WIN32}

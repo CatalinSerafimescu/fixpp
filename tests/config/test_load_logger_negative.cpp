@@ -37,6 +37,9 @@
 
 #include <gtest/gtest.h>
 
+
+#include "support/temp_dir.hpp"  // fixpp::test_support::try_remove_temp_dir (#404)
+
 #include "../support/msvc_debug_arena_skip.hpp"
 
 #ifdef _WIN32
@@ -762,7 +765,10 @@ TEST(T014_NegBattery, FileSinkDirNotWritable)
             std::filesystem::permissions(p,
                 std::filesystem::perms::owner_all,
                 std::filesystem::perm_options::add, e);
-            std::filesystem::remove_all(p, e);
+            // Permissions restored FIRST (that is why this guard is hand-written),
+            // then the shared noexcept removal — destructor, so never the throwing
+            // variant (#404).
+            fixpp::test_support::try_remove_temp_dir(p);
         }
     } cleanup{ro_dir};
 
@@ -847,7 +853,10 @@ TEST(T014_NegBattery, ZeroSideEffectsWhenAccumulatorNonEmpty)
     }
     struct Cleanup {
         std::filesystem::path p;
-        ~Cleanup() { std::error_code ec; std::filesystem::remove_all(p, ec); }
+        // try_ (noexcept) NOT remove_temp_dir: a destructor is implicitly noexcept,
+        // so the throwing variant would terminate rather than report (#404). The
+        // RETRY is the half that fixes the Windows leak; the throw is diagnostic.
+        ~Cleanup() { fixpp::test_support::try_remove_temp_dir(p); }
     } cleanup{log_dir};
 
     // Step 1: Resolve a VALID [logger] (file sink with our temp dir).
@@ -1687,7 +1696,8 @@ TEST(GateBR1E_DefaultDirBaseDir, DefaultDirectoryResolvesAgainstBaseDir)
     }
     struct Cleanup {
         std::filesystem::path p;
-        ~Cleanup() { std::error_code e; std::filesystem::remove_all(p, e); }
+        // noexcept variant — see the Cleanup guard above (#404).
+        ~Cleanup() { fixpp::test_support::try_remove_temp_dir(p); }
     } cl{base_dir};
 
     // Precondition: base_dir must differ from the process CWD for discrimination.
@@ -1935,7 +1945,10 @@ TEST(GateBR1F_Portability, PosixAccessCheckStillActiveOnPosix)
             std::filesystem::permissions(p,
                 std::filesystem::perms::owner_all,
                 std::filesystem::perm_options::add, e);
-            std::filesystem::remove_all(p, e);
+            // Permissions restored FIRST (that is why this guard is hand-written),
+            // then the shared noexcept removal — destructor, so never the throwing
+            // variant (#404).
+            fixpp::test_support::try_remove_temp_dir(p);
         }
     } cl{ro_dir};
 

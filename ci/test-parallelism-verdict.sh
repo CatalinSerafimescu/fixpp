@@ -432,11 +432,17 @@ cell "T19 an inflated summed test time is called out on a VALID sample" 0 \
 # ⚠️ THESE TWO CELLS DERIVE THE PIN; THEY DO NOT RESTATE IT. Both need a number
 # `ci/expected-eligible-tests.txt` actually holds — T24 one that MATCHES, T23
 # one that does not — so a hardcoded literal here is a copy of that file which
-# nothing keeps in step. It was a copy for three re-records (362 -> 368,
-# 368 -> 369, 369 -> 370) and went stale on all three, RED-ing `ci-script-pins`
-# and `tier1-required`; the third arrived one commit after the second's fix,
-# which was itself a comment asking the next editor to remember. Prose asking
-# for a step is not a step. Reading the pin is.
+# nothing keeps in step.
+#
+# It was a copy for FOUR re-records and went stale on THREE of them (362 -> 368,
+# 368 -> 369, and #405's 369 -> 370), each time RED-ing `ci-script-pins` and so
+# `tier1-required`. The third arrived one commit after the second's fix, which was
+# itself a comment asking the next editor to remember. The fourth (#406's own
+# 369 -> 370, developed in parallel with this branch) was moved by hand correctly
+# and its commit called that "the procedure working rather than another miss" —
+# which it was. But a procedure whose success rate is 1 in 4, and which is only
+# ever exercised by someone who happened to read a comment, is not a procedure.
+# Prose asking for a step is not a step. Reading the pin is.
 ASAN_PIN="$(awk '$1=="linux-clang-asan" && $2 ~ /^[0-9]+$/ {print $2; exit}' \
               "$HERE/expected-eligible-tests.txt")"
 # The guard is load-bearing, not defensive: an empty ASAN_PIN yields `--ran ,,`,
@@ -448,7 +454,8 @@ if [[ ! "$ASAN_PIN" =~ ^[0-9]+$ ]]; then
 fi
 # T23's count must merely DIFFER from the pin. Derived rather than a literal for
 # the same reason: a fixed number is correct only until the lane pins at it, and
-# that day the cell goes green for the wrong reason instead of red.
+# that day the cell goes green for the wrong reason instead of red. (#406's side
+# of this merge still carried `--ran 300,300,300` for exactly that role.)
 ASAN_MISS=$((ASAN_PIN - 1))
 cell "T23 a count that disagrees with the lane's pinned basis VOIDs the sample" 3 \
   "NOT THE LANE'S PRODUCTION WORKLOAD" --preset linux-clang-asan \

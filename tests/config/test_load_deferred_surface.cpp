@@ -50,6 +50,9 @@
 
 #include <gtest/gtest.h>
 
+#include "support/temp_dir.hpp"  // fixpp::test_support::remove_temp_dir (#404)
+#include "logger_owner_release.hpp"  // fixpp::config_test::release_log_owners
+
 #include <asio/io_context.hpp>
 #include <filesystem>
 #include <fixpp/config/load_diagnostic.hpp>
@@ -322,7 +325,7 @@ TEST(LoadDeferredSurface, T020_TypoDistinction) {
 //   (c) engine.logger is non-null
 //
 // The file-sink directory is created in the system temp dir to avoid source-tree
-// pollution; it is removed afterwards via RAII.
+// pollution; it is removed at the end of the test.
 
 TEST(LoadDeferredSurface, T020_LoggerNotDeferred) {
     // Pre-create a temp directory for the file sink.
@@ -401,9 +404,12 @@ TEST(LoadDeferredSurface, T020_LoggerNotDeferred) {
     // thread racing against remove_all at the coverage gate (T026).
     [[maybe_unused]] auto sd_res = result->engine.logger->shutdown();
 
-    // Cleanup temp dir
-    {
-        std::error_code ec;
-        std::filesystem::remove_all(tmp_base, ec);
-    }
+    // Cleanup temp dir.
+    //
+    // ⚠️ shutdown() above DRAINS but does not CLOSE the sink: the FileSink keeps
+    // its handle until the Logger is destroyed, so removing the tree here used to
+    // fail on Windows and be swallowed with `ec` (#404 -- this directory leaked on
+    // Windows).
+    fixpp::config_test::release_log_owners(*result);
+    fixpp::test_support::remove_temp_dir(tmp_base);
 }

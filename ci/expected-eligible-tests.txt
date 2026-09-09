@@ -53,6 +53,20 @@
 #   does not read this file at all. Running it and shipping is exactly how the
 #   2026-09-08 break reached `main`.
 #
+# ⚠️ ALL FOURTEEN LANE PINS IN THIS FILE WERE RE-RECORDED +1 ON 2026-09-08 (#400/#211).
+# This is a DERIVED bump, not a measurement: `tests/log/CMakeLists.txt` gained
+# exactly one `add_test` (`log_file_backpressure`), which every lane runs — it
+# carries no LABELS, so no lane's `-LE packaging` filter excludes it. The
+# previous values and their CI provenance are in the per-block comments below
+# and are unchanged as history. ⚠️ That commit ALSO hand-moved T24 in
+# ci/test-parallelism-verdict.sh, which was still a hardcoded copy of the asan pin
+# at the time. It no longer is -- see the T23/T24 note above -- so a future
+# re-record does not need that step, and this sentence is kept only as history.
+#
+# ⚠️ A DERIVED BUMP IS A CLAIM, NOT A FACT. It is right only if the new test is
+# eligible on every lane. Re-derive rather than trusting this paragraph:
+#     cmake --build <preset-dir> && ctest --test-dir <preset-dir> -N -LE packaging | tail -1
+#
 # ── WHY IT IS PER-LANE, AND NOT ONE NUMBER ───────────────────────────────────
 #
 # The counts genuinely DIFFER per lane — some tests are registered only under
@@ -98,8 +112,8 @@
 # siblings) rather than using `gtest_discover_tests`, so removing a TEST inside a
 # binary moves no ctest count. Stated because "+1 -1 = 0" is the plausible wrong
 # answer here.
-linux-clang-debug     364
-linux-clang-release   364
+linux-clang-debug     365
+linux-clang-release   365
 # ⚠️ 368 -> 369, RE-RECORDED 2026-09-08. This lane has now drifted twice; the
 # earlier 362 -> 368 (2026-09-06, campaign run 33990959916) was a lane-local
 # fuzz-target drift, and the note that then said "of the eleven Linux pins, ten
@@ -115,31 +129,43 @@ linux-clang-release   364
 # workstation: Tier 1 run 34160147412 at commit `d66b4351` (PR #392), job
 # `linux-clang-asan` — annotation "the executed test count (369)".
 #
-# ⚠️ 369 -> 370, #405/PR #407. LANE-LOCAL and DELIBERATE: this change adds
-# `tests/fuzz/corpus/message_store/`, and tests/fuzz/CMakeLists.txt registers one
-# `fuzz_replay_<name>` ctest per corpus DIRECTORY, so exactly one registration
-# appears. It lands on this lane and nowhere else because the whole `tests/fuzz`
-# subdirectory sits behind `if(FIXPP_BUILD_FUZZ)` in the root CMakeLists, and this
-# is the only lane that sets it — the same reason the 362 -> 368 drift above was
-# lane-local, and the opposite of the uniform +1 the note above retracts.
+# ⚠️ 369 -> 371, AND NEITHER MERGE PARENT SAYS 371. This is the one number in this
+# file that no single branch is able to get right, so read the arithmetic before
+# trusting it:
 #
-# Provenance: CI-read from Tier 1 run 34277938132 at commit `b4f8b683` (PR #407),
-# job `linux-clang-asan` — `100% tests passed, 0 tests failed out of 370`, and the
-# peak-memory annotation's `[ran: 370/370]`. `fuzz_replay_message_store` appears in
-# that log as test #373, Passed in 1.32 s.
+#   369  CI-read basis (run 34160147412, commit `d66b4351`, PR #392)
+#   +1   PR #406 (#400/#211): `log_file_backpressure`, one unguarded `add_test` in
+#        tests/log/CMakeLists.txt that EVERY lane runs -- the suite-wide +1 the
+#        header block above describes. CI-confirmed on `main` at 370.
+#   +1   PR #407 (#405): `tests/fuzz/corpus/message_store/`, and
+#        tests/fuzz/CMakeLists.txt registers one `fuzz_replay_<name>` ctest per
+#        corpus DIRECTORY. LANE-LOCAL -- the whole `tests/fuzz` subdirectory sits
+#        behind `if(FIXPP_BUILD_FUZZ)` in the root CMakeLists and this is the only
+#        lane that sets it. CI-confirmed on the branch at 370 (run 34277938132,
+#        commit `b4f8b683`; `fuzz_replay_message_store` is test #373, Passed in
+#        1.32 s -- the other seven replays take 0.04-0.06 s, which is how you tell
+#        a corpus that REPLAYS from one that merely registered).
+#   ---
+#   371  this line
 #
-# ⚠️ IT WAS WRITTEN HERE AS A PREDICTION FIRST, AND THAT IS WHY THE LINE ABOVE IS
-# TRUSTWORTHY. When this PR added the corpus it recorded 370 as 369 (CI-read, run
-# 34160147412) plus one, derived from the registration mechanism above, and said so
-# rather than dressing it as a measurement — because this file's rule is that a
-# basis is read off CI and never a workstation. The prediction could not have passed
-# quietly if wrong: the gate compares the executed count against this line and fails
-# loudly on any mismatch. It did not fail, so the label is now retired and replaced
-# by the run that confirms it. Had it failed, the fix was to correct the number and
-# re-record provenance to that run — never to widen the check.
-linux-clang-asan      370
-linux-clang-ubsan     363
-linux-clang-tsan      363
+# ⚠️ BOTH BRANCHES INDEPENDENTLY WROTE `370`, AND GIT WOULD HAVE TAKEN IT SILENTLY.
+# Each computed base+1 against the same 369 and each was RIGHT ALONE; the merge is
+# base+2. The two sides of this hunk conflicted only because #406 also moved
+# `linux-clang-ubsan`/`-tsan` on the adjacent lines -- on the asan line itself the
+# two sides are byte-identical, so a lost update here is invisible to `git merge`
+# BY CONSTRUCTION. Nothing in the conflict markers points at the line that is wrong.
+# ⚠️ Whenever two branches both re-record a pin, the merged value is NOT either
+# branch's value: re-derive it from the mechanisms, do not resolve the conflict.
+#
+# ⚠️ 371 IS A PREDICTION AGAIN, and saying so is the point. Run 34277938132 measured
+# the branch alone; #406's run measured `main` alone; NOTHING has yet executed the
+# merged tree. The confirming basis is this branch's first CI run after this merge
+# commit. A wrong prediction cannot pass quietly -- the gate compares the executed
+# count against this line and fails loudly -- so if it does fail, correct the number
+# here and re-record provenance to that run; do not widen the check.
+linux-clang-asan      371
+linux-clang-ubsan     364
+linux-clang-tsan      364
 
 # `linux-gcc-release` runs a DIFFERENT workload, not no workload.  ⚠️ An earlier
 # revision of this file said it "SKIPS the minimal-tier Test step entirely, so
@@ -153,7 +179,7 @@ linux-clang-tsan      363
 # `linux-clang-release` (a `-LE packaging` count, a different quantity).
 # ⚠️ RE-RECORDED 2026-09-08 to 372 in the suite-wide +1 — provenance now Tier 1
 # run 34160147412 at `d66b4351`.
-linux-gcc-release     372
+linux-gcc-release     373
 
 # Tier 3 (`.github/workflows/tier3-libcxx.yml`). These lanes run the FULL suite
 # — their Test step carries no `-LE packaging` — so the counts are lower than
@@ -162,10 +188,10 @@ linux-gcc-release     372
 # phase 3. ⚠️ RE-RECORDED 2026-09-08 in the suite-wide +1 (was 358/357/357/357);
 # provenance now Tier 3 run 34160147444 at `d66b4351`, replacing the original
 # Tier 3 run 31737273304 at `5c56a17e`.
-linux-clang-libc++        359
-linux-clang-libc++-asan   358
-linux-clang-libc++-ubsan  358
-linux-clang-libc++-tsan   358
+linux-clang-libc++        360
+linux-clang-libc++-asan   359
+linux-clang-libc++-ubsan  359
+linux-clang-libc++-tsan   359
 
 # The coverage lane runs the FULL suite (no `-LE packaging` filter), so its
 # count is not comparable to any lane above and had never been read off a CI log
@@ -179,7 +205,7 @@ linux-clang-libc++-tsan   358
 # filtered lanes because this one runs the packaging tier they exclude.
 # ⚠️ RE-RECORDED 2026-09-08 in the suite-wide +1: 370 -> 371, provenance Tier 1
 # run 34160147412 at `d66b4351`.
-linux-clang-coverage  371
+linux-clang-coverage  372
 
 # ── Tier 2, MSVC (`.github/workflows/tier2.yml`) — NEW 2026-09-06 ────────────
 #
@@ -203,6 +229,6 @@ linux-clang-coverage  371
 #
 # Provenance: Tier 2 run 33995191253, `push:main` at `9e03680d` — the same
 # commit as the Tier 1 basis above, so all fourteen lines describe one tree.
-windows-msvc-debug    352
-windows-msvc-release  360
-windows-msvc-asan     351
+windows-msvc-debug    353
+windows-msvc-release  361
+windows-msvc-asan     352

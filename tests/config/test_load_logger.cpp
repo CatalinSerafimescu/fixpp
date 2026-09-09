@@ -56,6 +56,9 @@
 
 #include <gtest/gtest.h>
 
+#include "support/temp_dir.hpp"  // fixpp::test_support::remove_temp_dir (#404)
+#include "logger_owner_release.hpp"  // fixpp::config_test::release_log_owners
+
 #include <asio/io_context.hpp>
 #include <chrono>
 #include <filesystem>
@@ -116,6 +119,7 @@ std::string diag_string(const std::vector<fixpp::config::LoadDiagnostic>& diags)
 std::filesystem::path fixture_dir() {
     return std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}};
 }
+
 
 }  // namespace
 
@@ -195,6 +199,13 @@ TEST(LoadLogger, T008_EquivalenceFileSink) {
     EXPECT_TRUE(found)
         << "Expected a log file starting with 'fixpp_t008' in " << log_dir
         << "; file not found — wrong directory or base_name in resolved logger";
+
+    // #404: no end-of-test cleanup existed here either, and this directory is
+    // under FIXPP_CONFIG_FIXTURE_DIR -- the SOURCE TREE (gitignored via
+    // fixtures/.gitignore `logs/`), not %TEMP%. The temp-dir leak count could not
+    // see it, which is why it survived the first pass of this change.
+    fixpp::config_test::release_log_owners(*result);
+    fixpp::test_support::remove_temp_dir(log_dir);
 }
 
 // ── T008_DuplicateFileSinkFanout ─────────────────────────────────────────────
@@ -308,6 +319,12 @@ TEST(LoadLogger, T008_DuplicateFileSinkFanout) {
     EXPECT_TRUE(has_file_with_prefix(sink_dir_b, "fanout_b"))
         << "Expected a log file 'fanout_b*' in sink_dir_b (" << sink_dir_b
         << "); sink_dir_b did not receive a log record — fan-out broken";
+
+    // #404: this test had no end-of-test cleanup at all -- it relied on the NEXT
+    // run's start-of-test reset, which leaves the directories behind in between.
+    fixpp::config_test::release_log_owners(*result);
+    fixpp::test_support::remove_temp_dir(sink_dir_a);
+    fixpp::test_support::remove_temp_dir(sink_dir_b);
 }
 
 // ── T008_EquivalenceOtlpSink (build-conditional) ────────────────────────────
@@ -429,6 +446,10 @@ TEST(LoadLogger, T008_EquivalenceOtlpSink) {
     EXPECT_TRUE(found)
         << "Expected a log file 't008_otlp*' in " << log_dir
         << "; file sink did not produce a file — wrong resolved logger configuration";
+
+    // #404: as above -- no end-of-test cleanup existed here either.
+    fixpp::config_test::release_log_owners(*result);
+    fixpp::test_support::remove_temp_dir(log_dir);
 }
 
 #endif  // FIXPP_CONFIG_HAS_OTLP
@@ -534,6 +555,12 @@ TEST(LoadLogger, T008_OtlpSinkCountAndOrder) {
     // ORDER + TYPE: sinks[1] is OtlpLogSink
     EXPECT_NE(dynamic_cast<fixpp::log::OtlpLogSink*>(pending.engine->sinks[1].get()), nullptr)
         << "sinks[1] must be an OtlpLogSink; order or type is wrong";
+
+    // #404: no Logger was constructed here -- the sinks are owned by `pending`,
+    // so release THAT before removing the directory they opened files in.
+    pending.engine.reset();
+    pending.sessions.clear();
+    fixpp::test_support::remove_temp_dir(log_dir);
 }
 
 #endif  // FIXPP_CONFIG_HAS_OTLP (OtlpSinkCountAndOrder)
@@ -630,6 +657,10 @@ TEST(LoadLogger, T008_OtlpSinkResolvedNegative) {
     EXPECT_TRUE(found)
         << "expected missing_required on endpoint for the otlp sink; diagnostics:\n"
         << diag_string(result.error());
+
+    // #404: the load FAILED here, so no Logger exists and nothing ever opened a
+    // file in log_dir -- no owner to release, just the directory to remove.
+    fixpp::test_support::remove_temp_dir(log_dir);
 }
 
 #endif  // FIXPP_CONFIG_HAS_OTLP
@@ -798,11 +829,10 @@ TEST(LoadLogger, T027_QuickstartLoad) {
         if (result->sessions[0].config.logger_override)
             [[maybe_unused]] auto r2 = result->sessions[0].config.logger_override->shutdown();
     }
-    {
-        std::error_code ec;
-        std::filesystem::remove_all(log_dir, ec);
-        std::filesystem::remove_all(acme_dir, ec);
-    }
+    // #404: the shutdown() above is not enough on its own -- see release_log_owners.
+    fixpp::config_test::release_log_owners(*result);
+    fixpp::test_support::remove_temp_dir(log_dir);
+    fixpp::test_support::remove_temp_dir(acme_dir);
 }
 
 // =============================================================================
@@ -1002,8 +1032,7 @@ TEST(LoadLogger, T026_FileSinkRotationParamsBehavioral) {
     EXPECT_TRUE(live_present)
         << "the live file \"" << live_name << "\" must exist in " << sink_dir;
 
-    {
-        std::error_code ec;
-        std::filesystem::remove_all(sink_dir, ec);
-    }
+    // #404: see release_log_owners -- shutdown() alone leaves the handle open.
+    fixpp::config_test::release_log_owners(*result);
+    fixpp::test_support::remove_temp_dir(sink_dir);
 }
