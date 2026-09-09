@@ -89,3 +89,19 @@ if(NOT _fixpp_toml_crash_files)
 endif()
 
 fixpp_add_fuzz_replay(fuzz_replay_toml_crashes fuzz_toml_loader "${_fixpp_toml_crashes}")
+
+# ── #408: this suite gets the same completeness assertion as tests/fuzz/ ─────
+#
+# Today this directory defines exactly ONE harness and wires its replay by hand
+# just above, so the check escalates nothing. That is precisely why it is worth
+# adding NOW: the gap it guards is invisible while there is one target, and a
+# second `add_executable(fuzz_*)` added here without a matching
+# fixpp_add_fuzz_replay() call would be compiled by the asan lane and never run
+# — the #408/#405 shape, in the one other place this project builds libFuzzer
+# binaries. The check is keyed on what fixpp_add_fuzz_replay() registered rather
+# than on any directory convention, so it works here despite this suite naming
+# its inputs `crashes/` instead of `corpus/<harness>/`.
+set(_fixpp_config_fuzz_no_replay_exempt "")
+
+cmake_language(DEFER CALL fixpp_assert_every_fuzz_harness_replays
+                          _fixpp_config_fuzz_no_replay_exempt)

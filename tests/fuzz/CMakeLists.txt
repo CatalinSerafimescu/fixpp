@@ -285,3 +285,55 @@ if(_fixpp_fuzz_replays_registered EQUAL 0)
     "${_fixpp_fuzz_corpus_root}. Refusing to configure a fuzz build that replays nothing.")
 endif()
 message(STATUS "fixpp: registered ${_fixpp_fuzz_replays_registered} fuzz corpus replay test(s)")
+
+# ── #408: every harness here must actually be REPLAYED by something ──────────
+#
+# The loop above iterates CORPUS DIRECTORIES, so it can only ever register a
+# replay for a harness that already has one. A harness with no `corpus/<name>/`
+# registers no `fuzz_replay_<name>` ctest, is still COMPILED by the asan lane,
+# and therefore reports green having executed nothing. The block above makes the
+# reverse direction fatal (a corpus whose harness does not exist); this closes
+# the direction that let #405's hang survive.
+#
+# The check itself lives in cmake/Helpers.cmake next to fixpp_add_fuzz_replay(),
+# which is what records the coverage it reads — see that function's header for
+# why the invariant is "a replay exists" rather than "a corpus directory
+# exists", and why it must be called DEFERRED.
+#
+# ⚠️ ESCALATION RATE, STATED AS A CONDITION RATHER THAN A COUNT: on the tree as
+# shipped this check escalates NOTHING, because every harness here is either
+# seeded or named below. It fires only when a harness is ADDED without inputs.
+# That is the property to preserve — a check that escalates most of its
+# population conveys as little as one that escalates none, and trains readers to
+# skip the rows that mattered. If this list ever grows to rival the number of
+# seeded harnesses, the barrier has moved and the check needs rethinking, not
+# widening.
+#
+# ⚠️ SEED PROVENANCE — these are HAND-AUTHORED or COPIED fixtures, not campaign
+# finds. The corpora tracked before #408 are libFuzzer artifacts and wear sha1
+# filenames; every seed added by #408 is named `seed_<what it is>` precisely so
+# the two cannot be confused — a hand-written input wearing a sha1 name would
+# falsely claim a crash once reached it. Where a seed is a byte-identical copy of
+# an existing fixture (`corpus/file_cert_source/seed_*.pem` from
+# `tests/tls/fixtures/`, `corpus/dict_xml_loader/seed_fixt11_real_dictionary.xml`
+# and `seed_malformed_dict.xml` from `tests/config/fixtures/`), the copy is
+# DELIBERATE and must not be replaced by a reference to the original: a corpus is
+# a frozen record of inputs, so it must not move when an unrelated test rotates
+# its fixture. The cost is that a rotated fixture leaves the copy behind — which
+# is the intended behaviour here, not drift to be repaired.
+#
+# Harnesses deliberately shipped WITHOUT a replay. Seeding one is strictly
+# better than exempting it.
+#
+#   transport_handshake — the harness body is a placeholder. It calls the local
+#     `stub_handshake_adversarial()` byte-range check and asserts a compile-time
+#     error-slot invariant; the real surface (mock_transport + async_handshake)
+#     is deferred to 2h US4 T041, which the source names in place. Seeds fed to
+#     the stub would exercise no production code, so a corpus here would report
+#     coverage it does not have — the failure mode this check is about, wearing
+#     the opposite sign.
+set(_fixpp_fuzz_no_replay_exempt
+    transport_handshake)
+
+cmake_language(DEFER CALL fixpp_assert_every_fuzz_harness_replays
+                          _fixpp_fuzz_no_replay_exempt)
