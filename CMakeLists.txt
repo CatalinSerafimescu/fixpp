@@ -501,6 +501,37 @@ install(
   DESTINATION "${CMAKE_INSTALL_DOCDIR}"
 )
 
+# ── #255: fixpp's OWN licence ships too ─────────────────────────────────────
+#
+# The rule above discharges obligations we owe UPSTREAM. It does not ship the
+# licence THIS product is distributed under, and until now nothing did:
+# `CPACK_RESOURCE_FILE_LICENSE` (cmake/FixppPackaging.cmake) is consumed by
+# interactive installers, NOT by the TGZ/DEB/RPM generators this project uses,
+# and `[project] license` in bindings/python/pyproject.toml records an SPDX
+# EXPRESSION in METADATA rather than shipping any text.
+#
+# ⚠️ MEASURED, not reasoned — every shipped artifact of tier1 run 34263674899
+# (`f7e42854`) was unpacked and searched: the AGPL text was in NONE of the .whl,
+# .tar.gz, .deb or .rpm. Only the third-party attributions above were present.
+#
+# This one rule reaches BOTH artifact families, which is why it is a docdir
+# install and not a wheel-side setting: the C++ packages take it directly, and
+# the wheel takes it because bindings/python/pyproject.toml's `wheel.exclude`
+# drops `share/fixpp/**` but deliberately KEEPS `share/doc/fixpp/**`. Those two
+# places are one decision — see the exclude list's comment before changing
+# either.
+#
+# LICENSE-COMMERCIAL.md is shipped alongside deliberately. fixpp is dual
+# licensed, and a recipient holding only the AGPL text cannot tell that the
+# other option exists. It is a placeholder pending v1.0 and says so in its own
+# body; that is a reason to keep it accurate, not a reason to withhold it.
+install(
+  FILES
+    "${CMAKE_SOURCE_DIR}/LICENSE"
+    "${CMAKE_SOURCE_DIR}/LICENSE-COMMERCIAL.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+)
+
 # 061-typed-app-messages (061-slim) T023 / FR-008 (research.md Decision 7):
 # install the configure-time-generated typed-message flyweight headers onto
 # the public installed include path. Previously these attached to the

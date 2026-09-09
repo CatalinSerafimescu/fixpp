@@ -64,6 +64,45 @@ Built against the limited API (`Py_LIMITED_API`), so one wheel serves many CPyth
 constrains what the extension may use — a non-limited API call will build locally and break the wheel
 contract, which is the failure mode to watch for.
 
+## ⭐ The wheel takes the CMake install tree VERBATIM — that is the packaging trap
+
+`Root-Is-Purelib: false`, and scikit-build-core stages whatever the configured `install()` rules
+produce. So the wheel's contents are **not** a curated list; they are *the C++ install tree*, minus
+whatever `wheel.exclude` in `bindings/python/pyproject.toml` removes.
+
+⚠️ **That is a DENY-LIST, and it has already failed once.** Until #255 it excluded only `include/**`,
+so every other root install rule shipped inside the wheel — archives, loose objects,
+`lib/cmake/fixpp/`, and a second copy of the dictionaries that **no code path can reach** (the
+locator resolves through `importlib.resources` against the `_fixpp_data` *package*; `share/` is not
+one). Nothing noticed, because the neighbouring CI checks all inspect the **extension module** — tag,
+`NEEDED` set, abi3 conformance — and none of them reads the archive's file list.
+
+**The rule that follows: adding an `install()` rule anywhere in the root `CMakeLists.txt` changes what
+the wheel ships.** Check `wheel.exclude` when you add one. The guard is
+`ci/check-wheel-payload.sh`, which asserts the **permitted top-level set** rather than probing
+known-bad roots — so a rule landing under a name nobody predicted is still rejected.
+
+⚠️ **That guard's reach is narrower than its logic.** It runs inside `python-wheel-build`, which on a
+PR is path-gated: the filter names the root `CMakeLists.txt` and `bindings/python/`, but **not a
+subdirectory `CMakeLists.txt`**, so a rule added only there is first seen on `push:main` — after the
+gate, not before it. Verify against the filter in `tier1.yml` rather than assuming this sentence is
+still current.
+
+⚠️ **`share/doc/fixpp/**` is kept in the wheel deliberately** and is not dead weight: it is the
+wheel's only copy of `LICENSE`, `NOTICE` and `QUICKFIX_LICENSE.txt`, and the wheel redistributes the
+QuickFIX-derived XMLs those attach to. One `install(FILES …)` into `CMAKE_INSTALL_DOCDIR` serves the
+wheel *and* the `.tar.gz`/`.deb`/`.rpm`, which is why the licences are not wired through a
+wheel-specific setting. ⚠️ PEP 639 cannot do it here anyway — the licences sit two levels above the
+project dir, and of the three routes, `[project] license-files` errors while **`wheel.license-files`
+and `wheel.force-include` build clean and ship nothing**.
+
+## Re-derive (the packaging half)
+
+```bash
+ci/check-wheel-payload.sh <wheel.whl>          # contents + the two-sided assertion
+python3 -c 'import zipfile,sys;[print(n) for n in sorted(zipfile.ZipFile(sys.argv[1]).namelist())]' <whl>
+```
+
 ## Re-derive
 
 ```bash

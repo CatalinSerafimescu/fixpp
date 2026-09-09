@@ -14,8 +14,19 @@ Third-party material redistributed with this product
 ### FIX protocol dictionaries (QuickFIX)
 
 This product redistributes FIX protocol data dictionary files (`FIX40.xml`
-through `FIX50SP2.xml`, `FIXT11.xml`) obtained from the QuickFIX project. In a
-binary distribution these are installed under `share/fixpp/dictionaries/`.
+through `FIX50SP2.xml`, `FIXT11.xml`) obtained from the QuickFIX project.
+
+The binary distributions carry them in different places, and neither location is
+incidental:
+
+  * the C++ packages -- `.tar.gz`, `.deb`, `.rpm` and the Windows `.zip` --
+    install the whole set under `share/fixpp/dictionaries/`;
+  * the Python wheel bundles the subset its locator exposes inside the
+    `_fixpp_data` package, reached through `importlib.resources` rather than
+    through a filesystem path.
+
+This file and `QUICKFIX_LICENSE.txt` ship under `share/doc/fixpp/` in every one
+of them.
 
 They are covered by The QuickFIX Software License, Version 1.0
 (Copyright (c) 2001-2020 Oren Miller), which is redistributed in full alongside
