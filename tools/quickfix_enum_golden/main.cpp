@@ -515,13 +515,17 @@ int main() {
     // is the point: QuickFIX never reaches its enum arm for this field at
     // all, so this row cannot be used to prove enum-arm parity (that is what
     // row 6 was rewritten to do, with a STRING-typed header field instead).
-    rows.push_back({13, "FIX44", "FIX.4.4", "0", 43, "X", false,
-                    "PossDupFlag(43)=X (header, BOOLEAN) -- DV-5 characterization only: "
-                    "QuickFIX rejects/6 via checkValidFormat's BoolConvertor "
-                    "(DataDictionary.cpp:171) BEFORE the enum arm at :172; fixpp's Boolean "
-                    "type-arm imposes no constraint (validator.hpp:419-425) so it reaches "
-                    "enum_valid and rejects/5. Both engines REJECT; only the reason differs.",
-                    [](FIX::Message& m) { m.getHeader().setField(43, "X"); }});
+    rows.push_back(
+        {13, "FIX44", "FIX.4.4", "0", 43, "X", false,
+         "PossDupFlag(43)=X (header, BOOLEAN) -- DV-5 characterization only: "
+         "QuickFIX rejects/6 via checkValidFormat's BoolConvertor "
+         "(DataDictionary.cpp:171) BEFORE the enum arm at :172; fixpp's Boolean "
+         "type-arm imposes no constraint (validator.hpp:419-425) so it reaches "  // citation-ok:
+                                                                                  // emitted into
+                                                                                  // golden.csv
+                                                                                  // (#310)
+         "enum_valid and rejects/5. Both engines REJECT; only the reason differs.",
+         [](FIX::Message& m) { m.getHeader().setField(43, "X"); }});
 
     // Row 12 also spans FIX42 (the corpus row's own dictionary spans BOTH
     // FIX41 and FIX42 per T003/FR-019's topology note) -- measured
@@ -657,8 +661,8 @@ int main() {
     out_file << "#     Both reason AND mechanism in the original DV-1 text were wrong.\n";
     out_file << "#   Row 13 (asserted:false) PossDupFlag(43)=X (header, BOOLEAN) -- DV-5, NEW:\n";
     out_file << "#     QuickFIX rejects/6 via BoolConvertor (DataDictionary.cpp:171) before its\n";
-    out_file
-        << "#     enum arm (:172); fixpp's Boolean type-arm imposes no constraint so fixpp's\n";
+    out_file << "#     enum arm (:172); "  // citation-ok: emitted into golden.csv (#310)
+                "fixpp's Boolean type-arm imposes no constraint so fixpp's\n";
     out_file << "#     OWN enum_valid fires and rejects/5. Both REJECT; only the reason differs.\n";
     out_file << "#\n";
     out_file << "# No asserted:true row disagrees with its predicted verdict as of this run.\n";
