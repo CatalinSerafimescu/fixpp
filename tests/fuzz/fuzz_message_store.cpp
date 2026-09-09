@@ -40,6 +40,7 @@
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -53,6 +54,8 @@
 #include <memory_resource>
 #include <span>
 #include <string>
+
+#include "support/pump_until_ready.hpp"
 
 namespace {
 
@@ -124,17 +127,42 @@ inline Op decode_op(std::uint8_t b) noexcept {
 
 // ── Run a single-coro task on io_context ─────────────────────────────────────
 
+// A WINDOW, not a deadline (#405). The hazard being removed is the unbounded
+// `fut.get()` this replaces: a coroutine that never resumes hung libFuzzer with
+// no diagnostic. The hazard being AVOIDED is the opposite one -- a window close
+// to observed latency silently abandons legitimate inputs, which costs coverage
+// in the one harness whose whole job is coverage, and does so invisibly.
+//
+// RECIPE for re-deriving the budget -- run this, do not trust a number written
+// here or in the PR: instrument `run_coro` to record `steady_clock` elapsed per
+// call, run `fuzz_message_store -runs=3000` over several passes, take the MAX
+// across passes, and pick a generous multiple of it. What the multiple has to
+// clear is the TAIL: the overwhelming majority of calls are microseconds and
+// say nothing at all about the budget. The value below is such a multiple, far
+// enough above the tail that it can only be reached by a genuine hang.
+inline constexpr auto kFuzzWindow = std::chrono::seconds{1};
+
+// Returns false when the coroutine did not finish inside the window. The caller
+// must then stop driving this input -- and the FileStore drive additionally owes
+// the pool quiesce documented at `PoolQuiesce`, because an abandoned frame can
+// leave an offload in flight (that is the site-specific teardown obligation
+// `run_window_then_ready` puts on its callers).
+//
+// No `ADD_FAILURE` / `drain_or_report` on the miss branch. In a libFuzzer TU a
+// gtest failure is a FALSE GREEN -- measured: it prints and the process still
+// exits 0, and `ctest -L fuzz` replays with `-runs=0` and grades on exit code
+// alone. `abort()` was considered and rejected: a miss here is a timing
+// observation, not a defect in the code under test. Same reasoning, same
+// wording as the sibling harness `fuzz_session_recovery_admin_parse.cpp`.
 template <class Coro>
-static void run_coro(asio::io_context& ioc, Coro coro) {
+[[nodiscard]] static bool run_coro(asio::io_context& ioc, const char* site, Coro coro) {
     auto fut = asio::co_spawn(ioc.get_executor(), std::move(coro), asio::use_future);
-    // Run until the coroutine suspends or completes. Use poll() to avoid
-    // blocking the fuzzer if a coroutine is never posted-back (safety valve).
-    for (int guard = 0; guard < 100'000 && !ioc.stopped(); ++guard) {
-        ioc.poll_one();
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kFuzzWindow, site)) {
+        return false;
     }
-    ioc.restart();
     // Retrieve result to propagate any exception (assert/abort in DEBUG mode).
     (void)fut.get();
+    return true;
 }
 
 // ── MemoryStore fuzzer drive ──────────────────────────────────────────────────
@@ -177,40 +205,53 @@ static void fuzz_memory_store(const std::uint8_t* data, std::size_t size) {
                 for (std::size_t i = 0; i < flen; ++i) {
                     frame_buf[i] = static_cast<std::byte>(static_cast<std::uint8_t>(i ^ seq));
                 }
-                run_coro(ioc, [&]() -> asio::awaitable<void> {
-                    auto r = co_await store.store(
-                        seq, std::span<const std::byte>(frame_buf.data(), flen), dir);
-                    (void)r;  // legal errors (out-of-order, exhausted) are expected
-                });
+                if (!run_coro(ioc, "fuzz_message_store/mem/store", [&]() -> asio::awaitable<void> {
+                        auto r = co_await store.store(
+                            seq, std::span<const std::byte>(frame_buf.data(), flen), dir);
+                        (void)r;  // legal errors (out-of-order, exhausted) are expected
+                    })) {
+                    return;
+                }
                 break;
             }
             case Op::retrieve_op: {
                 seqnum_t begin = (seq == 0) ? seqnum_min : seq;
                 seqnum_t end = 0;  // open-ended walk
                 DiscardVisitor vis;
-                run_coro(ioc, [&]() -> asio::awaitable<void> {
-                    auto r = co_await store.retrieve(begin, end, dir, vis);
-                    (void)r;
-                });
+                if (!run_coro(ioc, "fuzz_message_store/mem/retrieve",
+                              [&]() -> asio::awaitable<void> {
+                                  auto r = co_await store.retrieve(begin, end, dir, vis);
+                                  (void)r;
+                              })) {
+                    return;
+                }
                 break;
             }
             case Op::reset_op:
-                run_coro(ioc, [&]() -> asio::awaitable<void> {
-                    auto r = co_await store.reset();
-                    (void)r;
-                });
+                if (!run_coro(ioc, "fuzz_message_store/mem/reset", [&]() -> asio::awaitable<void> {
+                        auto r = co_await store.reset();
+                        (void)r;
+                    })) {
+                    return;
+                }
                 break;
             case Op::next_seqnum_r:
-                run_coro(ioc, [&]() -> asio::awaitable<void> {
-                    auto r = co_await store.next_seqnum(dir, /*increment=*/false);
-                    (void)r;
-                });
+                if (!run_coro(ioc, "fuzz_message_store/mem/next_seqnum_read",
+                              [&]() -> asio::awaitable<void> {
+                                  auto r = co_await store.next_seqnum(dir, /*increment=*/false);
+                                  (void)r;
+                              })) {
+                    return;
+                }
                 break;
             case Op::next_seqnum_i:
-                run_coro(ioc, [&]() -> asio::awaitable<void> {
-                    auto r = co_await store.next_seqnum(dir, /*increment=*/true);
-                    (void)r;
-                });
+                if (!run_coro(ioc, "fuzz_message_store/mem/next_seqnum_incr",
+                              [&]() -> asio::awaitable<void> {
+                                  auto r = co_await store.next_seqnum(dir, /*increment=*/true);
+                                  (void)r;
+                              })) {
+                    return;
+                }
                 break;
         }
     }
@@ -235,6 +276,42 @@ static void fuzz_file_store(const std::uint8_t* data, std::size_t size,
     auto& store = *store_or;
 
     asio::io_context ioc;
+
+    // Quiesce the pool while `store` and `ioc` are STILL ALIVE.
+    //
+    // A window miss (see run_coro) abandons a suspended coroutine, and a
+    // FileStore operation reaches the disk via `co_await offload_to(
+    // file_io_executor, ...)` -- so at that moment an offload can be running on
+    // `io_pool`. That offload touches `store` and posts its completion back to
+    // `ioc`'s executor. Both die at this function's return, and the pool's own
+    // join is one frame further out still.
+    //
+    // MEASURED, not reasoned: with the window forced to 1 us so that nearly
+    // every call misses, ASan reports a heap-use-after-free inside
+    // `asio::detail::scheduler::work_started()`, reached from
+    // `any_executor_base::copy_object` -- the pool thread copying the executor
+    // of an already-destroyed io_context. Re-derive it that way (shrink
+    // kFuzzWindow, rebuild ASan, run the harness) rather than trusting this
+    // paragraph.
+    //
+    // Declared AFTER `ioc` so it is destroyed BEFORE it -- and before `store`.
+    // `join()` is idempotent (asio guards it on `joinable_`) and `~thread_pool`
+    // joins anyway, so the caller's own `io_pool.join()` stays correct.
+    //
+    // ⚠️ THIS DOES NOT MAKE EVERY WAIT ON THIS PATH BOUNDED, and #405 should not
+    // be read as if it did. `join()` waits for the pool's in-flight work, so a
+    // blocking file syscall that NEVER RETURNS still hangs here rather than in
+    // `fut.get()` -- one frame further out. What the change buys is a strict
+    // NARROWING, and it is the interesting half: the old unbounded `get()` hung
+    // whenever the coroutine failed to complete for ANY reason, including the
+    // never-resumed frame that #405 is actually about. That class is now
+    // bounded by kFuzzWindow. What is left is a single blocking syscall on a
+    // small file in a temp dir, which is a kernel-level wedge, not a logic one.
+    struct PoolQuiesce {
+        asio::thread_pool& pool;
+        ~PoolQuiesce() noexcept { pool.join(); }
+    } quiesce{io_pool};
+
     std::array<std::byte, 1024> frame_buf;
 
     for (std::size_t off = 0; off + kChunkSize <= size; off += kChunkSize) {
@@ -251,39 +328,52 @@ static void fuzz_file_store(const std::uint8_t* data, std::size_t size,
                 for (std::size_t i = 0; i < flen; ++i) {
                     frame_buf[i] = static_cast<std::byte>(static_cast<std::uint8_t>(i ^ seq));
                 }
-                run_coro(ioc, [&]() -> asio::awaitable<void> {
-                    auto r = co_await store->store(
-                        seq, std::span<const std::byte>(frame_buf.data(), flen), dir);
-                    (void)r;
-                });
+                if (!run_coro(ioc, "fuzz_message_store/file/store", [&]() -> asio::awaitable<void> {
+                        auto r = co_await store->store(
+                            seq, std::span<const std::byte>(frame_buf.data(), flen), dir);
+                        (void)r;
+                    })) {
+                    return;
+                }
                 break;
             }
             case Op::retrieve_op: {
                 seqnum_t begin = (seq == 0) ? seqnum_min : seq;
                 DiscardVisitor vis;
-                run_coro(ioc, [&]() -> asio::awaitable<void> {
-                    auto r = co_await store->retrieve(begin, 0, dir, vis);
-                    (void)r;
-                });
+                if (!run_coro(ioc, "fuzz_message_store/file/retrieve",
+                              [&]() -> asio::awaitable<void> {
+                                  auto r = co_await store->retrieve(begin, 0, dir, vis);
+                                  (void)r;
+                              })) {
+                    return;
+                }
                 break;
             }
             case Op::reset_op:
-                run_coro(ioc, [&]() -> asio::awaitable<void> {
-                    auto r = co_await store->reset();
-                    (void)r;
-                });
+                if (!run_coro(ioc, "fuzz_message_store/file/reset", [&]() -> asio::awaitable<void> {
+                        auto r = co_await store->reset();
+                        (void)r;
+                    })) {
+                    return;
+                }
                 break;
             case Op::next_seqnum_r:
-                run_coro(ioc, [&]() -> asio::awaitable<void> {
-                    auto r = co_await store->next_seqnum(dir, /*increment=*/false);
-                    (void)r;
-                });
+                if (!run_coro(ioc, "fuzz_message_store/file/next_seqnum_read",
+                              [&]() -> asio::awaitable<void> {
+                                  auto r = co_await store->next_seqnum(dir, /*increment=*/false);
+                                  (void)r;
+                              })) {
+                    return;
+                }
                 break;
             case Op::next_seqnum_i:
-                run_coro(ioc, [&]() -> asio::awaitable<void> {
-                    auto r = co_await store->next_seqnum(dir, /*increment=*/true);
-                    (void)r;
-                });
+                if (!run_coro(ioc, "fuzz_message_store/file/next_seqnum_incr",
+                              [&]() -> asio::awaitable<void> {
+                                  auto r = co_await store->next_seqnum(dir, /*increment=*/true);
+                                  (void)r;
+                              })) {
+                    return;
+                }
                 break;
         }
     }
