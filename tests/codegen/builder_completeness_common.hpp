@@ -18,7 +18,9 @@
 // tools/codegen/fixpp-codegen/ir.hpp/ir.cpp/emit_builders.cpp, does NOT call
 // build_ir(), and does NOT read `MessageIR.is_application`. It
 // re-implements the identical fail-closed app/admin rule those files use
-// (ir.cpp:182-197 legacy, ir.cpp:479-485 Orchestra) independently, so an
+// (`populate_group_order`'s "missing or unrecognized msgcat attribute" arm for
+// legacy, `populate_orchestra_projection`'s `category=="Session"` -> admin rule
+// for Orchestra) independently, so an
 // app/admin misclassification in the emitter's own IR is NOT inherited here
 // (the 075/076 blind-corpus lesson:
 // feedback_verification_corpus_built_from_the_read_it_checks_is_blind).
