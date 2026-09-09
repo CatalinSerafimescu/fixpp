@@ -123,15 +123,20 @@ linux-clang-release   364
 # is the only lane that sets it — the same reason the 362 -> 368 drift above was
 # lane-local, and the opposite of the uniform +1 the note above retracts.
 #
-# ⚠️ PROVENANCE IS WEAKER HERE THAN THIS FILE'S OWN RULE WANTS, AND SAYING SO IS
-# THE POINT. The rule is that a basis is read off CI and never a workstation. 370
-# is NOT read off CI: it is 369 (CI-read, run 34160147412) plus one, derived from
-# the registration mechanism above. It is a PREDICTION, and it is deliberately
-# recorded as one rather than dressed as a measurement. The confirming basis is
-# this PR's own `linux-clang-asan` run — and a wrong prediction cannot pass
-# quietly, because the gate compares the executed count against this line and
-# fails loudly on any mismatch. If it does fail, correct the number here and
-# re-record the provenance to that run; do not widen the check.
+# Provenance: CI-read from Tier 1 run 34277938132 at commit `b4f8b683` (PR #407),
+# job `linux-clang-asan` — `100% tests passed, 0 tests failed out of 370`, and the
+# peak-memory annotation's `[ran: 370/370]`. `fuzz_replay_message_store` appears in
+# that log as test #373, Passed in 1.32 s.
+#
+# ⚠️ IT WAS WRITTEN HERE AS A PREDICTION FIRST, AND THAT IS WHY THE LINE ABOVE IS
+# TRUSTWORTHY. When this PR added the corpus it recorded 370 as 369 (CI-read, run
+# 34160147412) plus one, derived from the registration mechanism above, and said so
+# rather than dressing it as a measurement — because this file's rule is that a
+# basis is read off CI and never a workstation. The prediction could not have passed
+# quietly if wrong: the gate compares the executed count against this line and fails
+# loudly on any mismatch. It did not fail, so the label is now retired and replaced
+# by the run that confirms it. Had it failed, the fix was to correct the number and
+# re-record provenance to that run — never to widen the check.
 linux-clang-asan      370
 linux-clang-ubsan     363
 linux-clang-tsan      363
