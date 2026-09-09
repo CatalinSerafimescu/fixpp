@@ -111,8 +111,7 @@ constexpr std::array<std::string_view, 5> kN002N003Excluded = {"BE", "BF", "BW",
 // session-FSM-dispatch class there, so v50sp2/vlatest emit their full
 // `is_application` set unfiltered.
 bool is_n002_n003_excluded(std::string_view ns, std::string_view msg_type) {
-    return ns == "v44" && std::ranges::find(kN002N003Excluded, msg_type) !=
-                              kN002N003Excluded.end();
+    return ns == "v44" && std::ranges::find(kN002N003Excluded, msg_type) != kN002N003Excluded.end();
 }
 
 // Defensive floor: the 8-tag framer envelope — BeginString(8), BodyLength(9),
@@ -256,8 +255,11 @@ public:
             return it->second;
         }
         std::size_t const idx = plans.size();
-        plans.push_back(InternedPlan{no_tag, delimiter_tag, std::move(signature),
-                                     std::move(members), /*name=*/{}});
+        plans.push_back(InternedPlan{.no_tag = no_tag,
+                                     .delimiter_tag = delimiter_tag,
+                                     .signature = std::move(signature),
+                                     .members = std::move(members),
+                                     .name = {}});
         key_to_index_.emplace(std::move(key), idx);
         return idx;
     }
@@ -522,8 +524,12 @@ void emit_level_body(TemplateWriter& w, LevelPlan const& plan, std::string const
         }
         w.line("        }");
         std::string const ge = "ge" + std::to_string(id);
-        w.line("        auto " + ge + " = bb.group_end(*" + gh + ");");
-        w.line("        if (!" + ge + ") return ::std::unexpected(" + ge + ".error());");
+        w.raw("        auto ").raw(ge).raw(" = bb.group_end(*").raw(gh).line(");");
+        w.raw("        if (!")
+            .raw(ge)
+            .raw(") return ::std::unexpected(")
+            .raw(ge)
+            .line(".error());");
         w.line("    }");
     }
 }
@@ -1250,8 +1256,7 @@ void assert_builder_surface_validator_free(std::vector<EmittedFile> const& files
         if (!is_builder_surface) {
             continue;
         }
-        if (f.content.contains("writer_traits") ||
-            f.content.contains("validate_") ||
+        if (f.content.contains("writer_traits") || f.content.contains("validate_") ||
             f.content.contains("validators/traits.hpp")) {
             throw std::runtime_error("fixpp-codegen: builder surface file '" + rel +
                                      "' references a validator symbol (FR-005/SC-003 violation)");
@@ -1374,17 +1379,20 @@ std::vector<EmittedFile> emit_builders(VersionIR const& ir, CoverageMode mode) {
     for (auto const& p : intern.plans) {
         TemplateWriter pw;
         emit_group_plan_hpp(pw, ir.ns, p, intern);
-        files.push_back({std::filesystem::path{"groups/" + p.name + ".hpp"}, std::move(pw).take()});
+        files.push_back({.rel = std::filesystem::path{"groups/" + p.name + ".hpp"},
+                         .content = std::move(pw).take()});
     }
     {
         TemplateWriter gw;
         emit_groups_hpp(gw, ir.ns, intern);
-        files.push_back({std::filesystem::path{"groups.hpp"}, std::move(gw).take()});
+        files.push_back(
+            {.rel = std::filesystem::path{"groups.hpp"}, .content = std::move(gw).take()});
     }
     {
         TemplateWriter tw;
         emit_validators_traits_hpp(tw, ir.ns, intern);
-        files.push_back({std::filesystem::path{"validators/traits.hpp"}, std::move(tw).take()});
+        files.push_back({.rel = std::filesystem::path{"validators/traits.hpp"},
+                         .content = std::move(tw).take()});
     }
 
     for (std::size_t i = 0; i < official_msg_ids.size(); ++i) {
@@ -1395,39 +1403,39 @@ std::vector<EmittedFile> emit_builders(VersionIR const& ir, CoverageMode mode) {
         {
             TemplateWriter mw;
             emit_msg_hpp(mw, ir.ns, msg_id, plan, intern);
-            files.push_back(
-                {std::filesystem::path{"messages/" + msg_id + ".hpp"}, std::move(mw).take()});
+            files.push_back({.rel = std::filesystem::path{"messages/" + msg_id + ".hpp"},
+                             .content = std::move(mw).take()});
         }
         {
             TemplateWriter bi;
             emit_msg_builder(bi, ir.ns, msg_id, msg_type, plan, intern, /*as_inline=*/true);
-            files.push_back({std::filesystem::path{"messages/" + msg_id + ".builder.inl"},
-                             std::move(bi).take()});
+            files.push_back({.rel = std::filesystem::path{"messages/" + msg_id + ".builder.inl"},
+                             .content = std::move(bi).take()});
         }
         {
             TemplateWriter vi;
             emit_msg_validator(vi, ir.ns, msg_id, plan, /*as_inline=*/true);
-            files.push_back({std::filesystem::path{"messages/" + msg_id + ".validator.inl"},
-                             std::move(vi).take()});
+            files.push_back({.rel = std::filesystem::path{"messages/" + msg_id + ".validator.inl"},
+                             .content = std::move(vi).take()});
         }
         {
             TemplateWriter bc;
             emit_msg_builder(bc, ir.ns, msg_id, msg_type, plan, intern, /*as_inline=*/false);
-            files.push_back({std::filesystem::path{"messages/" + msg_id + ".builder.cpp"},
-                             std::move(bc).take()});
+            files.push_back({.rel = std::filesystem::path{"messages/" + msg_id + ".builder.cpp"},
+                             .content = std::move(bc).take()});
         }
         {
             TemplateWriter vc;
             emit_msg_validator(vc, ir.ns, msg_id, plan, /*as_inline=*/false);
-            files.push_back({std::filesystem::path{"messages/" + msg_id + ".validator.cpp"},
-                             std::move(vc).take()});
+            files.push_back({.rel = std::filesystem::path{"messages/" + msg_id + ".validator.cpp"},
+                             .content = std::move(vc).take()});
         }
     }
 
     {
         TemplateWriter aw;
         emit_all_hpp(aw, ir.ns, official_msg_ids, registry_msg_types);
-        files.push_back({std::filesystem::path{"all.hpp"}, std::move(aw).take()});
+        files.push_back({.rel = std::filesystem::path{"all.hpp"}, .content = std::move(aw).take()});
     }
 
     // T005 (FR-005/SC-003) — regression check: the builder surface never

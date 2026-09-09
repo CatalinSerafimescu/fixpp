@@ -170,8 +170,8 @@ std::string emit_manifest(VersionIR const& ir) {
     for (auto const& m : ir.messages) {
         msgs.push_back(&m);
     }
-    std::ranges::sort(msgs,
-              [](MessageIR const* a, MessageIR const* b) { return a->msg_type < b->msg_type; });
+    std::ranges::sort(
+        msgs, [](MessageIR const* a, MessageIR const* b) { return a->msg_type < b->msg_type; });
 
     TemplateWriter w;
     w.raw("# fixpp-codegen census manifest -- fixpp::");
