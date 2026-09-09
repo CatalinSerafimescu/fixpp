@@ -8,6 +8,7 @@ refs:
   - .specify/constitution.md
   - tools/check_alloc.py
   - tests/support/pump_until_ready.hpp
+  - tests/support/temp_dir.hpp
   - ci/pump-census.sh
   - ci/pump-get-sweep.sh
   - ci/pump-red-arm.sh
@@ -524,6 +525,37 @@ collapse onto. Two things a reader needs that the code does not state:
 (failure class 13). One survived that way: `first_frame_stop_test.cpp` held a copy of the helper
 `engine_firstframe_test.cpp` had already retired, and its comment cited that file for two things the
 file no longer contains. If you are about to conclude a seam helper is retired, enumerate by shape.
+
+## The temp-dir seam (#404) — and the measurement that could not see half the leak
+
+`tests/support/temp_dir.hpp` is the second hoisted primitive on this page. It was extracted out of
+`tests/session/_fixtures_/store_temp_dir.hpp` when `tests/log` needed it too — a `tests/log` file
+including a fixture out of `tests/session` is a layering inversion. That old path is now a
+**migration shim with a stated end condition and a re-derivation recipe**; read its banner before
+adding an include to it.
+
+Three things the code cannot tell you:
+
+- **The two removal functions are not interchangeable, and the choice is a correctness one.**
+  `try_remove_temp_dir` is `noexcept`; `remove_temp_dir` ends in a throwing attempt so a genuine
+  holder surfaces instead of leaking. Destructors are implicitly `noexcept`, so calling the throwing
+  one from an RAII `Cleanup` guard turns a leaked directory into `std::terminate()`. Several
+  `tests/config` guards are exactly that shape.
+- **⚠️ The Windows retry loop is inside `#ifdef _WIN32`, so NO Linux build compiles it.** A green
+  Linux matrix is not evidence about that block — an arithmetic error in its backoff survived a full
+  local sweep and was caught by reading, twice, independently. If you change it, the instrument is
+  MSVC or nothing.
+- **⚠️ The retry is not what fixes the leak at most sites.** Where an owner still holds the sink
+  (the `tests/config` sites, which reset a `shared_ptr<Logger>` first) the RESET is the fix and the
+  retry is only insurance — retrying cannot outlast a handle held for the rest of the test. Which
+  mechanism is load-bearing is a property of the CALL SITE, not of the helper.
+
+⚠️ **The measurement that opened #404 was ~5/6 wrong, and the instrument is why** (failure class:
+an instrument that fails toward clean). It counted leftover directories under `%TEMP%`, so it read
+the whole population as "Windows removals that failed". Five of the six had **no end-of-test cleanup
+at all** — they leak on Linux too — and a second class leaked into the **source tree** under
+`FIXPP_CONFIG_FIXTURE_DIR`, which a `%TEMP%` census cannot see by construction. Before believing a
+temp-dir count, enumerate the directories a fixture can create, not the ones one directory holds.
 
 ## Related
 

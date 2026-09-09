@@ -8,6 +8,8 @@ refs:
   - include/fixpp/otel/session_spans.hpp
   - src/otel/session_spans.cpp
   - src/otel/providers.cpp
+  - src/log/logger.cpp
+  - src/log/file_sink.cpp
   - .specify/2k-log-otel.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2k-log-otel.md
@@ -29,6 +31,8 @@ codegraph_entry: [trace_context, current_trace_context, engine_trace_context, Pa
 | The span wrappers | `include/fixpp/otel/session_spans.hpp` · `src/otel/session_spans.cpp` |
 | Provider / exporter wiring | `src/otel/providers.cpp` · `src/otel/exporters.cpp` |
 | Why any of it is shaped this way | `.specify/2k-log-otel.md` — ⚠️ that doc also owns the **engine-wide error enum**; see [`errors.md`](./errors.md) |
+| The **logging** half — the MPSC ring and its memory ordering | `src/log/logger.cpp` — the ring-protocol header at the top is the argument; the `.hpp` and `2k-log-otel.md` both defer to it |
+| `FileSink` rotation / backpressure / drop accounting | `src/log/file_sink.cpp` · witness `tests/log/test_file_sink_backpressure.cpp` · forced-mutation arms `ci/red-arms/filesink-join-and-backpressure.sh` |
 
 ## ⚠️ Two states that look alike and are not — measured 2026-08-31
 
@@ -72,6 +76,28 @@ freeze-by-compiler pattern used in [`errors.md`](./errors.md).
 `FIXPP_BUILD_OTEL` is a CMake option. A build with it off is a supported configuration, so **nothing on
 an engine path may hard-depend on OTel types.** That constraint is a large part of why the trace slot
 holds a small POD rather than a provider handle.
+
+## ⚠️ #402 — the ring's step-2 load, and a rationale that had contradicted the protocol for the life of the feature
+
+`2k-log-otel.md` specified the producer's fullness check as an **acquire** load of `read_sequence_`
+in step 2, and then justified it in prose as *safe to keep relaxed* (a stale, under-advanced read
+only makes the ring look fuller ⇒ at worst an early drop, correct under `drop_newest`). The code
+took the prose. The prose is wrong for a reason the prose never considered: the same load also
+guards **slot REUSE on wraparound**, where a stale read lets a producer overwrite a slot the drain
+is still copying — a torn record, not an early drop.
+
+Three things a reader should take from it, none of which are about atomics:
+
+- **The design doc was amended in place, not annotated around** (close-out row 11). The old
+  rationale is deleted; the row that generated the defect is deliberately left standing above a
+  warning, because the row *is* the lesson.
+- **The contradiction was between two halves of one document** — step 2 said `acquire`, the
+  rationale said `relaxed is safe`. It survived Gate A and shipped. A doc that argues with itself
+  will be resolved by whoever writes the code, silently, in whichever direction is cheaper.
+- **The zero that hid it was blind, not clean.** `spec/feature-catalogue.md` LOG-001 read *"TSan 0
+  races on the ring"* for the life of the feature; no test drove a wraparound with the drain still
+  copying. #211's new backpressure witness reached that path on its first run. The ordering now has
+  a paired forced-mutation arm (arm 6) rather than an asserted zero.
 
 ## Related
 
