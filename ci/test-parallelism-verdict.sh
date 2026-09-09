@@ -424,14 +424,17 @@ cell "T19 an inflated summed test time is called out on a VALID sample" 0 \
 # ── T23/T24: is it the LANE's workload, or some other workload? ──────────────
 #
 # Three passes agreeing with each other says nothing about agreeing with
-# PRODUCTION. `linux-clang-asan` is pinned at 369 in ci/expected-eligible-tests
+# PRODUCTION. `linux-clang-asan` is pinned at 370 in ci/expected-eligible-tests
 # .txt; a job that configures the tree differently measures a suite that does
 # not ship. The disposition is the probe document's own designed one for a basis
 # mismatch — DIAGNOSTIC ONLY, i.e. toward "not evidence", never toward a false
 # acceptance.
 cell "T23 a count that disagrees with the lane's pinned basis VOIDs the sample" 3 \
   "NOT THE LANE'S PRODUCTION WORKLOAD" --preset linux-clang-asan --ran 300,300,300
-# ⚠️ 369 TRACKS `ci/expected-eligible-tests.txt` AND MOVES WITH IT. This is a
+# ⚠️ THIS CELL'S COUNT TRACKS `ci/expected-eligible-tests.txt` AND MOVES WITH IT.
+# (The number is deliberately not repeated here: it lives in the cell below, and a
+# comment that restates it is a RESULT that goes stale — it already had, at 369,
+# while the pin and the cell had both moved on.) This is a
 # deliberate coupling, not a leak: the cell asserts that a MATCHING count is
 # confirmed, so it has to state a number the pin actually holds. When a pin is
 # re-recorded, this line is re-recorded in the same commit — that file's header
@@ -445,8 +448,12 @@ cell "T23 a count that disagrees with the lane's pinned basis VOIDs the sample" 
 # is not a step anyone performs; the pin file now carries a POINTER BACK to
 # this cell, so the coupling is discoverable from the file you are editing
 # rather than only from the file that breaks.
+#
+# ⚠️ RE-RECORDED AGAIN 369 -> 370 (#400/#211), for the suite-wide +1 from the new
+# `log_file_backpressure` test. Moved in the same commit as the pin, which is the
+# procedure working rather than another miss.
 cell "T24 a count matching the pinned basis is confirmed on the page" 0 \
-  "matching \`ci/expected-eligible-tests.txt\`" --preset linux-clang-asan --ran 369,369,369
+  "matching \`ci/expected-eligible-tests.txt\`" --preset linux-clang-asan --ran 370,370,370
 # A preset with no pin line must NOT void — inventing an expectation for an
 # unpinned lane would void every sample it ever took.
 #

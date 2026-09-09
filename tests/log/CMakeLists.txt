@@ -84,6 +84,9 @@ target_link_libraries(log_file_rotation_test PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
+target_include_directories(log_file_rotation_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"  # support/temp_dir.hpp (#404)
+)
 add_test(NAME log_file_rotation COMMAND log_file_rotation_test)
 
 # ── Slice 3c: T018 (TS-5) — FileSink fsync on drain thread ───────────────────
@@ -93,27 +96,53 @@ target_link_libraries(log_file_fsync_test PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
+target_include_directories(log_file_fsync_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"  # support/temp_dir.hpp (#404)
+)
 add_test(NAME log_file_fsync COMMAND log_file_fsync_test)
-# Gate B PR #227 F-1: this test decides pass/fail from four small wall-clock
-# ceilings, and carries the tightest absolute slack anywhere in the suite:
-#   :212  enqueue of 10 records             < 40 ms
-#   :259  flush(10 ms) under a 500 ms fsync < 100 ms
-#   :274  close() after a 500 ms fsync      < 700 ms  -> 200 ms slack
-#   :365  close() after an 800 ms stall     < 1000 ms -> 200 ms slack
-# (line numbers are the EXPECT_LT itself, not the comment above it)
-# Under `ctest --parallel` a correct implementation can be descheduled past any
-# of these behind a CPU-heavy co-runner, reporting an I/O-blocking regression
-# that never happened. RUN_SERIAL costs 1.42 s (its whole runtime, measured on
-# the TSan lane) and is a no-op on every serial lane — CMake defines it as "do
-# not run this test in parallel with any other test", which is isolation from
-# CTest's own scheduler, not from unrelated machine load.
-# Unrelated pre-existing nit spotted while doing this, deliberately NOT touched:
-# the comment at :234 says the 100 ms bound is "3x the flush_deadline", but the
-# constants at :233/:235 are 10 ms and 100 ms, i.e. 10x.
-# The deeper fix is to make the assertions scheduler-independent — assert enqueue
-# completes while the mocked fsync is still blocked, rather than comparing a small
-# wall-clock number — but that is a test-semantics change, not a CI probe's job.
-set_tests_properties(log_file_fsync PROPERTIES RUN_SERIAL TRUE)
+# Gate B PR #227 F-1 / #400. CONDITION, not a census: some assertions in this
+# file still decide pass/fail from a small absolute wall-clock ceiling, and a
+# correct implementation descheduled behind a CPU-heavy co-runner reports an
+# I/O-blocking regression that never happened. Re-derive which ones and how much
+# slack each has -- do not trust a list written here, it goes stale silently:
+#   grep -n 'EXPECT_LT\|EXPECT_GT' test_file_sink_async_fsync.cpp
+# RUN_SERIAL is isolation from CTest's OWN scheduler, not from unrelated machine
+# load, so it mitigates and does not cure. It is a no-op on every serial lane.
+#
+# #400 removed the two close() ceilings rather than widening them: the join
+# obligation they named is now asserted CAUSALLY (the injected fsync sets a flag
+# as its last act; close() must have joined by the time it returns), which has no
+# budget to tune and, unlike a ceiling, goes red on the detach regression.
+# Prefer that shape over a new ceiling when adding to this file.
+#
+# TIMEOUT is the instrument for a HANG. Dropping the close() ceilings means a
+# close() that never returns no longer fails an assertion, so it must fail here
+# instead -- ctest's default is 1500 s, which reports a hang as 25 minutes of
+# nothing. The whole binary measured ~1.4 s on the TSan lane.
+set_tests_properties(log_file_fsync PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+
+# ── #211: FileSink under producer backpressure (real sink, rotation storm) ───
+add_executable(log_file_backpressure_test test_file_sink_backpressure.cpp)
+target_link_libraries(log_file_backpressure_test PRIVATE
+  fixpp_log
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(log_file_backpressure_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"  # support/temp_dir.hpp (#404)
+)
+add_test(NAME log_file_backpressure COMMAND log_file_backpressure_test)
+# RUN_SERIAL for two independent reasons, both structural rather than measured:
+#   * the rotation storm creates and renames files in a loop, and the test reads
+#     the whole directory back; it must not share a working directory or the
+#     machine's I/O with another log test mid-rotation.
+#   * backpressure is "the producer outruns the drain". A CPU-heavy co-runner
+#     starving the DRAIN only makes drops more likely, so the risk is not a
+#     false red here but a co-runner starving the PRODUCER into keeping up.
+# TIMEOUT is the hang instrument (ctest's default is 1500 s). The bound is
+# generous against the 60 s drain_timeout the test configures, so it fires only
+# on a genuine hang, never on a slow runner.
+set_tests_properties(log_file_backpressure PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 
 # ── Slice 3c: T029 — SyslogSink smoke test (POSIX-only; guard inside test) ───
 add_executable(log_syslog_test test_syslog_sink.cpp)

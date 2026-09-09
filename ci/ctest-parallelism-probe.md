@@ -578,20 +578,47 @@ asserted bound and the *intended* path:
 
 | Test | ceiling | intended path | slack |
 |---|---|---|---|
-| `log_file_fsync` enqueue (`test_file_sink_async_fsync.cpp:212`) | 40 ms | ~0 | tight, no lower bound |
-| `log_file_fsync` flush (`:259`) | 100 ms | 10 ms deadline | 10× |
-| `log_file_fsync` close (`:274`) | 700 ms | 500 ms injected fsync | **200 ms** |
-| `log_file_fsync` close (`:365`) | 1000 ms | 800 ms injected stall | **200 ms** |
-| `otel_exporters` teardown (`tests/otel/test_engine_close_teardown.cpp:311`) | 400 ms | ~50 ms | 8× |
-| plain-transport close (`tests/transport/test_asio_plain_transport_config.cpp:242`) | 500 ms | immediate (wrong path is 2 s) | wide |
-| C-API close (`tests/capi/lifecycle_test.cpp:~310`) | 1 s | immediate | wide |
+| `log_file_fsync` enqueue (`ProducerDoesNotBlockOnFsync`) | 40 ms | ~0 | tight, no lower bound |
+| `log_file_fsync` flush return (`FlushDeadlineBounded`) | 100 ms | 10 ms deadline | 10× |
+| `otel_exporters` teardown (`EngineCloseTeardown.E2_EngineTeardownHonorsDrainTimeout`) | 400 ms | ~50 ms | 8× |
+| plain-transport close (`AsioPlainTransportConfig.CloseIsPromptNoTlsCloseNotify`) | 500 ms | immediate (wrong path is 2 s) | wide |
+| C-API close (`CapiLifecycle.Sc007CloseBreaksBlockedIdleReadPromptly`) | 1 s | immediate | wide |
 | session / interop stop watchdogs | 1.5–5 s | prompt | wide |
 
-The four smallest margins in the whole suite are all inside `log_file_fsync`, and two of them are
-an absolute 200 ms rather than a multiple — which is why that one test is pinned `RUN_SERIAL` in
-`tests/log/CMakeLists.txt` (1.42 s, its entire runtime). Everything else has enough headroom that
-2× CPU contention should not reach it; that expectation is what acceptance criterion 3 exists to
-falsify.
+⚠️ **Two `log_file_fsync` close rows were removed here, not merely re-pointed.** They recorded
+700 ms and 1000 ms ceilings whose slack was **an absolute 200 ms rather than a multiple** — which
+is the property that made them fragile, and the stated reason this test is pinned `RUN_SERIAL`.
+**#400 deleted both**: those `close()` bands are now CAUSAL assertions (a flag the injected
+`fsync_fn` sets, checked after `close()` returns), so neither ceiling exists any more.
+
+⚠️ **Do not read the table above as a census of what is left.** `tests/log/CMakeLists.txt` states
+the rule for this exact file — *"CONDITION, not a census … do not trust a list written here, it
+goes stale silently"* — and gives the recipe. Use it rather than a count written here:
+
+```
+grep -n 'EXPECT_LT\|EXPECT_GT' tests/log/test_file_sink_async_fsync.cpp
+```
+
+`RUN_SERIAL` is kept for whatever that recipe still returns.
+
+Everything else has enough headroom that 2× CPU contention should not reach it; that expectation is
+what acceptance criterion 3 exists to falsify.
+
+⚠️ **Cite these by TEST NAME, not by line.** Every row here was a `file:NNN` citation, and the
+CONDITION that matters is that a line number cannot survive an edit of the file it points into
+while a test name can. Two of them had decayed all the way to assertions that no longer exist.
+
+⚠️ **An earlier version of this warning said "every one of them rotted". That was a tally about a
+moving file, and it was false** — the old `:212` still landed exactly on
+`EXPECT_LT(enqueue_elapsed_ms, 40LL)`. Stating how many had rotted was the same mistake the
+warning is about, one paragraph down from the warning.
+
+⚠️ **The other three rows have been converted too, because leaving them would have made
+this warning contradict the table it sits under.** They had rotted by varying amounts —
+`test_asio_plain_transport_config.cpp:242` was **280 lines** off its assertion (really
+`EXPECT_LT(close_ms, 500)` at `:522`); the other two landed inside the right test but not
+on the bound. Verified by opening each, not by trusting the row — and re-derive rather than
+trusting this paragraph either.
 
 The same sweeps found **no** cross-test fixed path, fixed listening port, Unix socket, or
 process-global env/cwd writer; every listener binds `127.0.0.1:0`; `codegen_determinism_test` uses

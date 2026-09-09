@@ -37,6 +37,8 @@
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
 
+#include "support/temp_dir.hpp"  // fixpp::test_support::unique_temp_dir (#404)
+
 namespace {
 
 // Enumerate archived files in dir matching base_name pattern.
@@ -78,16 +80,15 @@ protected:
     void SetUp() override
     {
         // Create a temp directory for this test run.
-        tmpdir_ = std::filesystem::temp_directory_path() /
-                  ("fixpp_log_test_" + std::to_string(
-                      std::chrono::steady_clock::now().time_since_epoch().count()));
-        std::filesystem::create_directories(tmpdir_);
+        tmpdir_ = fixpp::test_support::unique_temp_dir("log_rotation");
     }
 
     void TearDown() override
     {
-        std::error_code ec;
-        std::filesystem::remove_all(tmpdir_, ec);
+        // CONTRACT (see support/temp_dir.hpp): every FileSink over tmpdir_ must
+        // already be destroyed -- they are locals in the test bodies, and
+        // tmpdir_ is this fixture's only member, so nothing outlives the test.
+        fixpp::test_support::remove_temp_dir(tmpdir_);
     }
 
     std::filesystem::path tmpdir_;

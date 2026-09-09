@@ -54,8 +54,11 @@ enum class overflow_policy : std::uint8_t {
     // record it is about to enqueue. Increments drop_count_. In a FIFO ring,
     // dropping the newest-produced record preserves all older in-flight records
     // — satisfying [const §XIII.2]'s "drop-oldest permitted" allowance.
-    // read_sequence_ is std::atomic; producers load with relaxed ordering (a
-    // stale read can only cause an early drop — safe under drop_newest).
+    // read_sequence_ is std::atomic; producers load with ACQUIRE ordering,
+    // pairing with the drain's release store (#402). It said "relaxed ... a
+    // stale read can only cause an early drop — safe under drop_newest": true
+    // about liveness, and the wrong axis — slot REUSE on wraparound needs the
+    // happens-before that only the acquire supplies.
     drop_newest = 0,
 
     // block: producer spins with std::this_thread::yield() until a ring slot

@@ -16,7 +16,7 @@
 // ── MPSC ring protocol (§4.3 P1-2 fix implemented) ──────────────────────────
 //
 // write_sequence_ (producers CAS acq_rel/relaxed) — tracks the NEXT slot to claim.
-// read_sequence_  (drain release store; producers relaxed load) — tracks the
+// read_sequence_  (drain release store; producers ACQUIRE load) — tracks the
 //                  NEXT slot the drain will consume.
 //
 // Each ring slot has an `alignas(64) std::atomic<uint64_t> sequence` beside the
@@ -27,7 +27,7 @@
 //
 // Overflow check (load-check-CAS, R5 — never overwrites an unread slot):
 //   1. Load w = write_sequence_.load(relaxed).
-//   2. Load r = read_sequence_.load(relaxed).
+//   2. Load r = read_sequence_.load(ACQUIRE).
 //   3. If w - r >= capacity → overflow: drop (increment drop_count_); return.
 //   4. CAS write_sequence_(w → w+1, acq_rel/relaxed).
 //   5. CAS fail → retry from step 1.
@@ -37,9 +37,41 @@
 // Key correctness properties:
 // - Step 3 checks BEFORE claiming a slot.  write_sequence_ is never advanced
 //   on overflow so the drain never waits on a slot that was claimed-but-not-written.
-// - Relaxed load of read_sequence_ in step 2: a stale (under-advanced) read makes
-//   the ring look fuller than it is → at worst causes an early drop_newest drop.
-//   Safe because drop_newest is the defined behaviour; no corruption possible.
+// - ACQUIRE load of read_sequence_ in step 2 (#402): it pairs with the drain's
+//   release store at the end of a slot copy, and that pair is what makes SLOT
+//   REUSE on wraparound safe — once the drain has copied slot i and advanced,
+//   a producer may claim i + capacity and overwrite the same RingSlot, and
+//   without this edge the drain's reads of the old generation are unordered
+//   against those writes (a TORN record, not a lost one).
+//   ⚠️ This step said `relaxed` and justified it as: "a stale (under-advanced)
+//   read makes the ring look fuller than it is → at worst an early drop_newest
+//   drop. Safe because drop_newest is the defined behaviour; no corruption
+//   possible." That argument is about LIVENESS and was the wrong axis — being
+//   conservative about whether a slot is free says nothing about the ordering
+//   that reusing it requires. Do not restore it. Zero cost on x86-64 (relaxed
+//   and acquire emit the same instruction).
+//   RE-DERIVATION, not a recorded count: build tests/log/test_file_sink_backpressure
+//   .cpp under linux-clang-tsan and run it. It is the only test here that drives
+//   the ring through sustained WRAPAROUND against a live drain, which is the
+//   shape this edge protects; weakening the load reports races on the ring slot,
+//   restoring the acquire reports none.
+// - ⚠️ STEP 1's `w` IS RELAXED AND IS READ BEFORE `r`, so with MULTIPLE producers
+//   the two can be mutually inconsistent: another producer may advance
+//   write_sequence_, and the drain may then advance read_sequence_ past the `w`
+//   this thread already loaded. `w - r` is unsigned, so step 3 underflows to a
+//   huge value and reports "full" for a ring that is not — returning false
+//   BEFORE the step-4 CAS that would have caught the stale `w`.
+//   The direction is safe: it can only over-drop, never overwrite an unread
+//   slot, and the drop is counted, so drop_count() remains exact in the sense
+//   that every dropped record is accounted for. A QoS effect, not a correctness
+//   one, PRE-EXISTING, and deliberately NOT changed by #402 — which is about
+//   slot reuse and a torn record, a different hazard on a different axis.
+//   Unreachable from either test in tests/log/test_file_sink_backpressure.cpp:
+//   both are SINGLE-producer, so `r` can never pass `w`. Written down because
+//   #402 deleted the old step-2 rationale, which was the only text in this file
+//   that hinted a stale read could affect the fullness check at all. This is the
+//   CONDITION, not a claim about how often it fires — nothing here has measured
+//   that.
 // - The per-slot sequence atomic prevents the drain from reading a partially-written
 //   slot: the producer stores sequence = w+1 AFTER writing the Record (release),
 //   the drain reads with acquire semantics, so the full Record write is visible.
@@ -101,7 +133,9 @@ struct Logger::Impl {
     // ── Sequence counters — each on its own cache line ───────────────────
     // Producer: CAS acq_rel/relaxed.  Drain: reads relaxed for slot index.
     alignas(64) std::atomic<std::uint64_t> write_sequence_{0};
-    // Drain: release store after consuming.  Producer: relaxed load (overflow check).
+    // Drain: release store after consuming.  Producer: ACQUIRE load (overflow
+    // check) — the pair that makes slot reuse on wraparound safe; see the MPSC
+    // ring protocol header (#402).
     alignas(64) std::atomic<std::uint64_t> read_sequence_{0};
 
     // ── Filter mask ───────────────────────────────────────────────────────
@@ -229,10 +263,15 @@ struct Logger::Impl {
             // Step 1: load current write position (relaxed — we will CAS it).
             std::uint64_t w = write_sequence_.load(std::memory_order_relaxed);
 
-            // Step 2: load drain position with relaxed ordering.
-            // A stale (under-advanced) read makes the ring look fuller → early drop.
-            // Safe under drop_newest (contracts/log-core.md §Runtime obligations).
-            std::uint64_t r = read_sequence_.load(std::memory_order_relaxed);
+            // Step 2: load drain position — ACQUIRE, pairing with the drain's
+            // release store to read_sequence_ after a slot copy. This is what
+            // makes SLOT REUSE on wraparound safe.
+            //
+            // ⚠️ MUST NOT BE WEAKENED TO RELAXED (#402). The full argument, and
+            // the wrong-axis one it replaced, are in this file's MPSC ring
+            // protocol header — kept in ONE place deliberately, so the two
+            // cannot drift into disagreeing about the memory model.
+            std::uint64_t r = read_sequence_.load(std::memory_order_acquire);
 
             // Step 3: overflow check BEFORE claiming a slot (R5).
             if (w - r >= capacity_) {
