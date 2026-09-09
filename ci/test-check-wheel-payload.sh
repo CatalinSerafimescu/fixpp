@@ -192,6 +192,33 @@ LICENCE—EM-DASH
 '
 cell "doclist-non-ascii" 1 "neither a comment nor a valid filename" "$WORK/good.whl" "$HN"
 
+# ── THE REAL LIST, NOT A FIXTURE ────────────────────────────────────────────
+# ⚠️ EVERY CELL ABOVE USES A FIXTURE, AND THAT IS EXACTLY HOW THIS PIN WENT
+# GREEN OVER A BROKEN SHIPPED FILE. `doclist-non-ascii` proved the PARSER
+# rejects a non-ASCII row; it said nothing about ci/expected-shipped-doc-files.txt
+# itself. A later edit added a `⚠️` to a COMMENT in that file, CMake's
+# file(STRINGS) split the line at the non-ASCII byte, the tail fragment no longer
+# began with '#', and `fixpp::packaging::contents` went RED on three legs — while
+# this pin still reported all-pass. Proving a check can reject bad input is not
+# the same as checking the input we actually ship.
+#
+# So: drive the REAL script against the REAL list (no harness copy — $0-relative
+# resolution finds ci/expected-shipped-doc-files.txt), and assert the file is
+# ASCII directly, because that is the property CMake's reader is sensitive to
+# and the one a Python-only parse would not notice.
+cell "real-doclist-parses" 0 "" "$WORK/good.whl" "$HERE"
+
+if LC_ALL=C grep -qP '[^\x00-\x7F]' "$HERE/expected-shipped-doc-files.txt" 2>/dev/null; then
+  echo "  FAIL real-doclist-ascii    ci/expected-shipped-doc-files.txt has non-ASCII byte(s):"
+  LC_ALL=C grep -nP '[^\x00-\x7F]' "$HERE/expected-shipped-doc-files.txt" | sed 's/^/           /' | head -5
+  echo "           CMake's file(STRINGS) SPLITS a line at a non-ASCII byte, so even a"
+  echo "           COMMENT containing one yields a fragment that parses as a member."
+  fail=$((fail+1))
+else
+  printf '  ok   %-22s (no non-ASCII bytes in the shipped list)\n' "real-doclist-ascii"
+  pass=$((pass+1))
+fi
+
 echo
 echo "check-wheel-payload pin: ${pass} pass, ${fail} fail"
 [ "$fail" -eq 0 ] || exit 1

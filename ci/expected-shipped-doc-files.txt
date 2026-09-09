@@ -36,7 +36,7 @@
 # loud failure instead of a phantom member, and a non-ASCII byte anywhere in
 # this file will stop the build rather than corrupt the set. Keep it ASCII.
 #
-# ⚠️ The two grammars must stay identical. If a filename ever legitimately needs
+# !! The two grammars must stay identical. If a filename ever legitimately needs
 # a character outside that class, change BOTH readers together:
 #   tests/packaging/run_package_contents_witness.cmake  (the packages)
 #   ci/check-wheel-payload.sh                           (the wheel)
