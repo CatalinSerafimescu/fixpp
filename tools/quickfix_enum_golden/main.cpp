@@ -115,11 +115,10 @@
 //
 // ─────────────────────────────────────────────────────────────────────────
 
-#include <quickfix/DataDictionary.h>
-#include <quickfix/Message.h>
-#include <quickfix/Group.h>
-
 #include <openssl/evp.h>
+#include <quickfix/DataDictionary.h>
+#include <quickfix/Group.h>
+#include <quickfix/Message.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -135,8 +134,8 @@ namespace {
 
 // ── SHA-1 helpers ───────────────────────────────────────────────────────
 
-std::string hex_encode(const unsigned char *data, unsigned int len) {
-    static const char *kHex = "0123456789abcdef";
+std::string hex_encode(const unsigned char* data, unsigned int len) {
+    static const char* kHex = "0123456789abcdef";
     std::string out;
     out.reserve(len * 2);
     for (unsigned int i = 0; i < len; ++i) {
@@ -146,10 +145,10 @@ std::string hex_encode(const unsigned char *data, unsigned int len) {
     return out;
 }
 
-std::string sha1_hex(const std::string &bytes) {
+std::string sha1_hex(const std::string& bytes) {
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int digest_len = 0;
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
     if (!ctx) {
         std::cerr << "FATAL: EVP_MD_CTX_new failed\n";
         std::exit(1);
@@ -165,7 +164,7 @@ std::string sha1_hex(const std::string &bytes) {
     return hex_encode(digest, digest_len);
 }
 
-std::string read_file_bytes(const std::string &path) {
+std::string read_file_bytes(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) {
         std::cerr << "FATAL: cannot open '" << path << "' to hash it\n";
@@ -180,9 +179,9 @@ std::string read_file_bytes(const std::string &path) {
 
 struct RowResult {
     bool is_accept = false;
-    int reason = -1;          // -1 == no reason (accept)
-    int ref_tag_id = -1;      // -1 == no RefTagID (accept) — 075 T005a
-    std::string detail;       // human-readable, for the stdout report only
+    int reason = -1;      // -1 == no reason (accept)
+    int ref_tag_id = -1;  // -1 == no RefTagID (accept) — 075 T005a
+    std::string detail;   // human-readable, for the stdout report only
 };
 
 struct Row {
@@ -191,15 +190,16 @@ struct Row {
     std::string begin_string;  // "FIX.4.4" | "FIX.4.1" | "FIX.4.2"
     std::string msg_type;
     int tag;
-    std::string value;         // the raw wire value under test
+    std::string value;  // the raw wire value under test
     bool asserted;
     std::string note;
-    std::function<void(FIX::Message &)> fill;
+    std::function<void(FIX::Message&)> fill;
 };
 
-constexpr const char *kSendingTime = "20260714-12:00:00";
+constexpr const char* kSendingTime = "20260714-12:00:00";
 
-void set_common_header(FIX::Message &msg, const std::string &begin_string, const std::string &msg_type) {
+void set_common_header(FIX::Message& msg, const std::string& begin_string,
+                       const std::string& msg_type) {
     msg.getHeader().setField(FIX::FIELD::BeginString, begin_string);
     msg.getHeader().setField(FIX::FIELD::MsgType, msg_type);
     msg.getHeader().setField(FIX::FIELD::SenderCompID, "SENDER");
@@ -213,69 +213,70 @@ void set_common_header(FIX::Message &msg, const std::string &begin_string, const
 // COMPONENTS in FIX44.xml but declare zero required LEAF fields, so no
 // Symbol/OrderQty is needed for `checkHasRequired` to pass (confirmed
 // empirically — see the T002 report).
-void nos_required(FIX::Message &msg) {
+void nos_required(FIX::Message& msg) {
     msg.setField(11, "CLORDID1");
     msg.setField(40, "1");  // OrdType=Market, in-domain
     msg.setField(60, kSendingTime);
 }
 
-RowResult classify(const FIX::DataDictionary &dd, FIX::Message &parsed) {
+RowResult classify(const FIX::DataDictionary& dd, FIX::Message& parsed) {
     RowResult r;
     try {
         dd.validate(parsed);
         r.is_accept = true;
         r.detail = "ACCEPT";
         return r;
-    } catch (FIX::IncorrectTagValue &e) {
+    } catch (FIX::IncorrectTagValue& e) {
         r.reason = FIX::SessionRejectReason_VALUE_IS_INCORRECT;  // 5
         r.ref_tag_id = e.field;
         r.detail = "REJECT reason=5 (IncorrectTagValue) field=" + std::to_string(e.field);
-    } catch (FIX::NoTagValue &e) {
+    } catch (FIX::NoTagValue& e) {
         r.reason = FIX::SessionRejectReason_TAG_SPECIFIED_WITHOUT_A_VALUE;  // 4
         r.ref_tag_id = e.field;
         r.detail = "REJECT reason=4 (NoTagValue) field=" + std::to_string(e.field);
-    } catch (FIX::TagNotDefinedForMessage &e) {
+    } catch (FIX::TagNotDefinedForMessage& e) {
         r.reason = FIX::SessionRejectReason_TAG_NOT_DEFINED_FOR_THIS_MESSAGE_TYPE;  // 2
         r.ref_tag_id = e.field;
         r.detail = "REJECT reason=2 (TagNotDefinedForMessage) field=" + std::to_string(e.field);
-    } catch (FIX::RequiredTagMissing &e) {
+    } catch (FIX::RequiredTagMissing& e) {
         r.reason = FIX::SessionRejectReason_REQUIRED_TAG_MISSING;  // 1
         r.ref_tag_id = e.field;
         r.detail = "REJECT reason=1 (RequiredTagMissing) field=" + std::to_string(e.field);
-    } catch (FIX::IncorrectDataFormat &e) {
+    } catch (FIX::IncorrectDataFormat& e) {
         r.reason = FIX::SessionRejectReason_INCORRECT_DATA_FORMAT_FOR_VALUE;  // 6
         r.ref_tag_id = e.field;
         r.detail = "REJECT reason=6 (IncorrectDataFormat) field=" + std::to_string(e.field);
-    } catch (FIX::InvalidTagNumber &e) {
+    } catch (FIX::InvalidTagNumber& e) {
         r.reason = FIX::SessionRejectReason_INVALID_TAG_NUMBER;  // 0
         r.ref_tag_id = e.field;
         r.detail = "REJECT reason=0 (InvalidTagNumber) field=" + std::to_string(e.field);
-    } catch (FIX::TagOutOfOrder &e) {
+    } catch (FIX::TagOutOfOrder& e) {
         r.reason = FIX::SessionRejectReason_TAG_SPECIFIED_OUT_OF_REQUIRED_ORDER;  // 14
         r.ref_tag_id = e.field;
         r.detail = "REJECT reason=14 (TagOutOfOrder) field=" + std::to_string(e.field);
-    } catch (FIX::RepeatedTag &e) {
+    } catch (FIX::RepeatedTag& e) {
         r.reason = FIX::SessionRejectReason_TAG_APPEARS_MORE_THAN_ONCE;  // 13
         r.ref_tag_id = e.field;
         r.detail = "REJECT reason=13 (RepeatedTag) field=" + std::to_string(e.field);
-    } catch (FIX::RepeatingGroupCountMismatch &e) {
+    } catch (FIX::RepeatingGroupCountMismatch& e) {
         r.reason = FIX::SessionRejectReason_INCORRECT_NUMINGROUP_COUNT_FOR_REPEATING_GROUP;  // 16
         r.ref_tag_id = e.field;
-        r.detail = "REJECT reason=16 (RepeatingGroupCountMismatch) field=" + std::to_string(e.field);
-    } catch (FIX::Exception &e) {
+        r.detail =
+            "REJECT reason=16 (RepeatingGroupCountMismatch) field=" + std::to_string(e.field);
+    } catch (FIX::Exception& e) {
         // Any exception type outside the above set is UNEXPECTED for this
         // corpus and must not be silently miscategorized as some other
         // reason. Fail loudly so a broken frame is caught, not measured.
         std::cerr << "FATAL: unexpected QuickFIX exception during validate(): " << e.what() << "\n";
         std::exit(1);
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         std::cerr << "FATAL: unexpected std::exception during validate(): " << e.what() << "\n";
         std::exit(1);
     }
     return r;
 }
 
-FIX::DataDictionary make_dd(const std::string &path) {
+FIX::DataDictionary make_dd(const std::string& path) {
     FIX::DataDictionary dd(path);
     dd.checkFieldsHaveValues(false);
     dd.checkFieldsOutOfOrder(false);
@@ -284,7 +285,7 @@ FIX::DataDictionary make_dd(const std::string &path) {
     return dd;
 }
 
-RowResult run_row(const FIX::DataDictionary &dd, const Row &row) {
+RowResult run_row(const FIX::DataDictionary& dd, const Row& row) {
     FIX::Message msg;
     set_common_header(msg, row.begin_string, row.msg_type);
     row.fill(msg);
@@ -344,44 +345,47 @@ int main() {
     // Row 1 — in-domain single value. Positive control against
     // over-rejection (pairs with row 2 on the same tag).
     rows.push_back({1, "FIX44", "FIX.4.4", "D", 54, "1", true,
-                     "Side(54)=1, in-domain -> accept (positive control)",
-                     [](FIX::Message &m) { nos_required(m); m.setField(54, "1"); }});
+                    "Side(54)=1, in-domain -> accept (positive control)", [](FIX::Message& m) {
+                        nos_required(m);
+                        m.setField(54, "1");
+                    }});
 
     // Row 2 — out-of-domain single value. The headline.
     rows.push_back({2, "FIX44", "FIX.4.4", "D", 54, "Z", true,
-                     "Side(54)=Z, out-of-domain -> reject/5",
-                     [](FIX::Message &m) { nos_required(m); m.setField(54, "Z"); }});
+                    "Side(54)=Z, out-of-domain -> reject/5", [](FIX::Message& m) {
+                        nos_required(m);
+                        m.setField(54, "Z");
+                    }});
 
     // Row 3 — multi-value, all tokens declared. Positive control (reddens
     // under a whole-string-lookup mutation of the tokenizer).
     rows.push_back({3, "FIX44", "FIX.4.4", "D", 18, "1 G 6", true,
-                     "ExecInst(18)=\"1 G 6\", all tokens declared -> accept (positive control)",
-                     [](FIX::Message &m) {
-                         nos_required(m);
-                         m.setField(54, "1");
-                         m.setField(18, "1 G 6");
-                     }});
+                    "ExecInst(18)=\"1 G 6\", all tokens declared -> accept (positive control)",
+                    [](FIX::Message& m) {
+                        nos_required(m);
+                        m.setField(54, "1");
+                        m.setField(18, "1 G 6");
+                    }});
 
     // Row 4 — multi-value, one token undeclared.
     rows.push_back({4, "FIX44", "FIX.4.4", "D", 18, "1 ZZ 6", true,
-                     "ExecInst(18)=\"1 ZZ 6\", ZZ undeclared -> reject/5",
-                     [](FIX::Message &m) {
-                         nos_required(m);
-                         m.setField(54, "1");
-                         m.setField(18, "1 ZZ 6");
-                     }});
+                    "ExecInst(18)=\"1 ZZ 6\", ZZ undeclared -> reject/5", [](FIX::Message& m) {
+                        nos_required(m);
+                        m.setField(54, "1");
+                        m.setField(18, "1 ZZ 6");
+                    }});
 
     // Row 5 — degenerate whitespace (double space -> empty token). FR-014.
     // (The trailing-space form `18=1 ` was independently verified during
     // T002 scratch-testing to also reject/5 under the same mechanism; only
     // ONE literal is carried as a golden row per FR-018's 12-row corpus.)
     rows.push_back({5, "FIX44", "FIX.4.4", "D", 18, "1  G", true,
-                     "ExecInst(18)=\"1  G\" (double space -> empty token) -> reject/5",
-                     [](FIX::Message &m) {
-                         nos_required(m);
-                         m.setField(54, "1");
-                         m.setField(18, "1  G");
-                     }});
+                    "ExecInst(18)=\"1  G\" (double space -> empty token) -> reject/5",
+                    [](FIX::Message& m) {
+                        nos_required(m);
+                        m.setField(54, "1");
+                        m.setField(18, "1  G");
+                    }});
 
     // Row 6 — enum-backed HEADER field, engine-parity variant. FR-015.
     // MUST be a STRING-typed header field, not a BOOLEAN one: QuickFIX's
@@ -392,26 +396,26 @@ int main() {
     // is STRING, so StringConvertor imposes no format constraint and BOTH
     // engines actually reach their enum arm here.
     rows.push_back({6, "FIX44", "FIX.4.4", "0", 347, "ZZZZ", true,
-                     "MessageEncoding(347)=ZZZZ, header field, STRING type -> both engines' "
-                     "format check is a no-op, so both reach the enum arm -> reject/5.",
-                     [](FIX::Message &m) { m.getHeader().setField(347, "ZZZZ"); }});
+                    "MessageEncoding(347)=ZZZZ, header field, STRING type -> both engines' "
+                    "format check is a no-op, so both reach the enum arm -> reject/5.",
+                    [](FIX::Message& m) { m.getHeader().setField(347, "ZZZZ"); }});
 
     // Row 7 — strict prefix of a declared code. FR-009.
     rows.push_back({7, "FIX44", "FIX.4.4", "AE", 574, "A", true,
-                     "MatchType(574)=A on TradeCaptureReport, no bare 'A' declared -> reject/5",
-                     [](FIX::Message &m) {
-                         m.setField(571, "TR1");                 // TradeReportID
-                         m.setField(570, "N");                   // PreviouslyReported
-                         m.setField(32, "100");                  // LastQty
-                         m.setField(31, "10.5");                 // LastPx
-                         m.setField(75, "20260714");              // TradeDate
-                         m.setField(60, kSendingTime);            // TransactTime
-                         m.setField(574, "A");                    // MatchType under test
-                         FIX::Group sides(552, 54);                // NoSides, delim Side
-                         sides.setField(54, "1");
-                         sides.setField(37, "ORDER1");             // OrderID
-                         m.addGroup(sides);
-                     }});
+                    "MatchType(574)=A on TradeCaptureReport, no bare 'A' declared -> reject/5",
+                    [](FIX::Message& m) {
+                        m.setField(571, "TR1");        // TradeReportID
+                        m.setField(570, "N");          // PreviouslyReported
+                        m.setField(32, "100");         // LastQty
+                        m.setField(31, "10.5");        // LastPx
+                        m.setField(75, "20260714");    // TradeDate
+                        m.setField(60, kSendingTime);  // TransactTime
+                        m.setField(574, "A");          // MatchType under test
+                        FIX::Group sides(552, 54);     // NoSides, delim Side
+                        sides.setField(54, "1");
+                        sides.setField(37, "ORDER1");  // OrderID
+                        m.addGroup(sides);
+                    }});
 
     // Row 8 — empty value x Char. asserted:false, characterization-only
     // (DV-1). MEASURED: QuickFIX rejects via checkValidFormat's
@@ -427,60 +431,65 @@ int main() {
     // *reject*, just via unrelated mechanisms and (for QuickFIX) a different
     // reason.
     rows.push_back({8, "FIX44", "FIX.4.4", "D", 54, "", false,
-                     "Side(54)=\"\" (empty x Char) -- DV-1 characterization only; QuickFIX "
-                     "rejects/6 via CharConvertor (DataDictionary.cpp:171), never reaching "
-                     "the enum arm -- corrects DV-1's original reject/5 claim.",
-                     [](FIX::Message &m) { nos_required(m); m.setField(54, ""); }});
+                    "Side(54)=\"\" (empty x Char) -- DV-1 characterization only; QuickFIX "
+                    "rejects/6 via CharConvertor (DataDictionary.cpp:171), never reaching "
+                    "the enum arm -- corrects DV-1's original reject/5 claim.",
+                    [](FIX::Message& m) {
+                        nos_required(m);
+                        m.setField(54, "");
+                    }});
 
     // Row 9 — empty value x String. asserted:false, characterization-only
     // (DV-2). MEASURED: reject/5 (IncorrectTagValue via isFieldValue's
     // empty-token miss) -- matches the DV-2 prediction.
     rows.push_back({9, "FIX44", "FIX.4.4", "D", 18, "", false,
-                     "ExecInst(18)=\"\" (empty x String) -- DV-2 characterization only",
-                     [](FIX::Message &m) {
-                         nos_required(m);
-                         m.setField(54, "1");
-                         m.setField(18, "");
-                     }});
+                    "ExecInst(18)=\"\" (empty x String) -- DV-2 characterization only",
+                    [](FIX::Message& m) {
+                        nos_required(m);
+                        m.setField(54, "1");
+                        m.setField(18, "");
+                    }});
 
     // Row 10 — out-of-domain enum on a repeating-group member
     // (NoPartyIDs(453) -> PartyRole(452)). asserted:false (DV-3).
-    rows.push_back({10, "FIX44", "FIX.4.4", "D", 452, "9999", false,
-                     "PartyRole(452)=9999 inside NoPartyIDs(453) group member -- DV-3 characterization only",
-                     [](FIX::Message &m) {
-                         nos_required(m);
-                         m.setField(54, "1");
-                         FIX::Group party(453, 448);  // NoPartyIDs, delim PartyID
-                         party.setField(448, "PID1");
-                         party.setField(447, "D");     // valid PartyIDSource
-                         party.setField(452, "9999");  // out-of-domain PartyRole under test
-                         m.addGroup(party);
-                     }});
+    rows.push_back(
+        {10, "FIX44", "FIX.4.4", "D", 452, "9999", false,
+         "PartyRole(452)=9999 inside NoPartyIDs(453) group member -- DV-3 characterization only",
+         [](FIX::Message& m) {
+             nos_required(m);
+             m.setField(54, "1");
+             FIX::Group party(453, 448);  // NoPartyIDs, delim PartyID
+             party.setField(448, "PID1");
+             party.setField(447, "D");     // valid PartyIDSource
+             party.setField(452, "9999");  // out-of-domain PartyRole under test
+             m.addGroup(party);
+         }});
 
     // Row 11 — out-of-domain enum on a NESTED-group member, depth 2
     // (NoPartyIDs(453) -> NoPartySubIDs(802) -> PartySubIDType(803)).
     // asserted:false (DV-3, at depth).
-    rows.push_back({11, "FIX44", "FIX.4.4", "D", 803, "999", false,
-                     "PartySubIDType(803)=999 inside NoPartyIDs->NoPartySubIDs nested group member (depth 2) "
-                     "-- DV-3 characterization only",
-                     [](FIX::Message &m) {
-                         nos_required(m);
-                         m.setField(54, "1");
-                         FIX::Group party(453, 448);
-                         party.setField(448, "PID1");
-                         party.setField(447, "D");
-                         party.setField(452, "1");     // valid PartyRole
-                         FIX::Group sub(802, 523);       // NoPartySubIDs, delim PartySubID
-                         sub.setField(523, "SUB1");
-                         sub.setField(803, "999");       // out-of-domain PartySubIDType under test
-                         party.addGroup(sub);
-                         m.addGroup(party);
-                     }});
+    rows.push_back(
+        {11, "FIX44", "FIX.4.4", "D", 803, "999", false,
+         "PartySubIDType(803)=999 inside NoPartyIDs->NoPartySubIDs nested group member (depth 2) "
+         "-- DV-3 characterization only",
+         [](FIX::Message& m) {
+             nos_required(m);
+             m.setField(54, "1");
+             FIX::Group party(453, 448);
+             party.setField(448, "PID1");
+             party.setField(447, "D");
+             party.setField(452, "1");  // valid PartyRole
+             FIX::Group sub(802, 523);  // NoPartySubIDs, delim PartySubID
+             sub.setField(523, "SUB1");
+             sub.setField(803, "999");  // out-of-domain PartySubIDType under test
+             party.addGroup(sub);
+             m.addGroup(party);
+         }});
 
     // Row 12 — SettlLocation(166)="US" on FIX41/FIX42 (the "ISO Country
     // Code" placeholder codeset). asserted:true (DV-4 -- both engines
     // agree and both reject).
-    auto settl_fill = [](FIX::Message &m) {
+    auto settl_fill = [](FIX::Message& m) {
         m.setField(162, "SI1");        // SettlInstID
         m.setField(163, "N");          // SettlInstTransType
         m.setField(214, "SIR1");       // SettlInstRefID
@@ -491,8 +500,8 @@ int main() {
         m.setField(166, "US");         // SettlLocation under test
     };
     rows.push_back({12, "FIX41", "FIX.4.1", "T", 166, "US", true,
-                     "SettlLocation(166)=US on FIX41 SettlementInstructions -- reject/5, DV-4",
-                     settl_fill});
+                    "SettlLocation(166)=US on FIX41 SettlementInstructions -- reject/5, DV-4",
+                    settl_fill});
 
     // Row 13 — PossDupFlag(43)="X" on Heartbeat. asserted:false,
     // characterization-only (DV-5). This is the row 6 originally carried
@@ -507,12 +516,12 @@ int main() {
     // all, so this row cannot be used to prove enum-arm parity (that is what
     // row 6 was rewritten to do, with a STRING-typed header field instead).
     rows.push_back({13, "FIX44", "FIX.4.4", "0", 43, "X", false,
-                     "PossDupFlag(43)=X (header, BOOLEAN) -- DV-5 characterization only: "
-                     "QuickFIX rejects/6 via checkValidFormat's BoolConvertor "
-                     "(DataDictionary.cpp:171) BEFORE the enum arm at :172; fixpp's Boolean "
-                     "type-arm imposes no constraint (validator.hpp:419-425) so it reaches "
-                     "enum_valid and rejects/5. Both engines REJECT; only the reason differs.",
-                     [](FIX::Message &m) { m.getHeader().setField(43, "X"); }});
+                    "PossDupFlag(43)=X (header, BOOLEAN) -- DV-5 characterization only: "
+                    "QuickFIX rejects/6 via checkValidFormat's BoolConvertor "
+                    "(DataDictionary.cpp:171) BEFORE the enum arm at :172; fixpp's Boolean "
+                    "type-arm imposes no constraint (validator.hpp:419-425) so it reaches "
+                    "enum_valid and rejects/5. Both engines REJECT; only the reason differs.",
+                    [](FIX::Message& m) { m.getHeader().setField(43, "X"); }});
 
     // Row 12 also spans FIX42 (the corpus row's own dictionary spans BOTH
     // FIX41 and FIX42 per T003/FR-019's topology note) -- measured
@@ -526,24 +535,28 @@ int main() {
         std::string wire = msg.toString();
         FIX::Message parsed(wire, fix42, true);
         RowResult r42 = classify(fix42, parsed);
-        std::cout << "[confirm] SettlLocation(166)=US on FIX42 (not a golden row, cross-check only): "
-                   << r42.detail << "\n";
+        std::cout
+            << "[confirm] SettlLocation(166)=US on FIX42 (not a golden row, cross-check only): "
+            << r42.detail << "\n";
     }
 
     // ── Run every row, print + collect results ─────────────────────────
     struct OutRow {
-        const Row *row;
+        const Row* row;
         RowResult result;
     };
     std::vector<OutRow> out;
     out.reserve(rows.size());
 
-    for (const Row &row : rows) {
-        const FIX::DataDictionary &dd = row.dict == "FIX44" ? fix44 : row.dict == "FIX41" ? fix41 : fix42;
+    for (const Row& row : rows) {
+        const FIX::DataDictionary& dd = row.dict == "FIX44"   ? fix44
+                                        : row.dict == "FIX41" ? fix41
+                                                              : fix42;
         RowResult r = run_row(dd, row);
-        std::cout << "row " << row.id << " [" << row.dict << " " << row.msg_type << " tag=" << row.tag
-                  << " value=\"" << row.value << "\" asserted=" << (row.asserted ? "true" : "false") << "]: "
-                  << r.detail << "\n";
+        std::cout << "row " << row.id << " [" << row.dict << " " << row.msg_type
+                  << " tag=" << row.tag << " value=\"" << row.value
+                  << "\" asserted=" << (row.asserted ? "true" : "false") << "]: " << r.detail
+                  << "\n";
         out.push_back({&row, r});
     }
 
@@ -551,23 +564,25 @@ int main() {
     const std::string dict_sha1_fix44 = sha1_hex(read_file_bytes(fix44_path));
     const std::string dict_sha1_fix41 = sha1_hex(read_file_bytes(fix41_path));
     const std::string dict_sha1_fix42 = sha1_hex(read_file_bytes(fix42_path));
-    const std::string generator_source_hash = sha1_hex(read_file_bytes(FIXPP_GOLDEN_GENERATOR_SOURCE));
+    const std::string generator_source_hash =
+        sha1_hex(read_file_bytes(FIXPP_GOLDEN_GENERATOR_SOURCE));
 
     std::ostringstream input_buf;
-    for (const OutRow &o : out) {
-        input_buf << o.row->id << "|" << o.row->dict << "|" << o.row->msg_type << "|" << o.row->tag << "|"
-                   << o.row->value << "\n";
+    for (const OutRow& o : out) {
+        input_buf << o.row->id << "|" << o.row->dict << "|" << o.row->msg_type << "|" << o.row->tag
+                  << "|" << o.row->value << "\n";
     }
     const std::string corpus_input_hash = sha1_hex(input_buf.str());
 
     std::ostringstream output_buf;
-    for (const OutRow &o : out) {
+    for (const OutRow& o : out) {
         output_buf << o.row->id << "|" << (o.result.is_accept ? "accept" : "reject") << "|"
-                    << (o.result.is_accept ? "" : std::to_string(o.result.reason)) << "|"
-                    << (o.result.is_accept ? "" : std::to_string(o.result.ref_tag_id)) << "|"
-                    << (o.row->asserted ? "true" : "false") << "\n";
+                   << (o.result.is_accept ? "" : std::to_string(o.result.reason)) << "|"
+                   << (o.result.is_accept ? "" : std::to_string(o.result.ref_tag_id)) << "|"
+                   << (o.row->asserted ? "true" : "false") << "\n";
     }
-    const std::string golden_output_hash = sha1_hex(output_buf.str());  // 075 T005a: now covers ref_tag_id too
+    const std::string golden_output_hash =
+        sha1_hex(output_buf.str());  // 075 T005a: now covers ref_tag_id too
 
     // ── Write golden.csv ─────────────────────────────────────────────────
     std::ofstream out_file(FIXPP_GOLDEN_OUTPUT_CSV, std::ios::binary | std::ios::trunc);
@@ -576,10 +591,13 @@ int main() {
         return 1;
     }
 
-    out_file << "# 075-live-wire-enum-validation -- QuickFIX enum-domain golden (FR-018/FR-019/FR-024)\n";
-    out_file << "# Generated by tools/quickfix_enum_golden/main.cpp against a REAL, locally built\n";
+    out_file << "# 075-live-wire-enum-validation -- QuickFIX enum-domain golden "
+                "(FR-018/FR-019/FR-024)\n";
+    out_file
+        << "# Generated by tools/quickfix_enum_golden/main.cpp against a REAL, locally built\n";
     out_file << "# QuickFIX v1.16.0. Every quickfix_verdict/quickfix_reason value below is the\n";
-    out_file << "# literal measured output of FIX::DataDictionary::validate() -- never hand-authored.\n";
+    out_file
+        << "# literal measured output of FIX::DataDictionary::validate() -- never hand-authored.\n";
     out_file << "#\n";
     out_file << "# MANIFEST (FR-024, six fields):\n";
     out_file << "# quickfix_version=1.16.0\n";
@@ -599,15 +617,22 @@ int main() {
     out_file << "# config.AllowUnknownMsgFields=false\n";
     out_file << "#\n";
     out_file << "# Hash algorithm: SHA-1 (OpenSSL EVP_sha1), 40 lowercase hex chars.\n";
-    out_file << "# dictionary_sha1: over the raw bytes of dictionaries/<D>.xml (same algorithm as\n";
-    out_file << "#   CMake's file(SHA1) -- see tests/dictionary/CMakeLists.txt's FIXPP_ORCHESTRA_SHA1_PIN).\n";
+    out_file
+        << "# dictionary_sha1: over the raw bytes of dictionaries/<D>.xml (same algorithm as\n";
+    out_file << "#   CMake's file(SHA1) -- see tests/dictionary/CMakeLists.txt's "
+                "FIXPP_ORCHESTRA_SHA1_PIN).\n";
     out_file << "# generator_source_hash: over the raw bytes of this file, main.cpp.\n";
-    out_file << "# corpus_input_hash: over the concatenation, for row ids 1..13 ascending, of the\n";
-    out_file << "#   exact bytes \"{id}|{dictionary}|{msg_type}|{tag}|{value}\\n\" (decimal id/tag, LF\n";
+    out_file
+        << "# corpus_input_hash: over the concatenation, for row ids 1..13 ascending, of the\n";
+    out_file << "#   exact bytes \"{id}|{dictionary}|{msg_type}|{tag}|{value}\\n\" (decimal "
+                "id/tag, LF\n";
     out_file << "#   line ending after EVERY row including the 13th, value = the raw wire value\n";
-    out_file << "#   byte-for-byte including embedded spaces, empty string for an empty-value row).\n";
-    out_file << "# golden_output_hash: over the concatenation, for row ids 1..13 ascending, of the\n";
-    out_file << "#   exact bytes \"{id}|{verdict}|{reason}|{ref_tag_id}|{asserted}\\n\" (verdict in\n";
+    out_file
+        << "#   byte-for-byte including embedded spaces, empty string for an empty-value row).\n";
+    out_file
+        << "# golden_output_hash: over the concatenation, for row ids 1..13 ascending, of the\n";
+    out_file
+        << "#   exact bytes \"{id}|{verdict}|{reason}|{ref_tag_id}|{asserted}\\n\" (verdict in\n";
     out_file << "#   {accept,reject}, reason = decimal SessionRejectReason or empty string for\n";
     out_file << "#   accept, ref_tag_id = decimal RefTagID (the offending tag QuickFIX's own\n";
     out_file << "#   validation exception reported, its `.field` member) or empty string for\n";
@@ -624,22 +649,25 @@ int main() {
     out_file << "#\n";
     out_file << "# REGISTERED DIVERGENCES surfaced by measurement (not silently reconciled --\n";
     out_file << "# 075 T006 owns folding these into contracts/enum-domain.md's C-6 register):\n";
-    out_file << "#   Row 8  (asserted:false) Side(54)=\"\" (empty x Char) -- DV-1, CORRECTED: the\n";
+    out_file
+        << "#   Row 8  (asserted:false) Side(54)=\"\" (empty x Char) -- DV-1, CORRECTED: the\n";
     out_file << "#     original DV-1 text predicted QuickFIX reject/5 \"via isFieldValue's\n";
     out_file << "#     set.find(\\\"\\\") miss\"; MEASURED is reject/6 (IncorrectDataFormat via\n";
     out_file << "#     CharConvertor, DataDictionary.cpp:171) -- the enum arm is never reached.\n";
     out_file << "#     Both reason AND mechanism in the original DV-1 text were wrong.\n";
     out_file << "#   Row 13 (asserted:false) PossDupFlag(43)=X (header, BOOLEAN) -- DV-5, NEW:\n";
     out_file << "#     QuickFIX rejects/6 via BoolConvertor (DataDictionary.cpp:171) before its\n";
-    out_file << "#     enum arm (:172); fixpp's Boolean type-arm imposes no constraint so fixpp's\n";
+    out_file
+        << "#     enum arm (:172); fixpp's Boolean type-arm imposes no constraint so fixpp's\n";
     out_file << "#     OWN enum_valid fires and rejects/5. Both REJECT; only the reason differs.\n";
     out_file << "#\n";
     out_file << "# No asserted:true row disagrees with its predicted verdict as of this run.\n";
     out_file << "#\n";
-    out_file << "row,dictionary,begin_string,msg_type,tag,value,asserted,quickfix_verdict,quickfix_reason,"
-                 "quickfix_ref_tag_id,note\n";
+    out_file << "row,dictionary,begin_string,msg_type,tag,value,asserted,quickfix_verdict,quickfix_"
+                "reason,"
+                "quickfix_ref_tag_id,note\n";
 
-    auto csv_quote = [](const std::string &s) {
+    auto csv_quote = [](const std::string& s) {
         std::string q = "\"";
         for (char c : s) {
             if (c == '"') {
@@ -652,13 +680,14 @@ int main() {
         return q;
     };
 
-    for (const OutRow &o : out) {
-        out_file << o.row->id << "," << o.row->dict << "," << o.row->begin_string << "," << o.row->msg_type << ","
-                  << o.row->tag << "," << csv_quote(o.row->value) << "," << (o.row->asserted ? "true" : "false")
-                  << "," << (o.result.is_accept ? "accept" : "reject") << ","
-                  << (o.result.is_accept ? "" : std::to_string(o.result.reason)) << ","
-                  << (o.result.is_accept ? "" : std::to_string(o.result.ref_tag_id)) << ","
-                  << csv_quote(o.row->note) << "\n";
+    for (const OutRow& o : out) {
+        out_file << o.row->id << "," << o.row->dict << "," << o.row->begin_string << ","
+                 << o.row->msg_type << "," << o.row->tag << "," << csv_quote(o.row->value) << ","
+                 << (o.row->asserted ? "true" : "false") << ","
+                 << (o.result.is_accept ? "accept" : "reject") << ","
+                 << (o.result.is_accept ? "" : std::to_string(o.result.reason)) << ","
+                 << (o.result.is_accept ? "" : std::to_string(o.result.ref_tag_id)) << ","
+                 << csv_quote(o.row->note) << "\n";
     }
 
     out_file.close();
