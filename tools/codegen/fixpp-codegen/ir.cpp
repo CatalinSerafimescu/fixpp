@@ -60,7 +60,8 @@ ComponentIndex build_component_index(pugi::xml_node const& root) {
 // NOLINTNEXTLINE(misc-no-recursion)
 void walk_level(pugi::xml_node const& node, ComponentIndex const& comps,
                 fixpp::dict::Dictionary const& dict, std::vector<std::uint16_t> const& parent_path,
-                std::vector<GroupOrderMember>& out_members, std::vector<GroupOrderEntry>& out_groups) {
+                std::vector<GroupOrderMember>& out_members,
+                std::vector<GroupOrderEntry>& out_groups) {
     for (auto const& child : node.children()) {
         std::string_view const tag_name{child.name()};
         if (tag_name == "field") {
@@ -179,8 +180,8 @@ void collect_group_tags(pugi::xml_node const& node, ComponentIndex const& comps,
 // Throws std::runtime_error if the re-parse of `xml_path` fails (should be
 // unreachable: XmlLoader already parsed the same file successfully to build
 // `dict`).
-void populate_group_order(std::filesystem::path const& xml_path, fixpp::dict::Dictionary const& dict,
-                          VersionIR& ir) {
+void populate_group_order(std::filesystem::path const& xml_path,
+                          fixpp::dict::Dictionary const& dict, VersionIR& ir) {
     std::ifstream in(xml_path, std::ios::binary);
     if (!in) {
         throw std::runtime_error("fixpp-codegen: group_order re-parse cannot open " +
@@ -199,7 +200,7 @@ void populate_group_order(std::filesystem::path const& xml_path, fixpp::dict::Di
     collect_tags(root.child("header"), comps, dict, header_trailer);
     collect_tags(root.child("trailer"), comps, dict, header_trailer);
     ir.header_trailer_tags.assign(header_trailer.begin(), header_trailer.end());
-    std::sort(ir.header_trailer_tags.begin(), ir.header_trailer_tags.end());
+    std::ranges::sort(ir.header_trailer_tags);
 
     // 082 D-3 fix-up: header/trailer-declared groups (e.g. NoHops(627) in
     // FIX44's/FIXT11's own <header>) are outside group_order's body-only
@@ -420,7 +421,8 @@ void collect_orchestra_group_tags(pugi::xml_node const& node, OrchestraComponent
 // NOLINTNEXTLINE(misc-no-recursion)
 void walk_orchestra_level(pugi::xml_node const& node, OrchestraComponentIndex const& comps,
                           OrchestraGroupIndex const& groups, fixpp::dict::Dictionary const& dict,
-                          std::string const& msg_type, std::vector<std::uint16_t> const& parent_path,
+                          std::string const& msg_type,
+                          std::vector<std::uint16_t> const& parent_path,
                           std::vector<GroupOrderMember>& out_members,
                           std::vector<GroupOrderEntry>& out_groups,
                           std::vector<OccurrenceIR>& out_occurrences) {
@@ -436,12 +438,12 @@ void walk_orchestra_level(pugi::xml_node const& node, OrchestraComponentIndex co
             bool const required =
                 std::string_view{child.attribute("presence").as_string("")} == "required";
             auto const fr = dict.field_ref(msg_type, tag);
-            out_occurrences.push_back(OccurrenceIR{
-                .group_path = parent_path,
-                .tag = tag,
-                .rule = required ? fixpp::dict::field_presence::Required
-                                 : fixpp::dict::field_presence::Optional,
-                .datatype = fr.type});
+            out_occurrences.push_back(
+                OccurrenceIR{.group_path = parent_path,
+                             .tag = tag,
+                             .rule = required ? fixpp::dict::field_presence::Required
+                                              : fixpp::dict::field_presence::Optional,
+                             .datatype = fr.type});
         } else if (tag_name == "fixr:componentRef") {
             std::uint16_t id = 0;
             if (!try_parse_orchestra_uint16(std::string_view{child.attribute("id").as_string("")},
@@ -452,8 +454,8 @@ void walk_orchestra_level(pugi::xml_node const& node, OrchestraComponentIndex co
             if (it == comps.by_id.end()) {
                 continue;
             }
-            walk_orchestra_level(it->second, comps, groups, dict, msg_type, parent_path, out_members,
-                                 out_groups, out_occurrences);
+            walk_orchestra_level(it->second, comps, groups, dict, msg_type, parent_path,
+                                 out_members, out_groups, out_occurrences);
         } else if (tag_name == "fixr:groupRef") {
             std::uint16_t id = 0;
             if (!try_parse_orchestra_uint16(std::string_view{child.attribute("id").as_string("")},
@@ -478,12 +480,12 @@ void walk_orchestra_level(pugi::xml_node const& node, OrchestraComponentIndex co
             bool const grequired =
                 std::string_view{child.attribute("presence").as_string("")} == "required";
             auto const nfr = dict.field_ref(msg_type, no_tag);
-            out_occurrences.push_back(OccurrenceIR{
-                .group_path = parent_path,
-                .tag = no_tag,
-                .rule = grequired ? fixpp::dict::field_presence::Required
-                                  : fixpp::dict::field_presence::Optional,
-                .datatype = nfr.type});
+            out_occurrences.push_back(
+                OccurrenceIR{.group_path = parent_path,
+                             .tag = no_tag,
+                             .rule = grequired ? fixpp::dict::field_presence::Required
+                                               : fixpp::dict::field_presence::Optional,
+                             .datatype = nfr.type});
 
             GroupOrderEntry entry;
             entry.parent_path = parent_path;
@@ -542,7 +544,7 @@ void populate_orchestra_projection(std::filesystem::path const& xml_path,
         collect_orchestra_tags(it->second, comps, groups, header_trailer);
     }
     ir.header_trailer_tags.assign(header_trailer.begin(), header_trailer.end());
-    std::sort(ir.header_trailer_tags.begin(), ir.header_trailer_tags.end());
+    std::ranges::sort(ir.header_trailer_tags);
 
     // 082 D-3 fix-up (Orchestra sibling of populate_group_order's fix-up
     // above): union StandardHeader/StandardTrailer-declared group no_tags

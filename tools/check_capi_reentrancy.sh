@@ -70,6 +70,20 @@ for f in "${files[@]}"; do
         if (line !~ /\*\//) incmt = 1
         next
       }
+      # DECLARATION PREFIX: `FIXPP_API_EXPORT <return type>` with the function
+      # name wrapped onto the next line. clang-format produces this whenever the
+      # name is long enough to break the line -- e.g.
+      #     FIXPP_API_EXPORT fixpp_error_t
+      #     fixpp_session_config_set_heartbeat_seconds(fixpp_session_config_t* cfg, uint32_t n);
+      # Such a line carries no `(`, so it used to fall through to the `else`
+      # below and DISCARD the doc-block, making the next line report 0 tokens for
+      # a symbol that is correctly documented. Keep the block pending instead.
+      # ⚠️ Deliberately narrow: ONLY an unparenthesised FIXPP_API_EXPORT line
+      # preserves adjacency. Every other non-declaration code line still resets,
+      # because widening this is the fail-OPEN direction -- it would let a real
+      # missing doc-block inherit an unrelated comment from further up.
+      if (stripped ~ /^FIXPP_API_EXPORT/ && line !~ /\(/) { block = block " " line; next }
+
       # CODE line. Is it an exported fixpp_* function declaration?
       if (line ~ /fixpp_[a-z0-9_]+[ \t]*\(/) {
         tmp = line; name = ""

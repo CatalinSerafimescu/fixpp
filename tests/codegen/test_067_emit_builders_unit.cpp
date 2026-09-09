@@ -606,7 +606,7 @@ TEST(Group067EmitBuilders, RC1PerMessagePlannerDistinctDelimiterWvsX) {
 // 077-builder-args-dedup T007 — dedup-soundness discriminating witness.
 //
 // MUST FAIL FIRST: the current emitter (pre-T008) names group Args structs by
-// message-rooted path (`resolve_level`, emit_builders.cpp:415-416) and never
+// message-rooted path (`resolve_level` in emit_builders.cpp) and never
 // emits a `groups::G_<no_tag>[_ord]Args` name at all — every "found" assertion
 // below is RED until T008 lands (data-model.md Entity 1; contracts
 // generated-builder-dedup.md G1/G1a/G1b).

@@ -121,9 +121,8 @@
 //
 // ─────────────────────────────────────────────────────────────────────────
 
-#include <quickfix/DataDictionary.h>
-
 #include <openssl/evp.h>
+#include <quickfix/DataDictionary.h>
 
 #include <algorithm>
 #include <array>
@@ -143,8 +142,8 @@ namespace {
 
 // ── SHA-1 helpers (byte-identical algorithm to 075's generator) ────────────
 
-std::string hex_encode(const unsigned char *data, unsigned int len) {
-    static const char *kHex = "0123456789abcdef";
+std::string hex_encode(const unsigned char* data, unsigned int len) {
+    static const char* kHex = "0123456789abcdef";
     std::string out;
     out.reserve(len * 2);
     for (unsigned int i = 0; i < len; ++i) {
@@ -154,10 +153,10 @@ std::string hex_encode(const unsigned char *data, unsigned int len) {
     return out;
 }
 
-std::string sha1_hex(const std::string &bytes) {
+std::string sha1_hex(const std::string& bytes) {
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int digest_len = 0;
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
     if (!ctx) {
         std::cerr << "FATAL: EVP_MD_CTX_new failed\n";
         std::exit(1);
@@ -173,7 +172,7 @@ std::string sha1_hex(const std::string &bytes) {
     return hex_encode(digest, digest_len);
 }
 
-std::string read_file_bytes(const std::string &path) {
+std::string read_file_bytes(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) {
         std::cerr << "FATAL: cannot open '" << path << "' to hash it\n";
@@ -187,20 +186,14 @@ std::string read_file_bytes(const std::string &path) {
 // ── The 9 QuickFIX-schema dicts (Contract 2 scope — NO vlatest/Orchestra) ──
 
 struct DictCase {
-    std::string label;   // e.g. "FIX44" — also the golden's `dictionary` column
-    std::string filename; // e.g. "FIX44.xml"
+    std::string label;     // e.g. "FIX44" — also the golden's `dictionary` column
+    std::string filename;  // e.g. "FIX44.xml"
 };
 
 std::vector<DictCase> const kDicts{
-    {"FIX40", "FIX40.xml"},
-    {"FIX41", "FIX41.xml"},
-    {"FIX42", "FIX42.xml"},
-    {"FIX43", "FIX43.xml"},
-    {"FIX44", "FIX44.xml"},
-    {"FIX50", "FIX50.xml"},
-    {"FIX50SP1", "FIX50SP1.xml"},
-    {"FIX50SP2", "FIX50SP2.xml"},
-    {"FIXT11", "FIXT11.xml"},
+    {"FIX40", "FIX40.xml"},       {"FIX41", "FIX41.xml"},       {"FIX42", "FIX42.xml"},
+    {"FIX43", "FIX43.xml"},       {"FIX44", "FIX44.xml"},       {"FIX50", "FIX50.xml"},
+    {"FIX50SP1", "FIX50SP1.xml"}, {"FIX50SP2", "FIX50SP2.xml"}, {"FIXT11", "FIXT11.xml"},
 };
 
 // Trivial (non-recursive) structural scan: message-type list + max declared
@@ -229,14 +222,15 @@ struct GroupRow {
 // dictionary's own real nesting depth. Appends one GroupRow per real group
 // context found, pre-order (tag-ascending at each level, depth-first) --
 // this fixes `golden_groups_output_hash`'s row emission order.
-void walk_groups(FIX::DataDictionary const &cur_dd, std::string const &dict_label, std::string const &msg_type,
-                  std::uint32_t max_tag, std::vector<std::uint16_t> &path, std::vector<GroupRow> &rows_out) {
+void walk_groups(FIX::DataDictionary const& cur_dd, std::string const& dict_label,
+                 std::string const& msg_type, std::uint32_t max_tag,
+                 std::vector<std::uint16_t>& path, std::vector<GroupRow>& rows_out) {
     for (std::uint32_t tag = 1; tag <= max_tag; ++tag) {
         if (!cur_dd.isGroup(msg_type, static_cast<int>(tag))) {
             continue;
         }
         int delim = 0;
-        FIX::DataDictionary const *sub = nullptr;
+        FIX::DataDictionary const* sub = nullptr;
         if (!cur_dd.getGroup(msg_type, static_cast<int>(tag), delim, sub) || sub == nullptr) {
             continue;  // isGroup already said true; defensive only, should not happen
         }
@@ -262,7 +256,7 @@ void walk_groups(FIX::DataDictionary const &cur_dd, std::string const &dict_labe
     }
 }
 
-DictScan scan_dict(std::filesystem::path const &xml_path) {
+DictScan scan_dict(std::filesystem::path const& xml_path) {
     pugi::xml_document doc;
     auto const result = doc.load_file(xml_path.c_str());
     if (!result) {
@@ -272,14 +266,14 @@ DictScan scan_dict(std::filesystem::path const &xml_path) {
     auto const root = doc.child("fix");
 
     DictScan scan;
-    for (auto const &f : root.child("fields").children("field")) {
+    for (auto const& f : root.child("fields").children("field")) {
         auto const num = f.attribute("number").as_uint();
         if (num > scan.max_tag) {
             scan.max_tag = num;
         }
     }
     std::set<std::string> msg_types_set;
-    for (auto const &m : root.child("messages").children("message")) {
+    for (auto const& m : root.child("messages").children("message")) {
         msg_types_set.insert(std::string{m.attribute("msgtype").as_string("")});
     }
     scan.msg_types.assign(msg_types_set.begin(), msg_types_set.end());
@@ -303,7 +297,8 @@ int main() {
 #endif
 
     std::filesystem::path const dict_dir = FIXPP_REQUIRED_GOLDEN_DICT_DIR;
-    std::string const generator_source_hash = sha1_hex(read_file_bytes(FIXPP_GOLDEN_GENERATOR_SOURCE));
+    std::string const generator_source_hash =
+        sha1_hex(read_file_bytes(FIXPP_GOLDEN_GENERATOR_SOURCE));
 
     struct DictOut {
         std::string label;
@@ -319,7 +314,7 @@ int main() {
     std::ostringstream candidate_buf;
     std::ostringstream output_buf;
 
-    for (auto const &dc : kDicts) {
+    for (auto const& dc : kDicts) {
         auto const xml_path = dict_dir / dc.filename;
         std::string const dict_sha1 = sha1_hex(read_file_bytes(xml_path.string()));
         auto const scan = scan_dict(xml_path);
@@ -341,7 +336,7 @@ int main() {
         d_out.label = dc.label;
         d_out.dict_sha1 = dict_sha1;
 
-        for (auto const &msg_type : scan.msg_types) {
+        for (auto const& msg_type : scan.msg_types) {
             std::vector<std::uint16_t> req;
             for (std::uint32_t tag = 1; tag <= scan.max_tag; ++tag) {
                 if (dd.isRequiredField(msg_type, static_cast<int>(tag))) {
@@ -365,8 +360,9 @@ int main() {
             walk_groups(dd, dc.label, msg_type, scan.max_tag, path, group_rows);
         }
 
-        std::cout << "[" << dc.label << "] " << scan.msg_types.size() << " message type(s), max_tag="
-                  << scan.max_tag << ", dictionary_sha1=" << dict_sha1 << "\n";
+        std::cout << "[" << dc.label << "] " << scan.msg_types.size()
+                  << " message type(s), max_tag=" << scan.max_tag
+                  << ", dictionary_sha1=" << dict_sha1 << "\n";
         out.push_back(std::move(d_out));
     }
 
@@ -377,7 +373,7 @@ int main() {
     // pre-order-depth-first order, per walk_groups' own iteration order) and
     // hash them the same way as golden_output_hash above.
     std::ostringstream group_output_buf;
-    for (auto const &row : group_rows) {
+    for (auto const& row : group_rows) {
         group_output_buf << row.dict << "|" << row.msg_type << "|";
         for (std::size_t i = 0; i < row.path.size(); ++i) {
             if (i != 0) {
@@ -398,49 +394,59 @@ int main() {
 
     std::ofstream out_file(FIXPP_REQUIRED_GOLDEN_OUTPUT_CSV, std::ios::binary | std::ios::trunc);
     if (!out_file) {
-        std::cerr << "FATAL: cannot open '" << FIXPP_REQUIRED_GOLDEN_OUTPUT_CSV << "' for writing\n";
+        std::cerr << "FATAL: cannot open '" << FIXPP_REQUIRED_GOLDEN_OUTPUT_CSV
+                  << "' for writing\n";
         return 1;
     }
 
     out_file << "# 079-required-presence-scope -- QuickFIX required-set parity golden (Contract 2, "
-                 "T018/T019, fixpp#201)\n";
-    out_file << "# Generated by tools/quickfix_required_golden/main.cpp against a REAL, locally built\n";
-    out_file << "# QuickFIX v1.16.0. Every required_tags value below is the literal measured output of\n";
+                "T018/T019, fixpp#201)\n";
+    out_file
+        << "# Generated by tools/quickfix_required_golden/main.cpp against a REAL, locally built\n";
+    out_file << "# QuickFIX v1.16.0. Every required_tags value below is the literal measured "
+                "output of\n";
     out_file << "# FIX::DataDictionary::isRequiredField(msgType, tag) -- never hand-authored.\n";
     out_file << "#\n";
     out_file << "# SCOPE: body-only (message-level component-AND set). isRequiredField() has NO\n";
-    out_file << "# header/trailer-required surface (verified against DataDictionary.cpp -- see this\n";
+    out_file
+        << "# header/trailer-required surface (verified against DataDictionary.cpp -- see this\n";
     out_file << "# generator's main.cpp header comment); the StandardHeader/Trailer carve-out is\n";
-    out_file << "# pinned separately by Contract 1's census (tests/dictionary/required_scope_census_test.cpp),\n";
-    out_file << "# NOT by this golden. NO vlatest/Orchestra row (QuickFIX 1.16.0 cannot parse Orchestra).\n";
+    out_file << "# pinned separately by Contract 1's census "
+                "(tests/dictionary/required_scope_census_test.cpp),\n";
+    out_file << "# NOT by this golden. NO vlatest/Orchestra row (QuickFIX 1.16.0 cannot parse "
+                "Orchestra).\n";
     out_file << "#\n";
     out_file << "# MANIFEST:\n";
     out_file << "# quickfix_version=1.16.0\n";
     out_file << "# quickfix_soname=libquickfix.so.17.0.0\n";
-    for (auto const &d : out) {
+    for (auto const& d : out) {
         out_file << "# dictionary_sha1[" << d.label << "]=" << d.dict_sha1 << "\n";
     }
     out_file << "# generator_source_hash=" << generator_source_hash << "\n";
     out_file << "# candidate_universe_hash=" << candidate_universe_hash << "\n";
     out_file << "# golden_output_hash=" << golden_output_hash << "\n";
-    out_file << "# golden_groups_output_hash=" << golden_groups_output_hash << " (081 T020 -- see the\n";
+    out_file << "# golden_groups_output_hash=" << golden_groups_output_hash
+             << " (081 T020 -- see the\n";
     out_file << "#   sibling golden_groups.csv, this dict/message/group-run's per-group golden)\n";
     out_file << "#\n";
     out_file << "# Hash algorithm: SHA-1 (OpenSSL EVP_sha1), 40 lowercase hex chars.\n";
     out_file << "# dictionary_sha1: over the raw bytes of dictionaries/<D>.xml.\n";
     out_file << "# generator_source_hash: over the raw bytes of this file, main.cpp.\n";
     out_file << "# candidate_universe_hash: over the concatenation, for the 9 dicts in the fixed\n";
-    out_file << "#   kDicts order, of the exact bytes \"{dict}|{max_tag}|{msgtype1},{msgtype2},...\\n\"\n";
+    out_file << "#   kDicts order, of the exact bytes "
+                "\"{dict}|{max_tag}|{msgtype1},{msgtype2},...\\n\"\n";
     out_file << "#   (msgtypes sorted ascending, comma-separated).\n";
-    out_file << "# golden_output_hash: over the concatenation, for the 9 dicts in kDicts order and\n";
+    out_file
+        << "# golden_output_hash: over the concatenation, for the 9 dicts in kDicts order and\n";
     out_file << "#   messages in ascending msgtype order, of the exact bytes\n";
     out_file << "#   \"{dict}|{msg_type}|{tag1} {tag2} ...\\n\" (required tags ascending, space-\n";
-    out_file << "#   separated, empty for zero body-required tags). Computed over the OUTPUT ROWS\n";
+    out_file
+        << "#   separated, empty for zero body-required tags). Computed over the OUTPUT ROWS\n";
     out_file << "#   ONLY -- excludes this manifest block, so it is not self-referential.\n";
     out_file << "#\n";
     out_file << "dictionary,msg_type,required_tags\n";
 
-    auto csv_quote = [](std::string const &s) {
+    auto csv_quote = [](std::string const& s) {
         std::string q = "\"";
         for (char c : s) {
             if (c == '"') {
@@ -453,8 +459,8 @@ int main() {
         return q;
     };
 
-    for (auto const &d : out) {
-        for (auto const &[msg_type, req] : d.required_by_msg) {
+    for (auto const& d : out) {
+        for (auto const& [msg_type, req] : d.required_by_msg) {
             std::ostringstream tags;
             for (std::size_t i = 0; i < req.size(); ++i) {
                 if (i != 0) {
@@ -470,48 +476,65 @@ int main() {
 
     // 081 T020: per-group golden -- SEPARATE file (see the header-comment
     // banner above for why it is not appended to golden.csv).
-    std::ofstream group_file(FIXPP_REQUIRED_GOLDEN_GROUPS_OUTPUT_CSV, std::ios::binary | std::ios::trunc);
+    std::ofstream group_file(FIXPP_REQUIRED_GOLDEN_GROUPS_OUTPUT_CSV,
+                             std::ios::binary | std::ios::trunc);
     if (!group_file) {
-        std::cerr << "FATAL: cannot open '" << FIXPP_REQUIRED_GOLDEN_GROUPS_OUTPUT_CSV << "' for writing\n";
+        std::cerr << "FATAL: cannot open '" << FIXPP_REQUIRED_GOLDEN_GROUPS_OUTPUT_CSV
+                  << "' for writing\n";
         return 1;
     }
 
     group_file << "# 081-strict-validation-residuals -- QuickFIX PER-GROUP required-member parity "
                   "golden (Concern B, T020, contracts/census-and-parity.md)\n";
-    group_file << "# Generated by tools/quickfix_required_golden/main.cpp against a REAL, locally built\n";
-    group_file << "# QuickFIX v1.16.0. Every row's (existence AND required_tags) is the literal measured\n";
-    group_file << "# output of FIX::DataDictionary::isGroup/getGroup (DataDictionary.h:286/298) recursively\n";
-    group_file << "# descended, then isRequiredField(msgType, tag) called on the returned sub-DataDictionary\n";
+    group_file
+        << "# Generated by tools/quickfix_required_golden/main.cpp against a REAL, locally built\n";
+    group_file << "# QuickFIX v1.16.0. Every row's (existence AND required_tags) is the literal "
+                  "measured\n";
+    group_file << "# output of FIX::DataDictionary::isGroup/getGroup (DataDictionary.h:286/298) "
+                  "recursively\n";
+    group_file << "# descended, then isRequiredField(msgType, tag) called on the returned "
+                  "sub-DataDictionary\n";
     group_file << "# -- never hand-authored, never derived from the independent oracle.\n";
     group_file << "#\n";
-    group_file << "# SCOPE: body-only, same rationale as golden.csv (addXMLGroup/addGroup register\n";
-    group_file << "# header/trailer groups under the literal keys \"_header_\"/\"_trailer_\", not the real\n";
-    group_file << "# msgType, so probing isGroup(msg_type, tag) with the real message type naturally\n";
-    group_file << "# excludes them). NO vlatest/Orchestra row (QuickFIX 1.16.0 cannot parse Orchestra).\n";
+    group_file
+        << "# SCOPE: body-only, same rationale as golden.csv (addXMLGroup/addGroup register\n";
+    group_file << "# header/trailer groups under the literal keys \"_header_\"/\"_trailer_\", not "
+                  "the real\n";
+    group_file
+        << "# msgType, so probing isGroup(msg_type, tag) with the real message type naturally\n";
+    group_file
+        << "# excludes them). NO vlatest/Orchestra row (QuickFIX 1.16.0 cannot parse Orchestra).\n";
     group_file << "#\n";
     group_file << "# MANIFEST:\n";
     group_file << "# quickfix_version=1.16.0\n";
     group_file << "# quickfix_soname=libquickfix.so.17.0.0\n";
-    for (auto const &d : out) {
+    for (auto const& d : out) {
         group_file << "# dictionary_sha1[" << d.label << "]=" << d.dict_sha1 << "\n";
     }
     group_file << "# generator_source_hash=" << generator_source_hash << "\n";
     group_file << "# candidate_universe_hash=" << candidate_universe_hash << "\n";
     group_file << "# golden_groups_output_hash=" << golden_groups_output_hash << "\n";
     group_file << "#\n";
-    group_file << "# Hash algorithm: SHA-1 (OpenSSL EVP_sha1), 40 lowercase hex chars (see golden.csv's\n";
-    group_file << "# own manifest comment for dictionary_sha1/generator_source_hash/candidate_universe_hash\n";
+    group_file
+        << "# Hash algorithm: SHA-1 (OpenSSL EVP_sha1), 40 lowercase hex chars (see golden.csv's\n";
+    group_file << "# own manifest comment for "
+                  "dictionary_sha1/generator_source_hash/candidate_universe_hash\n";
     group_file << "# definitions -- identical here).\n";
-    group_file << "# golden_groups_output_hash: over the concatenation, in walk_groups' own emission\n";
-    group_file << "# order (dict-then-message per kDicts/ascending-msgtype order, pre-order depth-first\n";
+    group_file
+        << "# golden_groups_output_hash: over the concatenation, in walk_groups' own emission\n";
+    group_file
+        << "# order (dict-then-message per kDicts/ascending-msgtype order, pre-order depth-first\n";
     group_file << "# within a message), of the exact bytes\n";
-    group_file << "#   \"{dict}|{msg_type}|{path tag1 tag2 ...}|{no_tag}|{req tag1 tag2 ...}\\n\"\n";
-    group_file << "# (path = ancestor no_tags outer-to-inner, space-separated, empty for a depth-1 group;\n";
-    group_file << "# required tags ascending, space-separated). Computed over the OUTPUT ROWS ONLY.\n";
+    group_file
+        << "#   \"{dict}|{msg_type}|{path tag1 tag2 ...}|{no_tag}|{req tag1 tag2 ...}\\n\"\n";
+    group_file << "# (path = ancestor no_tags outer-to-inner, space-separated, empty for a depth-1 "
+                  "group;\n";
+    group_file
+        << "# required tags ascending, space-separated). Computed over the OUTPUT ROWS ONLY.\n";
     group_file << "#\n";
     group_file << "dictionary,msg_type,group_path,no_tag,required_tags\n";
 
-    auto csv_quote_path = [](std::vector<std::uint16_t> const &path) {
+    auto csv_quote_path = [](std::vector<std::uint16_t> const& path) {
         std::ostringstream oss;
         for (std::size_t i = 0; i < path.size(); ++i) {
             if (i != 0) {
@@ -522,7 +545,7 @@ int main() {
         return "\"" + oss.str() + "\"";
     };
 
-    for (auto const &row : group_rows) {
+    for (auto const& row : group_rows) {
         std::ostringstream tags;
         for (std::size_t i = 0; i < row.required.size(); ++i) {
             if (i != 0) {
@@ -530,8 +553,8 @@ int main() {
             }
             tags << row.required[i];
         }
-        group_file << row.dict << "," << row.msg_type << "," << csv_quote_path(row.path) << "," << row.no_tag
-                    << "," << csv_quote(tags.str()) << "\n";
+        group_file << row.dict << "," << row.msg_type << "," << csv_quote_path(row.path) << ","
+                   << row.no_tag << "," << csv_quote(tags.str()) << "\n";
     }
 
     group_file.close();
