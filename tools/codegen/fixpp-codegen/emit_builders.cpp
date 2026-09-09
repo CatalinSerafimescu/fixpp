@@ -94,7 +94,7 @@ constexpr std::array<std::string_view, 33> kOfficial33 = {
     "c", "d", "e", "f", "g", "h", "i", "b", "S", "R",  "AG", "Z", "a", "J", "P", "AS"};
 
 bool is_official(std::string_view msg_type) {
-    return std::find(kOfficial33.begin(), kOfficial33.end(), msg_type) != kOfficial33.end();
+    return std::ranges::find(kOfficial33, msg_type) != kOfficial33.end();
 }
 
 // 069-v44-all-families (data-model.md Entity "N-002/N-003 exclusion set"):
@@ -111,7 +111,7 @@ constexpr std::array<std::string_view, 5> kN002N003Excluded = {"BE", "BF", "BW",
 // session-FSM-dispatch class there, so v50sp2/vlatest emit their full
 // `is_application` set unfiltered.
 bool is_n002_n003_excluded(std::string_view ns, std::string_view msg_type) {
-    return ns == "v44" && std::find(kN002N003Excluded.begin(), kN002N003Excluded.end(), msg_type) !=
+    return ns == "v44" && std::ranges::find(kN002N003Excluded, msg_type) !=
                               kN002N003Excluded.end();
 }
 
@@ -124,7 +124,7 @@ bool is_n002_n003_excluded(std::string_view ns, std::string_view msg_type) {
 constexpr std::array<std::uint16_t, 8> kFramingTags = {8, 9, 10, 34, 35, 49, 52, 56};
 
 bool is_framing_tag(std::uint16_t tag) {
-    return std::find(kFramingTags.begin(), kFramingTags.end(), tag) != kFramingTags.end();
+    return std::ranges::find(kFramingTags, tag) != kFramingTags.end();
 }
 
 // Provenance-based exclusion (data-model.md §2.1 / contract G5): true if
@@ -135,7 +135,7 @@ bool is_framing_tag(std::uint16_t tag) {
 // SignatureLength(93), routing fields, etc.), not just the 8-tag framer
 // floor above.
 bool is_header_trailer(std::uint16_t tag, std::vector<std::uint16_t> const& header_trailer_tags) {
-    return std::binary_search(header_trailer_tags.begin(), header_trailer_tags.end(), tag);
+    return std::ranges::binary_search(header_trailer_tags, tag);
 }
 
 std::string_view args_cpp_type(TypeKind k) {
@@ -1250,9 +1250,9 @@ void assert_builder_surface_validator_free(std::vector<EmittedFile> const& files
         if (!is_builder_surface) {
             continue;
         }
-        if (f.content.find("writer_traits") != std::string::npos ||
-            f.content.find("validate_") != std::string::npos ||
-            f.content.find("validators/traits.hpp") != std::string::npos) {
+        if (f.content.contains("writer_traits") ||
+            f.content.contains("validate_") ||
+            f.content.contains("validators/traits.hpp")) {
             throw std::runtime_error("fixpp-codegen: builder surface file '" + rel +
                                      "' references a validator symbol (FR-005/SC-003 violation)");
         }

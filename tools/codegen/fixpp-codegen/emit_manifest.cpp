@@ -170,7 +170,7 @@ std::string emit_manifest(VersionIR const& ir) {
     for (auto const& m : ir.messages) {
         msgs.push_back(&m);
     }
-    std::sort(msgs.begin(), msgs.end(),
+    std::ranges::sort(msgs,
               [](MessageIR const* a, MessageIR const* b) { return a->msg_type < b->msg_type; });
 
     TemplateWriter w;
@@ -203,7 +203,7 @@ std::string emit_manifest(VersionIR const& ir) {
 
     for (auto const* m : msgs) {
         std::vector<OccurrenceIR> occs = m->occurrences;
-        std::sort(occs.begin(), occs.end(), occurrence_less);
+        std::ranges::sort(occs, occurrence_less);
 
         w.raw("MSG\t");
         w.raw(m->msg_type);

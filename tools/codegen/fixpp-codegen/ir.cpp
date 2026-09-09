@@ -200,7 +200,7 @@ void populate_group_order(std::filesystem::path const& xml_path,
     collect_tags(root.child("header"), comps, dict, header_trailer);
     collect_tags(root.child("trailer"), comps, dict, header_trailer);
     ir.header_trailer_tags.assign(header_trailer.begin(), header_trailer.end());
-    std::sort(ir.header_trailer_tags.begin(), ir.header_trailer_tags.end());
+    std::ranges::sort(ir.header_trailer_tags);
 
     // 082 D-3 fix-up: header/trailer-declared groups (e.g. NoHops(627) in
     // FIX44's/FIXT11's own <header>) are outside group_order's body-only
@@ -544,7 +544,7 @@ void populate_orchestra_projection(std::filesystem::path const& xml_path,
         collect_orchestra_tags(it->second, comps, groups, header_trailer);
     }
     ir.header_trailer_tags.assign(header_trailer.begin(), header_trailer.end());
-    std::sort(ir.header_trailer_tags.begin(), ir.header_trailer_tags.end());
+    std::ranges::sort(ir.header_trailer_tags);
 
     // 082 D-3 fix-up (Orchestra sibling of populate_group_order's fix-up
     // above): union StandardHeader/StandardTrailer-declared group no_tags
