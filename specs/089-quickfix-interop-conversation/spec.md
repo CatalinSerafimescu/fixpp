@@ -625,6 +625,14 @@ claiming a pass with no corroborating run artifact.
   is indistinguishable from a validator that never ran — a dead validator produces identical sets by
   construction, and this feature exists partly because the validator is exercised today by exactly one
   interop cell.
+  ⛔ **AND THE PAIR'S REFERENCES ARE GATED FOR FRESHNESS, not merely checked once when it is built** —
+  `contracts/witness-evidence.md` **E-7c** re-evaluates, in the committed schema check on every CI run,
+  that both runs referenced by every `authoritative: true` pair are **still** `authoritative: true`.
+  ⚠️ **Stated here for the same reason E-7b is — a requirement is not a gate**, and this one has a
+  temporal edge the others do not: `authoritative` is **mutable after a pair is written**, so a retry
+  landing later supersedes a referenced run and the construction-time check does not re-run. The scope and
+  the normative text are in `contracts/witness-evidence.md` § *Obligations*; this clause is the FR/SC
+  anchor, not a second statement of the rule.
 - **FR-011**: Both arms MUST verify at run time that a production dictionary is loaded, so that a cell
   running against the FIX 4.2 sentinel is detected. ⚠️ **FR-011 is NOT arm evidence and MUST NOT be cited
   as any**: per FR-001/R-5a the production FIX 4.4 dictionary is loaded on **both** arms of every cell this
@@ -698,7 +706,7 @@ claiming a pass with no corroborating run artifact.
   |---|---|---|
   | `tests/interop/cell_results.yaml` — **committed expected inventory** | the shipped ctest, in all three CI tiers, **opening nothing** | structure only. New evidence fields are required **conditionally on `kind: conversation`**, so the 59 existing rows are untouched (FR-020). Each `status: pass` conversation row must name a ledger entry that exists, whose `terminal_state` is `completed`, and whose `witness_count` equals the census figure for that slot |
   | the **run ledger** (a `runs:` section of the witness-evidence record, FR-015b) — **committed**, machine-independent | the same ctest | one **`kind: conformance`**, `authoritative: true` entry per `(cell_id, config)`; the set of those slots equals the 32-slot inventory exactly; `run_id`, `run_timestamp`, counterparty flavour/version/digest, `script_digest`, `terminal_state`, `witness_count`, `evidence_digest`, `authoritative`, `kind`. **No absolute path**. ⚠️ `validator-positive-control` and retry rows are **recorded here and excluded from that equality** (data-model §11 § *THE TWO DISCRIMINATORS*) |
-  | the **validation pairs** (a `validation_pairs:` section of the same record, FR-012a) — **committed** | the same ctest | the `kind: conformance` pair set equals the **16-pair inventory exactly** (E-7a); every `off_run_id`/`on_run_id` resolves to a ledger row |
+  | the **validation pairs** (a `validation_pairs:` section of the same record, FR-012a) — **committed** | the same ctest | ⛔ **NO ROSTER IN THIS CELL** — the pair obligations this ctest evaluates are stated in `contracts/witness-evidence.md` § *Obligations*, their normative home. ⚠️ A roster stood here naming **E-7a** and reference resolution only; it was stale from the commit that added E-7b and E-7c, and an implementer building the ctest from it would have built one gate of three. Deleted rather than corrected |
   | the **run artifact** — machine-local, never committed | the **promotion step** (FR-014b), on the machine that ran the cell | the stream is opened, **each of the run's two processes'** `hello` **and `terminal`** records are read (⚠️ **TWO is the process count, not the emitter count** — `contracts/readback-jsonl.md` § *THE THREE EMITTERS* carries the distinction), their `run_id` / `script_digest` / `config` are checked against each other and against the row, the completeness gate is evaluated, and `evidence_digest` is computed over the persisted bundle |
 
   ⚠️ Requiring the manifest fields to be merely *present* is not corroboration — six hand-editable strings
@@ -1186,8 +1194,12 @@ load-bearing for the anti-vacuity arms and are fixed here so the arms have a sub
   perturb this equality.
 - **SC-009d**: The `validation_pairs:` section of the committed record carries **exactly** the 16
   conformance pairs, demonstrated RED by an **empty** section and by a **15-of-16** section (E-7a). Without
-  it, an implementation emitting no pairs at all satisfies every other gate while SC-004 and FR-010/FR-010a
-  range over an entity that does not exist.
+  it, SC-004 and FR-010/FR-010a range over an entity whose existence nothing checks. ⛔ **The claim that
+  stood here — that an implementation emitting no pairs at all *"satisfies every other gate"* — is
+  DELETED, not corrected**: E-7b falsified it, and any replacement enumeration is falsified by the next
+  obligation over this entity. The demonstrations are unchanged; what is removed is a count of what stays
+  green, which is a property of the obligation set at the moment of writing. `contracts/witness-evidence.md`
+  § *Proof obligations for Level 1* carries each fixture with its co-fires named.
 - **SC-009c**: Each run's arm attestation (FR-011a) equals the arm its row claims, demonstrated RED by
   launching a validation-on cell with `validate_inbound_messages` forced false.
 - **SC-010**: All 32 runs (8 cells x 4 configs) complete and emit their own result row, with **zero**

@@ -61,7 +61,7 @@ record (§12)** is the other half; FR-014's corroboration requires both.
 | `config` | string | `normal` · `asan` · `ubsan` · `tsan` |
 | `script_digest` | string | content digest of the conversation script driving this run (FR-008c) |
 | `counterparty_digest` | string | the image digest this build was pulled from (FR-016b) |
-| **`typed_accessor_arm`** | integer | ⭐ **the typed-accessor compile arm's version this build was gated by** (FR-003b, C-12). The harness requires ≥ what the cell needs; **absent** ⇒ the cell **FAILS** under FR-016a's standing rule, which is the whole point — an image built *before* the arm existed announces nothing. ⛔ **NOT a literal in the counterparty source.** It is a compile definition (C++) / generated constant (Java) emitted by the **same build step that asserts the arm**, and the source fails to compile when that definition is absent — otherwise the field is hand-typeable and attests nothing. ⚠️ This attests a **build-time** arm; it is not a witness of runtime typed-accessor invocation, which `spec.md` § *Clarifications* records as structurally unwitnessable |
+| **`typed_accessor_arm`** | integer | ⭐ **the typed-accessor compile arm's version this build was gated by** (FR-003b, C-12). The harness requires ≥ **the minimum declared for this cell by the harness capability-minimums artifact**, whose normative home is `plan.md` § *External obligations* → the capability-minimums row (⛔ **no minimum is written into this bundle**); **absent** ⇒ the cell **FAILS** under FR-016a's standing rule, which is the whole point — an image built *before* the arm existed announces nothing. ⛔ **NOT a literal in the counterparty source.** It is a compile definition (C++) / generated constant (Java) emitted by the **same build step that asserts the arm**, and the source fails to compile when that definition is absent — otherwise the field is hand-typeable and attests nothing. ⚠️ This attests a **build-time** arm; it is not a witness of runtime typed-accessor invocation, which `spec.md` § *Clarifications* records as structurally unwitnessable |
 
 **Where these values come from — the channel, named.** ⚠️ **Scoped: the run-identity fields only.**
 `engine`, `engine_version` and `readback_protocol` are properties of the build, and
@@ -129,7 +129,9 @@ carries ten keys, so the cost it was priced at was never real. Leaving the rejec
 **Validation rules**
 
 - **Absent hello ⇒ the cell FAILS.** Not a skip. A peer that cannot announce itself is a stale peer.
-- `readback_protocol` **older than the cell requires ⇒ FAIL.** Newer is permitted only if the format is
+- `readback_protocol` **older than the minimum declared for this cell ⇒ FAIL** — that minimum's normative
+  home is `plan.md` § *External obligations* → the capability-minimums row, which also states that a cell
+  with **no** declared minimum FAILS rather than defaulting. Newer is permitted only if the format is
   backward-compatible; the contract states which changes are.
 - ⚠️ **This is distinct from the existing availability probe.** `probe_counterparty()`
   (`tests/interop/support/counterparty_probe.hpp:178`) answers *is a peer listening* and yields a
@@ -632,17 +634,15 @@ round 2 filed against this very section. **File**: a `validation_pairs:` section
 `library/tests/interop/witness_evidence.yaml` that carries the witness rows (§6) and the run ledger (§11)
 — not a fourth file. **Producer**: the named promotion command
 (`phase-9-harness/tools/promote_interop_evidence.py`, FR-014b), which **constructs** each pair from two
-already-promoted runs and **evaluates E-7** on it before writing it. **Gated by**: E-7 (well-formedness,
-at promotion), **E-7a** (conformance completeness), **E-7b** (control-pair existence) and **E-7c**
-(references still authoritative) — the last three in the committed schema check
-(`contracts/witness-evidence.md`, which is the normative home of all four). ⚠️ Without E-7a **zero
-*conformance* pairs is green**: an implementation emitting none would satisfy every other gate, and the
-control half is covered by E-7b, not by E-7a. ⛔ **This list is an INVENTORY, not a pointer, and it has
-already gone stale once** — it named two gates for a four-gate entity after E-7b and E-7c landed in the
-same commit that left it unchanged. Because it is a copy, it carries a maintenance duty: **any new E-*
-over this entity is added here in the same edit**, or the reader who lands on §10 — which is where
-`contracts` sends them — gets an undercount. The normative text of each obligation stays in
-`contracts/witness-evidence.md`; only the roster is here.
+already-promoted runs and **evaluates E-7** on it before writing it. **Gated by**: ⛔ **NO ROSTER HERE — `contracts/witness-evidence.md`
+§ *Obligations* is the normative home of every E-\* over this entity, and this section points at it.**
+⚠️ Without a gate over the pairs' *existence*, **zero *conformance* pairs is green**: an implementation
+emitting none would satisfy the gates that range over runs and witnesses, and the **control** half is a
+separate obligation from the conformance half — one does not cover the other. ⛔ **A roster stood here and
+went stale, twice over**: it named two gates for a four-gate entity, and it carried a maintenance duty —
+*"any new E-\* over this entity is added here in the same edit"* — that was violated four times inside the
+commit that wrote it. It is **deleted rather than extended**: a pointer cannot undercount, and a corrected
+copy is the next round's finding.
 
 | Field | Type | Rules |
 |---|---|---|
@@ -755,7 +755,7 @@ counted, which is what SC-009b demands.
 > | axis | value | meaning |
 > |---|---|---|
 > | `kind` | `conformance` | **occupies a slot**; enters the 32-slot inventory, the manifest, the completeness projection π, and every W-*/E-* gate below |
-> | ″ | `validator-positive-control` | **occupies NO slot**; carries `cell_id`/`config` to name the cell it *probes*, never a slot claim. Enters **only** E-7 / E-7a / FR-010a. ⛔ It is **`authoritative: true`** — making it `false` would place it in "enter no gate" and E-7's entire purpose is to gate it |
+> | ″ | `validator-positive-control` | **occupies NO slot**; carries `cell_id`/`config` to name the cell it *probes*, never a slot claim, and is excluded from the 32-slot inventory, the manifest and π. ⛔ **NO GATE ROSTER HERE** — `contracts/witness-evidence.md` § *Obligations* is the normative home; a roster stood in this cell, named E-7 / E-7a / FR-010a, and was wrong on both counts (E-7a **excludes** control pairs by design; E-7b and E-7c were missing). Deleted rather than corrected. Its `authoritative` truth conditions are the `authoritative` row below |
 > | `authoritative` | `true` | the run that governs its slot |
 > | ″ | `false` | a superseded retry — recorded, and entering no gate |
 >
@@ -770,7 +770,7 @@ counted, which is what SC-009b demands.
 |---|---|---|
 | `cell_id` · `config` | string | for `kind: conformance` — **the slot**; the set of slots carried by rows with `kind: conformance` **and** `authoritative: true` MUST equal the 32-slot inventory **exactly**. For `kind: validator-positive-control` — the cell this control **probes**, which is **not** a slot claim and is excluded from that equality |
 | `run_id` | string | for `kind: conformance` — the run designated for that slot (one carries `authoritative: true`); for a control run — its own identity, which is what `off_run_id`/`on_run_id` resolve to |
-| `authoritative` | boolean | **not `true` by construction** — the section records every run, so a superseded retry is written here with `false` and enters no gate. ⚠️ A `validator-positive-control` run is `true`: it is not a retry, and making it `false` would place it in *"enters no gate"* while E-7/E-7a exist precisely to gate it |
+| `authoritative` | boolean | **not `true` by construction** — the section records every run, so a superseded retry is written here with `false` and enters no gate. ⛔ **A `validator-positive-control` RUN CAN BE SUPERSEDED, AND THE RULE IS STATED HERE RATHER THAN INFERRED FROM ITS ORIGIN** — an earlier revision said only that such a run *is* `true` *"because it is not a retry"*, which says why it **starts** `true` and settles nothing about whether it can later be demoted, while §10's demotion trigger (2) ranges over *"a RUN"* with no `kind` scoping. The rule: a control run is written **`authoritative: true` when it is promoted**, and is **demoted to `false` when a later control run for the same probe supersedes it** — the same rule the conformance half runs under, on the same writer, with the same consequence (*enters no gate*), and §10's trigger (2) then demotes every pair referencing it. ⛔ **The tempting repair — declaring control runs unsupersedable — is REJECTED**: it would leave `contracts/witness-evidence.md` **E-7b** needing no `authoritative` scoping, contradict *"non-authoritative pairs enter no gate"* for the control half, and move the contradiction rather than remove it. ⚠️ **This does not make a control run enter no gate in the ordinary case**: the *current* control run is `true`, and E-7b requires an `authoritative: true` control pair to exist, so a superseded control probe must be replaced by a promoted one **and its pair rebuilt** — which is exactly the omission E-7b's spurious-hit fixture arms |
 | `kind` | enum | `conformance` · `validator-positive-control` (FR-010a) — the same two spellings §9 and §10 use. **Only `conformance` runs occupy a slot**; see *THE TWO DISCRIMINATORS* above. ⚠️ A `validator-positive-control` row is legal and expected here — this is the row `off_run_id`/`on_run_id` resolve against for a control pair, and §10's *"`kind` MUST match the `kind` of both referenced runs"* is unsatisfiable without it |
 | `expected_verdict` | enum | positive controls only — `diverged` |
 | `run_timestamp` | timestamp | |
