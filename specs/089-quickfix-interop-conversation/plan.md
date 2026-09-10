@@ -13,7 +13,7 @@ message set. Both QuickFIX counterparties gain **typed, dictionary-backed parsin
 per-field readback channel**; the interop sessions get a **real FIX 4.4 dictionary** on both sides
 instead of a FIX 4.2 single-Heartbeat sentinel; results gain a **two-level cell/witness structure** with
 an exact-set completeness gate at each level and run **evidence** binding a `pass` to a real run; and the
-whole scripted conversation runs across **4 role×flavour × 2 validation arms × 3 build configs = 24 runs**.
+whole scripted conversation runs across **4 role×flavour × 2 validation arms × 4 build configs = 32 runs**.
 
 The feature spans **two repositories** plus a container image. It closes **zero catalogue rows** by
 itself — the narrow set is already `done` — and exists so the breadth follow-on has something true to
@@ -50,8 +50,10 @@ a cell must terminate; see *Constraints*.
   bound from the competing timeout (heartbeat interval × N), never from a default.
 - Only fixpp is sanitizer-instrumented; the counterparties are unmodified production binaries.
 
-**Scale/Scope**: 5 business message types × 2 directions × 4 role×flavour × 2 validation arms × 3 build
-configs. 8 cells; 24 runs; witness count derived from the conversation script, never hand-listed.
+**Scale/Scope**: 5 business message types × 2 directions × 4 role×flavour × 2 validation arms × 4 build
+configs. **8 logical cells; 32 runs**; witness count derived from the conversation script and cross-checked
+against an independent declarative census (FR-015d), never hand-listed and never derived from one source
+alone.
 
 ---
 
@@ -61,17 +63,35 @@ configs. 8 cells; 24 runs; witness count derived from the conversation script, n
 
 ### The instrument that fails toward clean
 
-Measured 2026-09-10 on this machine:
+⛔ **THE NUMBERS ARE NOT IN THIS SECTION, DELIBERATELY.** What follows is the **condition**, the
+**re-derivation recipe**, and exactly one dated historical observation kept as motivation. ⚠️ This section's
+whole subject is a number that reports comfort it cannot keep true, so a current reading pasted here
+**re-arms it**: an earlier draft's figures were falsified **within the hour** by a routine scratch-tree
+reclaim, and nothing ever re-runs a document. Correcting them would schedule the next falsification.
 
-| Reading | Command | Value |
-|---|---|---|
-| Inside the WSL2 VHD | `df -k /` | `/dev/sdd` — **87,050,032 KiB (83.0 GiB) available** |
-| The Windows host drive backing that VHD | `df -k /mnt/e` | `E:\` — **17,766,184 KiB (16.9 GiB) available**, 93 % used |
+**The condition — this is what is normative:**
 
-**`df` inside WSL over-reports available space by roughly 5×.** A task that gates on `df /` will start a
-34 GiB ASan configuration, burn the compile time, and die on `ENOSPC` partway. This is the repository's
-dominant recorded failure class — an instrument reporting a comfortable number because it cannot see the
-constraint that actually binds — and it is treated here as a defect class, not as housekeeping.
+> `df` **inside** WSL and `df` on the **Windows host drive backing the VHD** measure two different
+> quantities. The internal reading bounds *total data resident at once*; the host reading bounds *net new
+> allocation* — how much the VHD may still grow. The internal reading is routinely the larger and the
+> **more comfortable**, and it is the one that will authorise a build the host cannot finance, so that the
+> build burns its compile time and dies on `ENOSPC` partway. The gate therefore encodes **two predicates**,
+> never one ratio and never one threshold (D-1).
+
+**The recipe — run it, do not read a figure:**
+
+```bash
+df -k /                       # internal: what may be RESIDENT
+df -k /mnt/e                  # host: what the VHD may still GROW      (WSL only)
+du -sh build/*/               # per-tree occupancy, for sequencing and reclaim
+df -k /mnt/wsl/fixppbuild     # the evidence root + ccache device — a DIFFERENT device
+```
+
+**One dated historical observation, kept as motivation and never as an operand.** On **2026-09-10** the
+internal reading was ≈83 G while the host reading was ≈17 G, with the ASan build tree at ≈34 G — a tree
+that would not fit in the host's remaining space, sitting inside a filesystem reporting four times that
+much free. That is the shape of the failure. ⚠️ **Every one of those three figures had moved by later the
+same day.** Do not carry them forward; run the recipe.
 
 ### The mechanism, so the reclaim procedure is understood rather than cargo-culted
 
@@ -84,18 +104,38 @@ The WSL2 ext4 VHD grows on demand and **does not auto-shrink**. Therefore:
 - ⇒ *"delete a build config to make room"* is a valid claim. *"delete a build config to give E: its space
   back"* is **not**, and no task may assert it.
 
-Two ceilings, and they are different quantities:
+Two ceilings, and they are different quantities. The VHD is
+`/mnt/e/Catalin/Work/WSL/Ubuntu24.04LTS/ext4.vhdx`:
 
-| Ceiling | What it bounds | Value now |
-|---|---|---|
-| Free **inside** the VHD | total data resident at once | 83.0 GiB |
-| Free on **the host** (`E:\`) | **net new** allocation — how much the VHD may still grow | 16.9 GiB |
+| Ceiling | What it bounds | Reading | Predicate |
+|---|---|---|---|
+| Free **inside** the VHD | total data resident at once | `df -k /` | `required_internal_free` |
+| Free on **the host** (`E:\`) | **net new** allocation — how much the VHD may still grow | `df -k /mnt/e` | `required_host_growth` |
 
-⚠️ **Which ceiling binds a given build is NOT known a priori and MUST be measured, not assumed.** A build
-that lands entirely in blocks freed by a prior reclaim may cost the host nothing; a build on a VHD with no
-internal free blocks costs the host 1:1. **R-1** in `research.md` mandates the experiment: build one
-configuration from clean while sampling **both** numbers, and derive the budget from what is observed.
-Until R-1 has run, tasks must assume the pessimistic model (host cost = build size).
+**The gap between them is a reuse pool**, and it is why the two predicates are not interchangeable: the
+VHD has materialised more host space than its filesystem currently uses, so some writes land in already
+-allocated extents and cost **zero** host growth, while writes beyond that force VHD growth against the
+host reading alone. Its size is `materialised_on_host − used_inside − ext4 reserve`.
+
+⚠️ **That pool is a BOUND, not a measurement, and the plan must not spend it — so its size is not recorded
+here.** ext4 does not preferentially allocate into already-materialised extents, so the pool may simply not
+be realised: an allocator that picks fresh extents converts a "free" write into 1:1 host growth. **Deriving
+a reuse figure from the two `df` readings is exactly the inference R-1 exists to replace**, which is also
+why writing the figure down at all invites the gate to subtract it (D-7a forbids that).
+
+⚠️ **Which ceiling binds a given build is NOT known a priori and MUST be measured, not assumed.** **R-1**
+in `research.md` mandates the experiment: build each configuration (targeted, per below) from clean while
+sampling **both** numbers, and derive **both** predicates from what is observed.
+
+⚠️ **Bootstrap, because R-1 cannot run under its own gate.** This section makes the gate normative for
+*every build-bearing task*, D-9 makes an unset threshold a hard error, and D-7 requires both values to come
+from R-1's measurement — whose experiment is four builds. That is circular. **Resolution: a bootstrap
+mode.** `ci/disk-preflight.sh --bootstrap` accepts thresholds carrying the literal label
+`estimated, pending R-1` with a date, sourced from the pessimistic model (host cost = build size), and
+**prints that label on every line of its output**. It is admissible for the R-1 experiment **and for
+nothing else**: any other task invoking it is a violation, and the label makes that visible in the log
+rather than inferable. Once R-1 lands, the labelled values are replaced by measured ones and the bootstrap
+path is dead.
 
 ### Reserve ballast — a one-shot valve
 
@@ -114,8 +154,24 @@ job (`.github/workflows/tier1.yml:2130`) alongside `test-restore-conan-cache.sh`
 
 Required behaviour:
 
-1. **Gate on the MINIMUM of two readings** — the build mount *and* the host mount. Gating on the WSL
-   reading alone is precisely the defect above.
+1. ⚠️ **TWO named predicates, evaluated INDEPENDENTLY, both per configuration** —
+   `required_internal_free` against the **build-mount** reading, and `required_host_growth` against the
+   **host-mount** reading. The failing predicate is named in the output.
+
+   *This replaces "gate on the minimum of the two readings", and the reason is worth stating because the
+   fail-open is not where it looks.* As an abstract predicate `min(a, b) ≥ T` is **stricter** than either
+   alone, so it fails toward a false RED — not the dangerous direction. The dangerous direction is that
+   **R-1 derives the threshold from the host delta while the gate applies it to the build-mount reading**,
+   which bounds *total data resident at once*. Illustratively — *a dated 2026-09-10 observation kept
+   because the argument needs a vivid magnitude, **not** an operand; re-derive with `du -sh build/*/`* —
+   the ASan tree stood at ≈34 GiB. A 4 GiB host-delta threshold then authorises that build whenever the VHD
+   has 4 GiB free: the exact ENOSPC this gate exists to prevent, produced by the gate's own arithmetic.
+   **One threshold applied to two ceilings under-checks whichever ceiling is larger.**
+
+1a. ⚠️ **`reclaim-first` is offered ONLY for an internal-space failure.** Deleting inside WSL frees blocks
+   for reuse within the VHD and returns nothing to the host (see *The mechanism* above), so prescribing
+   reclaim for a **host** failure prescribes a remedy this section proves cannot work — and the readings
+   are unchanged afterwards, so the operator loops.
 2. **Detect WSL** via `microsoft` in `/proc/version` (verified present) and locate the host mount via
    `/proc/mounts` (`/mnt/e` is a `9p` `drvfs` mount — verified). On a non-WSL host (a CI runner, where
    `/mnt/e` does not exist) the host reading is **not applicable** and the plain `df` governs.
@@ -128,40 +184,149 @@ Required behaviour:
 5. Print both readings and the derived verdict on **every** invocation, pass or fail — a diagnostic is a
    diff between the two cases, so the passing path must be legible too.
 
-### Per-configuration budget — measured, not guessed
+### ★ The build unit is TARGETED, not `all` — this is the single largest lever
 
-Current occupancy (`du -sh build/*/`, 2026-09-10):
+**The condition:** `run_interop_cell.py` **never builds anything** — it expects a pre-built tree and runs
+one named gtest binary per cell (each cell carries a `binary:` and a `gtest_filter:`). **What gets built is
+therefore this plan's choice**, and a full build of a preset produces hundreds of executables of which the
+matrix opens **four**.
 
-| Configuration | Size | Reclaimable? |
-|---|---:|---|
-| `build/linux-clang-asan/` | 34 G | yes — third |
-| `build/linux-clang-debug/` | 27 G | ⛔ **NEVER** — standing user rule 2026-09-10 |
-| `build/linux-clang-tsan/` | 25 G | yes — second |
-| `build/linux-clang-ubsan/` | 1.5 G | yes — **first** (cheapest useful) |
+⇒ **Each configuration builds only the interop driver targets**
+(`cmake --build <preset> --target <the interop targets the cells name>`), never `all`.
 
-**Thresholds are derived from R-1's measurement with headroom, not from a round number**, and each
-recorded with the figure and the date it was taken, because these move.
+**Re-derive the lever before relying on it** — a size read off a tree is a claim about that tree's current
+state, nothing more:
+
+```bash
+du -sh build/<preset>/bin build/<preset>/lib build/<preset>/CMakeFiles
+ls build/<preset>/bin | wc -l                       # total executables
+ls build/<preset>/bin/interop_* | wc -l             # of which interop drivers
+du -ch build/<preset>/bin/<the 4 binaries the cells name> | tail -1
+```
+
+⚠️ **Do not record the answer here.** An earlier draft did, and the `_packaging_tests` slice it counted was
+reclaimed within the hour — inside the section whose subject is instruments that cannot stay true.
+
+⚠️ **State the scope limit wherever the sanitizer result is reported, and do not overclaim.** A targeted
+UBSan build gives UBSan coverage of **exactly the paths 089 exercises** — which is what FR-021 and SC-010
+assert and all they assert. It is **not** repo-wide UBSan coverage; Tier 1 runs full suites under
+sanitizers separately. Reporting it as the latter would repeat, at the reporting layer, the same
+label-vs-substance error that made the previous `asan-ubsan` claim false.
+
+### Per-configuration budget — a mapping and a recipe, not a table of sizes
+
+| Matrix config | Build tree | Reclaimable? |
+|---|---|---|
+| `normal` | `build/linux-clang-debug/` | ⛔ **NEVER** — standing user rule 2026-09-10 |
+| `asan` | `build/linux-clang-asan/` | yes — **after its 8 cells have run and their evidence is persisted** |
+| `tsan` | `build/linux-clang-tsan/` | yes — same condition |
+| `ubsan` | `build/linux-clang-ubsan/` | yes — same condition |
+
+**Re-derive occupancy at the moment you need it** — `du -sh build/*/`, plus an object count
+(`find build/<preset> -name '*.o' | wc -l`) whenever a tree's size is used to argue about a *build* rather
+than about the tree.
+
+⚠️ **A SIZE IS NOT A COST, and one tree here proves it: `linux-clang-ubsan` is essentially UNPOPULATED** —
+a fraction of the object count of its three siblings. Its small directory is evidence about the directory,
+not about a ubsan build; scaled to a populated sibling's object count at that sibling's bytes-per-object, a
+**full** ubsan build is comparable to the others.
+
+⛔ **This falsifies the "ubsan is nearly free" reasoning** an earlier draft used to justify the fourth
+configuration and to order the sequence. The fourth config is cheap **only under the targeted build
+above**. The decision itself is unaffected — it rests on Article IX §2, not on cost — but the cost argument
+had to be re-derived rather than repeated.
+
+⚠️ **All four are matrix configurations now, not three configurations plus a scratch tree.** Under FR-021
+`linux-clang-ubsan` is a **required arm** as well as the cheapest thing to delete, so the reclaim order and
+the matrix order are two different orderings over the same four trees. **A tree may be reclaimed only once
+its runs are complete and its evidence is persisted outside the build tree** — otherwise the reclaim order
+silently destroys a run the matrix still owes.
+
+**Both required values are derived from R-1's measurement with headroom, not from a round number** —
+`required_internal_free` and `required_host_growth`, **per configuration, all four, against the targeted
+build**, each recorded with the figure and the date it was taken, because these move. An unset or
+unparseable value is a hard error, never `0`.
+
+**`/mnt/wsl/fixppbuild` is a different device and must NOT be budgeted against either ceiling.**
+`CCACHE_DIR=/mnt/wsl/fixppbuild/ccache` — and the persisted evidence root
+`$FIXPP_INTEROP_EVIDENCE_ROOT`, default `/mnt/wsl/fixppbuild/interop-evidence/` (FR-014b) — sit on
+`/dev/sde`, a **separate VHD** whose backing file is not on `E:`, while `/` is `/dev/sdd`. Growth there
+consumes neither `required_internal_free` nor `required_host_growth` (D-11). Confirm the device and its
+free space with `df -k /mnt/wsl/fixppbuild`; no figure is recorded here.
+
+⚠️ **That separateness is what makes the evidence root safe**: it is outside every build tree, so
+`rm -rf build/<preset>` cannot destroy a run the matrix still owes, which is the hazard FR-014b exists to
+close.
 
 ### Reclaim procedure
 
-Order, cheapest-useful-first: `linux-clang-ubsan` (1.5 G) → `linux-clang-tsan` (25 G) →
-`linux-clang-asan` (34 G). **`build/linux-clang-debug/` is never deleted.**
+Order: **cheapest-useful-first, re-derived with `du -sh build/*/` at the moment of reclaim** — never from a
+remembered order. ⚠️ The order genuinely moves: `linux-clang-ubsan` has headed it only because that tree is
+currently unpopulated, and **this feature's own matrix populates it**, which changes its position. **⛔
+`build/linux-clang-debug/` is never deleted** — standing user rule 2026-09-10, and it is also the `normal`
+configuration's tree, so it stays resident throughout.
 
-⚠️ Deleting a configuration means it must be **rebuilt** before its arm of the 24-run matrix can execute.
+⚠️ Deleting a configuration means it must be **rebuilt** before its arm of the 32-run matrix can execute,
+and it must not be deleted before that arm has run.
 
-### ★ Matrix sequencing — all three configurations may not fit at once
+### ★ Matrix sequencing — four FULL builds cannot fit; four TARGETED builds can
 
-This is a real planning constraint on FR-021, not an afterthought. `asan (34) + tsan (25) + debug (27)`
-= 86 G already, against 83.0 GiB free inside the VHD and 16.9 GiB of host growth. **Plan for the
-three-config matrix to be run in sequence, one configuration resident at a time**, with:
+This is a real planning constraint on FR-021, not an afterthought, and the two build units give opposite
+answers — which is why the unit is decided above rather than left to the implementer:
+
+**The condition:** four **full** builds of the four presets do not fit inside the VHD, by a wide margin.
+Four **targeted** interop-driver builds do. That is the planning constraint on FR-021, and it is why the
+build unit is decided above rather than left to the implementer.
+
+**Derive it, do not read it** — the arithmetic is deliberately not written out here, because every operand
+in it moves:
+
+```bash
+du -sh build/*/                                   # current occupancy of the four trees
+find build/<populated preset> -name '*.o' | wc -l # objects, for scaling an UNPOPULATED tree
+df -k /                                           # what may be resident
+df -k /mnt/e                                      # what the VHD may still grow — the binding one
+```
+
+Scale any unpopulated tree to a populated sibling's object count at that sibling's bytes-per-object before
+summing; sum the four; compare with `df -k /`.
+
+⛔ **An earlier draft summed the four trees' *current* sizes and concluded they fit.** They did not: it took
+an essentially unpopulated `linux-clang-ubsan` at face value. The conclusion (*sequence them*) survived;
+the number that justified it did not — **a size read off a tree is a claim about that tree's current state,
+not about the build it will hold.** A second draft replaced that number with a corrected one, which was
+itself falsified the same day. Hence no number.
+
+⚠️ **Fitting inside the VHD is necessary, not sufficient.** Only the already-materialised reuse pool may be
+reusable — a *bound*, not a measurement (see *Two ceilings* above) — and beyond it every byte costs host
+growth against the host reading alone. So sequencing is required even under targeted builds, and R-1's
+`required_host_growth` is the predicate that decides it.
+
+**Plan for the four-config matrix to be run in sequence**, with:
 
 1. Preflight → build config *k* → run its 8 cells → **persist that config's results and evidence to disk
-   outside the build tree** → reclaim config *k* → preflight → build config *k+1*.
-2. Results must be **durable before reclaim**. Deleting a build tree that still holds the only copy of a
-   run's evidence loses the run.
+   outside the build tree** → reclaim config *k* (never `normal`) → preflight → build config *k+1*.
+2. Results must be **durable before reclaim**, and the persisted location is a **named value**:
+   `$FIXPP_INTEROP_EVIDENCE_ROOT`, default **`/mnt/wsl/fixppbuild/interop-evidence/`** (FR-014b). That is
+   on `/dev/sde` — the separate VHD already holding `CCACHE_DIR`, whose backing file is not on `E:` — so it
+   is outside **every** build tree and outside **both** disk predicates (D-11). The **named promotion
+   command** `promote_interop_evidence.py` (FR-014b) copies the bundle there and writes the ledger entry;
+   it runs **after** the config's 8 cells and **before** its tree is reclaimed. ⚠️ Deleting a build tree
+   that still holds the only copy of a run's evidence loses the run. **No committed row ever names a path
+   into a build tree** — no committed row names an absolute path at all.
 3. The evidence record must therefore be **accumulated across configurations**, not rewritten per
    configuration — a later config must not erase an earlier one's rows. The witness completeness gate
-   (FR-015b) runs over the **union**, after the last configuration.
+   (FR-015b/FR-015c) compares each configuration's projection against every other configuration's and
+   against the census's 100 keys — **across `config`, never across `arm`** — *and* runs over the union after
+   the last configuration; the union reading alone cannot see a configuration that produced nothing.
+4. **Suggested order: `normal` → `ubsan` → `asan` → `tsan`.** `normal`'s tree is resident and never
+   reclaimed. `ubsan` goes early because it is the arm whose absence made the previous Article IX §2 claim
+   false, so the constitutional coverage lands first — **not** because its directory is currently small;
+   that tree is unpopulated and a targeted ubsan build costs what any other targeted build costs. The two
+   heaviest configurations then run one at a time against the host ceiling.
+   ⚠️ **Reclaiming the existing FULL trees is what buys the room**: deleting the two heaviest full trees
+   frees space *inside* the VHD for the targeted rebuilds to land in — which is also the only case where
+   the reuse pool could plausibly be realised, and therefore a case R-1 should sample rather than assume.
 
 ### When the preflight cannot be satisfied even after reclaim
 
@@ -182,14 +347,15 @@ corrupts the evidence set this feature exists to make trustworthy.
 | **II** — Language, Compilers, Platforms | C++23 / Clang | **PASS** | Counterparty apps are separate programs against their own vendored engines; fixpp-side code is ordinary test C++ |
 | **III** — Build & Dependency Toolchain | Conan/CMake | **PASS** — *watch resolved by R-3* | QuickFIX-cpp and QuickFIX-J stay **outside** the Conan graph — they are counterparties, not dependencies. **R-3 confirms no new dependency**: neither side has a JSON library (verified), and the readback writer is hand-rolled on both. Typed access needs no new link deps either — `src/C++/fix44/` is header-only and `quickfixj-messages-fix44` is already a compile dependency |
 | **V** — License | AGPL-3.0 | **PASS** — *watch resolved by R-3* | Counterparty sources are ours; QuickFIX itself is not vendored. No new library is introduced, so no licence review is triggered |
-| **VI** — Spec Coverage Discipline | 100 % FIX rule | **PASS** | Produces evidence toward it; flips nothing |
+| **VI §1/§4** — Spec Coverage Discipline | 100 % FIX rule | **PASS** | Produces evidence toward it; flips nothing. `[const §VI.4]`'s coverage-index obligation is not triggered — no new OFFICIAL row |
+| **VI §5** — Normative References section | presence obligation | **PASS** — *added at Gate A round 1* | ⚠️ It was **absent** and this row did not exist; `[const §VI.5]` is unconditional and the VI row above addresses §1/§4, a different clause. 089 could not use 086/087's *"the FIX set is empty"* discharge — SC-007 names five catalogue rows and each carries `[FIX50SP2] Single General Order Handling`. Now present in `spec.md`, non-empty, covering the business set plus the FIX-SL §4 sections the admin repertoire exercises. **Fifth bundle running to be caught here (085, 086, 087, 088, 089)** |
 | **VII §3** — TDD mandatory | red-green-refactor | **PASS — binding** | Every witness lands RED first. FR-017/FR-018 make the RED arms deliverables, not process |
 | **VII §6** — Interop | ≥1 live QuickFIX interop test covering Logon → NOS → ExecRpt → Logout | **PASS — strengthened** | Already satisfied; this feature makes it assert field values in **both** directions rather than counters in one |
 | **VII §8** — grouped tests, ctest labels | select by label | **PASS** *(watch)* | Interop cells are isolation-sensitive (live peer, ports, TLS) ⇒ they stay standalone, which §8 explicitly permits. Selection stays by `-L`, never `-R <exe>` |
 | **VIII** — Performance Budgets | bench for perf-sensitive modules | **N/A** | No perf-sensitive module touched. No bench obligation |
 | **IX §1** — Coverage ≥95/85 on touched modules | diff-scoped | **NEEDS CONFIRMATION → R-6** | Whether this feature touches any `include/fixpp/<mod>` or `src/<mod>` at all is undetermined; test files are excluded from measurement. If the diff is tests + harness + parent repo only, the module glob selects nothing and the gate is vacuous — **which must be stated as a measured fact, not assumed** |
-| **IX §2** — Sanitizers every PR | ASan, UBSan, TSan | **PASS — expanded** | FR-021 runs all three configs (user decision 2026-09-10). ⚠️ FR-022 makes the TSan arm **bring-up**, not a config flip |
-| **IX §4** — Static analysis | clang-tidy / clang-format / cppcheck / IWYU | **PASS** *(watch)* | ⚠️ `/speckit-verify` is the **only** enforcement point for three of the four — no CI job runs them. New C++ in the counterparty lives in the **parent** repo, outside the Step-1 glob (`src/**`, `include/**`) — the same blind spot filed as **#265**. State the disposition; do not let it pass silently |
+| **IX §2** — Sanitizers every PR | ASan, UBSan, TSan | **PASS** — *false as previously written; corrected at Gate A round 1* | ⚠️ This row read *"**PASS — expanded** … FR-021 runs all three configs"*. It was **affirmatively false**: `asan-ubsan` maps to `linux-clang-asan`, which sets `FIXPP_ENABLE_ASAN` only, and `cmake/Sanitizers.cmake` adds `-fsanitize=address` and `-fsanitize=undefined` from **independent** `if()` blocks — so `-fsanitize=undefined` reached no compile or link line and **UBSan did not run**. Article IX §2 (`.specify/constitution.md`, Article IX §2) reads *"Sanitizers — Tier 1 (every PR, Linux/Clang): ASan, UBSan, TSan must all run and pass."* Now satisfied by FR-021's **four** configs — `normal`, `asan`, `ubsan`, `tsan` (user decision, Gate A round 1). ⚠️ FR-022 makes the TSan arm **bring-up**, not a config flip |
+| **IX §4** — Static analysis | clang-tidy / clang-format / cppcheck / IWYU | ⚠️ **CONDITIONAL — disposition required** | ⚠️ **NOT a PASS, and the row said PASS while the re-check table below recorded the same clause as *"disposition required, not a pass"*.** An upheld scoping disposition does not launder a green row over an unmet clause — that is precisely the aggregate-verdict defect this bundle exists to remove, appearing in the bundle's own gate table. **Scoping (settled Gate A round 1, upheld round 2, NOT reopened here):** Article IX §4 reads *"Static analysis — **Tier 1**:"*; Tier 1 is the library's CI tier and does not build the QuickFIX counterparties, which are outside fixpp's Conan graph by design. **No parent-repo clang-tidy / clang-format / cppcheck / IWYU tasks are added.** What is required is the disposition itself — how the counterparty sources are linted, or that they are not and why — written at `/speckit-verify`. Related blind spot: **#265** |
 | **X** — ABI Policy | C ABI versioned contract | **N/A** | `include/fix/c_api*` untouched |
 | **XII** — Security & TLS | TLS posture | **PASS** | Cells stay on TLS `one_way_ca`; mutual mTLS remains `deferred:v1.1-mtls` |
 | **XVI** — Spec Kit Workflow | phase order | **PASS** | specify → clarify → plan, in order |
@@ -197,32 +363,64 @@ corrupts the evidence set this feature exists to make trustworthy.
 | **XVIII** — Roadmap Discipline | scope honesty | **PASS** | Re-scope, the falsified premise, and the zero-rows-closed consequence are all recorded in the spec, `REMAINING-WORK.md` and `typed-messages.md` |
 | **XX** — Amendments | ride a Gate A | **N/A — deliberately** | The Article XVIII §7 / Article I §1 amendment belongs to **4c**, the first catalogue-closure feature (user decision 2026-09-10) |
 
-**Gate verdict (pre-Phase 0): PASS**, with two items routed to research (**R-3** dependency, **R-6**
+**Gate verdict (pre-Phase 0): CONDITIONAL**, with two items routed to research (**R-3** dependency, **R-6**
 coverage applicability) and one standing disposition to write down rather than assume (Article IX §4 on
 parent-repo C++).
 
-### Re-check after Phase 1 design — **PASS**
+⚠️ **The verdict was previously written as PASS over a table containing a `NEEDS CONFIRMATION` row.** A
+gate verdict that aggregates to PASS over rows saying the gate is unresolved is the same defect class as
+the instruments this feature exists to fix, and it should not appear in this bundle of all bundles. It is
+also *why* the IX §2 and VI §5 failures survived: an aggregate PASS is not read row by row.
+
+### Re-check after Phase 1 design — **CONDITIONAL**
 
 | Article | Change | Basis |
 |---|---|---|
 | **III**, **V** | *watch* → **PASS** | R-3 settled it by **verified absence**, not by preference: no JSON library exists on either side, so a hand-rolled writer is the only option that adds no dependency. Typed access is free — R-2 |
-| **VII §3** (TDD) | unchanged, now **concrete** | The RED arms are enumerated as deliverables in `contracts/disk-preflight.md` (7 arms) and `quickstart.md` § Step 4, not left to process |
+| **VI §5** (Normative References) | **absent → PASS** | Added at Gate A round 1; non-empty, per the row above |
+| **VII §3** (TDD) | unchanged, now **concrete** | The RED arms are enumerated as deliverables in `contracts/disk-preflight.md` § *Required RED arms*, `contracts/witness-evidence.md` § *Proof obligations*, `contracts/readback-jsonl.md` § *Witnesses this contract requires*, and `quickstart.md` § Step 4 — not left to process. ⚠️ This row previously claimed *"enumerated … in `contracts/disk-preflight.md` (7 arms) and `quickstart.md` § Step 4"*, which was **true of the disk gate and false of the readback contract**: six of that contract's own *"needs a witness"* clauses had no arm anywhere. The count is deliberately not repeated here — cite the tables, which cannot go stale against themselves |
 | **IX §1** (coverage) | still **open — R-6** | Deliberate. Whether the module glob selects anything must be **measured and recorded**, including when the answer is *nothing*. An empty selection reporting success is indistinguishable from a pass |
-| **IX §2** (sanitizers) | unchanged | FR-021's three configs; FR-022 keeps the TSan arm from going vacuously green |
-| **IX §4** (static analysis) | **disposition required, not a pass** | New C++ lands in the **parent** repo, outside `/speckit-verify`'s Step-1 glob (`src/**`, `include/**`) — the same blind spot filed as **#265**. Record how the counterparty sources are linted, or record that they are not and why |
+| **IX §2** (sanitizers) | **corrected** — see the row above | FR-021's **four** configs; FR-022 keeps the TSan arm from going vacuously green, FR-015c keeps any arm from going vacuously green |
+| **IX §4** (static analysis) | **disposition required, not a pass** | New C++ lands in the **parent** repo, outside `/speckit-verify`'s Step-1 glob (`src/**`, `include/**`) — the same blind spot filed as **#265**. Record how the counterparty sources are linted, or record that they are not and why. ⚠️ **Scoping, settled at Gate A round 1**: Article IX §4 reads *"Static analysis — **Tier 1**:"* and Tier 1 is the library's CI tier; the QuickFIX counterparties are deliberately outside it (they link QuickFIX, outside fixpp's Conan graph by design), and Tier 1 does not build them. A counter-proposal to add parent-repo clang-tidy / clang-format / cppcheck / IWYU as **required tasks** was therefore **rejected** — it over-reads the clause. The correct discharge is the disposition; what was wrong was calling it PASS while saying so |
 
 **No new violations were introduced by the design.** The one structural addition — a second result
 artifact beside `cell_results.yaml` — is justified in *Complexity Tracking* and exists to preserve the
 exact-set completeness property at the witness level, which nesting would destroy.
 
-⚠️ **Two design decisions are load-bearing against a false green and must survive `/speckit-tasks`
-intact**, because both look like details and neither is:
+**Open items behind the CONDITIONAL verdict**, named rather than aggregated away:
+
+| Item | State |
+|---|---|
+| **IX §1** — coverage applicability | **open**, routed to R-6; must be *measured*, and recorded even when the answer is *nothing selected* |
+| **IX §4** — parent-repo static-analysis disposition | **disposition required**, scoping settled (Tier 1 does not build the counterparties); the disposition itself is written at `/speckit-verify` |
+| **IX §2** — sanitizer coverage | **resolved** by the four-config decision (Gate A round 1). Retained in this list because it was the row the aggregate PASS concealed |
+
+⚠️ **Six design decisions are load-bearing against a false green and must survive `/speckit-tasks`
+intact**, because all six look like details and none is:
 1. **Readback file opened in TRUNCATE mode** (R-4). Append would silently accumulate stale records
    across runs, and a stale record can satisfy a comparator looking for a witness this run never
    produced.
-2. **The expected witness set derived from the conversation script, never hand-listed** (W-2). A
-   hand-maintained list drifts toward whatever is currently produced — a gate that agrees with reality
-   by construction and can therefore never fail.
+2. **The expected witness set derived from the conversation script, never hand-listed** (W-2) **AND
+   cross-checked against an independent declarative census** (W-2a / FR-015d). Both halves are required and
+   neither alone is a check: a hand-maintained list drifts toward whatever is currently produced, and
+   script-derivation alone is self-consistent under step deletion — one source drives both production and
+   expectation, so deleting a step removes the witness *and* its expectation and the gate stays green.
+3. **`config` on every witness row, and `cell_id` inside the completeness key** (FR-015c / W-3a / W-1). A
+   union-only gate over rows with no `config` cannot see a configuration that produced **zero** witnesses —
+   the union is unchanged and exact-set equality passes. And the obvious remainder key
+   `(arm, script_step_id, direction, occurrence)` collapses all four role×flavour combos into one set, so a
+   configuration that ran one of its four projects identically to one that ran all four. Both are the same
+   blindness on neighbouring axes.
+4. **The manifest and the run ledger are two artifacts, and the committed check opens nothing**
+   (FR-014/FR-014b, `witness-evidence.md` § *Two artifacts*). The schema check is a **ctest** three CI tiers
+   run on hosted runners with no artifacts, against a manifest holding 59 pre-existing `pass` rows. Any
+   restatement that merges them fails everywhere and breaks FR-020.
+5. **Both streams carry a `hello` AND a `terminal` record** (FR-014a, data-model §12). The hello is written
+   before any message is processed, so a peer that starts, announces itself and conversates not at all
+   satisfies every field a hello-only corroboration reads.
+6. **The arm attestation is `Session::has_validator_for_test()` read from the LIVE session** (FR-011a). The
+   `arm` label is what the harness *intended*; without the live reading the whole of US4 can go vacuously
+   green, and FR-011's *"a dictionary is loaded"* cannot discriminate because it is true in both arms.
 
 ---
 
@@ -251,19 +449,24 @@ research/G19-fix-fpml-iso20022/phase-9-harness/
 │   └── interop_counterparty_main.cpp   # typed parse + readback emitter (C++)
 ├── quickfixj/src/main/java/io/fixpp/phase9harness/quickfixj/
 │   └── InteropCounterparty.java        # typed parse + readback emitter (Java)
-├── configs/*.cfg.in                    # UseDataDictionary=Y for the FIX 4.4 cells
+├── configs/conversation-*.cfg.in       # NEW x4 — UseDataDictionary=Y; the EXISTING *-tls.cfg.in
+│                                       #   templates are NOT edited (they are named by the PD-* and
+│                                       #   idle-cadence cells R-5 protects)
 ├── golden/                             # re-captured per cell, verify-first
 ├── tools/run_interop_cell.py           # collect readback; capability handshake; 8 cells
+├── tools/promote_interop_evidence.py   # NEW — the named promotion step (FR-014b): the ONLY reader
+│                                       #   of a run artifact, and the only writer of a pass row
 └── ci/counterparties.Dockerfile        # rebuilt + republished; consumed BY DIGEST
 
 # ── LIBRARY submodule: .../G19-fix-fpml-iso20022/library ────────────────────
 tests/interop/
 ├── happy/hp_support.hpp                # real FIX 4.4 dictionary, not the FIX 4.2 sentinel
 ├── conversation/                       # NEW — the scripted conversation cells
-├── support/                            # intent records + the readback comparator
-├── cell_results.yaml                   # + evidence fields
-├── cell_results_schema_check_test.py   # reject a pass with no evidence
-└── witness_evidence.yaml               # NEW — per-witness rows + completeness gate
+├── support/                            # fixpp-side sent + readback records; the shared comparator
+├── cell_results.yaml                   # + evidence fields, CONDITIONAL on kind: conversation
+├── cell_results_schema_check_test.py   # structure only — opens NO artifact (it is a ctest that
+│                                       #   tier1/tier2/tier3-libcxx run without any run artifacts)
+└── witness_evidence.yaml               # NEW — witness rows + the runs: ledger (data-model §11)
 ci/
 ├── disk-preflight.sh                   # NEW — the gate
 └── test-disk-preflight.sh              # NEW — its RED arms, pinned in ci-script-pins
@@ -281,6 +484,121 @@ link QuickFIX, which is deliberately outside fixpp's dependency graph.
    published image predating it is the stale-peer hazard FR-016a/FR-016b exist to make loud.
 3. **Order of operations**: parent counterparty change → image rebuild + publish → digest captured →
    library-side cells pinned to that digest. A library PR merged ahead of the image is a broken tree.
+4. ⚠️ **Republishing moves `:latest`, and everything NOT pinned rides it.** FR-016b pins *this feature's*
+   cells to a digest; `interop-smoke.yml`'s `IMAGE:` key names the mutable `:latest`, which is the only tag
+   that workflow knows. On republish, **every existing interop consumer immediately runs new counterparty
+   code**, unpinned and ungated — including the cells FR-020 requires to keep passing, the cells R-5
+   deliberately protects (`INTEROP_CP_CORRUPT_ADMIN`, the `PD-*` malformed-dup cells: the readback emitter
+   is new code on the inbound path of every message they send), and the required smoke workflow itself.
+   **Step 0 of the ordering is therefore to pin existing consumers to the pre-089 digest**, so `:latest`
+   moving is inert. See **FR-026** and **R-11**; it costs one line in the workflow.
+
+---
+
+## External obligations — files this feature MUST change that are not in the bundle
+
+*Collected at Gate A round 1. Six of these were previously stated in prose scattered across three
+artifacts, and `/speckit-tasks` derives from FRs — a prose obligation in a research item is not a task.
+This table is the single place they are enumerated.*
+
+| File | Obligation | Required by |
+|---|---|---|
+| `library/tests/interop/cell_results_schema_check_test.py` | **`CONFIGS`** gains `asan` / `ubsan`, loses `asan-ubsan` | FR-021a |
+| ″ | ⛔ **`test_ids_unique` is NOT replaced.** Round 1 recorded that it must be, on the assumption that 8 ids had to serve 32 rows. The manifest/ledger split removes that: the committed manifest carries one row per `(cell_id, config)` slot with `id = "<cell_id>@<config>"`, unique across 32, and retry rows never reach it | FR-013a · E-1a |
+| ″ | **Status vocabulary** extended with `error:enospc` / `aborted`. The shipped set `{pass, fail, skip, known-limitation, n/a}` is closed by an assertion, `n/a` is bound to a `deferred:*` disposition and `known-limitation:*` to a tracking issue — so every existing option is forbidden and the implementer reaches for `fail` | FR-014a · E-5 |
+| ″ | ⛔ **`REQUIRED_FIELDS` is extended CONDITIONALLY, on `kind: conversation` only — never globally.** An unconditional extension breaks the **59** `status: pass` rows already committed, none of which has an 089 run artifact, colliding head-on with FR-020 | FR-013 · FR-020 · E-1 |
+| ″ | ⛔ **The check MUST NOT open any artifact path.** It is a **ctest** (`tests/interop/CMakeLists.txt:459`) provisioned in `tier1.yml`, `tier2.yml` and `tier3-libcxx.yml` on hosted runners that hold **no** run artifacts. What it checks instead: every `status: pass` conversation row names an existing ledger entry whose `terminal_state` is `completed` and whose `witness_count` equals the census figure for that slot; the ledger's slot set equals the 32-slot inventory exactly; exactly one authoritative run per slot | FR-014 · E-1 · E-1c · W-3b |
+| `library/tests/interop/witness_evidence.yaml` (**NEW**) | Witness rows **and** the `runs:` **ledger** — committed, machine-independent, `evidence_relpath` relative to `$FIXPP_INTEROP_EVIDENCE_ROOT`, **never an absolute path** | FR-014b · data-model §11 |
+| `phase-9-harness/tools/promote_interop_evidence.py` (**NEW**) | The **named promotion command** (FR-014b). Opens both streams, requires a `hello` **and** a `terminal` on each, checks the join keys, evaluates the completeness gate, persists the bundle under the evidence root, records `evidence_digest`, writes the ledger entry and the manifest row. Runs **after** a config's 8 cells complete and **before** its build tree is reclaimed. Nothing else may write a `status: pass` conversation row | FR-014 · FR-014b · E-1b |
+| `phase-9-harness/tools/run_interop_cell.py` | **`CONFIG_TO_PRESET`**: `{normal→linux-clang-debug, asan→linux-clang-asan, ubsan→linux-clang-ubsan, tsan→linux-clang-tsan}`; the `asan-ubsan` key is retired | FR-021 · FR-021a |
+| ″ | **Six metadata keys added to the existing `cp_env` block in `launch_counterparty`** — `INTEROP_CP_{RUN_ID, CELL_ID, CONFIG, IMAGE_DIGEST, SCRIPT_PATH, SCRIPT_DIGEST}`. That block already assembles ten `INTEROP_CP_*` knobs and is passed as `env=cp_env` to **both** the C++ and the Java branch, so this is one more block in an existing pattern. ⚠️ Without it the counterparty is required by FR-013b to emit four hello fields it has **no channel to receive** | FR-013b · data-model §1 · R-4 (reversed) |
+| ″ | The shim **computes** `script_digest` (lowercase-hex SHA-256 over the script bytes) and **compares** it against the value each side recomputes; a mismatch FAILS before the gtest is launched | FR-008c · FR-013b |
+| ″ | **Four dedicated conversation config templates** for the eight new cells (`config_template` is already a per-cell attribute), carrying `UseDataDictionary=Y` with a FIX 4.4 `DataDictionary` path. ⛔ The existing `quickfix-cpp-{initiator,acceptor}-tls.cfg.in` and `quickfixj-{initiator,acceptor}-tls.cfg.in` MUST NOT be edited — they all carry `UseDataDictionary=N` and are named by the idle-cadence and `PD-*` cells R-5 protects, so editing them flips those cells. A regression check asserts a protected cell still renders `UseDataDictionary=N`. ⛔ A "narrowly scoped renderer override" was **rejected**: the per-cell `config_template` seam already exists | FR-002 · R-5 |
+| ″ | A **new environment variable** carrying the run's readback path to the fixpp-side gtest, alongside the existing `INTEROP_<TOKEN>_PORT` / `_HOST` / `FIXPP_TLS_FIXTURE_DIR` / `FIXPP_FIX44_DICT_XML` | FR-024 · R-4a |
+| ″ | The **pre-conversation hello gate** (FR-016a), shim-side, before the gtest is launched. ⚠️ Its failure text must not use `unavailable:` — `parse_gtest_status` greps that token and returns `skip:` | FR-016a · FR-024 · R-4a |
+| ″ | Invoke the named promotion command after each configuration's 8 cells and **before** reclaiming that configuration's build tree | FR-014b |
+| `phase-9-harness/INTEROP-016-DESIGN.md` | The config vocabulary `normal\|asan-ubsan\|tsan` is corrected to the four-config set | FR-021a |
+| `phase-9-harness/INTEROP-COVERAGE-REPORT.md` | The claim that the charter's ASan+UBSan requirement is met by `asan-ubsan` is corrected | FR-021a |
+| `library/.github/workflows/interop-smoke.yml` | The `IMAGE:` key is pinned to the **pre-089 digest before the counterparty image is republished**, so moving `:latest` is inert for existing consumers | FR-026 · R-11 |
+| `phase-9-harness/quickfix-cpp/counterparty/interop_counterparty_main.cpp`, `phase-9-harness/quickfixj/.../InteropCounterparty.java` | `sent` **and** `readback` emitters, the hello record, `occurrence` ordinals, and the specified header partition including the tag-1156 reconciliation | FR-003 · FR-003a · FR-004 · FR-005 · R-10 |
+
+⚠️ **Out of scope, and it must stay stated rather than assumed**: re-characterising the `asan-ubsan` rows
+already in `cell_results.yaml`. Every one of them records a result that was never under UBSan. That is a
+pre-existing corpus problem and belongs in a filed issue, not in this feature.
+
+---
+
+## Gate A
+
+- Round 1 applied 2026-09-10: Codex P1=9 P2=6 P3=1; Opus post-judging P1=12 P2=9 P3=3; rewrite addresses root causes #A #B #C #D #E #F. Reviews: research/reviews/codex_089-quickfix-interop-conversation_gate_a_review.md, research/reviews/opus_089-quickfix-interop-conversation_gate_a_adversarial_review.md.
+- Round 2 applied 2026-09-10: Codex P1=9 P2=9 P3=2; Opus post-judging P1=10 P2=10 P3=4; rewrite addresses root causes #G #A #B #C #E #H #I. Reviews: research/reviews/codex_089-quickfix-interop-conversation_gate_a_2_review.md, research/reviews/opus_089-quickfix-interop-conversation_gate_a_2_adversarial_review.md.
+
+> ⚠️ **The round-2 tally was taken against a partially-moving target, and must not later be read as a clean
+> measurement.** The round-2 Codex review began at **11:46:38** while the round-1 rewriter was still
+> writing two of the nine bundle files — `quickstart.md` (**11:47:07**) and `plan.md` (**11:47:17**), i.e.
+> 29 s and 39 s *after* launch. The other seven files were stable (11:36:52 → 11:46:17, all before launch).
+> The judge re-read both raced files in full after the race and every finding it carried forward is judged
+> against the post-race bytes, so the dispositions stand on their own evidence — but the *tally* spans two
+> states of the bundle. One sub-claim (`plan.md`'s duplicate `checklists/` entry) is permanently
+> **indeterminate**: the intermediate state is unrecoverable, because the bundle files are uncommitted
+> working-tree modifications and `git show HEAD:` yields the pre-rewrite round-0 text.
+>
+> ⚠️ **The same condition holds for round 3** — the bundle is still uncommitted working-tree state, so a
+> round-3 review can be raced the same way and its findings would be equally unrecoverable. **Record every
+> bundle file's mtime immediately before launching the round-3 review**
+> (`stat -c '%y %n' specs/089-quickfix-interop-conversation/{,contracts/,checklists/}*.md`) and compare
+> against the review's start time, so a raced finding is identifiable rather than argued about
+> afterwards.
+
+### ⛔ The round-2 acceptance rule, recorded because it is the rule this rewrite was written against
+
+> **Produce the artifact, not a sentence about the artifact.** A clause of the form *"X is declared /
+> enumerated / specified / named"* is scored as **absent**. Round 1 replaced four wrong claims with claims
+> that the work had been done — FR-015d's *"is therefore itself declared, in the spec"* (no step table),
+> `readback-jsonl.md`'s *"this contract enumerates the reconciliation"* (undecided, and self-contradictory
+> on tag 1156), FR-014b's *"a persisted evidence location outside every build tree"* (no location), and
+> this table's *"a named promotion step"* (not named). Round 2's artifacts, so they can be pointed at:
+> `spec.md` § *Conversation census* · `contracts/readback-jsonl.md` § *THE CANONICAL PARTITION* ·
+> FR-014b's `$FIXPP_INTEROP_EVIDENCE_ROOT` and `promote_interop_evidence.py` · `quickstart.md` Step 4's
+> observable column · `contracts/readback-jsonl.md` § *Canonical form*'s parsed-path sort rule.
+
+### Round 2 — disagreements
+
+*Findings the judge marked Disagree / Downgrade / counter-proposal-rejected, recorded with the reason so a
+later round does not re-apply the rejected form.*
+
+| Finding | Disposition | Reason |
+|---|---|---|
+| **Codex 14** — the bundle contradicts the live disk measurements | **counter-proposal REJECTED**; finding confirmed at P2 | Codex asked to *replace* `83 G`→`93 G` and `34 G`→`29 G`. That reproduces the defect it reports, in the section titled *"The instrument that fails toward clean"* whose entire subject is a number that reports comfort it cannot keep true. The decisive evidence is not that the figures were wrong but **how fast**: `plan.md` was rewritten at 11:47:17 and its figures were false **within the hour**, because ~9.8 G of `_packaging_tests` scratch was reclaimed after they were written. Patching them **re-arms** the section. **Applied as DELETION**: the condition, the `df`/`du` recipe, and exactly one dated historical pair kept as motivation and marked as never an operand |
+| **Codex 20** — stale FR count and two duplicated headings | **two sub-claims DISAGREE (false)**; the count half confirmed at P3 | `research.md`'s duplicate `R-4a` heading is **false** — `grep -c '^## R-4a'` returns 1; the `:194` occurrence is a prose forward-reference. `plan.md`'s duplicate `checklists/` entry is **indeterminate** (raced file; the intermediate state is unrecoverable) and the bundle gets no credit and Codex no charge. For the count itself the fix is **deletion, not correction** — a hand-maintained count is the same rot class, and correcting it schedules the next round's finding |
+| **Codex 9 / round-2 #17** — Article IX §4 | **scoping disposition UPHELD, not reopened**; verdict hygiene fixed | Article IX §4 reads *"Static analysis — **Tier 1**:"* and Tier 1 does not build the counterparties. **No parent-repo clang-tidy / clang-format / cppcheck / IWYU tasks are added.** What was wrong was the Constitution Check row rendering **PASS** over a clause the same plan recorded as *"disposition required, not a pass"*. Only the row changed |
+| **Codex 4** — the divergence probe contradicts FR-010 and has no run model | **DOWNGRADED P1 → P2** | Substance confirmed, but the failure direction is **loud**: seeding the probe into the normal script makes FR-010 fail on all 32 runs immediately. Two fields (`kind`, `expected_verdict`) plus placing positive-control executions outside the 32 |
+| **Codex 16** — C-9 contradicts the closed record grammar | **DOWNGRADED P2 → P3** | Real, but it is a scope word and the contradiction is visible in a schema table an implementer must read anyway. Applied: C-9 scoped to `sent`/`readback`, `script_step_id` dropped from receiver records |
+| **Codex 18** — the script digest is not reproducible as specified | **DOWNGRADED P2 → P3** | Smaller than filed. Once the metadata handoff exists the **shim** is the single computer of record, so no cross-language digest *agreement* is needed and the algorithm choice is nearly free. What mattered was **who computes and who verifies** — applied as: shim computes, each side **recomputes over the file it opened**, shim compares. Algorithm named (lowercase-hex SHA-256; OpenSSL is already linked on the C++ side and `MessageDigest` is stdlib on the Java side, so R-3's *"no new dependency"* is preserved) |
+| **Codex 12** — the per-cell dictionary scope has no structural implementation seam | **counter-proposal NARROWED** | First branch only: four dedicated conversation templates named by the eight new cells. The *"narrowly scoped renderer override"* is **rejected** — the per-cell `config_template` seam already exists and a renderer override is machinery for a problem the harness solved |
+| **Round-2 #1** — the correlation key | ⚠️ **The key was NOT invalidated. Only the emission point moved.** | The user's recorded clarification — *"`MsgSeqNum(34)` + direction, using data already on the wire; nothing is injected"* — **survives intact**: tag 34 is on the wire and both engines expose it on the header object *before* serialization (QuickFIX-cpp `Session::sendRaw` → `fill(header)` → `toApp`; QuickFIX-J `sendRaw` → `initializeHeader` → `toApp`). What was wrong was `data-model.md` §3's own *"emitted before transmission"* design statement. **Do not put the clarification back to the user.** Fixed with the two-stage sender record (FR-003a) |
+
+### Round 1 — disagreements
+
+*Findings the judge marked Disagree / Downgrade / counter-proposal-rejected, recorded with the reason so a
+later round does not re-apply the rejected form.*
+
+| Finding | Disposition | Reason |
+|---|---|---|
+| **Codex 9** — Article IX §4 unresolved despite a PASS verdict | **counter-proposal REJECTED**; the verdict-hygiene half confirmed at P2 | The counter-proposal demanded parent-repo clang-tidy / clang-format / cppcheck / IWYU as required tasks. Article IX §4 reads *"Static analysis — **Tier 1**:"*; Tier 1 is the library's CI tier and does not build the QuickFIX counterparties, which are outside fixpp's Conan graph by design. Demanding four Tier-1 tools over code Tier 1 does not build over-reads the clause. **Fix the verdict, not the scope** — the disposition stands as the correct discharge |
+| **Codex 11** — no named test seams for the acceptance criteria | **counter-proposal DOWNGRADED**; substance confirmed at P2 | It asked for an acceptance/test matrix mapping every FR and SC to a concrete test file and case — that is `tasks.md` output, and `tasks.md` is Phase 2, not created at Gate A. Mapping 28 FRs to file names before the tasks pass would be invented precision. The **checkable** half — six contract-mandated witnesses with no arm — is applied in full via `quickstart.md` Step 4 and the contracts' own witness tables |
+| **Codex 6** — the disk gate compares two quantities to one threshold | **mechanism REPLACED**; finding confirmed at P1 | Codex's route was *"`min(build, host) ≥ T` cannot express two requirements"*. True but not the hazard: `min(a,b) ≥ T` is **stricter** than either alone, so it fails toward a false RED. The real fail-open is that **R-1 derives the threshold from the host delta while D-1 applies it to the build-mount reading**, which bounds total resident footprint (34 GiB for ASan) — the larger ceiling is the under-checked one. Fixed as two independent named predicates |
+| **Codex 7** — the dictionary scope contradicts US1 and FR-001 | **DOWNGRADED P1 → P2**, and **narrowed** | The axes were crossed: R-5's evidence is entirely peer-side and governs **FR-002**, not FR-001. The genuine contradiction is narrower — US1's Independent Test required a peer-side flip on existing cells that R-5 declines. The hazard Codex missed is on the side R-5 does not cover (the fixpp-side flip's own collateral drift), now recorded as **R-5a**. P2 because the fix is a scope decision plus wording, not new design |
+| **Codex 13** — `MsgSeqNum + direction + PossDupFlag` is not a unique identity | **DOWNGRADED P2 → P3**, absorbed into root cause #A | Technically correct but over-severe in isolation: within one stream `direction` is constant and two replays of one seq number need two ResendRequests over the same range in one scripted session. The occurrence ordinal is adopted because it costs nothing. ⚠️ The part that actually bites is the half Codex did not file — `L-021-3` records QuickFIX-cpp **strips** `PossDupFlag(43)`, so on those combos the disambiguator is not on the wire at all |
+
+### Round 2 — residuals left open, named rather than silent
+
+| Residual | Why it is acceptable here | Where it lands |
+|---|---|---|
+| **The FR/SC counts in `checklists/requirements.md`** | ⚠️ **Deleted rather than corrected.** A hand-maintained count is a result nothing re-runs, and correcting one schedules the next round's finding. The derivation is recorded in its place | `checklists/requirements.md` § *Re-validation — after Gate A round 2* |
+| **`checklists/requirements.md` lines 76–84 three-config vocabulary** | Struck in place rather than rewritten — the lines sit under a dated *"after `/speckit-clarify`"* heading and are a historical record of that session; striking preserves the record while removing the false present tense | same file |
+| **The `occurrence` ordinal is still computed per stream** | ⚠️ **Stated, not hidden.** The declared-occurrence route (FR-005 · W-7) closes the *reconciliation* — the comparator checks the observed pairing against the census's declared occurrence values, not against the peer's independent count — but the ordinal itself is still each side's own. **If implementation shows the declared route does not hold**, the alternative is a narrow exception to the no-injection rule **for the replay steps only**, and that is a **user decision**, because the no-injection half of the correlation-key clarification is the user's | FR-005 · W-7 · escalate to the user if the declared route fails |
+| **R-1, R-6, R-9 remain open by design** | Each carries a mandated measurement rather than an assumption. R-1 is now unblocked by the D-9a bootstrap mode | `research.md` |
 
 ---
 
@@ -289,6 +607,7 @@ link QuickFIX, which is deliberately outside fixpp's dependency graph.
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |---|---|---|
 | Two repositories in one feature | The counterparties link QuickFIX, deliberately outside fixpp's Conan graph; the assertions must live with fixpp's tests | Vendoring QuickFIX into the library would put a competing FIX engine in fixpp's dependency graph — a far larger change than the feature it serves |
-| 24 runs (8 cells × 3 configs) | User decision 2026-09-10; satisfies Article IX §2 in full on this surface | `normal` + `asan-ubsan` (16 runs) was recommended and declined. The cost is accepted deliberately and is recorded in the spec's Assumptions |
-| A first-ever TSan bring-up inside a feature | Falls out of the three-config decision | Deferring TSan was the recommendation and was declined. FR-022 contains the risk by forbidding a vacuous green: a TSan arm producing no witnesses is a failure |
-| A second result artifact (witness evidence) beside `cell_results.yaml` | A cell is one process run; witnesses are (message × direction). Flattening ~80 witnesses into cell ids would redefine what the runner dispatches on | Nesting witnesses inside cell rows loses the exact-set completeness property at the witness level — the very property that makes a silently-absent witness detectable |
+| **32 runs (8 logical cells × 4 configs)** | User decision, Gate A round 1; satisfies Article IX §2 in full on this surface, **measured per sanitizer rather than inferred from a config label** | The recorded three-config answer (24 runs) is superseded: `asan-ubsan` mapped to an ASan-only preset, so it delivered two sanitizer kinds while claiming three. A **combined ASan+UBSan preset** was the other option and was declined — `linux-clang-ubsan` already exists, so a new preset buys nothing, and adding `FIXPP_ENABLE_UBSAN` to `linux-clang-asan` is forbidden outright (it is a Tier-1 CI lane; changing its flags moves every object's command line and invalidates its compiler cache). `normal` + `asan-ubsan` (16 runs) was the original recommendation and was declined |
+| The fourth configuration's sequencing cost | Four build trees against two ceilings — what may be resident inside the VHD, and what the VHD may still grow on the host (§ *Disk preflight*; re-derive, never copy) | Not paid in a new toolchain — `linux-clang-ubsan` already exists as a preset. ⛔ It is **not** paid by that tree's small current size either; that tree is unpopulated, and a size is not a cost. What pays for it is the **targeted build unit**, which is what turns four full builds (do not fit) into four targeted ones (fit). The residual cost is one more build/run/persist round in § Matrix sequencing and one more measured pair of thresholds in R-1 |
+| A first-ever TSan bring-up inside a feature | Falls out of the sanitizer-coverage decision | Deferring TSan was the recommendation and was declined. FR-022 contains the risk by forbidding a vacuous green: a TSan arm producing no witnesses is a failure — and FR-015c makes that detectable, which it was not while witness rows carried no `config` |
+| A second result artifact (`witness_evidence.yaml`, carrying both the witness rows and the `runs:` ledger) beside `cell_results.yaml` | Two separations at once. (a) **Witness vs cell**: a cell is a logical identity the runner dispatches on; witnesses are (step × direction × occurrence), and flattening the census's population into cell ids would redefine what the runner dispatches on. (b) **Ledger vs manifest**: `cell_results.yaml` is checked by a **ctest** three CI tiers run on hosted runners with no run artifacts, against a committed manifest holding 59 pre-existing `pass` rows — so it cannot also be a machine-local run ledger, and an unconditional `REQUIRED_FIELDS` extension would break those 59 rows (FR-020) | Nesting witnesses inside cell rows loses the exact-set completeness property at the witness level — the very property that makes a silently-absent witness detectable. Making the manifest carry `artifact_path` and requiring the check to open it fails on **every hosted runner for every 089 row** — the shape the round-2 review escalated. ⛔ A **third** file was rejected: the ledger is a `runs:` section of the witness-evidence artifact, which already accumulates per run |

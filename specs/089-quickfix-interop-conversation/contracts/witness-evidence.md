@@ -12,40 +12,127 @@ feature delivers, evidence that cannot distinguish a real run from a typed word 
 
 ## Level 1 — cell rows
 
-Existing fields unchanged. New evidence fields per [data-model.md](../data-model.md) §5.
+New identity and evidence fields per [data-model.md](../data-model.md) §5.
+
+> ⚠️ **WITHDRAWN at Gate A round 1: *"Existing fields unchanged."*** That was a constraint this contract
+> imposed on itself, and it was jointly unsatisfiable with the obligations below. It stays withdrawn — but
+> the edits it was withdrawn to permit are **narrower than round 1 assumed**; see E-1a.
+
+### ⛔ Two artifacts, and they must not be one
+
+⚠️ **One artifact cannot be both a committed CI-checked manifest and a machine-local run ledger.** This is
+not a preference; the tree refuses it. `cell_results_schema_check_test.py` is registered as a **ctest**
+(`tests/interop/CMakeLists.txt:459`) and is provisioned in **three** CI tiers — `tier1.yml`, `tier2.yml`,
+`tier3-libcxx.yml` — on GitHub-hosted runners that have never executed an interop cell and hold **no run
+artifacts at all**; it resolves a **committed** manifest relative to its own file; and that manifest carries
+**59** `status: pass` rows today, none of which has an 089 run artifact. So *"the check opens every
+referenced artifact"* fails on every hosted runner for every 089 row, and an unconditional
+`REQUIRED_FIELDS` extension breaks all 59 rows, colliding with FR-020. Every restatement that keeps them as
+one artifact fails the same way.
+
+| Artifact | Checked by | Asserts | Opens anything? |
+|---|---|---|---|
+| `cell_results.yaml` — committed expected inventory | the shipped ctest, three CI tiers | structure; new fields **conditional on `kind: conversation`**; every `pass` names a ledger entry | **no** |
+| the **run ledger** — a `runs:` section of `witness_evidence.yaml`, committed (data-model §11) | the same ctest | one authoritative entry per `(cell_id, config)`; the 32-slot inventory exactly; `terminal_state`, `witness_count`, `evidence_relpath`, `evidence_digest`; **no absolute paths** | **no** |
+| the **run artifact** — machine-local, never committed | the **promotion step** (FR-014b), on the machine that ran the cell | both streams' `hello` **and `terminal`**, the join keys, the completeness gate, `evidence_digest` | **yes — this is the only reader** |
 
 | # | Obligation |
 |---|---|
-| E-1 | `status: pass` **without** complete evidence ⇒ schema check **FAILS** |
+| E-1 | `status: pass` **without** a ledger entry whose `terminal_state` is `completed` and whose `witness_count` equals the census figure for that slot ⇒ schema check **FAILS**. The check itself **opens nothing** |
+| E-1a | Manifest row identity is **`(cell_id, config)`** — 32 rows, retries never committed — and the shipped `id` field is retained, derived as `"<cell_id>@<config>"`. ⚠️ **`test_ids_unique` therefore does NOT need replacing**; round 1's claim that it did rested on 8 ids serving 32 rows, which the manifest/ledger split removes |
+| E-1b | **Corroboration runs at promotion time, where the artifacts are** (FR-014b): the named promotion command opens both streams, requires a `hello` **and** a `terminal` on each, checks the join keys against the row, evaluates the completeness gate, persists the bundle under `$FIXPP_INTEROP_EVIDENCE_ROOT` and records `evidence_digest`. Nothing else may write a `status: pass` conversation row |
+| E-1c | Exactly **one authoritative run per `(cell_id, config)`**; retries carry `authoritative: false` and enter no gate. ⚠️ This does not fail loudly on its own: the completeness projection drops `run_id`, so duplicate rows *collapse* and a retry is invisible — a failed run and a retried pass could otherwise both sit in the record with nothing saying which governs |
 | E-2 | `counterparty_version` is sourced from the **hello record**, never from a config file — a config says what was *asked for*, not what *ran* |
 | E-3 | `counterparty_digest` is the digest actually used, not a tag |
-| E-4 | Each of the 3 configs emits its **own** row; folding one into another is a violation |
-| E-5 | An `ENOSPC`-killed run is recorded as **neither** `pass` **nor** `skip` |
+| E-4 | Each of the **4** configs emits its **own** row; folding one into another is a violation |
+| E-5 | An `ENOSPC`-killed run is recorded as **`error:enospc`** — never `pass`, `skip`, `n/a` or `fail`. The shipped status vocabulary has no slot for it, so the vocabulary is extended; leaving it closed forces the implementer onto `fail` and makes an infrastructure abort indistinguishable from a fidelity defect |
+| E-6 | The run's **arm attestation** (`has_validator`, data-model §1a) MUST equal `arm == "validation-on"` |
 
-**Proof obligation for E-1**: a deliberately falsified row — `pass`, no evidence — is committed to the
-test corpus and the check is shown RED against it. An assertion that has never rejected anything is not
-known to reject.
+**Why E-1b exists.** Requiring six more fields to be **present** does not close the threat this contract
+states for itself — a hand-edited `status: pass`. Six hand-editable strings are as easy to type as one.
+Corroboration means *someone* opens the stream and finds it agrees; the question round 1 got wrong was
+**who**, and the answer cannot be a ctest three CI tiers run without artifacts.
+
+**Why a `hello` is not enough.** `readback-jsonl.md` fixes the hello as the **first** line, emitted before
+any message is processed. A counterparty that starts, writes its hello and conversates not at all supplies
+every field a hello-only corroboration inspects. The **terminal record** (data-model §12) is required on
+**both** streams for exactly this reason.
+
+**Proof obligations for Level 1** — each shown RED against its own diagnostic, not merely a non-zero exit:
+
+| Fixture | Must show |
+|---|---|
+| `pass`, no evidence fields | E-1 RED |
+| `pass`, naming a ledger entry that does not exist | E-1 RED |
+| **a run whose stream carries a `hello` and NO `terminal` record** | **E-1b RED at promotion** — *the pre-conversation hello does not corroborate a pass*. This is the fixture that separates announcing from conversating |
+| a promoted bundle whose stream's `hello` carries a different `run_id` from the row | E-1b RED — *because the stream disagrees* |
+| a ledger `witness_count` differing from the census figure for that slot | E-1 RED |
+| **two authoritative runs for one `(cell_id, config)`** | **E-1c RED** — and shown *not* to be caught by the completeness gate alone, which collapses them |
+| a `validation-on` row whose run recorded `has_validator: false` | E-6 RED |
+| an `ENOSPC` abort recorded as `fail` | E-5 RED |
+| **the 59 pre-existing `pass` rows, unmodified** | the schema check stays **GREEN** — the control that proves the conditional-field rule did not break FR-020 |
 
 ## Level 2 — witness rows
 
+**Three identities, named separately (FR-015c). Conflating them is what made the previous single "key"
+both unsatisfiable and blind:**
+
+| # | Identity | Value |
+|---|---|---|
+| 1 | **observed-row uniqueness** | `(run_id, cell_id, config, arm, script_step_id, direction, occurrence)` |
+| 2 | **stable completeness key** | **`(cell_id, script_step_id, direction, occurrence)`** — `cell_id ≡ (combo_id, arm)`, so the **role × flavour axis is retained** |
+| 3 | **cross-config projection `π`** | an observed row reduced to identity 2 — drops `run_id` and `config` |
+
 | # | Obligation |
 |---|---|
-| W-1 | One row per (cell × message × direction) |
-| W-2 | The expected set is **derived from the conversation script**, never hand-listed |
+| W-1 | One row per identity 1, carrying `combo_id`, `cell_id`, `config`, `run_id`, `arm` and `authoritative` as fields |
+| W-2 | The per-run expected set is **derived from the conversation script**, never hand-listed |
+| W-2a | The script-derived set is asserted **exactly equal to the declarative census in `spec.md` § *Conversation census*** — the business step table, its declared inapplicable combinations and its expansion rule, totalling **100** completeness keys — that figure is a **pointer to § *Conversation census*'s arithmetic**, not an independent count — enumerated over **business steps × applicable combos × declared occurrences × 2 arms**, in exactly the unit of identity 2 (FR-015d). ⚠️ **W-2a consumes that table**; it MUST NOT re-derive the population from the script file, or it agrees by construction and is not a second opinion |
 | W-3 | Exact-set equality: a missing witness **FAILS** the gate |
+| W-3a | **π(authoritative rows of config `c`) = π(authoritative rows of config `c'`)** for every ordered pair of the four configs, **and** each equals the census's 100 keys. ⚠️ **Across `config`, never across `arm`** — `arm` is inside `cell_id`, so a cross-arm equality is unsatisfiable by construction and is not what SC-011 asks for |
+| W-3b | The set of `(cell_id, config)` slots carrying an authoritative run **equals the 32-slot inventory exactly**, not merely is contained in it |
+| W-3c | **Exactly one authoritative run per slot**; rows with `authoritative: false` enter no gate |
 | W-4 | Rows **accumulate** across configs; a later config MUST NOT overwrite an earlier one's |
-| W-5 | The gate runs **after the last configuration**, over the union |
+| W-5 | The gate **also** runs after the last configuration, over the union — as a second reading, never as the only one |
 | W-6 | `skip` may not be produced by a missing readback record — that is `fail` |
+| W-7 | An observed occurrence count differing from the **census-declared** count for that `(step, combo)` is its own class, **`occurrence_count_mismatch`**, distinct from a field-level `missing`. ⚠️ The two sides compute the ordinal independently and it never travels on the wire, so under the ResendRequest/GapFill steps FR-008 mandates the counters can legitimately diverge; reconciling against the peer's count would yield a false RED or an off-by-one pairing. Reconciling against the **declared** count keeps the no-injection rule intact |
 
-**⚠️ W-2 is the anti-vacuity clause.** A hand-maintained expected list drifts toward whatever is
-currently produced, so the gate ends up agreeing with reality by construction — a check that cannot
-fail. Deriving from the script means the gate disagrees when production stops.
+**⚠️ W-2 and W-2a are two halves of one clause; neither alone is a check.** A hand-maintained expected
+list drifts toward whatever is currently produced, so the gate agrees with reality by construction — the
+reason W-2 exists. But script-derivation alone has the mirror defect: **one source drives both production
+and expectation**, so deleting a business step removes the witness *and* its expectation, and the gate
+stays green over a conversation that no longer covers that message type. W-2a gives the derivation
+something that can disagree with it. This is not a retreat to a hand list — the per-run projection stays
+script-derived.
 
-**⚠️ W-4 exists because of disk.** The three configs run in sequence with reclaim between them
-(plan.md § Matrix sequencing). A record rewritten per config loses two thirds of the evidence, and the
+**⚠️ W-3a is the clause that makes the config axis visible.** With no `config` on the row and equality
+taken over the union, a configuration producing **zero** witnesses leaves the union unchanged and the gate
+passes. That is the repository's named failure class — an instrument reporting clean because it could not
+report anything else — inside the gate written to catch it.
+
+**⚠️ Identity 2 keeps `cell_id`, and that is not decoration.** The obvious remainder after dropping
+`run_id` and `config` — `(arm, script_step_id, direction, occurrence)` — **collapses all four role×flavour
+combos into one set**. Under it, a configuration that ran **one** of its four combos projects to the same
+set as one that ran all four, and the gate passes over a matrix that ran a quarter of itself. That is
+W-3a's own failure, one axis over, inside the clause written to close it.
+
+**⚠️ W-4 exists because of disk.** The four configs run in sequence with reclaim between them
+(plan.md § Matrix sequencing). A record rewritten per config keeps only the last one's rows, and the
 completeness gate would then pass over the remainder — a green produced by amnesia.
 
-**Proof obligation for W-3**: delete one witness and show the gate RED.
+**Proof obligations for Level 2:**
+
+| Arm | Kind | Must show |
+|---|---|---|
+| Delete one witness row | forced miss | W-3 RED |
+| **Drop one whole configuration** | **spurious hit** — the gate reports PASS for a reason other than completeness | W-3a RED. ⚠️ Single-row deletion passes under a union-only gate, so it cannot discriminate a correct gate from a config-blind one; this arm can |
+| Delete a business step from the script | forced miss | W-2a RED — the census disagrees |
+| Add a step to the script that produces no witness | forced miss | W-2a RED — in the other direction |
+| A witness row missing its `config` field | schema RED | W-1 — the field is required, not optional |
+| **Run one combo of one config and none of the other three** | **spurious hit** — the gate reports PASS because the projection lost the role×flavour axis | W-3a RED. ⚠️ This is the arm that discriminates identity 2 from `(arm, script_step_id, direction, occurrence)`; dropping a whole *config* does not, because a config-blind gate and a combo-blind gate both redden on that one |
+| **A second (retry) run for one slot** | spurious hit | W-3c RED; and shown **not** caught by W-3/W-3a alone, which collapse the duplicate |
+| A slot with no authoritative run at all | forced miss | W-3b RED — the inventory equality, not mere containment |
+| A replayed step delivered once where the census declares two occurrences | forced miss | W-7 RED as `occurrence_count_mismatch`, **not** as a field-level `missing` |
 
 ## What this contract does NOT do
 

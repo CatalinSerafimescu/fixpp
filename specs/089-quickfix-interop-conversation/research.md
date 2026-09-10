@@ -33,16 +33,58 @@ from an ordinary `int`. Both engines gate group parsing on a non-null dictionary
 **Decision**: **not decidable by reasoning; it must be measured.** Until it is, every task assumes the
 **pessimistic model** (host cost = build size).
 
-**Why it matters.** The two ceilings are different quantities (see `plan.md` § Disk preflight): 83.0 GiB
-free inside the VHD vs 16.9 GiB of host growth on `E:\`. If a build lands in blocks freed by a prior
-reclaim it may cost the host nothing; on a VHD with no internal free blocks it costs 1:1.
+**Why it matters.** The two ceilings are different quantities (see `plan.md` § Disk preflight): **83 G**
+free inside the VHD vs **17 G** of host growth on `E:\`, measured 2026-09-10. If a build lands in blocks
+freed by a prior reclaim it may cost the host nothing; on a VHD with no internal free blocks it costs 1:1.
 
-**The experiment**: build one configuration from clean while sampling **both** `df -k /` and
-`df -k /mnt/e` before, during and after; record the delta in each. Derive the per-configuration
-threshold from the observed host delta with headroom, and record the figure **with its date**.
+⚠️ **The reuse pool can be BOUNDED from the two readings, and that bound must not be mistaken for the
+answer.** The VHD (`/mnt/e/Catalin/Work/WSL/Ubuntu24.04LTS/ext4.vhdx`) is **191 G materialised on the
+host**, against 156 G used inside and ~12 G ext4 reserve ⇒ **≈23 G already allocated on the host but free
+inside the VHD**. That is an upper bound on how much this feature's builds could cost the host *nothing*.
+**It is not a measurement**: ext4 does not preferentially allocate into already-materialised extents, so an
+allocator that picks fresh extents converts a "free" write into 1:1 host growth. **Inferring the reuse
+figure from these two `df` readings is precisely the reasoning this item exists to replace** — R-1 stays
+mandatory, and no task may substitute the ≈23 G bound for its result.
+
+⚠️ **Measure the TARGETED build, because that is the unit the matrix runs.** `run_interop_cell.py` builds
+nothing — it expects a pre-built tree and runs one named gtest binary per cell — so `plan.md` fixes the
+unit as *the interop driver targets only*, never `all`. Measuring a full build would derive thresholds for
+a build this feature does not perform (~24 G against an estimated 3–8 G), which fails in the expensive
+direction: a threshold three to eight times too large refuses builds that would have succeeded.
+
+⚠️ **ccache is out of scope for both predicates.** `CCACHE_DIR=/mnt/wsl/fixppbuild/ccache` is on
+`/dev/sde`, a separate 64 G VHD whose backing file is not on `E:`, while `/` is `/dev/sdd`. Its growth
+consumes neither ceiling, and sampling it into either predicate would inflate both.
+
+**The experiment**: build **each** of the four configurations from clean, **targeted**, while sampling
+**both** `df -k /` and `df -k /mnt/e` before, during and after; record the delta in each. Derive **two**
+per-configuration values with headroom, and record each **with its date**:
+
+| Value | Derived from | Compared against | Bounds |
+|---|---|---|---|
+| `required_internal_free` | the peak **build-mount** occupancy observed for that configuration | the build-mount reading | total data resident at once — 34 GiB for ASan |
+| `required_host_growth` | the observed **host delta** for that configuration | the host-mount reading | net new allocation the VHD may still need |
+
+⚠️ **These are two different quantities and one may not stand in for the other.** Deriving a threshold
+from the host delta and applying it to the build-mount reading authorises a 34 GiB build on a VHD with
+4 GiB free — the exact ENOSPC the gate exists to prevent, produced by the gate's own arithmetic. See
+`contracts/disk-preflight.md` D-1.
+
+⚠️ **Four configurations, not one.** This research item previously mandated measuring **one**
+configuration while `plan.md` promised per-configuration budgets across the whole span. Under FR-021's
+four-config matrix all four are built and run, so all four are measured — `linux-clang-ubsan` included; it
+is a **required arm** now, not merely the first thing to delete.
+
+⛔ **Do not treat `linux-clang-ubsan` as cheap on the strength of its current 1.5 G.** Measured
+2026-09-10, that tree holds **128 objects and 4 executables** against 1598–1783 objects and 339–356
+executables in the other three — it is essentially unpopulated. At the measured ~15–19 MB/object a **full**
+ubsan build is **≈24 G**. What makes the fourth configuration affordable is the *targeted* build unit, not
+the size of the directory currently on disk.
 
 ⚠️ **This is the one place where an unmeasured guess would reproduce the exact defect the gate exists to
-prevent.** Do not let a plausible number stand in for the measurement.
+prevent.** Do not let a plausible number stand in for the measurement — and note that an unset or
+unparseable threshold must be a hard error, never a `0` that makes `proceed` true while measuring nothing
+(D-9, arm A-7).
 
 **Alternatives considered**: assume 1:1 (safe but may make the 34 GiB ASan config look impossible when it
 is not); assume reuse (unsafe — this is the failure being designed against).
@@ -52,6 +94,20 @@ is not); assume reuse (unsafe — this is the failure being designed against).
 ## R-2 — How does each counterparty get typed, dictionary-backed access? ✅ DECIDED
 
 **Decision**: use each engine's **direct typed conversion**, not its `MessageCracker`.
+
+⚠️ **Typed conversion alone contributes NOTHING to what R-8 enumerates, and the bundle previously let it
+sit inert.** The evidence below says why: the `FIX44::` classes *"add **no data members** — they are
+`FIELD_SET(...)` macros over `Message`"*, so the converting constructor is a copy that re-parses nothing,
+a typed accessor resolves to `getField` on the same `FieldMap` the generic walk iterates, and group parsing
+is decided **at parse time by the dictionary**, not by the wrapper. The typed conversion could have been
+deleted and every witness would still have passed.
+
+**What makes it worth having is a different assertion, and FR-003b now requires it.** A typed accessor is
+not a *value* check but a **schema-conformance** check: `NewOrderSingle::get(Symbol&)` compiles only if
+`Symbol` belongs to `NewOrderSingle` in FIX 4.4, and `FieldNotFound` fires if the peer did not receive it.
+Generic enumeration cannot make that assertion at all; typed access cannot see missing/spurious fields or
+group shape. **Both are required, the script declares which fields go which way (FR-003b), and an arm
+bypasses the typed accessor while leaving enumeration intact and requires RED.**
 
 - **QuickFIX-cpp** — a converting constructor exists: `fix44/NewOrderSingle.h:13`
   `NewOrderSingle(const FIX::Message& m) : Message(m) {}`. So `FIX44::NewOrderSingle nos(message);`
@@ -97,11 +153,31 @@ assertj — **no Jackson, no Gson, no JSON-B**. The QuickFIX-cpp counterparty li
 OpenSSL + Threads (`counterparty/CMakeLists.txt:29-35`) — **no JSON library**.
 
 ⚠️ **The escaping rule is a correctness requirement, not a formatting detail, and it belongs in the
-contract.** FIX values may contain `"` and `\`, and the data fields — `RawData(96)`, `XmlData(213)`,
-`SecureData(91)` — may contain **arbitrary bytes including SOH and control characters**. A naive writer
-emits invalid JSON on precisely the messages most worth inspecting. The rule must cover `"`, `\`, every
-byte `< 0x20` as `\u00XX`, and must state a decision for non-UTF-8 bytes. **Both writers must be tested
-against a value containing each class**, or the escaping is an untested claim.
+contract.** FIX values may contain `"` and `\`, and data fields may contain **arbitrary bytes including
+SOH and control characters**. A naive writer emits invalid JSON on precisely the messages most worth
+inspecting. The rule must cover `"`, `\`, every byte `< 0x20` as `\u00XX`, and must state a decision for
+non-UTF-8 bytes. **Both writers must be tested against a value containing each class**, or the escaping is
+an untested claim.
+
+**✅ The non-UTF-8 decision, taken at Gate A round 1 — it could not be deferred.** This item previously
+handed the decision to the contract and the contract handed it back (*"the contract MUST state a single
+decision"*, unmet, inside the artifact whose job is to be the decision). It cannot go to implementation
+either: Java `String` is UTF-16 and C++ `std::string` is bytes, so two independent implementations of an
+unstated rule **diverge**, and FR-004 breaks.
+
+**Decision**: a field entry whose raw bytes are **not valid UTF-8** carries `value_b64` — base64
+(RFC 4648 standard alphabet, `=` padding, no line breaks) of the raw bytes as received — and **no `value`
+key**. Exactly one of the two is present on every entry. Base64 is byte-exact, has one canonical alphabet,
+imposes no encoding assumption on either language's string type, and is trivially producible by a
+hand-rolled writer in both. Alongside it the contract now pins a **canonical form** — fixed key order, no
+insignificant whitespace, lower-case `\u00XX` hex, no optional escapes — because C-7's byte compatibility
+admits exactly one spelling, and a **cross-language golden fixture** (one consumer, both producers, one
+committed expected artifact) so C-7 is exercised rather than asserted.
+
+⚠️ **Read the motivating field list with R-10 in hand**: `XmlData(213)` is a built-in **header** field on
+both engines and `SecureData(91)` becomes header under `UseDataDictionary=Y`, so two of the three fields
+named above are excluded from `fields` by C-6 under this feature's own configuration. `RawData(96)`
+remains reachable. The rule and its witness stand; the justification does not rest on excluded fields.
 
 **Alternatives rejected**: adding a JSON library (a new third-party dependency in two languages, for a
 writer of this size); snakeyaml flow-style on the Java side only (YAML is a JSON superset, but it is a
@@ -109,7 +185,13 @@ workaround, and it would make the two emitters structurally different — FR-004
 
 ---
 
-## R-4 — Where does the readback record go, and what must the shim change? ✅ DECIDED — **nothing**
+## R-4 — Where does the readback record go, and what must the shim change **for collection**? ✅ DECIDED — **nothing for collection**
+
+⚠️ **Headline narrowed at Gate A round 1.** It previously read *"what must the shim change? ✅ DECIDED —
+**nothing**"*, which is true of **collection** and false of everything else. The body already said so
+(*"a sibling file lands in the right place with **no collection change**"*, and the impact table's
+*"**Zero** `run_interop_cell.py` changes **for collection**"*), but the headline is what gets quoted.
+**Consumption** and the **FR-016a refusal** both require shim changes — decided in **R-4a** below.
 
 **Decision**: write `counterparty-readback.jsonl` as a **sibling of `argv[2]`** (the transcript path),
 opened in **truncate** mode.
@@ -129,13 +211,70 @@ C++ `std::ios::app` at `:232-241`, Java `StandardOpenOption.APPEND` at `:520-528
 accumulate stale records across runs**, and stale records are worse than none: they would satisfy a
 comparator looking for a witness that this run never produced.
 
-**Alternatives rejected**: an `argv[3]` path (needs the C++ arg guard at
+**Alternatives rejected — for the readback file's PATH**: an `argv[3]` path (needs the C++ arg guard at
 `interop_counterparty_main.cpp:227` relaxed); an env var (needs a new `cp_env` key in
-`launch_counterparty`). Both cost changes the sibling approach does not.
+`launch_counterparty`). Both cost changes the sibling approach does not, **for that purpose**.
+
+⚠️ **REVERSED at Gate A round 2, for the METADATA handoff — and the rejection reason was never the cost it
+was priced at.** FR-013b requires the counterparty's hello to carry `run_id`, the script digest, the
+configuration name and the counterparty image digest. **The counterparty has no channel to receive any of
+them**, so it was required to emit four fields it cannot obtain — a defect this item's own rejection
+created. But *"needs a new `cp_env` key"* is not a cost: `launch_counterparty` **already assembles a
+`cp_env` dict carrying ten `INTEROP_CP_*` knobs** and already passes it as `env=cp_env` to **both** the C++
+and the Java branch. Adding six metadata keys is one more block in an existing pattern.
+
+**Decision (round 2):** `INTEROP_CP_{RUN_ID, CELL_ID, CONFIG, IMAGE_DIGEST, SCRIPT_PATH, SCRIPT_DIGEST}` are
+added to that block. The hello copies the first four verbatim and **recomputes** `script_digest` over the
+file it opened — lowercase-hex SHA-256, computed identically by the shim (`hashlib`), the C++ counterparty
+(OpenSSL, already linked) and the Java counterparty (`MessageDigest`), so **no new dependency on any side**
+and R-3's Article III/V `PASS` is preserved. The shim compares before launching the gtest. A verbatim copy
+of the digest would prove only that the counterparty can echo a string. See data-model §1.
+
+⚠️ The sibling-file decision for the readback **path** is unaffected and stands; what is reversed is the
+blanket rejection of `cp_env` as a channel.
 
 ---
 
-## R-5 — How widely is `UseDataDictionary=Y` enabled? ✅ DECIDED — **per-cell, not globally**
+## R-4a — Who CONSUMES the readback stream, and where does the hello gate live? ✅ DECIDED (Gate A round 1)
+
+R-4 leaves the record on disk in the right place. Nothing in the bundle said which process reads it, how
+the path reaches that process, or where the FR-016a refusal executes — and *"some handoff must be added"*
+is not a design decision.
+
+**Decision — three parts:**
+
+1. **The fixpp-side gtest performs the field comparison**, because it is the only process holding fixpp's
+   own sent and typed-read records. It receives the run's readback path through a **new environment
+   variable**, set alongside the ones `run_interop_cell.py` already sets on the gtest — the same
+   mechanism, not a new one. Both cell branches build an `env` dict carrying
+   `INTEROP_<TOKEN>_PORT` / `_HOST`, `INTEROP_FIXPP_PORT` (acceptor branch), `FIXPP_TLS_FIXTURE_DIR` and
+   `FIXPP_FIX44_DICT_XML`; the readback path is one more key of exactly that kind, and `run_dir` is in
+   scope at both sites.
+2. **The FR-016a hello gate runs shim-side, BEFORE the gtest is launched.** *"The harness MUST refuse to
+   **run** a cell against a peer that announces nothing"* and R-7's *"the harness reads it **before the
+   conversation**"* both place the check before the conversation starts — and at that moment only the shim
+   is running. This is a `run_interop_cell.py` change, and R-4's *"nothing"* never covered it.
+3. ⚠️ **The refusal MUST NOT be phrased in the `unavailable:` vocabulary.** `parse_gtest_status` greps
+   `unavailable: .*` out of gtest stdout and returns `skip:<reason>`, and `probe_counterparty` already
+   emits `"<cp> unavailable: …"` strings into that channel. A hello check implemented gtest-side in the
+   idiom already present in that file would record a **present-but-stale peer** as `skip:` — exactly the
+   collapse data-model §1 warns against (*"Collapsing the two reintroduces exactly the silence this feature
+   exists to remove"*), reached by imitation rather than carelessness. Placing the gate shim-side, ahead of
+   the gtest, removes the temptation structurally: there is no gtest stdout to grep yet.
+
+**Alternatives rejected**: comparing shim-side in Python (the shim has no access to fixpp's builder inputs
+or its typed reads, so it cannot form either sent record); passing the path via the counterparty's `cp_env`
+(wrong process — the counterparty writes the file, the comparator reads it).
+
+---
+
+## R-5 — How widely is `UseDataDictionary=Y` enabled **on the PEER**? ✅ DECIDED — **per-cell, not globally**
+
+⚠️ **Scope stated explicitly at Gate A round 1.** Everything in this item is **peer-side** evidence —
+`DefaultSessionFactory`, `MessageSessionUtils`, `DataDictionaryProvider` — so it governs **FR-002** and
+says nothing about FR-001. FR-001 governs fixpp's own `SessionConfig::dictionary`
+(`tests/interop/happy/hp_support.hpp` — `c.dictionary = fixpp::test_support::make_minimal_dictionary();`),
+a different mechanism on a different side. See **R-5a** for the half this item does not cover.
 
 **Decision**: enable the dictionary **only on the business-message conversation cells this feature
 adds**. Leave every existing cell as it is.
@@ -162,11 +301,66 @@ Do not plan around it.
 ⚠️ **That asymmetry is real** and a config template that copies the C++ form to the Java side, or vice
 versa, will fail at session construction rather than at review.
 
+### ⛔ The seam that makes "per-cell" implementable — decided at Gate A round 2
+
+*"Per-cell, not global"* had no structural seam, and `plan.md` § Project Structure read
+`configs/*.cfg.in  # UseDataDictionary=Y for the FIX 4.4 cells`, which is the **global** flip this item
+declines. Verified in the tree: `quickfix-cpp-{initiator,acceptor}-tls.cfg.in` and
+`quickfixj-{initiator,acceptor}-tls.cfg.in` **all** carry `UseDataDictionary=N`, and
+`quickfixj-acceptor-tls.cfg.in` is named by the idle-cadence cells and by the `PD-*` cells — exactly the
+cells this item protects. Editing those templates flips them; not editing them cannot satisfy FR-002.
+
+**Decision**: `config_template` is already a **per-cell** attribute selected in `run_interop_cell.py`, so
+the eight new cells name **four new dedicated conversation templates** carrying `UseDataDictionary=Y`. The
+existing `*-tls.cfg.in` templates are **not edited**, and a regression check asserts a protected cell still
+renders `UseDataDictionary=N`.
+
+⛔ **A "narrowly scoped renderer override" was rejected**: the per-cell `config_template` seam already
+exists, and a renderer override is machinery for a problem the harness has already solved.
+
 **A C++-only alternative, noted and not chosen**: `FIX::DataDictionary(path)` can be constructed
 standalone (`DataDictionaryProvider.h:54`) purely for tag→name/type, leaving session validation
 untouched. It gives naming with zero behavioural change — but it has **no clean QFJ equivalent for group
 parsing**, because groups are decided at parse time inside the session. Using it would make the two
 engines structurally different, which FR-004 forbids.
+
+---
+
+## R-5a — Does the same collateral-drift argument apply to the **fixpp** side? ✅ DECIDED — **yes, and FR-001 is scoped accordingly**
+
+R-5's collateral-drift reasoning was never applied to the side R-5 does not cover, and it applies there
+with equal force.
+
+**The mechanism.** Swapping `SessionConfig::dictionary` from the FIX 4.2 single-Heartbeat sentinel to the
+production FIX 4.4 dictionary changes **fixpp's own inbound parse** for those cells: group detection is
+dictionary-driven on the read path, so an existing cell would begin seeing repeating-group structure where
+it previously saw flat fields. That is the same class of change R-5 declines to make peer-side, and it is
+unbudgeted if FR-001 is read as *"every live FIX 4.4 interop cell"*.
+
+**Decision**: **FR-001 is scoped to the cells this feature adds**, exactly as FR-002 is. Existing live
+cells keep their current dictionary on both sides and are covered by **FR-020**'s regression obligation
+instead. US1's Independent Test is narrowed to match — it previously required running *"the **existing**
+cells"* with the real dictionary on both sides, which asked for both flips this item and R-5 decline.
+
+**Consequence for FR-019.** If a later feature does widen the scope, the golden re-captures it triggers are
+not only about serialization and ordering: the dictionary flip changes the **membership** of the field set
+under comparison (see **R-10**), so a re-capture must be reviewed as a set change, not a formatting change.
+
+---
+
+## R-1a — The gate cannot be calibrated under its own precondition ✅ DECIDED (Gate A round 2) — **bootstrap mode**
+
+R-1's experiment is four clean targeted builds. `plan.md` makes the disk gate normative for *"every
+build-bearing task"*, D-9 makes an unset threshold a hard error, and D-7 sources both values from R-1's
+measurement. So R-1 cannot run: it needs thresholds that only it can produce. R-1's own fallback
+(*"until R-1 has run, tasks assume the pessimistic model"*) was stated in this file and **forbidden** by
+D-7/D-9 in the contract — one artifact permitting what another refuses.
+
+**Decision**: `ci/disk-preflight.sh --bootstrap` (D-9a) accepts thresholds carrying the literal label
+**`estimated, pending R-1`** with a date, taken from the pessimistic model (host cost = build size), and
+prints that label on **every** output line. Admissible for the R-1 experiment and nothing else; any other
+task invoking it is a violation that is **visible in the log** rather than inferable. The path is dead once
+R-1's measured values land. One clause, and it fails loudly.
 
 ---
 
@@ -250,14 +444,89 @@ quietly downgraded to `n/a`.
 
 ---
 
+## R-10 — Where exactly is the header/body boundary, and does it move? ✅ DECIDED (Gate A round 1) — **it moves, and the two engines already disagree**
+
+The bundle treated the exclusion as an enumeration (`8, 9, 35, 34, 49, 56, 52, 10`) in `spec.md` and as a
+structural rule in `data-model.md` and `readback-jsonl.md` C-6. The structural rule is the correct one, and
+resolving it turns up two consequences neither artifact had checked.
+
+**Membership is `built-in list ∪ dictionary-declared header`, on both engines.**
+
+- `quickfix-cpp/src/C++/Message.cpp` — `Message::isHeaderField(int field, const DataDictionary *pD)`
+  returns true if the field is on the built-in `switch` list, and otherwise consults `pD` when one is
+  present. (Spelled as an `if`-chain, not a single `||` expression — the behaviour is the disjunction, the
+  source text is not.)
+- `quickfixj-base/src/main/java/quickfix/Message.java` — the same rule, spelled as one disjunction:
+  `isHeaderField(field.getField()) || (dd != null && dd.isHeaderField(field.getField()))`, over its own
+  built-in `switch`.
+
+⚠️ **Re-derive both by opening the two `isHeaderField` overloads** rather than trusting the paraphrase
+above; the built-in lists are what move, and no line number is given here for that reason.
+
+**(a) The body set SHRINKS when US1 turns the dictionary on.** `FIX44.xml`'s `<header>` block declares
+fields that are **not** in QuickFIX-cpp's built-in list — `SecureData(91)` and the `NoHops` members among
+them. Under `UseDataDictionary=N` those are **body** and appear in `fields`; under `=Y` they are **header**
+and C-6 excludes them. So FR-006's exact-set equality ranges over a *different set* before and after the
+flip this feature mandates, and any golden or expected set fixed against today's `=N` behaviour is wrong
+afterwards. **FR-019's re-capture obligation must be read as covering set membership**, not only the
+peer's serialization or ordering.
+
+**(b) The two built-in lists are not identical, so FR-004/C-7 is violated by the engines themselves.**
+QuickFIX-J's list contains **`ApplExtID(1156)`**; QuickFIX-cpp's does not. For identical bytes carrying tag
+1156, QFJ classifies it **header** (excluded) and QuickFIX-cpp **body** (included) — two emitters, two
+different `fields` sets, silently, with no configuration involved. (Tag 1156 is the field the library
+records as open work under 074's `L-074-1`, so it is a live case, not a hypothetical.) Format identity is
+therefore **not free**: the contract must **specify the partition itself** where the built-ins disagree
+rather than delegating it to each engine, and C-7's cross-engine fixture must contain tag 1156.
+
+**Decision**: state the rule structurally in FR-003 with the eight tags as an illustrative subset; pin the
+reconciliation in `contracts/readback-jsonl.md`; put tag 1156 in the cross-engine fixture.
+
+---
+
+## R-11 — Republishing the counterparty image moves `:latest`. What rides it? ✅ DECIDED (Gate A round 1)
+
+`plan.md` § Structure Decision gives the ordering — *parent counterparty change → image rebuild + publish
+→ digest captured → library-side cells pinned to that digest* — and it is sound as far as it goes. FR-016b
+pins **this feature's** cells to a digest. Nothing addressed what is **not** pinned.
+
+- `.github/workflows/interop-smoke.yml`'s `IMAGE:` key names
+  `ghcr.io/…/fixpp-interop-counterparties:latest` — the only tag that workflow knows.
+- `spec.md` § Assumptions requires the image to be **rebuilt and republished**, because this feature
+  changes both counterparty applications.
+
+If the rebuild publishes to `:latest`, **every existing interop consumer immediately runs new counterparty
+code**, with no digest pin and no gate:
+
+- The cells **FR-020** requires to keep passing — they would be exercised against a rebuilt peer, a change
+  FR-020 does not anticipate and cannot attribute.
+- The cells **R-5 protects**: `INTEROP_CP_CORRUPT_ADMIN`, whose entire design is that QFJ does not
+  validate, and the `PD-*` malformed-dup cells. R-5 carefully declines a global `UseDataDictionary` flip to
+  avoid disturbing them; the republish disturbs the binary underneath them anyway, since the readback
+  emitter is new code on the inbound path of **every** message those cells send.
+- The **smoke workflow itself**, which is a required check.
+
+**Decision**: pin `interop-smoke.yml` and the existing cells to the **pre-089 digest before republishing**,
+so `:latest` moving is inert. It costs one line in the workflow. The alternative — publish under a new tag
+and move `:latest` only after FR-020's regression run is green — is acceptable but leaves a window in which
+`:latest` and the pinned digest disagree. Recorded as **FR-026**.
+
+---
+
 ## Consolidated impact on the plan
 
 | Item | Effect |
 |---|---|
-| R-2 | Typed access is **free**. The feature's cost is the readback *channel* and the *dictionary*, not typed parsing |
-| R-3 | Article III / Article V watch items resolve to **PASS** — no new dependency. The JSON escaping rule becomes a contract clause with its own witness |
-| R-4 | **Zero** `run_interop_cell.py` changes for collection; goldens inert by construction. Truncate mode is load-bearing |
-| R-5 | FR-002 is **per-cell**, and a global flip is now an explicit non-goal that would drift unrelated goldens |
+| R-2 | Typed access is **free**. The feature's cost is the readback *channel* and the *dictionary*, not typed parsing. FR-003b makes typed accessors a **required** assertion distinct from generic enumeration, so the wrapper is no longer inert |
+| R-3 | Article III / Article V watch items resolve to **PASS** — no new dependency. The escaping rule, the **non-UTF-8 `value_b64` decision**, the canonical form and a cross-language golden fixture all become contract clauses with their own witnesses |
+| R-4 | **Zero** `run_interop_cell.py` changes **for collection**; goldens inert by construction. Truncate mode is load-bearing |
+| R-4a | Consumption and the FR-016a gate are **not** free: one new env var to the gtest, and a shim-side pre-conversation hello gate that must avoid the `unavailable:` idiom |
+| R-4 (reversed, round 2) | The **metadata** handoff to the counterparty uses the existing `cp_env` block — six `INTEROP_CP_*` keys. R-4's rejection of an env var was priced on a cost that does not exist; without it the counterparty must emit four hello fields it cannot receive |
+| R-1a | The disk gate's calibration circularity is closed by a **labelled bootstrap mode** (D-9a), admissible only for R-1's own experiment |
+| R-5 | FR-002 is **per-cell** (peer side), and a global flip is an explicit non-goal that would drift unrelated goldens. The **seam** is four new dedicated conversation `config_template`s; the existing `*-tls.cfg.in` templates are not edited |
+| R-5a | FR-001 is **per-cell** on the fixpp side too, for the same reason. US1's Independent Test narrows to this feature's cells |
 | R-7 | FR-016a is new capability, distinct from the existing availability probe: *unavailable* = skip, *wrong version* = **failure** |
-| R-8 | Two silent traps promoted into the contract, each needing a witness |
-| R-1, R-6, R-9 | Remain open **deliberately**, each with a mandated measurement rather than an assumption |
+| R-8 | Two silent traps promoted into the contract, each needing a witness — reachable only because FR-008b puts a nested group in the script |
+| R-10 | The header/body partition is **specified in the contract**, moves under US1's flip, and needs a tag-1156 reconciliation fixture |
+| R-11 | The `:latest` blast radius is closed by pinning existing consumers to the pre-089 digest first (FR-026) |
+| R-1, R-6, R-9 | Remain open **deliberately**, each with a mandated measurement rather than an assumption. R-1 now measures **four** configurations and **two** predicates each |

@@ -75,16 +75,85 @@ newly passes, nothing regressed.
 
 Five clarifications were integrated (exact-set field comparison; `MsgSeqNum(34)`+direction as the
 correlation key; digest pin + capability handshake; two-level cell/witness result shape with its own
-completeness gate; all three sanitizer configs). Each made an existing requirement *more* testable
-rather than adding a new open question — FR count 20 → 28, SC count 8 → 12, and the circular
+completeness gate; ~~all three sanitizer configs~~ — **superseded**, see the round-1 note below). Each made
+an existing requirement *more* testable rather than adding a new open question, and the circular
 "field of interest" wording in FR-003/FR-006 that the first clarification targeted is gone.
 
-The two unchecked items are unchanged in character: the clarifications added FIX-protocol vocabulary
+~~The two unchecked items are unchanged in character: the clarifications added FIX-protocol vocabulary
 (`MsgSeqNum(34)`, `PossDupFlag(43)`) and existing build-config identifiers (`normal`, `asan-ubsan`,
 `tsan`), which are domain terms already used by the artifacts this feature edits — not newly-introduced
-implementation prescriptions. No class name, function signature, file format, or transport is chosen
-anywhere in the spec.
+implementation prescriptions.~~ ⚠️ **STRUCK at Gate A round 2 — the present tense was false.**
+`asan-ubsan` is **retired** by FR-021a: it named a preset enabling ASan only. The build-config identifiers
+are now `normal`, `asan`, `ubsan`, `tsan`. The substantive point survives in the round-1 note below; only
+the vocabulary was stale. No class name, function signature, file format, or transport is chosen anywhere
+in the spec.
 
 ⚠️ One clarification resolved *against* the stated recommendation: the sanitizer axis was decided as
-**all three configs**, not `normal` + `asan-ubsan`. That is recorded in Assumptions with its cost
-stated plainly, because it pulls a first-ever TSan bring-up on the paired live matrix into scope.
+~~**all three configs**, not `normal` + `asan-ubsan`~~ — **superseded at Gate A round 1, see below**. That
+is recorded in Assumptions with its cost stated plainly, because it pulls a first-ever TSan bring-up on the
+paired live matrix into scope.
+
+## Re-validation — 2026-09-10, after Gate A round 1
+
+Re-evaluated every item against the rewritten bundle. **14/16 → 14/16** on the tick counts, but one tick
+was **false when it was written** and is now true for the first time.
+
+⚠️ **"All mandatory sections completed" was `[x]` while `spec.md` had no `Normative References`
+section.** `[const §VI.5]` is unconditional and is a *presence* obligation, so that item could not honestly
+have been ticked. This is the fifth bundle running to be caught on it at this gate (085, 086, 087, 088,
+089), and 088's own checklist note said as much. The section now exists and is **non-empty** — 089 could
+not use the *"the FIX set is empty"* discharge 086 and 087 used, because SC-007 names five catalogue rows
+and each carries `[FIX50SP2] Single General Order Handling`. The tick now stands on something.
+
+The sanitizer clarification is **superseded**: the axis is now **four configs** — `normal`, `asan`,
+`ubsan`, `tsan` — because `asan-ubsan` named a harness config whose preset enables **ASan only**, so the
+recorded "all three sanitizer configs" decision was taken on a false label and delivered two sanitizer
+kinds. The run count moves 24 → **32**. The TSan bring-up cost is unchanged.
+
+⛔ **The FR and SC counts that stood here are DELETED, not corrected.** They were stale (the file said 45
+against a spec carrying more), and a hand-maintained count in a document is a result nothing re-runs —
+correcting it only schedules the next round's finding. Derive them when they are wanted:
+
+```bash
+grep -o 'FR-[0-9]\+[a-z]*' spec.md | sort -u | wc -l
+grep -o 'SC-[0-9]\+[a-z]*' spec.md | sort -u | wc -l
+```
+
+The additions are not new open questions — each closes an axis the bundle already gated on but could not express (the peer's `sent` record; `config`
+on the witness row; the run/cell identity split; the `error:enospc` terminal state; the validation pair;
+the declarative script; the two disk predicates; the corrected spurious-hit definition).
+
+The two unchecked items are unchanged in character. The rewrite added FIX-protocol vocabulary
+(`ApplExtID(1156)`, the header/trailer partition) and named two **existing** engine functions as evidence
+for a structural rule — `isHeaderField` on both engines — rather than prescribing new code. No class name,
+function signature, file format, or transport is chosen anywhere in the spec; where the rewrite *does*
+name a serialization (base64 for non-UTF-8 bytes, FR-025), that is a **contract-level interoperability
+decision between two independently-written emitters**, not an implementation choice — leaving it unstated
+was the defect, because Java `String` and C++ `std::string` would have diverged.
+
+## Re-validation — 2026-09-10, after Gate A round 2
+
+Re-evaluated every item against the rewritten bundle. **No item changed state.** The tick counts are
+deliberately not recorded — see the deletion note above; run the two `grep` recipes if a count is wanted.
+
+The round-2 rewrite changed no item's character. It added no new implementation prescription: the values it
+does fix are **contract-level interoperability decisions between two independently-written emitters**,
+which is the same category as round 1's base64 decision and for the same reason — leaving them unstated
+does not defer to implementation, it **diverges**:
+
+- the **canonical header/body partition** (union of both engines' built-in lists ∪ the dictionary's
+  `<header>` block) and tag `1156`'s disposition — the two engines already classify it differently, so
+  "whatever each engine says" is not one format;
+- the **canonical parsed-path sort order** for field entries — two engines' walks are not one order, so a
+  committed cross-language golden fixture could not otherwise be byte-compatible for both producers;
+- the **lowercase-hex SHA-256** script digest, computed by the shim and **recomputed** by each side over
+  the file it opened.
+
+Two items remain unchecked for the reasons already recorded, and their character is unchanged: this is a
+protocol-fidelity feature between two FIX engines and has no non-technical audience.
+
+⚠️ **One round-2 claim about this file was FALSE and is recorded so it is not "fixed" later**: the review
+alleged a duplicated `R-4a` heading in `research.md`. It is single (`grep -c '^## R-4a'` returns 1); the
+other occurrence is a prose forward-reference. A second alleged duplicate (`plan.md`'s `checklists/` entry)
+is permanently **indeterminate** — the file was rewritten mid-review and the intermediate state is
+unrecoverable, since the bundle files are uncommitted working-tree modifications.
