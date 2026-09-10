@@ -191,7 +191,7 @@ with §3.
 | `type` | string | literal `"readback"` |
 | `msg_type` | string | FIX `MsgType(35)` as received |
 | `seq_num` | integer | `MsgSeqNum(34)` — part of the correlation key (FR-005) |
-| `direction` | enum | which way the message travelled |
+| `direction` | enum | which way the message travelled — vocabulary and wire values: spec § *Conversation census*. **Absolute**: written from fixpp's point of view, never relative to whichever process emits the record, so every emitter writes the same value |
 | `occurrence` | integer | 0-based ordinal within `(seq_num, direction)` on this stream — completes the key |
 | `poss_dup` | boolean | `PossDupFlag(43)` as observed. **Diagnostic only — not a key component** |
 | `fields` | list of *field entries* | **every** body field parsed, each carrying the **raw** parsed spelling; header/trailer excluded |
@@ -352,7 +352,7 @@ The unit a catalogue row cites (FR-015a).
 | **`kind`** | enum | `conformance` · `validator-positive-control` — ⭐ **required.** W-3a's projection and the 32-slot rules **filter on this field**, and the entity omitted it: the scoping was applied to the rules and not to the schema that carries the discriminator |
 | `script_step_id` | string | the conversation-script step this witness covers |
 | `msg_type` | string | |
-| `direction` | enum | |
+| `direction` | enum | vocabulary and wire values: spec § *Conversation census* — **absolute**, never relative to the emitting process |
 | `occurrence` | integer | ordinal within `(seq_num, direction)` |
 | `verdict` | enum | `pass` · `fail` · `skip` — and `skip` may not be produced by a missing record |
 | `mismatch` | list | on failure: the offending paths, each classified |

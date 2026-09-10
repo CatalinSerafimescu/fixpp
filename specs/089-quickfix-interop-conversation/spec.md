@@ -1032,7 +1032,10 @@ not a stale sentence. Deleting the table does not make the gate lenient — it m
 
 ### Business steps — every step that carries a witness
 
-Direction is written from fixpp's point of view. `→` = `fixpp-to-peer`, `←` = `peer-to-fixpp`.
+Direction is written from fixpp's point of view, and these two strings are the enum's **wire values**, not
+a shorthand for the arrows: `→` = `fixpp-to-peer`, `←` = `peer-to-fixpp`. The value is **absolute** — it
+does not depend on which process emits the record, so every emitter writes the same value for the same
+message.
 
 | `step_id` | `msg_type` | originator | `direction` | applicable combos | declared `occurrence` values | `depends_on` |
 |---|---|---|---|---|---|---|
