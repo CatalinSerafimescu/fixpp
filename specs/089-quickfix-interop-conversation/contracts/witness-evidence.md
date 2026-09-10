@@ -66,6 +66,7 @@ every field a hello-only corroboration inspects. The **terminal record** (data-m
 | `pass`, naming a ledger entry that does not exist | E-1 RED |
 | **a run whose stream carries a `hello` and NO `terminal` record** | **E-1b RED at promotion** — *the pre-conversation hello does not corroborate a pass*. This is the fixture that separates announcing from conversating |
 | a promoted bundle whose stream's `hello` carries a different `run_id` from the row | E-1b RED — *because the stream disagrees* |
+| **a stream whose `hello` or `terminal` OMITS any join key** (`run_id`, `cell_id`, `config`, `script_digest`) | **E-1b RED at promotion.** ⚠️ This arm exists because the mismatch arm above cannot catch it: a *different* value disagrees loudly, an *absent* one leaves the comparator with nothing to compare and the join succeeds against nothing. Promotion MUST treat absent-key as failure, never as "not applicable". The gtest that cannot source a key aborts before the conversation starts |
 | a ledger `witness_count` differing from the census figure for that slot | E-1 RED |
 | **two authoritative runs for one `(cell_id, config)`** | **E-1c RED** — and shown *not* to be caught by the completeness gate alone, which collapses them |
 | a `validation-on` row whose run recorded `has_validator: false` | E-6 RED |

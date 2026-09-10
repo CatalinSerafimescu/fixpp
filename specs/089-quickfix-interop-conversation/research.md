@@ -33,24 +33,29 @@ from an ordinary `int`. Both engines gate group parsing on a non-null dictionary
 **Decision**: **not decidable by reasoning; it must be measured.** Until it is, every task assumes the
 **pessimistic model** (host cost = build size).
 
-**Why it matters.** The two ceilings are different quantities (see `plan.md` § Disk preflight): **83 G**
-free inside the VHD vs **17 G** of host growth on `E:\`, measured 2026-09-10. If a build lands in blocks
-freed by a prior reclaim it may cost the host nothing; on a VHD with no internal free blocks it costs 1:1.
+**Why it matters.** The two ceilings are different quantities (see `plan.md` § Disk preflight): free space
+*inside* the VHD bounds total resident footprint, while free space on the Windows host bounds how much the
+VHD may still **grow**. If a build lands in blocks freed by a prior reclaim it may cost the host nothing; on
+a VHD with no internal free blocks it costs 1:1.
 
-⚠️ **The reuse pool can be BOUNDED from the two readings, and that bound must not be mistaken for the
-answer.** The VHD (`/mnt/e/Catalin/Work/WSL/Ubuntu24.04LTS/ext4.vhdx`) is **191 G materialised on the
-host**, against 156 G used inside and ~12 G ext4 reserve ⇒ **≈23 G already allocated on the host but free
-inside the VHD**. That is an upper bound on how much this feature's builds could cost the host *nothing*.
-**It is not a measurement**: ext4 does not preferentially allocate into already-materialised extents, so an
-allocator that picks fresh extents converts a "free" write into 1:1 host growth. **Inferring the reuse
-figure from these two `df` readings is precisely the reasoning this item exists to replace** — R-1 stays
-mandatory, and no task may substitute the ≈23 G bound for its result.
+⛔ **No reading is recorded here, deliberately.** Both move — one reclaim shifted them within the hour on
+2026-09-10 — and this item exists precisely to replace inferred numbers with measured ones. Re-derive at
+execution time: `df -k /` (build mount), `df -k /mnt/e` (host), `du -sh build/*/` (trees). `plan.md`
+§ *The instrument that fails toward clean* carries the one dated illustration kept as motivation; it is
+**never an operand**.
+
+⚠️ **A reuse pool can be BOUNDED by comparing the materialised VHD file size against the space used
+inside it, and that bound must never be mistaken for the answer.** Writes landing in already-materialised
+blocks cost the host nothing; writes beyond them force VHD growth. **The bound is not a measurement**: ext4
+does not preferentially allocate into already-materialised extents, so an allocator that picks fresh extents
+converts a "free" write into 1:1 host growth. **Computing that bound and substituting it for a measurement
+is precisely the reasoning this item exists to replace** — no task may do so, and R-1 stays mandatory.
 
 ⚠️ **Measure the TARGETED build, because that is the unit the matrix runs.** `run_interop_cell.py` builds
 nothing — it expects a pre-built tree and runs one named gtest binary per cell — so `plan.md` fixes the
 unit as *the interop driver targets only*, never `all`. Measuring a full build would derive thresholds for
-a build this feature does not perform (~24 G against an estimated 3–8 G), which fails in the expensive
-direction: a threshold three to eight times too large refuses builds that would have succeeded.
+a build this feature never performs, and it fails in the **expensive direction**: a threshold sized for the
+full tree refuses targeted builds that would have succeeded.
 
 ⚠️ **ccache is out of scope for both predicates.** `CCACHE_DIR=/mnt/wsl/fixppbuild/ccache` is on
 `/dev/sde`, a separate 64 G VHD whose backing file is not on `E:`, while `/` is `/dev/sdd`. Its growth
@@ -62,32 +67,34 @@ per-configuration values with headroom, and record each **with its date**:
 
 | Value | Derived from | Compared against | Bounds |
 |---|---|---|---|
-| `required_internal_free` | the peak **build-mount** occupancy observed for that configuration | the build-mount reading | total data resident at once — 34 GiB for ASan |
+| `required_internal_free` | the peak **build-mount** occupancy observed for that configuration | the build-mount reading | total data resident at once |
 | `required_host_growth` | the observed **host delta** for that configuration | the host-mount reading | net new allocation the VHD may still need |
 
 ⚠️ **These are two different quantities and one may not stand in for the other.** Deriving a threshold
-from the host delta and applying it to the build-mount reading authorises a 34 GiB build on a VHD with
-4 GiB free — the exact ENOSPC the gate exists to prevent, produced by the gate's own arithmetic. See
-`contracts/disk-preflight.md` D-1.
+from the **host delta** and applying it to the **build-mount** reading authorises a large build on a VHD
+with almost no internal free space — the exact ENOSPC the gate exists to prevent, produced by the gate's
+own arithmetic. See `contracts/disk-preflight.md` D-1, and `plan.md` for the dated illustration.
 
 ⚠️ **Four configurations, not one.** This research item previously mandated measuring **one**
 configuration while `plan.md` promised per-configuration budgets across the whole span. Under FR-021's
 four-config matrix all four are built and run, so all four are measured — `linux-clang-ubsan` included; it
 is a **required arm** now, not merely the first thing to delete.
 
-⛔ **Do not treat `linux-clang-ubsan` as cheap on the strength of its current 1.5 G.** Measured
-2026-09-10, that tree holds **128 objects and 4 executables** against 1598–1783 objects and 339–356
-executables in the other three — it is essentially unpopulated. At the measured ~15–19 MB/object a **full**
-ubsan build is **≈24 G**. What makes the fourth configuration affordable is the *targeted* build unit, not
-the size of the directory currently on disk.
+⛔ **Do not treat `linux-clang-ubsan` as cheap on the strength of its directory size.** A tree that was
+configured but never fully built is small *because it is empty*, not because that configuration is cheap —
+and its size is the first thing a planner reads. **Probe populated-ness before believing any tree size**:
+compare its object and executable counts against a known-complete tree —
+`find build/<preset> -name '*.o' | wc -l` and `ls build/<preset>/bin | wc -l`. A tree an order of magnitude
+below its siblings is unpopulated. What makes the fourth configuration affordable is the *targeted* build
+unit, never a directory size.
 
 ⚠️ **This is the one place where an unmeasured guess would reproduce the exact defect the gate exists to
 prevent.** Do not let a plausible number stand in for the measurement — and note that an unset or
 unparseable threshold must be a hard error, never a `0` that makes `proceed` true while measuring nothing
 (D-9, arm A-7).
 
-**Alternatives considered**: assume 1:1 (safe but may make the 34 GiB ASan config look impossible when it
-is not); assume reuse (unsafe — this is the failure being designed against).
+**Alternatives considered**: assume 1:1 (safe, but may make the largest sanitizer configuration look
+impossible when it is not); assume reuse (unsafe — this is the failure being designed against).
 
 ---
 

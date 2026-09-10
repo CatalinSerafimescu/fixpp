@@ -1,8 +1,18 @@
 # Contract: counterparty readback stream
 
 **Producers**: `phase-9-harness/quickfix-cpp/counterparty/interop_counterparty_main.cpp` (C++),
-`phase-9-harness/quickfixj/.../InteropCounterparty.java` (Java).
+`phase-9-harness/quickfixj/.../InteropCounterparty.java` (Java), **and the fixpp-side emitter**
+(`tests/interop/support/`) — three producers, not two.
 **Consumer**: the fixpp-side comparator + the harness shim.
+
+⛔ **fixpp is a PRODUCER of this format, not only its consumer.** FR-006 compares fixpp's `fields` against
+the counterparties' by **exact set equality**, so fixpp's emitter is bound by **every** clause here that
+binds theirs — the canonical partition, the canonical form and sort order, the encoding rule, and the
+`hello`/`terminal` requirements. Wherever this contract says *"both emitters"* it means **all three**.
+⚠️ Leaving fixpp's emitter unbound does not fail quietly: FR-006's exact-set comparison goes RED on the
+first run. The hazard is the **repair**, because the cheapest way to make an unbound emitter agree is to
+relax FR-006 to a subset comparison — which is precisely what FR-006 forbids, and which would silently
+stop detecting a field the peer sends and fixpp drops.
 
 **FR-004 requires ONE format.** Both producers emit byte-compatible records; a single consumer parses
 both. A difference between the two emitters is a contract violation, not an implementation detail.
@@ -69,6 +79,25 @@ bytes — so an unstated decision here does not defer to implementation, it **di
 | every byte `< 0x20` | `\u00XX`, **lower-case hex** — including SOH, which appears inside data fields |
 | `/` and every byte `≥ 0x20` that is valid UTF-8 | emitted literally. **No optional escaping**: `\/`, `\uXXXX` for non-ASCII, and any other permitted-but-unnecessary escape are forbidden, because byte compatibility (C-7) admits exactly one spelling |
 | **non-UTF-8 bytes** | **DECIDED**: the field entry carries **`value_b64`** — base64 (RFC 4648 standard alphabet, `=` padding, no line breaks) of the **raw bytes as received** — and **no `value` key**. Exactly one of `value` / `value_b64` is present on every field entry |
+
+⛔ **The Java side can only honour `value_b64` because QuickFIX/J's charset is a total bijection — PIN IT.**
+QuickFIX/J decodes the frame's `byte[]` to a `String` before the application sees it, so an
+application-level emitter can reproduce raw bytes **only** if that conversion loses nothing. In the pinned
+engine it does not: `org.quickfixj.CharsetSupport.getDefaultCharset()` returns **`ISO-8859-1`**, which maps
+all 256 byte values bijectively to U+0000–U+00FF, so `new String(b, ISO_8859_1).getBytes(ISO_8859_1) == b`
+for every input. **Reconstruction is exact, and `value_b64` is emitted by re-encoding the `String` with
+`ISO-8859-1`.**
+
+⚠️ **This is a property of the charset, not of QuickFIX/J** — and it is the whole reason the decision above
+is implementable. Under any non-bijective charset (UTF-8 among them) malformed sequences are replaced
+during decode and the original bytes are **unrecoverable at application level**, at which point the only
+remaining route is capturing raw bytes below the decoder. The contract therefore **requires** the Java
+counterparty to assert `CharsetSupport.getDefaultCharset()` is `ISO-8859-1` at startup and fail loudly
+otherwise, rather than inheriting it.
+
+⚠️ **The synthetic fixture does not establish this.** Constructing a message directly in the emitter
+bypasses the decoder entirely, so it proves the *emitter* round-trips and says nothing about the **live**
+path. C-7's arm MUST include a cell that drives an invalid-byte field **over the wire**.
 
 **Why base64 and not an escape extension**: it is byte-exact, has one canonical alphabet, imposes no
 encoding assumption on either language's string type, and both a hand-rolled C++ writer and a Java writer

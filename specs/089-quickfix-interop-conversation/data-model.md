@@ -80,6 +80,38 @@ linked) and the Java counterparty (`MessageDigest`) — no new dependency on any
 R-3's Article III/V `PASS` intact. The **shim is the single computer of record**; every other party
 recomputes and is checked against it.
 
+#### ⛔ The gtest needs the SAME four values, and `INTEROP_CP_*` does not reach it
+
+The `INTEROP_CP_*` block above is **counterparty-only** — it is `env=cp_env` on the counterparty launch.
+But fixpp's own `hello` (above) and its `terminal` (§12) require `run_id`, `cell_id`, `config` and
+`script_digest` too, and **`run_id` is minted by the shim** (§11): there is no other source for it inside
+the gtest. Without a second channel, fixpp emits a stream that promotion cannot structurally join.
+
+The shim therefore sets a **parallel block on the gtest's environment**, at the point it invokes the
+binary named by the cell:
+
+| env key | consumed as | copied verbatim, or recomputed? |
+|---|---|---|
+| `INTEROP_FIXPP_RUN_ID` | `run_id` | verbatim |
+| `INTEROP_FIXPP_CELL_ID` | `cell_id` | verbatim |
+| `INTEROP_FIXPP_CONFIG` | `config` | verbatim |
+| `INTEROP_FIXPP_ARM` | `arm` (`validation-off` \| `validation-on`) | verbatim |
+| `INTEROP_FIXPP_SCRIPT_PATH` | the conversation script fixpp drives from | — |
+| `INTEROP_FIXPP_SCRIPT_DIGEST` | the shim's digest of that file | **not copied** — recomputed, as below |
+| `INTEROP_FIXPP_READBACK_PATH` | where fixpp writes its own stream | — |
+
+⚠️ **Same rule as the counterparty**: `script_digest` in fixpp's hello is **recomputed by fixpp over the
+file it actually opened** and compared against `INTEROP_FIXPP_SCRIPT_DIGEST`. Both sides recomputing
+against one shim-held value is what makes a *disagreement about which script ran* detectable at all; a
+verbatim echo on either side would prove only that a string can be copied.
+
+⛔ **An ABSENT value is a hard failure, not a defaulted one.** A gtest that cannot read
+`INTEROP_FIXPP_RUN_ID` MUST abort before the conversation starts rather than emit a record without it, and
+promotion MUST reject a stream whose `hello` or `terminal` omits any join key (`witness-evidence.md` E-1b).
+**This is the direction that fails toward green**: an omitted key leaves the comparator with nothing to
+disagree with, so the join silently succeeds against nothing — which is why the forced arm for it is an
+*omission*, not a mismatch.
+
 ⚠️ **R-4's rejection of an env var is thereby reversed and must be recorded as reversed.** R-4 declined it
 because it *"needs a new `cp_env` key in `launch_counterparty`"*; that block already exists and already
 carries ten keys, so the cost it was priced at was never real. Leaving the rejection on file would leave
@@ -561,6 +593,10 @@ the arm axis appeared in the cell cardinality (8 = 4 × 2) and nowhere else.
 | `cell_pair` | (cell_id, cell_id) | the validation-off and validation-on cells being compared |
 | `config` | string | the configuration both arms ran under — a pair is within one config |
 | `script_digest` | string | both arms must have run the same script |
+| **`off_run_id`** | string | ⭐ the **run** `accepted_off` was read from |
+| **`on_run_id`** | string | ⭐ the **run** `accepted_on` was read from |
+| **`kind`** | enum | `conformance` · `positive-control` — matches the `kind` of both referenced runs |
+| **`expected_verdict`** | enum \| absent | required when `kind: positive-control`; absent for `conformance` |
 | `accepted_off` | set of `script_step_id` | messages the validation-off arm accepted |
 | `accepted_on` | set of `script_step_id` | messages the validation-on arm accepted |
 | `dispositions` | list | per message, each arm's validator disposition — accepted, or rejected with the objection |
@@ -571,6 +607,17 @@ the arm axis appeared in the cell cardinality (8 = 4 × 2) and nowhere else.
 - `verdict: diverged` MUST name **the message and the validator's objection** (FR-012). The witness
   `mismatch` vocabulary is field-level (`value_mismatch` / `missing` / `spurious`) and cannot express
   *"the on arm rejected a message the off arm accepted"*.
+- ⛔ **`off_run_id` and `on_run_id` MUST name two DISTINCT runs whose arms are opposite.** Both referenced
+  runs must match the pair's `cell_pair`, `config`, `script_digest` and `kind`, and the run named by
+  `off_run_id` must have recorded `has_validator: false` while `on_run_id`'s recorded `true` (E-6).
+  ⚠️ **Without this the pair is satisfiable by DEGENERATE CONSTRUCTION**: nothing otherwise forbids
+  `accepted_off` and `accepted_on` being read from *one* execution, which yields `identical` across all 32
+  slots with the two arms never actually compared — a green that means only that a set equals itself. That
+  is a **spurious hit**, and it is not caught by any arm that forces a *divergence*, because the degenerate
+  pair reports the same verdict a correct one does.
+- `expected_verdict` is meaningful only for `kind: positive-control`; such pairs assert `diverged` and
+  **remain outside the 32 conformance slots**, so a deliberately-diverging control can never be counted as
+  a conformance result.
 - ⚠️ **`identical` is not by itself evidence.** A validator that never runs produces `identical` by
   construction, and FR-011's "a production dictionary is loaded" establishes presence, not execution. The
   pair is admissible only alongside FR-010a's **divergence probe**: a seeded message the dictionary should

@@ -462,6 +462,16 @@ research/G19-fix-fpml-iso20022/phase-9-harness/
 tests/interop/
 ├── happy/hp_support.hpp                # real FIX 4.4 dictionary, not the FIX 4.2 sentinel
 ├── conversation/                       # NEW — the scripted conversation cells
+│   ├── conversation_script.yaml        # NEW — ⭐ THE SCRIPT. The executable conversation: ordered
+│   │                                   #   steps with step_id, msg_type, originator, direction,
+│   │                                   #   intent field values, typed-read declarations, depends_on.
+│   │                                   #   Read by BOTH sides — the gtest, and the counterparty via
+│   │                                   #   INTEROP_CP_SCRIPT_PATH. Its digest is FR-008c's pin.
+│   └── census.yaml                     # NEW — ⭐ THE CENSUS. A mechanical TRANSCRIPTION of
+│                                       #   spec.md § Conversation census (the B-01..B-12 table, the
+│                                       #   applicability table, the declared-inapplicability table).
+│                                       #   ⛔ It MUST NOT be generated from conversation_script.yaml —
+│                                       #   see the note below.
 ├── support/                            # fixpp-side sent + readback records; the shared comparator
 ├── cell_results.yaml                   # + evidence fields, CONDITIONAL on kind: conversation
 ├── cell_results_schema_check_test.py   # structure only — opens NO artifact (it is a ctest that
@@ -472,6 +482,25 @@ ci/
 └── test-disk-preflight.sh              # NEW — its RED arms, pinned in ci-script-pins
 .github/workflows/interop-smoke.yml     # digest pin replaces :latest
 ```
+
+### ⛔ SC-009a's two operands are FILES, and they have separate provenance
+
+`SC-009a` / `W-2a` assert the census set **exactly equal** to the script-derived set. That is a second
+opinion only if the two artifacts have **independent origins**. Both are named above; neither may be
+produced from the other:
+
+| Artifact | Authored from | May NOT be derived from |
+|---|---|---|
+| `conversation_script.yaml` | the conversation design — it is what actually runs | `census.yaml` |
+| `census.yaml` | a **transcription of `spec.md` § *Conversation census***, which is the human statement of intent | `conversation_script.yaml`, or any traversal of it |
+
+⚠️ **This is the sole argument that admits a hand-written census at all.** `spec.md` § *Conversation
+census* concedes a hand-written table is normally this repository's rot class and claims exemption
+*because* SC-009a compares it against an independently-authored script every run. **Generating `census.yaml`
+from the script is the cheapest way to make SC-009a pass, and it converts the equality into a tautology
+that passes forever** — at which point the census is exactly the rot class it claimed exemption from, and
+the exemption argument is retroactively false. A task that generates one from the other has not
+implemented SC-009a; it has deleted it.
 
 **Structure Decision.** The split follows the existing seam: counterparty *programs* are parent-side,
 everything fixpp *asserts* is submodule-side. That boundary is not negotiable here — the counterparties
@@ -514,13 +543,18 @@ This table is the single place they are enumerated.*
 | ″ | **Six metadata keys added to the existing `cp_env` block in `launch_counterparty`** — `INTEROP_CP_{RUN_ID, CELL_ID, CONFIG, IMAGE_DIGEST, SCRIPT_PATH, SCRIPT_DIGEST}`. That block already assembles ten `INTEROP_CP_*` knobs and is passed as `env=cp_env` to **both** the C++ and the Java branch, so this is one more block in an existing pattern. ⚠️ Without it the counterparty is required by FR-013b to emit four hello fields it has **no channel to receive** | FR-013b · data-model §1 · R-4 (reversed) |
 | ″ | The shim **computes** `script_digest` (lowercase-hex SHA-256 over the script bytes) and **compares** it against the value each side recomputes; a mismatch FAILS before the gtest is launched | FR-008c · FR-013b |
 | ″ | **Four dedicated conversation config templates** for the eight new cells (`config_template` is already a per-cell attribute), carrying `UseDataDictionary=Y` with a FIX 4.4 `DataDictionary` path. ⛔ The existing `quickfix-cpp-{initiator,acceptor}-tls.cfg.in` and `quickfixj-{initiator,acceptor}-tls.cfg.in` MUST NOT be edited — they all carry `UseDataDictionary=N` and are named by the idle-cadence and `PD-*` cells R-5 protects, so editing them flips those cells. A regression check asserts a protected cell still renders `UseDataDictionary=N`. ⛔ A "narrowly scoped renderer override" was **rejected**: the per-cell `config_template` seam already exists | FR-002 · R-5 |
-| ″ | A **new environment variable** carrying the run's readback path to the fixpp-side gtest, alongside the existing `INTEROP_<TOKEN>_PORT` / `_HOST` / `FIXPP_TLS_FIXTURE_DIR` / `FIXPP_FIX44_DICT_XML` | FR-024 · R-4a |
+| ″ | ⭐ **A full `INTEROP_FIXPP_*` env block on the GTEST's environment** — `RUN_ID`, `CELL_ID`, `CONFIG`, `ARM`, `SCRIPT_PATH`, `SCRIPT_DIGEST`, `READBACK_PATH` (data-model §1). ⚠️ `INTEROP_CP_*` is `env=cp_env` on the **counterparty** launch and does not reach the gtest, while `run_id` is minted by the shim and has no other in-gtest source — so without this block fixpp emits a stream promotion cannot join. An absent key is a hard abort, never a default | FR-013b · FR-014 · E-1b |
 | ″ | The **pre-conversation hello gate** (FR-016a), shim-side, before the gtest is launched. ⚠️ Its failure text must not use `unavailable:` — `parse_gtest_status` greps that token and returns `skip:` | FR-016a · FR-024 · R-4a |
 | ″ | Invoke the named promotion command after each configuration's 8 cells and **before** reclaiming that configuration's build tree | FR-014b |
 | `phase-9-harness/INTEROP-016-DESIGN.md` | The config vocabulary `normal\|asan-ubsan\|tsan` is corrected to the four-config set | FR-021a |
 | `phase-9-harness/INTEROP-COVERAGE-REPORT.md` | The claim that the charter's ASan+UBSan requirement is met by `asan-ubsan` is corrected | FR-021a |
 | `library/.github/workflows/interop-smoke.yml` | The `IMAGE:` key is pinned to the **pre-089 digest before the counterparty image is republished**, so moving `:latest` is inert for existing consumers | FR-026 · R-11 |
 | `phase-9-harness/quickfix-cpp/counterparty/interop_counterparty_main.cpp`, `phase-9-harness/quickfixj/.../InteropCounterparty.java` | `sent` **and** `readback` emitters, the hello record, `occurrence` ordinals, and the specified header partition including the tag-1156 reconciliation | FR-003 · FR-003a · FR-004 · FR-005 · R-10 |
+
+| `library/tests/interop/conversation/conversation_script.yaml` (**NEW**) | ⭐ **THE SCRIPT** — the executable conversation SC-009a compares against. Ordered steps with `step_id`, `msg_type`, originator, direction, intent values, typed-read declarations, `depends_on`. Read by the gtest **and** the counterparty (`*_SCRIPT_PATH`); its digest is FR-008c's pin | FR-008a/b/c · SC-009a |
+| `library/tests/interop/conversation/census.yaml` (**NEW**) | ⭐ **THE CENSUS** — a mechanical transcription of `spec.md` § *Conversation census*. ⛔ **MUST NOT be generated from the script**: that makes SC-009a a tautology and retroactively voids the only argument admitting a hand-written census | FR-015d · W-2a · SC-009a |
+| `phase-9-harness/quickfix-cpp/counterparty/interop_counterparty_main.cpp`, `phase-9-harness/quickfixj/.../InteropCounterparty.java` | ⭐ **Typed-accessor invocation seam** (user decision, Gate A round 3): each `typed_reads` entry carries `accessor_witness`, obtainable **only** from the object the generated getter returned. ⚠️ It must run **through** the accessor's result, never beside the call — a seam written unconditionally is satisfied by the very bypass it detects. The **vendored engines stay unpatched**, so FR-023 holds | FR-003b · FR-018 |
+| `phase-9-harness/quickfixj/.../InteropCounterparty.java` | Assert `org.quickfixj.CharsetSupport.getDefaultCharset()` is **`ISO-8859-1`** at startup and fail loudly otherwise. `value_b64` is only reconstructible because that charset is a total bijection over all 256 byte values; under a non-bijective charset the raw bytes are unrecoverable at application level | C-7 · FR-004 |
 
 ⚠️ **Out of scope, and it must stay stated rather than assumed**: re-characterising the `asan-ubsan` rows
 already in `cell_results.yaml`. Every one of them records a result that was never under UBSan. That is a
@@ -577,6 +611,21 @@ later round does not re-apply the rejected form.*
 | **Codex 18** — the script digest is not reproducible as specified | **DOWNGRADED P2 → P3** | Smaller than filed. Once the metadata handoff exists the **shim** is the single computer of record, so no cross-language digest *agreement* is needed and the algorithm choice is nearly free. What mattered was **who computes and who verifies** — applied as: shim computes, each side **recomputes over the file it opened**, shim compares. Algorithm named (lowercase-hex SHA-256; OpenSSL is already linked on the C++ side and `MessageDigest` is stdlib on the Java side, so R-3's *"no new dependency"* is preserved) |
 | **Codex 12** — the per-cell dictionary scope has no structural implementation seam | **counter-proposal NARROWED** | First branch only: four dedicated conversation templates named by the eight new cells. The *"narrowly scoped renderer override"* is **rejected** — the per-cell `config_template` seam already exists and a renderer override is machinery for a problem the harness solved |
 | **Round-2 #1** — the correlation key | ⚠️ **The key was NOT invalidated. Only the emission point moved.** | The user's recorded clarification — *"`MsgSeqNum(34)` + direction, using data already on the wire; nothing is injected"* — **survives intact**: tag 34 is on the wire and both engines expose it on the header object *before* serialization (QuickFIX-cpp `Session::sendRaw` → `fill(header)` → `toApp`; QuickFIX-J `sendRaw` → `initializeHeader` → `toApp`). What was wrong was `data-model.md` §3's own *"emitted before transmission"* design statement. **Do not put the clarification back to the user.** Fixed with the two-stage sender record (FR-003a) |
+
+- Round 3 reviewed 2026-09-10 (bundle committed at `18813db6`): Codex P1=2 P2=3 P3=0; Opus post-judging **P1=3 P2=3 P3=1**. Trajectory 12/9/3 → 10/10/4 → **3/3/1**. **7 of 9 round-2 artifacts CLOSED under independent check**, census arithmetic recomputed from the tables (100 keys / 32 slots / 400 rows) and sound. Reviews: `research/reviews/codex_089-quickfix-interop-conversation_gate_a_3_review.md`, `research/reviews/opus_089-quickfix-interop-conversation_gate_a_3_adversarial_review.md`.
+- **Loop EXHAUSTED at round 3** — both rewrites spent. Per user decision 2026-09-10 the residual findings were applied as a **hand-edit** (not a third rewrite, not a re-plan): the trajectory was converging and every closure held, so re-planning would have re-derived correct artifacts and put three rounds of settled decisions back at risk of the *"a fix that replaces a wrong claim with a new claim"* class this bundle hit in rounds 1, 2 and 3. A fresh `/gate-a` follows, with the rewrite counter reset.
+
+**Hand-edit pass (2026-09-10, post-exhaustion).** Six files. Every change is an addition of a named artifact or a deletion; no settled decision was restated.
+
+| Finding | Fix | Where |
+|---|---|---|
+| **N-1** [P1] — SC-009a's two operands did not exist as files | Named **both**, with a provenance table forbidding either being generated from the other | `plan.md` § *Project Structure*, § *SC-009a's two operands* |
+| **#1** [P1] — fixpp could not source its own join identity | Added the **`INTEROP_FIXPP_*` gtest env block**; absent key ⇒ hard abort and promotion RED | `data-model.md` §1, `witness-evidence.md` E-1b |
+| **#2** [P1] — `fix_type` proves a dictionary lookup, not accessor invocation | **User decision**: `accessor_witness`, obtainable only from the object the getter returned | `spec.md` FR-018, `quickstart.md` Step 4, Clarifications |
+| **#3** [P2] — validation pair bound to no runs | `off_run_id` / `on_run_id` / `kind` / `expected_verdict`; two **distinct** runs with opposite arms | `data-model.md` §10 |
+| **N-2** [P2] — fixpp's emitter bound by nothing | fixpp declared a **third producer**; "both emitters" ⇒ all three | `contracts/readback-jsonl.md` |
+| **#5** [P2] — stale disk readings survived | **Deleted**, with the re-derivation recipe kept | `research.md` R-1 |
+| **#4** [P3] — charset unpinned | `ISO-8859-1` pinned + asserted at startup; live-path arm required | `contracts/readback-jsonl.md` |
 
 ### Round 1 — disagreements
 
