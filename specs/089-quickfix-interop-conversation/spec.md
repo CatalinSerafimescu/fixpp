@@ -199,6 +199,26 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
   **idiom only**: that guard is a *positive* `static_assert`, while this arm asserts a mutation must
   **not** compile, which needs its own mechanism (see `plan.md`).
 
+### Session 2026-09-10 (republish ordering — post-Gate-A, during checklist audit close-out)
+
+- Q: FR-026 enumerated two republish orderings and recommended pinning the existing consumers to the
+  pre-089 digest first. Which ordering does this feature actually take? → A: **Neither. The ordering is
+  `publish → verify → depend`, with NOTHING pinned.** Publish the rebuilt image, run FR-020's regression
+  against it, and only then let anything be pinned to it or built on it.
+  ⛔ **Option 1 was rejected because it obstructs the verification it exists to enable** — FR-020 asks
+  whether the existing cells still pass *against the new counterparty*, and a pin to the pre-089 digest
+  means nothing exercises it, so the pin would have to be lifted to test. It also cost two pins **plus**
+  an override mechanism for 089's own cells that was never designed.
+  ⛔ **Option 2 (publish under a new tag, move `:latest` after FR-020 is green) was rejected** because a
+  deferred move nobody performs leaves `:latest` stale indefinitely — it trades a loud exposure for a
+  silent one.
+  ⭐ **Both were remedies for a risk whose measured population was EMPTY** (zero open pull requests in
+  either repository, 2026-09-10), so the residual is recorded as a **sequencing rule, not a count**: open
+  no pull request touching the consumer paths between the publish and FR-020 reporting green, re-deriving
+  the open set at publish time. ⚠️ **`research.md` R-11's prescription is superseded by this**; its concern
+  — that nothing should silently depend on an unverified image — is what the new ordering discharges.
+
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Interop sessions run against the real dictionary (Priority: P1)

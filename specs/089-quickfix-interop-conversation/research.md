@@ -510,7 +510,7 @@ reconciliation in `contracts/readback-jsonl.md`; put tag 1156 in the cross-engin
 
 ---
 
-## R-11 — Republishing the counterparty image moves `:latest`. What rides it? ✅ DECIDED (Gate A round 1)
+## R-11 — Republishing the counterparty image moves `:latest`. What rides it? ✅ DECIDED (Gate A round 1) · ⚠️ **PRESCRIPTION SUPERSEDED 2026-09-10 — see `spec.md` FR-026**
 
 `plan.md` § Structure Decision gives the ordering — *parent counterparty change → image rebuild + publish
 → digest captured → library-side cells pinned to that digest* — and it is sound as far as it goes. FR-016b
@@ -532,10 +532,19 @@ code**, with no digest pin and no gate:
   emitter is new code on the inbound path of **every** message those cells send.
 - The **smoke workflow itself**, which is a required check.
 
-**Decision**: pin `interop-smoke.yml` and the existing cells to the **pre-089 digest before republishing**,
+**Decision** ~~pin `interop-smoke.yml` and the existing cells to the **pre-089 digest before republishing**,
 so `:latest` moving is inert. It costs one line in the workflow. The alternative — publish under a new tag
 and move `:latest` only after FR-020's regression run is green — is acceptable but leaves a window in which
-`:latest` and the pinned digest disagree. Recorded as **FR-026**.
+`:latest` and the pinned digest disagree.~~ Recorded as **FR-026**.
+
+⚠️ **SUPERSEDED 2026-09-10 (user decision). `spec.md` FR-026 is the normative home and now mandates the
+OPPOSITE ordering — publish → verify → depend, with NOTHING pinned.** Both options struck above were rejected
+on measurement, so this is not a choice between them: pinning the existing cells to the pre-089 digest
+**obstructs the verification it exists to enable**, because FR-020 asks whether those cells still pass *against
+the new counterparty* and they cannot exercise it while pinned away from it; publishing under a new tag defers
+the `:latest` move to a step nothing forces, and fails quietly. ⭐ **R-11's CONCERN survives and is exactly what
+the new ordering discharges** — nothing should silently depend on an unverified image. Only its prescription is
+dead. ⛔ Do not re-derive a pin from the struck text above.
 
 ---
 
@@ -554,5 +563,5 @@ and move `:latest` only after FR-020's regression run is green — is acceptable
 | R-7 | FR-016a is new capability, distinct from the existing availability probe: *unavailable* = skip, *wrong version* = **failure** |
 | R-8 | Two silent traps promoted into the contract, each needing a witness — reachable only because FR-008b puts a nested group in the script |
 | R-10 | The header/body partition is **specified in the contract**, moves under US1's flip, and needs a tag-1156 reconciliation fixture |
-| R-11 | The `:latest` blast radius is closed by pinning existing consumers to the pre-089 digest first (FR-026) |
+| R-11 | The `:latest` blast radius is closed by **publishing first, running FR-020's regression against the new image, and only then letting anything depend on it** — ⛔ **nothing is pinned**, and no pull request touching the consumer paths is opened in between (FR-026, which **supersedes R-11's own pin-first prescription**) |
 | R-1, R-6, R-9 | Remain open **deliberately**, each with a mandated measurement rather than an assumption. R-1 now measures **four** configurations and **two** predicates each |
