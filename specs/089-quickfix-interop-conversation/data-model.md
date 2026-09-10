@@ -21,8 +21,12 @@ Conversation script (declarative, digest-pinned)
    └──────────────────────────────────────────┘
                                                     Witness evidence record
                                                     (accumulates every run;
-                                                     gate per (config, arm)
-                                                     AND over the union)
+                                                     gate per CONFIG over the
+                                                     census's full 100-key
+                                                     projection, AND over the
+                                                     union.  `arm` is INSIDE
+                                                     `cell_id` — never a gate
+                                                     axis: W-3a)
 
    Disk preflight reading ── gates every build, per configuration
 ```
@@ -43,7 +47,7 @@ fixpp's hello is where the arm attestation lives (§1a).
 ⚠️ **A hello alone cannot corroborate a `pass`**, and this is the shape of the record's limitation rather
 than a defect in it: it is written *before any message is processed*, so a counterparty that starts, writes
 its hello and conversates not at all supplies every field a hello-only check inspects. The **terminal
-record (§11)** is the other half; FR-014's corroboration requires both.
+record (§12)** is the other half; FR-014's corroboration requires both.
 
 | Field | Type | Rules |
 |---|---|---|
@@ -199,11 +203,18 @@ requirement no side could satisfy.
 | `fix_type` | string | the field's FIX datatype **as the emitter resolved it from the dictionary loaded for that cell** (`PRICE`, `QTY`, `UTCTIMESTAMP`, `CHAR`, …). ⚠️ **The script does NOT declare it** — see below |
 | `value` | string | the accessor-resolved value rendered in **the contract's canonical form for that `fix_type`** — for `PRICE`/`QTY`, the shortest decimal spelling with no trailing zeros; for `UTCTIMESTAMP`, `YYYYMMDD-HH:MM:SS.sss` |
 
-⚠️ **`fix_type` is the observable that makes the FR-003b bypass arm discriminating**, and it works because
-of where the value has to come from: a generic enumeration walks the message's own field map and performs
-**no dictionary lookup at all**, so a bypass produces entries with `fix_type` absent or empty. The script
-deliberately does not carry `fix_type` and the comparator resolves the expected value from its **own** copy
-of `FIX44.xml`, so a bypass cannot fabricate it either — it has no source to copy from.
+⛔ **`fix_type` is evidence of DICTIONARY-BACKED RESOLUTION. It is NOT accessor provenance, and no
+record field is.** A generic enumeration walks the message's own field map and performs **no dictionary
+lookup at all**, so an entry with `fix_type` absent or empty shows the dictionary was not consulted — that
+is the property this column carries, and the only one. The script deliberately does not carry `fix_type`
+and the comparator resolves the expected value from its **own** copy of `FIX44.xml`.
+
+⚠️ **`fix_type` does NOT witness typed-accessor invocation, and neither does any other serialized value.**
+The generated getter returns the **caller's own object**, so every typed output value is derivable without
+calling it. FR-003b's anti-vacuity arm is therefore a **compile-time** arm over the counterparty source,
+not a record arm — see `spec.md` § *Clarifications* → *Session 2026-09-10 (Gate A fresh loop, round 1)*
+for the source evidence, and FR-003b for the arm. ⚠️ **No `accessor_witness` field exists in this schema
+and none is to be added**; three rounds proposed one and each proposal was synthesizable.
 
 ⚠️ **A decimal-spelling observable was tried and REJECTED on verified evidence, and the rejection is
 recorded so it is not re-proposed.** The idea was to seed `Price(44)` with the wire spelling `100.1000` and
@@ -525,10 +536,13 @@ the field from the comparison. Naming it explicitly routes it to §3 instead.
   fail-open was not where it looked. `min(a, b) ≥ T` is **stricter** than either alone, so it fails toward
   a false RED — not the dangerous direction. The dangerous direction is that the single threshold was
   **derived from the host delta** (R-1) and then **applied to the build-mount reading**, which bounds total
-  resident footprint — 34 GiB for the ASan configuration. A 4 GiB host-delta threshold would authorise a
-  34 GiB build whenever the VHD had 4 GiB free: the exact ENOSPC the gate exists to prevent, reproduced by
-  the gate's own arithmetic. **One threshold applied to two ceilings under-checks whichever ceiling is
-  larger.**
+  resident footprint. Those two quantities differ by **more than an order of magnitude** on a sanitizer
+  configuration, so one threshold sized for the smaller ceiling authorises a build the larger ceiling
+  cannot hold: the exact ENOSPC the gate exists to prevent, reproduced by the gate's own arithmetic.
+  **One threshold applied to two ceilings under-checks whichever ceiling is larger.** ⚠️ **No figures
+  here, deliberately** — every disk figure this bundle carried was false within the day it was written.
+  Re-derive with `du -sh build/*/` and `plan.md` § *Disk preflight*'s recipe; the argument needs the
+  *relation*, never an operand.
 - **`failing_predicate` is named in the output.** A verdict that does not say which ceiling refused cannot
   route the operator correctly.
 - ⚠️ **`reclaim-first` is offered ONLY for an internal-space failure.** Deleting inside WSL frees blocks
@@ -569,7 +583,7 @@ the field from the comparison. Naming it explicitly routes it to §3 instead.
 
 - The `run_id` is written into **both** streams' hello records (§1, §1a) and into every cell row and witness
   row it produced, so a row joins to its stream **structurally** rather than by a hand-written path.
-- A **terminal record (§12) is written to BOTH streams whatever the outcome**, including an abort. A stream
+- A **terminal record (§12) is written to BOTH streams whatever the outcome** — the run's two processes each write one (⚠️ process count, not emitter count) — including an abort. A stream
   with no terminal record is an incomplete run, not a passing one.
 - ⚠️ **A `validator-positive-control` run sits OUTSIDE the 32-slot inventory** and never occupies a slot.
   FR-010a's divergence probe is a separate execution precisely so that seeding a message the dictionary
@@ -595,8 +609,8 @@ the arm axis appeared in the cell cardinality (8 = 4 × 2) and nowhere else.
 | `script_digest` | string | both arms must have run the same script |
 | **`off_run_id`** | string | ⭐ the **run** `accepted_off` was read from |
 | **`on_run_id`** | string | ⭐ the **run** `accepted_on` was read from |
-| **`kind`** | enum | `conformance` · `positive-control` — matches the `kind` of both referenced runs |
-| **`expected_verdict`** | enum \| absent | required when `kind: positive-control`; absent for `conformance` |
+| **`kind`** | enum | `conformance` · `validator-positive-control` — **the same two spellings the Run entity and the run ledger use** (§9, §11); it MUST match the `kind` of both referenced runs. ⚠️ An earlier revision spelled the second value `positive-control` here and `validator-positive-control` everywhere else, which made the match-both-runs rule unsatisfiable — one enum, one spelling, bundle-wide |
+| **`expected_verdict`** | enum \| absent | **required when `kind: validator-positive-control`** — that exact value; absent for `conformance` |
 | `accepted_off` | set of `script_step_id` | messages the validation-off arm accepted |
 | `accepted_on` | set of `script_step_id` | messages the validation-on arm accepted |
 | `dispositions` | list | per message, each arm's validator disposition — accepted, or rejected with the objection |
@@ -609,13 +623,20 @@ the arm axis appeared in the cell cardinality (8 = 4 × 2) and nowhere else.
   *"the on arm rejected a message the off arm accepted"*.
 - ⛔ **`off_run_id` and `on_run_id` MUST name two DISTINCT runs whose arms are opposite.** Both referenced
   runs must match the pair's `cell_pair`, `config`, `script_digest` and `kind`, and the run named by
-  `off_run_id` must have recorded `has_validator: false` while `on_run_id`'s recorded `true` (E-6).
+  `off_run_id` must have recorded `has_validator: false` while `on_run_id`'s recorded `true`.
   ⚠️ **Without this the pair is satisfiable by DEGENERATE CONSTRUCTION**: nothing otherwise forbids
   `accepted_off` and `accepted_on` being read from *one* execution, which yields `identical` across all 32
   slots with the two arms never actually compared — a green that means only that a set equals itself. That
   is a **spurious hit**, and it is not caught by any arm that forces a *divergence*, because the degenerate
   pair reports the same verdict a correct one does.
-- `expected_verdict` is meaningful only for `kind: positive-control`; such pairs assert `diverged` and
+  ⛔ **This rule is promoted as `contracts/witness-evidence.md` E-7 and has its OWN arm there** — a
+  fixture constructing a pair whose `off_run_id == on_run_id` (and a second whose two runs both recorded
+  the same `has_validator`) must go **RED at promotion**, with a matching row in `quickstart.md` Step 4's
+  spurious-hit table. ⚠️ **Not E-6.** E-6 is a *single run's* arm attestation and says nothing about a
+  *pair's* two referenced runs; citing it here left this rule with no arm at all, which is precisely the
+  shape — *a clause that names a spurious hit and instantiates nothing* — that this bundle keeps
+  reproducing. A forced-MISS arm cannot catch a spurious HIT.
+- `expected_verdict` is meaningful only for **`kind: validator-positive-control`** — that exact value — and such pairs MUST assert `diverged`, and
   **remain outside the 32 conformance slots**, so a deliberately-diverging control can never be counted as
   a conformance result.
 - ⚠️ **`identical` is not by itself evidence.** A validator that never runs produces `identical` by
@@ -641,7 +662,7 @@ A `runs:` section of the same witness-evidence artifact (§6), not a third file.
 | `counterparty_flavour` · `counterparty_version` · `counterparty_digest` | string | version from the **hello**, never from a config file |
 | `script_digest` | string | the shim's value, having matched both sides' recomputation (§1) |
 | `has_validator` | boolean | fixpp's arm attestation (§1a); MUST equal `arm == "validation-on"` |
-| `terminal_state` | enum | `completed` · `aborted` · `error:enospc` — from **both** streams' terminal records (§12) |
+| `terminal_state` | enum | `completed` · `aborted` · `error:enospc` — from the terminal records of **both streams**, i.e. both of the run's two processes (§12). ⚠️ **TWO is the process count, not the emitter count** — see `contracts/readback-jsonl.md` § *THE THREE EMITTERS* |
 | `witness_count` | integer | rows this run produced; MUST equal the census figure for the slot |
 | `evidence_relpath` | string | **relative** to `$FIXPP_INTEROP_EVIDENCE_ROOT`. ⛔ never an absolute path |
 | `evidence_digest` | string | lowercase-hex SHA-256 over the persisted bundle, computed at promotion |

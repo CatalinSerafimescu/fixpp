@@ -157,3 +157,41 @@ alleged a duplicated `R-4a` heading in `research.md`. It is single (`grep -c '^#
 other occurrence is a prose forward-reference. A second alleged duplicate (`plan.md`'s `checklists/` entry)
 is permanently **indeterminate** — the file was rewritten mid-review and the intermediate state is
 unrecoverable, since the bundle files are uncommitted working-tree modifications.
+
+## Re-validation — 2026-09-10, after Gate A round 3 + the post-exhaustion hand-edit + fresh loop round 1
+
+⚠️ **The re-validation above stopped at round 2.** Round 3, the hand-edit and fresh-loop round 1 all landed
+after it, and the *"No item changed state"* conclusion was never re-derived against them. It is re-derived
+here.
+
+**No item changed state.** The additions since round 2 are of the same character as rounds 1–2: each closes
+an axis the bundle already gated on but could not express (the run ledger's join keys; the validation
+pair's two referenced runs; the live-path charset arm; the third emitter; the typed tier's compile arm).
+None adds an implementation prescription the spec did not already owe as a contract-level
+interoperability decision. Tick counts are deliberately not recorded — see the deletion note above.
+
+⚠️ **One statement in the dated sections above is now FALSE and is corrected HERE rather than rewritten
+there** (those sections are records of the sessions they name, and this file's precedent is to strike in
+place or append, never to rewrite history):
+
+> *"contract-level interoperability decisions between **two** independently-written emitters"* — lines
+> under *"after Gate A round 1"* and *"after Gate A round 2"*, and *"byte-compatible for both producers"*
+> under the round-2 list.
+
+**There are THREE emitters, not two**: the QuickFIX-cpp counterparty, the QuickFIX-J counterparty, and
+**fixpp** — see `contracts/readback-jsonl.md` § *THE THREE EMITTERS*. The reasoning in those sections is
+unaffected (an unstated cross-language decision diverges rather than deferring to implementation); only
+the count was wrong, and it was wrong because fixpp's role as a **producer** of this format — not only its
+consumer — was recognised after those sessions were written. C-7 is correspondingly **three-way**.
+
+⚠️ **A second count in those sections is CORRECT and must not be "fixed" to three**: the *two files, one
+per emitting process* rule. A cell pairs fixpp with exactly **one** counterparty, so the process count in
+a run is two while the implementation count is three. `contracts/readback-jsonl.md` carries that
+distinction as a table at its head.
+
+⚠️ **One round-2 obligation of this file is now discharged differently.** The typed-accessor guard's
+anti-vacuity arm is no longer a record-level witness at all — it is a **negative-compilation** arm, and
+FR-018's spurious-hit obligation for *runtime* typed-accessor invocation is recorded as **structurally
+unsatisfiable** with source evidence (`spec.md` § *Clarifications* → *Session 2026-09-10 (Gate A fresh
+loop, round 1)*, and SC-003's named exception). That is a scoping decision with a proof, not an unchecked
+item.

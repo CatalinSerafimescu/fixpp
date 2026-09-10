@@ -63,12 +63,16 @@ dangerous direction.
 
 **The actual fail-open is where the threshold comes from.** R-1 derives it from the observed **host
 delta**; D-1 then applied it to the **build-mount** reading, which bounds *total data resident at once*.
-Illustratively — *a dated observation from 2026-09-10, kept because the argument needs a vivid magnitude,
-and NOT an operand: re-derive with `du -sh build/*/`* — the ASan tree stood at ≈34 GiB. If R-1 measures
-block reuse and returns, say, a 4 GiB host delta, the gate authorises that ≈34 GiB build whenever the VHD
-has 4 GiB free. **That is the exact ENOSPC the gate exists to prevent, reproduced by the gate's own
-arithmetic.** One threshold applied to two ceilings under-checks whichever ceiling is larger — and the
-larger one is the build-mount ceiling.
+Those two quantities differ by **more than an order of magnitude** on a sanitizer configuration, so a
+threshold sized for the host delta authorises a build the build-mount ceiling cannot hold. **That is the
+exact ENOSPC the gate exists to prevent, reproduced by the gate's own arithmetic.** One threshold applied
+to two ceilings under-checks whichever ceiling is larger — and the larger one is the build-mount ceiling.
+
+⚠️ **No figures here, deliberately.** Every disk figure this bundle carried was false within the day it
+was written, and a figure repeated across four files stops reading as an illustration and starts reading
+as an operand. The argument needs the **relation**, not a magnitude. The bundle keeps **one** dated
+illustration, in `plan.md` § *Disk preflight*, marked *never an operand*; re-derive anything else with
+`du -sh build/*/` and that section's `df` recipe.
 
 **D-3 vs D-4 is the second crux.** Both are "no host reading available"; one must stop and one must
 proceed. Sharing a code path collapses them, and the collapse fails toward `proceed` — the direction that

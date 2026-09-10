@@ -108,9 +108,83 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
 
 ### Session 2026-09-10 (Gate A round 3 — post-exhaustion hand-edit)
 
-- Q: Round 3 proved `fix_type` cannot witness typed-accessor invocation — the counterparty holds bytes, dictionary and script, so every typed **output value** is derivable without calling the getter, and the one escape (a typed-parse failure on a malformed value) is closed by FR-002's peer-side `UseDataDictionary=Y`. How is FR-018's spurious-hit obligation met for this guard? → A: **Instrument the counterparty with an invocation seam** (user decision 2026-09-10). Each `typed_reads` entry gains `accessor_witness`, a value obtainable **only** by holding the object the generated typed getter returned. `fix_type` is retained as evidence of dictionary-backed resolution but is explicitly not accessor provenance.
-- Q: Where does that seam go — the vendored engines' generated accessors, or our counterparty programs? → A: **Our counterparty programs** (`phase-9-harness/quickfix-cpp/counterparty/`, `phase-9-harness/quickfixj/.../InteropCounterparty.java`). ⚠️ **The placement rule is what makes it non-vacuous**: the seam must run **through the accessor's returned object**, never beside the call. A seam our program writes unconditionally would be satisfied by the very bypass it exists to detect — that is the vacuity a Gate A reviewer correctly warned about. Routing it through the return value means FR-018's mutation (replacing the getter call with generic enumeration) removes the seam with it, and the arm goes RED.
-- Q: Does instrumenting the counterparty violate FR-023's *"unmodified production binaries"*? → A: **No.** FR-023 scopes to the **vendored QuickFIX engines**, which remain unpatched — the differential premise (an independent implementation) is untouched. The counterparty *programs* are this harness's own code and always have been. ⚠️ **Stated limit**: the seam therefore proves accessor provenance **at our call site**, not inside the engine. It cannot detect a QuickFIX getter that internally short-circuits, and it does not claim to.
+- Q: Round 3 proved `fix_type` cannot witness typed-accessor invocation — the counterparty holds bytes, dictionary and script, so every typed **output value** is derivable without calling the getter, and the one escape (a typed-parse failure on a malformed value) is closed by FR-002's peer-side `UseDataDictionary=Y`. How is FR-018's spurious-hit obligation met for this guard? → A: ~~**Instrument the counterparty with an invocation seam** (user decision 2026-09-10). Each `typed_reads` entry gains `accessor_witness`, a value obtainable **only** by holding the object the generated typed getter returned.~~ ⚠️ **SUPERSEDED at Gate A fresh loop round 1** — see *Session 2026-09-10 (Gate A fresh loop, round 1)* below: reading the generated getters in both vendored engines proved **no serialized value can witness invocation**, `accessor_witness` included. The half that stands: `fix_type` is retained as evidence of dictionary-backed resolution and is explicitly **not** accessor provenance.
+- Q: Where does that seam go — the vendored engines' generated accessors, or our counterparty programs? → A: **Our counterparty programs** (`phase-9-harness/quickfix-cpp/counterparty/`, `phase-9-harness/quickfixj/.../InteropCounterparty.java`). **That half stands** and carries over to the compile-time arm: the guard binds *our* counterparty source, and the vendored engines stay unpatched. ~~The placement rule is what makes it non-vacuous: the seam must run **through the accessor's returned object**, never beside the call.~~ ⚠️ **SUPERSEDED at Gate A fresh loop round 1** — routing through the returned object does **not** make it non-vacuous, because the returned object **is the caller's own object**. See the fresh-loop session below.
+- Q: Does instrumenting the counterparty violate FR-023's *"unmodified production binaries"*? → A: **No.** FR-023 scopes to the **vendored QuickFIX engines**, which remain unpatched — the differential premise (an independent implementation) is untouched. The counterparty *programs* are this harness's own code and always have been. ⚠️ **Stated limit** (unchanged by the fresh-loop supersession, and it is the same limit the compile-time arm carries): the guard binds **our call site**, not the engine's interior. It cannot detect a QuickFIX getter that internally short-circuits, and it does not claim to.
+
+### Session 2026-09-10 (Gate A fresh loop, round 1)
+
+- Q: Three rounds have now proposed an artifact-level observable for the typed-accessor guard (`fix_type`,
+  then a decimal spelling, then `accessor_witness`) and each turned out synthesizable. How is FR-018's
+  spurious-hit obligation met for this guard? → A: **It is not met at the artifact level, and it cannot
+  be. The guard becomes a COMPILE-TIME arm** (user decision 2026-09-10). The artifact-level claim and the
+  `accessor_witness` field are **deleted**.
+
+- Q: Why *cannot* it be met at the artifact level — what makes this different from the other guards? → A:
+  ⛔ **STATED DESIGN FACT — the impossibility, recorded so a fourth attempt is not made.**
+
+  > **A generated typed accessor is a pure copy of message state into an object the CALLER already owns.
+  > Neither the message nor the field records that the call happened. Therefore no value serialized into
+  > the readback stream can witness typed-accessor invocation.**
+
+  This is structural, not an observable we have not found yet. The evidence is the generated getters
+  themselves, in the vendored engines:
+
+  | Engine | Where | Body |
+  |---|---|---|
+  | QuickFIX-cpp | the `FIELD_SET` macro in `reference-engines/quickfix-cpp/include/quickfix/FieldMap.h`, which every generated message class expands once per declared field | `FIELD &get(FIELD &field) const { return (FIELD &)(MAP).getField(field); }` — returns a reference to **the caller's own object** |
+  | QuickFIX-J | each per-field `get` in the generated `quickfix/fix44/*.java` | `public quickfix.field.Symbol get(quickfix.field.Symbol value) throws FieldNotFound { getField(value); return value; }` — **literally returns its parameter** |
+
+  So of the pair the superseded design proposed as the witness:
+
+  - **`getTag()`** (`FieldBase::getTag` in `reference-engines/quickfix-cpp/include/quickfix/Field.h`)
+    returns `m_tag`, which the **caller's own constructor** set *before* `get()` was called. It is not a
+    function of the invocation at all — it is the caller's literal, round-tripped.
+  - **`getValue()`** (`StringField::getValue`, same header — ⚠️ **not** on `FieldBase`, which is the API
+    error the superseded sentence also carried) returns the field's wire string, which generic
+    enumeration already holds.
+
+  ⚠️ **The one counterexample a later reviewer will reach for is closed.** QuickFIX-J's `getGroups(tag)`
+  *does* mutate the message (`computeIfAbsent`) and would leave a trace — but `readback-jsonl.md` C-5
+  forbids exactly that mutation, it is QFJ-only, and using it as a witness would require the emitter to
+  cause the corruption C-5 exists to detect. **It is not an escape. Do not re-propose it.**
+
+- Q: What does the compile-time arm assert instead, and what proves *it* is not vacuous? → A: FR-003b
+  already named the right observable and never used it — a typed accessor *"compiles only if the field
+  belongs to that message in FIX 4.4"*. So:
+
+  - **The assertion**: the counterparty source calls the **per-message generated accessor** for each field
+    the script declares as a typed read. That call **is** the schema-conformance check, enforced by the
+    compiler at build time.
+  - **The anti-vacuity arm** is a **negative-compilation** arm: mutate the counterparty source to call the
+    generated accessor with a field that does **not** belong to that message, and assert the **build
+    FAILS**. Named mechanism and both arms: `plan.md` § *External obligations* → *the typed-accessor
+    compile arm*.
+  - ⭐ **The instrument was proven able to report non-zero, on both engines, before this decision was
+    written.** Re-derivation recipe (run it; do not trust this paragraph):
+    `g++ -fsyntax-only -std=c++17 -I reference-engines/quickfix-cpp/include` over a TU calling
+    `FIX44::NewOrderSingle::get(FIX::Symbol&)` (declared on that message ⇒ must compile) and then
+    `FIX::LastPx&` (not declared on it ⇒ must fail); and the `javac` equivalent against the QuickFIX-J
+    build output with `quickfix.field.Symbol` / `quickfix.field.LastPx`. **Observed 2026-09-10 on the
+    pinned vendored trees**: the positive control compiled on both; the mutant failed on both —
+    `no matching function for call to 'FIX44::NewOrderSingle::get(FIX::LastPx&)'` (g++) and
+    `no suitable method found for get(LastPx)` (javac). ⚠️ There is **no generic `get` overload** on
+    `FieldMap`, `Message`, or either generated class that could swallow the mutant; that absence is what
+    makes the arm work and is the thing to re-check if an engine is ever re-pinned.
+
+- Q: What is the honest scope of the compile-time arm? → A: ⚠️ **State it plainly; it is less than the
+  deleted claim pretended to be.** It proves the **schema-conformance property is really checked** — that
+  the counterparty reaches the field through the per-message generated accessor, which the compiler
+  refuses for a field the message does not declare. It does **not** prove runtime invocation.
+  **FR-018's spurious-hit obligation for *runtime* typed-accessor invocation is recorded as
+  STRUCTURALLY UNSATISFIABLE**, on the source evidence above — not deferred, not waived pending a better
+  idea. SC-003 is scoped accordingly.
+
+  This is the repository's own idiom for a property a build can decide:
+  `tests/session/test_quickfix_compat_path_b_guard.cpp` pins a decision with a file-scope `static_assert`
+  whose comment reads *"No runtime assertion is needed — the BUILD IS THE TEST."* ⚠️ Cite it for the
+  **idiom only**: that guard is a *positive* `static_assert`, while this arm asserts a mutation must
+  **not** compile, which needs its own mechanism (see `plan.md`).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -357,8 +431,28 @@ claiming a pass with no corroborating run artifact.
   assertions: a typed accessor is a **schema-conformance** check (it compiles only if the field belongs to
   that message in FIX 4.4, and raises `FieldNotFound` if the peer did not receive it) that generic
   enumeration cannot make; complete generic enumeration detects missing/spurious fields and group shape,
-  which typed access cannot. An arm MUST bypass the typed accessor while leaving enumeration intact and
-  require RED.
+  which typed access cannot.
+
+  ⛔ **The typed tier's anti-vacuity arm is a COMPILE-TIME arm, not a record arm** (user decision, Gate A
+  fresh loop round 1 — see § *Clarifications* → *Session 2026-09-10 (Gate A fresh loop, round 1)* for the
+  source evidence that no record-level witness can exist).
+
+  - **What is asserted**: for every field the script declares as a typed read, the counterparty source
+    MUST reach it through that message's **generated per-message accessor**
+    (`<Message>::get(<Field>&)` in QuickFIX-cpp; `<Message>.get(<Field>)` in QuickFIX-J). Because those
+    overloads exist only for fields the message declares in FIX 4.4, the **compiler** performs the
+    schema-conformance check at build time.
+  - **The anti-vacuity arm**: a **negative-compilation** arm. Mutate the counterparty source to call the
+    generated accessor with a field the message does **not** declare; the build MUST **fail**. The
+    mechanism that runs this arm is named in `plan.md` § *External obligations*, and both directions MUST
+    be shown — the unmutated source compiles, the mutant does not.
+  - ⚠️ **Scope limit, stated rather than implied**: this binds the counterparty's **source**, not any
+    record. It does not prove runtime invocation, and FR-018's spurious-hit obligation for *runtime*
+    typed-accessor invocation is recorded as **structurally unsatisfiable** (SC-003).
+  - ⚠️ **`fix_type` is NOT accessor provenance and no longer claims to be.** It is retained solely as
+    evidence of **dictionary-backed resolution**: a generic enumeration performs no dictionary lookup, so
+    an entry with `fix_type` absent or empty shows the dictionary was not consulted. That is a different
+    property from *the getter was called*, and conflating them is what rounds 1–3 kept doing.
 - **FR-004**: The readback and `sent` record formats MUST be identical across the QuickFIX-cpp and
   QuickFIX-J counterparties, so a single comparator serves both. ⚠️ Format identity is **not free**: the
   two engines' built-in header lists differ (QuickFIX-J's contains `ApplExtID(1156)`, QuickFIX-cpp's does
@@ -509,7 +603,7 @@ claiming a pass with no corroborating run artifact.
   |---|---|---|
   | `tests/interop/cell_results.yaml` — **committed expected inventory** | the shipped ctest, in all three CI tiers, **opening nothing** | structure only. New evidence fields are required **conditionally on `kind: conversation`**, so the 59 existing rows are untouched (FR-020). Each `status: pass` conversation row must name a ledger entry that exists, whose `terminal_state` is `completed`, and whose `witness_count` equals the census figure for that slot |
   | the **run ledger** (a `runs:` section of the witness-evidence record, FR-015b) — **committed**, machine-independent | the same ctest | one authoritative entry per `(cell_id, config)`; the 32-slot inventory exactly; `run_id`, `run_timestamp`, counterparty flavour/version/digest, `script_digest`, `terminal_state`, `witness_count`, `evidence_digest`, `authoritative`. **No absolute path** |
-  | the **run artifact** — machine-local, never committed | the **promotion step** (FR-014b), on the machine that ran the cell | the stream is opened, both sides' `hello` **and `terminal`** records are read, their `run_id` / `script_digest` / `config` are checked against each other and against the row, the completeness gate is evaluated, and `evidence_digest` is computed over the persisted bundle |
+  | the **run artifact** — machine-local, never committed | the **promotion step** (FR-014b), on the machine that ran the cell | the stream is opened, **each of the run's two processes'** `hello` **and `terminal`** records are read (⚠️ **TWO is the process count, not the emitter count** — `contracts/readback-jsonl.md` § *THE THREE EMITTERS* carries the distinction), their `run_id` / `script_digest` / `config` are checked against each other and against the row, the completeness gate is evaluated, and `evidence_digest` is computed over the persisted bundle |
 
   ⚠️ Requiring the manifest fields to be merely *present* is not corroboration — six hand-editable strings
   are as easy to type as one. Corroboration is what the promotion step performs; what CI re-checks is the
@@ -653,7 +747,17 @@ claiming a pass with no corroborating run artifact.
   (*"deleting the mechanism under test and asserting the witness goes RED"*), which is the **forced-miss**
   recipe — it proves a guard *can* fire and says nothing about what else could satisfy the condition the
   guard is watching. Every arm derived from the old definition inherited the inversion and must be
-  re-derived. The minimum spurious-hit set:
+  re-derived.
+
+  ⛔ **ONE declared exception to *"every guard"*, and it is the same one SC-003 names — the typed-accessor
+  guard (FR-003b).** Its arm is a **negative-compilation** arm covering **schema conformance**; a
+  spurious-hit arm for *runtime* typed-accessor invocation is **structurally unsatisfiable**, because the
+  generated getter returns the caller's own object and no serialized value can witness the call
+  (§ *Clarifications* → *Session 2026-09-10 (Gate A fresh loop, round 1)*). ⚠️ **An exception with a
+  proof, not a waiver.** It is stated here as well as in SC-003 so the FR and the success criterion cannot
+  contradict each other.
+
+  The minimum spurious-hit set:
 
   ⚠️ **An arm is not written until its OBSERVABLE exists.** An arm whose forced defect produces no
   observable difference measures its own setup and stays green — the repository's named class
@@ -663,7 +767,7 @@ claiming a pass with no corroborating run artifact.
   | Guard | The arm | **The observable — what differs** |
   |---|---|---|
   | Fidelity witness (FR-006) | Derive the `sent` record's `fields` **from the serialized frame** instead of from the builder inputs, **and** apply a post-capture frame mutation so the two derivations can differ at all | A test-only hook in the fixpp interop driver rewrites `Account(1)` from `ACCT0001` to `ACCT0009` in the outbound **`B-03`** frame, **after** stage-1 intent capture and **before** transmission. Three properties make the observable unambiguous: **same length**, with `CheckSum(10)` recomputed and `BodyLength(9)` unchanged, so the frame stays well-formed and the RED is attributable to fidelity rather than framing; `Account(1)` is **dictionary-declared for 35=F** so the validation-on arm accepts it; and nothing on either engine branches on it. ⚠️ **`B-03` rather than `B-01` because `B-03` has exactly ONE declared occurrence on all four combos** — `B-01` carries a replay at occurrence `1` on C3/C4, and whether the replayed frame is the stored pre- or post-mutation bytes is an implementation detail, which would make this arm's expected observable ambiguous. **Correct (builder-derived) implementation ⇒ witness RED with `value_mismatch` on path `1`, sent `ACCT0001`, readback `ACCT0009`. Mis-derived (frame-derived) implementation ⇒ GREEN.** The arm asserts the RED *and* that the mis-derivation yields GREEN — without the second half it is not discriminating. ⚠️ Without the frame mutation an unmutated serializer round-trips to the same field set and the two derivations are indistinguishable; that version of this arm is the defect, not the test |
-  | Fidelity witness (typed tier, FR-003b) | Bypass the peer's **typed accessor**, leaving generic enumeration intact | **A typed-accessor invocation seam, recorded through the accessor's own return.** Every `typed_reads` entry carries `accessor: "<Message>::<getter>"` **and** `accessor_witness`, a value the counterparty can obtain ONLY by holding the object the generated typed getter returned (e.g. the getter's out-parameter `FieldBase`, reported as its `getTag()`/`getValue()` pair read back off that object). The seam sits **on the call path, through the accessor's result** — never beside it. ⚠️ `fix_type` is retained as evidence of dictionary-backed resolution, but it is explicitly **NOT** accessor provenance: the counterparty already holds bytes + dictionary + script, so every typed *output value* is derivable without invoking the getter, and a bypass emitting identical `path`/`value`/`fix_type` would make the comparator agree for the wrong reason. Only a value routed **through the returned object** distinguishes them. |
+  | Fidelity witness (typed tier, FR-003b) — ⛔ **a COMPILE-TIME arm, not a record arm** | Mutate the counterparty **source** so a declared typed read calls the generated per-message accessor with a field that message does **not** declare in FIX 4.4 | **The BUILD FAILS.** The generated accessor is overloaded only over the fields the message declares (`FIELD_SET` in QuickFIX-cpp's `FieldMap.h`; one `get` per field in QuickFIX-J's generated class), and there is **no generic `get` overload** on `FieldMap`, `Message` or either generated class to swallow the mutant — verified on both engines, both directions, § *Clarifications* → *Session 2026-09-10 (Gate A fresh loop, round 1)*. ⚠️ **No serialized value can witness this guard** — the getter returns the caller's own object, so `accessor_witness` was deleted rather than re-specified. `fix_type` is retained as evidence of **dictionary-backed resolution** only. ⚠️ **Scope**: this proves the schema-conformance check is really made; it does **not** prove runtime invocation, which is recorded as structurally unsatisfiable (SC-003). |
   | Fidelity witness (FR-016c) | **Empty intent vs empty readback.** Emit a message whose declared intent set is empty | the comparator must **reject** rather than pass on `∅ == ∅` |
   | Completeness gate (FR-015b/FR-015c) | **Drop one whole configuration** | the per-config projection π for that config is empty while the other three are the census's 100 keys ⇒ RED. Deleting a single witness row leaves the union unchanged and therefore cannot discriminate |
   | Arm attestation (FR-011a) | Launch a **validation-on** cell with `validate_inbound_messages` forced **false** | fixpp's `hello` carries `has_validator: false` while the row claims `arm: validation-on` ⇒ RED. ⚠️ FR-011's *"a dictionary is loaded"* is true in **both** arms and cannot produce this observable |
@@ -729,8 +833,11 @@ claiming a pass with no corroborating run artifact.
   writers MUST implement it, together with a canonical key order and a canonical escaping form. The two
   writers are in different languages with different string models (Java `String` is UTF-16; C++
   `std::string` is bytes), so an unstated decision diverges and breaks FR-004. A **cross-language golden
-  fixture** — one consumer, both producers, one committed expected artifact — MUST exist; C-7's
-  byte-compatibility clause is otherwise a sentence with nothing behind it.
+  fixture** — one consumer, **all three emitters** (the QuickFIX-cpp counterparty, the QuickFIX-J
+  counterparty, and fixpp), one committed expected artifact — MUST exist; C-7's byte-compatibility clause
+  is otherwise a sentence with nothing behind it. ⛔ **Three-way, not two-way**: FR-006 compares parsed
+  field *sets* and is blind to sort order and escaping, so C-7 is the **only** guard on fixpp's byte-level
+  canonical form (`contracts/readback-jsonl.md` § *THE THREE EMITTERS*).
 - **FR-026**: Republishing the counterparty image MUST be ordered so that moving `:latest` cannot silently
   change any existing consumer. ⚠️ `.github/workflows/interop-smoke.yml`'s `IMAGE:` key names
   `…/fixpp-interop-counterparties:latest`, and this feature rebuilds both counterparty applications — so
@@ -898,11 +1005,19 @@ load-bearing for the anti-vacuity arms and are fixed here so the arms have a sub
 - **`B-03` declares `Account(1) = ACCT0001`.** That is the value FR-018's frame-derivation arm mutates
   (to `ACCT0009` — same length, dictionary-declared for 35=F, and nothing branches on it). `B-03` is chosen
   because it has exactly **one** declared occurrence on all four combos, unlike `B-01`.
-- ⚠️ **No seed value is declared for the typed-accessor arm, deliberately.** Its observable is the
-  `fix_type` column, which the emitter resolves from the dictionary and the script does not carry — see
-  FR-018. A decimal-spelling seed was tried and rejected: fixpp's decimal writer strips trailing fractional
-  zeros (`src/core/decimal.cpp`, `to_chars`, AC-S4), so the raw and typed spellings would have coincided
-  and the arm would have been inert.
+- ⚠️ **No seed value is declared for the typed-accessor arm, and no seed value CAN be.** That arm is a
+  **compile-time** arm over the counterparty source (FR-003b, FR-018): its observable is a build failure,
+  not a field. No message content participates in it. Two seed-based observables were tried and rejected —
+  a decimal spelling (fixpp's decimal writer strips trailing fractional zeros, `src/core/decimal.cpp`,
+  `to_chars`, AC-S4, so both paths read `100.1` and the arm was inert) and `accessor_witness` (the getter
+  returns the caller's own object, so the value is synthesizable) — see § *Clarifications* →
+  *Session 2026-09-10 (Gate A fresh loop, round 1)*.
+- **`B-05` declares `EncodedTextLen(354)`/`EncodedText(355)` with a value containing the byte `0xff`.**
+  That is C-11's live-path charset arm (`contracts/readback-jsonl.md` § *C-11*). Both tags are
+  dictionary-declared **body** fields on all five in-scope message types in `FIX44.xml` and are not in its
+  `<header>` block, so validation-on accepts them and C-6 does not exclude them. `B-05` is
+  fixpp-originated with exactly **one** declared occurrence on all four combos, so census cardinality is
+  unchanged and no completeness key is added.
 
 ## Success Criteria *(mandatory)*
 
@@ -917,6 +1032,13 @@ load-bearing for the anti-vacuity arms and are fixed here so the arms have a sub
   RED, and **every guard** carries at least one **spurious-hit** demonstration — *an arm that makes the
   guard report PASS for a reason other than the property it claims to measure* — per FR-018's table. A
   forced-miss arm does not satisfy this criterion.
+  ⛔ **ONE declared exception, scoped and named — the typed-accessor guard (FR-003b).** Its spurious-hit
+  arm is a **negative-compilation** arm rather than a record arm, and that arm covers **schema
+  conformance** only. A spurious-hit demonstration for *runtime* typed-accessor invocation is recorded as
+  **structurally unsatisfiable** — no value serialized into the readback stream can witness invocation,
+  proven from the generated getters in both vendored engines (§ *Clarifications* →
+  *Session 2026-09-10 (Gate A fresh loop, round 1)*). ⚠️ This is an **exception with a proof**, not a
+  waiver pending a better idea; do not re-open it by proposing a fourth artifact-level observable.
 - **SC-004**: Both validation arms run for every cell, and their accepted-message sets are asserted
   identical; any divergence is reported as a named finding rather than absorbed.
 - **SC-004a**: The divergence probe (FR-010a) is demonstrated: a message the dictionary should reject
@@ -982,12 +1104,15 @@ load-bearing for the anti-vacuity arms and are fixed here so the arms have a sub
   bring-up proves to be its own investigation, it is escalated as a filed issue rather than quietly
   downgraded to `n/a`. The fourth configuration (`ubsan`) is not a new build kind — `linux-clang-ubsan`
   already exists as a preset — so the increment is run time and sequencing, not a new toolchain.
-  ⚠️ **Correction (measured 2026-09-10):** an earlier draft justified this by calling `ubsan` *"the
-  cheapest of the four to keep resident"* on the strength of its 1.5 G directory. **That tree is
-  essentially unpopulated** (128 objects, 4 executables, against 1598–1783 objects in the other three); a
-  **full** ubsan build is ≈24 G. What makes the fourth configuration affordable is the **targeted build
-  unit** (`plan.md` § *The build unit is TARGETED*), under which every configuration costs 3–8 G — not the
-  size of the directory currently on disk.
+  ⚠️ **Correction — the CONDITION, with every figure DELETED.** An earlier draft justified this by
+  calling `ubsan` *"the cheapest of the four to keep resident"* on the strength of the size of its build
+  directory. **A directory's current size is not a build's cost**: that tree is essentially unpopulated,
+  so its size measures what has not been built rather than what will be. What makes the fourth
+  configuration affordable is the **targeted build unit** (`plan.md` § *The build unit is TARGETED*).
+  ⚠️ **Re-derive, never cite a figure from this bundle**: `du -sh build/*/` for occupancy and
+  `plan.md` § *Disk preflight*'s recipe for the two ceilings. Every disk figure this bundle once carried
+  was false within the same day it was written, which is why the numbers are deleted rather than
+  corrected.
 - Sanitizer instrumentation covers fixpp only; the counterparties are unmodified production binaries
   (`tests/interop/KNOWN-LIMITATIONS.md:108-115`). A clean sanitizer run bounds fixpp, not the peer.
 - The parent harness at `research/G19-fix-fpml-iso20022/phase-9-harness/` is git-tracked in the parent

@@ -163,7 +163,9 @@ OpenSSL + Threads (`counterparty/CMakeLists.txt:29-35`) — **no JSON library**.
 contract.** FIX values may contain `"` and `\`, and data fields may contain **arbitrary bytes including
 SOH and control characters**. A naive writer emits invalid JSON on precisely the messages most worth
 inspecting. The rule must cover `"`, `\`, every byte `< 0x20` as `\u00XX`, and must state a decision for
-non-UTF-8 bytes. **Both writers must be tested against a value containing each class**, or the escaping is
+non-UTF-8 bytes. **Each of the three emitters must be tested against a value containing each class**
+(`contracts/readback-jsonl.md` § *THE THREE EMITTERS*: the QuickFIX-cpp counterparty, the QuickFIX-J
+counterparty, and fixpp), or the escaping is
 an untested claim.
 
 **✅ The non-UTF-8 decision, taken at Gate A round 1 — it could not be deferred.** This item previously
@@ -178,7 +180,7 @@ key**. Exactly one of the two is present on every entry. Base64 is byte-exact, h
 imposes no encoding assumption on either language's string type, and is trivially producible by a
 hand-rolled writer in both. Alongside it the contract now pins a **canonical form** — fixed key order, no
 insignificant whitespace, lower-case `\u00XX` hex, no optional escapes — because C-7's byte compatibility
-admits exactly one spelling, and a **cross-language golden fixture** (one consumer, both producers, one
+admits exactly one spelling, and a **cross-language golden fixture** (one consumer, **all three emitters**, one
 committed expected artifact) so C-7 is exercised rather than asserted.
 
 ⚠️ **Read the motivating field list with R-10 in hand**: `XmlData(213)` is a built-in **header** field on
@@ -188,7 +190,8 @@ remains reachable. The rule and its witness stand; the justification does not re
 
 **Alternatives rejected**: adding a JSON library (a new third-party dependency in two languages, for a
 writer of this size); snakeyaml flow-style on the Java side only (YAML is a JSON superset, but it is a
-workaround, and it would make the two emitters structurally different — FR-004 requires one format).
+workaround, and it would make the emitters structurally different — FR-004 requires one format across all
+three).
 
 ---
 

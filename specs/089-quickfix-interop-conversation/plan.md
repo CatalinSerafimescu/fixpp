@@ -87,7 +87,7 @@ du -sh build/*/               # per-tree occupancy, for sequencing and reclaim
 df -k /mnt/wsl/fixppbuild     # the evidence root + ccache device — a DIFFERENT device
 ```
 
-**One dated historical observation, kept as motivation and never as an operand.** On **2026-09-10** the
+**A dated historical observation, kept as motivation and never as an operand.** ⚠️ The load-bearing half is the *condition* — **motivation, never an operand** — not how many such observations there are; a count is a result nothing re-runs. On **2026-09-10** the
 internal reading was ≈83 G while the host reading was ≈17 G, with the ASan build tree at ≈34 G — a tree
 that would not fit in the host's remaining space, sitting inside a filesystem reporting four times that
 much free. That is the shape of the failure. ⚠️ **Every one of those three figures had moved by later the
@@ -162,11 +162,12 @@ Required behaviour:
    fail-open is not where it looks.* As an abstract predicate `min(a, b) ≥ T` is **stricter** than either
    alone, so it fails toward a false RED — not the dangerous direction. The dangerous direction is that
    **R-1 derives the threshold from the host delta while the gate applies it to the build-mount reading**,
-   which bounds *total data resident at once*. Illustratively — *a dated 2026-09-10 observation kept
-   because the argument needs a vivid magnitude, **not** an operand; re-derive with `du -sh build/*/`* —
-   the ASan tree stood at ≈34 GiB. A 4 GiB host-delta threshold then authorises that build whenever the VHD
-   has 4 GiB free: the exact ENOSPC this gate exists to prevent, produced by the gate's own arithmetic.
-   **One threshold applied to two ceilings under-checks whichever ceiling is larger.**
+   which bounds *total data resident at once*. Those two quantities differ by **more than an order of
+   magnitude** on a sanitizer configuration, so a threshold sized for the host delta authorises a build the
+   build-mount ceiling cannot hold: the exact ENOSPC this gate exists to prevent, produced by the gate's
+   own arithmetic. **One threshold applied to two ceilings under-checks whichever ceiling is larger.**
+   ⚠️ **No figures here.** The single dated illustration this bundle keeps lives in § *Disk preflight*
+   above; repeating it here made it look like an operand. Re-derive with `du -sh build/*/`.
 
 1a. ⚠️ **`reclaim-first` is offered ONLY for an internal-space failure.** Deleting inside WSL frees blocks
    for reuse within the VHD and returns nothing to the host (see *The mechanism* above), so prescribing
@@ -530,6 +531,29 @@ link QuickFIX, which is deliberately outside fixpp's dependency graph.
 artifacts, and `/speckit-tasks` derives from FRs — a prose obligation in a research item is not a task.
 This table is the single place they are enumerated.*
 
+### ⛔ THE COMPLETION RULE — read this before adding any MUST-clause to this bundle
+
+> **A new MUST-clause lands in the SAME edit as its entry in the relevant CLOSED INVENTORY — or it is not
+> applied.** The closed inventories are exactly four:
+>
+> 1. `contracts/readback-jsonl.md` § *Witnesses this contract requires*
+> 2. `contracts/witness-evidence.md` § *Proof obligations for Level 1* (and the E-*/W-* obligation tables)
+> 3. `quickstart.md` Step 4 (forced-failure · spurious-hit · controls)
+> 4. **this table**
+>
+> If a clause deliberately belongs in **none** of them, say so **in the clause**, and say which
+> inventories do carry it. Silence is indistinguishable from an omission, and the next review files it.
+
+⚠️ **This rule exists because the post-exhaustion hand-edit added FIVE normative obligations and
+instantiated an arm for ONE.** The other four came back as findings — two of them as
+*replaced-with-new-defect* — and patching them individually would have left the mechanism that produced
+them intact. ⚠️ `plan.md`'s own miniature of the same failure: a stray blank line once terminated this
+table four rows early, so four obligations sat as prose **inside the section that claims to enumerate
+them**. Markdown does not warn.
+
+⚠️ **A clause of the form *"X is declared / enumerated / specified / named"* is scored ABSENT** — the
+round-2 acceptance rule, still in force. Produce the artifact, not a sentence about the artifact.
+
 | File | Obligation | Required by |
 |---|---|---|
 | `library/tests/interop/cell_results_schema_check_test.py` | **`CONFIGS`** gains `asan` / `ubsan`, loses `asan-ubsan` | FR-021a |
@@ -550,10 +574,11 @@ This table is the single place they are enumerated.*
 | `phase-9-harness/INTEROP-COVERAGE-REPORT.md` | The claim that the charter's ASan+UBSan requirement is met by `asan-ubsan` is corrected | FR-021a |
 | `library/.github/workflows/interop-smoke.yml` | The `IMAGE:` key is pinned to the **pre-089 digest before the counterparty image is republished**, so moving `:latest` is inert for existing consumers | FR-026 · R-11 |
 | `phase-9-harness/quickfix-cpp/counterparty/interop_counterparty_main.cpp`, `phase-9-harness/quickfixj/.../InteropCounterparty.java` | `sent` **and** `readback` emitters, the hello record, `occurrence` ordinals, and the specified header partition including the tag-1156 reconciliation | FR-003 · FR-003a · FR-004 · FR-005 · R-10 |
-
 | `library/tests/interop/conversation/conversation_script.yaml` (**NEW**) | ⭐ **THE SCRIPT** — the executable conversation SC-009a compares against. Ordered steps with `step_id`, `msg_type`, originator, direction, intent values, typed-read declarations, `depends_on`. Read by the gtest **and** the counterparty (`*_SCRIPT_PATH`); its digest is FR-008c's pin | FR-008a/b/c · SC-009a |
-| `library/tests/interop/conversation/census.yaml` (**NEW**) | ⭐ **THE CENSUS** — a mechanical transcription of `spec.md` § *Conversation census*. ⛔ **MUST NOT be generated from the script**: that makes SC-009a a tautology and retroactively voids the only argument admitting a hand-written census | FR-015d · W-2a · SC-009a |
-| `phase-9-harness/quickfix-cpp/counterparty/interop_counterparty_main.cpp`, `phase-9-harness/quickfixj/.../InteropCounterparty.java` | ⭐ **Typed-accessor invocation seam** (user decision, Gate A round 3): each `typed_reads` entry carries `accessor_witness`, obtainable **only** from the object the generated getter returned. ⚠️ It must run **through** the accessor's result, never beside the call — a seam written unconditionally is satisfied by the very bypass it detects. The **vendored engines stay unpatched**, so FR-023 holds | FR-003b · FR-018 |
+| `library/tests/interop/conversation/census.yaml` (**NEW**) | ⭐ **THE CENSUS — and W-2a's OPERAND.** A **manual, mechanical** transcription of `spec.md` § *Conversation census*, which is its **source**, not its operand. ⛔ **MUST NOT be generated from the script**: that makes SC-009a a tautology and retroactively voids the only argument admitting a hand-written census. ⛔ **MUST NOT hard-code `100`** — `spec.md` § *Conversation census* settles that the figure is derived in one place and a pointer everywhere else. ⚠️ **Stated limit** (`contracts/witness-evidence.md` W-2a): the transcription is manual and **nothing checks it** — mutate a row of the spec table and no gate reddens, because no check opens `spec.md`. **Re-transcribe in the same edit that changes the spec table** | FR-015d · W-2a · SC-009a |
+| `phase-9-harness/quickfix-cpp/counterparty/interop_counterparty_main.cpp`, `phase-9-harness/quickfixj/.../InteropCounterparty.java` | ⭐ **The typed-accessor COMPILE ARM** (user decision, Gate A fresh loop round 1 — supersedes round 3's `accessor_witness` seam, which is **deleted**). **(a)** For every field the script declares as a typed read, the counterparty source reaches it through that message's **generated per-message accessor** — `FIX44::<Message>::get(FIX::<Field>&)` (C++) / `quickfix.fix44.<Message>.get(quickfix.field.<Field>)` (Java). The compiler is the schema-conformance check. **(b) The NEGATIVE-COMPILATION arm needs its own MECHANISM, and here it is** — a `try_compile`-style target in the counterparty build (`phase-9-harness/quickfix-cpp/counterparty/CMakeLists.txt`: a `check_cxx_source_compiles` / `try_compile` case asserted to **FAIL**; Java side: a `javac` invocation in the counterparty build asserted to exit non-zero) over a TU calling the generated accessor with a field the message does **not** declare. **Both directions asserted**: unmutated compiles, mutant does not. ⛔ *"The build MUST fail"* with no named mechanism is scored **absent** under this file's round-2 acceptance rule. ⚠️ The **vendored engines stay unpatched**, so FR-023 holds; the arm binds our call site, not the engine's interior | FR-003b · FR-018 · SC-003 |
+| `library/tests/interop/support/` (**NEW** — fixpp's readback/sent emitter) | ⭐ **fixpp is the THIRD emitter of `contracts/readback-jsonl.md`, and C-7 is THREE-WAY.** fixpp's emitter is bound by every clause of that contract — canonical partition, canonical form and sort order, encoding rule, `hello`/`terminal` — and **participates in the committed cross-language golden fixture**: all three emitters invoked on the same constructed record, compared byte-for-byte against **one** committed expected artifact. ⚠️ **A declaration is not a binding.** FR-006 compares parsed field **sets** and is blind to sort order and escaping, so nothing else guards fixpp's byte-level form; the earlier claim that an unbound fixpp emitter *"goes RED on the first run"* was **false for three of the four clauses it covered** and is deleted. Force the walk-order mutation **in fixpp's emitter** too | C-7 · FR-004 · FR-025 |
+| `library/tests/interop/conversation/conversation_script.yaml`, `phase-9-harness/quickfixj/.../InteropCounterparty.java` | ⭐ **C-11 — the LIVE-path charset arm** (`contracts/readback-jsonl.md` § *C-11*). The script declares `EncodedTextLen(354)`/`EncodedText(355)` on step `B-05` with a value containing byte `0xff`; the QuickFIX-J readback's `value_b64` for path `355` MUST equal the base64 of the wire bytes on C3/C4. ⚠️ **Census-neutral** — existing step, same `(seq_num, direction, occurrence)`, no completeness key added. ⚠️ The synthetic C-7 fixture **cannot** discharge this: it never enters QFJ's decoder. ⚠️ **Two vacuity closures travel with this arm** (`contracts/readback-jsonl.md` § *C-11*): the `value`/`value_b64` decision is made on the **ISO-8859-1 re-encoded bytes**, not on the decoded `String` — under ISO-8859-1 `0xff` decodes to the valid char `U+00FF`, and an implementer classifying on the string would write `value` and pass without ever exercising the b64 path; and `EncodedTextLen(354)` is **derived from the value's octet count, never a literal** — an inconsistent LENGTH/DATA pair is rejected by the validation-on arm before any readback exists. | C-11 · C-7 · FR-004 |
 | `phase-9-harness/quickfixj/.../InteropCounterparty.java` | Assert `org.quickfixj.CharsetSupport.getDefaultCharset()` is **`ISO-8859-1`** at startup and fail loudly otherwise. `value_b64` is only reconstructible because that charset is a total bijection over all 256 byte values; under a non-bijective charset the raw bytes are unrecoverable at application level | C-7 · FR-004 |
 
 ⚠️ **Out of scope, and it must stay stated rather than assumed**: re-characterising the `asan-ubsan` rows
@@ -614,6 +639,7 @@ later round does not re-apply the rejected form.*
 
 - Round 3 reviewed 2026-09-10 (bundle committed at `18813db6`): Codex P1=2 P2=3 P3=0; Opus post-judging **P1=3 P2=3 P3=1**. Trajectory 12/9/3 → 10/10/4 → **3/3/1**. **7 of 9 round-2 artifacts CLOSED under independent check**, census arithmetic recomputed from the tables (100 keys / 32 slots / 400 rows) and sound. Reviews: `research/reviews/codex_089-quickfix-interop-conversation_gate_a_3_review.md`, `research/reviews/opus_089-quickfix-interop-conversation_gate_a_3_adversarial_review.md`.
 - **Loop EXHAUSTED at round 3** — both rewrites spent. Per user decision 2026-09-10 the residual findings were applied as a **hand-edit** (not a third rewrite, not a re-plan): the trajectory was converging and every closure held, so re-planning would have re-derived correct artifacts and put three rounds of settled decisions back at risk of the *"a fix that replaces a wrong claim with a new claim"* class this bundle hit in rounds 1, 2 and 3. A fresh `/gate-a` follows, with the rewrite counter reset.
+- Fresh loop round 1 applied 2026-09-10: Codex P1=1 P2=3 P3=3; Opus post-judging P1=1 P2=6 P3=7; rewrite addresses RC-1..RC-4. Reviews: research/reviews/codex_089-quickfix-interop-conversation_gate_a_4_review.md, research/reviews/opus_089-quickfix-interop-conversation_gate_a_4_adversarial_review.md.
 
 **Hand-edit pass (2026-09-10, post-exhaustion).** Six files. Every change is an addition of a named artifact or a deletion; no settled decision was restated.
 
@@ -621,11 +647,24 @@ later round does not re-apply the rejected form.*
 |---|---|---|
 | **N-1** [P1] — SC-009a's two operands did not exist as files | Named **both**, with a provenance table forbidding either being generated from the other | `plan.md` § *Project Structure*, § *SC-009a's two operands* |
 | **#1** [P1] — fixpp could not source its own join identity | Added the **`INTEROP_FIXPP_*` gtest env block**; absent key ⇒ hard abort and promotion RED | `data-model.md` §1, `witness-evidence.md` E-1b |
-| **#2** [P1] — `fix_type` proves a dictionary lookup, not accessor invocation | **User decision**: `accessor_witness`, obtainable only from the object the getter returned | `spec.md` FR-018, `quickstart.md` Step 4, Clarifications |
+| **#2** [P1] — `fix_type` proves a dictionary lookup, not accessor invocation | ~~**User decision**: `accessor_witness`, obtainable only from the object the getter returned~~ ⛔ **SUPERSEDED at fresh loop round 1 — do not re-implement from this row.** The getter returns the **caller's own object**, so `accessor_witness` was synthesizable too. Replaced by a **compile-time** arm; `accessor_witness` is **deleted from the bundle**. See `spec.md` § *Clarifications* → *Session 2026-09-10 (Gate A fresh loop, round 1)* | `spec.md` FR-003b + FR-018, `quickstart.md` Step 4, `plan.md` § *External obligations* |
 | **#3** [P2] — validation pair bound to no runs | `off_run_id` / `on_run_id` / `kind` / `expected_verdict`; two **distinct** runs with opposite arms | `data-model.md` §10 |
-| **N-2** [P2] — fixpp's emitter bound by nothing | fixpp declared a **third producer**; "both emitters" ⇒ all three | `contracts/readback-jsonl.md` |
+| **N-2** [P2] — fixpp's emitter bound by nothing | ~~fixpp declared a **third producer**; "both emitters" ⇒ all three~~ ⛔ **NOT CLOSED by that edit — superseded at fresh loop round 1.** The blanket remap keyed on **one** spelling over a document using **five**, so it reached almost none of the normative sites; and the safety argument attached to it was **false**. Replaced by an explicit three-emitter population, a three-way C-7, and per-clause naming | `contracts/readback-jsonl.md` § *THE THREE EMITTERS* |
 | **#5** [P2] — stale disk readings survived | **Deleted**, with the re-derivation recipe kept | `research.md` R-1 |
 | **#4** [P3] — charset unpinned | `ISO-8859-1` pinned + asserted at startup; live-path arm required | `contracts/readback-jsonl.md` |
+
+### Fresh loop round 1 — disagreements
+
+*Findings, or parts of findings, declined or narrowed, recorded with the reason so a later round does not
+re-apply the rejected form.*
+
+| Item | Disposition | Reason |
+|---|---|---|
+| **Codex N-2 marked CLOSED while Codex #4 said the binding does not reach** | ⛔ **Resolved as NOT CLOSED** — the judge's reading is adopted | Both cannot hold. The *declaration* existed (`readback-jsonl.md`'s three-producer preamble); the *binding* did not, because the remap that carried it was keyed on one spelling. ⚠️ **A false CLOSED is the worse error**, because nothing downstream re-checks it. Applied as a real binding: `§ THE THREE EMITTERS`, a three-way C-7, per-clause naming, and the removal of the remap |
+| **RC-2 — *"delete every 'both/two &lt;synonym&gt;' construction"*** | ⚠️ **PARTIALLY DECLINED — applied to the EMITTER count, NOT to the PROCESS count** | RC-2's sweep conflates two different numbers. `readback-jsonl.md` § *Transport* is dispositive: **TWO files, one per emitting process**, because a cell pairs fixpp with **exactly one** counterparty. So *"each side emits both record kinds"* (§ Transport, § Records) and C-8's *"emitted by each of the run's two processes"* are **TWO and correct**; blanket-applying RC-2 would have written *"three sides emit both record kinds"* into the contract — a **new false claim**, the exact class this bundle keeps reproducing. The distinction is now a table at the head of the contract so the next reviewer reads it as deliberate. **THREE** was applied everywhere it belongs: format, bytes, sort order, escaping, the partition, C-7 — plus `spec.md` FR-025 and `quickstart.md` Step 4 |
+| **Disk figures inside `plan.md`'s Gate-A *disagreement-record* rows** (Codex 14's `83 G`→`93 G` / `34 G`→`29 G`; Codex 6's build-mount ceiling) | **RETAINED deliberately** — not swept by RC-3 | Those figures appear **inside the record of why a counter-proposal was rejected**. Deleting them deletes the reason and re-opens the decision. They are **history, not operands**, and are marked as such by the row they sit in. ⚠️ The distinguishing CONDITION, not a count: a figure inside a dated *disagreement record* is retained; a figure in any *live* clause is deleted. RC-3's sweep targets *live* claims; every one of those was deleted (`spec.md` § Assumptions, `data-model.md` §8, `contracts/disk-preflight.md`, `plan.md`'s second illustration), leaving **one** dated illustration in `plan.md` § *Disk preflight* |
+| **`checklists/requirements.md` lines under dated *"after Gate A round 1 / round 2"* headings** | **NOT rewritten** | They are dated historical records of those sessions, and the file's own precedent is to **strike in place or append**, never to rewrite history. The three-emitter correction is recorded in a **new** dated re-validation section instead |
+| **Codex #1's counter-proposal (an opaque receipt type)** | **DECLINED — superseded by the user decision** | The receipt's *serialized value* witnesses nothing (no value can). What it would have closed is a **compile-time** closure, which FR-003b already contained in one sentence — *"it compiles only if the field belongs to that message in FIX 4.4"* — at a fraction of the cost. The compile-time arm is adopted; the receipt type is not |
 
 ### Round 1 — disagreements
 
