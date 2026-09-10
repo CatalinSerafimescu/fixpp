@@ -38,7 +38,24 @@ env:
   # Prebuilt QuickFIX counterparty + bundled single-cell harness driver, published
   # PUBLIC from the parent harness (ci/counterparties.Dockerfile). Pulled anonymously
   # here so the smoke cell runs LIVE without checking out the private parent repo.
-  IMAGE: ghcr.io/catalinserafimescu/fixpp-interop-counterparties:latest
+  #
+  # ⛔ PINNED BY IMMUTABLE DIGEST, NOT BY `:latest`. Feature 089 rebuilds and
+  # republishes this image (readback emitters + the typed-accessor compile arm), and
+  # `:latest` is MUTABLE: the moment the parent's publish-counterparties.yml runs,
+  # every consumer of the tag starts executing new counterparty code, unpinned and
+  # ungated, with no change on this side to say so. This digest is the image that
+  # was live before that republish, so moving `:latest` is inert here.
+  #
+  # ⚠️ THIS PIN IS NOT SELF-MAINTAINING, and the failure is silent in the GREEN
+  # direction: if the digest ever becomes unpullable — deleted as a superseded GHCR
+  # version, most likely — this job takes the counterparty-absent path (FR-023),
+  # skips the cell with a reason, and the job stays GREEN. So a passing run is not
+  # by itself evidence that the cell ran; read the step log, not the conclusion.
+  # ⛔ Corollary for whoever prunes GHCR: never delete a version this file names.
+  #
+  # To move it deliberately: republish, then repoint this to the NEW digest and
+  # confirm from the step log that the smoke cell actually executed.
+  IMAGE: ghcr.io/catalinserafimescu/fixpp-interop-counterparties@sha256:be149447f3c3702a2ba47092752077b70804cfa9702802e8de8e6d9ca889ee8f
 
 # Newest run per PR only (mirror tier1.yml).
 concurrency:
