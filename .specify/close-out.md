@@ -24,13 +24,67 @@ step 19 points here.
 |---|---|---|---|
 | 1 | `spec/feature-catalogue.md` row(s) → `done` | **auto** | Covered by `/gate-b` pre-flight 4d against the diff |
 | 2 | **B&L functional delta** — the B-\*/L-\* rows for *what a user or operator must now know that they did not before*, **or** an explicit `B&L delta: none — <reason>` | **auto** | `.claude/scripts/check_bl_delta.py gate --feature <id>`. ⚠️ Its green proves a B&L surface **moved**, not that it moved for *this* feature — that judgement is Gate B Post-loop §4b |
-| 3 | **SecondBrain** — if the PR changed a component with a page under `brain/components/`, update it; if it **superseded** a decision an existing document records, flag that document there | manual | Also: name the governing feature id in a **header comment** at the code, the way `async_mutex.hpp` names *"Erratum E-5 (048)"*. A pointer, not a result — it does not rot like a line citation (#310) |
+| 3 | **SecondBrain** — the update itself happens **PRE-PUSH** (pipeline step 15a), on the branch. Here it is a **RE-CHECK**: fires only if the pre-push pass no longer holds. See "Row 3 is now two things" below | manual edit · **auto** re-check | Re-run the `refs_external` sweep as the **LAST** close-out action, after the parent commits — same reason as row 4: a later commit falsifies an earlier verify |
 | 4 | Parent: **submodule-pointer bump** commit (post-merge) | **auto** | ⚠️ **Two silent wrong-SHA traps.** `update-index --cacheinfo` does **not** validate the SHA exists, and `git commit -- <path>` afterwards **silently discards** the staged gitlink and re-reads the worktree. Stage with `git add`, commit **without** a pathspec, then verify: `git ls-tree HEAD <path>` matches `git -C <path> rev-parse HEAD`, and `git cat-file -t <sha>` says `commit` |
 | 5 | `gate-{a,b}-{done,waived}` labels on the merged PR | **auto** | ⚠️ `gh pr edit --add-label` **silently no-ops** on this repo — use `.claude/scripts/gh-pr-meta.sh` (REST) and **read back**. (`gh issue edit --add-label` does work; PRs are the broken case.) A `*-waived` label is half a disclosure pair — the rationale belongs in the PR body |
 | 6 | `phases/phase-4.md` — **status dashboard ONLY** | manual | Terse Track Log cells + the Module Status row. **No decision narrative here** — that goes in the per-feature sub-file |
 | 7 | `phases/phase-4/<module>/README.md` — feature progress + exit criteria | manual | |
 | 8 | `<feature>-verify.md` / lifecycle doc — final **User sign-off** line | manual | |
 | 9 | **Issues** — review and close what this PR closes | manual | ⚠️ Verify with `closingIssuesReferences`, **not** the PR body. A commit message saying a PR does *not* close an issue is what **closed** it — the linker ignores negation. Grep the whole commit range |
+
+**Row 3 is now two things, and the first one is not here.**
+
+*What to update* is unchanged: if the PR changed a component with a page under `brain/components/`,
+update that page; if it **superseded** a decision an existing document records, flag that document
+there; and name the governing feature id in a **header comment** at the code, the way
+`async_mutex.hpp` names *"Erratum E-5 (048)"* — a pointer, not a result, so it does not rot like a
+line citation (#310).
+
+*When* changed. That work now happens at **pipeline step 15a — on the branch, before the push** —
+together with a local run of BOTH freshness halves. It used to happen here, post-merge, and the
+records show what that produced: `337` (`fcbcf7cb`), `pr367-264` (`89f453ef`) and `360-361`
+(PR #383) all landed the brain edit as a separate direct-to-`main` push or its own PR, so the
+instruments first ran on a commit that no review was going to look at.
+
+⚠️ **And a red there blocks nothing.** `brain-freshness.yml` is **not** in branch protection's
+required set — that is `Gate A`, `Gate B`, `tier{1,2,3}-required`, derived from
+`repos/.../branches/main/protection`, not assumed. So the failure mode is not "CI stops you", it is
+"CI goes red on `main` and nobody is obliged to look". That is the argument for running the
+instruments **locally, pre-push**, rather than treating CI as the discovery channel. Folding the
+brain edit into the feature branch costs **zero** extra CI: `brain-freshness.yml` fires on
+`pull_request: branches: ["**"]` ungated by the gate labels, so it runs on that PR whether or not
+brain/ is in the diff. A separate post-merge push is the shape that buys a `push: main` run nobody
+reviewed.
+
+**Run the WRAPPER for the external half.** `check_brain.py sweep` exits **0** on *"no refs_external
+declared"* — a green over nothing, this repo's signature failure. The parent's
+`research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh` is what CI runs and what you run: it
+self-tests the instrument, seeds a broken ref into a **temp copy** and requires RED on it, then
+requires the real sweep to pass **and** report a non-zero execution count. Quote that count in the
+disposition — `337`'s record already does (*"self-test 11/11 first, then sweep OK (`<N>` refs) +
+gate clean"*), which is the shape to copy. Copy the SHAPE, not a number: what the sweep should
+report is "more than nothing", and any figure written here is a result that nothing re-runs.
+
+**The re-check (row 3b) has TWO trigger arms — the second one is the structural gap.**
+
+1. **Gate B or CI forced a change** after the pre-push pass: a fix round touched a component, or
+   changed a decision the pre-push brain update does not record.
+2. **Close-out itself dangled a ref.** Rows 4/6/7/11/12/13 write `phases/**` and
+   `decisions/**` — which is *exactly* what `refs_external` names. Row 11 is literally *"amend the
+   signed-off artifact a gate decision invalidated"*. So close-out can break a brain reference
+   **after** step 15a proved them all resolving, and the submodule's `brain-freshness.yml` is
+   structurally blind to it: it checks `refs` only, because `refs_external` paths do not exist in a
+   `fixpp` checkout. The parent's `brain-external-freshness.yml` does catch it — as a red on `main`,
+   post-merge, on a `push` no PR reviewed. **So do not evaluate arm 2 by judgement: re-run the
+   sweep as the last close-out action, after the parent commits.**
+
+**One line to settle in the Gate B record, not to leave implicit.** A brain commit inserted between
+steps 14 and 15 is a commit **Gate B never reviewed** — a gate result is scoped to the commits that
+existed when it ran. Either land the brain edit inside a Gate B fix round (`gate-b.md` is already
+brain-aware — it has the reviewer paste the component page's superseded-documents table), or
+state in the record that the brain commit is docs-only and deliberately outside the reviewed range.
+Pick one and write it down; otherwise it comes back as a Gate B finding.
+
 
 ## §2 — CONDITIONAL. Row applies only when its trigger fires; otherwise `N/A — <reason>`.
 
@@ -66,7 +120,8 @@ worktree gets a plain gitignored directory instead; re-create the symlink or its
 ALWAYS
 1.  catalogue row(s) done .............. DONE | N/A — <reason>
 2.  B&L functional delta ............... DONE (<ids>) | N/A — none, <reason>   [auto: check_bl_delta.py]
-3.  SecondBrain component page ......... DONE | N/A — <reason>
+3.  SecondBrain component page ......... pre-push: DONE (<sha>; gate clean, sweep <N> refs) | N/A — <reason>
+3b. SecondBrain close-out re-check ..... trigger: <fired|not fired> — <disposition>   [sweep re-run LAST]
 4.  submodule pointer bump ............. DONE (<old> -> <new>, ls-tree verified) | N/A
 5.  gate labels ........................ DONE (<labels>, read back) | N/A
 6.  phase-4.md dashboard ............... DONE | N/A
