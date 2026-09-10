@@ -995,40 +995,39 @@ claiming a pass with no corroborating run artifact.
   is otherwise a sentence with nothing behind it. ⛔ **Three-way, not two-way**: FR-006 compares parsed
   field *sets* and is blind to sort order and escaping, so C-7 is the **only** guard on fixpp's byte-level
   canonical form (`contracts/readback-jsonl.md` § *THE THREE EMITTERS*).
-- **FR-026**: Republishing the counterparty image MUST be ordered so that moving `:latest` cannot silently
-  change any existing consumer. ⚠️ `.github/workflows/interop-smoke.yml`'s `IMAGE:` key names
-  `…/fixpp-interop-counterparties:latest`, and this feature rebuilds both counterparty applications — so
-  on republish **every existing interop consumer immediately runs new counterparty code**, unpinned and
-  ungated. That includes the cells FR-020 requires to keep passing, the cells R-5 protects (the
-  `INTEROP_CP_CORRUPT_ADMIN` cell whose entire design is that QFJ does not validate, and the `PD-*`
-  malformed-dup cells — the readback emitter is new code on the inbound path of every message they send),
-  and the required smoke workflow itself. Either pin `interop-smoke.yml` and the existing cells to the
-  **pre-089 digest before republishing** (so `:latest` moving is inert), or publish under a new tag and
-  move `:latest` only after FR-020's regression run is green. The first is the safer shape and costs one
-  line in the workflow.
-  ⚠️ **"Safer" is not "sufficient", and the residual is a CONDITION rather than a file list.** Any
-  consumer that resolves the counterparty image at **run time** under a `pull_request` trigger carrying
-  `branches: ["**"]` is **not reachable by a pin merged only to the default branch**: that trigger admits
-  pull requests based on *any* branch, and such a run resolves its `IMAGE:` reference in its own base's
-  context, which a default-branch pin has not reached. So pin-first is **inert for the default branch —
-  which is exactly what makes it the safer shape there — and NOT inert for work already in flight**;
-  those runs keep exercising the moved `:latest` until their base carries the pin. ⛔ Stated as a
-  condition deliberately: a list of the consumers that satisfy it today re-arms the moment a third one
-  appears. The re-derivation recipe, and the discriminator that separates a consumer from the publisher,
-  are in `plan.md` § *External obligations*.
-  ⛔ **AND THAT RESIDUAL REOPENS THE CHOICE ABOVE — "the first is the safer shape" WAS CONCLUDED WITHOUT
-  IT AND IS NOT RE-CONFIRMED HERE.** ⚠️ A new fact that weakens a recorded conclusion, recorded *next to*
-  the conclusion without revisiting it, is how a stale recommendation survives review — so the
-  re-examination is written out rather than left to the reader. On the evidence now in hand the **second**
-  option dominates for two independent reasons: (1) it never moves `:latest`, so the in-flight population
-  this residual identifies is not exposed at all, whereas pin-first leaves it exposed until every open
-  base carries the pin; and (2) it needs **no** workflow-level pin on the matrix, which dissolves the
-  override problem that pinning creates — `plan.md` § *External obligations* records that override
-  mechanism as **OPEN**, and it exists only because option 1 was assumed. Option 1's advantage is that it
-  costs one line; option 2 costs a tag and the sequencing discipline to move `:latest` only after
-  FR-020's regression run is green. ⛔ **This is a STANDING DECISION, not an implementation detail, and
-  it is recorded here as REQUIRING CONFIRMATION rather than silently re-recommended** — the original
-  choice was made deliberately and is not overturned by an analysis pass acting alone.
+- **FR-026**: The counterparty republish MUST be ordered **publish → verify → depend**: the new image is
+  published, FR-020's regression run is executed against it, and only then may anything be pinned to it or
+  built on it. ⛔ **NOTHING IS PINNED TO THE OLD IMAGE.** Both consumers
+  (`.github/workflows/interop-smoke.yml`, the parent's `.github/workflows/interop-matrix.yml`) keep naming
+  `:latest` and therefore pull the new image as soon as it is published — which is **required**, not
+  tolerated: FR-020 asks whether the existing cells still pass **against the new counterparty**, and they
+  cannot exercise it while pinned away from it.
+  ⭐ **USER DECISION 2026-09-10, and it REPLACES an earlier two-option formulation that was wrong in both
+  branches.** That version offered (1) pin every existing consumer to the pre-089 digest before
+  republishing, or (2) publish under a new tag and move `:latest` only after FR-020 is green, and called
+  the first *"the safer shape [costing] one line"*. Both were rejected on measurement:
+  - ⛔ **Option 1 obstructs the verification it exists to enable.** Pinning the existing cells to the
+    pre-089 digest means nothing exercises the new image, so **FR-020 cannot be discharged** through the
+    normal path; the pin would have to be lifted to test, restoring the exposure it deferred. It also
+    cost far more than "one line" — two pins **plus** an override mechanism for 089's own cells, which was
+    never designed and was recorded as an open obligation.
+  - ⛔ **Option 2 traded a loud exposure for a silent one.** Deferring the `:latest` move leaves it stale
+    until someone performs a step nothing forces — the *spent valve nobody refills* hazard this bundle
+    already names for the disk reserve, and it fails quietly.
+  - ⭐ **Both were remedies for a risk whose population was EMPTY**: measured 2026-09-10, **zero open pull
+    requests in either repository**. The in-flight-PR reachability finding is real — both consumers
+    trigger on `pull_request` with `branches: ["**"]`, so a pin merged to a default branch never reaches a
+    PR resolving the image against its own base — but it describes a hazard that only exists when work is
+    in flight.
+  ⚠️ **THE RESIDUAL IS A SEQUENCING RULE, NOT A COUNT.** "Zero open PRs" is a fact about one moment and
+  re-arms the moment someone opens one. The obligation is therefore stated as a condition: **no pull
+  request touching the counterparty-image consumer paths may be opened between the publish and FR-020
+  reporting green.** ⛔ Do not restate the count; re-derive it (`gh pr list --state open`) at the moment of
+  publishing.
+  ⛔ **AND THE ROLLBACK IS PART OF THE ORDER, NOT AN IMPROVISATION.** If FR-020 goes red against the new
+  image, `:latest` is re-tagged to the pre-089 digest **before** anything else is attempted; GHCR retains
+  superseded versions, so the old digest remains addressable. A recovery decided under pressure is when
+  the wrong version gets deleted.
 
 ### Key Entities
 
