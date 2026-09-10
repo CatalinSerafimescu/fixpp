@@ -25,9 +25,9 @@ not a preference; the tree refuses it. `cell_results_schema_check_test.py` is re
 (`tests/interop/CMakeLists.txt:459`) and is provisioned in **three** CI tiers — `tier1.yml`, `tier2.yml`,
 `tier3-libcxx.yml` — on GitHub-hosted runners that have never executed an interop cell and hold **no run
 artifacts at all**; it resolves a **committed** manifest relative to its own file; and that manifest carries
-**59** `status: pass` rows today, none of which has an 089 run artifact. So *"the check opens every
+**pre-existing** `status: pass` rows today, none of which has an 089 run artifact. So *"the check opens every
 referenced artifact"* fails on every hosted runner for every 089 row, and an unconditional
-`REQUIRED_FIELDS` extension breaks all 59 rows, colliding with FR-020. Every restatement that keeps them as
+`REQUIRED_FIELDS` extension breaks all of them, colliding with FR-020. Every restatement that keeps them as
 one artifact fails the same way.
 
 | Artifact | Checked by | Asserts | Opens anything? |
@@ -98,7 +98,7 @@ Each shown RED against its own diagnostic, not merely a non-zero exit:
 | **a `witness_evidence.yaml` whose `validation_pairs:` section is EMPTY**, the artifact otherwise complete | **E-7a RED.** ⚠️ This is the arm that closes *zero pairs is green*; force it against the **otherwise-complete** artifact, or it proves only that a broken bundle fails. ⛔ **E-7b CO-FIRES here, so this arm does NOT isolate E-7a** — an empty section carries no control pair either. Per the doctrine two rows above, name the co-fire rather than asserting the rest of the gate set is satisfied: **isolating E-7a would require an admissible control pair to be present**, which an empty section cannot have. ⛔ **The claim that was here — *"every other gate satisfied"* — is DELETED, not corrected**: a replacement enumeration is falsified by the next obligation over this entity, which is exactly how this one was falsified by E-7b |
 | **a `validation_pairs:` section carrying 15 of the 16 conformance pairs** | **E-7a RED** — equality, not containment. ⚠️ The empty fixture alone cannot discriminate an existence check from a completeness check |
 | an `ENOSPC` abort recorded as `fail` | E-5 RED |
-| **the 59 pre-existing `pass` rows, unmodified** | the schema check stays **GREEN** — the control that proves the conditional-field rule did not break FR-020 |
+| **the pre-existing `pass` rows already committed, unmodified** | the schema check stays **GREEN** — the control that proves the conditional-field rule did not break FR-020 |
 
 ## Level 2 — witness rows
 

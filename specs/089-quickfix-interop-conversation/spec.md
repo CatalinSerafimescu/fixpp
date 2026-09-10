@@ -96,7 +96,7 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
 ### Session 2026-09-10 (Gate A round 1)
 
 - Q: `asan-ubsan` names a preset that enables ASan only — how is Article IX §2 (*"ASan, UBSan, TSan must all run and pass"*) actually satisfied on this surface? → A: **Four configurations — `normal`, `asan`, `ubsan`, `tsan`** (8 × 4 = **32 runs**). Not a combined ASan+UBSan preset: `linux-clang-ubsan` already exists, so no new preset is needed, no Tier-1 CI lane is edited, and per-sanitizer coverage is honest rather than inferred from a label. This supersedes the three-config answer above and its arithmetic everywhere it appears (FR-021, SC-010, SC-011, the disk sequencing, the evidence row count, the completeness census).
-- Q: The `asan-ubsan` name is used outside this bundle. Is 089 introducing the gap or inheriting it? → A: **Inheriting it.** The misnomer is pre-existing and repo-wide: `phase-9-harness/tools/run_interop_cell.py`'s `CONFIG_TO_PRESET` maps `asan-ubsan` → `linux-clang-asan`; `phase-9-harness/INTEROP-016-DESIGN.md:130` defines the config vocabulary as `normal|asan-ubsan|tsan`; `phase-9-harness/INTEROP-COVERAGE-REPORT.md:53` states the charter requires ASan+UBSan. 089 **corrects an inherited false claim** rather than creating one, and every `asan-ubsan` row already in `cell_results.yaml` records a result that was never under UBSan. Correcting the vocabulary is a specified obligation of this feature (see *External obligations* in `plan.md`); re-characterising the historical corpus is not.
+- Q: The `asan-ubsan` name is used outside this bundle. Is 089 introducing the gap or inheriting it? → A: **Inheriting it.** The misnomer is pre-existing and repo-wide: `phase-9-harness/tools/run_interop_cell.py`'s `CONFIG_TO_PRESET` maps `asan-ubsan` → `linux-clang-asan`; `phase-9-harness/INTEROP-016-DESIGN.md:130` defines the config vocabulary as `normal|asan-ubsan|tsan`; `phase-9-harness/INTEROP-COVERAGE-REPORT.md:53` states the charter requires ASan+UBSan. 089 **corrects an inherited false claim** rather than creating one. ⛔ **There is no historical `asan-ubsan` corpus** — an earlier revision of this answer asserted one in `cell_results.yaml`; measurement found that file holds only `config: normal` rows. What the retired label did produce is two **overclaims**, in `spec/behaviors-and-limitations.md` and `spec/feature-catalogue.md`, which credited UBSan coverage the ASan-only preset never ran; both are **corrected** by this feature, not exempted. FR-021a is the normative home of the distinction — prescriptive artifacts are corrected, a record that was true when written is left alone, and a record that overclaims is fixed.
 - Q: How big is the exposure the UBSan gap left open? → A: **Bounded to fixpp.** Per FR-023 only fixpp is sanitizer-instrumented; the counterparties are unmodified production binaries either way. So the missing UBSan arm bounded **fixpp's** UB coverage on this surface and nothing else — it was never going to cover the peer. That does not excuse the false PASS; it is the correct size of what was missing.
 - Q: FR-018 defines a "spurious hit" as *deleting the mechanism under test and asserting RED* — is that a spurious hit? → A: **No, that is the forced-miss recipe**, and the definition is inverted. A spurious-hit arm is **an arm that makes the guard report PASS for a reason other than the property it claims to measure**. FR-018 is rewritten to that definition and every arm is re-derived from it; the readback-channel-removed arm keeps its proof obligation but is relabelled as the FR-016c forced-**miss** arm it always was.
 - Q: Is a peer-side **typed accessor** required, or merely available? → A: **Required, and it is a distinct assertion from generic enumeration.** A typed accessor (`NewOrderSingle::get(Symbol&)`) compiles only if the field belongs to that message in FIX 4.4 and throws `FieldNotFound` if the peer did not receive it — a *schema-conformance* check generic enumeration cannot make. Complete generic enumeration proves missing/spurious/group-shape, which typed access cannot. Both are required; the conversation script declares which fields are read each way (FR-003b).
@@ -699,12 +699,12 @@ claiming a pass with no corroborating run artifact.
   provisioned in **three CI tiers** (`tier1.yml`, `tier2.yml`, `tier3-libcxx.yml`) on hosted runners that
   have never executed an interop cell and hold **no run artifacts at all**, and it resolves a **committed**
   manifest relative to its own file. So *"the check opens every referenced artifact"* fails on every hosted
-  runner, for every 089 row; and extending the global `REQUIRED_FIELDS` unconditionally breaks the **59**
-  existing `status: pass` rows, colliding head-on with FR-020. Required split:
+  runner, for every 089 row; and extending the global `REQUIRED_FIELDS` unconditionally breaks the
+  **pre-existing `status: pass` rows already committed**, colliding head-on with FR-020. Required split:
 
   | Artifact | Where it is checked | What it asserts |
   |---|---|---|
-  | `tests/interop/cell_results.yaml` — **committed expected inventory** | the shipped ctest, in all three CI tiers, **opening nothing** | structure only. New evidence fields are required **conditionally on `kind: conversation`**, so the 59 existing rows are untouched (FR-020). Each `status: pass` conversation row must name a ledger entry that exists, whose `terminal_state` is `completed`, and whose `witness_count` equals the census figure for that slot |
+  | `tests/interop/cell_results.yaml` — **committed expected inventory** | the shipped ctest, in all three CI tiers, **opening nothing** | structure only. New evidence fields are required **conditionally on `kind: conversation`**, so the pre-existing rows are untouched (FR-020). Each `status: pass` conversation row must name a ledger entry that exists, whose `terminal_state` is `completed`, and whose `witness_count` equals the census figure for that slot |
   | the **run ledger** (a `runs:` section of the witness-evidence record, FR-015b) — **committed**, machine-independent | the same ctest | one **`kind: conformance`**, `authoritative: true` entry per `(cell_id, config)`; the set of those slots equals the 32-slot inventory exactly; `run_id`, `run_timestamp`, counterparty flavour/version/digest, `script_digest`, `terminal_state`, `witness_count`, `evidence_digest`, `authoritative`, `kind`. **No absolute path**. ⚠️ `validator-positive-control` and retry rows are **recorded here and excluded from that equality** (data-model §11 § *THE TWO DISCRIMINATORS*) |
   | the **validation pairs** (a `validation_pairs:` section of the same record, FR-012a) — **committed** | the same ctest | ⛔ **NO ROSTER IN THIS CELL** — the pair obligations this ctest evaluates are stated in `contracts/witness-evidence.md` § *Obligations*, their normative home. ⚠️ A roster stood here naming **E-7a** and reference resolution only; it was stale from the commit that added E-7b and E-7c, and an implementer building the ctest from it would have built one gate of three. Deleted rather than corrected |
   | the **run artifact** — machine-local, never committed | the **promotion step** (FR-014b), on the machine that ran the cell | the stream is opened, **each of the run's two processes'** `hello` **and `terminal`** records are read (⚠️ **TWO is the process count, not the emitter count** — `contracts/readback-jsonl.md` § *THE THREE EMITTERS* carries the distinction), their `run_id` / `script_digest` / `config` are checked against each other and against the row, the completeness gate is evaluated, and `evidence_digest` is computed over the persisted bundle |
@@ -842,18 +842,38 @@ claiming a pass with no corroborating run artifact.
   cell requires. That refusal MUST be a **failure**, not a skip and not a pass.
 - **FR-016b**: The counterparty image MUST be referenced by immutable digest, not by a mutable tag, so
   that the exact counterparty build behind any result is recoverable after the fact.
+  ⛔ **AN UNPULLABLE PIN IS A *SKIP*, AND A SKIP IS *GREEN*.** This image's consumers skip-with-reason and
+  keep the job green when the image cannot be pulled (that is the deliberate counterparty-absent
+  handling), so a digest that is wrong, stale or simply gone does **not** redden anything — it silently
+  removes the cell while the check still reports success. ⚠️ *Ask what ELSE satisfies "the pinned cell
+  passed"*: **the cell not having run**. So every site that pins a digest MUST also evidence that the
+  cell **actually executed**, read from that run's own **step log** and never from the job conclusion —
+  and the sites that pin one are enumerated in `plan.md` § *External obligations*, which carries this
+  obligation per consumer rather than leaving it to the reader of this clause.
 - **FR-016c**: A message for which **no** readback record arrived MUST fail its cell. An empty or absent
   readback set MUST NOT satisfy any fidelity comparison — the comparator MUST assert that a record was
   received before comparing its contents.
 - **FR-017**: Every new assertion MUST be accompanied by a forced-failure demonstration proving it can
   report RED: a wrong field value, an omitted required field, and a message the peer should reject.
+  ⛔ **THE POPULATION THIS CLAUSE RANGES OVER IS CLOSED, AND `quickstart.md` § *Step 4* IS THE
+  ENUMERATION** — its forced-miss, spurious-hit and controls tables, together with THE COMPLETION RULE's
+  four closed inventories (`plan.md` § *External obligations*). *"Every new assertion"* is an open noun
+  phrase and was one: a new assertion is not yet subject to this clause **until it is added to one of
+  them**, and adding it there is the same edit that states it. ⚠️ Two rules bind **every** arm in all
+  three of Step 4's tables — *an arm is not written until its OBSERVABLE exists*, and *each RED cell
+  asserts its OWN diagnostic, never a bare non-zero exit, and is run against the unmutated tree and
+  confirmed GREEN there first*. **`quickstart.md` § *Step 4* → § *THE THREE RULES BELOW BIND ALL THREE TABLES* is their normative home** — a named `###` heading, cited by name because six pointers in this bundle once resolved to a section that had no heading; this
+  requirement adopts both by reference, with the same force, and does not restate their reasoning —
+  three restatements are three fossils.
 - **FR-018**: In addition to forced-miss arms, **every guard** MUST carry at least one **spurious-hit**
   arm. A spurious-hit arm is defined as: **an arm that makes the guard report PASS for a reason other than
   the property it claims to measure.** ⚠️ This definition replaces the one this spec previously carried
   (*"deleting the mechanism under test and asserting the witness goes RED"*), which is the **forced-miss**
   recipe — it proves a guard *can* fire and says nothing about what else could satisfy the condition the
   guard is watching. Every arm derived from the old definition inherited the inversion and must be
-  re-derived.
+  re-derived. ⛔ **The arms discharging this clause are the same CLOSED enumeration FR-017 names** —
+  `quickstart.md` § *Step 4* — and the two rules FR-017 adopts by reference bind the spurious-hit table
+  no differently from the other two.
 
   ⛔ **ONE declared exception to *"every guard"*, and it is the same one SC-003 names — the typed-accessor
   guard (FR-003b).** Its arm is a **negative-compilation** arm covering **schema conformance**; a
@@ -888,7 +908,14 @@ claiming a pass with no corroborating run artifact.
 - **FR-019**: Golden re-captures caused by the dictionary flip MUST be performed per cell with the
   prior golden diffed and the change recorded; a matrix-wide auto-update MUST NOT be used.
 - **FR-020**: Existing passing cells outside the narrow business set MUST continue to pass, or any
-  change in their status MUST be explained and recorded.
+  change in their status MUST be explained and recorded. ⛔ **THIS IS A MEASUREMENT — RUN THE CELLS AND
+  COMPARE — AND AN ARGUMENT IS NOT ONE.** Specifically: reasoning that the counterparty republish is safe
+  *because* the new emitter code activates only when `INTEROP_CP_RUN_ID` is set argues from an opt-in
+  gate; it reasons about a mechanism and runs **zero** existing cells, so it cannot report the status
+  change this clause is written to catch. The inherited work made exactly that substitution once, which
+  is why the prohibition is stated here rather than only where the mistake was found. ⚠️ **The producer
+  of the measurement is `tasks.md` T099**, which executes it and records the result; no argument, and no
+  other task, discharges this requirement.
 - **FR-021**: Every cell MUST run under **all four** build configurations — `normal`, `asan`, `ubsan` and
   `tsan` — giving 4 role x flavour x 2 validation arms x 4 configs = **32 runs**, and each MUST emit its
   own result row rather than being folded into another config's row. ⚠️ The configuration names must map
@@ -902,9 +929,22 @@ claiming a pass with no corroborating run artifact.
   `run_interop_cell.py`'s `CONFIG_TO_PRESET` gains the four entries above and loses `asan-ubsan`, and the
   schema check's `CONFIGS` set follows. The harness design documents that define the old vocabulary
   (`phase-9-harness/INTEROP-016-DESIGN.md`, `phase-9-harness/INTEROP-COVERAGE-REPORT.md`) MUST be
-  corrected in the same change. ⚠️ Historical `asan-ubsan` rows already in `cell_results.yaml` record
-  results that were never under UBSan; **re-characterising that corpus is out of scope** — it is a filed
-  issue, not this feature's work. See *External obligations* in `plan.md`.
+  corrected in the same change, as is the vocabulary comment in `tests/interop/cell_results.yaml`, which
+  is prescriptive rather than a record. ⛔ **THERE IS NO `asan-ubsan` CORPUS, AND AN EARLIER REVISION OF
+  THIS CLAUSE INVENTED ONE.** It asserted *"historical `asan-ubsan` rows already in `cell_results.yaml`"*
+  and deferred them to *"a filed issue"*. **Measured: that file holds only `config: normal` rows and no
+  `asan-ubsan` row at all**, no such issue existed, and a sweep of the parent harness found the retired
+  label **only** in prescriptive artifacts. Both halves of the deferral were false — the corpus and the
+  issue — so the clause is deleted rather than re-scoped, and nothing is filed.
+  ⚠️ **Re-derive, do not trust this sentence**: the rows are inline flow-mappings (`- { id: …, config:
+  normal, … }`), so an anchored `^ *config:` pattern returns zero and reads as confirmation. Use
+  `grep -o "config: [a-z-]*" tests/interop/cell_results.yaml | sort | uniq -c`.
+  ⭐ **What did exist was two overclaims, and they are CORRECTED, not exempted.** `run_interop_cell.py`
+  mapped `asan-ubsan` → the **ASan-only** preset, so evidence cells reading *"green under `normal` +
+  `asan-ubsan`"* credited UBSan coverage that never ran. The two live sites —
+  `spec/behaviors-and-limitations.md` and `spec/feature-catalogue.md` — now state the preset that
+  actually ran while keeping the historical label. **A record that was true when written is left alone;
+  a record that overclaims is fixed.** See *External obligations* in `plan.md`.
 - **FR-022**: The `tsan` configuration MUST be treated as **bring-up, not a config flip**. TSan has never
   been run on the paired live matrix, so the feature MUST establish that the TSan arm actually executes
   the conversation — a TSan run that skips, aborts during setup, or produces no witnesses MUST NOT be
@@ -966,6 +1006,16 @@ claiming a pass with no corroborating run artifact.
   **pre-089 digest before republishing** (so `:latest` moving is inert), or publish under a new tag and
   move `:latest` only after FR-020's regression run is green. The first is the safer shape and costs one
   line in the workflow.
+  ⚠️ **"Safer" is not "sufficient", and the residual is a CONDITION rather than a file list.** Any
+  consumer that resolves the counterparty image at **run time** under a `pull_request` trigger carrying
+  `branches: ["**"]` is **not reachable by a pin merged only to the default branch**: that trigger admits
+  pull requests based on *any* branch, and such a run resolves its `IMAGE:` reference in its own base's
+  context, which a default-branch pin has not reached. So pin-first is **inert for the default branch —
+  which is exactly what makes it the safer shape there — and NOT inert for work already in flight**;
+  those runs keep exercising the moved `:latest` until their base carries the pin. ⛔ Stated as a
+  condition deliberately: a list of the consumers that satisfy it today re-arms the moment a third one
+  appears. The re-derivation recipe, and the discriminator that separates a consumer from the publisher,
+  are in `plan.md` § *External obligations*.
 
 ### Key Entities
 

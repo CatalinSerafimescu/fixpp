@@ -449,7 +449,7 @@ that hold no run artifacts. See §11 and FR-014.
   reading of this section claimed it did, on the assumption that 8 ids had to serve 32 rows; separating the
   ledger from the manifest removes that assumption.
 - **New fields are required CONDITIONALLY, on `kind: conversation`.** Extending the global
-  `REQUIRED_FIELDS` would break the **59** `status: pass` rows already committed — none of which has an 089
+  `REQUIRED_FIELDS` would break the **pre-existing** `status: pass` rows already committed — none of which has an 089
   run artifact — colliding head-on with FR-020.
 - **`status: pass` requires a ledger entry** (§11) whose `terminal_state` is `completed` and whose
   `witness_count` equals the census figure for that slot. The check **opens nothing**: corroboration

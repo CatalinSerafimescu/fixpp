@@ -757,7 +757,8 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   in `tests/interop/cell_results.yaml`. fixpp's tolerance is a RECEIVE-path property — the
   injected bytes are identical regardless of the sending engine — so it is proven LIVE against
   QuickFIX-J 3.0.1 (the four `PD-QFj-*` cells: replay-survives + malformed-dup-rejected ×
-  initiator + acceptor, green under `normal` + `asan-ubsan`) and in-process by
+  initiator + acceptor, green under `normal` + `asan` — the config then labelled `asan-ubsan`,
+  which `run_interop_cell.py` mapped to the **ASan-only** preset, so **no UBSan ran**) and in-process by
   `test_inbound_poss_dup_tolerance.cpp` / `test_inbound_poss_dup_validation.cpp`. Consequently
   **SC-004's QuickFIX-cpp clause is waived-with-rationale, not met**; SC-001/SC-002 are
   satisfied by the QuickFIX-J live cells + the unit suite. **Status: shipped + waived**

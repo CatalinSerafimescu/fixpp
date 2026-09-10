@@ -9,7 +9,7 @@
 # (per-cell completeness rule). Validated by cell_results_schema_check_test.py.
 #
 # `config: normal` is the in-repo/local declaration; the parent re-emits each row
-# per build config (normal | asan-ubsan | tsan) at release-prep. Live cells carry
+# per build config (normal | asan | ubsan | tsan) at release-prep. Live cells carry
 # `status: skip:counterparty-unavailable` here (FR-023): in this environment no
 # QuickFIX counterparty is configured, so the live cells skip-with-reason — never
 # silently passed. The parent overrides status with real results when the

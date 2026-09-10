@@ -117,7 +117,7 @@ python3 ../phase-9-harness/tools/promote_interop_evidence.py \
    keys, evaluates the completeness gate, copies the bundle under the evidence root and records
    `evidence_digest`. The committed manifest then carries a row naming that ledger entry and **no path**.
    ⚠️ **The schema check opens nothing** — it is a ctest three CI tiers run on hosted runners that hold no
-   run artifacts at all, against a committed manifest holding 59 pre-existing `pass` rows. Asking it to
+   run artifacts at all, against a committed manifest holding pre-existing `pass` rows. Asking it to
    open `artifact_path` fails everywhere; that is why the manifest and the ledger are two artifacts.
 
 ---
@@ -193,6 +193,32 @@ substitute for the other**:
 witness"*, and the arms this bundle labelled *spurious hit* were second flavours of forced miss. The table
 is now derived from the contracts' own witness lists, not from memory.
 
+### ⛔ THE THREE RULES BELOW BIND ALL THREE TABLES — forced-miss, spurious-hit and controls alike
+
+⭐ **This section is the CLOSED ENUMERATION `spec.md` FR-017 and FR-018 range over.** An assertion becomes
+subject to those requirements when it appears in one of the three tables below, and not before; adding an
+arm here is the same edit that states the clause mandating it (THE COMPLETION RULE, `plan.md` § *External
+obligations*). The three rules were previously scoped narrower than the population they are about — two of
+them to one table, one of them to no obligation at all — and are hoisted here so that scope is structural
+rather than a matter of where a paragraph happened to sit.
+
+1. ⛔ **AN ARM IS NOT WRITTEN UNTIL ITS OBSERVABLE EXISTS.** Any arm in the tables below whose forced
+   defect produces **no difference the guard can see** measures its own setup and stays green — the
+   repository's named class `feedback_an_arm_whose_forced_defect_stays_green_measures_its_own_setup`.
+   Every arm MUST name *what differs*, as a value. ⚠️ This rule stood inside § *Spurious-hit arms* and
+   read *"Two of **the arms below**"*, binding one table of three; the forced-miss table has no observable
+   column, so its `Expect` cells named a discriminant by habit rather than by obligation. **They are now
+   required to.**
+2. ⛔ **EVERY RED CELL MUST ASSERT ITS OWN DIAGNOSTIC, NOT MERELY A NON-ZERO EXIT** — the specific
+   classification, status token or matcher its `Expect` cell names. In PR #255 two cells reddened via a
+   *different* check than the one they were written for and stayed green under a mutation that reverted
+   the rule they were meant to pin.
+3. ⛔ **EVERY ARM MUST BE RUN AGAINST THE UNMUTATED TREE FIRST AND CONFIRMED GREEN THERE**, before its RED
+   is trusted, so a RED is attributable to the mutation and not to a harness broken in a way that reddens
+   everything. ⚠️ **An obligation, not advice** — this read *"Before believing any of these arms…"*, a
+   phrasing nothing can fail. Its per-arm result is **recorded**, and `plan.md` § *External obligations*
+   names the artifact that holds it and the command that produces it.
+
 ### Forced-miss arms
 
 | Force | Expect | Mandated by |
@@ -220,7 +246,6 @@ is now derived from the contracts' own witness lists, not from memory.
 | A promoted bundle whose stream's `hello` carries a **different `run_id`** from the row | promotion RED — *because the stream disagrees*. ⚠️ The fixture that separates presence from corroboration | FR-013b · FR-014 · E-1b |
 | A slot with **no** authoritative run | schema check RED — the 32-slot inventory equality, not containment | W-3b |
 | A replayed step delivered once where the census declares **two** occurrences | RED as **`occurrence_count_mismatch`**, not as a field-level `missing` | FR-005 · W-7 |
-| **The 59 pre-existing `pass` rows, unmodified** | the schema check stays **GREEN** — the control proving the conditional-field rule did not break FR-020 | FR-020 |
 | An `ENOSPC` abort recorded as `fail` | schema check RED — it must be `error:enospc` | FR-014a · E-5 |
 | Delete one witness | completeness gate RED (W-3) | FR-015b |
 | Delete a business step from the script | the census's 100 keys disagree with the script-derived projection ⇒ RED | FR-015d · W-2a |
@@ -230,14 +255,14 @@ is now derived from the contracts' own witness lists, not from memory.
 
 ### Spurious-hit arms — the guard reports PASS for the wrong reason
 
-⛔ **An arm is not written until its OBSERVABLE exists.** Two of the arms below were previously listed with
-no observable at all — their forced defect produced **no difference the guard could see**, so they measured
-their own setup and stayed green. The middle column now names *what differs*.
+⚠️ This table's middle column is where rule 1 of § *Step 4* → § *THE THREE RULES BELOW BIND ALL THREE TABLES* — *an arm is not written until its
+OBSERVABLE exists* — is carried explicitly; the rule itself binds all three tables and is stated there, not
+here. Two of the arms below were previously listed with no observable at all.
 
 | Force | **The observable — what differs** | Expect | Mandated by |
 |---|---|---|---|
 | Derive the `sent` record's `fields` **from the serialized frame**, **and** mutate the frame after intent capture | A test-only hook rewrites `Account(1)` from `ACCT0001` to `ACCT0009` in the outbound **`B-03`** frame, after stage-1 capture and before transmission — **same length**, `CheckSum(10)` recomputed, `BodyLength(9)` unchanged, dictionary-declared for 35=F, and nothing branches on it. ⚠️ **`B-03`, not `B-01`**: `B-03` has exactly one declared occurrence on all four combos, while `B-01` carries a replay at occurrence `1` on C3/C4 whose stored bytes may be pre- or post-mutation — which would make this arm's expected observable ambiguous | **builder-derived ⇒ RED, `value_mismatch` on path `1`, sent `ACCT0001` / readback `ACCT0009`. Frame-derived ⇒ GREEN.** Assert **both halves**; the second is what makes it discriminating. ⚠️ Without the mutation an unmutated serializer round-trips to the same field set and the two derivations are indistinguishable — that version of this arm *is* the defect | FR-018 · data-model §3 · C-8 |
-| ⭐ **COMPILE-TIME ARM.** Mutate **`interop_counterparty_main.cpp` / `InteropCounterparty.java` themselves** (or the shared typed-read adapter TU the production call site depends on) so a declared typed read calls the generated per-message accessor with a field that message does **not** declare in FIX 4.4 (e.g. `NewOrderSingle::get(LastPx&)`). ⛔ **Never a standalone snippet** — a detached TU proves the *pinned engine API* accepts `Symbol` and rejects `LastPx`, and proves nothing about the counterparty | **the BUILD OF THAT FILE FAILS.** The generated accessor is overloaded only over the fields the message declares — `FIELD_SET` in QuickFIX-cpp's `FieldMap.h`, one `get` per field in QuickFIX-J's generated class — and there is **no generic `get`** on `FieldMap`, `Message` or either generated class to swallow the mutant | **the mutant does not compile, AND the unmutated source does.** ⚠️ **Assert BOTH halves** — a build that fails for an unrelated reason is not this arm, so ⛔ **the failure MUST MATCH the expected missing-overload diagnostic** — a **condition + per-toolchain recipe**, not a literal string: the diagnostic names the `get` call as having no viable overload **and** names the mutated field (error line or candidate notes). ⚠️ **The toolchains do NOT share a diagnostic shape, and the field identity is not always on the error line** — clang, today, carries it in the **candidate notes only**, so **match the WHOLE diagnostic, not its first line**, and derive *where* the identity lands rather than assuming it. ⛔ **Derive each toolchain's pattern by running the recipe in the arm's own EXECUTION HOST** — never from a literal written here, in a review, or in a commit message: `plan.md` § *External obligations* → the typed-accessor compile-arm row is the **one place** the host, the derivation and the two free variables that make a pinned literal wrong are stated. ⛔ Do **not** repair a red arm by loosening to *"the build failed"* — never merely a non-zero exit: a typo, a missing include or a wrong namespace fails the build too. ⚠️ **Stated coverage limit** — **one** mutated `(Message, Field)` site per language; sufficient because the absence of a generic `get` is **structural, not per-message**, and **re-checkable only on an engine re-pin** (`plan.md` § *External obligations*). ⚠️ **This arm covers SCHEMA CONFORMANCE only.** A spurious-hit arm for *runtime* typed-accessor invocation is **structurally unsatisfiable**: the generated getter returns the caller's own object, so no serialized value can witness the call (`spec.md` § *Clarifications* → *Session 2026-09-10 (Gate A fresh loop, round 1)*). Three artifact-level observables were proposed and each was synthesizable — **do not propose a fourth** | FR-003b · FR-018 · SC-003 |
+| ⭐ **COMPILE-TIME ARM.** Mutate **`interop_counterparty_main.cpp` / `InteropCounterparty.java` themselves** (or the shared typed-read adapter TU the production call site depends on) so a declared typed read calls the generated per-message accessor with a field that message does **not** declare in FIX 4.4 (e.g. `NewOrderSingle::get(LastPx&)`). ⛔ **Never a standalone snippet** — a detached TU proves the *pinned engine API* accepts `Symbol` and rejects `LastPx`, and proves nothing about the counterparty | **the BUILD OF THAT FILE FAILS.** The generated accessor is overloaded only over the fields the message declares — `FIELD_SET` in QuickFIX-cpp's `FieldMap.h`, one `get` per field in QuickFIX-J's generated class — and there is **no generic `get`** on `FieldMap`, `Message` or either generated class to swallow the mutant | **the mutant does not compile, AND the unmutated source does.** ⚠️ **Assert BOTH halves** — a build that fails for an unrelated reason is not this arm, so ⛔ **the failure MUST MATCH the expected missing-overload diagnostic** — a **condition + per-toolchain recipe**, not a literal string: the diagnostic names the `get` call as having no viable overload **and** names the mutated field (error line or candidate notes). ⚠️ **The toolchains do NOT share a diagnostic shape, and the field identity is not always on the error line** — clang, today, carries it in the **candidate notes only**, so **match the WHOLE diagnostic, not its first line**, and derive *where* the identity lands rather than assuming it. ⛔ **Derive each toolchain's pattern by running the recipe in the arm's own EXECUTION HOST** — never from a literal written here, in a review, or in a commit message: `plan.md` § *External obligations* → the typed-accessor compile-arm row is the **one place** the host, the derivation and the two free variables that make a pinned literal wrong are stated. ⛔ Do **not** repair a red arm by loosening to *"the build failed"* — never merely a non-zero exit: a typo, a missing include or a wrong namespace fails the build too. ⚠️ **Stated coverage limit** — **one** mutated `(Message, Field)` site per language; sufficient because the absence of a generic `get` is **structural, not per-message**, and **re-checkable only on an engine re-pin** (`plan.md` § *External obligations*). ⚠️ **This arm covers SCHEMA CONFORMANCE only.** A spurious-hit arm for *runtime* typed-accessor invocation is **structurally unsatisfiable**: the generated getter returns the caller's own object, so no serialized value can witness the call (`spec.md` § *Clarifications* → *Session 2026-09-10 (Gate A fresh loop, round 1)*). Three artifact-level observables were proposed and each was synthesizable — **do not propose a fourth**. ⭐ **CONTROL — WITHOUT IT THIS ARM TESTS NOTHING: the mutant field type MUST exist on *some* FIX 4.4 message.** A **nonexistent** type produces a *cascading* diagnostic — unknown type, then no viable overload — which satisfies the arm's match condition (no viable `get`, the mutated identifier named) **while exercising no schema check at all**, and it left the C++ arm GREEN when it happened. ⛔ Assert the control: the chosen field exists in FIX 4.4, on a message other than the mutated one. `plan.md` § *External obligations* → the typed-accessor compile-arm row carries the same control as an obligation | FR-003b · FR-018 · SC-003 |
 | ⭐ **A HAND-WRITTEN `typed_accessor_arm` ATTESTATION.** Write the value as a literal in `interop_counterparty_main.cpp` / `InteropCounterparty.java` and **remove the compile arm from `CMakeLists.txt` / `pom.xml`** | the `hello` announces the required version and **every C-12 check passes** — the announcement is byte-identical to a genuine one, so the handshake reports the same shape whether the arm ran or not | ⛔ **THE BUILD MUST FAIL.** The value is a compile definition / generated constant emitted by the arm's own build step, and **each language carries a compile dependency on the arm's build step that is INDEPENDENT of the announced-value expression** — so removing or disabling the arm fails the build *even though this fixture has already replaced the value with a literal*. C++: `#ifndef INTEROP_TYPED_ACCESSOR_ARM` → `#error`, which the value expression does not gate. ⛔ **Java: the clause that stood here — *"the generated constant is absent ⇒ compile error"* — was FALSE against this very fixture** and is deleted, not weakened: that implication holds only while the source still *references* the constant, which is precisely the reference the literal replaces, so the execution could be removed from `pom.xml`, the constant left unconsumed, and `InteropCounterparty.java` would compile and announce a truthful-looking value with no arm behind it. The mechanism that repairs it — an **unconditional** compile dependency on a generated marker produced only by the arm's own maven execution — is stated in `plan.md` § *External obligations* → the typed-accessor compile-arm row, its normative home; this arm does not restate it. ⚠️ **Assert the Java half explicitly**: replace the value with a literal, remove the arm's execution, and the maven build MUST still fail. ⚠️ **Stated limit** (`plan.md` § *External obligations* → the compile-arm row): that is the drift this closes; it does not defend against someone **also** writing a source-level `#define` of the same macro. Nothing in-repo can, and the arm does not claim to. ⚠️ Without this arm C-12 measures a **string**, not a build — and a forced-miss arm on the *absent* announcement cannot see it, because this one is present and correct | C-12 · FR-003b · FR-018 |
 | **Empty intent vs empty readback** | the comparator is handed `∅` on both sides | it **rejects**; it must not pass on `∅ == ∅` | FR-018 · FR-016c |
 | **Run one combo of one config and none of the other three** | that config's projection π is missing 12–13 of the census's 100 keys while the other three are complete | completeness gate RED. ⚠️ **This is the arm that discriminates the completeness key from `(arm, step, direction, occurrence)`** — dropping a whole *config* does not, because a config-blind gate and a combo-blind gate both redden on that one | FR-015c · W-3a · N-1 |
@@ -254,20 +279,29 @@ their own setup and stayed green. The middle column now names *what differs*.
 
 ### Controls — arms that must stay GREEN
 
+⚠️ **A GREEN-must-hold obligation stated inline inside another table is still a control, and this table is
+the closed set of them.** The `⤷` rows below are **cross-references, not second copies**: the arm named in
+each `Force` cell is the assertion's normative home, it is asserted there, and this table exists so that a
+reader enumerating the controls finds it. ⛔ A control-labelled row must not sit in a RED-arm table — one
+did, the FR-020 row now first below, whose own `Expect` cell called it a control while it was filed under
+§ *Forced-miss arms*.
+
 | Force | Expect | Mandated by |
 |---|---|---|
+| **The pre-existing `pass` rows already committed in `tests/interop/cell_results.yaml`, unmodified** — the whole population as it stands when the arm runs, ⛔ **re-derived, never a written-down count** (`plan.md` § *External obligations* → the `REQUIRED_FIELDS` row carries the recipe) | the schema check stays **GREEN** — the control proving the conditional-field rule did not break FR-020. ⚠️ A hardcoded population silently stops covering the rows added after it was written, **including the ones 089 itself adds** | FR-020 |
+| ⤷ **Cross-reference — the GREEN half of the frame-derivation arm** (§ *Spurious-hit arms*, first row): the **mis-derived**, frame-derived implementation, on that same post-capture-mutated `B-03` frame | **GREEN** — asserted at the arm named in the `Force` cell, which is its normative home | FR-018 · C-8 |
+| ⤷ **Cross-reference — the GREEN half of the image-omitting-`typed_accessor_arm` arm** (§ *Forced-miss arms*): FR-016b's digest pin, resolved against that same pre-arm image | the pin **RESOLVES and stays GREEN** — asserted at the arm named in the `Force` cell, which is its normative home | C-12 · FR-016b |
+| ⤷ **Cross-reference — the GREEN half of the duplicate-slot arm** (§ *Spurious-hit arms*): the completeness gate **alone**, on the artifact carrying two runs for one `(cell_id, config)` slot | the completeness gate alone stays **GREEN** — asserted at the arm named in the `Force` cell, which is its normative home | FR-015c · W-3c |
+| ⤷ **Cross-reference — the GREEN half of the degenerate-validation-pair arm** (§ *Spurious-hit arms*): FR-010a's divergence probe, on the degenerate pair | the divergence probe stays **GREEN** — asserted at the arm named in the `Force` cell, which is its normative home | E-7 · FR-012a |
 | `ci/disk-preflight.sh` A-2 (both comfortable) | GREEN, with both readings, both required values and their dates printed | D-6 |
 | `ci/disk-preflight.sh` A-4 (not WSL, no host mount) | GREEN via **D-4** — proves A-3 is not just "no host mount ⇒ fail" | D-4 |
 | A ledger carrying a **`kind: validator-positive-control`** run for a cell whose slot already holds a conformance run | **GREEN** — the slot is claimed once, by the conformance run; the control row carries `cell_id`/`config` as the cell it *probes*, not a slot claim. ⚠️ Before this scoping the control row read as a **33rd slot** and reddened an equality it has nothing to do with, which is what made E-7 unenforceable for exactly the pairs carrying `expected_verdict` | W-3b · W-3c · E-1c · data-model §11 |
 | The same ledger, **π and the 100-key equality** | **GREEN** — π ranges over `kind: conformance` rows only, so a control run's witness rows never enter W-3a | W-3a · W-1 |
 
-**Every RED cell must assert its OWN diagnostic, not merely a non-zero exit.** In PR #255 two cells
-reddened via a *different* check than the one they were written for and stayed green under a mutation
-that reverted the rule they were meant to pin.
-
-⚠️ **Before believing any of these arms, prove the instrument can report non-zero** — run each against the
-unmutated tree and confirm it is GREEN there, so a RED is attributable to the mutation and not to the
-harness being broken in a way that reddens everything.
+⚠️ **Rules 2 and 3 of § *Step 4* → § *THE THREE RULES BELOW BIND ALL THREE TABLES* apply to every row of all three tables above** — assert your own
+diagnostic, and prove the instrument can report non-zero by running each arm against the unmutated tree
+first. They stood here, after the tables, where they read as closing remarks scoped to nothing; they are
+now stated as obligations ahead of the tables they bind, and are not restated here.
 
 ---
 
