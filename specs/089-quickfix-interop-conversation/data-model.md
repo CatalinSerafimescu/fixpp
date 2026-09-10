@@ -431,7 +431,12 @@ that hold no run artifacts. See §11 and FR-014.
 **Validation rules**
 
 - **Row identity is `(cell_id, config)`** — the 32-slot inventory, one committed row per slot, retries
-  never committed, and **`validator-positive-control` runs never committed** (they occupy no slot, §11).
+  never committed, and **`validator-positive-control` runs never committed *as a row of THIS manifest*** (they
+  occupy no slot, §11). ⚠️ **Qualify the subject, because two different files in this bundle are "committed"**:
+  this manifest, and the `witness_evidence.yaml` carrying the run **ledger**. §11 says the opposite about the
+  ledger — *"the `runs:` ledger holds **every** run — `conformance` and `validator-positive-control`,
+  authoritative and superseded"* — and E-7 / **E-7b** depend on exactly that. Read unqualified, this sentence
+  makes E-7's control-pair reference resolution unsatisfiable.
   ⚠️ So this manifest's population is `kind: conformance`, `authoritative: true` runs — exactly 32. The shipped `id` field is **retained** and derived as `"<cell_id>@<config>"`, so
   `test_ids_unique` keeps a well-defined subject and **does not need to be replaced**. ⚠️ An earlier
   reading of this section claimed it did, on the assumption that 8 ids had to serve 32 rows; separating the
@@ -640,8 +645,8 @@ ranges over a pair's cardinality, so an implementation emitting none satisfies e
 | `accepted_off` | set of `script_step_id` | messages the validation-off arm accepted |
 | `accepted_on` | set of `script_step_id` | messages the validation-on arm accepted |
 | `dispositions` | list | per message, each arm's validator disposition — accepted, or rejected with the objection |
-| **`authoritative`** | bool | ⭐ **exactly one `authoritative: true` pair per `(cell_pair, config)`.** ⚠️ The pair entity lacked this field entirely while the Run entity has it — the very discriminator invented to close the duplicate-collapse problem, absent one entity over |
-| `verdict` | enum | `identical` · `diverged` | ⛔ **DERIVED, never asserted** — see the validation rules |
+| **`authoritative`** | bool | ⭐ **exactly one `authoritative: true` pair per `(cell_pair, config)`.** ⚠️ The pair entity lacked this field entirely while the Run entity has it — the very discriminator invented to close the duplicate-collapse problem, absent one entity over. ⛔ **TRUTH CONDITIONS, WRITER AND SUPERSESSION — modelled on §11's, because a field with no producer is the RC-A shape**: the `validation_pairs:` section records **every** pair, authoritative and superseded alike, and is not filtered on the way in; a pair is **`authoritative: false` iff either referenced run has been superseded** (mirroring §11's *"a superseded retry — recorded, and entering no gate"*); and the **named promotion command sets it** — it writes each new pair `authoritative: true` and **demotes the prior pair for that `(cell_pair, config)`** in the same write. ⚠️ Non-authoritative pairs **enter no gate**: E-7a's set equality is scoped onto this field, exactly as §11 scopes the slot equality |
+| `verdict` | enum | `identical` · `diverged` — ⛔ **DERIVED, never asserted**; see the validation rules |
 
 **Validation rules**
 
@@ -651,6 +656,12 @@ ranges over a pair's cardinality, so an implementation emitting none satisfies e
   ids, opposite arms, matching metadata and opposite `has_validator` are all satisfiable by them. All 16
   conformance slots could then be backed by runs the ledger says govern nothing, with E-1c, E-7 **and** E-7a
   green. **Fails toward GREEN.**
+  ⛔ **AND THIS PREDICATE NEEDS A HOST THAT RE-EVALUATES IT, NOT ONLY ONE THAT FIRES ONCE** — it is promoted
+  as **both** `contracts/witness-evidence.md` **E-7** (at promotion, when the pair is constructed) and
+  **E-7c** (in the committed schema check, on every CI run). ⚠️ `authoritative` is **mutable after the pair
+  is written**: a retry landing later supersedes a referenced run, and E-7 does not re-run. The committed
+  check's *"every `off_run_id`/`on_run_id` resolves to a `runs:` row"* does not catch it — a superseded row
+  resolves. Both operands are in the committed file, so E-7c opens nothing.
 - ⛔ **`accepted_off`, `accepted_on` AND `dispositions` MUST BE EXTRACTED FROM THE TWO REFERENCED RUN
   ARTIFACTS, AND `verdict` MUST BE COMPUTED FROM THEM** — exact set equality over `accepted_off` /
   `accepted_on`. A `conformance` pair MUST yield `verdict: identical`; a `validator-positive-control` pair
@@ -660,7 +671,11 @@ ranges over a pair's cardinality, so an implementation emitting none satisfies e
   divergence probe — the pair reports the expected answer without ever measuring the property, and the whole
   cross-arm claim (FR-010 / SC-004) is unevidenced. A forced-**miss** arm cannot catch it, because a
   hard-coded pair reports the same shape a correct one does.
-- ⛔ **EXACTLY ONE `kind: conformance` PAIR PER `(cell_pair, config)`.** ⚠️ E-7a asserts *set* equality
+- ⛔ **EXACTLY ONE `authoritative: true`, `kind: conformance` PAIR PER `(cell_pair, config)`, AND E-7a's SET
+  EQUALITY IS SCOPED `kind: conformance ∧ authoritative: true`** — the same scoping §11 applies to the slot
+  equality. ⚠️ **Without the scoping the rule is one field short of the defect it closes**: two
+  `authoritative: false` pairs plus one `true` pair for one slot satisfy the cardinality sentence, and an
+  unscoped equality collapses all three — the same set-collapse, one discriminator over. ⚠️ E-7a asserts *set* equality
   against the 16-pair inventory, and a set equality keyed on the slot is **satisfied when a slot is claimed
   twice** — the duplicates collapse. An `identical` pair and a `diverged` pair for the same slot can both
   sit in the committed artifact with no rule saying which governs. That is verbatim the collapse E-1c and
@@ -700,6 +715,13 @@ ranges over a pair's cardinality, so an implementation emitting none satisfies e
   construction, and FR-011's "a production dictionary is loaded" establishes presence, not execution. The
   pair is admissible only alongside FR-010a's **divergence probe**: a seeded message the dictionary should
   reject must make this entity report `diverged`, with the objection recorded.
+  ⛔ **AND THAT ADMISSIBILITY CONDITION HAS AN INSTRUMENT — `contracts/witness-evidence.md` E-7b**, which
+  requires at least one `kind: validator-positive-control` pair with `expected_verdict: diverged` and
+  `verdict: diverged` to exist in the committed section. ⚠️ **It exists because ZERO CONTROL pairs was
+  GREEN**: E-7a excludes control pairs from its equality by design, the committed check's other operands do
+  not mention them, and E-7 is vacuous over a `kind` nothing emitted — so 16 conformance pairs with no
+  control pair at all passed every standing gate, while this paragraph says those 16 are inadmissible. A
+  requirement and a success criterion are not gates.
 
 ---
 

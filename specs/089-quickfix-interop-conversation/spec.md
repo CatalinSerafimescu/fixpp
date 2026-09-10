@@ -160,21 +160,26 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
     generated accessor with a field that does **not** belong to that message, and assert the **build
     FAILS**. Named mechanism and both arms: `plan.md` § *External obligations* → *the typed-accessor
     compile arm*.
-  - ⭐ **The instrument was proven able to report non-zero, on both engines, before this decision was
-    written.** Re-derivation recipe (run it; do not trust this paragraph):
-    `g++ -fsyntax-only -std=c++17 -I reference-engines/quickfix-cpp/include` over a TU calling
+  - ⭐ **The instrument was proven able to report non-zero, on every toolchain the matcher claims, before
+    this decision was written.** Re-derivation recipe (run it; do not trust this paragraph):
+    `-fsyntax-only -std=c++17 -I reference-engines/quickfix-cpp/include` over a TU calling
     `FIX44::NewOrderSingle::get(FIX::Symbol&)` (declared on that message ⇒ must compile) and then
-    `FIX::LastPx&` (not declared on it ⇒ must fail); and the `javac` equivalent against the QuickFIX-J
-    build output with `quickfix.field.Symbol` / `quickfix.field.LastPx`. **Observed 2026-09-10 on the
-    pinned vendored trees**: the positive control compiled on both; the mutant failed on both —
-    `no matching function for call to 'FIX44::NewOrderSingle::get(FIX::LastPx&)'` (g++),
-    `no matching member function for call to 'get'` (**clang** — with the field named only in the candidate
-    notes) and `no suitable method found for get(LastPx)` (javac, **simple** field name).
-    ⛔ **RUN ALL THREE TOOLCHAINS, NOT TWO.** An earlier revision of this paragraph proved the instrument on
-    `g++` and `javac` while the matcher claimed *"(clang/gcc)"* — and **every** configuration in FR-021's
-    matrix is a `linux-clang-*` preset, so the one compiler it had been proven on is the one the matrix
-    never runs. That is this repository's dominant defect class occurring **inside** the paragraph written
-    to prevent it. ⚠️ There is **no generic `get` overload** on
+    `FIX::LastPx&` (not declared on it ⇒ must fail), under **each** C++ compiler the arm's execution host
+    may resolve to; and the `javac` equivalent against the QuickFIX-J build output with
+    `quickfix.field.Symbol` / `quickfix.field.LastPx`. **Re-run 2026-09-10 on the pinned vendored trees**
+    under g++ 13.3.0, clang 22.1.2 and javac 21.0.12, reading each **process exit status** rather than a
+    filtered log: every positive control exited **0**, every mutant exited **non-zero**.
+    ⛔ **THE POLARITY IS THE RESULT; NO DIAGNOSTIC TEXT IS RECORDED HERE.** Three consecutive revisions of
+    this bundle pinned a diagnostic literal in this paragraph and each was falsified by the next round —
+    the text depends on the **locale** and on the mutated call site's **receiver constness** as well as on
+    the compiler, so a literal is under-determined even for one compiler — FR-003b's matcher clause below
+    states both variables. **Derive; do not transcribe.**
+    ⛔ **RUN EVERY TOOLCHAIN THE HOST MAY RESOLVE TO, NOT A SUBSET.** An earlier revision of this paragraph
+    proved the instrument on `g++` and `javac` while the matcher claimed *"(clang/gcc)"* — proving an
+    instrument on a subset of the toolchains it claims is this repository's dominant defect class occurring
+    **inside** the paragraph written to prevent it. ⚠️ **Which toolchains those are follows from the arm's
+    EXECUTION HOST**, stated in one place: `plan.md` § *External obligations* → the typed-accessor
+    compile-arm row. ⚠️ There is **no generic `get` overload** on
     `FieldMap`, `Message`, or either generated class that could swallow the mutant; that absence is what
     makes the arm work and is the thing to re-check if an engine is ever re-pinned.
 
@@ -477,23 +482,32 @@ claiming a pass with no corroborating run artifact.
     `#include` fails "correctly" for entirely the wrong reason.
   - ⛔ **THE MATCHER IS A CONDITION PLUS A PER-TOOLCHAIN RECIPE — NOT A LITERAL STRING.** The **condition**
     is: *the diagnostic identifies the call to `get` as having no viable overload, **and** the mutated field
-    type is named in the diagnostic (on the error line or in its candidate notes)*. Each toolchain's exact
-    text is **derived by running the recipe on the pinned tree**, never copied from here.
-    ⛔ **The three toolchains do NOT share a diagnostic shape, and two of them do not even carry the field
-    identity in the same place.** A single pattern across them is the defect this clause replaces.
-
-    | toolchain | error line | field identity carried where |
-    |---|---|---|
-    | g++ | `no matching function for call to '…::get(FIX::<Field>&)'` | **on the error line** |
-    | clang | `no matching member function for call to 'get'` | ⚠️ **notes only** — `no known conversion from 'FIX::<Field>' to 'FIX::<Other> &'`; the field is **absent from the error line** |
-    | javac | `no suitable method found for get(<Field>)` | on the error line, **simple name** — *not* `quickfix.field.<Field>` |
-
-    *Illustrations observed 2026-09-10 on g++ 13.3.0 / clang 22.1.2 / javac (QFJ 3.0.1); they are dated
-    motivation, never operands — re-derive with the recipe above.*
-
-    ⛔ **CLANG NEEDS A TWO-LINE MATCH**: the error line (`no matching member function for call to 'get'`)
-    **plus** a candidate note naming the mutated field. Matching only the error line does not distinguish a
-    schema failure from any other overload-resolution failure on `get`.
+    type is named **somewhere in that diagnostic** — on the error line or in its candidate notes*. Each
+    toolchain's exact text is **derived by running the recipe in the arm's execution host**, never copied
+    from here, from a review, or from a commit message.
+    ⛔ **MATCH THE WHOLE DIAGNOSTIC, NOT ITS FIRST LINE.** The toolchains do not share a shape and do not
+    carry the field identity in the same place — clang, today, puts it in the **candidate notes only**, so a
+    matcher anchored on the error line alone cannot distinguish a schema failure from any other
+    overload-resolution failure on `get`. ⛔ **Where the identity lands is itself DERIVED, not assumed**: the
+    derivation must inspect the full diagnostic and record which line carried it.
+  - ⛔ **WHICH TOOLCHAINS THE ARM MUST SATISFY FOLLOWS FROM ITS EXECUTION HOST, STATED IN ONE PLACE** —
+    `plan.md` § *External obligations* → the typed-accessor compile-arm row, which names the host, the
+    build-time derivation of its compilers, and the trigger on which the arm actually runs. ⚠️ **A toolchain
+    list is a measurement and rots on every image rebuild; a host is structural.** Do not restate a list
+    here, and do not reason about this arm through FR-021's configuration matrix — that matrix maps the
+    **fixpp** build, not this one.
+  - ⛔ **A PINNED DIAGNOSTIC LITERAL IS UNDER-DETERMINED EVEN FOR ONE COMPILER.** Two free variables, both
+    measured on the pinned trees 2026-09-10, neither visible in any literal:
+    - **Locale.** g++ quotes identifiers `‘…’` (U+2018/U+2019) under a UTF-8 locale and `'…'` under
+      `LC_ALL=C`; clang uses ASCII `'` in both. **Pin the locale in the arm** and derive the pattern under
+      that same locale, or match quote-agnostically — otherwise the arm passes on one runner and fails on a
+      developer box, for a reason that has nothing to do with the schema.
+    - **Receiver constness.** g++ appends ` const` to the printed call signature when the mutated call's
+      object expression is const-qualified and omits it when it is not — so the *same compiler* prints two
+      different strings for the same mutation, decided by how the call site happens to be written.
+      (Identical under `-std=c++17`, `c++20` and `c++23`.)
+    ⚠️ These are why a literal transcribed from a previous revision has been wrong three rounds running.
+    **Derive under the arm's own pinned locale, against the arm's own mutated call site.**
     ⛔ **AND THE REPAIR THAT MUST NOT BE MADE**: when this arm goes red under a toolchain whose text was not
     anticipated, do **not** loosen the matcher to *"the build failed"*. That reinstates exactly the
     spurious-hit hole this clause exists to close, and it would be invisible. Add the toolchain's row.
@@ -598,7 +612,14 @@ claiming a pass with no corroborating run artifact.
   carries **`kind` ∈ {`conformance`, `validator-positive-control`}** and, for a positive control, an
   **`expected_verdict`** (`diverged`); positive-control executions get their own `run_id` and sit
   **outside** the 32-slot run inventory, so they neither satisfy nor disturb FR-021/SC-010 (§ *Conversation
-  census*, run inventory). Without it, SC-004's green state
+  census*, run inventory).
+  ⛔ **AND THE PROBE'S EXISTENCE IS GATED, not merely required** — `contracts/witness-evidence.md` **E-7b**
+  obliges the committed `validation_pairs:` section to carry at least one `kind: validator-positive-control`
+  pair with `expected_verdict: diverged` and `verdict: diverged`, resolving to two control ledger rows with
+  opposite `has_validator`. ⚠️ **Stated because a requirement is not a gate**: E-7a excludes control pairs
+  from its equality by design and E-7 is vacuous over a `kind` nothing emitted, so before E-7b an artifact
+  with 16 conformance pairs and **zero** control pairs passed every standing check — while data-model §10
+  makes the control pair the *precondition of admissibility* for all 16. Without it, SC-004's green state
   is indistinguishable from a validator that never ran — a dead validator produces identical sets by
   construction, and this feature exists partly because the validator is exercised today by exactly one
   interop cell.
