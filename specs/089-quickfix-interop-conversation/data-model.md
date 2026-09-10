@@ -236,10 +236,19 @@ emitters byte-identical for C-7 — it is simply not what the bypass arm discrim
 
 **Validation rules**
 
-- **Body only, structurally determined.** A field is excluded iff the receiving engine classifies it as
-  header or trailer **under the dictionary loaded for that cell**; that membership is
-  *built-in list ∪ dictionary-declared header* on both engines. `8, 9, 35, 34, 49, 56, 52, 10` are an
-  illustrative subset, **not the rule**.
+- **Body only, structurally determined — and the partition is the CANONICAL one, not the RECEIVER's.**
+  ⚠️ **What each ENGINE classifies is the PROBLEM STATEMENT, not the rule** — the same demotion
+  `contracts/readback-jsonl.md` § *⚠️ The header/body partition is specified HERE, not delegated to the
+  engines* already makes. Each engine's own membership is *its built-in list ∪ dictionary-declared header*,
+  and **the two built-in lists differ** (QuickFIX-J's contains `ApplExtID(1156)`, QuickFIX-cpp's does not),
+  so a receiver-specific rule yields two different `fields` sets for identical bytes and breaks FR-004.
+  ⛔ **The normative inclusion rule is the CANONICAL UNION PARTITION**
+  (`contracts/readback-jsonl.md` § *⛔ THE CANONICAL PARTITION — the decision, as a value*, restated at
+  FR-004): `header` = (QuickFIX-cpp's built-in list) ∪ (QuickFIX-J's built-in list) ∪ (the fields declared
+  in the `<header>` block of the dictionary loaded for that cell); a field in that set is excluded from
+  `fields` by **both** emitters, whichever engine's own classifier would have called it body. An engine's
+  own classification survives only as **captured diagnostic evidence**, never as the inclusion rule.
+  `8, 9, 35, 34, 49, 56, 52, 10` are an illustrative subset, **not the rule**.
 - ⚠️ **The body set SHRINKS when US1 turns the dictionary on**, so FR-006's exact-set equality ranges over
   a *different set* before and after the flip this feature mandates. `FIX44.xml`'s `<header>` block
   declares fields that are **not** in QuickFIX-cpp's built-in list — `SecureData(91)` and the `NoHops`
@@ -360,7 +369,9 @@ close it.
 `cell_id`, so a cross-arm equality is unsatisfiable by construction; cross-arm agreement is §10's property
 over a different entity.
 
-⚠️ **Exactly one authoritative run per `(cell_id, config)` slot.** `(cell_id, config, run_id)` uniqueness
+⚠️ **Exactly one authoritative `conformance` run per `(cell_id, config)` slot** — and π ranges over
+`kind: conformance` rows only, so a `validator-positive-control` run's rows never enter this equality.
+`(cell_id, config, run_id)` uniqueness
 alone permits unbounded rows per slot — every retry mints a new `run_id` — and because `π` drops `run_id`
 those duplicates *collapse*, so a retry is **invisible** rather than loud, and a failed run and a retried
 pass can both sit in the record with no rule saying which governs. That fails toward green.
@@ -419,7 +430,8 @@ that hold no run artifacts. See §11 and FR-014.
 **Validation rules**
 
 - **Row identity is `(cell_id, config)`** — the 32-slot inventory, one committed row per slot, retries
-  never committed. The shipped `id` field is **retained** and derived as `"<cell_id>@<config>"`, so
+  never committed, and **`validator-positive-control` runs never committed** (they occupy no slot, §11).
+  ⚠️ So this manifest's population is `kind: conformance`, `authoritative: true` runs — exactly 32. The shipped `id` field is **retained** and derived as `"<cell_id>@<config>"`, so
   `test_ids_unique` keeps a well-defined subject and **does not need to be replaced**. ⚠️ An earlier
   reading of this section claimed it did, on the assumption that 8 ids had to serve 32 rows; separating the
   ledger from the manifest removes that assumption.
@@ -453,9 +465,12 @@ A separate artifact accumulating witness rows across all cells and all configs.
   census*), which the expansion rule derives from `business steps × applicable combos × declared
   occurrences × 2 arms`. The **`config` axis multiplies the runs, not the key** — `config` is deliberately
   *not* in the completeness key, because it is the axis the equality is taken **over**.
-- The gate compares **π(authoritative rows of config `c`)** against **π(authoritative rows of config `c'`)**
-  for every ordered pair of the four configs, and against the census set — **exact set equality**, not
-  containment. Only rows with `authoritative: true` participate. It *also* runs over the union after the
+- The gate compares **π(`kind: conformance` authoritative rows of config `c`)** against **π(the same, for
+  config `c'`)** for every ordered pair of the four configs, and against the census set — **exact set
+  equality**, not containment. Only rows with `authoritative: true` **and `kind: conformance`**
+  participate. ⚠️ **Both discriminators, not one** (§11 § *THE TWO DISCRIMINATORS*): a
+  `validator-positive-control` run's rows are not census keys, so unscoped the first control run breaks
+  this equality on the config it ran under. It *also* runs over the union after the
   last configuration. ⚠️ The union pass alone is not a check: with
   no `config` on the row, a configuration producing **zero** witnesses leaves the union unchanged and
   exact-set equality passes. SC-011's *"the same witness set as the `normal` arm"* is unimplementable
@@ -601,6 +616,16 @@ the field from the comparison. Naming it explicitly routes it to §3 instead.
 The entity SC-004 and FR-010a/FR-012 range over. Nothing in the model carried it before Gate A round 1:
 the arm axis appeared in the cell cardinality (8 = 4 × 2) and nowhere else.
 
+⭐ **WHERE IT LANDS AND WHAT PRODUCES IT** — a schema with no producer is the defect Gate A fresh-loop
+round 2 filed against this very section. **File**: a `validation_pairs:` section of the same committed
+`library/tests/interop/witness_evidence.yaml` that carries the witness rows (§6) and the run ledger (§11)
+— not a fourth file. **Producer**: the named promotion command
+(`phase-9-harness/tools/promote_interop_evidence.py`, FR-014b), which **constructs** each pair from two
+already-promoted runs and **evaluates E-7** on it before writing it. **Gated by**: E-7 (well-formedness,
+at promotion) and **E-7a** (existence and completeness, in the committed schema check —
+`contracts/witness-evidence.md`). ⚠️ Without E-7a **zero pairs is green**: nothing else in this bundle
+ranges over a pair's cardinality, so an implementation emitting none satisfies every other gate.
+
 | Field | Type | Rules |
 |---|---|---|
 | `pair_id` | string | identifies the pair |
@@ -621,9 +646,12 @@ the arm axis appeared in the cell cardinality (8 = 4 × 2) and nowhere else.
 - `verdict: diverged` MUST name **the message and the validator's objection** (FR-012). The witness
   `mismatch` vocabulary is field-level (`value_mismatch` / `missing` / `spurious`) and cannot express
   *"the on arm rejected a message the off arm accepted"*.
-- ⛔ **`off_run_id` and `on_run_id` MUST name two DISTINCT runs whose arms are opposite.** Both referenced
-  runs must match the pair's `cell_pair`, `config`, `script_digest` and `kind`, and the run named by
-  `off_run_id` must have recorded `has_validator: false` while `on_run_id`'s recorded `true`.
+- ⛔ **`off_run_id` and `on_run_id` MUST name two DISTINCT runs whose arms are opposite.** ⚠️ Stated
+  **positionally**, because a run carries one `cell_id` while the pair carries a pair and *"both match the
+  pair's `cell_pair`"* has no defined truth value: the run named by **`off_run_id` carries `cell_pair[0]`**
+  (the validation-**off** cell) and recorded `has_validator: false`; the run named by **`on_run_id` carries
+  `cell_pair[1]`** (the validation-**on** cell) and recorded `has_validator: true`; and **both** carry the
+  pair's `config`, `script_digest` and `kind`.
   ⚠️ **Without this the pair is satisfiable by DEGENERATE CONSTRUCTION**: nothing otherwise forbids
   `accepted_off` and `accepted_on` being read from *one* execution, which yields `identical` across all 32
   slots with the two arms never actually compared — a green that means only that a set equals itself. That
@@ -636,6 +664,12 @@ the arm axis appeared in the cell cardinality (8 = 4 × 2) and nowhere else.
   *pair's* two referenced runs; citing it here left this rule with no arm at all, which is precisely the
   shape — *a clause that names a spurious hit and instantiates nothing* — that this bundle keeps
   reproducing. A forced-MISS arm cannot catch a spurious HIT.
+- ⛔ **The `kind: conformance` pair inventory is EXACTLY 16, and the set must equal it — not be contained
+  in it** (E-7a). **16 is derived, never an independent count**: it is the 32 conformance slots (§11)
+  quotiented by the arm axis — `cell_id ≡ (combo_id, arm)`, so the two arms of one `combo_id` under one
+  `config` are one pair ⇒ 4 combos × 4 configs = 16. ⚠️ Scoped to `kind: conformance`: control pairs are
+  **additional** and carry no slot, so an unscoped cardinality would be `16 + N` and unsatisfiable in
+  exactly the way the ledger's slot rule was before it was scoped.
 - `expected_verdict` is meaningful only for **`kind: validator-positive-control`** — that exact value — and such pairs MUST assert `diverged`, and
   **remain outside the 32 conformance slots**, so a deliberately-diverging control can never be counted as
   a conformance result.
@@ -648,15 +682,39 @@ the arm axis appeared in the cell cardinality (8 = 4 × 2) and nowhere else.
 
 ## 11. Run ledger — the committed, machine-independent record of the runs (FR-014b)
 
-A `runs:` section of the same witness-evidence artifact (§6), not a third file. One entry per
-**authoritative** run.
+A `runs:` section of the same witness-evidence artifact (§6), not a third file. **One entry per RUN** —
+authoritative and superseded alike, and `conformance` and `validator-positive-control` alike. The
+`authoritative` and `kind` columns discriminate; the section is not filtered on the way in.
+⚠️ An earlier revision said *"one entry per **authoritative** run"* while the `authoritative` column said
+*"retries are recorded with `false`"* — recorded **where**, if the section holds only authoritative runs?
+Resolved here in favour of recording: a retry that is never written down cannot be shown not to have been
+counted, which is what SC-009b demands.
+
+> ### ⛔ THE TWO DISCRIMINATORS — read before restating any rule about *slots* or *authoritative runs*
+>
+> A ledger row is admitted to a gate by **two independent axes**, and scoping one while leaving the other
+> is the same partial-restatement defect one dimension over:
+>
+> | axis | value | meaning |
+> |---|---|---|
+> | `kind` | `conformance` | **occupies a slot**; enters the 32-slot inventory, the manifest, the completeness projection π, and every W-*/E-* gate below |
+> | ″ | `validator-positive-control` | **occupies NO slot**; carries `cell_id`/`config` to name the cell it *probes*, never a slot claim. Enters **only** E-7 / E-7a / FR-010a. ⛔ It is **`authoritative: true`** — making it `false` would place it in "enter no gate" and E-7's entire purpose is to gate it |
+> | `authoritative` | `true` | the run that governs its slot |
+> | ″ | `false` | a superseded retry — recorded, and entering no gate |
+>
+> **Therefore**: every clause in this bundle that says *slot*, *the 32-slot inventory*, *authoritative
+> run/entry/row* or ranges over π means **`kind: conformance` ∧ `authoritative: true`**, unless it names
+> `validator-positive-control` explicitly. There is no `occupies_slot` column: it would be a second copy of
+> `kind` that can disagree with it. ⚠️ **A separate `control_runs:` section was REJECTED** — §9 already
+> models the control as a *Run*, and a second section would force E-7 to resolve `off_run_id`/`on_run_id`
+> across two populations.
 
 | Field | Type | Rules |
 |---|---|---|
-| `cell_id` · `config` | string | the slot; the set of slots MUST equal the 32-slot inventory exactly |
-| `run_id` | string | the authoritative run for that slot |
-| `authoritative` | boolean | `true` here by construction; retries are recorded with `false` and enter no gate |
-| `kind` | enum | `conformance` · `validator-positive-control` (FR-010a). Only `conformance` runs occupy a slot |
+| `cell_id` · `config` | string | for `kind: conformance` — **the slot**; the set of slots carried by rows with `kind: conformance` **and** `authoritative: true` MUST equal the 32-slot inventory **exactly**. For `kind: validator-positive-control` — the cell this control **probes**, which is **not** a slot claim and is excluded from that equality |
+| `run_id` | string | for `kind: conformance` — the run designated for that slot (one carries `authoritative: true`); for a control run — its own identity, which is what `off_run_id`/`on_run_id` resolve to |
+| `authoritative` | boolean | **not `true` by construction** — the section records every run, so a superseded retry is written here with `false` and enters no gate. ⚠️ A `validator-positive-control` run is `true`: it is not a retry, and making it `false` would place it in *"enters no gate"* while E-7/E-7a exist precisely to gate it |
+| `kind` | enum | `conformance` · `validator-positive-control` (FR-010a) — the same two spellings §9 and §10 use. **Only `conformance` runs occupy a slot**; see *THE TWO DISCRIMINATORS* above. ⚠️ A `validator-positive-control` row is legal and expected here — this is the row `off_run_id`/`on_run_id` resolve against for a control pair, and §10's *"`kind` MUST match the `kind` of both referenced runs"* is unsatisfiable without it |
 | `expected_verdict` | enum | positive controls only — `diverged` |
 | `run_timestamp` | timestamp | |
 | `counterparty_flavour` · `counterparty_version` · `counterparty_digest` | string | version from the **hello**, never from a config file |

@@ -113,8 +113,24 @@ deleted and every witness would still have passed.
 not a *value* check but a **schema-conformance** check: `NewOrderSingle::get(Symbol&)` compiles only if
 `Symbol` belongs to `NewOrderSingle` in FIX 4.4, and `FieldNotFound` fires if the peer did not receive it.
 Generic enumeration cannot make that assertion at all; typed access cannot see missing/spurious fields or
-group shape. **Both are required, the script declares which fields go which way (FR-003b), and an arm
-bypasses the typed accessor while leaving enumeration intact and requires RED.**
+group shape. **Both are required, and the script declares which fields go which way (FR-003b).**
+
+⛔ **THE ANTI-VACUITY ARM IS COMPILE-TIME, and the runtime-bypass arm this item used to name is
+SUPERSEDED — do not derive a task from it.** The deleted text read *"an arm bypasses the typed accessor
+while leaving enumeration intact and requires RED"*. That arm is **structurally unsatisfiable**: the
+generated getter returns **the caller's own object** — `getTag()` is caller-set before the call and
+`getValue()` is the wire string — so no serialized value can witness that the accessor was invoked, and
+every artifact-level observable proposed for it was synthesizable without calling it (user decision, Gate A
+fresh loop round 1; `spec.md` § *Clarifications* → *Session 2026-09-10 (Gate A fresh loop, round 1)*).
+
+**The decision that replaces it**: a **negative-compilation** arm. Mutate the counterparty **source file**
+so a declared typed read calls the generated per-message accessor with a field that message does **not**
+declare in FIX 4.4; the build of that file MUST fail, with the failure matching the expected
+**missing-overload diagnostic** rather than merely a non-zero exit. Both directions are asserted — the
+unmutated file compiles, the mutant does not. **Stated scope**: this proves the *schema-conformance* check
+is really made; it does **not** prove runtime invocation, which is recorded as structurally unsatisfiable
+under SC-003's one named exception. ⚠️ Do **not** propose a fourth artifact-level observable for runtime
+invocation. The mechanism lives in `plan.md` § *External obligations*; the requirement is FR-003b.
 
 - **QuickFIX-cpp** — a converting constructor exists: `fix44/NewOrderSingle.h:13`
   `NewOrderSingle(const FIX::Message& m) : Message(m) {}`. So `FIX44::NewOrderSingle nos(message);`

@@ -390,15 +390,29 @@ claiming a pass with no corroborating run artifact.
   global**; existing cells' counterparty configs are unchanged.
 - **FR-003**: Both counterparty applications MUST emit, for every application message they receive, a
   structured readback record naming **every body field the peer parsed** and the value it decoded for
-  each. **The header/trailer exclusion is structural, not a fixed tag list**: a field is excluded iff the
-  receiving engine classifies it as header or trailer **under the dictionary loaded for that cell**. On
-  both engines that membership is *built-in list ∪ dictionary-declared header*, computed by each engine's
-  two-argument `isHeaderField` overload — `quickfix-cpp/src/C++/Message.cpp`'s
-  `Message::isHeaderField(int field, const DataDictionary *pD)`, which returns true on the built-in list
-  and otherwise consults `pD` when one is present, and `quickfixj-base/src/main/java/quickfix/Message.java`'s
-  equivalent, which spells the same rule as one disjunction over its own built-in list. So the partition
-  **moves when US1 turns the dictionary on**. Tags `8, 9, 35, 34, 49, 56, 52, 10` are an illustrative
-  subset, **not the definition**.
+  each. **The header/trailer exclusion is structural, not a fixed tag list.**
+
+  ⚠️ **What each ENGINE classifies is the PROBLEM STATEMENT, not the rule** — the same demotion
+  `contracts/readback-jsonl.md` § *⚠️ The header/body partition is specified HERE, not delegated to the
+  engines* already makes, and this requirement previously stated the receiver-specific rule as an **iff**,
+  which made the receiving engine's classifier necessary *and sufficient* and contradicted FR-004 sixty
+  lines below. On both engines an engine's **own** membership is *its built-in list ∪ dictionary-declared
+  header*, computed by its two-argument `isHeaderField` overload —
+  `quickfix-cpp/src/C++/Message.cpp`'s `Message::isHeaderField(int field, const DataDictionary *pD)`,
+  which returns true on the built-in list and otherwise consults `pD` when one is present, and
+  `quickfixj-base/src/main/java/quickfix/Message.java`'s equivalent, which spells the same rule as one
+  disjunction over its own built-in list. **The two built-in lists differ** (tag `1156`), so a
+  receiver-specific rule yields two different `fields` sets for identical bytes and breaks FR-004.
+
+  ⛔ **The normative inclusion rule is the CANONICAL UNION PARTITION**, defined in
+  `contracts/readback-jsonl.md` § *⛔ THE CANONICAL PARTITION — the decision, as a value* and restated at
+  FR-004: `header` = (QuickFIX-cpp's built-in list) ∪ (QuickFIX-J's built-in list) ∪ (the fields declared
+  in the `<header>` block of the dictionary loaded for that cell); a field in that set is excluded from
+  `fields` by **both** emitters, **whichever engine's own classifier would have called it body**. An
+  engine's own classification survives only as **captured diagnostic evidence** — useful for explaining a
+  divergence, never the inclusion rule. So the partition still **moves when US1 turns the dictionary on**,
+  because the `<header>` block is one of the union's operands. Tags `8, 9, 35, 34, 49, 56, 52, 10` are an
+  illustrative subset, **not the definition**.
 - **FR-003a**: Each side MUST also emit a **`sent` record**, symmetric to the readback record — same
   `fields` grammar, same **format**, same correlation key — whose `fields` are written from the values
   handed to **its own builder**. ⚠️ **It is produced in TWO stages, and the stages MUST be separated**,
@@ -442,10 +456,31 @@ claiming a pass with no corroborating run artifact.
     (`<Message>::get(<Field>&)` in QuickFIX-cpp; `<Message>.get(<Field>)` in QuickFIX-J). Because those
     overloads exist only for fields the message declares in FIX 4.4, the **compiler** performs the
     schema-conformance check at build time.
-  - **The anti-vacuity arm**: a **negative-compilation** arm. Mutate the counterparty source to call the
-    generated accessor with a field the message does **not** declare; the build MUST **fail**. The
-    mechanism that runs this arm is named in `plan.md` § *External obligations*, and both directions MUST
-    be shown — the unmutated source compiles, the mutant does not.
+  - **The anti-vacuity arm**: a **negative-compilation** arm. Mutate the counterparty **source file
+    itself** — `interop_counterparty_main.cpp` / `InteropCounterparty.java`, or the shared typed-read
+    adapter TU the production call site depends on — to call the generated accessor with a field the
+    message does **not** declare; the build of **that file** MUST **fail**. ⛔ **Not a standalone snippet**:
+    a detached translation unit proves the *pinned engine API* accepts `Symbol` and rejects `LastPx`, and
+    proves nothing about the counterparty whose conformance is claimed. The mechanism is named in `plan.md`
+    § *External obligations*, and both directions MUST be shown — the unmutated source compiles, the mutant
+    does not.
+  - ⛔ **The failure MUST MATCH THE EXPECTED MISSING-OVERLOAD DIAGNOSTIC**, not merely be a non-zero exit.
+    ⚠️ *A forced MISS cannot catch a spurious HIT*: a typo, a missing include or a wrong namespace also
+    makes the mutated build fail, and the arm would report RED for a reason that has nothing to do with the
+    schema. Required: the compiler output matches *no matching function for call to …
+    `get(FIX::<Field>&)`* (clang/gcc) / *cannot find symbol … method `get(quickfix.field.<Field>)`*
+    (javac). A snippet is strictly **worse** on this than the real file, because a snippet missing an
+    `#include` fails "correctly" for entirely the wrong reason.
+  - ⚠️ **Per-site coverage — a STATED LIMIT, not silence.** FR-003b(a) binds **every** field the script
+    declares as a typed read; the *positive* direction covers all of them by construction (the whole file
+    compiles, so every typed read in it is schema-conformant). The **negative** arm mutates **one**
+    `(Message, Field)` site per language. That is sufficient *for what it proves* — that the compiler is
+    really the check — because the property is **structural, not per-message**: there is no generic `get`
+    overload on `FieldMap`, on `Message`, or on either generated class, so no message can have an escape
+    the mutated one lacks. ⚠️ **This argument is engine-pin-bound.** On any re-pin of either vendored
+    engine, re-check the inherited overload set, generic fallbacks and field-type conversions before
+    relying on one site (`plan.md` § *External obligations*). Parameterizing the mutation over the script's
+    typed-read declarations would remove the limit; it is **not** required here.
   - ⚠️ **Scope limit, stated rather than implied**: this binds the counterparty's **source**, not any
     record. It does not prove runtime invocation, and FR-018's spurious-hit obligation for *runtime*
     typed-accessor invocation is recorded as **structurally unsatisfiable** (SC-003).
@@ -566,10 +601,21 @@ claiming a pass with no corroborating run artifact.
   validation-on cell to launch with the flag false MUST go RED.
 - **FR-012**: Any divergence between the two validation arms MUST be reported as a named finding
   identifying the message and the validator's objection.
-- **FR-012a**: A **validation-pair** entity MUST exist, carrying the paired-arm identity, each arm's
-  accepted-message set, each arm's validator disposition per message, and the cross-arm verdict. The
-  witness `mismatch` vocabulary (`value_mismatch` / `missing` / `spurious`) is field-level and cannot
-  express *"the on arm rejected a message the off arm accepted, and here is the objection"*.
+- **FR-012a**: The named promotion command (FR-014b, `phase-9-harness/tools/promote_interop_evidence.py`)
+  MUST **construct** a **validation-pair** record for every `(combo_id, config)` and **write** it to the
+  `validation_pairs:` section of the committed `library/tests/interop/witness_evidence.yaml`
+  (data-model §10), carrying the paired-arm identity, each arm's accepted-message set, each arm's validator
+  disposition per message, and the cross-arm verdict. The witness `mismatch` vocabulary
+  (`value_mismatch` / `missing` / `spurious`) is field-level and cannot express *"the on arm rejected a
+  message the off arm accepted, and here is the objection"*.
+  - ⛔ **The `kind: conformance` pair set MUST EQUAL the 16-pair inventory** — set equality, not
+    containment — checked by the committed schema check (`contracts/witness-evidence.md` **E-7a** / W-3d).
+    **16 is derived, never an independent count**: the 32 conformance slots quotiented by the arm axis
+    (`cell_id ≡ (combo_id, arm)`) = 4 combos × 4 configs.
+  - ⚠️ **This requirement previously read *"a validation-pair entity MUST exist"*** — verbatim the shape
+    `plan.md` § *THE COMPLETION RULE* scores **ABSENT**, and it was: four artifacts described the pair and
+    nothing produced one, so **zero pairs passed every gate** while SC-004 and FR-010/FR-010a ranged over
+    an entity that could legally not exist.
 - **FR-013**: Each emitted cell result MUST carry evidence binding it to an actual run: a run
   identifier, a timestamp, the counterparty flavour and version, the counterparty image digest, the
   conversation-script digest, and a **`ledger_ref`** naming the run-ledger entry that corroborates it
@@ -578,7 +624,7 @@ claiming a pass with no corroborating run artifact.
 - **FR-013a**: The identity model MUST separate the **logical cell** from the **run**. A `cell_id ≡
   (combo_id, arm)` names one (role × flavour × validation arm) identity — 8 of them; a `run_id` uniquely
   names one execution. Manifest row identity is **`(cell_id, config)`** — the 32-slot inventory — with
-  exactly **one authoritative run per slot** (FR-015c); the committed manifest carries one row per slot and
+  exactly **one `kind: conformance` run carrying `authoritative: true` per slot** (FR-015c); the committed manifest carries one row per slot and
   no retry rows, so its shipped `id` field is derived as `"<cell_id>@<config>"` and is unique across the 32.
   ⚠️ **`test_ids_unique` therefore does NOT need to be replaced** — an earlier reading of this requirement
   claimed it did, on the assumption that 8 ids had to serve 32 rows. Retry runs are recorded in the run
@@ -602,7 +648,8 @@ claiming a pass with no corroborating run artifact.
   | Artifact | Where it is checked | What it asserts |
   |---|---|---|
   | `tests/interop/cell_results.yaml` — **committed expected inventory** | the shipped ctest, in all three CI tiers, **opening nothing** | structure only. New evidence fields are required **conditionally on `kind: conversation`**, so the 59 existing rows are untouched (FR-020). Each `status: pass` conversation row must name a ledger entry that exists, whose `terminal_state` is `completed`, and whose `witness_count` equals the census figure for that slot |
-  | the **run ledger** (a `runs:` section of the witness-evidence record, FR-015b) — **committed**, machine-independent | the same ctest | one authoritative entry per `(cell_id, config)`; the 32-slot inventory exactly; `run_id`, `run_timestamp`, counterparty flavour/version/digest, `script_digest`, `terminal_state`, `witness_count`, `evidence_digest`, `authoritative`. **No absolute path** |
+  | the **run ledger** (a `runs:` section of the witness-evidence record, FR-015b) — **committed**, machine-independent | the same ctest | one **`kind: conformance`**, `authoritative: true` entry per `(cell_id, config)`; the set of those slots equals the 32-slot inventory exactly; `run_id`, `run_timestamp`, counterparty flavour/version/digest, `script_digest`, `terminal_state`, `witness_count`, `evidence_digest`, `authoritative`, `kind`. **No absolute path**. ⚠️ `validator-positive-control` and retry rows are **recorded here and excluded from that equality** (data-model §11 § *THE TWO DISCRIMINATORS*) |
+| the **validation pairs** (a `validation_pairs:` section of the same record, FR-012a) — **committed** | the same ctest | the `kind: conformance` pair set equals the **16-pair inventory exactly** (E-7a); every `off_run_id`/`on_run_id` resolves to a ledger row |
   | the **run artifact** — machine-local, never committed | the **promotion step** (FR-014b), on the machine that ran the cell | the stream is opened, **each of the run's two processes'** `hello` **and `terminal`** records are read (⚠️ **TWO is the process count, not the emitter count** — `contracts/readback-jsonl.md` § *THE THREE EMITTERS* carries the distinction), their `run_id` / `script_digest` / `config` are checked against each other and against the row, the completeness gate is evaluated, and `evidence_digest` is computed over the persisted bundle |
 
   ⚠️ Requiring the manifest fields to be merely *present* is not corroboration — six hand-editable strings
@@ -679,18 +726,20 @@ claiming a pass with no corroborating run artifact.
   inside `cell_id`, so a cross-arm equality would be unsatisfiable by construction; cross-arm agreement is
   SC-004's accepted-message-set property over a different entity. Required:
 
-  - **π(authoritative rows of config `c`) = π(authoritative rows of config `c'`)** for every ordered pair
-    of the four configs, **and** each equals the **census-declared set of completeness keys** —
+  - **π(`kind: conformance` authoritative rows of config `c`) = π(same, config `c'`)** for every ordered
+    pair of the four configs, **and** each equals the **census-declared set of completeness keys** —
     **100** of them, a pointer to § *Conversation census*'s arithmetic rather than an independent count.
     Exact set equality, not containment.
-  - **Exactly one authoritative run per `(cell_id, config)` slot.** Each slot designates one run
-    (`authoritative: true`); a retry mints a new `run_id` and its rows are recorded with
+  - **Exactly one `kind: conformance` run with `authoritative: true` per `(cell_id, config)` slot.** Each
+    slot designates one run (`authoritative: true`); a retry mints a new `run_id` and its rows are recorded with
     `authoritative: false` and are **excluded from every gate**. Without this, `(cell_id, config, run_id)`
     uniqueness permits unbounded rows per slot, and because π drops `run_id` the duplicates *collapse* —
     a retry becomes invisible, and a failed run and a retried pass can both sit in the record with no rule
     saying which governs. That fails toward green.
-  - **The set of `(cell_id, config)` slots carrying an authoritative run MUST equal the 32-slot run
-    inventory exactly** (8 cells × 4 configs) — not be a subset of it.
+  - **The set of `(cell_id, config)` slots carrying a `kind: conformance` authoritative run MUST equal the
+    32-slot run inventory exactly** (8 cells × 4 configs) — not be a subset of it. ⚠️ **Scoped**: a
+    `validator-positive-control` run occupies no slot (FR-010a, data-model §11), so unscoped it would read
+    as a 33rd slot and this equality would be unsatisfiable the moment the divergence probe ran.
   - The gate also runs over the union after the last configuration, as a second reading, never as the only
     one. ⚠️ A union-only gate over rows carrying no `config` is **structurally blind** to the axis
     FR-021/SC-010/SC-011 exist to protect: if one configuration produces **zero** witnesses the union is
@@ -810,9 +859,12 @@ claiming a pass with no corroborating run artifact.
 - **FR-023a**: Each configuration MUST be built as a **targeted build of the interop driver targets only**,
   never `cmake --build <preset>` over `all`. `run_interop_cell.py` builds nothing — it expects a pre-built
   tree and runs one named gtest binary per cell — so the build unit is this feature's choice, and a full
-  build produces ~14 G of executables the matrix never opens (measured 2026-09-10 in
-  `build/linux-clang-asan/`: `bin/` is 16 G over 356 executables, of which 25 are `interop_*` totalling
-  2.1 G, of which the **four** binaries the cells actually name total ~365 MB).
+  build produces executables the matrix never opens, while the cells name **four** binaries.
+  ⚠️ **No figure is recorded here, deliberately** — a stated disk result rots silently, because nothing
+  ever re-runs a sentence, and the earlier wording did not survive its own arithmetic (it subtracted all
+  `interop_*` binaries while the matrix opens only the four). **Re-derive** with
+  `du -sh build/<preset>/bin`, `du -ch build/<preset>/bin/interop_*` and `du -ch` over the four binaries
+  the cells name; the only permitted dated illustration in this bundle is the one enumerated in `plan.md`.
 - **FR-023b**: The **second** bound MUST be stated wherever a sanitizer result is reported, alongside
   FR-023's: a targeted build gives sanitizer coverage of **exactly the paths these cells exercise**, which
   is what FR-021 and SC-010 assert and all they assert. It is **not** repo-wide coverage — Tier 1 runs full
@@ -829,10 +881,18 @@ claiming a pass with no corroborating run artifact.
   greps `unavailable: .*` out of gtest stdout and returns `skip:<reason>`, so reusing the idiom already in
   that file silently converts a **stale peer failure** into a skip — precisely the collapse FR-016a exists
   to prevent, reached by imitation rather than carelessness.
-- **FR-025**: The readback record format MUST state a **single decision** for non-UTF-8 bytes and both
-  writers MUST implement it, together with a canonical key order and a canonical escaping form. The two
-  writers are in different languages with different string models (Java `String` is UTF-16; C++
-  `std::string` is bytes), so an unstated decision diverges and breaks FR-004. A **cross-language golden
+- **FR-025**: The readback record format MUST state a **single decision** for non-UTF-8 bytes and **all
+  three emitters** MUST implement it, together with a canonical key order and a canonical escaping form.
+  The topology is **three implementations in two languages** — QuickFIX/C++ counterparty, fixpp, and
+  QuickFIX/J counterparty — with different string models (Java `String` is UTF-16; C++ `std::string` is
+  bytes), so an unstated decision diverges and breaks FR-004. ⚠️ **It is 2 C++ : 1 Java, and that is why
+  the fixture is three-way rather than two-way**: fixpp's emitter can silently diverge from the
+  QuickFIX-cpp counterparty's *despite sharing `std::string`*, so "one per language" would leave fixpp's
+  byte-level form unguarded. ⛔ **Do not "fix" the PROCESS count to three** — a run has **two** processes
+  (`contracts/readback-jsonl.md` § *THE THREE EMITTERS*, which carries the distinction as a table at its
+  head; `checklists/requirements.md` § *Re-validation — 2026-09-10, after Gate A round 3 + the
+  post-exhaustion hand-edit + fresh loop round 1* records it explicitly as **not** to be "fixed"); it is
+  the **emitter** count that is three. A **cross-language golden
   fixture** — one consumer, **all three emitters** (the QuickFIX-cpp counterparty, the QuickFIX-J
   counterparty, and fixpp), one committed expected artifact — MUST exist; C-7's byte-compatibility clause
   is otherwise a sentence with nothing behind it. ⛔ **Three-way, not two-way**: FR-006 compares parsed
@@ -857,11 +917,13 @@ claiming a pass with no corroborating run artifact.
 - **Cell**: one **logical** (role × flavour × validation arm) identity, named by `cell_id ≡ (combo_id,
   arm)`. **Eight logical cells.** A cell is *not* a process run — it is executed once per configuration.
 - **Run**: one **execution** of one cell under one configuration, named by a unique `run_id`. The join key
-  binding an evidence row to the stream that produced it. Exactly one run per `(cell_id, config)` slot is
-  **authoritative**; the 32 slots are the run inventory.
-- **Run ledger**: the committed, machine-independent record of the authoritative runs — one entry per slot,
-  carrying identity, `terminal_state`, `witness_count`, `evidence_relpath` and `evidence_digest`, and **no
-  absolute path**. It is the bridge FR-014b names between a machine-local artifact and a CI-checkable row.
+  binding an evidence row to the stream that produced it. Exactly one **`kind: conformance`** run per
+  `(cell_id, config)` slot is **authoritative**; the 32 slots are the conformance run inventory. A
+  `validator-positive-control` run is authoritative too but occupies **no** slot.
+- **Run ledger**: the committed, machine-independent record of **every** run — one `kind: conformance`
+  authoritative entry per slot, plus the retry rows (`authoritative: false`) and the control rows
+  (`kind: validator-positive-control`, no slot) — carrying identity, `terminal_state`, `witness_count`,
+  `evidence_relpath` and `evidence_digest`, and **no absolute path**. It is the bridge FR-014b names between a machine-local artifact and a CI-checkable row.
 - **Witness**: one (step × direction × occurrence) fidelity result inside a run; the unit a catalogue row
   cites. Its three identities are named in FR-015c; the **completeness key** is `(cell_id, script_step_id,
   direction, occurrence)`.
@@ -875,6 +937,9 @@ claiming a pass with no corroborating run artifact.
   all.
 - **Validation pair**: the two arms of one (role × flavour × config) combination, carrying each arm's
   accepted-message set, each arm's per-message validator disposition, and the cross-arm verdict.
+  **Constructed by the promotion command and written to `validation_pairs:` in the committed
+  `witness_evidence.yaml`** (FR-012a, data-model §10). There are **16** conformance pairs — the 32 slots
+  quotiented by the arm axis — plus any control pairs.
 - **Evidence row**: the per-message, per-direction, per-combination, **per-configuration** result a
   catalogue row cites, bound to a specific run.
 - **Terminal record**: the last line of each stream, carrying the `hello`'s join keys plus
@@ -989,7 +1054,7 @@ all (see FR-015c).
 
 ⚠️ **These numbers are census outputs, not remembered figures**, and they are asserted rather than trusted:
 SC-009a compares 100 against the script-derived projection every run, and FR-015c compares the 32-slot
-inventory against the runs that actually produced authoritative rows. **The arithmetic is derived once,
+inventory against the `kind: conformance` runs that actually produced authoritative rows. **The arithmetic is derived once,
 here.** Where `100` or `32` appears elsewhere (FR-015c, `witness-evidence.md` W-2a, `quickstart.md`) it is a
 pointer back to this section, never an independent count — and each of those places says so.
 
@@ -1065,9 +1130,15 @@ load-bearing for the anti-vacuity arms and are fixed here so the arms have a sub
 - **SC-009a**: The declarative census in § *Conversation census* (FR-015d) and the script-derived
   expected set are asserted **exactly equal** — 100 completeness keys — and the assertion is shown RED under
   both a script **step deletion** and a script **step addition**.
-- **SC-009b**: Exactly one authoritative run exists per `(cell_id, config)` slot, the set of slots carrying
-  one equals the 32-slot inventory exactly, and a second (retry) run for a slot is shown **not** to
-  multiply witness rows in any gate.
+- **SC-009b**: Exactly one `kind: conformance` run with `authoritative: true` exists per
+  `(cell_id, config)` slot, the set of slots carrying one equals the 32-slot inventory exactly, and a
+  second (retry) run for a slot is shown **not** to multiply witness rows in any gate. ⚠️ A
+  `validator-positive-control` run is recorded in the ledger, occupies **no** slot, and is shown not to
+  perturb this equality.
+- **SC-009d**: The `validation_pairs:` section of the committed record carries **exactly** the 16
+  conformance pairs, demonstrated RED by an **empty** section and by a **15-of-16** section (E-7a). Without
+  it, an implementation emitting no pairs at all satisfies every other gate while SC-004 and FR-010/FR-010a
+  range over an entity that does not exist.
 - **SC-009c**: Each run's arm attestation (FR-011a) equals the arm its row claims, demonstrated RED by
   launching a validation-on cell with `validate_inbound_messages` forced false.
 - **SC-010**: All 32 runs (8 cells x 4 configs) complete and emit their own result row, with **zero**
