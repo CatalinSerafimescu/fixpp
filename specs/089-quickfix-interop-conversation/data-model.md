@@ -61,8 +61,13 @@ record (§12)** is the other half; FR-014's corroboration requires both.
 | `config` | string | `normal` · `asan` · `ubsan` · `tsan` |
 | `script_digest` | string | content digest of the conversation script driving this run (FR-008c) |
 | `counterparty_digest` | string | the image digest this build was pulled from (FR-016b) |
+| **`typed_accessor_arm`** | integer | ⭐ **the typed-accessor compile arm's version this build was gated by** (FR-003b, C-12). The harness requires ≥ what the cell needs; **absent** ⇒ the cell **FAILS** under FR-016a's standing rule, which is the whole point — an image built *before* the arm existed announces nothing. ⛔ **NOT a literal in the counterparty source.** It is a compile definition (C++) / generated constant (Java) emitted by the **same build step that asserts the arm**, and the source fails to compile when that definition is absent — otherwise the field is hand-typeable and attests nothing. ⚠️ This attests a **build-time** arm; it is not a witness of runtime typed-accessor invocation, which `spec.md` § *Clarifications* records as structurally unwitnessable |
 
-**Where these values come from — the channel, named.** The shim sets them in the counterparty's
+**Where these values come from — the channel, named.** ⚠️ **Scoped: the run-identity fields only.**
+`engine`, `engine_version` and `readback_protocol` are properties of the build, and
+**`typed_accessor_arm` is set by the counterparty's own BUILD, not by the shim** — it has no env key by
+design (a shim-supplied value would attest the shim, not the build; see the `typed_accessor_arm` row).
+For the rest, the shim sets them in the counterparty's
 environment before launch, extending the `cp_env` dict `launch_counterparty` already builds
 (`phase-9-harness/tools/run_interop_cell.py` — it already carries ten `INTEROP_CP_*` knobs and is passed as
 `env=cp_env` to both the C++ and the Java branch):
@@ -628,9 +633,16 @@ round 2 filed against this very section. **File**: a `validation_pairs:` section
 — not a fourth file. **Producer**: the named promotion command
 (`phase-9-harness/tools/promote_interop_evidence.py`, FR-014b), which **constructs** each pair from two
 already-promoted runs and **evaluates E-7** on it before writing it. **Gated by**: E-7 (well-formedness,
-at promotion) and **E-7a** (existence and completeness, in the committed schema check —
-`contracts/witness-evidence.md`). ⚠️ Without E-7a **zero pairs is green**: nothing else in this bundle
-ranges over a pair's cardinality, so an implementation emitting none satisfies every other gate.
+at promotion), **E-7a** (conformance completeness), **E-7b** (control-pair existence) and **E-7c**
+(references still authoritative) — the last three in the committed schema check
+(`contracts/witness-evidence.md`, which is the normative home of all four). ⚠️ Without E-7a **zero
+*conformance* pairs is green**: an implementation emitting none would satisfy every other gate, and the
+control half is covered by E-7b, not by E-7a. ⛔ **This list is an INVENTORY, not a pointer, and it has
+already gone stale once** — it named two gates for a four-gate entity after E-7b and E-7c landed in the
+same commit that left it unchanged. Because it is a copy, it carries a maintenance duty: **any new E-*
+over this entity is added here in the same edit**, or the reader who lands on §10 — which is where
+`contracts` sends them — gets an undercount. The normative text of each obligation stays in
+`contracts/witness-evidence.md`; only the roster is here.
 
 | Field | Type | Rules |
 |---|---|---|
@@ -645,7 +657,7 @@ ranges over a pair's cardinality, so an implementation emitting none satisfies e
 | `accepted_off` | set of `script_step_id` | messages the validation-off arm accepted |
 | `accepted_on` | set of `script_step_id` | messages the validation-on arm accepted |
 | `dispositions` | list | per message, each arm's validator disposition — accepted, or rejected with the objection |
-| **`authoritative`** | bool | ⭐ **exactly one `authoritative: true` pair per `(cell_pair, config)`.** ⚠️ The pair entity lacked this field entirely while the Run entity has it — the very discriminator invented to close the duplicate-collapse problem, absent one entity over. ⛔ **TRUTH CONDITIONS, WRITER AND SUPERSESSION — modelled on §11's, because a field with no producer is the RC-A shape**: the `validation_pairs:` section records **every** pair, authoritative and superseded alike, and is not filtered on the way in; a pair is **`authoritative: false` iff either referenced run has been superseded** (mirroring §11's *"a superseded retry — recorded, and entering no gate"*); and the **named promotion command sets it** — it writes each new pair `authoritative: true` and **demotes the prior pair for that `(cell_pair, config)`** in the same write. ⚠️ Non-authoritative pairs **enter no gate**: E-7a's set equality is scoped onto this field, exactly as §11 scopes the slot equality |
+| **`authoritative`** | bool | ⭐ **exactly one `authoritative: true` pair per `(cell_pair, config)`.** ⚠️ The pair entity lacked this field entirely while the Run entity has it — the very discriminator invented to close the duplicate-collapse problem, absent one entity over. ⛔ **TRUTH CONDITIONS, WRITER AND SUPERSESSION — modelled on §11's, because a field with no producer is the RC-A shape**: the `validation_pairs:` section records **every** pair, authoritative and superseded alike, and is not filtered on the way in; a pair is **`authoritative: false` iff either referenced run has been superseded** (mirroring §11's *"a superseded retry — recorded, and entering no gate"*); and the **named promotion command sets it**, on **TWO** triggers — (1) it writes each new pair `authoritative: true` and **demotes the prior pair for that `(cell_pair, config)`** in the same write; and (2) ⭐ **when a RUN is superseded by a retry, it demotes every pair referencing that run, in that same write** — ⛔ **including when no replacement pair is constructed**, which is the case trigger (1) does not reach. ⚠️ **Trigger (2) is what makes the `iff` above an obligation rather than a wish**: without it a producer may re-promote a run, write no new pair, and leave the old pair `authoritative: true` while satisfying every stated duty — and **E-7c**, whose whole subject is that omission, would then redden a compliant producer. The two must be read together: the `iff` states the invariant, trigger (2) is the act that maintains it, E-7c checks it held. ⚠️ Non-authoritative pairs **enter no gate**: E-7a's set equality is scoped onto this field, exactly as §11 scopes the slot equality |
 | `verdict` | enum | `identical` · `diverged` — ⛔ **DERIVED, never asserted**; see the validation rules |
 
 **Validation rules**

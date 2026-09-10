@@ -286,6 +286,7 @@ FR-019's re-capture obligation covers set **membership**, not only serialization
 | C-8 | `sent` records emitted by **each of the run's two processes** (fixpp and its counterparty), with **`fields` from builder inputs** | a `sent` record whose **`fields`** are derived from the serialized frame is a violation (data-model §3). ⚠️ Reading **`MsgSeqNum(34)` and direction** from the outbound seam is **required** by the two-stage rule and is **not** a violation — the restriction is on *what* is read there, not on *where* |
 | C-9 | Every **`sent`** and **`readback`** record carries `occurrence`; every **`sent`** record carries `script_step_id` | a repeat of `(seq_num, direction)` with no distinguishing ordinal is a violation. ⚠️ Scoped: the mandatory `hello` (data-model §1) and `terminal` (§12) schemas have neither, so *"every record"* contradicted the record grammar. A **readback** carries no `script_step_id` at all — nothing puts a step identifier on the wire — and inherits it from the paired `sent` record after correlation |
 | C-10 | Each stream carries a `hello` **first** and a `terminal` **last**, whatever the outcome | a stream with a `hello` and no `terminal` is an incomplete run, never a pass — the pre-conversation hello alone does not corroborate anything |
+| **C-12** | **`typed_accessor_arm` ≥ what the cell requires** — the peer announces, in its `hello`, the version of the typed-accessor compile arm **its own build was gated by** (data-model §1, FR-003b) | **absent or older ⇒ cell FAILS** — not skip, not pass, on FR-016a's standing rule. ⚠️ An image published **before** the arm existed announces nothing, which is exactly the case this closes: pinning such a digest satisfies FR-016b while attesting nothing, and it does so in the shape a correct pin has. ⛔ **Provenance is part of the obligation**: the announced value MUST originate in the arm's own build step (compile definition / generated constant) and the source MUST fail to compile without it — a hand-written literal satisfies the announcement and attests nothing. ⚠️ **Attests that the ARM RAN on the build that produced this peer — NOT that any typed accessor is called**; see the note above the witness table |
 | C-11 | An invalid byte survives the **live** decode → re-encode round trip, per § *C-11 — the live-path charset arm* | `value_b64` for path `355` on step `B-05` differing from the base64 of the wire bytes is a violation. ⚠️ The synthetic C-7 fixture **cannot** discharge this: it constructs the message inside the emitter and never enters the engine's decoder |
 
 **C-4 and C-5 are silent failures.** Neither is caught by a green run: C-4 yields a populated-looking
@@ -307,9 +308,22 @@ that no such field can exist. Its closed-inventory entries are `spec.md` FR-003b
 `quickstart.md` Step 4, and `plan.md` § *External obligations*. **Absence here is a decision, not an
 omission.**
 
+⚠️ **C-12 IS NOT AN EXCEPTION TO THAT PARAGRAPH, AND THE DISTINCTION IS THE WHOLE POINT — read it before
+proposing either as the other.** C-12 does **not** witness the guard. It witnesses that **the peer's build
+was gated by the arm at all** — a *peer-capability* fact, in exactly C-2's population (announce a version,
+refuse an older one), added because an image published before the arm existed satisfies FR-016b's digest
+pin while attesting nothing. ⚠️ **C-12 does not distinguish a conforming counterparty from a
+non-conforming one**, and does not need to: a non-conforming one **never compiles, so it is never
+published and never becomes a peer** that could announce anything. What C-12 discriminates is *which
+build produced this peer* — one the arm gated, or one from before the arm existed — not any property of
+the records that peer emits. ⛔ **Do not "strengthen" C-12 into a
+conformance witness, and do not read it as the fourth artifact-level observable the settled decision
+forbids**: no field of this format can witness typed-accessor *invocation*, and C-12 does not claim to.
+
 | # | Witness |
 |---|---|
 | C-2 | a `readback_protocol` **older** than the cell requires ⇒ cell FAILS |
+| **C-12** | a peer whose `hello` **omits** `typed_accessor_arm`, or announces one older than the cell requires ⇒ cell **FAILS** — ⚠️ **and assert FR-016b's digest pin RESOLVES and stays GREEN on that same image**, which is the contrast that makes the arm discriminating: the pin alone cannot tell a gated build from an ungated one. ⚠️ **Plus the provenance half, which is where the vacuity is**: a counterparty source carrying a **hand-written** `typed_accessor_arm` literal, with the arm removed from its build, **MUST FAIL TO COMPILE** — otherwise the announcement is satisfiable without the arm and C-12 measures a string |
 | C-3 / C-4 | group **instances** present with their paths, not just the `NoXxx` count |
 | C-5 | enumeration does not mutate the message (the QFJ `computeIfAbsent` trap) |
 | C-6 | a **partition**-header field appearing in `fields` is rejected, **and** a partition-body field excluded because one engine's built-in list contains it is rejected — both directions. Tag 1156 is the pinned case: it is **header**, excluded by all three emitters |

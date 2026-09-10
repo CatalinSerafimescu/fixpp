@@ -195,3 +195,48 @@ FR-018's spurious-hit obligation for *runtime* typed-accessor invocation is reco
 unsatisfiable** with source evidence (`spec.md` § *Clarifications* → *Session 2026-09-10 (Gate A fresh
 loop, round 1)*, and SC-003's named exception). That is a scoping decision with a proof, not an unchecked
 item.
+
+## Re-validation — 2026-09-10, after Gate A rounds 4–9
+
+⚠️ **The re-derivation above stopped at fresh-loop round 1, and its stated basis therefore did not range
+over the additions that followed** — which is the defect that paragraph was written to close, recurring
+inside it (Gate A round 9, P2 #8). ⛔ **Appended, not rewritten**: the paragraph above is a record of the
+session it names, and this file's precedent is to strike in place or append. Its round list is left alone.
+
+**The additions since fresh-loop round 1, enumerated so the conclusion below has an operand:**
+
+- the validation pair's **`authoritative`** discriminator, with truth conditions, a named writer and
+  supersession semantics (`data-model.md` §10);
+- **E-7a** — the pairs must exist and the conformance set must be complete;
+- **E-7b** — at least one `validator-positive-control` pair must exist;
+- **E-7c** — a pair's references must *still* be authoritative when the committed check re-evaluates them,
+  **scoped in round 9 to `authoritative: true` pairs** (unscoped it contradicted §10's own supersession
+  *iff* and would have put the committed ctest permanently RED);
+- the typed-accessor compile arm restated as an **execution host** with the toolchain table deleted
+  (round 8), plus round 9's conditions on the *invocation* — configure-time `try_compile` rather than a
+  ctest case, a maven phase at or before `package` rather than surefire, neither behind a switch the host
+  does not set, and an explicit `FATAL_ERROR` on the conjunction of result and diagnostic;
+- the **user decision** that the counterparty is rebuilt and republished before 089's CI, with the compile
+  arm gating that publish, and no new PR-time workflow;
+- **C-12 / `typed_accessor_arm`** — the peer announces, in its `hello`, the arm version its own *build* was
+  gated by, so that pinning a pre-arm image cannot satisfy FR-016b while attesting nothing.
+
+**No item changed state, and here is the derivation rather than the assertion.** Every addition above is
+either (a) a **gate over an entity the spec already owed** — the validation pair is FR-012a's and
+FR-010a's, and E-7a/b/c only make its existence, completeness and freshness checkable rather than assumed;
+or (b) a **statement of where an already-required check executes** — rounds 8 and 9 moved the compile arm
+from a maintained toolchain list to a host plus an invocation condition, and added no new obligation on the
+counterparty's behaviour. Neither class introduces an implementation prescription the spec did not already
+owe as a contract-level interoperability decision, which is the criterion every re-validation above uses.
+
+⚠️ **C-12 is the one addition that is a NEW peer-observable, and it is dispositioned rather than waved
+past.** It adds a `hello` field, so it is a genuine interoperability decision between independently-written
+emitters — exactly the class this checklist's *"no implementation details"* items already admit (the
+charset rule, the canonical partition and the script digest are the precedents, all recorded above). It is
+**not** a runtime witness of typed-accessor invocation, which stays recorded as structurally unsatisfiable;
+`contracts/readback-jsonl.md` § *Witnesses this contract requires* carries that distinction normatively.
+Item states are unchanged.
+
+⚠️ **The two unchecked items are unchanged and unchanged for the same reason**: this is a protocol-fidelity
+feature between two FIX engines and has no non-technical audience. Tick counts are still deliberately not
+recorded — see the deletion note above.

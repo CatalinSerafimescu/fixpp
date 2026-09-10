@@ -162,7 +162,9 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
     compile arm*.
   - ⭐ **The instrument was proven able to report non-zero, on every toolchain the matcher claims, before
     this decision was written.** Re-derivation recipe (run it; do not trust this paragraph):
-    `-fsyntax-only -std=c++17 -I reference-engines/quickfix-cpp/include` over a TU calling
+    `-fsyntax-only -I <the host's own include path>` — ⛔ **no `-std=` flag is pinned here**; run it under the
+    **language standard the arm's own host resolves** (the counterparty CMake project sets it, and a value
+    written down here would be wrong the moment that moves) — over a TU calling
     `FIX44::NewOrderSingle::get(FIX::Symbol&)` (declared on that message ⇒ must compile) and then
     `FIX::LastPx&` (not declared on it ⇒ must fail), under **each** C++ compiler the arm's execution host
     may resolve to; and the `javac` equivalent against the QuickFIX-J build output with
