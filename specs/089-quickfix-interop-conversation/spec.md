@@ -167,8 +167,14 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
     `FIX::LastPx&` (not declared on it ⇒ must fail); and the `javac` equivalent against the QuickFIX-J
     build output with `quickfix.field.Symbol` / `quickfix.field.LastPx`. **Observed 2026-09-10 on the
     pinned vendored trees**: the positive control compiled on both; the mutant failed on both —
-    `no matching function for call to 'FIX44::NewOrderSingle::get(FIX::LastPx&)'` (g++) and
-    `no suitable method found for get(LastPx)` (javac). ⚠️ There is **no generic `get` overload** on
+    `no matching function for call to 'FIX44::NewOrderSingle::get(FIX::LastPx&)'` (g++),
+    `no matching member function for call to 'get'` (**clang** — with the field named only in the candidate
+    notes) and `no suitable method found for get(LastPx)` (javac, **simple** field name).
+    ⛔ **RUN ALL THREE TOOLCHAINS, NOT TWO.** An earlier revision of this paragraph proved the instrument on
+    `g++` and `javac` while the matcher claimed *"(clang/gcc)"* — and **every** configuration in FR-021's
+    matrix is a `linux-clang-*` preset, so the one compiler it had been proven on is the one the matrix
+    never runs. That is this repository's dominant defect class occurring **inside** the paragraph written
+    to prevent it. ⚠️ There is **no generic `get` overload** on
     `FieldMap`, `Message`, or either generated class that could swallow the mutant; that absence is what
     makes the arm work and is the thing to re-check if an engine is ever re-pinned.
 
@@ -467,10 +473,30 @@ claiming a pass with no corroborating run artifact.
   - ⛔ **The failure MUST MATCH THE EXPECTED MISSING-OVERLOAD DIAGNOSTIC**, not merely be a non-zero exit.
     ⚠️ *A forced MISS cannot catch a spurious HIT*: a typo, a missing include or a wrong namespace also
     makes the mutated build fail, and the arm would report RED for a reason that has nothing to do with the
-    schema. Required: the compiler output matches *no matching function for call to …
-    `get(FIX::<Field>&)`* (clang/gcc) / *cannot find symbol … method `get(quickfix.field.<Field>)`*
-    (javac). A snippet is strictly **worse** on this than the real file, because a snippet missing an
+    schema. A snippet is strictly **worse** on this than the real file, because a snippet missing an
     `#include` fails "correctly" for entirely the wrong reason.
+  - ⛔ **THE MATCHER IS A CONDITION PLUS A PER-TOOLCHAIN RECIPE — NOT A LITERAL STRING.** The **condition**
+    is: *the diagnostic identifies the call to `get` as having no viable overload, **and** the mutated field
+    type is named in the diagnostic (on the error line or in its candidate notes)*. Each toolchain's exact
+    text is **derived by running the recipe on the pinned tree**, never copied from here.
+    ⛔ **The three toolchains do NOT share a diagnostic shape, and two of them do not even carry the field
+    identity in the same place.** A single pattern across them is the defect this clause replaces.
+
+    | toolchain | error line | field identity carried where |
+    |---|---|---|
+    | g++ | `no matching function for call to '…::get(FIX::<Field>&)'` | **on the error line** |
+    | clang | `no matching member function for call to 'get'` | ⚠️ **notes only** — `no known conversion from 'FIX::<Field>' to 'FIX::<Other> &'`; the field is **absent from the error line** |
+    | javac | `no suitable method found for get(<Field>)` | on the error line, **simple name** — *not* `quickfix.field.<Field>` |
+
+    *Illustrations observed 2026-09-10 on g++ 13.3.0 / clang 22.1.2 / javac (QFJ 3.0.1); they are dated
+    motivation, never operands — re-derive with the recipe above.*
+
+    ⛔ **CLANG NEEDS A TWO-LINE MATCH**: the error line (`no matching member function for call to 'get'`)
+    **plus** a candidate note naming the mutated field. Matching only the error line does not distinguish a
+    schema failure from any other overload-resolution failure on `get`.
+    ⛔ **AND THE REPAIR THAT MUST NOT BE MADE**: when this arm goes red under a toolchain whose text was not
+    anticipated, do **not** loosen the matcher to *"the build failed"*. That reinstates exactly the
+    spurious-hit hole this clause exists to close, and it would be invisible. Add the toolchain's row.
   - ⚠️ **Per-site coverage — a STATED LIMIT, not silence.** FR-003b(a) binds **every** field the script
     declares as a typed read; the *positive* direction covers all of them by construction (the whole file
     compiles, so every typed read in it is schema-conformant). The **negative** arm mutates **one**
@@ -649,7 +675,7 @@ claiming a pass with no corroborating run artifact.
   |---|---|---|
   | `tests/interop/cell_results.yaml` — **committed expected inventory** | the shipped ctest, in all three CI tiers, **opening nothing** | structure only. New evidence fields are required **conditionally on `kind: conversation`**, so the 59 existing rows are untouched (FR-020). Each `status: pass` conversation row must name a ledger entry that exists, whose `terminal_state` is `completed`, and whose `witness_count` equals the census figure for that slot |
   | the **run ledger** (a `runs:` section of the witness-evidence record, FR-015b) — **committed**, machine-independent | the same ctest | one **`kind: conformance`**, `authoritative: true` entry per `(cell_id, config)`; the set of those slots equals the 32-slot inventory exactly; `run_id`, `run_timestamp`, counterparty flavour/version/digest, `script_digest`, `terminal_state`, `witness_count`, `evidence_digest`, `authoritative`, `kind`. **No absolute path**. ⚠️ `validator-positive-control` and retry rows are **recorded here and excluded from that equality** (data-model §11 § *THE TWO DISCRIMINATORS*) |
-| the **validation pairs** (a `validation_pairs:` section of the same record, FR-012a) — **committed** | the same ctest | the `kind: conformance` pair set equals the **16-pair inventory exactly** (E-7a); every `off_run_id`/`on_run_id` resolves to a ledger row |
+  | the **validation pairs** (a `validation_pairs:` section of the same record, FR-012a) — **committed** | the same ctest | the `kind: conformance` pair set equals the **16-pair inventory exactly** (E-7a); every `off_run_id`/`on_run_id` resolves to a ledger row |
   | the **run artifact** — machine-local, never committed | the **promotion step** (FR-014b), on the machine that ran the cell | the stream is opened, **each of the run's two processes'** `hello` **and `terminal`** records are read (⚠️ **TWO is the process count, not the emitter count** — `contracts/readback-jsonl.md` § *THE THREE EMITTERS* carries the distinction), their `run_id` / `script_digest` / `config` are checked against each other and against the row, the completeness gate is evaluated, and `evidence_digest` is computed over the persisted bundle |
 
   ⚠️ Requiring the manifest fields to be merely *present* is not corroboration — six hand-editable strings
@@ -706,7 +732,7 @@ claiming a pass with no corroborating run artifact.
 - **FR-015b**: The witness evidence record MUST carry its own **exact-set completeness gate**, in the
   same spirit as the existing cell-id set-equality check, so that a witness which silently stops being
   produced is detected rather than absent. A missing witness MUST fail that gate.
-- **FR-015c**: Witness rows MUST carry `combo_id`, `cell_id`, `config`, `run_id` and `arm`. **Three
+- **FR-015c**: Witness rows MUST carry `combo_id`, `cell_id`, `config`, `run_id`, `arm`, **`kind`** and **`authoritative`**. ⚠️ The last two were omitted here while identity 3's projection and the 32-slot rules **filter on them** — a required-field list that omits the discriminator its own projection uses. **Three
   distinct identities MUST be named and MUST NOT be conflated** — the previous single "key" was
   unsatisfiable as an equality and blind on the role×flavour axis:
 

@@ -342,6 +342,7 @@ The unit a catalogue row cites (FR-015a).
 | `cell_id` | string | the **logical cell**, `≡ (combo_id, arm)`; 8-valued |
 | `config` | string | `normal` · `asan` · `ubsan` · `tsan` — **required**, see below |
 | `arm` | enum | `validation-off` · `validation-on` |
+| **`kind`** | enum | `conformance` · `validator-positive-control` — ⭐ **required.** W-3a's projection and the 32-slot rules **filter on this field**, and the entity omitted it: the scoping was applied to the rules and not to the schema that carries the discriminator |
 | `script_step_id` | string | the conversation-script step this witness covers |
 | `msg_type` | string | |
 | `direction` | enum | |
@@ -639,10 +640,32 @@ ranges over a pair's cardinality, so an implementation emitting none satisfies e
 | `accepted_off` | set of `script_step_id` | messages the validation-off arm accepted |
 | `accepted_on` | set of `script_step_id` | messages the validation-on arm accepted |
 | `dispositions` | list | per message, each arm's validator disposition — accepted, or rejected with the objection |
-| `verdict` | enum | `identical` · `diverged` |
+| **`authoritative`** | bool | ⭐ **exactly one `authoritative: true` pair per `(cell_pair, config)`.** ⚠️ The pair entity lacked this field entirely while the Run entity has it — the very discriminator invented to close the duplicate-collapse problem, absent one entity over |
+| `verdict` | enum | `identical` · `diverged` | ⛔ **DERIVED, never asserted** — see the validation rules |
 
 **Validation rules**
 
+- ⛔ **BOTH REFERENCED RUNS MUST BE `authoritative: true`, AND FOR A `conformance` PAIR EACH MUST BE THE RUN
+  SELECTED FOR ITS `(cell_id, config)` SLOT.** ⚠️ Without this the pair is satisfiable by two **superseded**
+  retries: the ledger records `authoritative: false` rows and §11 says those *enter no gate*, yet distinct
+  ids, opposite arms, matching metadata and opposite `has_validator` are all satisfiable by them. All 16
+  conformance slots could then be backed by runs the ledger says govern nothing, with E-1c, E-7 **and** E-7a
+  green. **Fails toward GREEN.**
+- ⛔ **`accepted_off`, `accepted_on` AND `dispositions` MUST BE EXTRACTED FROM THE TWO REFERENCED RUN
+  ARTIFACTS, AND `verdict` MUST BE COMPUTED FROM THEM** — exact set equality over `accepted_off` /
+  `accepted_on`. A `conformance` pair MUST yield `verdict: identical`; a `validator-positive-control` pair
+  MUST yield `diverged` and match its `expected_verdict`.
+  ⚠️ **This is a SPURIOUS HIT, not a missing check**: with the result merely *carried* rather than
+  *derived*, a producer that hard-codes `identical` for conformance pairs passes E-7, E-7a **and** FR-010a's
+  divergence probe — the pair reports the expected answer without ever measuring the property, and the whole
+  cross-arm claim (FR-010 / SC-004) is unevidenced. A forced-**miss** arm cannot catch it, because a
+  hard-coded pair reports the same shape a correct one does.
+- ⛔ **EXACTLY ONE `kind: conformance` PAIR PER `(cell_pair, config)`.** ⚠️ E-7a asserts *set* equality
+  against the 16-pair inventory, and a set equality keyed on the slot is **satisfied when a slot is claimed
+  twice** — the duplicates collapse. An `identical` pair and a `diverged` pair for the same slot can both
+  sit in the committed artifact with no rule saying which governs. That is verbatim the collapse E-1c and
+  W-3c were written to close **for runs** (§11), and the 15-of-16 fixture cannot catch it: that fixture
+  forces a *miss*, and a duplicate slot is a *spurious hit*.
 - `verdict: diverged` MUST name **the message and the validator's objection** (FR-012). The witness
   `mismatch` vocabulary is field-level (`value_mismatch` / `missing` / `spurious`) and cannot express
   *"the on arm rejected a message the off arm accepted"*.
