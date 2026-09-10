@@ -1016,6 +1016,19 @@ claiming a pass with no corroborating run artifact.
   condition deliberately: a list of the consumers that satisfy it today re-arms the moment a third one
   appears. The re-derivation recipe, and the discriminator that separates a consumer from the publisher,
   are in `plan.md` § *External obligations*.
+  ⛔ **AND THAT RESIDUAL REOPENS THE CHOICE ABOVE — "the first is the safer shape" WAS CONCLUDED WITHOUT
+  IT AND IS NOT RE-CONFIRMED HERE.** ⚠️ A new fact that weakens a recorded conclusion, recorded *next to*
+  the conclusion without revisiting it, is how a stale recommendation survives review — so the
+  re-examination is written out rather than left to the reader. On the evidence now in hand the **second**
+  option dominates for two independent reasons: (1) it never moves `:latest`, so the in-flight population
+  this residual identifies is not exposed at all, whereas pin-first leaves it exposed until every open
+  base carries the pin; and (2) it needs **no** workflow-level pin on the matrix, which dissolves the
+  override problem that pinning creates — `plan.md` § *External obligations* records that override
+  mechanism as **OPEN**, and it exists only because option 1 was assumed. Option 1's advantage is that it
+  costs one line; option 2 costs a tag and the sequencing discipline to move `:latest` only after
+  FR-020's regression run is green. ⛔ **This is a STANDING DECISION, not an implementation detail, and
+  it is recorded here as REQUIRING CONFIRMATION rather than silently re-recommended** — the original
+  choice was made deliberately and is not overturned by an analysis pass acting alone.
 
 ### Key Entities
 
