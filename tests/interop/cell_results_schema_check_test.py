@@ -17,9 +17,11 @@
 # Run via ctest (registered in tests/interop/CMakeLists.txt) or directly:
 #   python3 -m pytest -xvs tests/interop/cell_results_schema_check_test.py
 
-import builtins
+import contextlib
+import inspect
 import os
 import re
+import sys
 
 import pytest
 import yaml
@@ -53,17 +55,68 @@ CONFIGS = {"normal", "asan", "ubsan", "tsan"}
 STATUS_KINDS = {"pass", "fail", "skip", "known-limitation", "n/a", "error", "aborted"}
 PRIORITIES = {"P1", "P2", "P3", "watch:P1", "watch:P2", "watch:info"}
 # data-model.md §6/§10/§11: witness_evidence.yaml's three top-level sections.
-# ⚠️ `witnesses` is not a literal key name given anywhere in the spec bundle
-# (unlike `runs`/`validation_pairs`, named literally throughout) — see the
-# NOTE in witness_evidence.yaml itself.
+# `witnesses` is pinned as the section key in data-model.md §6.
 WITNESS_EVIDENCE_SECTIONS = ("witnesses", "runs", "validation_pairs")
 
 
 class ArtifactPathOpened(Exception):
-    """Raised by the guarded `open()` in the T030 tests below when the schema
-    check attempts to open anything other than the two committed, in-repo
-    manifests. The check MUST open nothing else — it is a ctest provisioned
-    on tier1/tier2/tier3-libcxx hosted runners that hold no run artifacts."""
+    """Raised by the artifact-path audit hook (see _artifact_path_guard below)
+    when the schema check attempts to open anything other than the two
+    committed, in-repo manifests. The check MUST open nothing else — it is a
+    ctest provisioned on tier1/tier2/tier3-libcxx hosted runners that hold no
+    run artifacts."""
+
+
+# T030 fix round: a monkeypatch on builtins.open alone walks straight past
+# pathlib (Path.open()/read_text()/write_text() bind their own C-level open,
+# not builtins.open) and os.open() (same). Verified empirically: `sys.audit`
+# tracing shows the "open" audit event fires for ALL THREE call paths —
+# builtins.open(), pathlib's Path methods, and os.open() — so it is the one
+# mechanism that sees every open regardless of call path.
+#
+# sys.addaudithook() cannot be uninstalled once added (CPython — there is no
+# removehook), so this hook is installed ONCE, permanently, at import time,
+# and is a no-op unless _ARTIFACT_GUARD_ACTIVE is True — which only the
+# _artifact_path_guard() context manager below sets, for the duration of a
+# single `with` block.
+_ARTIFACT_GUARD_ACTIVE = False
+_ARTIFACT_GUARD_ALLOWED_PATHS = set()
+
+
+def _artifact_path_audit_hook(event, args):
+    if event != "open" or not _ARTIFACT_GUARD_ACTIVE:
+        return
+    raw_path = args[0]
+    if raw_path is None:
+        return
+    try:
+        raw_path = os.fspath(raw_path)
+    except TypeError:
+        # Not path-like (e.g. an int fd via os.open(dir_fd=...)) — nothing to
+        # check against a path allow-list.
+        return
+    if isinstance(raw_path, bytes):
+        raw_path = os.fsdecode(raw_path)
+    real_path = os.path.realpath(raw_path)
+    if real_path not in _ARTIFACT_GUARD_ALLOWED_PATHS:
+        raise ArtifactPathOpened(real_path)
+
+
+sys.addaudithook(_artifact_path_audit_hook)
+
+
+@contextlib.contextmanager
+def _artifact_path_guard():
+    global _ARTIFACT_GUARD_ACTIVE, _ARTIFACT_GUARD_ALLOWED_PATHS
+    _ARTIFACT_GUARD_ALLOWED_PATHS = {
+        os.path.realpath(MANIFEST), os.path.realpath(WITNESS_EVIDENCE),
+    }
+    _ARTIFACT_GUARD_ACTIVE = True
+    try:
+        yield
+    finally:
+        _ARTIFACT_GUARD_ACTIVE = False
+        _ARTIFACT_GUARD_ALLOWED_PATHS = set()
 
 
 DEFERRED_TAGS = {
@@ -436,52 +489,85 @@ def test_per_cell_completeness_no_silent_absence(cells):
 # T030 (089-quickfix-interop-conversation): "the check MUST NOT open any
 # artifact path" (contracts/witness-evidence.md § "Two artifacts, and they
 # must not be one" / plan.md's REQUIRED_FIELDS row). Both committed manifests
-# — cell_results.yaml and witness_evidence.yaml — are IN the allow-list below;
-# a run artifact under $FIXPP_INTEROP_EVIDENCE_ROOT, or anything else, is not.
-_CELL_CHECKS = (
-    test_required_fields_present,
-    test_ids_unique,
-    test_enum_fields_valid,
-    test_deferred_iff_status_na,
-    test_skip_only_on_live_cells,
-    test_known_limitation_has_tracking_issue,
-    test_thorny_rows_have_priority,
-    test_corpus_p1_block_rule,
-    test_per_cell_completeness_no_silent_absence,
-)
+# — cell_results.yaml and witness_evidence.yaml — are IN the allow-list of
+# _artifact_path_guard(); a run artifact under $FIXPP_INTEROP_EVIDENCE_ROOT,
+# or anything else, is not.
+def _discover_cell_checks():
+    # T030 fix round, HOLE 2: derived by SHAPE — every module-level test_*
+    # function whose parameters are exactly ["cells"] — not a hand-kept
+    # tuple. A hand-kept list is blind to the next check added with that
+    # same shape (an instrument keyed on an identifier is blind to copies).
+    module = sys.modules[__name__]
+    checks = [
+        obj for name, obj in vars(module).items()
+        if name.startswith("test_")
+        and inspect.isfunction(obj)
+        and list(inspect.signature(obj).parameters) == ["cells"]
+    ]
+    checks.sort(key=lambda fn: fn.__name__)
+    return checks
 
 
-def _install_artifact_path_guard(monkeypatch):
-    allowed = {os.path.realpath(MANIFEST), os.path.realpath(WITNESS_EVIDENCE)}
-    real_open = builtins.open
-
-    def guarded_open(path, *args, **kwargs):
-        real_path = os.path.realpath(os.fspath(path))
-        if real_path not in allowed:
-            raise ArtifactPathOpened(real_path)
-        return real_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "open", guarded_open)
+def test_cell_checks_discovery_is_non_empty_and_finds_a_known_check():
+    # An empty derivation must not pass vacuously (it would make
+    # test_schema_check_opens_no_artifact_path below trivially green by
+    # running nothing) — assert non-empty AND that a specific, known check
+    # is present by IDENTITY.
+    discovered = _discover_cell_checks()
+    assert discovered, "shape-derived cell-check discovery found NOTHING"
+    assert test_required_fields_present in discovered
+    assert test_per_cell_completeness_no_silent_absence in discovered
 
 
-def test_schema_check_opens_no_artifact_path(monkeypatch):
-    _install_artifact_path_guard(monkeypatch)
-    cells_rows = _load_cells()
-    for check in _CELL_CHECKS:
-        check(cells_rows)
-    witness_doc = _load_witness_evidence()
-    _check_witness_evidence_sections(witness_doc)
+def test_schema_check_opens_no_artifact_path():
+    with _artifact_path_guard():
+        cells_rows = _load_cells()
+        for check in _discover_cell_checks():
+            check(cells_rows)
+        witness_doc = _load_witness_evidence()
+        _check_witness_evidence_sections(witness_doc)
 
 
-def test_schema_check_opens_no_artifact_path_guard_is_live(monkeypatch, tmp_path):
-    # Proves the guard above is actually live rather than silently a no-op
-    # (feedback_a_watcher_that_fails_toward_silence_is_invisible): plant a
-    # read of a path outside the allow-list and confirm it reddens with our
-    # own diagnostic (ArtifactPathOpened), not merely "something raised".
-    planted = tmp_path / "planted_run_artifact.jsonl"
+def test_artifact_path_guard_catches_planted_open(tmp_path):
+    # T030 fix round, HOLE 1: builtins.open() call path.
+    planted = tmp_path / "planted_open.jsonl"
     planted.write_text("not a committed manifest\n", encoding="utf-8")
-
-    _install_artifact_path_guard(monkeypatch)
     with pytest.raises(ArtifactPathOpened, match=re.escape(str(planted.resolve()))):
-        with open(planted, encoding="utf-8"):
-            pass
+        with _artifact_path_guard():
+            with open(planted, encoding="utf-8"):
+                pass
+
+
+def test_artifact_path_guard_catches_planted_path_read_text(tmp_path):
+    # T030 fix round, HOLE 1: pathlib.Path.read_text() call path — this is
+    # exactly the hole the coordinator's probe found (builtins.open-only
+    # monkeypatch walked straight past it).
+    planted = tmp_path / "planted_read_text.jsonl"
+    planted.write_text("not a committed manifest\n", encoding="utf-8")
+    with pytest.raises(ArtifactPathOpened, match=re.escape(str(planted.resolve()))):
+        with _artifact_path_guard():
+            planted.read_text(encoding="utf-8")
+
+
+def test_artifact_path_guard_catches_planted_os_open(tmp_path):
+    # T030 fix round, HOLE 1: os.open() call path.
+    planted = tmp_path / "planted_os_open.jsonl"
+    planted.write_text("not a committed manifest\n", encoding="utf-8")
+    with pytest.raises(ArtifactPathOpened, match=re.escape(str(planted.resolve()))):
+        with _artifact_path_guard():
+            fd = os.open(str(planted), os.O_RDONLY)
+            os.close(fd)
+
+
+def test_artifact_path_guard_is_off_outside_guarded_block(tmp_path):
+    # The audit hook is PERMANENT for the process once installed (no
+    # removehook), so this proves it does not leak into ordinary test code:
+    # a normal tmp_path write/read OUTSIDE any `with _artifact_path_guard():`
+    # block must still succeed, via all three call paths.
+    outside = tmp_path / "ordinary.txt"
+    outside.write_text("fine\n", encoding="utf-8")
+    assert outside.read_text(encoding="utf-8") == "fine\n"
+    with open(outside, encoding="utf-8") as fh:
+        assert fh.read() == "fine\n"
+    fd = os.open(str(outside), os.O_RDONLY)
+    os.close(fd)
