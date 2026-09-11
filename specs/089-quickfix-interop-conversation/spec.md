@@ -255,7 +255,8 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
 - Q: Both counterparties read `conversation_script.yaml` only to hash it; the messages they originate are
   hardcoded literals that differ from the script's declared values (B-07's `ClOrdID` is `PRCL-B07-0001` in
   the script). How does the peer originate from the script? → A: **The shim renders the peer's messages
-  into a flat intent file both counterparties parse by hand** (user decision) — FR-008d (a). Implementing
+  into a flat intent file both counterparties parse by hand** (user decision) — FR-008d (a), widened to
+  fixpp's cell as well, since the library has no YAML parser either. Implementing
   the arm showed nothing could see an originator ignoring the script, on either side, since FR-006
   compares a `sent` record only with the readback of the same frame; FR-008d (b) is that check.
 
@@ -659,10 +660,11 @@ claiming a pass with no corroborating run artifact.
   every run's hello record**, so a result can be bound to the exact script that produced it.
 - **FR-008d**: Every message the script declares a process originates MUST be built from that message's
   declared `intent_fields`, read at run time — for a counterparty, never from literals in its own source.
-  (a) **Delivery to the peer**: the shim renders every `originator: peer` message's declarations into a flat
-  per-run intent file — one line per field, `step_id` TAB `path` TAB `value` — which both counterparties
-  parse with hand-rolled code, so neither carries a YAML parser (the same precedent as FR-025's three
-  hand-rolled JSON emitters). It is rendered from the same script bytes whose digest FR-008c records, and
+  (a) **Delivery to both processes**: the shim renders every message's declarations into a flat per-run
+  intent file — one line per field, `step_id` TAB `originator` TAB `path` TAB `value` — which both
+  counterparties and fixpp's conversation cell parse with hand-rolled code, each building the messages its
+  own `originator` value names, so none of the three carries a YAML parser (the same precedent as FR-025's
+  three hand-rolled JSON emitters). It is rendered from the same script bytes whose digest FR-008c records, and
   the shim **refuses to render** a value containing TAB, LF or SOH rather than escaping it. (b) **The check
   that makes (a) observable**: for every `sent` record of either process, each path the script declares
   for that step MUST be present with the declared value; a missing or different one FAILS the cell. Paths
