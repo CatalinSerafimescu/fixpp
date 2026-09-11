@@ -11,7 +11,7 @@
 // witness: a reject-everything regression would leave the first half green.
 //
 // fixpp validates BEFORE interpret_logon on the NotConnected arm
-// (src/session/session.cpp:2060-2070), which is QuickFIX parity
+// (`Session::on_inbound_frame`'s `NotConnected` case), which is QuickFIX parity
 // (Session::next validates at Session.cpp:1218-1229, before nextLogon at
 // :1231). Reject(3) and Logout(5) stay exempt via the pre-existing
 // no-reject-loop guard, so enum checking cannot induce a reject loop.

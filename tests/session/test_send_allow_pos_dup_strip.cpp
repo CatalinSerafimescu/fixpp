@@ -1157,15 +1157,21 @@ TEST_F(AllowPosDupStripTest, Cell3_DefaultPath_ReplayByteIdentical) {
     }
     ASSERT_NE(replayed, nullptr) << "Cell3: expected a replayed frame after ResendRequest";
 
-    // T003 byte oracle: captured empirically from a pre-T015 build on 2026-06-14.
+    // T003 byte oracle: captured empirically from a pre-T015 build on 2026-06-14;
+    // REORDERED 2026-09-11 for fixpp#419 (43/122 move from after-the-body to the
+    // standard-header/body boundary — see build_replay_frame, src/session/session.cpp).
     // Deterministic because:
     //   - mock_clock stamps fixed UTC 2024-01-01T00:00:00.000 (1704067200 epoch s)
     //   - seqnum 2 (Logon=1 → this app send=2); ResendRequest arrives as inbound seq 2
     //   - fixed session params: sender=ISLD, target=TW, BeginString=FIX.4.4
     // Wire content: 8=FIX.4.4\x01 9=95\x01 35=D\x01 34=2\x01 49=ISLD\x01
-    //               52=20240101-00:00:00.000\x01 56=TW\x01 11=ORDXXX\x01 54=1\x01
-    //               43=Y\x01 122=20240101-00:00:00.000\x01 10=223\x01
-    // [037 FR-006; INV-4; T003 oracle frozen 2026-06-14]
+    //               52=20240101-00:00:00.000\x01 56=TW\x01
+    //               43=Y\x01 122=20240101-00:00:00.000\x01 11=ORDXXX\x01 54=1\x01
+    //               10=223\x01
+    // #419: 9=/10= are UNCHANGED by the reorder — moving 43/122 earlier is a pure
+    // permutation of the same field bytes (same total byte count → same BodyLength;
+    // CheckSum is an order-independent byte-sum mod 256 → same value).
+    // [037 FR-006; INV-4; T003 oracle frozen 2026-06-14; reordered fixpp#419]
     static const unsigned char kOracle[] = {
         0x38, 0x3D, 0x46, 0x49, 0x58, 0x2E, 0x34, 0x2E, 0x34, 0x01,  // 8=FIX.4.4 SOH
         0x39, 0x3D, 0x39, 0x35, 0x01,                                  // 9=95 SOH
@@ -1176,12 +1182,12 @@ TEST_F(AllowPosDupStripTest, Cell3_DefaultPath_ReplayByteIdentical) {
         0x31, 0x2D, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30, 0x30,   // -00:00:00
         0x2E, 0x30, 0x30, 0x30, 0x01,                                  // .000 SOH
         0x35, 0x36, 0x3D, 0x54, 0x57, 0x01,                            // 56=TW SOH
-        0x31, 0x31, 0x3D, 0x4F, 0x52, 0x44, 0x58, 0x58, 0x58, 0x01,   // 11=ORDXXX SOH
-        0x35, 0x34, 0x3D, 0x31, 0x01,                                  // 54=1 SOH
         0x34, 0x33, 0x3D, 0x59, 0x01,                                  // 43=Y SOH
         0x31, 0x32, 0x32, 0x3D, 0x32, 0x30, 0x32, 0x34, 0x30, 0x31,   // 122=20240101
         0x30, 0x31, 0x2D, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30,   // 01-00:00:0
         0x30, 0x2E, 0x30, 0x30, 0x30, 0x01,                            // 0.000 SOH
+        0x31, 0x31, 0x3D, 0x4F, 0x52, 0x44, 0x58, 0x58, 0x58, 0x01,   // 11=ORDXXX SOH
+        0x35, 0x34, 0x3D, 0x31, 0x01,                                  // 54=1 SOH
         0x31, 0x30, 0x3D, 0x32, 0x32, 0x33, 0x01,                      // 10=223 SOH
     };
     static constexpr std::size_t kOracleLen = sizeof(kOracle);

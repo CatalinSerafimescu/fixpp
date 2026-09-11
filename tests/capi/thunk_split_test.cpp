@@ -20,7 +20,7 @@
 // ── Steady-state-throw witness via the FIXPP_TEST_HOOKS send-throw seam ───────
 // The positive steady-state witness — an escaping exception INTO fixpp_session_send's
 // catch(...) → SIGABRT — is not INPUT-triggerable: Session::send
-// (src/session/session.cpp:4023) is `noexcept` and converts ANY component throw
+// (src/session/session.cpp) is `noexcept` and converts ANY component throw
 // (store, transport, async_mutex cancel, …) into a `dispatch_aborted` expected_t,
 // so nothing input-driven reaches the C-ABI catch(...). The fromApp callback-throw
 // abort (engine.cpp) is NOT a substitute: it fires on a WORKER thread, and

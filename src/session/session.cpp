@@ -1742,19 +1742,44 @@ struct SendingTimeStamp {
 }
 
 // 013 FR-010 [FIX-SL §4.3.5] — re-serialize a STORED outbound frame for resend
-// reply: copy every original field (preserving MsgSeqNum 34), append
-// PossDupFlag(43)=Y and OrigSendingTime(122)=<the stored SendingTime(52)>, and
-// recompute BodyLength(9)/CheckSum(10) via fixpp::wire::Writer. The replayed
-// message keeps its ORIGINAL sequence number and does NOT advance the live
-// outbound counter (resend semantics). Stack-only; the 9=/10= source fields are
-// skipped (the Writer rebuilds them on commit).
+// reply: copy every original field (preserving MsgSeqNum 34), insert
+// PossDupFlag(43)=Y and OrigSendingTime(122)=<the stored SendingTime(52)> at
+// the header/body boundary, and recompute BodyLength(9)/CheckSum(10) via
+// fixpp::wire::Writer. The replayed message keeps its ORIGINAL sequence number
+// and does NOT advance the live outbound counter (resend semantics). Stack-only;
+// the 9=/10= source fields are skipped (the Writer rebuilds them on commit).
+//
+// #419 supersedes 037's tail placement (43/122 appended after the full stored
+// body, groups included): 43 and 122 are standard-header fields and MUST
+// precede every body field, or a peer validating field order (QuickFIX-J with
+// UseDataDictionary=Y) rejects the replayed frame (373=14). 037's spec.md
+// Assumptions section called tail placement "order-safe"; that claim was never
+// checked against a strict peer.
+//
+// Header-tag set S = {8,34,35,49,52,56} (9/10/43/122 are skipped before
+// classification by the `continue` below, so they never reach it). Deviates
+// from the issue's Fix bullet ("the stored frame's header set comes from the
+// canonical header partition, not a positional guess") deliberately: S is
+// NOT the full FIX standard header, and is not meant to be. The insertion
+// point below is the first stored tag NOT in S. Correctness needs only that
+// S is a SUBSET of the real standard header, in every FIX version from 4.0 to
+// FIXT.1.1 — every real body tag then lies outside S, so the insertion point
+// is at or before the first body field, and every field before it is a
+// header field. This holds even when the stored payload carries a header
+// tag outside S (115, 128, 97, NoHops, …) that `send_impl` does not forbid:
+// such a tag is classified as "body" by S and 43/122 land before it — still
+// header-before-body, just earlier within the header than that tag. It also
+// holds for the degenerate case (nothing outside S — the fallback below).
+// A wider S (the true standard header) would be neutral for interop —
+// neither QuickFIX-J nor QuickFIX-cpp validates the relative order of header
+// fields after the mandatory 8,9,35 preamble —
+// and strictly worse here: it would need a dictionary or a private,
+// FIXT-scoped table, for no behavioural gain. Keep S as it is.
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_replay_frame(
     std::span<std::byte> out, std::span<const std::byte> stored) noexcept {
     fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};
-    std::string_view orig_sending_time;
-    std::size_t i = 0;
     const std::size_t n = stored.size();
     // 040 US3 (FR-008) — JUSTIFIED EXCLUSION from the inbound forged-tag-overflow
     // guard: this scanner parses STORED OWN-OUTBOUND frames (the `stored` span —
@@ -1763,7 +1788,17 @@ struct SendingTimeStamp {
     // can rewrite our own message store has already won). The unguarded accumulate
     // is intentional — do NOT "harden" it as a missed inbound scanner (it is site 6
     // in the 040 census; the 5 live-inbound scanners use fixpp::wire::accumulate_tag_digit).
-    while (i < n) {
+
+    // Parses one "<tag>=<value>" field at stored[i..], advancing `i` past it
+    // (including the terminating SOH). On a malformed field (no '=', non-digit
+    // tag) `i` is advanced to the next SOH and `.ok` is false. Shared by the
+    // pre-scan pass and the write loop below so the two never diverge.
+    struct FieldScan {
+        bool ok;
+        std::uint32_t tag;
+        std::span<const std::byte> value;
+    };
+    const auto scan_field = [&](std::size_t& i) -> FieldScan {
         std::uint32_t tag = 0;
         bool tag_ok = true;
         while (i < n && stored[i] != EQ && stored[i] != SOH) {
@@ -1775,33 +1810,80 @@ struct SendingTimeStamp {
         if (i >= n || stored[i] != EQ || !tag_ok) {
             while (i < n && stored[i] != SOH) ++i;
             if (i < n) ++i;
-            continue;
+            return {false, 0, {}};
         }
         ++i;  // skip '='
         const std::size_t vstart = i;
         while (i < n && stored[i] != SOH) ++i;
         std::span<const std::byte> val{stored.data() + vstart, i - vstart};
         if (i < n) ++i;  // skip SOH
-        if (tag == 9 || tag == 10 || tag == 43 || tag == 122)
-            continue;  // 9/10 recomputed; 43/122 re-added below (037 FR-004 dedup)
-        if (tag == 52) {
-            orig_sending_time =
-                std::string_view{reinterpret_cast<const char*>(val.data()), val.size()};
-        }
-        if (auto r = w.append_raw(tag, val); !r) return std::unexpected(r.error());
-    }
-    // PossDupFlag(43)=Y
-    {
+        return {true, tag, val};
+    };
+
+    // Emits PossDupFlag(43)=Y + OrigSendingTime(122)=<orig_sending_time>. Shared
+    // by the header/body-boundary insertion point and the degenerate no-body
+    // fallback below, so the two emit sites cannot silently diverge.
+    const auto append_possdup =
+        [&](std::string_view ost_val) -> fixpp::core::expected_t<void> {
         std::byte y[] = {static_cast<std::byte>('Y')};
         if (auto r = w.append_raw(43, std::span<const std::byte>{y}); !r) {
             return std::unexpected(r.error());
         }
-    }
-    // OrigSendingTime(122) = the stored SendingTime(52) value.
-    {
-        std::span<const std::byte> ost{reinterpret_cast<const std::byte*>(orig_sending_time.data()),
-                                       orig_sending_time.size()};
+        std::span<const std::byte> ost{reinterpret_cast<const std::byte*>(ost_val.data()),
+                                       ost_val.size()};
         if (auto r = w.append_raw(122, ost); !r) return std::unexpected(r.error());
+        return {};
+    };
+
+    // Pre-scan pass: capture SendingTime(52) BEFORE the write loop runs, so
+    // inserting 43/122 at the header/body boundary (the first body tag) never
+    // depends on 52 having already been walked by that point. [#419: the old
+    // single-pass code appended 122 only after the whole loop, so it could rely
+    // on `orig_sending_time` being set by then; inserting mid-loop cannot.]
+    std::string_view orig_sending_time;
+    {
+        std::size_t i = 0;
+        while (i < n) {
+            auto fr = scan_field(i);
+            if (!fr.ok) continue;
+            if (fr.tag == 52) {
+                orig_sending_time = std::string_view{
+                    reinterpret_cast<const char*>(fr.value.data()), fr.value.size()};
+                break;
+            }
+        }
+    }
+
+    constexpr std::array<std::uint32_t, 6> kReplayHeaderTags = {8, 34, 35, 49, 52, 56};
+    bool inserted_pd = false;
+    std::size_t i = 0;
+    while (i < n) {
+        auto fr = scan_field(i);
+        if (!fr.ok) continue;
+        if (fr.tag == 9 || fr.tag == 10 || fr.tag == 43 || fr.tag == 122)
+            continue;  // 9/10 recomputed; 43/122 re-inserted below (037 FR-004 dedup)
+
+        // #419: insert PossDupFlag(43)=Y + OrigSendingTime(122) at the
+        // header/body boundary — before the first tag NOT in the header set —
+        // instead of after the loop (which placed them after the full body,
+        // groups included).
+        if (!inserted_pd &&
+            std::ranges::find(kReplayHeaderTags, fr.tag) == kReplayHeaderTags.end()) {
+            if (auto r = append_possdup(orig_sending_time); !r) return std::unexpected(r.error());
+            inserted_pd = true;
+        }
+        if (auto r = w.append_raw(fr.tag, fr.value); !r) return std::unexpected(r.error());
+    }
+    // Fallback for a stored frame with no tag outside S: the insertion point
+    // above is never reached (nothing to insert BEFORE), so emit 43/122 here.
+    // For a frame with no body, "at the header/body boundary" and "at the
+    // tail" are the same position, so this is not a special case of the rule
+    // above — it follows from it. Reachable: `Session::send("35=D\x01")`
+    // (a bare MsgType, no other field) stores exactly 8,9,35,34,49,52,56,10 —
+    // see tests/session/test_resend_answer_field_order.cpp
+    // Replay_NoBodyFallback_StillCarries43And122.
+    if (!inserted_pd) {
+        if (auto r = append_possdup(orig_sending_time); !r) return std::unexpected(r.error());
     }
     auto committed = std::move(w).commit();
     if (!committed) return std::unexpected(committed.error());
