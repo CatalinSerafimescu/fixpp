@@ -183,6 +183,19 @@ inline std::string canonical_typed_value(std::string const& fix_type, std::strin
     return raw;
 }
 
+// ── direction wire values (089 T037) ────────────────────────────────────────
+//
+// spec.md § "Conversation census" → "Business steps": "Direction is written
+// from fixpp's point of view, and these two strings are the enum's WIRE
+// VALUES... The value is ABSOLUTE — it does not depend on which process
+// emits the record, so every emitter writes the same value for the same
+// message." Named here so a future `sent`/`readback` call site (T052) has a
+// single spelling to reference instead of a hand-typed literal — and so a
+// typo in either spelling is a compile-time-adjacent, pinned-by-test defect
+// rather than a silent join-key mismatch discovered only at a live cell.
+inline constexpr char const* kDirectionFixppToPeer = "fixpp-to-peer";
+inline constexpr char const* kDirectionPeerToFixpp = "peer-to-fixpp";
+
 // ── field entries and their canonical order ─────────────────────────────────
 
 struct FieldEntry {
@@ -241,6 +254,27 @@ inline bool path_less(std::string const& lhs, std::string const& rhs)
 class Stream {
 public:
     explicit Stream(std::string const& path) : out_(path, std::ios::binary | std::ios::trunc) {}
+
+#ifdef FIXPP_TEST_HOOKS
+    // TEST-ONLY (089 T047). Opens in APPEND mode instead of the mandated
+    // TRUNCATE (R-4: "a stale record surviving a re-run is worse than a
+    // missing one" — a load-bearing decision, not a formatting choice). No
+    // production call site may reach this: it exists so a test can drive the
+    // real write_line()/sent()/readback()/hello()/terminal() code path with
+    // the open mode a defect would flip, to prove why TRUNCATE matters,
+    // rather than hand-writing an appended fixture file. Gated behind
+    // FIXPP_TEST_HOOKS (set per-target by fixpp_add_interop_test) so the
+    // single-arg constructor above — the one emit_fixpp_fixture.cpp compiles
+    // with a bare `g++`, no test macros — stays byte-identical.
+    // Returns a prvalue constructed directly in the return statement (C++17
+    // guaranteed copy elision, [class.copy.elision]) -- Stream holds a
+    // std::mutex, so it is neither copyable nor movable, and a named local
+    // returned by value here would need NRVO, which is NOT guaranteed.
+    static Stream append_mode_for_test(std::string const& path)
+    {
+        return Stream(path, std::ios::app);
+    }
+#endif
 
     [[nodiscard]] bool ok() const
     {
@@ -392,6 +426,13 @@ private:
         out_ << line << '\n';
         out_.flush();
     }
+
+#ifdef FIXPP_TEST_HOOKS
+    // Reachable only via append_mode_for_test() above.
+    Stream(std::string const& path, std::ios::openmode extra_mode)
+        : out_(path, std::ios::binary | extra_mode)
+    {}
+#endif
 
     std::ofstream out_;
     std::mutex mutex_;

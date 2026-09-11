@@ -675,6 +675,29 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
             }
 
             ParsedRecord const& readback = *it->second;
+
+            // FR-018 spurious-hit (spec.md:954): "Emit a message whose
+            // declared intent set is empty -- the comparator must reject
+            // rather than pass on ∅ == ∅." Distinct from the "readback not
+            // found" branch above (T042/FR-016c): here a readback record
+            // DOES exist, at the correct key, and ALSO declares zero
+            // fields -- the per-field loops below would then find zero
+            // mismatches and wrongly report "pass", comparing nothing
+            // against nothing. Checked here, BEFORE those loops, and
+            // narrowed to BOTH sides empty: a sent record with zero
+            // declared fields against a readback that reports real fields
+            // is not this case -- it is already correctly caught below as
+            // one `spurious` mismatch per reported field.
+            if (sent.fields.empty() && readback.fields.empty()) {
+                row.verdict = "fail";
+                row.mismatch.push_back(Mismatch{.path = "",
+                                                 .cls = "missing",
+                                                 .sent_value = "<empty intent vs empty readback>",
+                                                 .readback_value = ""});
+                rows.push_back(std::move(row));
+                continue;
+            }
+
             std::unordered_map<std::string, std::string> readback_fields;
             for (FieldEntry const& fe : readback.fields) {
                 readback_fields[fe.path] = fe.value;

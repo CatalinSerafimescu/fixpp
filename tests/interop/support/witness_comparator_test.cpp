@@ -15,12 +15,17 @@
 // no fractional part at all.
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdlib>
 #include <fstream>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include "support/readback_jsonl.hpp"
+#include "support/sent_record_intent.hpp"
 #include "support/witness_comparator.hpp"
 
 using namespace fixpp::interop::readback;
@@ -191,6 +196,14 @@ TEST(WitnessComparator, AbsentReadbackFailsEvenWithNoDeclaredFields)
     EXPECT_EQ(rows[0].verdict, "fail");
     ASSERT_EQ(rows[0].mismatch.size(), 1u);
     EXPECT_EQ(rows[0].mismatch[0].cls, "missing");
+    // Pins WHICH "missing" branch fired -- the "no readback record at all"
+    // one (FR-016c), never the ∅-vs-∅ "empty intent vs empty readback" one
+    // (FR-018 / T049, EmptyIntentVsEmptyReadbackRejectsRatherThanPassing
+    // below), even though both classify "missing" and this record's
+    // declared fields are also empty. The two are structurally disjoint: the
+    // T049 branch only runs once a readback record has been FOUND at the
+    // key, which never happens here.
+    EXPECT_EQ(rows[0].mismatch[0].sent_value, "<record>");
 }
 
 // §4: "Value comparison is on decoded values, not rendered text — decimals
@@ -533,4 +546,237 @@ TEST(WitnessComparator, ParseWitnessRowsThrowsOnMissingRequiredField)
                                                           << what;
     }
     EXPECT_TRUE(threw) << "a witness row missing a required §4 field must throw, not default it";
+}
+
+// ── 089 T037 — direction is part of the join key, not decorative ───────────
+// spec.md § "Conversation census": direction values are ABSOLUTE wire
+// strings, identical from every emitter. If `Key` ever stopped comparing
+// `direction`, a readback recorded under the WRONG direction would silently
+// satisfy a sent record it does not correspond to. This arm pins the
+// opposite: a readback at the correct (seq_num, occurrence) but the WRONG
+// direction spelling must NOT be found -- the sent record reports `missing`,
+// not `pass`.
+TEST(WitnessComparator, DirectionIsPartOfTheJoinKeyNotDecorative)
+{
+    std::string const dir = testing::TempDir();
+    {
+        Stream sender(dir + "wc_dir_sender.jsonl");
+        sender.sent("D", 40, kDirectionFixppToPeer, 0, "T037-dir", {{"1", "ACCT0001"}});
+    }
+    {
+        // Same seq_num/occurrence, WRONG direction spelling.
+        Stream receiver(dir + "wc_dir_receiver.jsonl");
+        receiver.readback("D", 40, kDirectionPeerToFixpp, 0, false, {{"1", "ACCT0001"}}, {});
+    }
+    auto const a = parse_stream(dir + "wc_dir_sender.jsonl");
+    auto const b = parse_stream(dir + "wc_dir_receiver.jsonl");
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "fail")
+        << "a readback recorded under the wrong direction must not satisfy the sent record -- "
+           "direction is part of the join key";
+    ASSERT_EQ(rows[0].mismatch.size(), 1u);
+    EXPECT_EQ(rows[0].mismatch[0].cls, "missing");
+}
+
+// ── 089 T047 — TRUNCATE mode is load-bearing (R-4) ──────────────────────────
+// Two Stream opens on the SAME path -- representing run n-1 then run n
+// reusing a run directory's file -- must not let run n-1's stale readback
+// satisfy run n's sent record. Pinned via the REAL open()/write path
+// (Stream's mandated single-arg constructor, always TRUNCATE), not a
+// hand-written appended fixture.
+TEST(WitnessComparator, ReopeningOnSamePathTruncatesRunNMinus1sStaleReadback)
+{
+    std::string const dir = testing::TempDir();
+    std::string const receiver_path = dir + "wc_r4_receiver.jsonl";
+    // Run n-1: peer answers seq_num=50 with "ACCT0001".
+    {
+        Stream receiver(receiver_path);
+        receiver.readback("D", 50, kDirectionFixppToPeer, 0, false, {{"1", "ACCT0001"}}, {});
+    }
+    // Run n reuses the SAME path (a fresh process, same run directory) but
+    // the peer never answers this time -- no readback() call at all. The
+    // mandated single-arg constructor truncates on reopen.
+    {
+        Stream receiver(receiver_path);
+        (void)receiver;
+    }
+    std::string const sender_path = dir + "wc_r4_sender.jsonl";
+    {
+        Stream sender(sender_path);
+        sender.sent("D", 50, kDirectionFixppToPeer, 0, "T047-run-n", {{"1", "ACCT0001"}});
+    }
+    auto const a = parse_stream(sender_path);
+    auto const b = parse_stream(receiver_path);
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "fail")
+        << "run n received no readback -- TRUNCATE must have wiped run n-1's stale record, or "
+           "this would wrongly pass";
+    ASSERT_EQ(rows[0].mismatch.size(), 1u);
+    EXPECT_EQ(rows[0].mismatch[0].cls, "missing");
+}
+
+// THE DANGER THIS GUARDS AGAINST -- the flipped-mode mutant of the test
+// above, using append_mode_for_test() (089 T047: the SAME real open()/write
+// path, mode APPEND instead of the mandated TRUNCATE). Run n-1's stale
+// "ACCT0001" readback survives and wrongly satisfies run n's sent record,
+// which never received a real reply: the test above's RED (fail/missing)
+// turns GREEN (pass) under this mutant. Kept as a permanent, LABELLED
+// expected-priced-survivor witness proving the hazard by contrast with the
+// test above -- production never reaches this mode (Stream's single-arg
+// constructor never opens append; append_mode_for_test() is gated behind
+// FIXPP_TEST_HOOKS and reachable only from test code).
+TEST(WitnessComparator, AppendModeAcrossTwoRunsWronglyPassesOnRunNMinus1sStaleReadback)
+{
+    std::string const dir = testing::TempDir();
+    std::string const receiver_path = dir + "wc_r4_append_receiver.jsonl";
+    {
+        Stream receiver(receiver_path);
+        receiver.readback("D", 51, kDirectionFixppToPeer, 0, false, {{"1", "ACCT0001"}}, {});
+    }
+    {
+        // The mode a defect would flip -- real open() path, real write path,
+        // APPEND instead of TRUNCATE. Writes nothing further (the peer
+        // still never answers run n).
+        auto receiver = Stream::append_mode_for_test(receiver_path);
+        (void)receiver;
+    }
+    std::string const sender_path = dir + "wc_r4_append_sender.jsonl";
+    {
+        Stream sender(sender_path);
+        sender.sent("D", 51, kDirectionFixppToPeer, 0, "T047-append-mutant", {{"1", "ACCT0001"}});
+    }
+    auto const a = parse_stream(sender_path);
+    auto const b = parse_stream(receiver_path);
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "pass")
+        << "append mode let run n-1's stale readback satisfy run n's sent record -- this IS the "
+           "hazard R-4's mandated truncate mode prevents, not a correct outcome";
+    EXPECT_TRUE(rows[0].mismatch.empty());
+}
+
+// ── 089 T048 — C-8 spurious-hit: sent.fields MUST be builder-derived ───────
+// Exercises the PRODUCTION functions in sent_record_intent.hpp (built on
+// fixpp::wire::body_builder, the shipped 061 body-only serializer), not a
+// test-local re-implementation -- see that file's header for why they had
+// to be added: no such seam existed anywhere in the tree before this arm.
+TEST(WitnessComparator, SpuriousHitFrameDerivedSentMasksPostCaptureMutation_C8)
+{
+    std::string const cl_ord_id = "ORD0001";
+    std::string const orig_cl_ord_id = "ORIG0001";
+    std::string const account = "ACCT0001";
+
+    // The REAL production write path.
+    std::array<std::byte, 256> buf{};
+    auto built = build_order_cancel_request(buf, cl_ord_id, orig_cl_ord_id, account);
+    ASSERT_TRUE(built.has_value());
+    std::span<std::byte> const frame = *built;
+
+    // Stage-1 intent capture -- BEFORE the frame is mutated (C-8: "reading
+    // MsgSeqNum(34) and direction from the outbound seam is required... the
+    // restriction is on WHAT is read there, not on WHERE").
+    auto const intent_fields =
+        order_cancel_request_sent_fields_from_intent(cl_ord_id, orig_cl_ord_id, account);
+
+    // Test-only hook: rewrite Account(1) in the ALREADY-SERIALIZED frame,
+    // AFTER intent capture -- same length ("ACCT0001" -> "ACCT0009"),
+    // nothing else touched. quickstart.md's C-8 arm names B-03/Account(1) on
+    // the live conversation script; that script has no support-layer
+    // equivalent yet (T052), so this uses the same message shape
+    // (OrderCancelRequest/Account(1)) built directly here.
+    {
+        std::string_view const view(reinterpret_cast<char const*>(frame.data()), frame.size());
+        std::size_t const pos = view.find("1=ACCT0001\x01");
+        ASSERT_NE(pos, std::string_view::npos) << "mutation anchor not found in the built frame";
+        frame[pos + std::string_view("1=ACCT000").size()] = std::byte{'9'};  // trailing '1' -> '9'
+    }
+
+    // The "peer's readback" always reflects the wire bytes actually
+    // received -- the MUTATED frame -- independent of which sent-derivation
+    // is under test.
+    auto const readback_fields = order_cancel_request_sent_fields_from_frame(frame);
+    ASSERT_EQ(readback_fields.size(), 3u);
+
+    std::string const dir = testing::TempDir();
+
+    // -- half 1: BUILDER-DERIVED sent (the correct, mandated derivation) --
+    {
+        Stream sender(dir + "c8_builder_sender.jsonl");
+        sender.sent("F", 60, kDirectionFixppToPeer, 0, "T048-builder", intent_fields);
+    }
+    {
+        Stream receiver(dir + "c8_builder_receiver.jsonl");
+        receiver.readback("F", 60, kDirectionFixppToPeer, 0, false, readback_fields, {});
+    }
+    auto const rows1 = compare_streams(parse_stream(dir + "c8_builder_sender.jsonl"),
+                                        parse_stream(dir + "c8_builder_receiver.jsonl"),
+                                        test_identity(), test_resolver());
+    ASSERT_EQ(rows1.size(), 1u);
+    EXPECT_EQ(rows1[0].verdict, "fail") << "builder-derived sent must catch the post-capture mutation";
+    ASSERT_EQ(rows1[0].mismatch.size(), 1u);
+    EXPECT_EQ(rows1[0].mismatch[0].cls, "value_mismatch");
+    EXPECT_EQ(rows1[0].mismatch[0].path, "1");
+    EXPECT_EQ(rows1[0].mismatch[0].sent_value, "ACCT0001");
+    EXPECT_EQ(rows1[0].mismatch[0].readback_value, "ACCT0009");
+
+    // -- half 2: FRAME-DERIVED sent (the MIRROR MUTANT C-8 forbids) --
+    // Reads the SAME mutated bytes the readback is derived from, so the two
+    // trivially agree -- this is what makes half 2 discriminating: it
+    // measures the writer against its OWN reader, not against reality. Both
+    // halves' readback record is produced by the SAME frame parser (the
+    // support layer has no independent decoder), so this proves
+    // intent-vs-frame provenance, not reader independence.
+    auto const frame_derived_sent = order_cancel_request_sent_fields_from_frame(frame);
+    {
+        Stream sender2(dir + "c8_frame_sender.jsonl");
+        sender2.sent("F", 61, kDirectionFixppToPeer, 0, "T048-frame-mutant", frame_derived_sent);
+    }
+    {
+        Stream receiver2(dir + "c8_frame_receiver.jsonl");
+        receiver2.readback("F", 61, kDirectionFixppToPeer, 0, false, readback_fields, {});
+    }
+    auto const rows2 = compare_streams(parse_stream(dir + "c8_frame_sender.jsonl"),
+                                        parse_stream(dir + "c8_frame_receiver.jsonl"),
+                                        test_identity(), test_resolver());
+    ASSERT_EQ(rows2.size(), 1u);
+    EXPECT_EQ(rows2[0].verdict, "pass")
+        << "frame-derived sent wrongly masks the mutation it should have caught -- the exact "
+           "violation C-8 forbids";
+    EXPECT_TRUE(rows2[0].mismatch.empty());
+}
+
+// ── 089 T049 — ∅ intent vs ∅ readback must reject, not pass ────────────────
+// spec.md:954: "Emit a message whose declared intent set is empty -- the
+// comparator must reject rather than pass on ∅ == ∅." Distinct from
+// AbsentReadbackFailsEvenWithNoDeclaredFields (T042) above: THAT arm's
+// readback record does not exist at all. THIS arm's readback record EXISTS,
+// at the correct key, and ALSO declares zero fields -- the exact case a
+// mis-implementation modeling "compare field sets" as "find zero mismatches"
+// would wrongly accept, since an empty set trivially equals an empty set.
+TEST(WitnessComparator, EmptyIntentVsEmptyReadbackRejectsRatherThanPassing)
+{
+    std::string const dir = testing::TempDir();
+    {
+        Stream sender(dir + "wc_empty_intent_sender.jsonl");
+        sender.sent("0", 4, kDirectionFixppToPeer, 0, "T049-empty", {});
+    }
+    {
+        Stream receiver(dir + "wc_empty_intent_receiver.jsonl");
+        receiver.readback("0", 4, kDirectionFixppToPeer, 0, false, {}, {});
+    }
+    auto const a = parse_stream(dir + "wc_empty_intent_sender.jsonl");
+    auto const b = parse_stream(dir + "wc_empty_intent_receiver.jsonl");
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "fail")
+        << "an empty declared intent set must never pass, even when the readback also reports "
+           "zero fields -- ∅ == ∅ is not proof of fidelity";
+    ASSERT_EQ(rows[0].mismatch.size(), 1u);
+    EXPECT_EQ(rows[0].mismatch[0].cls, "missing");
+    // Distinguishes this branch's reject from AbsentReadbackFailsEvenWithNoDeclaredFields's --
+    // both use cls=="missing" (FR-006's three-class vocabulary), but this one's readback
+    // record genuinely exists at the correct key.
+    EXPECT_EQ(rows[0].mismatch[0].sent_value, "<empty intent vs empty readback>");
 }

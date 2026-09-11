@@ -38,6 +38,18 @@ std::vector<std::string> read_lines(std::string const& path)
 
 }  // namespace
 
+// ── spec.md § "Conversation census" — direction wire values (089 T037) ─────
+// "these two strings are the enum's wire values... The value is ABSOLUTE."
+// Pinned so a typo in either constant (wrong casing, an arrow, an
+// underscore) fails HERE rather than surfacing later as a silent join-key
+// mismatch at a live cell.
+
+TEST(ReadbackJsonl, DirectionWireValuesMatchTheCensusExactly)
+{
+    EXPECT_STREQ(kDirectionFixppToPeer, "fixpp-to-peer");
+    EXPECT_STREQ(kDirectionPeerToFixpp, "peer-to-fixpp");
+}
+
 // ── contract § Escaping and encoding — witness required, per emitter ───────
 
 TEST(ReadbackJsonl, EscapesQuoteBackslashAndControlByte)
