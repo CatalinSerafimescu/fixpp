@@ -30,6 +30,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -103,13 +104,70 @@ struct WitnessRow {
     std::vector<Mismatch> mismatch;
 };
 
+// data-model.md §4: "Value comparison is on decoded values, not rendered
+// text — decimals compare numerically." Whether a field is a decimal is a
+// property of its FIX TYPE, not its spelling — a raw `fields` entry (§2/§3)
+// carries no type, so the comparator needs an external tag→"is this a
+// decimal type" oracle. `true` iff the tag's dictionary type collapses to
+// `fixpp::dict::field_type::Float` (PRICE, QTY, AMT, FLOAT, PRICEOFFSET,
+// PERCENTAGE — `fixpp::dict::field_type_from_data_type`'s own collapse,
+// include/fixpp/dict/field_type.hpp). Every other type — including every
+// STRING-collapsed one — compares EXACTLY, byte for byte; there is no
+// spelling-based fallback.
+using DecimalTagResolver = std::function<bool(std::uint16_t tag)>;
+
+// Builds a DecimalTagResolver backed by fixpp's own FIX 4.4 dictionary,
+// loaded once from `dict_xml_path` (the gtests' copy of the path the harness
+// sets via `FIXPP_FIX44_DICT_XML`, data-model.md §1 / R-4a). Throws whatever
+// `fixpp::dict::XmlLoader::load` throws on a malformed/missing file
+// (construction-time exception, `[arch §5.3]` — this is test-support setup,
+// never the parse/fromApp hot path).
+[[nodiscard]] DecimalTagResolver make_fix44_decimal_resolver(std::string const& dict_xml_path);
+
 // The shared comparator. `stream_a`/`stream_b` are the two parsed streams of
 // one run, in EITHER order — pairing is by key, not by which file a record
 // came from (contracts/readback-jsonl.md § Transport: "the comparator reads
 // both streams and pairs ... the same key regardless of which file each came
 // from"). One witness row per `sent` record pooled from both streams.
+// `is_decimal_tag` resolves whether a given field's tag is decimal-typed
+// (see DecimalTagResolver above) — required, not defaulted: a comparator
+// with no dictionary behind it has no basis for guessing.
 [[nodiscard]] std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_a,
                                                        std::vector<ParsedRecord> const& stream_b,
-                                                       WitnessIdentity const& identity);
+                                                       WitnessIdentity const& identity,
+                                                       DecimalTagResolver const& is_decimal_tag);
+
+// The comparator→promotion hand-off (data-model.md §4, pinned `a7923892`):
+// `rows` — the FULL result of one compare_streams() call, not a filtered
+// subset — written one JSON object per line to `path` (the run directory's
+// `witnesses.jsonl`, beside `fixpp-readback.jsonl` /
+// `counterparty-readback.jsonl`), TRUNCATE mode (same rule as
+// readback_jsonl.hpp::Stream — a stale row surviving a re-run is worse than
+// a missing one). Every W-1 field, in data-model.md §4's table order;
+// canonical JSON form per contracts/readback-jsonl.md § "Escaping and
+// encoding" (json_escape, no insignificant whitespace, bare decimal
+// integers) — the same rules the streams use, because the promotion
+// command's reader (`promote_interop_evidence.py::_read_records`) is a
+// PLAIN `json.loads` per line, not this repo's hand-rolled grammar; it only
+// needs valid, well-formed JSON, and reusing the streams' rendering rules
+// keeps one canonical-form story instead of two. Returns false (no file
+// written, or a short/partial write) on an unopenable path; true otherwise.
+[[nodiscard]] bool write_witness_rows(std::string const& path, std::vector<WitnessRow> const& rows);
+
+// The round-trip counterpart of write_witness_rows(). Every §4 field on the
+// FIELD LIST BELOW is REQUIRED on every line — an absent one throws
+// `std::runtime_error` naming the missing field(s) by name, rather than
+// silently defaulting it. This is the direct fix for the gap
+// witness-evidence.md itself names: "a witness row missing `kind`/
+// `authoritative`... is silently dropped from the population it should have
+// joined" (W-1) — a reader that defaults a missing field reproduces exactly
+// that silent drop one layer down, at parse time instead of at the gate.
+// Required: witness_id, run_id, authoritative, combo_id, cell_id, config,
+// arm, kind, script_step_id, msg_type, direction, occurrence, verdict,
+// mismatch (the last always present, possibly `[]`). A malformed/absent
+// FILE (as opposed to a malformed ROW) returns an empty vector, matching
+// parse_stream()'s convention — "no witnesses" is a legitimate state
+// (data-model.md §4's own "an absent file is no witnesses").
+[[nodiscard]] std::vector<WitnessRow> parse_witness_rows(std::string const& path);
 
 }  // namespace fixpp::interop::readback

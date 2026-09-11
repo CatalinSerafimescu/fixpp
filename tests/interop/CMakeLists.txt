@@ -129,14 +129,22 @@ fixpp_add_interop_test(
 )
 
 # ── 089 T018: the witness producer — fixpp's readback_jsonl Stream + the
-# shared comparator (data-model.md §4). Standard-library only (see both
-# files' headers); linked into interop_support like golden_diff.cpp above,
-# and registered here the same way support tests are (interop_support_smoke_test).
+# shared comparator (data-model.md §4). readback_jsonl.hpp is standard-library
+# only; witness_comparator.{hpp,cpp} additionally depends on fixpp::dict (the
+# decimal-type resolver, gate-b fix round) — both linked into interop_support
+# like golden_diff.cpp above, and registered here the same way support tests
+# are (interop_support_smoke_test).
 fixpp_add_interop_test(
     NAME interop_readback_witness_test
     GROUP happy
     LABEL "interop;089;interop-support"
     SOURCES support/readback_jsonl_test.cpp support/witness_comparator_test.cpp
+)
+# Self-contained fallback dictionary path for the decimal-type resolver when
+# FIXPP_FIX44_DICT_XML is unset (a plain, non-shim `ctest` run) — same pattern
+# as tests/dictionary/CMakeLists.txt's FIXPP_DICT_DATA_DIR.
+target_compile_definitions(interop_readback_witness_test PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
 )
 
 # ── US1 happy-path drivers (T010, T016) ───────────────────────────────────────
