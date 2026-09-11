@@ -79,14 +79,33 @@ HOST_MOUNT_HINT="${FIXPP_DISK_PREFLIGHT_HOST_MOUNT_HINT:-/mnt/e}"
 BALLAST_FILES="${FIXPP_DISK_PREFLIGHT_BALLAST_FILES:-/mnt/e/_wsl-reserve-1.bin /mnt/e/_wsl-reserve-2.bin}"
 BALLAST_EXPECTED_KB=$(( 2 * 5 * 1024 * 1024 ))  # 2 files x 5 GiB
 
+# ── T002a: refill target + the refill's own safety floor ───────────────────
+# plan.md § "Reserve ballast": "if spent, it must be refilled ... a spent
+# valve nobody refills is worse than no valve". BALLAST_PER_FILE_KB is the
+# per-file target (5 GiB); BALLAST_REFILL_FLOOR_KB is the floor a refill must
+# not push the HOST mount below — refilling into an already-critical host
+# would itself reproduce the ENOSPC this valve exists to prevent, so a refill
+# is refused (never performed) when it would cross the floor. Both are
+# overridable ONLY for ci/test-disk-preflight.sh (never write GiB files in a
+# test), and neither override is silent — same discipline as the threshold
+# overrides above (labelled "test-override" on every line it governs).
+BALLAST_PER_FILE_KB="${FIXPP_DISK_PREFLIGHT_BALLAST_PER_FILE_KB:-$((5*1024*1024))}"
+BALLAST_PER_FILE_SRC="embedded (5 GiB, plan.md \"Reserve ballast\")"
+[ -n "${FIXPP_DISK_PREFLIGHT_BALLAST_PER_FILE_KB:-}" ] && BALLAST_PER_FILE_SRC="test-override"
+BALLAST_REFILL_FLOOR_KB="${FIXPP_DISK_PREFLIGHT_BALLAST_REFILL_FLOOR_KB:-$((3*1024*1024))}"
+BALLAST_REFILL_FLOOR_SRC="embedded (3 GiB stop-line)"
+[ -n "${FIXPP_DISK_PREFLIGHT_BALLAST_REFILL_FLOOR_KB:-}" ] && BALLAST_REFILL_FLOOR_SRC="test-override"
+
 CONFIG=""
 BOOTSTRAP=0
 BOOTSTRAP_INTERNAL_KB=""
 BOOTSTRAP_HOST_KB=""
 BOOTSTRAP_DATE=""
+ENSURE_BALLAST=0
 
 usage() {
   echo "usage: $0 --config <normal|asan|ubsan|tsan> [--bootstrap --internal-free-kb N --host-growth-kb N --bootstrap-date YYYY-MM-DD]" >&2
+  echo "       $0 --ensure-ballast   # T002a: check + refill the reserve ballast" >&2
   exit 2
 }
 
@@ -97,14 +116,17 @@ while [ "$#" -gt 0 ]; do
     --internal-free-kb) BOOTSTRAP_INTERNAL_KB="${2:-}"; shift 2 ;;
     --host-growth-kb) BOOTSTRAP_HOST_KB="${2:-}"; shift 2 ;;
     --bootstrap-date) BOOTSTRAP_DATE="${2:-}"; shift 2 ;;
+    --ensure-ballast) ENSURE_BALLAST=1; shift ;;
     *) echo "usage: unknown argument '$1'" >&2; usage ;;
   esac
 done
 
-case "$CONFIG" in
-  normal|asan|ubsan|tsan) ;;
-  *) echo "usage: --config must be one of normal|asan|ubsan|tsan, got '${CONFIG}'" >&2; usage ;;
-esac
+if [ "$ENSURE_BALLAST" != "1" ]; then
+  case "$CONFIG" in
+    normal|asan|ubsan|tsan) ;;
+    *) echo "usage: --config must be one of normal|asan|ubsan|tsan, got '${CONFIG}'" >&2; usage ;;
+  esac
+fi
 
 # D-9a bootstrap: admissible ONLY with all three flags present. This script
 # cannot police WHO calls it with --bootstrap (that discipline is procedural,
@@ -162,6 +184,127 @@ resolve_host_mount() {
   HOST_MOUNT="$m"
   return 0
 }
+
+# ── T002a: reserve-ballast check + refill ───────────────────────────────────
+# The other half of D-8: D-8 makes the preflight not COUNT the ballast as
+# available; this makes it not silently STAY spent. Run as an explicit step
+# BEFORE every configure/build this gate governs (never at the end of the
+# matrix — plan.md "the valve must be intact for the run that needs it").
+#
+# Presence is measured by ALLOCATED BLOCKS (`stat -c%b` * 512), never
+# apparent size (`stat -c%s`): a sparse file can report the full target via
+# %s while holding zero real blocks, which would report "intact" while the
+# valve is empty.
+allocated_kb() {  # $1=path -> KB of real allocated storage (0 if absent/unreadable)
+  local p="$1" blocks
+  [ -f "$p" ] || { echo 0; return; }
+  blocks="$(stat -c%b "$p" 2>/dev/null)" || { echo 0; return; }
+  [[ "$blocks" =~ ^[0-9]+$ ]] || { echo 0; return; }
+  echo $(( blocks * 512 / 1024 ))
+}
+
+ensure_ballast() {
+  if ! is_wsl; then
+    # The ballast is a host-mount (E:) mechanism; off WSL there is no host
+    # mount to protect and nothing to refill — mirrors D-4's "not applicable",
+    # a different case from "unreadable" below.
+    emit "ballast_check: not-applicable (not WSL)"
+    emit "verdict: proceed"
+    return 0
+  fi
+  if ! resolve_host_mount || ! read_df "$HOST_MOUNT"; then
+    # Mirrors D-3: an unresolvable/unreadable host mount is a FAILURE, never
+    # a pass — a refill cannot be shown safe without the host reading it
+    # would draw down.
+    emit "ballast_check: FAILED — host mount unresolvable/unreadable (cannot verify refill safety)"
+    emit "verdict: stop"
+    return 1
+  fi
+  local host_avail_kb="$DF_AVAIL_KB"
+
+  # An empty/unset file list is a misconfiguration, not "nothing to refill":
+  # the loop below would simply never run and vacuously report "intact",
+  # which is a spurious hit on the exact property this check exists to
+  # measure (there being real ballast, not merely no ballast to check).
+  if [ -z "${BALLAST_FILES// /}" ]; then
+    emit "ballast_check: FAILED — no ballast paths configured (T002a)"
+    emit "verdict: stop"
+    return 1
+  fi
+
+  emit "ballast_per_file_kb: ${BALLAST_PER_FILE_KB}"
+  emit "ballast_per_file_source: ${BALLAST_PER_FILE_SRC}"
+  emit "ballast_refill_floor_kb: ${BALLAST_REFILL_FLOOR_KB}"
+  emit "ballast_refill_floor_source: ${BALLAST_REFILL_FLOOR_SRC}"
+  emit "host_mount: ${HOST_MOUNT}"
+  emit "host_reading_kb: ${host_avail_kb}"
+
+  local need_refill=() f present_kb
+  for f in $BALLAST_FILES; do
+    present_kb="$(allocated_kb "$f")"
+    if [ "$present_kb" -ge "$BALLAST_PER_FILE_KB" ]; then
+      emit "ballast_file: ${f} present_kb=${present_kb} status=intact"
+    else
+      emit "ballast_file: ${f} present_kb=${present_kb} status=short"
+      need_refill+=("$f")
+    fi
+  done
+
+  if [ "${#need_refill[@]}" -eq 0 ]; then
+    emit "ballast_status: intact"
+    emit "verdict: proceed"
+    return 0
+  fi
+
+  # Pessimistic, on the same "assume no reuse" posture R-1 takes for the
+  # build cost itself: assume each refill costs the FULL per-file target in
+  # host growth. No partial refill — either every short file can be safely
+  # refilled now, or none is touched and the run STOPs (D-5's rule: never
+  # warn-and-continue, applied here to the valve rather than the gate).
+  local total_needed_kb=$(( BALLAST_PER_FILE_KB * ${#need_refill[@]} ))
+  local projected_kb=$(( host_avail_kb - total_needed_kb ))
+  emit "ballast_refill_total_needed_kb: ${total_needed_kb}"
+  emit "ballast_refill_projected_host_kb: ${projected_kb}"
+
+  if [ "$projected_kb" -lt "$BALLAST_REFILL_FLOOR_KB" ]; then
+    emit "ballast_status: spent-and-unrefillable"
+    emit "reason: refilling would leave the host mount below the floor (${BALLAST_REFILL_FLOOR_KB} KB) (T002a)"
+    emit "verdict: stop"
+    return 1
+  fi
+
+  # Real blocks, never sparse: dd writes actual zero bytes throughout (unlike
+  # truncate/fallocate over a 9p/drvfs mount, which may leave a hole). dd
+  # truncates the destination to the write length by default (no
+  # conv=notrunc), so this always lands the file at exactly the rounded
+  # target regardless of what was there before.
+  local mb_count=$(( (BALLAST_PER_FILE_KB + 1023) / 1024 ))
+  for f in "${need_refill[@]}"; do
+    if ! dd if=/dev/zero "of=$f" bs=1M "count=$mb_count" status=none 2>/dev/null; then
+      emit "ballast_file: ${f} refill_failed"
+      emit "ballast_status: spent-and-unrefillable"
+      emit "verdict: stop"
+      return 1
+    fi
+    present_kb="$(allocated_kb "$f")"
+    if [ "$present_kb" -lt "$BALLAST_PER_FILE_KB" ]; then
+      emit "ballast_file: ${f} refill_incomplete present_kb=${present_kb}"
+      emit "ballast_status: spent-and-unrefillable"
+      emit "verdict: stop"
+      return 1
+    fi
+    emit "ballast_file: ${f} present_kb=${present_kb} status=refilled"
+  done
+
+  emit "ballast_status: refilled"
+  emit "verdict: proceed"
+  return 0
+}
+
+if [ "$ENSURE_BALLAST" = "1" ]; then
+  ensure_ballast
+  exit $?
+fi
 
 # ── Threshold resolution — three legal sources, none silent ────────────────
 # resolve_threshold PREDICATE(internal|host) -> sets THR_KB THR_DATE THR_SRC

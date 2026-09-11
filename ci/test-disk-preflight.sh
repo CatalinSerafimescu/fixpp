@@ -450,6 +450,216 @@ mk_ballast "$BALLAST_DIR" $((5*GIB)) $((5*GIB))
 mk_comfortable_df
 
 echo
+echo "== T002a: reserve-ballast check + refill =================================="
+
+# T002a fixture plumbing: small per-file KB target so refills write bytes at
+# KB scale, never GiB (guardrail). run_ensure invokes disk-preflight.sh with
+# the SAME df/proc-version/proc-mounts fixtures as the arms above, plus the
+# ballast-specific overrides. Sets OUT, RC.
+run_ensure() {  # run_ensure <sut> [extra env assignments as "VAR=val" ...]
+  local sut="$1"; shift
+  OUT="$(
+    FIXPP_DISK_PREFLIGHT_PROC_VERSION="$PV_FILE" \
+    FIXPP_DISK_PREFLIGHT_PROC_MOUNTS="$PM_FILE" \
+    FIXPP_DISK_PREFLIGHT_DF="$FAKE_DF" \
+    FAKE_DF_TABLE="$DF_TABLE" \
+    FIXPP_DISK_PREFLIGHT_BUILD_MOUNT="/" \
+    FIXPP_DISK_PREFLIGHT_BALLAST_FILES="${BALLAST_TEST_FILES:-}" \
+    FIXPP_DISK_PREFLIGHT_BALLAST_PER_FILE_KB="${BALLAST_TEST_PER_FILE_KB:-100}" \
+    FIXPP_DISK_PREFLIGHT_BALLAST_REFILL_FLOOR_KB="${BALLAST_TEST_FLOOR_KB:-10}" \
+    "$@" \
+    "$sut" --ensure-ballast 2>&1
+  )"; RC=$?
+}
+
+cell_ensure() {  # $1=label $2=want_rc("*" for nonzero) $3=sut, then WANT_TOKENS/WANT_ABSENT
+  local label="$1" want_rc="$2" sut="$3"; shift 3
+  run_ensure "$sut" "$@"
+  if [ "$want_rc" = "nonzero" ]; then
+    if [ "$RC" -eq 0 ]; then
+      echo "  FAIL $label: want nonzero rc, got 0"; fail=$((fail+1)); print_out; return
+    fi
+  else
+    if [ "$RC" -ne "$want_rc" ]; then
+      echo "  FAIL $label: want rc=$want_rc, got rc=$RC"; fail=$((fail+1)); print_out; return
+    fi
+  fi
+  local t
+  for t in "${WANT_TOKENS[@]}"; do
+    if ! grep -qF -- "$t" <<<"$OUT"; then
+      echo "  FAIL $label: expected output to contain '$t'"; fail=$((fail+1)); print_out; return
+    fi
+  done
+  for t in "${WANT_ABSENT[@]:-}"; do
+    [ -z "$t" ] && continue
+    if grep -qF -- "$t" <<<"$OUT"; then
+      echo "  FAIL $label: expected output NOT to contain '$t'"; fail=$((fail+1)); print_out; return
+    fi
+  done
+  echo "  ok   $label (rc=$RC)"
+  pass=$((pass+1))
+}
+
+T2A_DIR="$WORK/ballast-t002a"
+mkdir -p "$T2A_DIR"
+# Writes REAL (non-sparse) bytes via dd, at KB scale — never GiB.
+mk_real_file() {  # $1=path $2=size_kb
+  dd if=/dev/zero "of=$1" bs=1K "count=$2" status=none 2>/dev/null
+}
+
+PV_FILE="$PV_WSL"; PM_FILE="$PM_WITH_HOST"
+mk_comfortable_df   # / plenty free, /mnt/e (host) plenty free, distinct sources
+
+# ── Control: both files already at target, real bytes — intact, no writes ──
+mk_real_file "$T2A_DIR/b1.bin" 100
+mk_real_file "$T2A_DIR/b2.bin" 100
+BALLAST_TEST_FILES="$T2A_DIR/b1.bin $T2A_DIR/b2.bin"
+BALLAST_TEST_PER_FILE_KB=100
+BALLAST_TEST_FLOOR_KB=10
+WANT_TOKENS=("ballast_status: intact" "verdict: proceed")
+WANT_ABSENT=("status=refilled" "status=short")
+cell_ensure "T002a intact (real blocks at target, no refill attempted)" 0 "$SCRIPT"
+
+# ── Refill success: one file short, host mount has plenty of room ──────────
+rm -f "$T2A_DIR/b1.bin"
+mk_real_file "$T2A_DIR/b1.bin" 10          # short of the 100 KB target
+mk_real_file "$T2A_DIR/b2.bin" 100
+WANT_TOKENS=("ballast_status: refilled" "verdict: proceed" "status=refilled")
+WANT_ABSENT=()
+cell_ensure "T002a refill-success (short file topped up, host has room)" 0 "$SCRIPT"
+# The refill must have landed REAL allocated blocks at the target, not a
+# hole — assert directly on the file this run just wrote, not on the
+# script's own report of itself.
+refilled_kb=$(( $(stat -c%b "$T2A_DIR/b1.bin") * 512 / 1024 ))
+if [ "$refilled_kb" -ge 100 ]; then
+  echo "  ok   T002a refill-lands-real-blocks (allocated_kb=$refilled_kb >= 100)"
+  pass=$((pass+1))
+else
+  echo "  FAIL T002a refill-lands-real-blocks: allocated_kb=$refilled_kb, want >= 100"
+  fail=$((fail+1))
+fi
+
+# ── STOP: refill would push the host mount below the floor — never refills ─
+rm -f "$T2A_DIR/b1.bin" "$T2A_DIR/b2.bin"
+mk_real_file "$T2A_DIR/b1.bin" 10
+mk_real_file "$T2A_DIR/b2.bin" 10
+# Host avail (KB) minus 2*100 KB needed must land BELOW the 10 KB floor:
+# 215 - 200 = 15 (comfortable, control) vs 205 - 200 = 5 (below floor).
+DF_TABLE="$WORK/df-t002a-tight-host"
+mk_df_table "$DF_TABLE" "/" "50000000" "/dev/sdd-build" "/mnt/e" "205" "/dev/sde-host"
+WANT_TOKENS=("ballast_status: spent-and-unrefillable" "verdict: stop")
+WANT_ABSENT=("status=refilled")
+cell_ensure "T002a stop-refill-would-cross-host-floor (never refills)" nonzero "$SCRIPT"
+# Confirm the STOP path genuinely never wrote — both files stay short.
+b1_kb=$(( $(stat -c%b "$T2A_DIR/b1.bin") * 512 / 1024 ))
+if [ "$b1_kb" -lt 100 ]; then
+  echo "  ok   T002a stop-path-never-writes (b1 stayed short at ${b1_kb}KB)"
+  pass=$((pass+1))
+else
+  echo "  FAIL T002a stop-path-never-writes: b1 grew to ${b1_kb}KB despite STOP"
+  fail=$((fail+1))
+fi
+mk_comfortable_df
+
+# ── Control: off WSL — not-applicable, proceed (mirrors D-4) ───────────────
+PV_FILE="$PV_NONWSL"
+WANT_TOKENS=("ballast_check: not-applicable" "verdict: proceed")
+WANT_ABSENT=()
+cell_ensure "T002a not-wsl (control)" 0 "$SCRIPT"
+PV_FILE="$PV_WSL"
+
+# ── Forced miss: host mount unreadable — STOP, never proceed (mirrors D-3) ─
+PM_FILE="$PM_NO_HOST"
+WANT_TOKENS=("ballast_check: FAILED" "verdict: stop")
+WANT_ABSENT=("verdict: proceed")
+cell_ensure "T002a host-mount-unreadable (D-3-style, cannot verify refill safety)" nonzero "$SCRIPT"
+PM_FILE="$PM_WITH_HOST"
+
+echo
+echo "== T002a spurious-hit arms (FR-018) ======================================="
+
+# ── Spurious hit: BALLAST_FILES empty -> loop never runs -> vacuous "intact"
+# unless guarded. Mutant deletes the emptiness guard; real script rejects.
+M_T2A_EMPTY="$(mutate M-T2A-empty <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = '''  if [ -z "${BALLAST_FILES// /}" ]; then
+    emit "ballast_check: FAILED — no ballast paths configured (T002a)"
+    emit "verdict: stop"
+    return 1
+  fi
+
+'''
+assert t.count(old) == 1
+open(dst, "w").write(t.replace(old, ""))
+PY
+)"
+if [ -n "$M_T2A_EMPTY" ]; then
+  # A bare "" cannot be distinguished from "unset" through bash's ${VAR:-...}
+  # default operator (both trigger the default) — the same reason the
+  # threshold overrides above are never expressed that way. A whitespace-only
+  # value survives the operator (non-empty string) and still collapses to
+  # empty under the check's own ${VAR// /} strip, so it exercises the guard
+  # without relying on an unrepresentable "explicitly empty" override.
+  BALLAST_TEST_FILES=" "
+  WANT_TOKENS=("ballast_status: intact" "verdict: proceed")
+  WANT_ABSENT=()
+  cell_ensure "T002a MUTANT empty-ballast-files -> spurious intact" 0 "$M_T2A_EMPTY"
+
+  WANT_TOKENS=("ballast_check: FAILED" "no ballast paths configured" "verdict: stop")
+  WANT_ABSENT=("verdict: proceed")
+  cell_ensure "T002a REAL empty-ballast-files -> RED, same fixture" nonzero "$SCRIPT"
+  BALLAST_TEST_FILES="$T2A_DIR/b1.bin $T2A_DIR/b2.bin"
+fi
+
+# ── Spurious hit: a SPARSE file reports full apparent size via `stat -c%s`
+# while holding zero real blocks. Mutant switches allocated_kb() to %s;
+# real script (blocks-based) correctly reports it as short, not intact.
+rm -f "$T2A_DIR/sparse1.bin" "$T2A_DIR/sparse2.bin"
+truncate -s 100K "$T2A_DIR/sparse1.bin"     # hole only — 0 real blocks
+mk_real_file "$T2A_DIR/sparse2.bin" 100
+sparse_blocks=$(stat -c%b "$T2A_DIR/sparse1.bin")
+if [ "$sparse_blocks" -gt 0 ]; then
+  echo "  SKIP T002a sparse-file arms: \$WORK filesystem does not support holes (blocks=$sparse_blocks)"
+else
+  M_T2A_SPARSE="$(mutate M-T2A-sparse <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = '''allocated_kb() {  # $1=path -> KB of real allocated storage (0 if absent/unreadable)
+  local p="$1" blocks
+  [ -f "$p" ] || { echo 0; return; }
+  blocks="$(stat -c%b "$p" 2>/dev/null)" || { echo 0; return; }
+  [[ "$blocks" =~ ^[0-9]+$ ]] || { echo 0; return; }
+  echo $(( blocks * 512 / 1024 ))
+}'''
+new = '''allocated_kb() {  # MUTANT: apparent size, not allocated blocks
+  local p="$1" sz
+  [ -f "$p" ] || { echo 0; return; }
+  sz="$(stat -c%s "$p" 2>/dev/null)" || { echo 0; return; }
+  [[ "$sz" =~ ^[0-9]+$ ]] || { echo 0; return; }
+  echo $(( sz / 1024 ))
+}'''
+assert t.count(old) == 1
+open(dst, "w").write(t.replace(old, new))
+PY
+)"
+  if [ -n "$M_T2A_SPARSE" ]; then
+    BALLAST_TEST_FILES="$T2A_DIR/sparse1.bin $T2A_DIR/sparse2.bin"
+    WANT_TOKENS=("ballast_status: intact" "verdict: proceed")
+    WANT_ABSENT=("status=short")
+    cell_ensure "T002a MUTANT apparent-size-sparse-file -> spurious intact" 0 "$M_T2A_SPARSE"
+
+    WANT_TOKENS=("status=short")
+    WANT_ABSENT=()
+    cell_ensure "T002a REAL blocks-based-sparse-file -> correctly short, same fixture" 0 "$SCRIPT"
+    BALLAST_TEST_FILES="$T2A_DIR/b1.bin $T2A_DIR/b2.bin"
+  fi
+fi
+mk_comfortable_df
+
+echo
 echo "PASS=$pass FAIL=$fail"
 if [ "$fail" -gt 0 ]; then
   echo "ci/test-disk-preflight.sh: FAILED"
