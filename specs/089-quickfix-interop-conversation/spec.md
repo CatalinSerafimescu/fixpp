@@ -239,8 +239,8 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
   T001 measure? → A: **The targeted build as the matrix performs it — incrementally, in the existing
   per-configuration trees** (user decision). A configuration whose tree is absent or partial is built from
   whatever exists, which is then the measured cost. The four binaries the new cells name do not exist
-  until T052, so the measurement uses the interop driver targets the existing cells name, and T095
-  re-derives it once T052's targets exist.
+  until T052, so the measurement uses the interop driver targets the existing cells name, and T052a
+  re-derives it as soon as T052's targets exist, before any later gated build.
 - Q: The `ubsan` configuration runs cells through `run_interop_cell.py`, which launches the gtest binary
   directly and so never receives the test preset's `UBSAN_OPTIONS=halt_on_error=1` (#268). Fix it here?
   → A: **Yes, in this feature** (user decision). FR-021a now requires each cell to run with its
