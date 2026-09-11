@@ -2,9 +2,9 @@
 //
 // tests/interop/conversation/conv_cell_test.cpp — 089 Phase 5 (US3): the
 // combo-neutral conversation driver. ONE gtest binary/TEST body for every
-// combo C1-C4 (C1 -- fixpp INITIATOR vs QuickFIX-cpp -- and C2 -- fixpp
-// ACCEPTOR vs QuickFIX-cpp -- are implemented so far; C3-C4 join in later
-// rounds), selected/configured entirely by the shim's environment
+// combo C1-C4 (C1/C2 -- fixpp vs QuickFIX-cpp -- and C3/C4 -- fixpp vs
+// QuickFIX-J, see qfj_combo_probe below), selected/configured entirely by
+// the shim's environment
 // (INTEROP_FIXPP_*): `combo` (INTEROP_FIXPP_COMBO_ID) picks the combo (and,
 // via `role` below, the transport role), `arm` decides
 // `validate_inbound_messages`, everything else is run-identity metadata
@@ -40,6 +40,25 @@
 // (B-08/B-10/B-12, T054) reactively from inside fromApp, off-strand
 // (asio::post + co_spawn, the INV-7 pattern test_business_message_interop.cpp
 // already established for re-entrant Engine::send from a callback).
+//
+// T060: QuickFIX-J-only arms, declared EXPLICITLY rather than silently
+// skipped. L-021-3 records that QuickFIX-cpp's Session::send() strips
+// PossDupFlag(43)/OrigSendingTime(122) unconditionally and exposes no
+// public injection knob, so any arm needing PEER-ORIGINATED hostile/replay
+// input is QuickFIX-J-only -- the reason the PD-QFj-* cells (pre-089) are
+// QF-J-only, and it is ALSO why this census's own "declared_inapplicable"
+// section (census.yaml) excludes "peer-originated replay (any step)" from
+// ALL FOUR combos of THIS feature: a peer-originated replay is out of
+// scope for 089 on every engine, not conditionally missing on QuickFIX-cpp.
+// A-RESEND (this feature's one resend/replay admin step) is the opposite
+// direction -- a FIXPP-originated replay the PEER receives -- and is
+// QF-J-only for a DIFFERENT, narrower reason: the census declares it
+// applicable_combos: [C3, C4] only (not a QuickFIX-cpp injection-knob gap
+// at all); the qfj_combo_probe-gated blocks below are where that
+// declaration is enforced in code, never a bare GTEST_SKIP with no reason
+// (there is nothing to skip -- C1/C2 simply never enter those blocks, by
+// the combo gate above, and every A-RESEND-dependent assertion states its
+// own reason inline -- see describe_a_resend_rejection()).
 //
 // [const §XV.9]: tests/-only.
 #include <gtest/gtest.h>
@@ -423,6 +442,39 @@ std::string run_dir_of(std::string const& readback_path)
     return slash == std::string::npos ? std::string(".") : readback_path.substr(0, slash);
 }
 
+// A-RESEND (C3/C4) is currently expected to fail: fixpp #419 -- both
+// build_sequence_reset_gapfill (session-admin GapFill emitter) and
+// build_replay_frame (the ResendRequest-answer replay path) append
+// PossDupFlag(43)/OrigSendingTime(122) AFTER every body field instead of in
+// standard-header position, which QuickFIX-J's UseDataDictionary=Y field-
+// order validation rejects (measured: Reject(35=3) 373=14 "Tag specified
+// out of required order, field=43"). Scans the counterparty's plaintext
+// transcript (a sibling of readback_path -- the same file the C++/Java
+// counterparties both write "OUT <msgtype> <fix-with-pipes>" lines to) for
+// that exact signature and, if found, names the known cause explicitly
+// rather than leaving a bare "replay not observed" diagnostic -- per the
+// coordinator's instruction that C3/C4 must fail for THIS reason, visibly,
+// never silently. Returns an empty string if the signature is not found
+// (e.g. #419 has since landed and something else is wrong instead).
+std::string describe_a_resend_rejection(std::string const& run_dir)
+{
+    std::ifstream f(run_dir + "/counterparty-transcript.txt");
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.find("35=3") != std::string::npos &&
+            line.find("Tag specified out of required order, field=43") != std::string::npos) {
+            return "peer rejected fixpp's B-01 replay with Reject(35=3) 373=14 "
+                   "(\"Tag specified out of required order\") field=43 -- known cause: "
+                   "fixpp #419 (PossDupFlag(43)/OrigSendingTime(122) appended after every "
+                   "body field in build_sequence_reset_gapfill/build_replay_frame instead "
+                   "of standard-header position; QuickFIX-J's UseDataDictionary=Y field-"
+                   "order validation rejects it). A-RESEND stays red until #419 lands. "
+                   "Wire line: " + line;
+        }
+    }
+    return {};
+}
+
 }  // namespace
 
 TEST(Conversation, Cell)
@@ -602,11 +654,43 @@ TEST(Conversation, Cell)
         EXPECT_TRUE(r.has_value()) << "A-REJECT: store_then_emit_test_access failed";
     }
     // Let the peer's Reject arrive; the session must survive it (measured:
-    // QuickFIX-cpp replies Reject(35=3) rather than disconnecting — see the
-    // implementation report).
+    // both QuickFIX-cpp and QuickFIX-J reply Reject(35=3) rather than
+    // disconnecting -- see the implementation report).
     fx.run_until([] { return false; }, 800ms);
     EXPECT_EQ(sess->state(), fsm_state::Active)
         << "session did not survive A-REJECT's malformed TestRequest exchange";
+
+    // T058: forced-miss arm. A bare "session survived" check is satisfied by
+    // a peer that silently IGNORES the malformed TestRequest -- indistinguishable
+    // from one that actually validated and rejected it. Read the peer's own
+    // transcript for the SPECIFIC Reject(35=3) signature this exchange
+    // produces (RefMsgType=1/TestRequest, SessionRejectReason=2/"Tag not
+    // defined for this message type"); tolerate a disconnect as the
+    // documented alternative outcome (KNOWN-LIMITATIONS.md:87-106: only
+    // QuickFIX-J 3.0.1 is CONFIRMED to emit Reject(35=3) on this pinned
+    // input -- measured here to hold for QuickFIX-cpp too, but the task's
+    // own tolerance is kept so a counterparty rebuild that changes this
+    // behavior does not spuriously fail this cell). Neither outcome is a
+    // "fidelity pass" (T058) -- this assertion exists ONLY to prove the cell
+    // WOULD fail if the peer did neither, which today it could not.
+    {
+        std::ifstream reject_transcript(run_dir_of(readback_path) + "/counterparty-transcript.txt");
+        std::string reject_line;
+        bool peer_rejected = false;
+        while (std::getline(reject_transcript, reject_line)) {
+            if (reject_line.find("35=3") != std::string::npos &&
+                reject_line.find("372=1") != std::string::npos &&
+                reject_line.find("373=2") != std::string::npos) {
+                peer_rejected = true;
+                break;
+            }
+        }
+        bool const peer_disconnected = (sess->state() != fsm_state::Active);
+        EXPECT_TRUE(peer_rejected || peer_disconnected)
+            << "T058: peer neither rejected A-REJECT's malformed TestRequest "
+               "(no Reject(35=3,372=1,373=2) line in its transcript) nor disconnected -- "
+               "it silently tolerated hostile input it should have refused";
+    }
 
     // ── Business steps B-01/B-03/B-05: fixpp-originated, from intent ────────
     auto send_fixpp_business = [&](std::string const& step_id) -> bool {
@@ -741,7 +825,8 @@ TEST(Conversation, Cell)
     // (app->next_occurrence), so the two can never disagree by construction.
     if (qfj_combo_probe) {
         ASSERT_GE(app->b01_seq.load(), 0) << "A-RESEND: B-01's fixpp-outbound seq_num was never captured";
-        std::string const cp_path_early = run_dir_of(readback_path) + "/counterparty-readback.jsonl";
+        std::string const run_dir_early = run_dir_of(readback_path);
+        std::string const cp_path_early = run_dir_early + "/counterparty-readback.jsonl";
         bool replay_observed = fx.run_until(
             [&] {
                 auto const cp_records_poll = rb::parse_stream(cp_path_early);
@@ -754,8 +839,14 @@ TEST(Conversation, Cell)
                 return false;
             },
             5s);
-        EXPECT_TRUE(replay_observed)
-            << "A-RESEND: no B-01 occurrence 1 readback observed on the peer within 5s";
+        if (!replay_observed) {
+            std::string const known_cause = describe_a_resend_rejection(run_dir_early);
+            EXPECT_TRUE(replay_observed)
+                << "A-RESEND: no B-01 occurrence 1 readback observed on the peer within 5s"
+                << (known_cause.empty()
+                        ? std::string(" -- cause not the known #419 signature; investigate")
+                        : (" -- " + known_cause));
+        }
         if (replay_observed) {
             auto it = intent_index.find({"B-01", "fixpp"});
             ASSERT_NE(it, intent_index.end()) << "no fixpp intent entry for B-01";
@@ -781,6 +872,43 @@ TEST(Conversation, Cell)
     std::string const cp_path = run_dir + "/counterparty-readback.jsonl";
     auto const fixpp_records = rb::parse_stream(readback_path);
     auto const cp_records = rb::parse_stream(cp_path);
+
+    // ── T057 / C-11 (spec.md § Conversation census, B-05's own note): assert
+    // EXPLICITLY, not just implicitly via the generic FR-006 witness pass
+    // below, that B-05's EncodedText(355) 0xff byte survives QuickFIX-J's
+    // live decode bit-for-bit -- `value_b64` for path 355 must equal the
+    // base64 of the declared wire bytes. ParsedRecord::fields already
+    // base64-decodes `value_b64` to raw bytes (witness_comparator.hpp), so
+    // this is a direct byte-for-byte comparison, not a re-encode-and-compare.
+    // The ISO-8859-1 charset in effect (charsetRefusalDiagnostic(), T017) is
+    // what makes this bijective; see the RED proof in the implementation
+    // report (INTEROP_CP_TEST_FORCE_CHARSET, a test-only startup override).
+    if (qfj_combo_probe) {
+        auto it = intent_index.find({"B-05", "fixpp"});
+        ASSERT_NE(it, intent_index.end()) << "no fixpp intent entry for B-05";
+        auto field_it = std::find_if(it->second.fields.begin(), it->second.fields.end(),
+                                     [](intent::FieldEntry const& f) { return f.path == "355"; });
+        ASSERT_NE(field_it, it->second.fields.end()) << "T057: B-05 declares no path 355 field";
+        std::string const expected_bytes = field_it->value;
+
+        bool found_355 = false;
+        for (auto const& r : cp_records) {
+            if (r.kind != rb::ParsedRecord::Kind::Readback || r.msg_type != "G" ||
+                r.direction != std::string(rb::kDirectionFixppToPeer)) {
+                continue;
+            }
+            auto fe = std::find_if(r.fields.begin(), r.fields.end(),
+                                   [](rb::FieldEntry const& f) { return f.path == "355"; });
+            if (fe == r.fields.end()) continue;
+            found_355 = true;
+            EXPECT_EQ(fe->value, expected_bytes)
+                << "T057/C-11: peer's decoded EncodedText(355) does not byte-match the "
+                   "declared wire bytes -- the 0xff byte did not survive QuickFIX-J's "
+                   "live decode";
+        }
+        EXPECT_TRUE(found_355) << "T057: no peer readback record carries path 355 (B-05 never "
+                                  "reached the peer, or the generic body walk dropped it)";
+    }
 
     rb::WitnessIdentity wid;
     wid.run_id = run_id;
@@ -810,9 +938,15 @@ TEST(Conversation, Cell)
     // (A-RESEND's replay, "declared_inapplicable" excludes it on C1/C2 only)
     // -- 13 keys. Derived from census.yaml, not an independent literal.
     std::size_t const expected_rows = qfj_combo_probe ? 13u : 12u;
+    std::string const known_cause_tail =
+        qfj_combo_probe ? [&] {
+            std::string const c = describe_a_resend_rejection(run_dir);
+            return c.empty() ? std::string() : (" -- " + c);
+        }()
+                        : std::string();
     EXPECT_EQ(rows.size(), expected_rows)
         << "expected " << expected_rows << " business-step witness rows (census.yaml keys for combo "
-        << combo << ", spec.md § Conversation census)";
+        << combo << ", spec.md § Conversation census)" << known_cause_tail;
     if (qfj_combo_probe) {
         // A-RESEND's whole point is B-01 occurrence 1 (spec.md's declared_
         // inapplicable note); rows.size()==13 alone is satisfied by ANY 13th
@@ -825,7 +959,8 @@ TEST(Conversation, Cell)
             }
         }
         EXPECT_TRUE(found_b01_occ1)
-            << "A-RESEND: no witness row for B-01 occurrence 1 (the PossDup replay)";
+            << "A-RESEND: no witness row for B-01 occurrence 1 (the PossDup replay)"
+            << known_cause_tail;
     }
 
     // ── T054: fixpp's typed-read tier must return the peer's DECLARED values
