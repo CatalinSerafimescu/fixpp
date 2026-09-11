@@ -19,15 +19,20 @@
 #include "support/intent_file.hpp"
 
 #include <fixpp/core/error.hpp>
+#include <fixpp/session/seqnum.hpp>
 #include <fixpp/wire/body_builder.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/writer.hpp>
 
+#include <cstdint>
 #include <map>
+#include <memory_resource>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 #include <vector>
 
 namespace fixpp::interop::conversation {
@@ -255,6 +260,60 @@ inline std::string fix_type_for_tag(int tag)
     };
     auto it = kTypes.find(tag);
     return it == kTypes.end() ? std::string() : it->second;
+}
+
+// ── the FIXPP_TEST_HOOKS hand-built-frame route (fixpp #418) ────────────────
+//
+// `fixpp::wire::body_builder::field()` accepts only printable ASCII
+// (`is_clean_field_value`, `0x20-0x7E` — src/wire/body_builder.cpp), so it
+// cannot carry a field like B-05's `EncodedText(355)` holding the byte
+// `0xff` (C-11; L-067-2; user decision 2026-09-11, spec.md § *Conversation
+// census* → the `B-05` bullet). This builds the FULL FRAME (header, body,
+// trailer) directly via `fixpp::wire::Writer` — which performs no such
+// content check, only wire mechanics — for a caller to hand to the session's
+// `FIXPP_TEST_HOOKS` seam (`Session::seqnum_mgr_test_access().assign_outbound()`
+// + `store_then_emit_test_access()`), the same seam A-REJECT's malformed
+// TestRequest already uses. Flat fields only (no repeating-group support) —
+// every currently-scripted use of this route (A-REJECT, B-05) needs only that.
+//
+// ⚠️ **What this route does NOT exercise**: fixpp's own builder
+// (`body_builder`/`Engine::send()`). A witness produced this way is evidence
+// of the PEER's live decode (C-11's actual subject), never evidence that
+// fixpp can itself emit binary `DATA` content — that gap is fixpp #418,
+// tracked open, not closed by this route. `toApp` is also NOT invoked on
+// this path (`store_then_emit_test_access` bypasses the normal
+// `Engine::send()`/`fire_to_admin_` flow entirely), so a caller using this
+// route for a BUSINESS message must write its own `sent` record — never
+// derived from this function's OUTPUT (C-8), always from the same intent
+// fields handed to it as `fields` here.
+[[nodiscard]] inline fixpp::core::expected_t<std::span<std::byte>> build_frame_via_writer(
+    std::span<std::byte> out, std::string_view msg_type, fixpp::session::seqnum_t seq,
+    std::string_view sender_comp_id, std::string_view target_comp_id,
+    std::string_view begin_string, std::string_view sending_time,
+    std::vector<fixpp::interop::intent::FieldEntry> const& fields)
+{
+    auto sv_to_bytes = [](std::string_view sv) {
+        return std::span<std::byte const>(reinterpret_cast<std::byte const*>(sv.data()), sv.size());
+    };
+    fixpp::wire::Writer w(out, std::pmr::get_default_resource());
+    if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) return std::unexpected(r.error());
+    if (auto r = w.append_raw(35, sv_to_bytes(msg_type)); !r) return std::unexpected(r.error());
+    {
+        std::string const seqstr = std::to_string(static_cast<std::uint32_t>(seq));
+        if (auto r = w.append_raw(34, sv_to_bytes(seqstr)); !r) return std::unexpected(r.error());
+    }
+    if (auto r = w.append_raw(49, sv_to_bytes(sender_comp_id)); !r) return std::unexpected(r.error());
+    if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) return std::unexpected(r.error());
+    if (auto r = w.append_raw(56, sv_to_bytes(target_comp_id)); !r) return std::unexpected(r.error());
+    for (auto const& f : fields) {
+        int const tag = std::stoi(f.path);
+        if (auto r = w.append_raw(static_cast<std::uint16_t>(tag), sv_to_bytes(f.value)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+    auto committed = std::move(w).commit();
+    if (!committed) return std::unexpected(committed.error());
+    return out.subspan(0, *committed);
 }
 
 }  // namespace fixpp::interop::conversation

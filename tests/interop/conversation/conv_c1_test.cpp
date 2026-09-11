@@ -68,7 +68,6 @@
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
-#include <fixpp/wire/writer.hpp>
 
 #include <fixpp/v44/Messages.hpp>
 
@@ -129,40 +128,6 @@ std::string now_utc_ms()
                  tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
                  static_cast<int>(ms.count()));
     return buf;
-}
-
-std::span<std::byte const> sv_to_bytes(std::string_view sv)
-{
-    return std::span<std::byte const>(reinterpret_cast<std::byte const*>(sv.data()), sv.size());
-}
-
-// A-REJECT: TestRequest(35=1) carrying an out-of-context Symbol(55) -- the
-// script's own design note (conversation_script.yaml A-REJECT). Mirrors
-// src/session/admin_messages.cpp's build_test_request shape plus the one
-// extra field; kept test-local rather than touching production source.
-[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_malformed_test_request(
-    std::span<std::byte> out, fixpp::session::seqnum_t seq, std::string_view sender_comp_id,
-    std::string_view target_comp_id, std::string_view test_req_id, std::string_view begin_string,
-    std::string_view sending_time, std::string_view symbol)
-{
-    fixpp::wire::Writer w(out, std::pmr::get_default_resource());
-    if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) return std::unexpected(r.error());
-    {
-        std::byte const val[] = {static_cast<std::byte>('1')};
-        if (auto r = w.append_raw(35, std::span<std::byte const>{val}); !r) return std::unexpected(r.error());
-    }
-    {
-        std::string const seqstr = std::to_string(static_cast<std::uint32_t>(seq));
-        if (auto r = w.append_raw(34, sv_to_bytes(seqstr)); !r) return std::unexpected(r.error());
-    }
-    if (auto r = w.append_raw(49, sv_to_bytes(sender_comp_id)); !r) return std::unexpected(r.error());
-    if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) return std::unexpected(r.error());
-    if (auto r = w.append_raw(56, sv_to_bytes(target_comp_id)); !r) return std::unexpected(r.error());
-    if (auto r = w.append_raw(112, sv_to_bytes(test_req_id)); !r) return std::unexpected(r.error());
-    if (auto r = w.append_raw(55, sv_to_bytes(symbol)); !r) return std::unexpected(r.error());
-    auto committed = std::move(w).commit();
-    if (!committed) return std::unexpected(committed.error());
-    return out.subspan(0, *committed);
 }
 
 std::string dec_to_str(fixpp::decimal_t const& d)
@@ -511,9 +476,10 @@ TEST(Conversation, C1)
                 auto seq_r = co_await sess->seqnum_mgr_test_access().assign_outbound();
                 if (!seq_r.has_value()) co_return std::unexpected(seq_r.error());
                 std::array<std::byte, 512> buf{};
-                auto frame_r = build_malformed_test_request(buf, *seq_r, sender_id, target_id,
-                                                            "TR-ADMIN-0002", begin_string,
-                                                            now_utc_ms(), "OUT-OF-CONTEXT");
+                std::vector<intent::FieldEntry> const reject_fields = {
+                    {"112", "TR-ADMIN-0002"}, {"55", "OUT-OF-CONTEXT"}};
+                auto frame_r = conv::build_frame_via_writer(buf, "1", *seq_r, sender_id, target_id,
+                                                            begin_string, now_utc_ms(), reject_fields);
                 if (!frame_r.has_value()) co_return std::unexpected(frame_r.error());
                 co_return co_await sess->store_then_emit_test_access(*seq_r, *frame_r);
             }(),
@@ -573,6 +539,61 @@ TEST(Conversation, C1)
         return true;
     };
 
+    // B-05: fixpp #418 -- body_builder cannot carry EncodedText(355)'s 0xff
+    // byte (C-11), so this ONE step is sent as a hand-built frame through the
+    // FIXPP_TEST_HOOKS seam A-REJECT already uses (user decision 2026-09-11;
+    // spec.md § Conversation census → the B-05 bullet). Its `sent` record
+    // still comes from the intent file, never from the hand-built frame
+    // (C-8) -- and since `store_then_emit_test_access` bypasses the normal
+    // Engine::send()/toApp flow entirely, that record is written HERE
+    // directly rather than via ConvApp::arm_pending_sent/toApp. ⚠️ What this
+    // route does NOT exercise: fixpp's own builder — see
+    // conv_wire.hpp::build_frame_via_writer's header comment.
+    auto send_b05_via_test_hook = [&]() -> bool {
+        auto it = intent_index.find({"B-05", "fixpp"});
+        if (it == intent_index.end()) {
+            ADD_FAILURE() << "no fixpp intent entry for B-05";
+            return false;
+        }
+        intent::Message const& decl = it->second;
+
+        fixpp::session::seqnum_t assigned_seq{};
+        auto send_fut = asio::co_spawn(
+            fx.ioc().get_executor(),
+            [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+                auto seq_r = co_await sess->seqnum_mgr_test_access().assign_outbound();
+                if (!seq_r.has_value()) co_return std::unexpected(seq_r.error());
+                assigned_seq = *seq_r;
+                std::array<std::byte, 512> buf{};
+                auto frame_r = conv::build_frame_via_writer(buf, decl.msg_type, *seq_r, sender_id,
+                                                            target_id, begin_string, now_utc_ms(),
+                                                            decl.fields);
+                if (!frame_r.has_value()) co_return std::unexpected(frame_r.error());
+                co_return co_await sess->store_then_emit_test_access(*seq_r, *frame_r);
+            }(),
+            asio::use_future);
+        fx.run_until([&] { return send_fut.wait_for(0ms) == std::future_status::ready; }, 3s);
+        if (send_fut.wait_for(0ms) != std::future_status::ready) {
+            ADD_FAILURE() << "B-05: hand-built-frame send timed out";
+            return false;
+        }
+        auto const r = send_fut.get();
+        if (!r.has_value()) {
+            ADD_FAILURE() << "B-05: store_then_emit_test_access failed; error="
+                          << static_cast<int>(r.error());
+            return false;
+        }
+
+        std::vector<rb::FieldEntry> sent_fields;
+        sent_fields.reserve(decl.fields.size());
+        for (auto const& f : decl.fields) sent_fields.push_back({f.path, f.value});
+        long long const seq_ll = static_cast<long long>(static_cast<std::uint32_t>(assigned_seq));
+        long long const occ = app->next_occurrence(seq_ll, std::string(rb::kDirectionFixppToPeer));
+        stream.sent(decl.msg_type, seq_ll, rb::kDirectionFixppToPeer, occ, "B-05",
+                   std::move(sent_fields));
+        return true;
+    };
+
     ASSERT_TRUE(send_fixpp_business("B-01"));
     ASSERT_TRUE(fx.run_until([&] { return app->inbound_business_count.load() >= 1; }, 5s))
         << "no reply to B-01 (B-02) within 5s";
@@ -581,7 +602,7 @@ TEST(Conversation, C1)
     ASSERT_TRUE(fx.run_until([&] { return app->inbound_business_count.load() >= 2; }, 5s))
         << "no reply to B-03 (B-04) within 5s";
 
-    ASSERT_TRUE(send_fixpp_business("B-05"));
+    ASSERT_TRUE(send_b05_via_test_hook());
     ASSERT_TRUE(fx.run_until([&] { return app->inbound_business_count.load() >= 3; }, 5s))
         << "no reply to B-05 (B-06) within 5s";
 
