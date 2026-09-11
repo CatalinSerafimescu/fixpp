@@ -8,6 +8,12 @@
 # well-formed and that no matrix/corpus cell is silently absent, so the parent
 # `interop-gate-evaluator` consumes a schema-conformant input.
 #
+# 089-quickfix-interop-conversation T026: also validates the STRUCTURE of the
+# sibling witness_evidence.yaml artifact (data-model.md §6/§10/§11) — the full
+# E-1c/E-7a/E-7b/E-7c/W-3* completeness gates are implemented by later tasks
+# (T066-T092); this file only proves the three sections exist and are
+# distinguishable from a missing/null section.
+#
 # Run via ctest (registered in tests/interop/CMakeLists.txt) or directly:
 #   python3 -m pytest -xvs tests/interop/cell_results_schema_check_test.py
 
@@ -19,11 +25,17 @@ import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MANIFEST = os.path.join(HERE, "cell_results.yaml")
+WITNESS_EVIDENCE = os.path.join(HERE, "witness_evidence.yaml")
 
 REQUIRED_FIELDS = {"id", "config", "kind", "status", "matrix_disposition", "spec_ref"}
 KINDS = {"happy", "thorny", "parity"}
 CONFIGS = {"normal", "asan", "ubsan", "tsan"}
 PRIORITIES = {"P1", "P2", "P3", "watch:P1", "watch:P2", "watch:info"}
+# data-model.md §6/§10/§11: witness_evidence.yaml's three top-level sections.
+# ⚠️ `witnesses` is not a literal key name given anywhere in the spec bundle
+# (unlike `runs`/`validation_pairs`, named literally throughout) — see the
+# NOTE in witness_evidence.yaml itself.
+WITNESS_EVIDENCE_SECTIONS = ("witnesses", "runs", "validation_pairs")
 DEFERRED_TAGS = {
     # deferred:fixt-routing RETIRED 2026-06-12 (033 US3): the 8 FIXT.1.1
     # establishment cells are live (HP-*-fixt11-{fix50sp2,fix44}-logon-hb-logout).
@@ -63,6 +75,58 @@ def cells():
     rows = doc.get("cells")
     assert isinstance(rows, list) and rows, "manifest must carry a non-empty `cells` list"
     return rows
+
+
+def _load_witness_evidence():
+    with open(WITNESS_EVIDENCE, encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+    assert doc.get("schema_version") == 1, \
+        "witness_evidence.yaml must declare schema_version: 1"
+    return doc
+
+
+@pytest.fixture(scope="module")
+def witness_evidence_doc():
+    return _load_witness_evidence()
+
+
+def _check_witness_evidence_sections(doc):
+    # data-model.md §6/§10/§11: witness_evidence.yaml carries THREE sections.
+    # A MISSING section is exactly the zero-pairs-green hazard T026 names
+    # (contracts/witness-evidence.md E-7a): "an implementation emitting none
+    # would satisfy the gates that range over runs and witnesses". Plain
+    # `section in doc` cannot tell "present and []" from "present and None"
+    # (a hand-edited `validation_pairs:` with no value) from "absent" — check
+    # all three states explicitly.
+    for section in WITNESS_EVIDENCE_SECTIONS:
+        assert section in doc, \
+            f"witness_evidence.yaml missing section {section!r}"
+        assert isinstance(doc[section], list), (
+            f"witness_evidence.yaml section {section!r} must be a list, "
+            f"got {doc[section]!r} (present-but-null is not the same as "
+            f"present-and-empty)"
+        )
+
+
+def test_witness_evidence_sections_present(witness_evidence_doc):
+    _check_witness_evidence_sections(witness_evidence_doc)
+
+
+def test_witness_evidence_missing_section_goes_red():
+    # forced-miss (quickstart.md Step 4 rule 1/2): delete a section and
+    # assert the checker names it, not merely "raises AssertionError".
+    mutant = {"schema_version": 1, "witnesses": [], "runs": []}
+    with pytest.raises(AssertionError, match="validation_pairs"):
+        _check_witness_evidence_sections(mutant)
+
+
+def test_witness_evidence_null_section_goes_red():
+    # A hand-edited `validation_pairs:` with no value parses to None, not
+    # `[]` — a third state between "present and empty" and "missing" that a
+    # bare `section in doc` check cannot distinguish from a real empty list.
+    mutant = {"schema_version": 1, "witnesses": [], "runs": [], "validation_pairs": None}
+    with pytest.raises(AssertionError, match="validation_pairs"):
+        _check_witness_evidence_sections(mutant)
 
 
 def test_required_fields_present(cells):

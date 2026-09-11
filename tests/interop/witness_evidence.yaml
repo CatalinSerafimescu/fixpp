@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# tests/interop/witness_evidence.yaml — 089-quickfix-interop-conversation T026.
+#
+# The second-level evidence record data-model.md §6/§9/§10/§11 describes,
+# committed and machine-independent (contracts/witness-evidence.md § "Two
+# artifacts, and they must not be one"). THREE sections, not two:
+#
+#   witnesses:         one row per (run_id, cell_id, config, arm, script_step_id,
+#                       direction, occurrence) — data-model.md §6, contract W-1.
+#   runs:               the run ledger — one entry per RUN, `conformance` and
+#                       `validator-positive-control` alike, authoritative and
+#                       superseded alike — data-model.md §11.
+#   validation_pairs:   the cross-arm comparison — data-model.md §10. This is
+#                       the section that was schemad, constrained (E-7) and
+#                       armed in quickstart.md Step 4 while no artifact held
+#                       it, so an ABSENT section here is exactly the
+#                       zero-pairs-green hazard contracts/witness-evidence.md
+#                       E-7a exists to close.
+#
+# No run has been promoted yet (T024's promotion command, phase-9-harness/
+# tools/promote_interop_evidence.py, is the only writer — FR-014b). All three
+# sections are therefore present and empty, not absent: an absent section and
+# a present-empty section are different states, and cell_results_schema_check_
+# test.py's _check_witness_evidence_sections() asserts the section KEYS are
+# present (not merely truthy) so the two cannot be confused.
+#
+# NOTE: `witnesses:` is not a literal key name given anywhere in the spec
+# bundle (unlike `runs:` and `validation_pairs:`, which data-model.md §10/§11,
+# contracts/witness-evidence.md and plan.md all name literally) — chosen here
+# to match "witness rows" / "witness evidence record" (data-model.md §6) and
+# the sibling section names' style. Flagged as a bundle gap, not a disagreement
+# with existing code (no producer branch spells this key either).
+
+schema_version: 1
+witnesses: []
+runs: []
+validation_pairs: []
