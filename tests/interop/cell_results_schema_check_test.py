@@ -42,6 +42,11 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 MANIFEST = os.path.join(HERE, "cell_results.yaml")
 WITNESS_EVIDENCE = os.path.join(HERE, "witness_evidence.yaml")
+# 089 T082/W-2a: the census (E-1's witness_count join operand too) and the
+# conversation script -- SC-009a's two independently-provenanced operands
+# (contracts/witness-evidence.md W-2a; census.yaml's own header comment).
+CENSUS = os.path.join(HERE, "conversation", "census.yaml")
+SCRIPT = os.path.join(HERE, "conversation", "conversation_script.yaml")
 
 REQUIRED_FIELDS = {"id", "config", "kind", "status", "matrix_disposition", "spec_ref"}
 # data-model.md §5 "New — identity and run evidence (FR-013, FR-013a)": required
@@ -123,6 +128,7 @@ def _artifact_path_guard():
     global _ARTIFACT_GUARD_ACTIVE, _ARTIFACT_GUARD_ALLOWED_PATHS
     _ARTIFACT_GUARD_ALLOWED_PATHS = {
         os.path.realpath(MANIFEST), os.path.realpath(WITNESS_EVIDENCE),
+        os.path.realpath(CENSUS), os.path.realpath(SCRIPT),
     }
     _ARTIFACT_GUARD_ACTIVE = True
     try:
@@ -494,6 +500,558 @@ def test_e7c_fresh_artifact_passes():
     _check_e7c(_e7_fixture_complete())
 
 
+# ── T075/T078/T079/T080/T081/T082/T083/T084/T085 (Phase 7 / US5): E-1/E-1a/
+# E-1c/E-4/E-5 and the W-* completeness gate — check LOGIC, proven against
+# CONSTRUCTED fixtures (the E-7a/b/c pattern above). ⚠️ E-1a, E-1c, W-3a,
+# W-3b, W-3c are NOT yet wired into test_schema_check_opens_no_artifact_path
+# below: `runs:`/`witnesses:` are still empty in the COMMITTED witness_
+# evidence.yaml (no run has been promoted into it — T095's matrix), and each
+# of these gates' own defect is "an empty/short population is green", so
+# running them unconditionally today would redden the whole schema check for
+# a reason that has nothing to do with a real defect. T095a wires them, in
+# the SAME commit that first promotes runs. W-2a is DIFFERENT: its two real
+# operands (census.yaml, conversation_script.yaml) are already fully
+# authored content, not run output, so it IS wired below, now. ─────────────
+
+EIGHT_LOGICAL_CELL_IDS = frozenset(
+    f"CONV-{c}-{a}" for c in CONV_COMBO_IDS for a in ("off", "on"))
+THIRTY_TWO_SLOT_INVENTORY = frozenset(
+    (cell, cfg) for cell in EIGHT_LOGICAL_CELL_IDS for cfg in CONFIGS)
+
+
+def _load_census():
+    with open(CENSUS, encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def _load_script():
+    with open(SCRIPT, encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def _expand_business_steps_combo(doc, combo_id):
+    """spec.md § The expansion rule, restricted to one combo_id — the SAME
+    algorithm applied to census.yaml (W-2a's census operand) and to
+    conversation_script.yaml (W-2a's script operand); both files share the
+    business_steps[]/applicable_combos/occurrences shape (data-model §7)."""
+    keys = set()
+    for step in doc.get("business_steps", []):
+        if combo_id not in step.get("applicable_combos", []):
+            continue
+        for occ in step.get("occurrences", {}).get(combo_id, []):
+            keys.add((step["step_id"], step["direction"], int(occ)))
+    return keys
+
+
+def _cell_arm(cell_id):
+    return cell_id.rsplit("-", 1)[-1]  # "CONV-C1-off" -> "off"
+
+
+def _full_keys(doc):
+    """The census's 100 completeness keys, in identity-2 shape (cell_id,
+    script_step_id, direction, occurrence) — cell_id ≡ (combo_id, arm),
+    arm-independent by construction (the expansion rule's 'for each arm' is
+    a cross product over an identical per-combo step/occurrence set)."""
+    keys = set()
+    for combo_id in CONV_COMBO_IDS:
+        combo_keys = _expand_business_steps_combo(doc, combo_id)
+        for arm in ("off", "on"):
+            cell_id = f"CONV-{combo_id}-{arm}"
+            for step_id, direction, occ in combo_keys:
+                keys.add((cell_id, step_id, direction, occ))
+    return keys
+
+
+def _full_keys_collapsed(doc):
+    """⚠️ DELIBERATELY WEAKER than _full_keys — exists ONLY as a spurious-hit
+    arm operand (T090). Drops combo_id, keeping only arm (contracts/witness-
+    evidence.md W-3a note: 'the obvious remainder after dropping run_id and
+    config ... collapses all four role×flavour combos into one set')."""
+    return {(_cell_arm(cell_id), step_id, direction, occ)
+            for cell_id, step_id, direction, occ in _full_keys(doc)}
+
+
+def _witness_rows_for(doc, config, kind="conformance", authoritative=True):
+    return [w for w in doc.get("witnesses", [])
+            if w.get("config") == config and w.get("kind") == kind
+            and w.get("authoritative") is authoritative]
+
+
+def _project_identity2(rows):
+    return {(w["cell_id"], w["script_step_id"], w["direction"], int(w["occurrence"]))
+            for w in rows}
+
+
+def _project_collapsed(rows):
+    return {(_cell_arm(w["cell_id"]), w["script_step_id"], w["direction"], int(w["occurrence"]))
+            for w in rows}
+
+
+def _check_w1(doc):
+    """W-1: one row per identity 1, carrying combo_id, cell_id, config,
+    run_id, arm, authoritative AND kind as fields — W-3a/W-3b/W-3c filter on
+    kind/authoritative, so a row missing one is silently DROPPED from the
+    population it should have joined, and the gate measures a smaller set
+    and reports complete."""
+    required = {"combo_id", "cell_id", "config", "run_id", "arm", "kind",
+                "authoritative", "script_step_id", "direction", "occurrence"}
+    for w in doc.get("witnesses", []):
+        missing = required - w.keys()
+        assert not missing, f"W-1: witness row missing field(s) {missing!r}: {w!r}"
+
+
+def _check_w2a(census_doc, script_doc):
+    """W-2a: the SCRIPT-derived completeness-key set MUST equal the
+    CENSUS-derived one, exactly — two files with independent provenance, the
+    SAME expansion algorithm applied to each. ⛔ Neither side is derived from
+    the other, or the equality agrees with itself and is not a second
+    opinion (the defect this obligation exists to close)."""
+    census_keys = _full_keys(census_doc)
+    script_keys = _full_keys(script_doc)
+    missing = census_keys - script_keys
+    unexpected = script_keys - census_keys
+    assert not missing and not unexpected, (
+        f"W-2a: script-derived completeness keys != census; "
+        f"missing={sorted(missing)} unexpected={sorted(unexpected)}")
+
+
+def _check_w2a_self_referential_WEAK(script_doc):
+    """⚠️ NOT a real check — exists ONLY as T087's third arm operand: the
+    WRONG implementation quickstart.md Step 4 warns against, deriving BOTH
+    operands of the equality from the SAME script file, so it agrees with
+    itself by construction and cannot redden on a script mutation. Proves
+    _check_w2a's census operand is load-bearing, by contrast."""
+    keys = _full_keys(script_doc)
+    assert keys == _full_keys(script_doc)  # trivially true, always
+
+
+def _check_completeness_union_only(doc, census_doc):
+    """⚠️ DELIBERATELY WEAKER than _check_w3a — exists ONLY as a spurious-hit
+    arm operand (T091). Unions witness rows across ALL FOUR configs with no
+    per-config split, so a config contributing ZERO keys leaves the union
+    unchanged and this reports complete regardless."""
+    expected = _full_keys(census_doc)
+    union = set()
+    for config in CONFIGS:
+        union |= _project_identity2(_witness_rows_for(doc, config))
+    missing = expected - union
+    unexpected = union - expected
+    assert not missing and not unexpected, (
+        f"union-only completeness gate: missing={sorted(missing)} "
+        f"unexpected={sorted(unexpected)}")
+
+
+def _check_completeness_collapsed(doc, census_doc, config):
+    """⚠️ DELIBERATELY WEAKER than _check_w3a — exists ONLY as a spurious-hit
+    arm operand (T090). Projects onto (arm, script_step_id, direction,
+    occurrence) for ONE config, dropping combo_id."""
+    expected = _full_keys_collapsed(census_doc)
+    observed = _project_collapsed(_witness_rows_for(doc, config))
+    missing = expected - observed
+    unexpected = observed - expected
+    assert not missing and not unexpected, (
+        f"collapsed completeness gate ({config!r}): missing={sorted(missing)} "
+        f"unexpected={sorted(unexpected)}")
+
+
+def _check_w3a(doc, census_doc):
+    """W-3a (also T081/T083's operand): π(kind:conformance authoritative
+    rows of config c) = π(same, config c') for every ordered pair of the
+    four configs, AND each equals the census's 100 keys."""
+    expected = _full_keys(census_doc)
+    per_config = {config: _project_identity2(_witness_rows_for(doc, config))
+                  for config in CONFIGS}
+    for config, keys in per_config.items():
+        missing = expected - keys
+        unexpected = keys - expected
+        assert not missing and not unexpected, (
+            f"W-3a: config {config!r} witness projection != census; "
+            f"missing={sorted(missing)} unexpected={sorted(unexpected)}")
+    ordered = sorted(per_config)
+    for i, a in enumerate(ordered):
+        for b in ordered[i + 1:]:
+            assert per_config[a] == per_config[b], (
+                f"W-3a: config {a!r} projection != config {b!r} projection")
+
+
+def _check_run_slot_completeness(doc):
+    """E-1c ∧ W-3b ∧ W-3c — ONE predicate, stated three times in the
+    contract (the run-ledger obligation, and the W-* table's own restatement
+    split into an equality half and a one-per-slot half): exactly one
+    kind:conformance run with authoritative:true per (cell_id, config), and
+    that slot set equals the 32-slot inventory exactly — not merely is
+    contained in it."""
+    slot_counts = {}
+    for r in doc.get("runs", []):
+        if r.get("kind") != "conformance" or r.get("authoritative") is not True:
+            continue
+        key = (r.get("cell_id"), r.get("config"))
+        slot_counts[key] = slot_counts.get(key, 0) + 1
+    duplicated = {k for k, c in slot_counts.items() if c > 1}
+    assert not duplicated, (
+        f"E-1c/W-3c: {duplicated!r} claimed by more than one authoritative "
+        f"kind:conformance run")
+    observed = set(slot_counts)
+    missing = THIRTY_TWO_SLOT_INVENTORY - observed
+    unexpected = observed - THIRTY_TWO_SLOT_INVENTORY
+    assert not missing and not unexpected, (
+        f"E-1c/W-3b: runs: kind:conformance,authoritative:true slot set != "
+        f"the 32-slot inventory; missing={missing!r} unexpected={unexpected!r}")
+
+
+def _check_e1a(conv_rows):
+    """E-1a: manifest row identity is (cell_id, config) — 32 rows exactly (8
+    logical cells x 4 configs), retries never committed. Scoped to
+    kind:conversation rows; happy/thorny/parity rows are untouched."""
+    keys = [(r.get("cell_id"), r.get("config")) for r in conv_rows]
+    dup = {k for k in keys if keys.count(k) > 1}
+    assert not dup, f"E-1a: duplicate (cell_id, config) manifest rows: {dup!r}"
+    observed = set(keys)
+    missing = THIRTY_TWO_SLOT_INVENTORY - observed
+    unexpected = observed - THIRTY_TWO_SLOT_INVENTORY
+    assert not missing and not unexpected, (
+        f"E-1a: kind:conversation manifest rows != 32-slot inventory; "
+        f"missing={missing!r} unexpected={unexpected!r}")
+
+
+def _check_e4(conv_rows):
+    """E-4: each of the 4 configs emits its OWN row; folding one into
+    another is a violation. ⚠️ Falls out of E-1a's (cell_id, config) set
+    equality — restated with its OWN diagnostic (rule 2 of quickstart.md §
+    Step 4) rather than relying on E-1a's message to discharge a DIFFERENT
+    obligation ID."""
+    by_cell = {}
+    for r in conv_rows:
+        by_cell.setdefault(r.get("cell_id"), set()).add(r.get("config"))
+    for cell_id, configs in by_cell.items():
+        missing = CONFIGS - configs
+        assert not missing, (
+            f"E-4: cell {cell_id!r} is missing a row for config(s) {missing!r} "
+            f"-- folded into another config's row?")
+
+
+def _ledger_slot_index(doc):
+    idx = {}
+    for r in doc.get("runs", []):
+        if r.get("kind") == "conformance" and r.get("authoritative") is True:
+            idx[(r.get("cell_id"), r.get("config"))] = r
+    return idx
+
+
+def _census_slot_witness_count(census_doc, combo_id):
+    return len(_expand_business_steps_combo(census_doc, combo_id))
+
+
+def _check_e1_and_e5(conv_rows, doc, census_doc):
+    """E-1: status:pass requires a runs: ledger entry (terminal_state:
+    completed, witness_count == the census figure for that slot) — the
+    check OPENS NOTHING, both operands are already in the committed file.
+    E-5: an infrastructure abort (ledger terminal_state aborted /
+    error:enospc) MUST be recorded with that EXACT status token — never
+    pass, skip, n/a or fail."""
+    ledger_idx = _ledger_slot_index(doc)
+    for row in conv_rows:
+        cell_id, config = row.get("cell_id"), row.get("config")
+        slot = (cell_id, config)
+        status = row.get("status", "")
+        sk = status.split(":", 1)[0]
+        entry = ledger_idx.get(slot)
+        if sk == "pass":
+            assert entry is not None, (
+                f"E-1: {row.get('id')!r} status:pass names no runs: ledger "
+                f"entry for slot {slot!r}")
+            assert entry.get("terminal_state") == "completed", (
+                f"E-1: {row.get('id')!r} status:pass but ledger entry "
+                f"terminal_state {entry.get('terminal_state')!r} != completed")
+            combo_id = cell_id.split("-")[1] if cell_id else None
+            expected_count = _census_slot_witness_count(census_doc, combo_id)
+            assert entry.get("witness_count") == expected_count, (
+                f"E-1: {row.get('id')!r} status:pass but ledger witness_count "
+                f"{entry.get('witness_count')!r} != census figure "
+                f"{expected_count!r} for slot {slot!r}")
+        elif entry is not None and entry.get("terminal_state") != "completed":
+            assert status == entry.get("terminal_state"), (
+                f"E-5: {row.get('id')!r} status {status!r} disagrees with "
+                f"ledger terminal_state {entry.get('terminal_state')!r} -- an "
+                f"infrastructure abort must be recorded with that EXACT "
+                f"token, never fail/skip/n/a")
+
+
+def _w_fixture_complete(census_doc):
+    """The full complete artifact: runs: (32 conformance + 2 control, from
+    _e7_fixture_complete), witnesses: (all 400 census-derived rows, 100 per
+    config x 4 configs), validation_pairs: (16 conformance + 1 control).
+    Every negative fixture below starts from a (deep) copy of this and
+    perturbs exactly the one thing its own arm names."""
+    import copy
+    doc = _e7_fixture_complete()
+    witnesses = []
+    for combo_id in CONV_COMBO_IDS:
+        for config in CONFIGS:
+            for arm, suffix in (("validation-off", "off"), ("validation-on", "on")):
+                cell_id = f"CONV-{combo_id}-{suffix}"
+                run_id = f"{cell_id}-{config}-{arm}-run"
+                for step_id, direction, occ in _expand_business_steps_combo(census_doc, combo_id):
+                    witnesses.append({
+                        "combo_id": combo_id, "cell_id": cell_id, "config": config,
+                        "run_id": run_id, "arm": arm, "kind": "conformance",
+                        "authoritative": True, "script_step_id": step_id,
+                        "direction": direction, "occurrence": occ,
+                    })
+    doc["witnesses"] = witnesses
+    return copy.deepcopy(doc)
+
+
+def _e1a_fixture_complete():
+    return [
+        {"id": f"{cell}@{cfg}", "cell_id": cell, "config": cfg, "kind": "conversation",
+         "status": "pass", "matrix_disposition": "live", "spec_ref": "FR-013"}
+        for cell in EIGHT_LOGICAL_CELL_IDS for cfg in CONFIGS
+    ]
+
+
+@pytest.fixture(scope="module")
+def census_doc():
+    return _load_census()
+
+
+@pytest.fixture(scope="module")
+def script_doc():
+    return _load_script()
+
+
+def test_w1_required_fields_present():
+    doc = _w_fixture_complete(_load_census())
+    _check_w1(doc)
+
+
+def test_w1_missing_field_goes_red():
+    doc = _w_fixture_complete(_load_census())
+    del doc["witnesses"][0]["authoritative"]
+    with pytest.raises(AssertionError, match="missing field"):
+        _check_w1(doc)
+
+
+def test_w2a_real_census_matches_real_script(census_doc, script_doc):
+    # SC-009a's end-to-end demonstration against the REAL committed
+    # artifacts (not a constructed fixture — both files are already fully
+    # authored content).
+    _check_w2a(census_doc, script_doc)
+
+
+def test_w3a_complete_artifact_passes(census_doc):
+    _check_w3a(_w_fixture_complete(census_doc), census_doc)
+
+
+def test_run_slot_completeness_complete_artifact_passes():
+    _check_run_slot_completeness(_w_fixture_complete(_load_census()))
+
+
+def test_e1a_complete_manifest_passes():
+    _check_e1a(_e1a_fixture_complete())
+
+
+def test_e4_complete_manifest_passes():
+    _check_e4(_e1a_fixture_complete())
+
+
+# ── T086: forced-miss arms on the schema check (E-1 / E-5) ─────────────────
+
+def _e1_manifest_row(cell_id, config, status, ledger_ref=None):
+    return {"id": f"{cell_id}@{config}", "cell_id": cell_id, "config": config,
+            "kind": "conversation", "status": status, "matrix_disposition": "live",
+            "spec_ref": "FR-013", "ledger_ref": ledger_ref or (cell_id, config)}
+
+
+def test_e1_pass_with_no_ledger_entry_goes_red():
+    census = _load_census()
+    doc = {"schema_version": 1, "witnesses": [], "runs": [], "validation_pairs": []}
+    rows = [_e1_manifest_row("CONV-C1-off", "normal", "pass")]
+    with pytest.raises(AssertionError, match="E-1"):
+        _check_e1_and_e5(rows, doc, census)
+
+
+def test_e1_pass_naming_nonexistent_ledger_entry_goes_red():
+    census = _load_census()
+    doc = {"schema_version": 1, "witnesses": [], "runs": [
+        {"cell_id": "CONV-C1-off", "config": "OTHER-SLOT", "kind": "conformance",
+         "authoritative": True, "terminal_state": "completed", "witness_count": 12},
+    ], "validation_pairs": []}
+    rows = [_e1_manifest_row("CONV-C1-off", "normal", "pass")]
+    with pytest.raises(AssertionError, match="E-1"):
+        _check_e1_and_e5(rows, doc, census)
+
+
+def test_e1_witness_count_mismatch_goes_red():
+    census = _load_census()
+    expected = _census_slot_witness_count(census, "C1")
+    doc = {"schema_version": 1, "witnesses": [], "runs": [
+        {"cell_id": "CONV-C1-off", "config": "normal", "kind": "conformance",
+         "authoritative": True, "terminal_state": "completed",
+         "witness_count": expected + 1},
+    ], "validation_pairs": []}
+    rows = [_e1_manifest_row("CONV-C1-off", "normal", "pass")]
+    with pytest.raises(AssertionError, match="E-1"):
+        _check_e1_and_e5(rows, doc, census)
+
+
+def test_e5_enospc_abort_recorded_as_fail_goes_red():
+    census = _load_census()
+    doc = {"schema_version": 1, "witnesses": [], "runs": [
+        {"cell_id": "CONV-C1-off", "config": "normal", "kind": "conformance",
+         "authoritative": True, "terminal_state": "error:enospc", "witness_count": 0},
+    ], "validation_pairs": []}
+    rows = [_e1_manifest_row("CONV-C1-off", "normal", "fail")]
+    with pytest.raises(AssertionError, match="E-5"):
+        _check_e1_and_e5(rows, doc, census)
+
+
+def test_e5_enospc_abort_recorded_correctly_passes():
+    census = _load_census()
+    doc = {"schema_version": 1, "witnesses": [], "runs": [
+        {"cell_id": "CONV-C1-off", "config": "normal", "kind": "conformance",
+         "authoritative": True, "terminal_state": "error:enospc", "witness_count": 0},
+    ], "validation_pairs": []}
+    rows = [_e1_manifest_row("CONV-C1-off", "normal", "error:enospc")]
+    _check_e1_and_e5(rows, doc, census)  # must not raise
+
+
+def test_e1_pass_row_backed_by_a_real_ledger_entry_passes():
+    census = _load_census()
+    expected = _census_slot_witness_count(census, "C1")
+    doc = {"schema_version": 1, "witnesses": [], "runs": [
+        {"cell_id": "CONV-C1-off", "config": "normal", "kind": "conformance",
+         "authoritative": True, "terminal_state": "completed",
+         "witness_count": expected},
+    ], "validation_pairs": []}
+    rows = [_e1_manifest_row("CONV-C1-off", "normal", "pass")]
+    _check_e1_and_e5(rows, doc, census)  # must not raise
+
+
+# ── T087: forced-miss arms on the completeness gate (W-3/W-2a) ─────────────
+
+def test_w3a_delete_one_witness_goes_red(census_doc):
+    doc = _w_fixture_complete(census_doc)
+    del doc["witnesses"][0]
+    with pytest.raises(AssertionError, match="W-3a"):
+        _check_w3a(doc, census_doc)
+
+
+def test_w2a_delete_a_business_step_from_script_goes_red(census_doc, script_doc):
+    import copy
+    mutant = copy.deepcopy(script_doc)
+    mutant["business_steps"] = [s for s in mutant["business_steps"] if s["step_id"] != "B-01"]
+    with pytest.raises(AssertionError, match="W-2a"):
+        _check_w2a(census_doc, mutant)
+
+
+def test_w2a_add_a_script_step_with_no_witness_goes_red(census_doc, script_doc):
+    import copy
+    mutant = copy.deepcopy(script_doc)
+    extra = copy.deepcopy(mutant["business_steps"][0])
+    extra["step_id"] = "B-EXTRA-NOT-IN-CENSUS"
+    mutant["business_steps"].append(extra)
+    with pytest.raises(AssertionError, match="W-2a"):
+        _check_w2a(census_doc, mutant)
+
+
+def test_w2a_self_referential_check_stays_green_on_both_mutants_above(script_doc):
+    # T087's third arm: the WRONG implementation (both operands derived from
+    # the SAME script file) stays green on the exact two mutations that
+    # redden the real _check_w2a above — proving the census operand is
+    # load-bearing, not decorative.
+    import copy
+    deleted = copy.deepcopy(script_doc)
+    deleted["business_steps"] = [s for s in deleted["business_steps"] if s["step_id"] != "B-01"]
+    _check_w2a_self_referential_WEAK(deleted)  # must not raise
+
+    added = copy.deepcopy(script_doc)
+    extra = copy.deepcopy(added["business_steps"][0])
+    extra["step_id"] = "B-EXTRA-NOT-IN-CENSUS"
+    added["business_steps"].append(extra)
+    _check_w2a_self_referential_WEAK(added)  # must not raise
+
+
+# ── T088: a slot with no authoritative run ⇒ W-3b RED (equality, not
+# containment) ──────────────────────────────────────────────────────────────
+
+def test_w3b_slot_with_no_authoritative_run_goes_red():
+    doc = _w_fixture_complete(_load_census())
+    doc["runs"] = [r for r in doc["runs"]
+                   if not (r["cell_id"] == "CONV-C1-off" and r["config"] == "normal"
+                           and r["kind"] == "conformance")]
+    with pytest.raises(AssertionError, match="E-1c/W-3b"):
+        _check_run_slot_completeness(doc)
+
+
+# ── T090: spurious-hit — one combo (both arms) of one config, none of the
+# other three combos of THAT config; the other three configs stay complete.
+# The COLLAPSED (arm-only) gate reports complete because C3's per-arm key
+# set is the union-maximal one across all four combos; the correct
+# identity-2 gate (W-3a) still sees the other three combos missing. ────────
+
+def test_w3a_one_combo_of_one_config_is_red_but_collapsed_gate_is_a_spurious_green(census_doc):
+    doc = _w_fixture_complete(census_doc)
+    doc["witnesses"] = [
+        w for w in doc["witnesses"]
+        if not (w["config"] == "normal" and w["combo_id"] != "C3")
+    ]
+    with pytest.raises(AssertionError, match="W-3a"):
+        _check_w3a(doc, census_doc)
+    _check_completeness_collapsed(doc, census_doc, "normal")  # spurious GREEN
+
+
+# ── T091: spurious-hit — drop one whole configuration; the union-only gate
+# cannot see it (the other three configs' union already equals the census),
+# W-3a (per-config) reddens on that config specifically. ───────────────────
+
+def test_w3a_dropped_config_is_red_but_union_only_gate_is_a_spurious_green(census_doc):
+    doc = _w_fixture_complete(census_doc)
+    doc["witnesses"] = [w for w in doc["witnesses"] if w["config"] != "tsan"]
+    with pytest.raises(AssertionError, match="W-3a"):
+        _check_w3a(doc, census_doc)
+    _check_completeness_union_only(doc, census_doc)  # spurious GREEN
+
+
+# ── T092: spurious-hit — a second (retry) run for one slot; π drops run_id
+# so the duplicate rows collapse and the completeness gate alone sees
+# nothing; W-3c (via _check_run_slot_completeness) is what catches it. ─────
+
+def test_w3c_retry_run_is_red_but_completeness_gate_alone_is_a_spurious_green(census_doc):
+    doc = _w_fixture_complete(census_doc)
+    original_run = next(r for r in doc["runs"]
+                         if r["cell_id"] == "CONV-C1-off" and r["config"] == "normal"
+                         and r["kind"] == "conformance")
+    retry_run = dict(original_run)
+    retry_run["run_id"] = original_run["run_id"] + "-retry"
+    doc["runs"].append(retry_run)  # BUG: still authoritative:true, never demoted
+    retry_witnesses = [dict(w, run_id=retry_run["run_id"])
+                        for w in doc["witnesses"]
+                        if w["cell_id"] == "CONV-C1-off" and w["config"] == "normal"]
+    doc["witnesses"].extend(retry_witnesses)  # same keys, different run_id
+    with pytest.raises(AssertionError, match="E-1c/W-3c"):
+        _check_run_slot_completeness(doc)
+    _check_w3a(doc, census_doc)  # spurious GREEN — the duplicate rows collapse
+
+
+# ── T094: controls that must stay GREEN ─────────────────────────────────────
+
+def test_control_run_on_an_occupied_slot_and_w3a_both_stay_green(census_doc):
+    # _w_fixture_complete already carries a validator-positive-control run
+    # occupying CONV-C1-off/on @ normal, the same slot a conformance run
+    # already claims — plus a control WITNESS row on that same cell_id, so
+    # W-3a's kind:conformance filter is exercised, not merely absent.
+    doc = _w_fixture_complete(census_doc)
+    doc["witnesses"].append({
+        "combo_id": "C1", "cell_id": "CONV-C1-off", "config": "normal",
+        "run_id": "ctrl-off-run", "arm": "validation-off",
+        "kind": "validator-positive-control", "authoritative": True,
+        "script_step_id": "PROBE-01", "direction": "fixpp-to-peer", "occurrence": 0,
+    })
+    _check_run_slot_completeness(doc)  # GREEN — the slot is claimed once
+    _check_w3a(doc, census_doc)  # GREEN — π excludes the control row by kind
+
+
 def test_required_fields_present(cells):
     for c in cells:
         missing = REQUIRED_FIELDS - c.keys()
@@ -804,6 +1362,11 @@ def test_schema_check_opens_no_artifact_path():
             check(cells_rows)
         witness_doc = _load_witness_evidence()
         _check_witness_evidence_sections(witness_doc)
+        # W-2a: unlike E-1a/E-1c/W-3a/W-3b/W-3c (deferred to T095a — their
+        # populations are still empty pending T095's matrix), census.yaml
+        # and conversation_script.yaml are already fully-authored content,
+        # so this gate is wired unconditionally now.
+        _check_w2a(_load_census(), _load_script())
 
 
 def test_artifact_path_guard_catches_planted_open(tmp_path):
