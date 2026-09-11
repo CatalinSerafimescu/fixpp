@@ -748,6 +748,19 @@ add_threading_test(session_resend_reply_possdup test_resend_reply_possdup.cpp)
 set_tests_properties(session_resend_reply_possdup PROPERTIES
   LABELS "037;us1;possdup;gapfill")
 
+# ── #419 — resend-answer header/body field order ─────────────────────────────
+# Regression witness: no standard-header tag (incl. 43/122) after the first body
+# tag, trailer(10) last, exactly one 43/122 — for both build_sequence_reset_gapfill
+# and build_replay_frame (the latter via a Session-driven resend of a stored
+# NewOrderSingle with a nested NoPartyIDs/NoPartySubIDs repeating group).
+# Supersedes 037's tail-placement assumption. Anchors: issue #419.
+add_threading_test(session_resend_answer_field_order
+  test_resend_answer_field_order.cpp
+  $<TARGET_OBJECTS:session_test_support>  # extract_field (support/frame_field_extract.hpp)
+)
+set_tests_properties(session_resend_answer_field_order PROPERTIES
+  LABELS "419;037;013;possdup;field-order")
+
 # T021 — Initiator transport-throw witness (FR-009 / SC-007).
 # Symmetric to the acceptor-side witness in session_send_path (send_path_test.cpp).
 # Exercises Session::open() when transport.send() throws during Logon emit;

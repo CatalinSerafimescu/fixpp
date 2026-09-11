@@ -458,8 +458,8 @@ template <class Pump>
 //     regression at 32 sites. Here `run_for` keeps its normal early-drain
 //     behaviour and the window costs what it costs today.
 //   - The window is PRESERVED, not sliced. A site's first transition to Active
-//     co_spawns a DETACHED `run_liveness_loop()` (src/session/session.cpp:2733
-//     acceptor, :4187 initiator), and `co_spawn` POSTS its first resumption, so
+//     co_spawns a DETACHED `run_liveness_loop()` (src/session/session.cpp,
+//     on both the acceptor and the initiator path), and `co_spawn` POSTS its first resumption, so
 //     it lands on a LATER `run_one_until`. An early-exit pump that stopped at
 //     future-readiness would leave that detached task unserviced; running the
 //     original window to drain-or-deadline services it exactly as today.
@@ -1544,7 +1544,7 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
 // `cancel_sleeps()` installs nothing to reject a later registration
 // (`src/core/test/mock_clock.cpp:166-181`), so a coroutine whose first run happens
 // during the drain — the session liveness loop's `sleep_until`,
-// `src/session/session.cpp:4816`, is the concrete case — arms a sleep the one-shot
+// `Session::run_liveness_loop`, is the concrete case — arms a sleep the one-shot
 // cancel has already missed. What changed is the lever: this destructor delegates
 // to `cancel_and_drain_or_report`, whose loop alternates the cancel with the
 // drain, so the sleep armed by slice N is released by slice N+1. Pinned by

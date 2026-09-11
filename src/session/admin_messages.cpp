@@ -1016,8 +1016,15 @@ namespace {
 // ── SequenceReset (35=4) — GapFill mode ─────────────────────────────────────────
 // FR-009, [FIX-SL §4.4]. 013 recovery sub-protocol (reply to inbound ResendRequest).
 // Fields: 8=begin_string, 35=4, 34=seq, 49=SenderCompID, 52=sending_time,
-//         56=TargetCompID, 36=NewSeqNo, 123=Y (GapFillFlag),
-//         43=Y (PossDupFlag), 122=sending_time (OrigSendingTime).
+//         56=TargetCompID, 43=Y (PossDupFlag), 122=sending_time (OrigSendingTime),
+//         36=NewSeqNo, 123=Y (GapFillFlag).
+//
+// #419 supersedes 037's tail placement (43/122 after 36/123): 43 and 122 are
+// standard-header fields and MUST precede every body field. A peer validating
+// field order (QuickFIX-J with UseDataDictionary=Y) rejects a header field
+// that appears after a body field (373=14). The header's own internal order
+// stays as before (8,35,34,49,52,56); only 43/122 moved up, from the tail to
+// right after 56.
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
 // / new_seqno / begin_string / sending_time).
@@ -1068,6 +1075,22 @@ namespace {
         return std::unexpected(r.error());
     }
 
+    // 43=Y (PossDupFlag) — FR-001: resend reply must carry PossDupFlag.
+    // #419: moved here (was after 36/123) — 43 is a standard-header field and
+    // must precede every body field; see the block comment above the function.
+    {
+        std::byte val[] = {static_cast<std::byte>('Y')};
+        if (auto r = w.append_raw(43, std::span<const std::byte>{val}); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 122=sending_time (OrigSendingTime) — FR-002/D-1: 122 == own 52 for a GapFill.
+    // #419: moved here (was after 36/123), same reason as 43 above.
+    if (auto r = w.append_raw(122, sv_to_bytes(sending_time)); !r) {
+        return std::unexpected(r.error());
+    }
+
     // 36=NewSeqNo
     {
         char nbuf[12];
@@ -1086,19 +1109,6 @@ namespace {
         if (auto r = w.append_raw(123, std::span<const std::byte>{val}); !r) {
             return std::unexpected(r.error());
         }
-    }
-
-    // 43=Y (PossDupFlag) — FR-001: resend reply must carry PossDupFlag.
-    {
-        std::byte val[] = {static_cast<std::byte>('Y')};
-        if (auto r = w.append_raw(43, std::span<const std::byte>{val}); !r) {
-            return std::unexpected(r.error());
-        }
-    }
-
-    // 122=sending_time (OrigSendingTime) — FR-002/D-1: 122 == own 52 for a GapFill.
-    if (auto r = w.append_raw(122, sv_to_bytes(sending_time)); !r) {
-        return std::unexpected(r.error());
     }
 
     // Commit: backpatch BodyLength(9=) and append CheckSum(10=).

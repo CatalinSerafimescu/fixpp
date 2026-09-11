@@ -1041,7 +1041,7 @@ in **two parts**, because the two are different kinds of evidence.
      reaches exactly one of them.** The discriminating `35=D` is the *second* message (bullet above),
      so it enters `Session::on_inbound_frame` (`:2069`) and takes that function's `switch` on
      `fsm_state_` (`:2087`) at the **`case fsm_state::LogonReceived: case
-     fsm_state::Active:`** arm (`src/session/session.cpp:2727-2728`), whose 041 T014 validate gate is
+     fsm_state::Active:`** arm (`src/session/session.cpp`, `Session::on_inbound_frame`), whose 041 T014 validate gate is
      at **`:2743-2749`** and emits at **`:2746`**. Not `:2100-2107`: that is the *same* 041 T014 gate
      on the **`case fsm_state::NotConnected:`** arm (`:2088`), which runs validate-first on the
      **first** inbound frame, before `interpret_logon` — a frame this seam has just ruled out. The
