@@ -76,6 +76,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -321,6 +322,46 @@ public:
     // frame -- this seq_num is header identity, not a body field).
     std::atomic<long long> b01_seq{-1};
 
+    // T061a fix: `app->stream` is wired BEFORE the Logon exchange (so
+    // fromApp/toApp can observe B-01..B-12), but `stream.hello()` is written
+    // by the TEST body only AFTER drive_to_active() returns. `run_until()`
+    // pumps the io_context in wall-clock SLICES and checks its ready
+    // predicate only BETWEEN slices -- so a peer-initiated admin message
+    // that arrives batched with (or immediately after) the Logon exchange
+    // (A-TESTREQ is engine-automatic and peer-scheduled, not driven by this
+    // test body) can be processed by fromAdmin/toAdmin and written to the
+    // stream WITHIN THE SAME SLICE drive_to_active() pumps to reach Active
+    // -- before the test body's next line calls stream.hello(). Every
+    // stream write goes through write_or_defer() below, which buffers a
+    // write until mark_hello_written() (called right after stream.hello())
+    // flushes it -- preserving readback-jsonl.md's "hello is the first
+    // line, emitted before any message is processed" for every record kind
+    // this driver writes, not just the ones the TEST body itself sequences.
+    std::mutex hello_mu;
+    bool hello_written = false;
+    std::vector<std::function<void()>> pending_before_hello;
+
+    template <typename F>
+    void write_or_defer(F&& write_call)
+    {
+        std::lock_guard<std::mutex> lk(hello_mu);
+        if (hello_written) {
+            write_call();
+        } else {
+            pending_before_hello.emplace_back(std::forward<F>(write_call));
+        }
+    }
+
+    void mark_hello_written()
+    {
+        std::lock_guard<std::mutex> lk(hello_mu);
+        for (auto& fn : pending_before_hello) {
+            fn();
+        }
+        pending_before_hello.clear();
+        hello_written = true;
+    }
+
     long long next_occurrence(long long seq, std::string const& dir)
     {
         std::lock_guard<std::mutex> lk(occ_mu);
@@ -345,8 +386,11 @@ public:
                 b01_seq.store(seq);
             }
             long long const occ = next_occurrence(seq, std::string(rb::kDirectionFixppToPeer));
-            stream->sent(std::string(msg.msg_type()), seq, rb::kDirectionFixppToPeer, occ,
-                        p.script_step_id, std::move(p.fields));
+            rb::Stream* s = stream;
+            write_or_defer([s, mt = std::string(msg.msg_type()), seq, occ,
+                            step_id = p.script_step_id, fields = std::move(p.fields)]() mutable {
+                s->sent(mt, seq, rb::kDirectionFixppToPeer, occ, step_id, std::move(fields));
+            });
         }
         return {};
     }
@@ -379,9 +423,14 @@ public:
             // data-model §13/T061a: the disposition ordinal is the SAME
             // arrival counter the readback record above just consumed — one
             // shared counter serves both, never a second independent count.
-            stream->disposition(mt, seq, rb::kDirectionPeerToFixpp, occ, "accepted");
-            stream->readback(mt, seq, rb::kDirectionPeerToFixpp, occ, poss_dup, std::move(fields),
+            rb::Stream* s = stream;
+            write_or_defer([s, mt, seq, occ]() { s->disposition(mt, seq, rb::kDirectionPeerToFixpp, occ,
+                                                                  "accepted"); });
+            write_or_defer([s, mt, seq, occ, poss_dup, fields = std::move(fields),
+                            typed = std::move(typed)]() mutable {
+                s->readback(mt, seq, rb::kDirectionPeerToFixpp, occ, poss_dup, std::move(fields),
                             std::move(typed));
+            });
         }
 
         std::string reply_step;
@@ -455,8 +504,10 @@ public:
         if (stream != nullptr) {
             long long const seq = msg.msg_seq_num();
             long long const occ = next_occurrence(seq, std::string(rb::kDirectionPeerToFixpp));
-            stream->disposition(std::string(msg.msg_type()), seq, rb::kDirectionPeerToFixpp, occ,
-                                 "accepted");
+            rb::Stream* s = stream;
+            write_or_defer([s, mt = std::string(msg.msg_type()), seq, occ]() {
+                s->disposition(mt, seq, rb::kDirectionPeerToFixpp, occ, "accepted");
+            });
         }
         return {};
     }
@@ -495,7 +546,10 @@ public:
             reject.text = std::string(fv->as_string());
         }
         long long const occ = next_occurrence(ref_seq, std::string(rb::kDirectionPeerToFixpp));
-        stream->disposition(ref_msg_type, ref_seq, rb::kDirectionPeerToFixpp, occ, "rejected", reject);
+        rb::Stream* s = stream;
+        write_or_defer([s, ref_msg_type, ref_seq, occ, reject]() {
+            s->disposition(ref_msg_type, ref_seq, rb::kDirectionPeerToFixpp, occ, "rejected", reject);
+        });
     }
 };
 
@@ -668,6 +722,11 @@ TEST(Conversation, Cell)
 
     bool const has_validator = sess->has_validator_for_test();
     stream.hello(run_id, cell_id, config, actual_digest, arm, has_validator, prod.dictionary_digest);
+    // Flushes any admin-arrival disposition ConvApp buffered while
+    // drive_to_active() was pumping (T061a fix, ConvApp::write_or_defer's own
+    // header comment) -- MUST run immediately after stream.hello() so no
+    // buffered record's ordinal can ever precede the hello line on disk.
+    app->mark_hello_written();
     // FR-011a / E-6: a validation-on arm MUST attest a live validator.
     EXPECT_EQ(has_validator, arm == "validation-on")
         << "has_validator (" << has_validator << ") disagrees with arm " << arm;
