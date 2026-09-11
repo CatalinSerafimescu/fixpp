@@ -518,6 +518,10 @@ A separate artifact accumulating witness rows across all cells and all configs.
 | `phase` | enum | `logon` · `admin` · `business` · `logout` |
 | `msg_type` | string | |
 | `originator` | enum | which side sends |
+| `direction` | enum | `fixpp-to-peer` · `peer-to-fixpp` — the completeness key's `direction` (FR-015c) |
+| `applicable_combos` | list of combo id | the role × flavour combinations the step runs on. A step inapplicable to a combo is **absent from this list and its reason is declared** (FR-009), never silently omitted |
+| `occurrences` | map combo id → list of integer | business steps: the declared occurrence values per applicable combo. With `applicable_combos` this is what SC-009a's **script-derived projection** expands exactly as spec.md § *The expansion rule* expands the census — without both fields the script cannot yield the combo axis at all, and the equality could only be taken against the census itself |
+| `messages` | list | admin steps: an admin **exchange** is more than one message, so each entry carries its own `msg_type`, `originator`, `direction` and field entries in place of the step-level ones |
 | `expects_witness` | boolean | business messages yes; admin exchanges assert session behaviour |
 | `intent_fields` | list of *field entries* | **concrete declared values**, same `path` grammar as §2/§3 — including discriminating decimal and timestamp values, and at least one multi-instance **nested** group across the script as a whole (FR-008b) |
 | `typed_reads` | list of paths | which fields the receiver reads via **typed accessors** (FR-003b); the rest are covered by generic enumeration |
