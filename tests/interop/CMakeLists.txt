@@ -224,21 +224,23 @@ fixpp_add_interop_test(
     TLS
 )
 
-# ── 089 Phase 5 (US3): combo C1 conversation driver (fixpp initiator vs
-# QuickFIX-cpp), both arms selected at runtime via INTEROP_FIXPP_ARM. Needs the
-# generated FIX 4.4 read flyweights (fixpp::v44::*) — same codegen-include
-# pattern as interop_business_message_interop_test above.
+# ── 089 Phase 5 (US3): combo-neutral conversation driver, one binary/gtest
+# for every combo (C1 first; C2-C4 join in later rounds) — the combo is
+# selected at runtime via INTEROP_FIXPP_COMBO_ID, the same env-selection
+# pattern INTEROP_FIXPP_ARM already uses. Needs the generated FIX 4.4 read
+# flyweights (fixpp::v44::*) — same codegen-include pattern as
+# interop_business_message_interop_test above.
 if(TARGET fixpp_codegen_generate)
     fixpp_add_interop_test(
-        NAME interop_conversation_c1_test
+        NAME interop_conversation_test
         GROUP happy
         LABEL "interop;089;interop-conversation;us3"
-        SOURCES conversation/conv_c1_test.cpp
+        SOURCES conversation/conv_cell_test.cpp
         TLS
         EXTRA_LIBS fixpp_dictionary
     )
-    add_dependencies(interop_conversation_c1_test fixpp_codegen_generate)
-    target_include_directories(interop_conversation_c1_test PRIVATE
+    add_dependencies(interop_conversation_test fixpp_codegen_generate)
+    target_include_directories(interop_conversation_test PRIVATE
         "${CMAKE_BINARY_DIR}/_codegen/include"
     )
 endif()

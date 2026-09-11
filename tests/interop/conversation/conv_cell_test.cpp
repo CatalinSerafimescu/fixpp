@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// tests/interop/conversation/conv_c1_test.cpp — 089 Phase 5 (US3) round b:
-// combo C1 (fixpp INITIATOR vs QuickFIX-cpp), both arms.
-//
-// One gtest binary, one TEST body, selected/configured entirely by the
-// shim's environment (INTEROP_FIXPP_*): `arm` decides
-// `validate_inbound_messages`, everything else is run-identity metadata
-// (data-model.md §1/§9). The control FLOW below (which step follows which)
-// is hardcoded per FR-008d(a) — no side may carry a YAML parser — but every
-// FIELD VALUE fixpp sends is read at run time from the shim-rendered intent
-// file (FR-008d), never a literal.
+// tests/interop/conversation/conv_cell_test.cpp — 089 Phase 5 (US3): the
+// combo-neutral conversation driver. ONE gtest binary/TEST body for every
+// combo C1-C4 (only C1 -- fixpp INITIATOR vs QuickFIX-cpp -- is implemented
+// so far; C2-C4 join in later rounds), selected/configured entirely by the
+// shim's environment (INTEROP_FIXPP_*): `combo` (INTEROP_FIXPP_COMBO_ID)
+// picks the combo, `arm` decides `validate_inbound_messages`, everything
+// else is run-identity metadata (data-model.md §1/§9). An unrecognised or
+// not-yet-implemented combo value fails closed (ASSERT_EQ below) rather
+// than silently running C1's script under the wrong identity. The control
+// FLOW below (which step follows which) is hardcoded per FR-008d(a) — no
+// side may carry a YAML parser — but every FIELD VALUE fixpp sends is read
+// at run time from the shim-rendered intent file (FR-008d), never a
+// literal.
 //
 // Admin repertoire (T056): A-LOGON is drive_to_active(); A-TESTREQ (peer
 // TestRequest -> fixpp Heartbeat) and A-GAPFILL (fixpp ResendRequest -> peer
@@ -361,7 +364,7 @@ std::string run_dir_of(std::string const& readback_path)
 
 }  // namespace
 
-TEST(Conversation, C1)
+TEST(Conversation, Cell)
 {
     // FR-023: the standard interop skip-with-reason convention (same macro
     // every other interop cell uses) — a bare ctest run with no counterparty
@@ -378,6 +381,7 @@ TEST(Conversation, C1)
     std::string const cell_id = env_or_empty("INTEROP_FIXPP_CELL_ID");
     std::string const config = env_or_empty("INTEROP_FIXPP_CONFIG");
     std::string const arm = env_or_empty("INTEROP_FIXPP_ARM");
+    std::string const combo = env_or_empty("INTEROP_FIXPP_COMBO_ID");
     std::string const script_path = env_or_empty("INTEROP_FIXPP_SCRIPT_PATH");
     std::string const script_digest_expected = env_or_empty("INTEROP_FIXPP_SCRIPT_DIGEST");
     std::string const readback_path = env_or_empty("INTEROP_FIXPP_READBACK_PATH");
@@ -386,10 +390,17 @@ TEST(Conversation, C1)
     ASSERT_FALSE(cell_id.empty()) << "INTEROP_FIXPP_CELL_ID absent";
     ASSERT_FALSE(config.empty()) << "INTEROP_FIXPP_CONFIG absent";
     ASSERT_FALSE(arm.empty()) << "INTEROP_FIXPP_ARM absent";
+    ASSERT_FALSE(combo.empty()) << "INTEROP_FIXPP_COMBO_ID absent";
     ASSERT_FALSE(script_path.empty()) << "INTEROP_FIXPP_SCRIPT_PATH absent";
     ASSERT_FALSE(script_digest_expected.empty()) << "INTEROP_FIXPP_SCRIPT_DIGEST absent";
     ASSERT_FALSE(readback_path.empty()) << "INTEROP_FIXPP_READBACK_PATH absent";
     ASSERT_FALSE(intent_path.empty()) << "INTEROP_FIXPP_INTENT_PATH absent";
+    // Fail closed on an unrecognised/not-yet-implemented combo: this driver
+    // hardcodes C1's step sequence below (FR-008d(a): no side may carry a
+    // YAML parser), so silently running that sequence under a C2-C4 label
+    // would be a lying observable, not a skip.
+    ASSERT_EQ(combo, "C1") << "combo " << combo
+                           << " is not implemented by this driver (only C1 so far)";
 
     std::string const actual_digest = sha256_hex_file(script_path);
     ASSERT_EQ(actual_digest, script_digest_expected) << "script_digest mismatch";
@@ -625,7 +636,7 @@ TEST(Conversation, C1)
 
     rb::WitnessIdentity wid;
     wid.run_id = run_id;
-    wid.combo_id = "C1";
+    wid.combo_id = combo;
     wid.cell_id = cell_id;
     wid.config = config;
     wid.arm = arm;
