@@ -1,0 +1,241 @@
+# census.yaml — W-2a's operand (FR-015d, SC-009a)
+#
+# MANUAL, MECHANICAL TRANSCRIPTION of spec.md § "Conversation census". Authored directly from
+# spec.md's prose tables; it MUST NOT be generated from `conversation_script.yaml`, nor from any
+# traversal of it (plan.md § "SC-009a's two operands" · tasks.md T013). SC-009a asserts the
+# script-derived completeness-key set exactly equal to the set this file expands to; an equality
+# is a second opinion only if the two sides have independent origins, and generating this file
+# from the script converts it into a tautology.
+#
+# Re-transcribe this file in the same edit that changes spec.md § "Conversation census"
+# (contracts/witness-evidence.md W-2a's own instruction).
+#
+# ── Mapping to spec.md § "Conversation census" (four subsections, transcribed in full) ──────────
+#   role_flavour_combinations  <- "### Role × flavour combinations"
+#                                  (the C1..C4 / fixpp-role / counterparty table, plus the
+#                                  arm ∈ {validation-off, validation-on} and cell_id ≡
+#                                  (combo_id, arm) rule stated in the same subsection's prose)
+#   business_steps              <- "### Business steps — every step that carries a witness"
+#                                  (the B-01..B-12 table). expects_witness: true for every row.
+#   admin_steps                 <- "### Admin steps — mandated by FR-008, carrying no witness"
+#                                  (the A-LOGON..A-LOGOUT table). expects_witness: false for every
+#                                  row. Transcribed even though these rows expand to ZERO
+#                                  completeness keys: spec.md states admin steps are "part of the
+#                                  script's step inventory (so a step deletion or addition is
+#                                  defined over the whole script)", and SC-009a's two RED
+#                                  demonstrations are a script step deletion and a script step
+#                                  addition — a census silent on admin steps could not state what
+#                                  the inventory should contain for either arm of that
+#                                  demonstration. A-RESEND's "C3 C4" is also the structural fact
+#                                  that explains why B-01 occurrence 1 exists only on C3/C4 below.
+#   declared_inapplicable        <- "### Declared inapplicable combinations (FR-009) — with
+#                                  reasons, not silence" (the two-row exceptions table)
+#
+# NOT transcribed: "### Field content the census presumes" (B-01 NoPartyIDs/NoPartySubIDs, B-03
+# Account, B-05 EncodedText/EncodedTextLen). That subsection fixes FR-008a/b SCRIPT CONTENT for
+# the anti-vacuity arms; it adds no step, no combo and no occurrence, so it does not change any
+# completeness key and is out of scope for the population this file states (FR-015d's "expected
+# witness set"). Named here rather than silently dropped, per plan.md's own completion rule that
+# silence is indistinguishable from an omission.
+#
+# ── Consumption contract (for T082 / W-2a) ────────────────────────────────────────────────────
+#   This file states RAW TABLE DATA ONLY — not the expanded completeness-key set, and no derived
+#   count (spec.md § "Conversation census" settles that such figures are derived in one place —
+#   its own "The expansion rule" subsection — and are a pointer everywhere else; this file is one
+#   of those "everywhere else" sites, so it carries none of them, not even in a comment).
+#   The consumer applies spec.md § "Conversation census" → "The expansion rule" identically to
+#   business_steps here and to the script-derived witnesses, producing two completeness-key sets
+#   of the shape (cell_id, script_step_id, direction, occurrence) — cell_id ≡ (combo_id, arm) —
+#   and asserts them exactly equal. Only expects_witness: true rows (business_steps) expand to
+#   completeness keys; admin_steps and declared_inapplicable are inputs that shape which keys
+#   exist (occurrences already reflect declared_inapplicable's exclusions — see the note on
+#   business_steps below) and are transcribed for step-inventory completeness and audit, not
+#   expanded themselves.
+#
+# ── Typing notes ──────────────────────────────────────────────────────────────────────────────
+#   msg_type is a quoted string ("8", "9", "D", "F", "G") — "8"/"9" parse as YAML ints otherwise.
+#   occurrence values are integers (0, 1) — must match the script side's type for the equality
+#   to hold; a "0" vs 0 mismatch would fail silently as a spurious set-inequality.
+#   applicable_combos and the occurrences mapping's key set agree on every business_steps row by
+#   construction (checked at transcription time — see the verification script in this task's
+#   report).
+
+role_flavour_combinations:
+  - combo_id: C1
+    fixpp_role: initiator
+    counterparty: QuickFIX-cpp
+  - combo_id: C2
+    fixpp_role: acceptor
+    counterparty: QuickFIX-cpp
+  - combo_id: C3
+    fixpp_role: initiator
+    counterparty: QuickFIX-J
+  - combo_id: C4
+    fixpp_role: acceptor
+    counterparty: QuickFIX-J
+
+arms:
+  - validation-off
+  - validation-on
+
+# cell_id ≡ (combo_id, arm) — stated in spec.md § "Conversation census" → "### Role × flavour
+# combinations" prose, not repeated here as a derived count.
+
+business_steps:
+  - step_id: B-01
+    msg_type: "D"
+    msg_name: NewOrderSingle
+    originator: fixpp
+    direction: fixpp-to-peer
+    applicable_combos: [C1, C2, C3, C4]
+    # spec.md verbatim: "`0` on C1 C2 · **`0,1`** on C3 C4" — B-01 occurrence 1 is the
+    # ResendRequest-driven replay (A-RESEND), declared inapplicable to C1/C2 below.
+    occurrences:
+      C1: [0]
+      C2: [0]
+      C3: [0, 1]
+      C4: [0, 1]
+    depends_on: []
+    expects_witness: true
+  - step_id: B-02
+    msg_type: "8"
+    msg_name: "ExecutionReport (New ack)"
+    originator: peer
+    direction: peer-to-fixpp
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: [B-01]
+    expects_witness: true
+  - step_id: B-03
+    msg_type: "F"
+    msg_name: OrderCancelRequest
+    originator: fixpp
+    direction: fixpp-to-peer
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: [B-02]
+    expects_witness: true
+  - step_id: B-04
+    msg_type: "9"
+    msg_name: OrderCancelReject
+    originator: peer
+    direction: peer-to-fixpp
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: [B-03]
+    expects_witness: true
+  - step_id: B-05
+    msg_type: "G"
+    msg_name: OrderCancelReplaceRequest
+    originator: fixpp
+    direction: fixpp-to-peer
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: [B-04]
+    expects_witness: true
+  - step_id: B-06
+    msg_type: "8"
+    msg_name: "ExecutionReport (Replaced)"
+    originator: peer
+    direction: peer-to-fixpp
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: [B-05]
+    expects_witness: true
+  - step_id: B-07
+    msg_type: "D"
+    msg_name: NewOrderSingle
+    originator: peer
+    direction: peer-to-fixpp
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: []
+    expects_witness: true
+  - step_id: B-08
+    msg_type: "8"
+    msg_name: "ExecutionReport (New ack)"
+    originator: fixpp
+    direction: fixpp-to-peer
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: [B-07]
+    expects_witness: true
+  - step_id: B-09
+    msg_type: "F"
+    msg_name: OrderCancelRequest
+    originator: peer
+    direction: peer-to-fixpp
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: [B-08]
+    expects_witness: true
+  - step_id: B-10
+    msg_type: "9"
+    msg_name: OrderCancelReject
+    originator: fixpp
+    direction: fixpp-to-peer
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: [B-09]
+    expects_witness: true
+  - step_id: B-11
+    msg_type: "G"
+    msg_name: OrderCancelReplaceRequest
+    originator: peer
+    direction: peer-to-fixpp
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: [B-10]
+    expects_witness: true
+  - step_id: B-12
+    msg_type: "8"
+    msg_name: "ExecutionReport (Replaced)"
+    originator: fixpp
+    direction: fixpp-to-peer
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: {C1: [0], C2: [0], C3: [0], C4: [0]}
+    depends_on: [B-11]
+    expects_witness: true
+
+admin_steps:
+  - step_id: A-LOGON
+    exchange: Logon / Logon
+    applicable_combos: [C1, C2, C3, C4]
+    expects_witness: false
+  - step_id: A-TESTREQ
+    exchange: "TestRequest → Heartbeat"
+    applicable_combos: [C1, C2, C3, C4]
+    expects_witness: false
+  - step_id: A-RESEND
+    exchange: "ResendRequest covering B-01 (drives B-01 occurrence 1)"
+    applicable_combos: [C3, C4]
+    expects_witness: false
+  - step_id: A-GAPFILL
+    exchange: SequenceReset-GapFill
+    applicable_combos: [C1, C2, C3, C4]
+    expects_witness: false
+  - step_id: A-REJECT
+    exchange: "Reject (35=3)"
+    applicable_combos: [C1, C2, C3, C4]
+    expects_witness: false
+  - step_id: A-LOGOUT
+    exchange: Logout / Logout
+    applicable_combos: [C1, C2, C3, C4]
+    expects_witness: false
+
+declared_inapplicable:
+  - what: "B-01 occurrence 1 (the fixpp-side app replay)"
+    combos_excluded: [C1, C2]
+    reason: >-
+      The replay needs a counterparty that will rewind its expected-target sequence number and
+      issue a ResendRequest for an already-delivered application message. That induction seam
+      exists only in the QuickFIX-J counterparty (INTEROP_CP_RESEND_APP, the
+      HP-QFj-*-recovery-outbound cells, which are QF-J-only for exactly this reason).
+      QuickFIX-cpp "never resends an already-seen frame" and strips PossDupFlag(43)/
+      OrigSendingTime(122) — recorded as L-021-3 and as the shipped
+      deferred:qfcpp-no-possdup-injection disposition.
+  - what: "peer-originated replay (any step)"
+    combos_excluded: [C1, C2, C3, C4]
+    reason: >-
+      Out of scope for this feature. On QuickFIX-cpp it is impossible (L-021-3); on QuickFIX-J it
+      is the PD-QFj-* cells' subject, not this conversation's.
