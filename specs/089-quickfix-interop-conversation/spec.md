@@ -880,12 +880,12 @@ claiming a pass with no corroborating run artifact.
   **the cell not having run**. So wherever a consumer's handling of a cell's outcome lets a cell that did
   not run leave the job green, any result cited from that consumer's run MUST be evidenced as having
   **actually executed**, read from that run's own **step log** and never from the job conclusion.
-  ⚠️ **The condition is a property of the consumer's OUTCOME HANDLING — not of the pull, and not of
-  pinning — so no trigger, workflow, line or shell behaviour is recorded here.** Earlier revisions each
-  recorded one, and each was false at source (Clarifications, 2026-09-11). **Re-derive it per consumer**:
-  read the step that interprets the cell's result and ask which non-`pass` outcomes still exit 0; the
-  pull step does not answer it. The consumers are enumerated by recipe in `plan.md` § *External
-  obligations*, which carries this obligation per consumer.
+  ⚠️ **The condition is keyed on the consumer's OUTCOME HANDLING, not on pinning — so no trigger,
+  workflow, line or shell behaviour is recorded here.** Earlier revisions each recorded one, and each was
+  false at source (Clarifications, 2026-09-11). **Re-derive it per consumer**: walk every step and script
+  from resolving the image to the job's verdict, and ask which non-`pass` outcomes — a skip, a missing
+  result, an image that will not pull — still let the job exit 0. The consumers are enumerated by recipe
+  in `plan.md` § *External obligations*, which carries this obligation per consumer.
 - **FR-016c**: A message for which **no** readback record arrived MUST fail its cell. An empty or absent
   readback set MUST NOT satisfy any fidelity comparison — the comparator MUST assert that a record was
   received before comparing its contents.
