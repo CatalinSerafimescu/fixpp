@@ -10,9 +10,22 @@
 #
 # 089-quickfix-interop-conversation T026: also validates the STRUCTURE of the
 # sibling witness_evidence.yaml artifact (data-model.md §6/§10/§11) — the full
-# E-1c/E-7a/E-7b/E-7c/W-3* completeness gates are implemented by later tasks
-# (T066-T092); this file only proves the three sections exist and are
-# distinguishable from a missing/null section.
+# E-1c/W-3* completeness gates are implemented by later tasks (T066-T092);
+# this file proves the three sections exist and are distinguishable from a
+# missing/null section, and (T066-T068) implements the E-7a/E-7b/E-7c CHECK
+# LOGIC itself, each proven against the CONSTRUCTED fixtures
+# contracts/witness-evidence.md § Proof obligations prescribes for it.
+# ⚠️ E-7a/E-7b/E-7c are NOT yet wired into test_schema_check_opens_no_
+# artifact_path()'s unconditional sweep over the REAL committed
+# witness_evidence.yaml: that file's `validation_pairs:`/`runs:` sections
+# are still empty (no run has been promoted into the COMMITTED artifact —
+# T061's live evidence went to a scratch ledger, per that task's own
+# instruction), and E-7a's own defect is exactly "zero pairs is green" — so
+# running it unconditionally against today's committed doc would redden the
+# whole schema check for a population a LATER task (T092, the same one this
+# comment already deferred W-3*/E-1c to) is responsible for populating. The
+# logic exists and is proven now; wiring it to the live artifact waits for
+# that population.
 #
 # Run via ctest (registered in tests/interop/CMakeLists.txt) or directly:
 #   python3 -m pytest -xvs tests/interop/cell_results_schema_check_test.py
@@ -214,6 +227,271 @@ def test_witness_evidence_null_section_goes_red():
     mutant = {"schema_version": 1, "witnesses": [], "runs": [], "validation_pairs": None}
     with pytest.raises(AssertionError, match="validation_pairs"):
         _check_witness_evidence_sections(mutant)
+
+
+# ── T066/T067/T068: E-7a / E-7b / E-7c (contracts/witness-evidence.md §
+# Obligations) — the validation_pairs: gates, re-evaluated against the
+# `runs:` ledger every time (both sections are committed; neither check
+# opens an artifact). See the module header comment for why these are not
+# yet wired into test_schema_check_opens_no_artifact_path()'s sweep over
+# the REAL committed doc. ────────────────────────────────────────────────────
+
+# census.yaml § role_flavour_combinations: C1..C4 — hand-kept here exactly as
+# EXPECTED_IDS below is (this file's own established pattern), not derived,
+# because deriving it would require opening a third committed file the
+# artifact-path guard does not yet allow.
+CONV_COMBO_IDS = ("C1", "C2", "C3", "C4")
+
+
+def _conformance_run(cell_id, config, arm, has_validator):
+    return {"run_id": f"{cell_id}-{config}-{arm}-run", "cell_id": cell_id, "config": config,
+            "combo_id": cell_id.split("-")[1], "arm": arm, "kind": "conformance",
+            "authoritative": True, "has_validator": has_validator}
+
+
+def _conformance_pair(combo_id, config):
+    off_cell, on_cell = f"CONV-{combo_id}-off", f"CONV-{combo_id}-on"
+    return {"pair_id": f"{off_cell}~{on_cell}@{config}", "cell_pair": [off_cell, on_cell],
+            "config": config, "off_run_id": f"{off_cell}-{config}-validation-off-run",
+            "on_run_id": f"{on_cell}-{config}-validation-on-run", "kind": "conformance",
+            "accepted_off": ["B-02"], "accepted_on": ["B-02"], "dispositions": [],
+            "authoritative": True, "verdict": "identical"}
+
+
+def _e7_fixture_complete():
+    """The 16-pair kind:conformance inventory (4 combos × 4 configs) PLUS one
+    admissible kind:validator-positive-control pair -- every E-7a/E-7b/E-7c
+    predicate satisfied. Every negative fixture in this section starts from
+    a (deep) copy of this and perturbs exactly the one thing its own arm
+    names."""
+    import copy
+    runs = []
+    pairs = []
+    for combo_id in CONV_COMBO_IDS:
+        for config in CONFIGS:
+            off_cell, on_cell = f"CONV-{combo_id}-off", f"CONV-{combo_id}-on"
+            runs.append(_conformance_run(off_cell, config, "validation-off", False))
+            runs.append(_conformance_run(on_cell, config, "validation-on", True))
+            pairs.append(_conformance_pair(combo_id, config))
+    ctrl_off = {"run_id": "ctrl-off-run", "cell_id": "CONV-C1-off", "config": "normal",
+                "kind": "validator-positive-control", "authoritative": True,
+                "has_validator": False, "expected_verdict": "diverged"}
+    ctrl_on = {"run_id": "ctrl-on-run", "cell_id": "CONV-C1-on", "config": "normal",
+               "kind": "validator-positive-control", "authoritative": True,
+               "has_validator": True, "expected_verdict": "diverged"}
+    ctrl_pair = {"pair_id": "ctrl-pair", "cell_pair": ["CONV-C1-off", "CONV-C1-on"],
+                 "config": "normal", "off_run_id": "ctrl-off-run", "on_run_id": "ctrl-on-run",
+                 "kind": "validator-positive-control", "accepted_off": ["B-01"],
+                 "accepted_on": [], "dispositions": [], "authoritative": True,
+                 "verdict": "diverged", "expected_verdict": "diverged"}
+    doc = {"schema_version": 1, "witnesses": [],
+           "runs": runs + [ctrl_off, ctrl_on], "validation_pairs": pairs + [ctrl_pair]}
+    return copy.deepcopy(doc)
+
+
+def _runs_by_id(doc):
+    return {r["run_id"]: r for r in doc.get("runs", []) if "run_id" in r}
+
+
+def _authoritative_pairs(doc, kind):
+    return [p for p in doc.get("validation_pairs", [])
+            if p.get("kind") == kind and p.get("authoritative") is True]
+
+
+def _check_e7a(doc):
+    """E-7a: the `validation_pairs:` section MUST carry EXACTLY the 16-pair
+    `kind: conformance` inventory (4 combos × 4 configs), scoped
+    `kind: conformance ∧ authoritative: true` — set EQUALITY, not
+    containment — AND exactly one such pair per (combo_id, config) slot (a
+    slot claimed twice collapses under bare set equality, which is why this
+    is a SEPARATE check from the equality below, not folded into it)."""
+    runs = _runs_by_id(doc)
+    slot_counts: dict[tuple, int] = {}
+    for p in _authoritative_pairs(doc, "conformance"):
+        off_run = runs.get(p.get("off_run_id"))
+        combo_id = off_run.get("combo_id") if off_run is not None else None
+        key = (combo_id, p.get("config"))
+        slot_counts[key] = slot_counts.get(key, 0) + 1
+    duplicated = {k for k, c in slot_counts.items() if c > 1}
+    assert not duplicated, (
+        f"E-7a: {duplicated!r} claimed by more than one authoritative "
+        f"kind:conformance pair")
+    observed = set(slot_counts)
+    expected = {(c, cfg) for c in CONV_COMBO_IDS for cfg in CONFIGS}
+    missing = expected - observed
+    unexpected = observed - expected
+    assert not missing and not unexpected, (
+        f"E-7a: validation_pairs kind:conformance,authoritative:true slot set != "
+        f"the 16-pair inventory; missing={missing!r} unexpected={unexpected!r}")
+
+
+def _check_e7b(doc):
+    """E-7b: AT LEAST ONE `authoritative: true` `kind: validator-positive-
+    control` pair MUST exist, carrying `expected_verdict: diverged` AND
+    `verdict: diverged`, whose off_run_id/on_run_id resolve to two DISTINCT
+    `authoritative: true` control runs with OPPOSITE has_validator. Restates
+    E-7's own distinctness/opposite-arm predicate rather than leaning on it
+    (E-7 fires once, at construction; E-7c is what re-evaluates on every CI
+    run — this is that host for the control half)."""
+    runs = _runs_by_id(doc)
+    for p in _authoritative_pairs(doc, "validator-positive-control"):
+        if p.get("expected_verdict") != "diverged" or p.get("verdict") != "diverged":
+            continue
+        off_run = runs.get(p.get("off_run_id"))
+        on_run = runs.get(p.get("on_run_id"))
+        if off_run is None or on_run is None:
+            continue
+        if off_run.get("authoritative") is not True or on_run.get("authoritative") is not True:
+            continue
+        if off_run.get("run_id") == on_run.get("run_id"):
+            continue
+        if off_run.get("has_validator") == on_run.get("has_validator"):
+            continue
+        return  # an admissible control pair exists
+    raise AssertionError(
+        "E-7b: no admissible authoritative:true kind:validator-positive-control pair "
+        "(expected_verdict: diverged, verdict: diverged, resolving to two distinct "
+        "authoritative:true control runs with opposite has_validator)")
+
+
+def _check_e7c(doc):
+    """E-7c: for EVERY `authoritative: true` pair, BOTH referenced runs MUST
+    STILL be `authoritative: true` — re-evaluated here, on every CI run,
+    because `authoritative` is MUTABLE after a pair is written (a later
+    retry supersedes a referenced run and E-7, which fired once at
+    construction, does not re-run). For a `conformance` pair, each
+    reference MUST additionally still be the run SELECTED for its
+    (cell_id, config) slot -- i.e. the unique authoritative kind:conformance
+    run for that slot, guarding independently of whatever else may or may
+    not have kept E-1c's one-per-slot invariant true."""
+    all_runs = doc.get("runs", [])
+    runs = _runs_by_id(doc)
+    for p in doc.get("validation_pairs", []):
+        if p.get("authoritative") is not True:
+            continue
+        pair_id = p.get("pair_id")
+        off_run = runs.get(p.get("off_run_id"))
+        on_run = runs.get(p.get("on_run_id"))
+        assert off_run is not None and on_run is not None, (
+            f"E-7c: pair {pair_id!r} references a run_id absent from runs:")
+        assert off_run.get("authoritative") is True and on_run.get("authoritative") is True, (
+            f"E-7c: pair {pair_id!r} is authoritative:true but references a "
+            f"SUPERSEDED run (off authoritative={off_run.get('authoritative')!r}, "
+            f"on authoritative={on_run.get('authoritative')!r})")
+        if p.get("kind") != "conformance":
+            continue
+        for run, label in ((off_run, "off"), (on_run, "on")):
+            selected = [r for r in all_runs
+                        if r.get("cell_id") == run.get("cell_id")
+                        and r.get("config") == run.get("config")
+                        and r.get("kind") == "conformance"
+                        and r.get("authoritative") is True]
+            assert run in selected, (
+                f"E-7c: pair {pair_id!r}'s {label} reference is not the run "
+                f"selected for its ({run.get('cell_id')!r}, {run.get('config')!r}) slot")
+
+
+def test_e7a_sixteen_pair_inventory_equality():
+    _check_e7a(_e7_fixture_complete())
+
+
+def test_e7a_duplicate_slot_goes_red():
+    # ⭐ SPURIOUS-HIT (T072 sibling / contracts/witness-evidence.md § Proof
+    # obligations): two authoritative kind:conformance pairs for ONE
+    # (cell_pair, config), opposite verdicts, every other gate satisfied —
+    # set equality alone COLLAPSES the duplicate and reports complete.
+    doc = _e7_fixture_complete()
+    dup = dict(doc["validation_pairs"][0])
+    dup["pair_id"] = dup["pair_id"] + "-dup"
+    dup["verdict"] = "diverged" if dup["verdict"] == "identical" else "identical"
+    doc["validation_pairs"].append(dup)
+    with pytest.raises(AssertionError, match="claimed by more than one"):
+        _check_e7a(doc)
+
+
+def test_e7a_empty_section_goes_red_on_an_otherwise_complete_artifact():
+    # ⭐ T071: the arm that closes "zero pairs is green" — forced against the
+    # OTHERWISE-COMPLETE artifact (runs: populated), not a stub.
+    doc = _e7_fixture_complete()
+    doc["validation_pairs"] = []
+    with pytest.raises(AssertionError, match="16-pair inventory"):
+        _check_e7a(doc)
+
+
+def test_e7a_fifteen_of_sixteen_goes_red_on_the_inventory_equality():
+    # T072: 15 of 16 conformance pairs, the other 15 well-formed and E-7-
+    # satisfying on every one -- equality, not containment. The empty
+    # fixture alone cannot discriminate an existence check from a
+    # completeness check.
+    doc = _e7_fixture_complete()
+    dropped = doc["validation_pairs"][0]["pair_id"]
+    doc["validation_pairs"] = [p for p in doc["validation_pairs"]
+                                if p["pair_id"] != dropped]
+    with pytest.raises(AssertionError, match="16-pair inventory") as excinfo:
+        _check_e7a(doc)
+    assert "missing=" in str(excinfo.value) and "unexpected=set()" in str(excinfo.value)
+
+
+def test_e7b_admissible_control_pair_required():
+    _check_e7b(_e7_fixture_complete())
+
+
+def test_e7b_sixteen_conformance_pairs_no_control_pair_goes_red():
+    # ⭐ an OTHERWISE-COMPLETE artifact (16 valid kind:conformance pairs) and
+    # NO kind:validator-positive-control pair at all. Assert E-7a stays
+    # GREEN on this fixture -- it excludes control pairs from its equality
+    # by design, so it reports complete over an artifact whose 16
+    # conformance `identical` verdicts are, per data-model §10, inadmissible
+    # without one.
+    doc = _e7_fixture_complete()
+    doc["validation_pairs"] = [p for p in doc["validation_pairs"]
+                                if p["kind"] != "validator-positive-control"]
+    doc["runs"] = [r for r in doc["runs"] if r["kind"] != "validator-positive-control"]
+    _check_e7a(doc)  # control absence does not perturb E-7a
+    with pytest.raises(AssertionError, match="no admissible"):
+        _check_e7b(doc)
+
+
+def test_e7b_control_pair_demoted_by_run_supersession_goes_red():
+    # ⭐ the ONLY control pair present resolves, is well-formed, carries
+    # expected_verdict/verdict: diverged -- but is authoritative: false
+    # because one referenced run was superseded and no replacement pair was
+    # built. Forced miss is the correct polarity (the defect IS an absence
+    # of an ADMISSIBLE pair) but only against this otherwise-complete shape.
+    doc = _e7_fixture_complete()
+    for p in doc["validation_pairs"]:
+        if p["kind"] == "validator-positive-control":
+            p["authoritative"] = False
+    with pytest.raises(AssertionError, match="no admissible"):
+        _check_e7b(doc)
+
+
+def test_e7c_stale_authoritative_pair_after_run_supersession_goes_red():
+    # ⭐ T068's own fixture (contracts/witness-evidence.md § Proof
+    # obligations): a pair STILL authoritative:true, one of whose referenced
+    # runs was LATER superseded by a retry (its own replacement run row IS
+    # present and authoritative), and NO replacement pair was constructed --
+    # the producer re-promoted the run and never rebuilt the pair.
+    doc = _e7_fixture_complete()
+    stale_off_run_id = doc["validation_pairs"][0]["off_run_id"]
+    stale_run = next(r for r in doc["runs"] if r["run_id"] == stale_off_run_id)
+    stale_run["authoritative"] = False
+    replacement = dict(stale_run)
+    replacement["run_id"] = stale_run["run_id"] + "-retry"
+    replacement["authoritative"] = True
+    doc["runs"].append(replacement)
+    # E-1c and E-7a both stay GREEN on this artifact -- exactly one
+    # authoritative pair claims the slot and the 32-slot equality (E-1c,
+    # not implemented in this file yet) is unaffected by a RUN-level retry
+    # that never touched the pairs section; assert E-7a specifically, since
+    # this file DOES implement it.
+    _check_e7a(doc)
+    with pytest.raises(AssertionError, match="SUPERSEDED run"):
+        _check_e7c(doc)
+
+
+def test_e7c_fresh_artifact_passes():
+    _check_e7c(_e7_fixture_complete())
 
 
 def test_required_fields_present(cells):
