@@ -34,6 +34,7 @@
 // (`readback`) and 3 (`terminal`) are C-7-bound across all three emitters.
 #include "readback_jsonl.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -68,7 +69,27 @@ int main(int argc, char** argv)
         {"355", std::string("\xff\xfe", 2)},
         {"58", "e\xcc\x81 utf8 multi-byte"},
         {"453", "2"},
+        // 089 T039/T040 (C-6/C-7): ApplExtID(1156) is not a FIX 4.4 field, so it
+        // never reaches a readback record via a live cell -- this constructed
+        // fixture is the only place it can be exercised. It is a CANDIDATE
+        // field here; the filter below must remove it before the record is
+        // written, or fixpp would diverge from both counterparties on C-6.
+        // ⚠️ This is a FIXTURE-ONLY restatement of the canonical partition's
+        // 1156 entry (contracts/readback-jsonl.md § THE CANONICAL PARTITION),
+        // hardcoded because fixpp's live walker has no general C-6 partition
+        // yet (089 T038, out of scope here) — there is no production function
+        // to call. The two counterparty drivers apply the identical tag
+        // through their own shared cross_engine_header_delta() /
+        // RECONCILED_HEADER_TAGS; this is fixpp's twin of that one entry.
+        {"1156", "should-be-excluded-as-header"},
     };
+    // THE CANONICAL PARTITION: applies at TOP LEVEL only (a bare numeric
+    // path) -- group members are body by construction.
+    f.erase(std::remove_if(f.begin(), f.end(),
+                            [](fixpp::interop::readback::FieldEntry const& e) {
+                                return e.path == "1156";
+                            }),
+            f.end());
     s.readback("D", 7, "fixpp-to-peer", 0, false, f,
                {{"55", "STRING", fixpp::interop::readback::canonical_typed_value("STRING", "AAPL")},
                 {"44", "PRICE", fixpp::interop::readback::canonical_typed_value("PRICE", "190.500")},
