@@ -218,6 +218,20 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
   the open set at publish time. ⚠️ **`research.md` R-11's prescription is superseded by this**; its concern
   — that nothing should silently depend on an unverified image — is what the new ordering discharges.
 
+### Session 2026-09-11 (FR-016b — the consumers' failure direction)
+
+- Q: FR-016b said an unpullable pin is a skip and a skip is green, and keyed its step-log obligation on
+  every site that pins a digest. Both halves were checked at source; what does the requirement become?
+  → A: **A CONDITION with a re-derivation recipe, and no recorded result.** Measured 2026-09-11: the
+  stated trigger was false — an image that will not pull fails the pull step and reddens both consumers;
+  the scope was empty — after FR-026 neither consumer pins; and the correction first written into
+  `plan.md` was itself partly false — it attributed a silent runtime skip to both consumers when only
+  one consumer's outcome handling tolerated one, and it cited this bundle's FR-023, which is the
+  sanitizer bound. ⛔ **Each revision had replaced a wrong claim about the workflows with a new one, so
+  the claim is deleted rather than corrected again**: FR-016b now states the condition (a consumer whose
+  outcome handling lets a cell that did not run leave the job green) and how to re-derive it. The digest
+  requirement itself is unchanged.
+
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -862,14 +876,16 @@ claiming a pass with no corroborating run artifact.
   cell requires. That refusal MUST be a **failure**, not a skip and not a pass.
 - **FR-016b**: The counterparty image MUST be referenced by immutable digest, not by a mutable tag, so
   that the exact counterparty build behind any result is recoverable after the fact.
-  ⛔ **AN UNPULLABLE PIN IS A *SKIP*, AND A SKIP IS *GREEN*.** This image's consumers skip-with-reason and
-  keep the job green when the image cannot be pulled (that is the deliberate counterparty-absent
-  handling), so a digest that is wrong, stale or simply gone does **not** redden anything — it silently
-  removes the cell while the check still reports success. ⚠️ *Ask what ELSE satisfies "the pinned cell
-  passed"*: **the cell not having run**. So every site that pins a digest MUST also evidence that the
-  cell **actually executed**, read from that run's own **step log** and never from the job conclusion —
-  and the sites that pin one are enumerated in `plan.md` § *External obligations*, which carries this
-  obligation per consumer rather than leaving it to the reader of this clause.
+  ⛔ **A GREEN JOB IS NOT EVIDENCE THAT A CELL RAN.** ⚠️ *Ask what ELSE satisfies "the cell passed"*:
+  **the cell not having run**. So wherever a consumer's handling of a cell's outcome lets a cell that did
+  not run leave the job green, any result cited from that consumer's run MUST be evidenced as having
+  **actually executed**, read from that run's own **step log** and never from the job conclusion.
+  ⚠️ **The condition is a property of the consumer's OUTCOME HANDLING — not of the pull, and not of
+  pinning — so no trigger, workflow, line or shell behaviour is recorded here.** Earlier revisions each
+  recorded one, and each was false at source (Clarifications, 2026-09-11). **Re-derive it per consumer**:
+  read the step that interprets the cell's result and ask which non-`pass` outcomes still exit 0; the
+  pull step does not answer it. The consumers are enumerated by recipe in `plan.md` § *External
+  obligations*, which carries this obligation per consumer.
 - **FR-016c**: A message for which **no** readback record arrived MUST fail its cell. An empty or absent
   readback set MUST NOT satisfy any fidelity comparison — the comparator MUST assert that a record was
   received before comparing its contents.
