@@ -17,17 +17,84 @@
 # prevent, reproduced by the gate's own arithmetic. See the contract's
 # § "Why D-1 is two predicates and not a minimum".
 #
-# ── The threshold table is EMPTY on purpose ─────────────────────────────────
-# T001 (the four-configuration disk measurement) has not run. Every threshold
-# slot below is an explicit unparseable sentinel, which D-9 makes a HARD ERROR
-# — never a silent 0 (a 0 threshold would make "comfortable" vacuously true).
-# Do not invent numbers here; fill them in, per config, per predicate, WITH
-# THE MEASUREMENT DATE, only once T001 lands (contract D-7).
+# ── The threshold table — T001's measurement, 2026-09-11 ───────────────────
+# ⚠️ Measured AS THE MATRIX PERFORMS IT (spec.md Clarifications 2026-09-11):
+# INCREMENTALLY, in the existing per-configuration trees, not from clean —
+# `cmake --build build/<preset> --target <the 18 interop-driver targets the
+# EXISTING cells name>` (T052's four new-cell binaries do not exist yet;
+# T052a re-derives once they do, before any later gated build). Method:
+# before/peak/after `df -k /` and `df -k /mnt/e`, sampled every 3s during the
+# build (peak = the running minimum availability seen, i.e. the largest draw-
+# down observed), run under `--bootstrap` (D-9a's only admissible use).
+# Non-vacuity of the sampler itself was proven first: a 500 MiB known write
+# on each mount moved that mount's reading by exactly 512000 KB before this
+# table was trusted.
 #
-# ── No figures anywhere in this script ──────────────────────────────────────
-# Every disk figure this bundle carried was false within the day it was
-# written (plan.md § "Disk preflight"). This script prints LIVE readings; it
-# never hardcodes one.
+# Measured deltas (KB), this run, this host state:
+#   normal (build/linux-clang-debug, already fully built): internal peak
+#     4812 (before 95831616 -> min 95826804), host peak 16 (unchanged in
+#     practice) — near-zero, as expected for an already-populated tree.
+#   asan   (build/linux-clang-asan, already fully built): internal peak
+#     10432 (before 93032168 -> min 93021736), host peak 0 — near-zero,
+#     despite ninja re-running all 154 steps (a codegen-fingerprint refresh
+#     touched generated headers) because every output OVERWRITES a path
+#     that already existed; nothing NEW was created.
+#   tsan   (build/linux-clang-tsan, already fully built): internal delta
+#     73576 (before 93033528 -> after 92959952), host peak 0 — same shape,
+#     somewhat larger (a live ccache miss on a couple of TUs), still small.
+#   ubsan  (build/linux-clang-ubsan, essentially EMPTY at measurement time —
+#     128 objects vs siblings' ~1600, the config this measurement exists to
+#     exercise): internal delta 2799200 (before 95831420 -> after 93032220,
+#     the after reading, not the 3s-granularity peak, is the true worst case
+#     here since the last sample landed slightly before final linking),
+#     HOST DELTA 0 (before/peak/after all 17709580) — the whole ~2.67 GiB of
+#     new internal data (codegen bootstrap + full core-library rebuild +
+#     18 test binaries, all genuinely NEW files in this tree) landed in the
+#     already-materialised VHD-on-host extents and cost the host mount
+#     NOTHING. No breach of the 3 GiB host floor at any config.
+#
+# ── Headroom rule (stated per D-7/D-7a; dated 2026-09-11) ───────────────────
+# required_internal_free = max(1.5 x measured_peak_delta_kb, floor_kb).
+#   floor_kb = 200 MiB (204800 KB) for a config whose tree was ALREADY
+#   POPULATED at measurement time (normal/asan/tsan) — comfortably above the
+#   largest of the three measured peaks (73576 KB, tsan) so the threshold is
+#   never so small it is trivially satisfied by an almost-full disk (the same
+#   vacuous-near-zero failure D-9/A-7 forbid for an UNSET slot, reproduced by
+#   a measured-but-negligible one). The floor does not bind for ubsan
+#   (1.5x its measured delta is already far larger).
+#
+# required_host_growth: D-7a requires this be R-1's MEASURED HOST DELTA, not
+# derived from or offset by the reuse pool. All four configs measured a host
+# delta at or effectively at 0 on THIS run — but per D-7a's own warning, the
+# already-materialised reuse pool that made every write land free is a
+# BOUND, not a guarantee, and "ext4 does not preferentially allocate into
+# already-materialised extents" (plan.md/research.md), so it may simply not
+# be realised on a future run with a differently-shaped VHD. Writing the
+# measured 0 forward would make the host predicate VACUOUSLY satisfied by
+# any host state whatsoever — precisely the A-7 spurious-hit shape, at the
+# far more consequential predicate. So required_host_growth uses:
+#   - normal/asan/tsan: the SAME 200 MiB floor as required_internal_free.
+#     Even if the reuse pool fails entirely on a future run, these three
+#     configs are OVERWRITING paths that already exist (no new file
+#     creation observed at this measurement), so their true host-growth
+#     exposure is inherently bounded by the same small figure, not by the
+#     reuse-pool bound.
+#   - ubsan: the SAME pessimistic value as required_internal_free (not a
+#     small floor) — this config genuinely creates thousands of NEW files,
+#     so a reuse-pool failure here translates directly into real host
+#     growth up to the full internal delta; research.md's own fallback
+#     model is exactly "assume no reuse; host cost = build size", applied
+#     here rather than trusting the one favourable measurement.
+#
+# Honestly labelled: measured against the EXISTING cells' 18 interop-driver
+# targets, on this host's 2026-09-11 state. T052a re-derives once T052's
+# four new-cell binaries exist, before any later gated build (D-7/T052a).
+#
+# ── No OTHER figures anywhere in this script ────────────────────────────────
+# Every disk figure this bundle carried elsewhere was false within the day it
+# was written (plan.md § "Disk preflight"). This script prints LIVE readings
+# for every OTHER quantity; the threshold table above is the one place a
+# dated, sourced figure belongs (D-7).
 #
 # ── Testability ──────────────────────────────────────────────────────────────
 # Every external input this script reads is overridable from the environment,
@@ -46,10 +113,10 @@
 # every line it governs — same visibility discipline as --bootstrap below.
 set -uo pipefail
 
-# ── The threshold table — every slot UNSET, awaiting T001's measurement ────
-declare -A INTERNAL_FREE_KB=( [normal]="" [asan]="" [ubsan]="" [tsan]="" )
-declare -A HOST_GROWTH_KB=(   [normal]="" [asan]="" [ubsan]="" [tsan]="" )
-declare -A THRESHOLD_DATE=(   [normal]="" [asan]="" [ubsan]="" [tsan]="" )
+# ── The threshold table — populated by T001, 2026-09-11 (see the block above)
+declare -A INTERNAL_FREE_KB=( [normal]="204800" [asan]="204800" [ubsan]="4198800" [tsan]="204800" )
+declare -A HOST_GROWTH_KB=(   [normal]="204800" [asan]="204800" [ubsan]="4198800" [tsan]="204800" )
+declare -A THRESHOLD_DATE=(   [normal]="2026-09-11" [asan]="2026-09-11" [ubsan]="2026-09-11" [tsan]="2026-09-11" )
 
 declare -A CONFIG_DIR=(
   [normal]="linux-clang-debug"
@@ -336,7 +403,7 @@ resolve_threshold() {
     THR_KB="${HOST_GROWTH_KB[$CONFIG]}"
   fi
   THR_DATE="${THRESHOLD_DATE[$CONFIG]}"
-  THR_SRC="embedded-table (awaiting T001 measurement)"
+  THR_SRC="embedded-table"
 }
 
 # D-9: unset OR unparseable OR missing its date is a hard error — never 0.

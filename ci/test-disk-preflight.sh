@@ -288,44 +288,54 @@ echo
 echo "== spurious-hit arms (FR-018): mutant GREEN-wrongly, then real RED ======="
 
 # ── A-7: threshold unset/unparseable, BOTH mounts nearly full — spurious hit.
-# Mutant: the embedded-table lookup defaults an unset slot to "0" instead of
-# leaving it empty (the exact "threshold defaulting to 0" shape D-9 exists to
-# forbid). Fixture deliberately does NOT set REQ_INTERNAL/REQ_HOST overrides
-# — this exercises the embedded per-config table, which is unset for every
-# config until T001 lands.
+# ⚠️ Re-aimed 2026-09-11 (T001 landed): the embedded table is now POPULATED
+# for all four configs, so "unset" can no longer be reached by leaving the
+# override unset and relying on an empty embedded slot — that arm no longer
+# exists to exercise. The override mechanism is what now reaches "unparseable"
+# (the contract's other named trigger, "unset OR unparseable"): a threshold
+# override that IS supplied but is NOT a number. Mutant re-aimed to the
+# OVERRIDE branch of resolve_threshold — the exact "defaulting to 0 instead of
+# failing validation" shape D-9 exists to forbid, now reachable via the
+# override path since the embedded-table path can no longer produce it.
 M7="$(mutate M-A7 <<'PY'
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = ('  if [ "$predicate" = "internal" ]; then\n'
-       '    THR_KB="${INTERNAL_FREE_KB[$CONFIG]}"\n'
-       '  else\n'
-       '    THR_KB="${HOST_GROWTH_KB[$CONFIG]}"\n'
-       '  fi\n'
-       '  THR_DATE="${THRESHOLD_DATE[$CONFIG]}"\n')
-new = ('  if [ "$predicate" = "internal" ]; then\n'
-       '    THR_KB="${INTERNAL_FREE_KB[$CONFIG]:-0}"\n'
-       '  else\n'
-       '    THR_KB="${HOST_GROWTH_KB[$CONFIG]:-0}"\n'
-       '  fi\n'
-       '  THR_DATE="${THRESHOLD_DATE[$CONFIG]:-1970-01-01}"\n')
+old = '''  if [ -n "$ov_val" ]; then
+    THR_KB="$ov_val"
+    THR_DATE="$ov_date"
+    THR_SRC="test-override"
+    return
+  fi
+'''
+new = '''  if [ -n "$ov_val" ]; then
+    if [[ "$ov_val" =~ ^[0-9]+$ ]]; then THR_KB="$ov_val"; else THR_KB=0; fi
+    THR_DATE="$ov_date"
+    THR_SRC="test-override"
+    return
+  fi
+'''
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 PY
 )"
 if [ -n "$M7" ]; then
   # Both mounts NEARLY FULL — 1 KB avail each — so the finding is stark: a
-  # defaulted-0 threshold is satisfied by essentially nothing free.
+  # defaulted-0 threshold is satisfied by essentially nothing free. The
+  # override VALUE is unparseable ("garbage"); its DATE is a valid, present
+  # date — isolating the property under test to the value-regex check alone,
+  # not conflated with the separate missing-date hard error.
   DF_TABLE="$WORK/df-a7"
   mk_df_table "$DF_TABLE" "/" "1" "/dev/sdd-build" "/mnt/e" "1" "/dev/sde-host"
-  unset REQ_INTERNAL REQ_INTERNAL_DATE REQ_HOST REQ_HOST_DATE
+  REQ_INTERNAL="garbage"; REQ_INTERNAL_DATE="2026-09-11"
+  REQ_HOST="garbage"; REQ_HOST_DATE="2026-09-11"
   WANT_TOKENS=("verdict: proceed")
   WANT_ABSENT=()
-  cell "A-7 MUTANT unset-threshold-defaults-to-0 -> spurious PASS" 0 "$M7" --config normal
+  cell "A-7 MUTANT override-unparseable-defaults-to-0 -> spurious PASS" 0 "$M7" --config normal
 
-  WANT_TOKENS=("hard_error:" "D-9")
+  WANT_TOKENS=("hard_error:" "threshold_unset_or_unparseable" "D-9")
   WANT_ABSENT=("verdict: proceed")
-  cell "A-7 REAL unset-threshold -> hard error (D-9), same fixture" 2 "$SCRIPT" --config normal
+  cell "A-7 REAL unparseable-override -> hard error (D-9), same fixture" 2 "$SCRIPT" --config normal
   REQ_INTERNAL="1000000"; REQ_INTERNAL_DATE="2026-09-11"; REQ_HOST="1000000"; REQ_HOST_DATE="2026-09-11"
   mk_comfortable_df
 fi
@@ -373,17 +383,32 @@ fi
 echo
 echo "== T007: D-9a bootstrap cannot bypass the gate in ordinary operation ====="
 
-# Ordinary operation (no --bootstrap, no threshold override) across ALL FOUR
-# configs must hard-error — the embedded table is unset for every one of
-# them. This is the proof that bypass is impossible without deliberately
-# supplying real, dated numbers: there is no code path in ordinary use that
-# reaches a verdict at all.
+# ⚠️ Re-expressed 2026-09-11 (T001 landed): the embedded table is now
+# POPULATED for all four configs (D-7), so "ordinary operation hard-errors
+# unconditionally" is no longer the correct claim — the whole POINT of T001
+# landing is that ordinary operation now reaches a REAL verdict. What must
+# still hold: (a) that verdict is real and dated, never a silent bypass
+# (proven below — no hard_error, a genuine proceed/stop/reclaim-first, and
+# the dates/sources printed are the embedded ones, not a stray override);
+# (b) the D-9a bootstrap discipline (all three flags required) is unaffected
+# (unchanged, still proven below); (c) D-9 still governs a threshold that IS
+# present but lacks its measurement date — proven with an explicit override.
 unset REQ_INTERNAL REQ_INTERNAL_DATE REQ_HOST REQ_HOST_DATE
 for c in normal asan ubsan tsan; do
-  WANT_TOKENS=("hard_error:" "threshold_unset_or_unparseable" "D-9")
-  WANT_ABSENT=("verdict: proceed" "verdict: stop" "verdict: reclaim-first")
-  cell "T007 ordinary-operation config=$c cannot bypass (D-9 fires unconditionally)" 2 "$SCRIPT" --config "$c"
+  WANT_TOKENS=("verdict:" "required_internal_free_source: embedded-table" "required_host_growth_source: embedded-table")
+  WANT_ABSENT=("hard_error:")
+  cell "T007 ordinary-operation config=$c now reaches a real verdict (T001 landed, D-7)" 0 "$SCRIPT" --config "$c"
 done
+mk_comfortable_df
+
+# D-9 still fires on a threshold that IS present but carries NO measurement
+# date — proven via an explicit override rather than relying on the (now
+# populated) embedded table to ever be in that state.
+REQ_INTERNAL="1000000"; REQ_INTERNAL_DATE=""
+WANT_TOKENS=("hard_error:" "threshold_missing_measurement_date" "D-9")
+WANT_ABSENT=("verdict: proceed")
+cell "T007 present-value-no-date still hard-errors (D-9)" 2 "$SCRIPT" --config normal
+unset REQ_INTERNAL REQ_INTERNAL_DATE REQ_HOST REQ_HOST_DATE
 
 # --bootstrap missing any one of the three required values is ALSO a hard
 # error — bootstrap mode cannot be entered by accident.
