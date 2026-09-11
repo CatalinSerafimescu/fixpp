@@ -109,7 +109,7 @@ and breaks FR-004.
 ⛔ **The Java side can only honour `value_b64` because QuickFIX/J's charset is a total bijection — PIN IT.**
 QuickFIX/J decodes the frame's `byte[]` to a `String` before the application sees it, so an
 application-level emitter can reproduce raw bytes **only** if that conversion loses nothing. In the pinned
-engine it does not: `org.quickfixj.CharsetSupport.getDefaultCharset()` returns **`ISO-8859-1`**, which maps
+engine it does not: the charset in effect, `org.quickfixj.CharsetSupport.getCharset()`, defaults to **`ISO-8859-1`**, which maps
 all 256 byte values bijectively to U+0000–U+00FF, so `new String(b, ISO_8859_1).getBytes(ISO_8859_1) == b`
 for every input. **Reconstruction is exact, and `value_b64` is emitted by re-encoding the `String` with
 `ISO-8859-1`.**
@@ -118,8 +118,8 @@ for every input. **Reconstruction is exact, and `value_b64` is emitted by re-enc
 is implementable. Under any non-bijective charset (UTF-8 among them) malformed sequences are replaced
 during decode and the original bytes are **unrecoverable at application level**, at which point the only
 remaining route is capturing raw bytes below the decoder. The contract therefore **requires** the Java
-counterparty to assert `CharsetSupport.getDefaultCharset()` is `ISO-8859-1` at startup and fail loudly
-otherwise, rather than inheriting it.
+counterparty to assert `CharsetSupport.getCharset()` is `ISO-8859-1` at startup and fail loudly
+otherwise, rather than inheriting it. ⚠️ *Not* `getDefaultCharset()`: in the pinned engine that method returns a hard-coded literal, so an assertion on it can never fail; the charset in effect starts as that default and `setCharset` changes it.
 
 ⚠️ **The synthetic fixture does not establish this.** Constructing a message directly in the emitter
 bypasses the decoder entirely, so it proves the *emitter* round-trips and says nothing about the **live**
@@ -331,6 +331,6 @@ forbids**: no field of this format can witness typed-accessor *invocation*, and 
 | sort order | the three emitters given the same constructed message produce **byte-identical** records; a walk-order-dependent emitter fails |
 | C-7 | the cross-language golden fixture is **byte-identical from all three emitters** — the QuickFIX-cpp counterparty, the QuickFIX-J counterparty, and fixpp — each invoked on the same constructed record and compared against **one** committed expected artifact |
 | escaping | each byte class, **each of the three emitters**, including a non-UTF-8 value routed to `value_b64`. ⚠️ Synthetic — emitter-level only; the live path is C-11's, not this row's |
-| C-11 | a `0xff` byte declared in `EncodedText(355)` on step `B-05`, driven **over the wire** on C3/C4, arrives with `value_b64` equal to the base64 of the original wire bytes; and the QuickFIX-J counterparty **asserts `CharsetSupport.getDefaultCharset() == ISO-8859-1` at startup**, failing loudly otherwise |
+| C-11 | a `0xff` byte declared in `EncodedText(355)` on step `B-05`, driven **over the wire** on C3/C4, arrives with `value_b64` equal to the base64 of the original wire bytes; and the QuickFIX-J counterparty **asserts `CharsetSupport.getCharset() == ISO-8859-1` at startup** (the charset in effect — never `getDefaultCharset()`, a literal), failing loudly otherwise |
 | C-8 | an intent/sent record derived from the serialized frame ⇒ RED (FR-018's first spurious-hit arm) |
 | R-4 | stale **append-mode** readback ⇒ RED — this is a load-bearing decision, not a formatting choice |
