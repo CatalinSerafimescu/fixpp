@@ -17,83 +17,123 @@
 # prevent, reproduced by the gate's own arithmetic. See the contract's
 # § "Why D-1 is two predicates and not a minimum".
 #
-# ── The threshold table — T001's measurement, 2026-09-11 ───────────────────
-# ⚠️ Measured AS THE MATRIX PERFORMS IT (spec.md Clarifications 2026-09-11):
-# INCREMENTALLY, in the existing per-configuration trees, not from clean —
-# `cmake --build build/<preset> --target <the 18 interop-driver targets the
-# EXISTING cells name>` (T052's four new-cell binaries do not exist yet;
-# T052a re-derives once they do, before any later gated build). Method:
-# before/peak/after `df -k /` and `df -k /mnt/e`, sampled every 3s during the
-# build (peak = the running minimum availability seen, i.e. the largest draw-
-# down observed), run under `--bootstrap` (D-9a's only admissible use).
-# Non-vacuity of the sampler itself was proven first: a 500 MiB known write
-# on each mount moved that mount's reading by exactly 512000 KB before this
-# table was trusted.
+# ── The threshold table — T052a's measurement, 2026-09-11 ──────────────────
+# ⚠️ Re-derivation of T001's table (D-7): T001 priced the 18 interop-driver
+# targets the EXISTING cells named, because T052's cells did not exist yet.
+# T052 landed and, per its own tasks.md note, collapsed to TWO new gtest
+# binaries, not four: `interop_conversation_test` (combo-neutral — all four
+# CONV-C1..C4 combos and both arms select behaviour at RUNTIME via
+# INTEROP_FIXPP_COMBO_ID/INTEROP_FIXPP_ARM, not at build time) and
+# `interop_probe_test` (the CONV-PROBE-* cells, deliberately a separate
+# binary — see probe_cell_test.cpp's header). Confirmed by enumerating the
+# distinct `binary=` field across every `Cell` in `run_interop_cell.py`
+# (`python3 -c "import run_interop_cell as m;
+# print(sorted({c.binary for c in m.CELLS.values()}))"` — 20 names, exactly
+# T001's 18 plus these two) and cross-checked against
+# `tests/interop/CMakeLists.txt`, which registers exactly two new
+# `fixpp_add_interop_test` targets under the "089 Phase 5"/"T062a/T062b"
+# comments. T001's "four binaries" language was a pre-T052 estimate this
+# measurement supersedes; the condition to re-derive next time is "the set
+# of distinct `Cell.binary` values changes", not a specific count.
 #
-# Measured deltas (KB), this run, this host state:
-#   normal (build/linux-clang-debug, already fully built): internal peak
-#     4812 (before 95831616 -> min 95826804), host peak 16 (unchanged in
-#     practice) — near-zero, as expected for an already-populated tree.
-#   asan   (build/linux-clang-asan, already fully built): internal peak
-#     10432 (before 93032168 -> min 93021736), host peak 0 — near-zero,
-#     despite ninja re-running all 154 steps (a codegen-fingerprint refresh
-#     touched generated headers) because every output OVERWRITES a path
-#     that already existed; nothing NEW was created.
-#   tsan   (build/linux-clang-tsan, already fully built): internal delta
-#     73576 (before 93033528 -> after 92959952), host peak 0 — same shape,
-#     somewhat larger (a live ccache miss on a couple of TUs), still small.
-#   ubsan  (build/linux-clang-ubsan, essentially EMPTY at measurement time —
-#     128 objects vs siblings' ~1600, the config this measurement exists to
-#     exercise): internal delta 2799200 (before 95831420 -> after 93032220,
-#     the after reading, not the 3s-granularity peak, is the true worst case
-#     here since the last sample landed slightly before final linking),
-#     HOST DELTA 0 (before/peak/after all 17709580) — the whole ~2.67 GiB of
-#     new internal data (codegen bootstrap + full core-library rebuild +
-#     18 test binaries, all genuinely NEW files in this tree) landed in the
-#     already-materialised VHD-on-host extents and cost the host mount
-#     NOTHING. No breach of the 3 GiB host floor at any config.
+# The targeted build this table now prices is `cmake --build
+# build/<preset> --target <these 20 names>`, never `all`. The counterparty
+# binaries (QuickFIX-cpp/-J) are OUT of this budget on every config: per
+# plan.md's "Structure Decision" consequence 3, `interop-matrix.yml` `docker
+# cp`s a prebuilt counterparty binary out of a published image rather than
+# rebuilding it, so it never lands in `build/linux-clang-*`.
+#
+# Method: before/peak/after `df -k /` and `df -k /mnt/e`, sampled every 1s
+# during the build (peak = the running minimum availability seen, i.e. the
+# largest draw-down observed; take max(peak-from-samples, before-after) since
+# a 1s-granularity sample can still land slightly before final linking).
+# Non-vacuity of the sampler was re-proven first, same recipe as T001: a
+# 500 MiB known write on each mount moved that mount's reading by exactly
+# 512000/512004 KB before this table was trusted. No `--bootstrap` here —
+# T052a's own task text says D-9a's bootstrap is admissible for R-1's first
+# measurement only, and this measurement runs unbootstrapped throughout.
+#
+# Measured deltas (KB), this run, this host state (2026-09-11):
+#   normal (build/linux-clang-debug, all 20 targets already built): internal
+#     delta 24 (before 92014732 -> after 92014708), host delta 0 (unchanged
+#     17709372) — near-zero, confirming the floor below still covers the
+#     already-populated shape even with the two new binaries in the target
+#     set.
+#   asan   (build/linux-clang-asan, 18 pre-existing targets already built;
+#     building ONLY the 2 new targets): internal delta 210880 (before
+#     92014692 -> after 91803812), host delta 0 (unchanged 17709372) —
+#     ALREADY-POPULATED shape (fixpp_dictionary/codegen/core lib all
+#     resident already; this is the true cost of adding the two new
+#     binaries on top of an otherwise-built tree). This is NOT this config's
+#     priced threshold — see the condition below.
+#   tsan   (build/linux-clang-tsan, same shape as asan): internal delta
+#     184444 (before 91803796 -> after 91619352), host delta 0 (unchanged
+#     17709372). Also NOT this config's priced threshold — see below.
+#   ubsan  (build/linux-clang-ubsan, GENUINE EMPTY TREE this time — `rm -rf
+#     build/linux-clang-ubsan` first, then `conan export`+`conan install`,
+#     `cmake --preset linux-clang-ubsan`, then the full 20-target build; a
+#     truer empty-tree measurement than T001's, which started from 128
+#     objects w/ CMakeCache already present): internal delta 3957736 KB
+#     (before, read right after `rm -rf` completed, 95887236 -> after the
+#     full sequence, 91929500), broken down as conan install 1972 (all 14
+#     packages already in the local `~/.conan2` cache — "Already installed!"
+#     for every one, so this leg costs almost nothing) + cmake configure
+#     592492 + `ninja` build 3363272. HOST DELTA 0 throughout every phase
+#     (17709372 unchanged at every one of the 142 one-second samples and at
+#     every phase boundary in the build log) — the whole ~3.78 GiB of new
+#     internal data (codegen bootstrap + full core-library rebuild + all 20
+#     test binaries, genuinely new files in a genuinely empty tree) again
+#     landed in the already-materialised VHD-on-host extents and cost the
+#     host mount nothing. The configure+`conan install` cost T001's table
+#     flagged as unmeasured is measured here (594464 KB of the 3957736
+#     total) — that deferral is now discharged, not still open.
 #
 # ⚠️ CONDITION THIS TABLE PRESUPPOSES (plan.md § Matrix sequencing / Reclaim
-# procedure): asan/ubsan/tsan are ALL reclaimable and the matrix's own order
-# (normal → ubsan → asan → tsan) reclaims-then-rebuilds asan and tsan too —
-# so "asan/tsan already fully built" is a PROPERTY OF THIS MOMENT (2026-09-11),
-# not of those configs. The first build of any of the three reclaimable
-# configs AFTER that config has been reclaimed is the EMPTY-TREE shape (same
-# as the ubsan measurement below), not the near-zero already-populated shape
-# — this table prices asan/tsan for that shape directly (see headroom rule),
-# rather than trusting they will always be consulted while still populated.
-# `normal` is the one config genuinely exempt: it is NEVER reclaimed (standing
-# user rule 2026-09-10), so it is always in the already-populated state this
-# table measured.
+# procedure), UNCHANGED from T001: asan/ubsan/tsan are ALL reclaimable and
+# the matrix's own order (normal → ubsan → asan → tsan) reclaims-then-
+# rebuilds asan and tsan too — so "asan/tsan already fully built" above is a
+# PROPERTY OF THIS MOMENT (2026-09-11), not of those configs. The first
+# build of any of the three reclaimable configs AFTER that config has been
+# reclaimed is the EMPTY-TREE shape (the ubsan measurement above), not the
+# already-populated shape asan/tsan happened to be measured in this round —
+# so asan/tsan's 210880/184444 KB readings above are NOT their priced
+# threshold; they are informational only, and are NOT compared against the
+# 200 MiB floor below (that floor governs `normal` alone). This table prices
+# asan/tsan for the empty-tree shape directly (see headroom rule), same
+# borrowing scheme T001 used, re-measured rather than re-asserted. `normal`
+# is the one config genuinely exempt: it is NEVER reclaimed (standing user
+# rule 2026-09-10), so it is always in the already-populated state measured
+# above.
 #
 # ── Headroom rule (stated per D-7/D-7a; dated 2026-09-11) ───────────────────
 # required_internal_free = max(1.5 x measured_peak_delta_kb, floor_kb).
 #   floor_kb = 200 MiB (204800 KB), used ONLY for `normal` (never reclaimed,
-#   so always already-populated at consult time) — comfortably above the
-#   largest of the already-populated peaks measured this run (73576 KB, tsan)
-#   so the threshold is never so small it is trivially satisfied by an
-#   almost-full disk (the same vacuous-near-zero failure D-9/A-7 forbid for an
-#   UNSET slot, reproduced by a measured-but-negligible one).
-#   asan/tsan/ubsan (all reclaimable, per the condition above) instead use the
-#   SAME pessimistic figure: 1.5x ubsan's measured empty-tree peak delta
-#   (2799200 KB -> 4198800 KB), because any of the three can legitimately be
-#   consulted in the empty-tree state the matrix's own reclaim order produces,
-#   and this run measured exactly that state only for ubsan. Using the
-#   already-populated 200 MiB floor for asan/tsan here would be the vacuous-
-#   near-zero failure above, at the config's WORST reachable state rather than
-#   its current one — the ENOSPC this gate exists to prevent, reproduced by
-#   trusting a moment instead of a condition.
-#   ⚠️ Even the ubsan figure this borrows from is itself a PARTIAL-tree
-#   measurement (128 objects w/ CMakeCache + conan_toolchain already present
-#   at measurement start, not a true `rm -rf build/<preset>` from-scratch
-#   build, which additionally pays configure + `conan install`). That
-#   additional cost is UNMEASURED here, not assumed zero; it routes to the
-#   same T052a re-derivation clause below, same as everything else this table
-#   cannot yet certify.
+#   so always already-populated at consult time) — comfortably above
+#   `normal`'s OWN measured peaks across both measurements to date (T001:
+#   4812 KB; T052a: 24 KB), so the threshold is never so small it is
+#   trivially satisfied by an almost-full disk (the same vacuous-near-zero
+#   failure D-9/A-7 forbid for an UNSET slot, reproduced by a measured-but-
+#   negligible one). It is NOT compared against asan/tsan's already-populated
+#   readings above, because the floor never governs those two configs.
+#   asan/tsan/ubsan (all reclaimable, per the condition above) instead use
+#   the SAME pessimistic figure: 1.5x ubsan's measured EMPTY-TREE peak delta
+#   (3957736 KB -> 5936604 KB), because any of the three can legitimately be
+#   consulted in the empty-tree state the matrix's own reclaim order
+#   produces, and this run measured exactly that state only for ubsan (same
+#   borrowing scheme as T001, re-measured). Using the already-populated
+#   floor, or the already-populated 210880/184444 KB readings above, for
+#   asan/tsan here would be the vacuous-near-zero failure above, at the
+#   config's WORST reachable state rather than its current one — the ENOSPC
+#   this gate exists to prevent, reproduced by trusting a moment instead of
+#   a condition. This figure moved UP from T001's 4198800 KB, as expected:
+#   the empty-tree unit now includes two more binaries AND, unlike T001's
+#   partial-tree ubsan reading, a genuine `rm -rf` + configure + `conan
+#   install` cost that was previously unmeasured, not assumed zero.
 #
 # required_host_growth: D-7a requires this be R-1's MEASURED HOST DELTA, not
-# derived from or offset by the reuse pool. All four configs measured a host
-# delta at or effectively at 0 on THIS run — but per D-7a's own warning, the
+# derived from or offset by the reuse pool. All four configs again measured
+# a host delta at exactly 0 on THIS run (including across every phase of
+# ubsan's genuine empty-tree rebuild) — but per D-7a's own warning, the
 # already-materialised reuse pool that made every write land free is a
 # BOUND, not a guarantee, and "ext4 does not preferentially allocate into
 # already-materialised extents" (plan.md/research.md), so it may simply not
@@ -115,13 +155,15 @@
 #     to all three reclaimable configs rather than only the one measured
 #     empty this run.
 #
-# Honestly labelled: measured against the EXISTING cells' 18 interop-driver
-# targets, on this host's 2026-09-11 state; asan/tsan's EMPTY-tree figures are
-# BORROWED from the ubsan measurement (same reclaimable-config shape), not
-# independently measured empty — T052a re-derives once T052's four new-cell
-# binaries exist, before any later gated build (D-7/T052a), and MAY also
-# re-derive asan/tsan directly empty at that time rather than continuing to
-# borrow ubsan's figure.
+# Honestly labelled: measured against the 20-target union T052 actually
+# produced (the 18 T001 measured plus `interop_conversation_test` and
+# `interop_probe_test`), on this host's 2026-09-11 state; asan/tsan's
+# EMPTY-tree figures are still BORROWED from the ubsan measurement (same
+# reclaimable-config shape), not independently measured empty — re-deriving
+# them directly would need their own `rm -rf` + full rebuild, deferred on
+# the same disk-budget grounds T001 deferred it on, not performed here. The
+# next re-derivation condition is unchanged from the note atop this block:
+# the set of distinct `Cell.binary` values changing again.
 #
 # ── No OTHER figures anywhere in this script ────────────────────────────────
 # Every disk figure this bundle carried elsewhere was false within the day it
@@ -146,9 +188,9 @@
 # every line it governs — same visibility discipline as --bootstrap below.
 set -uo pipefail
 
-# ── The threshold table — populated by T001, 2026-09-11 (see the block above)
-declare -A INTERNAL_FREE_KB=( [normal]="204800" [asan]="4198800" [ubsan]="4198800" [tsan]="4198800" )
-declare -A HOST_GROWTH_KB=(   [normal]="204800" [asan]="4198800" [ubsan]="4198800" [tsan]="4198800" )
+# ── The threshold table — populated by T052a, 2026-09-11 (see the block above)
+declare -A INTERNAL_FREE_KB=( [normal]="204800" [asan]="5936604" [ubsan]="5936604" [tsan]="5936604" )
+declare -A HOST_GROWTH_KB=(   [normal]="204800" [asan]="5936604" [ubsan]="5936604" [tsan]="5936604" )
 declare -A THRESHOLD_DATE=(   [normal]="2026-09-11" [asan]="2026-09-11" [ubsan]="2026-09-11" [tsan]="2026-09-11" )
 
 declare -A CONFIG_DIR=(
