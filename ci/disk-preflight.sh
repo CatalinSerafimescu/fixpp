@@ -172,12 +172,16 @@ BUILD_ROOT="${FIXPP_DISK_PREFLIGHT_BUILD_ROOT:-build}"
 # drvfs mount (D-2) rather than trusting the path outright.
 HOST_MOUNT_HINT="${FIXPP_DISK_PREFLIGHT_HOST_MOUNT_HINT:-/mnt/e}"
 # D-8: the ballast is a one-shot valve on the HOST drive, 5 GiB each
-# (plan.md § "Reserve ballast — a one-shot valve"). The expected total is a
-# CONSTANT cited from that anchor, never derived from the files' current
-# sizes — deriving it from what is present would make a fully-spent valve
-# read as "nothing to subtract", which is the fail-open direction.
+# (plan.md § "Reserve ballast — a one-shot valve"). BALLAST_PER_FILE_KB (the
+# per-file target, defined just below with T002a's other refill knobs) is the
+# ANCHOR constant; the expected TOTAL is derived from it times the file
+# count, never from the files' CURRENT sizes — deriving it from what is
+# present would make a fully-spent valve read as "nothing to subtract",
+# which is the fail-open direction. Defining BALLAST_EXPECTED_KB from the
+# same per-file constant T002a's --ensure-ballast path already uses (rather
+# than a second hard-coded "2 files x 5 GiB") is what lets a test scale both
+# paths down together via one override.
 BALLAST_FILES="${FIXPP_DISK_PREFLIGHT_BALLAST_FILES:-/mnt/e/_wsl-reserve-1.bin /mnt/e/_wsl-reserve-2.bin}"
-BALLAST_EXPECTED_KB=$(( 2 * 5 * 1024 * 1024 ))  # 2 files x 5 GiB
 
 # ── T002a: refill target + the refill's own safety floor ───────────────────
 # plan.md § "Reserve ballast": "if spent, it must be refilled ... a spent
@@ -195,6 +199,12 @@ BALLAST_PER_FILE_SRC="embedded (5 GiB, plan.md \"Reserve ballast\")"
 BALLAST_REFILL_FLOOR_KB="${FIXPP_DISK_PREFLIGHT_BALLAST_REFILL_FLOOR_KB:-$((3*1024*1024))}"
 BALLAST_REFILL_FLOOR_SRC="embedded (3 GiB stop-line)"
 [ -n "${FIXPP_DISK_PREFLIGHT_BALLAST_REFILL_FLOOR_KB:-}" ] && BALLAST_REFILL_FLOOR_SRC="test-override"
+
+# shellcheck disable=SC2086  # word-split on purpose: BALLAST_FILES is a
+# space-separated path list, same convention as every other loop over it.
+BALLAST_FILE_COUNT=0
+for _bf in $BALLAST_FILES; do BALLAST_FILE_COUNT=$((BALLAST_FILE_COUNT + 1)); done
+BALLAST_EXPECTED_KB=$(( BALLAST_PER_FILE_KB * BALLAST_FILE_COUNT ))
 
 CONFIG=""
 BOOTSTRAP=0
@@ -541,11 +551,15 @@ if [ "$WSL" = "yes" ]; then
       # ballast_status line below makes the spend itself visible, since
       # nothing else on this gate's output would say so (plan.md § "Reserve
       # ballast": "a spent valve nobody refills is worse than no valve").
+      # Presence is measured by ALLOCATED BLOCKS (allocated_kb, D-8's own
+      # sparse-blindness fix — see its definition above), never apparent
+      # size: a sparse file can report the full target via `stat -c%s`
+      # while holding zero real bytes, which would read as "intact" a valve
+      # that is actually gone.
       present_kb=0
       for f in $BALLAST_FILES; do
         if [ -f "$f" ]; then
-          sz="$(stat -c%s "$f" 2>/dev/null || echo 0)"
-          present_kb=$(( present_kb + sz / 1024 ))
+          present_kb=$(( present_kb + $(allocated_kb "$f") ))
         fi
       done
       missing_kb=$(( BALLAST_EXPECTED_KB - present_kb ))

@@ -82,7 +82,14 @@ mk_ballast() {
   if [ "$s2" != "absent" ]; then : > "$dir/b2.bin"; truncate -s "$s2" "$dir/b2.bin"; fi
 }
 
-GIB=$(( 1024 * 1024 * 1024 ))
+# Writes REAL (non-sparse) bytes via dd, at KB scale — never GiB. Moved above
+# the common fixture defaults so both the shared `run()` harness's ballast
+# fixture and the D-8/T002a cells can build real-allocated-blocks ballast
+# rather than truncate's sparse holes.
+mk_real_file() {  # $1=path $2=size_kb
+  mkdir -p "$(dirname "$1")"
+  dd if=/dev/zero "of=$1" bs=1K "count=$2" status=none 2>/dev/null
+}
 
 # Populate/clear a build-root's reclaim-candidate directories.
 # $1=build_root_dir  $2...=populated config names (asan/ubsan/tsan)
@@ -112,6 +119,7 @@ run() {
     FIXPP_DISK_PREFLIGHT_BUILD_MOUNT="/" \
     FIXPP_DISK_PREFLIGHT_BUILD_ROOT="$BUILD_ROOT" \
     FIXPP_DISK_PREFLIGHT_BALLAST_FILES="$BALLAST_DIR/b1.bin $BALLAST_DIR/b2.bin" \
+    FIXPP_DISK_PREFLIGHT_BALLAST_PER_FILE_KB="$BALLAST_PER_FILE_KB_MAIN" \
     FIXPP_DISK_PREFLIGHT_REQUIRED_INTERNAL_FREE_KB="${REQ_INTERNAL:-}" \
     FIXPP_DISK_PREFLIGHT_REQUIRED_INTERNAL_FREE_KB_DATE="${REQ_INTERNAL_DATE:-}" \
     FIXPP_DISK_PREFLIGHT_REQUIRED_HOST_GROWTH_KB="${REQ_HOST:-}" \
@@ -180,7 +188,14 @@ PV_WSL="$WORK/proc-version-wsl"; mk_wsl_proc_version "$PV_WSL"
 PV_NONWSL="$WORK/proc-version-nonwsl"; mk_nonwsl_proc_version "$PV_NONWSL"
 PM_WITH_HOST="$WORK/proc-mounts-with-host"; mk_proc_mounts "$PM_WITH_HOST" "/mnt/e"
 PM_NO_HOST="$WORK/proc-mounts-no-host"; mk_proc_mounts "$PM_NO_HOST" ""
-BALLAST_DIR="$WORK/ballast"; mk_ballast "$BALLAST_DIR" $((5*GIB)) $((5*GIB))
+# Scaled-down per-file ballast target for the whole `run()` harness (D-8's
+# gate-path check derives its expected TOTAL from this times the file count
+# — see disk-preflight.sh's BALLAST_EXPECTED_KB), so the fixtures below write
+# real KB-scale bytes rather than sparse GiB holes.
+BALLAST_PER_FILE_KB_MAIN=100
+BALLAST_DIR="$WORK/ballast"
+mk_real_file "$BALLAST_DIR/b1.bin" "$BALLAST_PER_FILE_KB_MAIN"
+mk_real_file "$BALLAST_DIR/b2.bin" "$BALLAST_PER_FILE_KB_MAIN"
 BUILD_ROOT="$WORK/build"; mk_build_root "$BUILD_ROOT"
 
 # Comfortable-by-default reading table: build mount plenty free, host mount
@@ -462,23 +477,45 @@ REQ_HOST="1000000"; REQ_HOST_DATE="2026-09-11"
 # proven on the real box during manual smoke-testing; pinned here as a
 # regression). Ballast SPENT: same adjusted reading (D-8 keeps the normal
 # budget flat regardless of spend — plan.md "not counted as available"), but
-# ballast_status must say so, which is the visibility half.
-mk_ballast "$BALLAST_DIR" $((5*GIB)) $((5*GIB))
+# ballast_status must say so, which is the visibility half. Real KB-scale
+# writes throughout (BALLAST_PER_FILE_KB_MAIN=100 -> EXPECTED_KB=200) — no
+# GiB written anywhere in this harness.
+mk_real_file "$BALLAST_DIR/b1.bin" "$BALLAST_PER_FILE_KB_MAIN"
+mk_real_file "$BALLAST_DIR/b2.bin" "$BALLAST_PER_FILE_KB_MAIN"
 DF_TABLE="$WORK/df-ballast-intact"
 mk_df_table "$DF_TABLE" "/" "50000000" "/dev/sdd-build" "/mnt/e" "20000000" "/dev/sde-host"
 WANT_TOKENS=("ballast_status: intact" "host_reading_kb: 20000000")
 WANT_ABSENT=()
 cell "D-8 ballast-intact (no adjustment, status visible)" 0 "$SCRIPT" --config normal
 
+# ── Sparse-blindness (escalation #1 from the T001/T002a review): a SPARSE
+# file reports the full target via apparent size (`stat -c%s`) though it
+# holds ZERO real allocated blocks — the exact hole `allocated_kb()` was
+# built to close on the --ensure-ballast path, left open on THIS gate path
+# until the fix below. Must be excluded exactly like "spent": ballast_status
+# must NOT say intact, and the freed amount must be excluded from
+# host_reading_kb identically to the real-spent cell below.
+rm -f "$BALLAST_DIR/b1.bin" "$BALLAST_DIR/b2.bin"
+truncate -s "$((BALLAST_PER_FILE_KB_MAIN * 1024))" "$BALLAST_DIR/b1.bin"
+truncate -s "$((BALLAST_PER_FILE_KB_MAIN * 1024))" "$BALLAST_DIR/b2.bin"
+DF_TABLE="$WORK/df-ballast-sparse"
+# Raw host avail inflated by the full 200 KB a sparse hole must be treated as
+# though it were absent — 20000000 + 200 = 20000200 KB (same math as spent).
+mk_df_table "$DF_TABLE" "/" "50000000" "/dev/sdd-build" "/mnt/e" "20000200" "/dev/sde-host"
+WANT_TOKENS=("ballast_status: spent" "host_reading_kb: 20000000")
+WANT_ABSENT=("ballast_status: intact")
+cell "D-8 ballast-sparse-not-real (apparent size only -> must read spent, not intact)" 0 "$SCRIPT" --config normal
+
 mk_ballast "$BALLAST_DIR" absent absent
 DF_TABLE="$WORK/df-ballast-spent"
-# Raw host avail inflated by the full 10 GiB the ballast used to occupy —
-# 20000000 + 10*1024*1024 = 30485760 KB.
-mk_df_table "$DF_TABLE" "/" "50000000" "/dev/sdd-build" "/mnt/e" "30485760" "/dev/sde-host"
+# Raw host avail inflated by the full 200 KB the ballast used to occupy —
+# 20000000 + 200 = 20000200 KB.
+mk_df_table "$DF_TABLE" "/" "50000000" "/dev/sdd-build" "/mnt/e" "20000200" "/dev/sde-host"
 WANT_TOKENS=("ballast_status: spent" "host_reading_kb: 20000000")
 WANT_ABSENT=()
 cell "D-8 ballast-spent (freed space excluded, status visible)" 0 "$SCRIPT" --config normal
-mk_ballast "$BALLAST_DIR" $((5*GIB)) $((5*GIB))
+mk_real_file "$BALLAST_DIR/b1.bin" "$BALLAST_PER_FILE_KB_MAIN"
+mk_real_file "$BALLAST_DIR/b2.bin" "$BALLAST_PER_FILE_KB_MAIN"
 mk_comfortable_df
 
 echo
@@ -534,10 +571,6 @@ cell_ensure() {  # $1=label $2=want_rc("*" for nonzero) $3=sut, then WANT_TOKENS
 
 T2A_DIR="$WORK/ballast-t002a"
 mkdir -p "$T2A_DIR"
-# Writes REAL (non-sparse) bytes via dd, at KB scale — never GiB.
-mk_real_file() {  # $1=path $2=size_kb
-  dd if=/dev/zero "of=$1" bs=1K "count=$2" status=none 2>/dev/null
-}
 
 PV_FILE="$PV_WSL"; PM_FILE="$PM_WITH_HOST"
 mk_comfortable_df   # / plenty free, /mnt/e (host) plenty free, distinct sources
