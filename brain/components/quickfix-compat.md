@@ -9,7 +9,9 @@ refs:
   - .specify/2e-msgstore.md
   - .specify/architecture.md
   - specs/089-quickfix-interop-conversation/spec.md
+  - specs/089-quickfix-interop-conversation/data-model.md
   - tests/session/test_quickfix_compat_path_b_guard.cpp
+  - tests/interop/support/readback_jsonl.hpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2e-msgstore.md
   - research/G19-fix-fpml-iso20022/decisions/architecture.md
@@ -101,6 +103,26 @@ appends ` const` to the reported signature only when the receiver is const-quali
 identifiers differently by locale; clang words it *"no matching **member** function"* and puts the
 field name only in candidate notes, never on the error line; javac names the field by its simple name.
 Derive the expectation from the compiler the build host actually ships.
+
+## ⭐ A THIRD settled point (`089-quickfix-interop-conversation`): the disposition record, not the witness verdict, is the accepted/rejected source
+
+A live interop conversation needs to know what fixpp's **own session** did with each inbound message —
+delivered it, or rejected it with a session Reject — so a validation-on/validation-off divergence can be
+judged. The candidate source that does not work is the existing per-message **witness verdict**
+(comparator field fidelity: did the value the peer reports match what was sent). Field fidelity and
+disposition are orthogonal: a message the validator accepted with one wrong field reads as a witness
+`fail`, which would misclassify as a validator rejection — a divergence with no validator behaviour
+behind it.
+
+**Settled instead**: a dedicated **disposition record** (data-model §13), written by fixpp's own
+conversation cell, one per inbound arrival — `accepted` when the session delivered the message to the
+application (`fromApp`/`fromAdmin`), `rejected` when the session emitted its own outbound session Reject
+naming that arrival's `RefSeqNum`. Both are direct observations of what the session did; neither is
+inferred from the other, and neither is inferred from the witness verdict.
+
+Re-derive: `grep -n 'void disposition' tests/interop/support/readback_jsonl.hpp` and read the writer;
+the join rule that turns a disposition into a `script_step_id` is data-model §13's own text, not
+restated here.
 
 ## Re-derive
 

@@ -1156,6 +1156,25 @@ def test_required_fields_present(cells):
             )
 
 
+def test_t100_preexisting_pass_rows_stay_green_and_population_is_nonempty(cells):
+    # 089 T100: a CONTROL (quickstart.md § Controls, not § Forced-miss arms --
+    # it was filed there while its own expectation called it a control). The
+    # pre-existing `pass` rows already committed in cell_results.yaml, none of
+    # which has an 089 run behind it, must keep the schema check GREEN under
+    # T027's conditional-field rule. Ranging over an EMPTY population would
+    # satisfy the loop below trivially, so the population is re-derived from
+    # the real committed fixture at run time (never hardcoded) and asserted
+    # non-empty before the loop is trusted.
+    preexisting_pass = [c for c in cells if c["kind"] != "conversation" and c["status"] == "pass"]
+    assert preexisting_pass, (
+        "no pre-existing non-conversation pass row found in the real manifest "
+        "-- this control covers nothing"
+    )
+    for c in preexisting_pass:
+        missing = REQUIRED_FIELDS - c.keys()
+        assert not missing, f"cell {c.get('id')!r} missing required fields {missing}"
+
+
 def test_conversation_row_missing_new_field_goes_red():
     row = {
         "id": "X@normal", "config": "normal", "kind": "conversation",
