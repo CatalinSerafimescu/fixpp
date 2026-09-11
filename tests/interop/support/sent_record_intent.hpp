@@ -68,39 +68,4 @@ inline std::vector<FieldEntry> order_cancel_request_sent_fields_from_intent(
     return bb.commit(out);
 }
 
-// THE MIRROR MUTANT C-8 forbids ("a sent record whose fields are derived
-// from the serialized frame is a violation") — re-derives `fields` by
-// parsing the SERIALIZED FRAME instead of using builder inputs. No real
-// cell may call this; it exists ONLY so the comparator arm below can show
-// what happens if someone did (quickstart.md Step 4's C-8 spurious-hit row:
-// "Assert BOTH halves; the second is what makes it discriminating").
-//
-// Flat tag=value\x01 body parse — this message carries no repeating groups,
-// so no dictionary is needed. MsgType(35) is EXCLUDED: C-6 classifies it as
-// a header field, never a `fields` member in any real emitter, and
-// build_order_cancel_request() always emits it first.
-inline std::vector<FieldEntry> order_cancel_request_sent_fields_from_frame(
-    std::span<std::byte const> body)
-{
-    std::vector<FieldEntry> out;
-    std::string_view const s(reinterpret_cast<char const*>(body.data()), body.size());
-    std::size_t i = 0;
-    while (i < s.size()) {
-        std::size_t const eq = s.find('=', i);
-        if (eq == std::string_view::npos) {
-            break;
-        }
-        std::size_t const soh = s.find('\x01', eq + 1);
-        if (soh == std::string_view::npos) {
-            break;
-        }
-        std::string tag(s.substr(i, eq - i));
-        if (tag != "35") {
-            out.push_back(FieldEntry{std::move(tag), std::string(s.substr(eq + 1, soh - eq - 1))});
-        }
-        i = soh + 1;
-    }
-    return out;
-}
-
 }  // namespace fixpp::interop::readback
