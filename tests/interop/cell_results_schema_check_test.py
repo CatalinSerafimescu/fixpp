@@ -44,6 +44,12 @@ CONVERSATION_REQUIRED_FIELDS = {
 }
 KINDS = {"happy", "thorny", "parity", "conversation"}
 CONFIGS = {"normal", "asan", "ubsan", "tsan"}
+# data-model.md §5 + spec.md FR-014a: "A run killed by ENOSPC is recorded as
+# error:enospc (with aborted as the general class), never as pass, skip, n/a
+# or fail." `_status_kind` splits on the first ":", so the closed-set token
+# for `error:enospc` is `error`; `aborted` is its own bare token (the general
+# infra-abort class FR-014a names alongside the ENOSPC-specific one).
+STATUS_KINDS = {"pass", "fail", "skip", "known-limitation", "n/a", "error", "aborted"}
 PRIORITIES = {"P1", "P2", "P3", "watch:P1", "watch:P2", "watch:info"}
 # data-model.md §6/§10/§11: witness_evidence.yaml's three top-level sections.
 # ⚠️ `witnesses` is not a literal key name given anywhere in the spec bundle
@@ -191,8 +197,22 @@ def test_enum_fields_valid(cells):
         assert c["kind"] in KINDS, f"{c['id']}: bad kind {c['kind']!r}"
         assert c["config"] in CONFIGS, f"{c['id']}: bad config {c['config']!r}"
         sk = _status_kind(c["status"])
-        assert sk in {"pass", "fail", "skip", "known-limitation", "n/a"}, \
+        assert sk in STATUS_KINDS, \
             f"{c['id']}: bad status {c['status']!r}"
+
+
+def test_status_error_and_aborted_accepted():
+    # FR-014a: "A run killed by ENOSPC is recorded as error:enospc (with
+    # aborted as the general class), never as pass, skip, n/a or fail."
+    for status in ("error:enospc", "aborted"):
+        row = {"id": "x", "config": "normal", "kind": "conversation", "status": status}
+        test_enum_fields_valid([row])  # must not raise
+
+
+def test_status_outside_closed_set_goes_red():
+    row = {"id": "x", "config": "normal", "kind": "conversation", "status": "bogus"}
+    with pytest.raises(AssertionError, match="bad status"):
+        test_enum_fields_valid([row])
 
 
 def test_deferred_iff_status_na(cells):
