@@ -700,6 +700,19 @@ claiming a pass with no corroborating run artifact.
   **`expected_verdict`** (`diverged`); positive-control executions get their own `run_id` and sit
   **outside** the 32-slot run inventory, so they neither satisfy nor disturb FR-021/SC-010 (§ *Conversation
   census*, run inventory).
+  ⭐ **THE PROBE'S MECHANISM (user decision 2026-09-11): a minimal probe script, not a modified copy of the
+  conversation script.** A committed probe script drives: Logon → **one** peer-originated NewOrderSingle
+  (`D`) whose declared intent **omits `TransactTime(60)`**, which FIX 4.4 marks required → fixpp waits for
+  that message's disposition (data-model §13) → **fixpp** initiates Logout. It runs on two cells,
+  `CONV-PROBE-off` / `CONV-PROBE-on`, combo C1 (fixpp initiator × QuickFIX-cpp), at least under `normal`.
+  Their registration, not a command-line flag, carries `kind: validator-positive-control` and
+  `expected_verdict: diverged`. ⚠️ **The probe ends on fixpp's own Logout because of a sequencing hazard**:
+  fixpp's validate gate does **not** advance the inbound MsgSeqNum on a rejection, while QuickFIX's
+  `generateReject` does. A peer message after the rejection could therefore start a resend loop, and a
+  probe that depends on post-rejection sequencing would measure that loop instead of the validator.
+  ⚠️ **The seed is a VALUE, not a guess**: if the on arm does not reject it, the control pair comes out
+  `identical` against `expected_verdict: diverged`, and promotion is RED. A dead validator therefore
+  cannot hide behind a badly chosen seed.
   ⛔ **AND THE PROBE'S EXISTENCE IS GATED, not merely required** — `contracts/witness-evidence.md` **E-7b**
   obliges the committed `validation_pairs:` section to carry at least one `kind: validator-positive-control`
   pair with `expected_verdict: diverged` and `verdict: diverged`, resolving to two control ledger rows with

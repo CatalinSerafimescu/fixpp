@@ -638,7 +638,9 @@ the field from the comparison. Naming it explicitly routes it to §3 instead.
 - ⚠️ **A `validator-positive-control` run sits OUTSIDE the 32-slot inventory** and never occupies a slot.
   FR-010a's divergence probe is a separate execution precisely so that seeding a message the dictionary
   should reject does not make FR-010's identical-accepted-sets assertion fail on all 32 conformance runs by
-  construction.
+  construction. Its cells are `CONV-PROBE-off` / `CONV-PROBE-on` and its script is the **probe script**
+  (spec.md FR-010a), so its `script_digest` differs from every conformance run's. That is correct: E-7
+  compares the two runs **of one pair**, and both control runs carry the probe's digest.
 - ⚠️ **Exactly one authoritative `conformance` run per slot.** A retry mints a new `run_id`; its rows carry
   `authoritative: false` and enter no gate. Without this rule the completeness projection — which drops
   `run_id` — collapses the duplicates, so a retry is invisible and a failed run can sit beside a retried
