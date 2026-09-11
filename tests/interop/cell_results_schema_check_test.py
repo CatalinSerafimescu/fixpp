@@ -17,6 +17,7 @@
 # Run via ctest (registered in tests/interop/CMakeLists.txt) or directly:
 #   python3 -m pytest -xvs tests/interop/cell_results_schema_check_test.py
 
+import builtins
 import os
 import re
 
@@ -56,6 +57,15 @@ PRIORITIES = {"P1", "P2", "P3", "watch:P1", "watch:P2", "watch:info"}
 # (unlike `runs`/`validation_pairs`, named literally throughout) — see the
 # NOTE in witness_evidence.yaml itself.
 WITNESS_EVIDENCE_SECTIONS = ("witnesses", "runs", "validation_pairs")
+
+
+class ArtifactPathOpened(Exception):
+    """Raised by the guarded `open()` in the T030 tests below when the schema
+    check attempts to open anything other than the two committed, in-repo
+    manifests. The check MUST open nothing else — it is a ctest provisioned
+    on tier1/tier2/tier3-libcxx hosted runners that hold no run artifacts."""
+
+
 DEFERRED_TAGS = {
     # deferred:fixt-routing RETIRED 2026-06-12 (033 US3): the 8 FIXT.1.1
     # establishment cells are live (HP-*-fixt11-{fix50sp2,fix44}-logon-hb-logout).
@@ -87,14 +97,18 @@ def _status_kind(status):
     return status.split(":", 1)[0]
 
 
-@pytest.fixture(scope="module")
-def cells():
+def _load_cells():
     with open(MANIFEST, encoding="utf-8") as fh:
         doc = yaml.safe_load(fh)
     assert doc.get("schema_version") == 1, "manifest must declare schema_version: 1"
     rows = doc.get("cells")
     assert isinstance(rows, list) and rows, "manifest must carry a non-empty `cells` list"
     return rows
+
+
+@pytest.fixture(scope="module")
+def cells():
+    return _load_cells()
 
 
 def _load_witness_evidence():
@@ -417,3 +431,57 @@ def test_per_cell_completeness_no_silent_absence(cells):
         f"every deferred axis must have a present row; missing "
         f"{DEFERRED_TAGS - present_tags}, unexpected {present_tags - DEFERRED_TAGS}"
     )
+
+
+# T030 (089-quickfix-interop-conversation): "the check MUST NOT open any
+# artifact path" (contracts/witness-evidence.md § "Two artifacts, and they
+# must not be one" / plan.md's REQUIRED_FIELDS row). Both committed manifests
+# — cell_results.yaml and witness_evidence.yaml — are IN the allow-list below;
+# a run artifact under $FIXPP_INTEROP_EVIDENCE_ROOT, or anything else, is not.
+_CELL_CHECKS = (
+    test_required_fields_present,
+    test_ids_unique,
+    test_enum_fields_valid,
+    test_deferred_iff_status_na,
+    test_skip_only_on_live_cells,
+    test_known_limitation_has_tracking_issue,
+    test_thorny_rows_have_priority,
+    test_corpus_p1_block_rule,
+    test_per_cell_completeness_no_silent_absence,
+)
+
+
+def _install_artifact_path_guard(monkeypatch):
+    allowed = {os.path.realpath(MANIFEST), os.path.realpath(WITNESS_EVIDENCE)}
+    real_open = builtins.open
+
+    def guarded_open(path, *args, **kwargs):
+        real_path = os.path.realpath(os.fspath(path))
+        if real_path not in allowed:
+            raise ArtifactPathOpened(real_path)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", guarded_open)
+
+
+def test_schema_check_opens_no_artifact_path(monkeypatch):
+    _install_artifact_path_guard(monkeypatch)
+    cells_rows = _load_cells()
+    for check in _CELL_CHECKS:
+        check(cells_rows)
+    witness_doc = _load_witness_evidence()
+    _check_witness_evidence_sections(witness_doc)
+
+
+def test_schema_check_opens_no_artifact_path_guard_is_live(monkeypatch, tmp_path):
+    # Proves the guard above is actually live rather than silently a no-op
+    # (feedback_a_watcher_that_fails_toward_silence_is_invisible): plant a
+    # read of a path outside the allow-list and confirm it reddens with our
+    # own diagnostic (ArtifactPathOpened), not merely "something raised".
+    planted = tmp_path / "planted_run_artifact.jsonl"
+    planted.write_text("not a committed manifest\n", encoding="utf-8")
+
+    _install_artifact_path_guard(monkeypatch)
+    with pytest.raises(ArtifactPathOpened, match=re.escape(str(planted.resolve()))):
+        with open(planted, encoding="utf-8"):
+            pass
