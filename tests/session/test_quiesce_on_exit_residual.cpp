@@ -22,7 +22,7 @@
 // one-shot drain of only the waiters present at the moment it runs
 // (src/core/test/mock_clock.cpp:166) — a coroutine whose first run happens
 // during the guard's own drain (the session liveness loop's `sleep_until`,
-// src/session/session.cpp:4816, is the concrete production case) can arm a
+// `Session::run_liveness_loop`, is the concrete production case) can arm a
 // sleep the one-shot cancel has already missed.
 //
 // (#322) THAT GAP IS NOW EXERCISED, and the paragraph above used to end "this
