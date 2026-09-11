@@ -22,10 +22,10 @@
 # T061's live evidence went to a scratch ledger, per that task's own
 # instruction), and E-7a's own defect is exactly "zero pairs is green" — so
 # running it unconditionally against today's committed doc would redden the
-# whole schema check for a population a LATER task (T092, the same one this
-# comment already deferred W-3*/E-1c to) is responsible for populating. The
-# logic exists and is proven now; wiring it to the live artifact waits for
-# that population.
+# whole schema check. The wiring lands in the SAME COMMIT that first
+# promotes runs into the committed witness_evidence.yaml, never before —
+# the logic exists and is proven now (against constructed fixtures), but is
+# not asserted against the live artifact until that commit exists.
 #
 # Run via ctest (registered in tests/interop/CMakeLists.txt) or directly:
 #   python3 -m pytest -xvs tests/interop/cell_results_schema_check_test.py
