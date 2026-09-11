@@ -82,6 +82,14 @@ environment before launch, extending the `cp_env` dict `launch_counterparty` alr
 | `INTEROP_CP_SCRIPT_DIGEST` | the shim's own digest of that file | **not copied** — see below |
 | `INTEROP_CP_INTENT_PATH` | the per-cell intent file the counterparty builds its messages from (FR-008d (a)), rendered by the shim from the same script bytes it digests | — |
 
+⚠️ **One test-only knob sits outside this table, because it is not run identity: `INTEROP_CP_TEST_FORCE_CHARSET`**
+(QuickFIX-J counterparty only, T057). It sets the peer's charset **after** the startup charset refusal
+has passed, so C-11's arm can run a peer with the wrong charset at all. The shim never sets it, **but the
+counterparty inherits the shim's whole environment** (`dict(os.environ)`), so a value left in the
+invoking shell reaches every QuickFIX-J cell. Unset it for every matrix run. With `UTF-8` the leak fails
+toward RED: QuickFIX-J miscounts the checksum on `B-05` and disconnects. ⚠️ A charset that round-trips
+`0xff` would **not** redden anything, and it would silently change the charset under test.
+
 ⚠️ **`script_digest` in the hello is RECOMPUTED by the counterparty over the file it actually opened**, and
 the shim compares it to `INTEROP_CP_SCRIPT_DIGEST` before launching the gtest. A verbatim copy would prove
 only that the counterparty can echo a string. The algorithm is **lowercase-hex SHA-256 over the script
