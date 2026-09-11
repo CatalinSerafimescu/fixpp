@@ -460,7 +460,7 @@ that hold no run artifacts. See §11 and FR-014.
 - Cardinality: **8 logical cells** = 4 role×flavour × 2 validation arms, executed **per config**; 8 × 4 =
   **32 rows**. FR-021 forbids folding a config into another's row.
 - ⚠️ A run that died on `ENOSPC` is recorded as **`error:enospc`** — never `pass`, `skip`, `n/a` or `fail`
-  (FR-014a). The vocabulary is closed by a shipped assertion (`{pass, fail, skip, known-limitation, n/a}`,
+  (FR-014a) — with **`aborted`** as the general class FR-014a names, so both join the status vocabulary. The vocabulary is closed by a shipped assertion (`{pass, fail, skip, known-limitation, n/a}`,
   with `n/a` bound to a `deferred:*` disposition and `known-limitation:*` bound to a tracking issue), so
   with no new state the implementer reaches for `fail` and an infrastructure abort becomes
   indistinguishable from a fidelity defect. Adding the state is a **required edit** to that check.
@@ -470,7 +470,10 @@ that hold no run artifacts. See §11 and FR-014.
 
 ## 6. Witness evidence record — the second level (FR-015b)
 
-A separate artifact accumulating witness rows across all cells and all configs.
+A separate artifact accumulating witness rows across all cells and all configs. In
+`tests/interop/witness_evidence.yaml` the rows sit under the top-level key **`witnesses:`**, beside
+`runs:` (§11) and `validation_pairs:` (§10); a key the producer and the schema check spell differently
+would leave one of them reading a section the other never writes.
 
 **Validation rules**
 
