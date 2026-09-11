@@ -1296,6 +1296,10 @@ CI_PIN_HARNESSES=(
   # the workflow invocation could be deleted later while every self-test
   # stays green.
   "ci/test-pump-census.sh"
+  # 089 T006's disk-preflight harness. ⚠️ ADDED WITH ITS OWN MUTANT (M73), same
+  # dead-call-site shape as M26/M64/M65/M69 — none of those prove THIS row can
+  # fail, only that the census mechanism can fail for a different harness.
+  "ci/test-disk-preflight.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1387,7 +1391,7 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=58  # M70 M71 M72 (#271) + M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
+MUTANTS_DECLARED=59  # M73 (089) + M70 M71 M72 (#271) + M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -1848,6 +1852,21 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "        run: bash ci/test-pump-census.sh\n"
 new = "        run: echo \"bash ci/test-pump-census.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M73 (089): the SAME dead-call-site shape as M26/M64/M65/M69, on the
+  # disk-preflight row 089 added. Its own mutant because none of those prove
+  # THIS row can fail — each proves the census mechanism fires for a
+  # DIFFERENT harness, and a row proven by a sibling mutant is a row nobody
+  # has seen fail.
+  mutate_workflow M73 "the disk-preflight harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-disk-preflight.sh\n"
+new = "        run: echo \"bash ci/test-disk-preflight.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
