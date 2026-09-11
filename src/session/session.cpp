@@ -1761,9 +1761,12 @@ struct SendingTimeStamp {
 // frame this function could later be asked to replay: 8/9/35/34/49/52/56, then
 // body, then 10. 9 and 10 never reach this classification (skipped by the
 // `continue` below); no other header tag is ever produced by fixpp's own
-// outbound path. This is NOT a reusable session/wire-layer header-tag list —
-// none exists in this codebase reachable from src/session/ (see the #419 fix
-// report); it is scoped to this function's actual input domain.
+// outbound path. This is NOT a reusable session/wire-layer header-tag list:
+// no such list exists in this codebase reachable from src/session/ (the two
+// candidates — codegen's `kFramingTags` and `orchestra_loader`'s
+// `is_header_trailer_tag` — are both codegen-side / dictionary-provenance,
+// unusable at session runtime without a dictionary). This set is scoped to
+// this function's actual input domain instead.
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_replay_frame(
     std::span<std::byte> out, std::span<const std::byte> stored) noexcept {
     fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
@@ -1778,44 +1781,16 @@ struct SendingTimeStamp {
     // is intentional — do NOT "harden" it as a missed inbound scanner (it is site 6
     // in the 040 census; the 5 live-inbound scanners use fixpp::wire::accumulate_tag_digit).
 
-    // Pre-scan pass: capture SendingTime(52) BEFORE the write loop runs, so
-    // inserting 43/122 at the header/body boundary (the first body tag) never
-    // depends on 52 having already been walked by that point. [#419: the old
-    // single-pass code appended 122 only after the whole loop, so it could rely
-    // on `orig_sending_time` being set by then; inserting mid-loop cannot.]
-    std::string_view orig_sending_time;
-    {
-        std::size_t i = 0;
-        while (i < n) {
-            std::uint32_t tag = 0;
-            bool tag_ok = true;
-            while (i < n && stored[i] != EQ && stored[i] != SOH) {
-                auto c = static_cast<unsigned char>(stored[i]);
-                if (c < '0' || c > '9') tag_ok = false;
-                tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
-                ++i;
-            }
-            if (i >= n || stored[i] != EQ || !tag_ok) {
-                while (i < n && stored[i] != SOH) ++i;
-                if (i < n) ++i;
-                continue;
-            }
-            ++i;  // skip '='
-            const std::size_t vstart = i;
-            while (i < n && stored[i] != SOH) ++i;
-            if (tag == 52) {
-                orig_sending_time = std::string_view{
-                    reinterpret_cast<const char*>(stored.data() + vstart), i - vstart};
-                break;
-            }
-            if (i < n) ++i;  // skip SOH
-        }
-    }
-
-    constexpr std::array<std::uint32_t, 6> kReplayHeaderTags = {8, 34, 35, 49, 52, 56};
-    bool inserted_pd = false;
-    std::size_t i = 0;
-    while (i < n) {
+    // Parses one "<tag>=<value>" field at stored[i..], advancing `i` past it
+    // (including the terminating SOH). On a malformed field (no '=', non-digit
+    // tag) `i` is advanced to the next SOH and `.ok` is false. Shared by the
+    // pre-scan pass and the write loop below so the two never diverge.
+    struct FieldScan {
+        bool ok;
+        std::uint32_t tag;
+        std::span<const std::byte> value;
+    };
+    const auto scan_field = [&](std::size_t& i) -> FieldScan {
         std::uint32_t tag = 0;
         bool tag_ok = true;
         while (i < n && stored[i] != EQ && stored[i] != SOH) {
@@ -1827,14 +1802,57 @@ struct SendingTimeStamp {
         if (i >= n || stored[i] != EQ || !tag_ok) {
             while (i < n && stored[i] != SOH) ++i;
             if (i < n) ++i;
-            continue;
+            return {false, 0, {}};
         }
         ++i;  // skip '='
         const std::size_t vstart = i;
         while (i < n && stored[i] != SOH) ++i;
         std::span<const std::byte> val{stored.data() + vstart, i - vstart};
         if (i < n) ++i;  // skip SOH
-        if (tag == 9 || tag == 10 || tag == 43 || tag == 122)
+        return {true, tag, val};
+    };
+
+    // Emits PossDupFlag(43)=Y + OrigSendingTime(122)=<orig_sending_time>. Shared
+    // by the header/body-boundary insertion point and the degenerate no-body
+    // fallback below, so the two emit sites cannot silently diverge.
+    const auto append_possdup =
+        [&](std::string_view ost_val) -> fixpp::core::expected_t<void> {
+        std::byte y[] = {static_cast<std::byte>('Y')};
+        if (auto r = w.append_raw(43, std::span<const std::byte>{y}); !r) {
+            return std::unexpected(r.error());
+        }
+        std::span<const std::byte> ost{reinterpret_cast<const std::byte*>(ost_val.data()),
+                                       ost_val.size()};
+        if (auto r = w.append_raw(122, ost); !r) return std::unexpected(r.error());
+        return {};
+    };
+
+    // Pre-scan pass: capture SendingTime(52) BEFORE the write loop runs, so
+    // inserting 43/122 at the header/body boundary (the first body tag) never
+    // depends on 52 having already been walked by that point. [#419: the old
+    // single-pass code appended 122 only after the whole loop, so it could rely
+    // on `orig_sending_time` being set by then; inserting mid-loop cannot.]
+    std::string_view orig_sending_time;
+    {
+        std::size_t i = 0;
+        while (i < n) {
+            auto fr = scan_field(i);
+            if (!fr.ok) continue;
+            if (fr.tag == 52) {
+                orig_sending_time = std::string_view{
+                    reinterpret_cast<const char*>(fr.value.data()), fr.value.size()};
+                break;
+            }
+        }
+    }
+
+    constexpr std::array<std::uint32_t, 6> kReplayHeaderTags = {8, 34, 35, 49, 52, 56};
+    bool inserted_pd = false;
+    std::size_t i = 0;
+    while (i < n) {
+        auto fr = scan_field(i);
+        if (!fr.ok) continue;
+        if (fr.tag == 9 || fr.tag == 10 || fr.tag == 43 || fr.tag == 122)
             continue;  // 9/10 recomputed; 43/122 re-inserted below (037 FR-004 dedup)
 
         // #419: insert PossDupFlag(43)=Y + OrigSendingTime(122) at the
@@ -1842,18 +1860,11 @@ struct SendingTimeStamp {
         // instead of after the loop (which placed them after the full body,
         // groups included).
         if (!inserted_pd &&
-            std::ranges::find(kReplayHeaderTags, tag) == kReplayHeaderTags.end()) {
-            std::byte y[] = {static_cast<std::byte>('Y')};
-            if (auto r = w.append_raw(43, std::span<const std::byte>{y}); !r) {
-                return std::unexpected(r.error());
-            }
-            std::span<const std::byte> ost{
-                reinterpret_cast<const std::byte*>(orig_sending_time.data()),
-                orig_sending_time.size()};
-            if (auto r = w.append_raw(122, ost); !r) return std::unexpected(r.error());
+            std::ranges::find(kReplayHeaderTags, fr.tag) == kReplayHeaderTags.end()) {
+            if (auto r = append_possdup(orig_sending_time); !r) return std::unexpected(r.error());
             inserted_pd = true;
         }
-        if (auto r = w.append_raw(tag, val); !r) return std::unexpected(r.error());
+        if (auto r = w.append_raw(fr.tag, fr.value); !r) return std::unexpected(r.error());
     }
     // Degenerate fallback: a stored frame consisting of ONLY header tags (no
     // body at all) never hits the insertion point above. Every real fixpp
@@ -1861,13 +1872,7 @@ struct SendingTimeStamp {
     // does, still emit 43/122 rather than silently dropping them (matches the
     // pre-#419 tail-placement behavior for this one unreachable-in-practice case).
     if (!inserted_pd) {
-        std::byte y[] = {static_cast<std::byte>('Y')};
-        if (auto r = w.append_raw(43, std::span<const std::byte>{y}); !r) {
-            return std::unexpected(r.error());
-        }
-        std::span<const std::byte> ost{reinterpret_cast<const std::byte*>(orig_sending_time.data()),
-                                       orig_sending_time.size()};
-        if (auto r = w.append_raw(122, ost); !r) return std::unexpected(r.error());
+        if (auto r = append_possdup(orig_sending_time); !r) return std::unexpected(r.error());
     }
     auto committed = std::move(w).commit();
     if (!committed) return std::unexpected(committed.error());

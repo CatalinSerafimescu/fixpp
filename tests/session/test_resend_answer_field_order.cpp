@@ -20,7 +20,8 @@
 // tag-digit accumulator shared by fixpp's production wire scanners (tag_scan.hpp,
 // 040-inbound-tag-overflow-hardening research.md D-1) — rather than ad hoc substring
 // matching. Its header-tag set is defined independently of any production header-tag
-// set (no reusable session/wire-layer header set exists — see #419 report), so a
+// set: no reusable session/wire-layer header set exists in this codebase (see the
+// equivalent note above `build_replay_frame` in src/session/session.cpp), so a
 // wrong production set cannot hide from this witness.
 //
 // Cell 1 (GapFill): direct build_sequence_reset_gapfill() call.
@@ -28,10 +29,12 @@
 //   NoPartyIDs(453)/NoPartySubIDs(802) repeating group, so the header/body boundary
 //   search must not stop inside a group (a substring-position scan could).
 //
-// RED (pre-#419-fix, captured verbatim in the #419 fix report): Cell 1 fails because
-// the builder emits ...52,56,36,123,43,122 (43/122 after body tags 36/123); Cell 2
-// fails because build_replay_frame appends 43/122 after the full stored body
-// (groups included).
+// RED (pre-#419-fix): Cell 1 fails because the builder emits
+// ...52,56,36,123,43,122 (43/122 after body tags 36/123); Cell 2 fails because
+// build_replay_frame appends 43/122 after the full stored body (groups included).
+// Reproduce: `git stash` the two builder fixes (admin_messages.cpp, session.cpp),
+// rebuild this target, and re-run — both cells fail with "header tag 43 appears
+// AFTER a body tag".
 //
 // Anchors: issue #419; specs/037-resend-reply-possdup-tags/spec.md (superseded tail
 // placement, Assumptions section); specs/013-session-reconnect-binding/spec.md FR-010.
@@ -67,11 +70,13 @@
 #include <string_view>
 #include <vector>
 
+#include "session/support/frame_field_extract.hpp"  // via -I tests/
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
+using fixpp::session::test_support::extract_field;
 
 namespace fixpp::session::test {
 namespace {
@@ -81,8 +86,9 @@ constexpr auto kWindow = 200ms;
 // ── Field-order witness scanner ──────────────────────────────────────────────
 
 // FIX standard-header tags relevant to a resend-answer frame. Defined
-// independently of any production header-tag set — see the #419 fix report for
-// why no reusable session/wire-layer header-tag list exists in this codebase.
+// independently of any production header-tag set — no reusable session/
+// wire-layer header-tag list exists in this codebase (see the equivalent
+// note above `build_replay_frame` in src/session/session.cpp).
 constexpr std::array<std::uint32_t, 9> kWitnessHeaderTags = {8, 9, 35, 34, 49, 52, 56, 43, 122};
 
 [[nodiscard]] bool is_witness_header_tag(std::uint32_t tag) noexcept {
@@ -435,36 +441,13 @@ TEST_F(ResendAnswerReplayTest, Replay_NoHeaderTagAfterBody_WithNestedRepeatingGr
             << "precondition: the original send must not carry PossDupFlag(43)";
     }
 
-    seqnum_t app_seq = 0;
-    {
-        // Extract MsgSeqNum(34) from the original send using the SAME field-order
-        // scanner's tag parser, keeping this file self-contained (no shared
-        // extract_field dependency).
-        const auto& frame = captured_frames.back();
-        std::size_t i = 0;
-        const std::size_t n = frame.size();
-        while (i < n) {
-            std::uint32_t tag = 0;
-            const std::size_t tag_begin = i;
-            bool tag_ok = true;
-            while (i < n && frame[i] != std::byte{'='} && frame[i] != std::byte{0x01}) {
-                const auto c = static_cast<unsigned char>(frame[i]);
-                if (c < '0' || c > '9' || !fixpp::wire::accumulate_tag_digit(tag, c)) tag_ok = false;
-                ++i;
-            }
-            ASSERT_TRUE(i < n && frame[i] == std::byte{'='} && tag_ok && i != tag_begin);
-            ++i;
-            const std::size_t vstart = i;
-            while (i < n && frame[i] != std::byte{0x01}) ++i;
-            if (tag == 34) {
-                std::string sv(reinterpret_cast<const char*>(frame.data() + vstart), i - vstart);
-                app_seq = static_cast<seqnum_t>(std::stoul(sv));
-                break;
-            }
-            if (i < n) ++i;
-        }
-        ASSERT_NE(app_seq, 0u) << "outbound frame must carry tag 34 (MsgSeqNum)";
-    }
+    // Extract MsgSeqNum(34) from the original send. Position-independent lookup
+    // is fine here — this reads a VALUE, not a position (the sibling helpers in
+    // this directory, e.g. test_sending_time_precision.cpp, use the same shared
+    // extract_field for exactly this purpose).
+    const auto tag34_opt = extract_field(std::span<const std::byte>(captured_frames.back()), 34);
+    ASSERT_TRUE(tag34_opt.has_value()) << "outbound frame must carry tag 34 (MsgSeqNum)";
+    const seqnum_t app_seq = static_cast<seqnum_t>(std::stoul(std::string(*tag34_opt)));
 
     captured_frames.clear();
 

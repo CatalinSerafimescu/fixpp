@@ -754,7 +754,10 @@ set_tests_properties(session_resend_reply_possdup PROPERTIES
 # and build_replay_frame (the latter via a Session-driven resend of a stored
 # NewOrderSingle with a nested NoPartyIDs/NoPartySubIDs repeating group).
 # Supersedes 037's tail-placement assumption. Anchors: issue #419.
-add_threading_test(session_resend_answer_field_order test_resend_answer_field_order.cpp)
+add_threading_test(session_resend_answer_field_order
+  test_resend_answer_field_order.cpp
+  $<TARGET_OBJECTS:session_test_support>  # extract_field (support/frame_field_extract.hpp)
+)
 set_tests_properties(session_resend_answer_field_order PROPERTIES
   LABELS "419;037;013;possdup;field-order")
 
