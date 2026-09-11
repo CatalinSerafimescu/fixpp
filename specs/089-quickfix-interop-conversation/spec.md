@@ -252,7 +252,12 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
   gtest is already running when the peer's hello arrives. → A: FR-024 (b) now states the role condition
   instead of the false reason; the gate's substance — shim-side, and a failure is a FAIL, never a skip —
   is unchanged. The sites repeating the old wording point at FR-024 (b).
-
+- Q: Both counterparties read `conversation_script.yaml` only to hash it; the messages they originate are
+  hardcoded literals that differ from the script's declared values (B-07's `ClOrdID` is `PRCL-B07-0001` in
+  the script). How does the peer originate from the script? → A: **The shim renders the peer's messages
+  into a flat intent file both counterparties parse by hand** (user decision) — FR-008d (a). Implementing
+  the arm showed nothing could see an originator ignoring the script, on either side, since FR-006
+  compares a `sent` record only with the readback of the same frame; FR-008d (b) is that check.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -652,6 +657,20 @@ claiming a pass with no corroborating run artifact.
   engines gate group parsing on a non-null dictionary.
 - **FR-008c**: The conversation script MUST be content-addressed, and its **digest MUST be recorded in
   every run's hello record**, so a result can be bound to the exact script that produced it.
+- **FR-008d**: Every message the script declares a process originates MUST be built from that message's
+  declared `intent_fields`, read at run time — for a counterparty, never from literals in its own source.
+  (a) **Delivery to the peer**: the shim renders every `originator: peer` message's declarations into a flat
+  per-run intent file — one line per field, `step_id` TAB `path` TAB `value` — which both counterparties
+  parse with hand-rolled code, so neither carries a YAML parser (the same precedent as FR-025's three
+  hand-rolled JSON emitters). It is rendered from the same script bytes whose digest FR-008c records, and
+  the shim **refuses to render** a value containing TAB, LF or SOH rather than escaping it. (b) **The check
+  that makes (a) observable**: for every `sent` record of either process, each path the script declares
+  for that step MUST be present with the declared value; a missing or different one FAILS the cell. Paths
+  the script does not declare are outside this check — the run-time-minted `OrderID`/`ExecID` (FR-003a)
+  among them — and remain covered by FR-006's sent-versus-readback comparison. ⚠️ **Without (b), (a) has
+  no witness**: FR-006 compares each `sent` record against the *readback* of the same message, and both
+  are derived from what the originator actually built, so an originator that ignored the script agrees
+  with itself and passes.
 - **FR-009**: The conversation MUST run in all four role x flavour combinations, and any combination
   that cannot run a given step or arm MUST be declared with a reason rather than silently skipped. ⚠️ **The
   declaration is an INPUT to the census, not a note beside it**: § *Conversation census* § *Declared
@@ -952,6 +971,7 @@ claiming a pass with no corroborating run artifact.
   | Fidelity witness (FR-006) | Derive the `sent` record's `fields` **from the serialized frame** instead of from the builder inputs, **and** apply a post-capture frame mutation so the two derivations can differ at all | A test-only hook in the fixpp interop driver rewrites `Account(1)` from `ACCT0001` to `ACCT0009` in the outbound **`B-03`** frame, **after** stage-1 intent capture and **before** transmission. Three properties make the observable unambiguous: **same length**, with `CheckSum(10)` recomputed and `BodyLength(9)` unchanged, so the frame stays well-formed and the RED is attributable to fidelity rather than framing; `Account(1)` is **dictionary-declared for 35=F** so the validation-on arm accepts it; and nothing on either engine branches on it. ⚠️ **`B-03` rather than `B-01` because `B-03` has exactly ONE declared occurrence on all four combos** — `B-01` carries a replay at occurrence `1` on C3/C4, and whether the replayed frame is the stored pre- or post-mutation bytes is an implementation detail, which would make this arm's expected observable ambiguous. **Correct (builder-derived) implementation ⇒ witness RED with `value_mismatch` on path `1`, sent `ACCT0001`, readback `ACCT0009`. Mis-derived (frame-derived) implementation ⇒ GREEN.** The arm asserts the RED *and* that the mis-derivation yields GREEN — without the second half it is not discriminating. ⚠️ Without the frame mutation an unmutated serializer round-trips to the same field set and the two derivations are indistinguishable; that version of this arm is the defect, not the test |
   | Fidelity witness (typed tier, FR-003b) — ⛔ **a COMPILE-TIME arm, not a record arm** | Mutate the counterparty **source** so a declared typed read calls the generated per-message accessor with a field that message does **not** declare in FIX 4.4 | **The BUILD FAILS.** The generated accessor is overloaded only over the fields the message declares (`FIELD_SET` in QuickFIX-cpp's `FieldMap.h`; one `get` per field in QuickFIX-J's generated class), and there is **no generic `get` overload** on `FieldMap`, `Message` or either generated class to swallow the mutant — verified on both engines, both directions, § *Clarifications* → *Session 2026-09-10 (Gate A fresh loop, round 1)*. ⚠️ **No serialized value can witness this guard** — the getter returns the caller's own object, so `accessor_witness` was deleted rather than re-specified. `fix_type` is retained as evidence of **dictionary-backed resolution** only. ⚠️ **Scope**: this proves the schema-conformance check is really made; it does **not** prove runtime invocation, which is recorded as structurally unsatisfiable (SC-003). |
   | Fidelity witness (FR-016c) | **Empty intent vs empty readback.** Emit a message whose declared intent set is empty | the comparator must **reject** rather than pass on `∅ == ∅` |
+  | Script-intent check (FR-008d (b)) | A counterparty that **ignores the intent file** and originates from literals equal to the script's values | only with a copy of the script whose peer-declared value is changed: the peer's `sent` record keeps the old value — against the unmodified script nothing differs |
   | Completeness gate (FR-015b/FR-015c) | **Drop one whole configuration** | the per-config projection π for that config is empty while the other three are the census's 100 keys ⇒ RED. Deleting a single witness row leaves the union unchanged and therefore cannot discriminate |
   | Arm attestation (FR-011a) | Launch a **validation-on** cell with `validate_inbound_messages` forced **false** | fixpp's `hello` carries `has_validator: false` while the row claims `arm: validation-on` ⇒ RED. ⚠️ FR-011's *"a dictionary is loaded"* is true in **both** arms and cannot produce this observable |
   | Level-1 corroboration (FR-014) | A stream carrying a `hello` and **no `terminal` record** | promotion RED — a counterparty that starts, writes its hello and conversates not at all supplies everything a hello-only check inspects |
