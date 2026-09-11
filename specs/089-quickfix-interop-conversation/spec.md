@@ -703,10 +703,10 @@ claiming a pass with no corroborating run artifact.
   ⭐ **THE PROBE'S MECHANISM (user decision 2026-09-11): a minimal probe script, not a modified copy of the
   conversation script.** A committed probe script drives: Logon → **one** peer-originated NewOrderSingle
   (`D`) whose declared intent **omits `TransactTime(60)`**, which FIX 4.4 marks required → fixpp waits for
-  that message's disposition (data-model §13) → **fixpp** initiates Logout. It runs on two cells,
+  that message's disposition (data-model §13) → **fixpp** ends the session (`Engine::stop()`). It runs on two cells,
   `CONV-PROBE-off` / `CONV-PROBE-on`, combo C1 (fixpp initiator × QuickFIX-cpp), at least under `normal`.
   Their registration, not a command-line flag, carries `kind: validator-positive-control` and
-  `expected_verdict: diverged`. ⚠️ **The probe ends on fixpp's own Logout because of a sequencing hazard**:
+  `expected_verdict: diverged`. ⚠️ **The probe ends the session from fixpp's side, right after the disposition, because of a sequencing hazard**:
   fixpp's validate gate does **not** advance the inbound MsgSeqNum on a rejection, while QuickFIX's
   `generateReject` does. A peer message after the rejection could therefore start a resend loop, and a
   probe that depends on post-rejection sequencing would measure that loop instead of the validator.
