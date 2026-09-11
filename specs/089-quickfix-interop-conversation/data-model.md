@@ -147,8 +147,8 @@ carries ten keys, so the cost it was priced at was never real. Leaving the rejec
   from here, and an evidence row's copies must match them. A row pointing at a **stale** run directory
   otherwise satisfies every evidence field — R-4 closes that hazard for records inside one stream (truncate
   mode) and leaves it open one level up, at the pointer.
-- ⚠️ **The gate that reads this record runs shim-side, before the conversation** (FR-024): the refusal is
-  *"do not run this cell"*, and at that moment only the shim is running. Its failure text MUST NOT use the
+- ⚠️ **The gate that reads this record runs shim-side, before the conversation** (FR-024 (b), which states
+  what *before* can mean in each session role): the refusal is *"do not run this cell"*. Its failure text MUST NOT use the
   word `unavailable:` — `parse_gtest_status` greps that token out of gtest stdout and converts it to
   `skip:`, which would turn a stale-peer **failure** into a skip.
 

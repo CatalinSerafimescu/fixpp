@@ -246,6 +246,12 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
   → A: **Yes, in this feature** (user decision). FR-021a now requires each cell to run with its
   configuration's test-preset environment, read from `CMakePresets.json`, with a forced-miss arm, a
   spurious-hit arm and a mutation in `quickstart.md` § *Step 4*.
+- Q: FR-024 (b) justified running the hello gate *"before the conversation"* with *"only the shim is
+  running at that point"*, and T021/T023 said *"before the gtest is launched"*. Implementing it showed both
+  hold only where fixpp **initiates**: a fixpp **acceptor** must bind before the peer can connect, so its
+  gtest is already running when the peer's hello arrives. → A: FR-024 (b) now states the role condition
+  instead of the false reason; the gate's substance — shim-side, and a failure is a FAIL, never a skip —
+  is unchanged. The sites repeating the old wording point at FR-024 (b).
 
 
 ## User Scenarios & Testing *(mandatory)*
@@ -1033,7 +1039,11 @@ claiming a pass with no corroborating run artifact.
   (a) the fixpp-side comparator receives the run's readback path through a new environment variable
   alongside the existing `INTEROP_<TOKEN>_PORT` / `_HOST` / `FIXPP_TLS_FIXTURE_DIR` /
   `FIXPP_FIX44_DICT_XML` that `run_interop_cell.py` already sets on the gtest; (b) the FR-016a hello gate
-  runs **shim-side, before the conversation**, because only the shim is running at that point.
+  runs **shim-side, before the conversation**. ⚠️ *Before the conversation* means **before the gtest is
+  launched** only where fixpp **initiates** (the peer is listening first). Where fixpp is the **acceptor**
+  it must bind before the peer can connect, so its gtest is already running when the peer's hello
+  arrives: the gate then runs as soon as the counterparty is launched, and a failed gate still FAILS the
+  cell. In neither role may the gate move gtest-side.
   ⚠️ The hello-gate failure MUST NOT be phrased in the `unavailable:` vocabulary: `parse_gtest_status`
   greps `unavailable: .*` out of gtest stdout and returns `skip:<reason>`, so reusing the idiom already in
   that file silently converts a **stale peer failure** into a skip — precisely the collapse FR-016a exists

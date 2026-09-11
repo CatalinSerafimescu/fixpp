@@ -282,6 +282,9 @@ is not a design decision.
    **run** a cell against a peer that announces nothing"* and R-7's *"the harness reads it **before the
    conversation**"* both place the check before the conversation starts — and at that moment only the shim
    is running. This is a `run_interop_cell.py` change, and R-4's *"nothing"* never covered it.
+   ⚠️ *Superseded in part (2026-09-11, implement):* *"before the gtest is launched"* and *"only the shim is
+   running"* hold only where fixpp initiates — a fixpp acceptor's gtest is already running when the peer's
+   hello arrives. FR-024 (b) states the role condition; the shim-side placement stands.
 3. ⚠️ **The refusal MUST NOT be phrased in the `unavailable:` vocabulary.** `parse_gtest_status` greps
    `unavailable: .*` out of gtest stdout and returns `skip:<reason>`, and `probe_counterparty` already
    emits `"<cp> unavailable: …"` strings into that channel. A hello check implemented gtest-side in the
