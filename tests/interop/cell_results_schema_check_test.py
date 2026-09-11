@@ -22,7 +22,7 @@ MANIFEST = os.path.join(HERE, "cell_results.yaml")
 
 REQUIRED_FIELDS = {"id", "config", "kind", "status", "matrix_disposition", "spec_ref"}
 KINDS = {"happy", "thorny", "parity"}
-CONFIGS = {"normal", "asan-ubsan", "tsan"}
+CONFIGS = {"normal", "asan", "ubsan", "tsan"}
 PRIORITIES = {"P1", "P2", "P3", "watch:P1", "watch:P2", "watch:info"}
 DEFERRED_TAGS = {
     # deferred:fixt-routing RETIRED 2026-06-12 (033 US3): the 8 FIXT.1.1

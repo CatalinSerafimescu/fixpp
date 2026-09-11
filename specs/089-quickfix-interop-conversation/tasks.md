@@ -69,7 +69,7 @@ and the configuration-vocabulary correction that four artifacts currently get wr
 - [ ] T006 [P] Register `ci/disk-preflight.sh` and `ci/test-disk-preflight.sh` in the `ci-script-pins` fixture so the gate's own scripts are pinned like every other CI script
 - [ ] T007 Resolve D-9a's bootstrap: R-1's measurement cannot run under its own gate, since D-7 sources both thresholds from it. Implement the documented bootstrap path in `ci/disk-preflight.sh` and prove it cannot be used to bypass the gate in ordinary operation
 - [ ] T008 [P] Correct `CONFIG_TO_PRESET` in `phase-9-harness/tools/run_interop_cell.py` to `{normal→linux-clang-debug, asan→linux-clang-asan, ubsan→linux-clang-ubsan, tsan→linux-clang-tsan}`, retiring the `asan-ubsan` key (FR-021 · FR-021a)
-- [ ] T009 [P] Extend `CONFIGS` in `tests/interop/cell_results_schema_check_test.py` to gain `asan` and `ubsan` and lose `asan-ubsan` (FR-021a)
+- [X] T009 [P] Extend `CONFIGS` in `tests/interop/cell_results_schema_check_test.py` to gain `asan` and `ubsan` and lose `asan-ubsan` (FR-021a)
 - [ ] T010 [P] Correct the config vocabulary `normal|asan-ubsan|tsan` to the four-config set in `phase-9-harness/INTEROP-016-DESIGN.md` (FR-021a)
 - [ ] T011 [P] Correct the claim that the charter's ASan+UBSan requirement is met by `asan-ubsan` in `phase-9-harness/INTEROP-COVERAGE-REPORT.md` (FR-021a)
 
