@@ -297,6 +297,13 @@ echo "== spurious-hit arms (FR-018): mutant GREEN-wrongly, then real RED =======
 # OVERRIDE branch of resolve_threshold — the exact "defaulting to 0 instead of
 # failing validation" shape D-9 exists to forbid, now reachable via the
 # override path since the embedded-table path can no longer produce it.
+# ⚠️ Disclosure: with all four embedded slots populated, this arm now pins
+# D-9's unset/unparseable branch on a route production never takes (only
+# ci/test-disk-preflight.sh sets the override env vars) — the branch is
+# unreachable on the gate's real --config path until a config's slot is
+# unset again. Kept because D-9 still names the trigger and the override
+# path is the only route left to exercise it, not because it is reachable
+# in production today.
 M7="$(mutate M-A7 <<'PY'
 import sys
 src, dst = sys.argv[1], sys.argv[2]

@@ -53,15 +53,43 @@
 #     already-materialised VHD-on-host extents and cost the host mount
 #     NOTHING. No breach of the 3 GiB host floor at any config.
 #
+# ⚠️ CONDITION THIS TABLE PRESUPPOSES (plan.md § Matrix sequencing / Reclaim
+# procedure): asan/ubsan/tsan are ALL reclaimable and the matrix's own order
+# (normal → ubsan → asan → tsan) reclaims-then-rebuilds asan and tsan too —
+# so "asan/tsan already fully built" is a PROPERTY OF THIS MOMENT (2026-09-11),
+# not of those configs. The first build of any of the three reclaimable
+# configs AFTER that config has been reclaimed is the EMPTY-TREE shape (same
+# as the ubsan measurement below), not the near-zero already-populated shape
+# — this table prices asan/tsan for that shape directly (see headroom rule),
+# rather than trusting they will always be consulted while still populated.
+# `normal` is the one config genuinely exempt: it is NEVER reclaimed (standing
+# user rule 2026-09-10), so it is always in the already-populated state this
+# table measured.
+#
 # ── Headroom rule (stated per D-7/D-7a; dated 2026-09-11) ───────────────────
 # required_internal_free = max(1.5 x measured_peak_delta_kb, floor_kb).
-#   floor_kb = 200 MiB (204800 KB) for a config whose tree was ALREADY
-#   POPULATED at measurement time (normal/asan/tsan) — comfortably above the
-#   largest of the three measured peaks (73576 KB, tsan) so the threshold is
-#   never so small it is trivially satisfied by an almost-full disk (the same
-#   vacuous-near-zero failure D-9/A-7 forbid for an UNSET slot, reproduced by
-#   a measured-but-negligible one). The floor does not bind for ubsan
-#   (1.5x its measured delta is already far larger).
+#   floor_kb = 200 MiB (204800 KB), used ONLY for `normal` (never reclaimed,
+#   so always already-populated at consult time) — comfortably above the
+#   largest of the already-populated peaks measured this run (73576 KB, tsan)
+#   so the threshold is never so small it is trivially satisfied by an
+#   almost-full disk (the same vacuous-near-zero failure D-9/A-7 forbid for an
+#   UNSET slot, reproduced by a measured-but-negligible one).
+#   asan/tsan/ubsan (all reclaimable, per the condition above) instead use the
+#   SAME pessimistic figure: 1.5x ubsan's measured empty-tree peak delta
+#   (2799200 KB -> 4198800 KB), because any of the three can legitimately be
+#   consulted in the empty-tree state the matrix's own reclaim order produces,
+#   and this run measured exactly that state only for ubsan. Using the
+#   already-populated 200 MiB floor for asan/tsan here would be the vacuous-
+#   near-zero failure above, at the config's WORST reachable state rather than
+#   its current one — the ENOSPC this gate exists to prevent, reproduced by
+#   trusting a moment instead of a condition.
+#   ⚠️ Even the ubsan figure this borrows from is itself a PARTIAL-tree
+#   measurement (128 objects w/ CMakeCache + conan_toolchain already present
+#   at measurement start, not a true `rm -rf build/<preset>` from-scratch
+#   build, which additionally pays configure + `conan install`). That
+#   additional cost is UNMEASURED here, not assumed zero; it routes to the
+#   same T052a re-derivation clause below, same as everything else this table
+#   cannot yet certify.
 #
 # required_host_growth: D-7a requires this be R-1's MEASURED HOST DELTA, not
 # derived from or offset by the reuse pool. All four configs measured a host
@@ -73,22 +101,27 @@
 # measured 0 forward would make the host predicate VACUOUSLY satisfied by
 # any host state whatsoever — precisely the A-7 spurious-hit shape, at the
 # far more consequential predicate. So required_host_growth uses:
-#   - normal/asan/tsan: the SAME 200 MiB floor as required_internal_free.
-#     Even if the reuse pool fails entirely on a future run, these three
-#     configs are OVERWRITING paths that already exist (no new file
-#     creation observed at this measurement), so their true host-growth
-#     exposure is inherently bounded by the same small figure, not by the
-#     reuse-pool bound.
-#   - ubsan: the SAME pessimistic value as required_internal_free (not a
-#     small floor) — this config genuinely creates thousands of NEW files,
-#     so a reuse-pool failure here translates directly into real host
+#   - normal: the SAME 200 MiB floor as its required_internal_free — never
+#     reclaimed, always overwriting paths that already exist, so its true
+#     host-growth exposure is inherently bounded by the same small figure,
+#     not by the reuse-pool bound.
+#   - asan/ubsan/tsan: the SAME pessimistic empty-tree value as their
+#     required_internal_free (not a small floor) — reclaimed-then-rebuilt,
+#     any of the three genuinely creates thousands of NEW files in that
+#     state, so a reuse-pool failure here translates directly into real host
 #     growth up to the full internal delta; research.md's own fallback
 #     model is exactly "assume no reuse; host cost = build size", applied
-#     here rather than trusting the one favourable measurement.
+#     here rather than trusting the one favourable measurement, and applied
+#     to all three reclaimable configs rather than only the one measured
+#     empty this run.
 #
 # Honestly labelled: measured against the EXISTING cells' 18 interop-driver
-# targets, on this host's 2026-09-11 state. T052a re-derives once T052's
-# four new-cell binaries exist, before any later gated build (D-7/T052a).
+# targets, on this host's 2026-09-11 state; asan/tsan's EMPTY-tree figures are
+# BORROWED from the ubsan measurement (same reclaimable-config shape), not
+# independently measured empty — T052a re-derives once T052's four new-cell
+# binaries exist, before any later gated build (D-7/T052a), and MAY also
+# re-derive asan/tsan directly empty at that time rather than continuing to
+# borrow ubsan's figure.
 #
 # ── No OTHER figures anywhere in this script ────────────────────────────────
 # Every disk figure this bundle carried elsewhere was false within the day it
@@ -114,8 +147,8 @@
 set -uo pipefail
 
 # ── The threshold table — populated by T001, 2026-09-11 (see the block above)
-declare -A INTERNAL_FREE_KB=( [normal]="204800" [asan]="204800" [ubsan]="4198800" [tsan]="204800" )
-declare -A HOST_GROWTH_KB=(   [normal]="204800" [asan]="204800" [ubsan]="4198800" [tsan]="204800" )
+declare -A INTERNAL_FREE_KB=( [normal]="204800" [asan]="4198800" [ubsan]="4198800" [tsan]="4198800" )
+declare -A HOST_GROWTH_KB=(   [normal]="204800" [asan]="4198800" [ubsan]="4198800" [tsan]="4198800" )
 declare -A THRESHOLD_DATE=(   [normal]="2026-09-11" [asan]="2026-09-11" [ubsan]="2026-09-11" [tsan]="2026-09-11" )
 
 declare -A CONFIG_DIR=(
