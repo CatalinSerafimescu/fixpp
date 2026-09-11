@@ -259,6 +259,11 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
   fixpp's cell as well, since the library has no YAML parser either. Implementing
   the arm showed nothing could see an originator ignoring the script, on either side, since FR-006
   compares a `sent` record only with the readback of the same frame; FR-008d (b) is that check.
+- Q: fixpp's `body_builder` rejects every byte outside `0x20–0x7E`, so it cannot build `B-05`'s
+  `EncodedText(355)` holding `0xff` — and `B-05` is fixpp-originated on all four combos. How does the
+  conversation send it? → A: **As a hand-built frame through the test-only `FIXPP_TEST_HOOKS` seam**
+  (user decision), with no production change; the builder gap is fixpp #418, and L-067-2's text is
+  corrected to the real range. See § *Conversation census* → the `B-05` bullet.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -1301,6 +1306,12 @@ load-bearing for the anti-vacuity arms and are fixed here so the arms have a sub
   `<header>` block, so validation-on accepts them and C-6 does not exclude them. `B-05` is
   fixpp-originated with exactly **one** declared occurrence on all four combos, so census cardinality is
   unchanged and no completeness key is added.
+  ⚠️ **fixpp's builder cannot emit it**: `wire::body_builder` rejects every byte outside `0x20–0x7E`
+  (L-067-2, fixpp #418), so fixpp sends `B-05` as a **hand-built frame through the test-only
+  `FIXPP_TEST_HOOKS` seam**, the same seam the cells use for A-REJECT's malformed TestRequest. Its `sent`
+  record still comes from the intent file (FR-003a, FR-008d). C-11's subject is the **peer's** live
+  decode, which this route exercises unchanged; what it does not exercise is fixpp's builder, and no
+  witness here may be cited as evidence that fixpp can emit binary `DATA` content.
 
 ## Success Criteria *(mandatory)*
 

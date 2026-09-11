@@ -453,9 +453,11 @@ admin_steps:
         direction: fixpp-to-peer
         runtime_generated: ["7", "16"]   # BeginSeqNo, EndSeqNo
         note: >-
-          Covers exactly the peer's A-TESTREQ TestRequest MsgSeqNum — an
-          admin-only range with no application message in it, which the peer
-          answers with SequenceReset-GapFill rather than a verbatim resend.
+          Covers an admin-only range of the peer's outbound sequence, with no
+          application message in it, which the peer answers with
+          SequenceReset-GapFill rather than a verbatim resend. How the gap is
+          induced is the cells' choice; the condition is only that no
+          application message falls inside the requested range.
       - msg_type: "4"      # SequenceReset (GapFill)
         originator: peer
         direction: peer-to-fixpp
