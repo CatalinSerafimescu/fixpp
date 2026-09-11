@@ -28,7 +28,21 @@ MANIFEST = os.path.join(HERE, "cell_results.yaml")
 WITNESS_EVIDENCE = os.path.join(HERE, "witness_evidence.yaml")
 
 REQUIRED_FIELDS = {"id", "config", "kind", "status", "matrix_disposition", "spec_ref"}
-KINDS = {"happy", "thorny", "parity"}
+# data-model.md §5 "New — identity and run evidence (FR-013, FR-013a)": required
+# CONDITIONALLY on kind: conversation only — an unconditional REQUIRED_FIELDS
+# extension breaks the pre-existing `status: pass` rows already committed, none
+# of which has an 089 run behind it (FR-020; contracts/witness-evidence.md E-1a).
+CONVERSATION_REQUIRED_FIELDS = {
+    "cell_id",
+    "run_id",
+    "run_timestamp",
+    "script_digest",
+    "counterparty_flavour",
+    "counterparty_version",
+    "counterparty_digest",
+    "ledger_ref",
+}
+KINDS = {"happy", "thorny", "parity", "conversation"}
 CONFIGS = {"normal", "asan", "ubsan", "tsan"}
 PRIORITIES = {"P1", "P2", "P3", "watch:P1", "watch:P2", "watch:info"}
 # data-model.md §6/§10/§11: witness_evidence.yaml's three top-level sections.
@@ -133,6 +147,37 @@ def test_required_fields_present(cells):
     for c in cells:
         missing = REQUIRED_FIELDS - c.keys()
         assert not missing, f"cell {c.get('id')!r} missing required fields {missing}"
+        if c["kind"] == "conversation":
+            missing_conv = CONVERSATION_REQUIRED_FIELDS - c.keys()
+            assert not missing_conv, (
+                f"cell {c.get('id')!r} kind:conversation missing new evidence "
+                f"fields {missing_conv} (data-model.md §5, FR-013/FR-013a)"
+            )
+
+
+def test_conversation_row_missing_new_field_goes_red():
+    row = {
+        "id": "X@normal", "config": "normal", "kind": "conversation",
+        "status": "pass", "matrix_disposition": "live", "spec_ref": "FR-013",
+        "cell_id": "X", "run_id": "r1", "run_timestamp": "2026-09-11T00:00:00Z",
+        "script_digest": "deadbeef", "counterparty_flavour": "quickfix-cpp",
+        "counterparty_version": "1.0", "counterparty_digest": "sha256:abc",
+        # ledger_ref deliberately omitted
+    }
+    with pytest.raises(AssertionError, match="ledger_ref"):
+        test_required_fields_present([row])
+
+
+def test_conversation_row_with_all_fields_present_passes():
+    row = {
+        "id": "X@normal", "config": "normal", "kind": "conversation",
+        "status": "pass", "matrix_disposition": "live", "spec_ref": "FR-013",
+        "cell_id": "X", "run_id": "r1", "run_timestamp": "2026-09-11T00:00:00Z",
+        "script_digest": "deadbeef", "counterparty_flavour": "quickfix-cpp",
+        "counterparty_version": "1.0", "counterparty_digest": "sha256:abc",
+        "ledger_ref": ("X", "normal"),
+    }
+    test_required_fields_present([row])
 
 
 def test_ids_unique(cells):
