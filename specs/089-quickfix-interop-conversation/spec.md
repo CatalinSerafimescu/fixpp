@@ -232,6 +232,21 @@ Given the four gaps, this feature is scoped **machinery-first, breadth-second**:
   outcome handling lets a cell that did not run leave the job green) and how to re-derive it. The digest
   requirement itself is unchanged.
 
+### Session 2026-09-11 (`/speckit-implement` — the build unit R-1 measures, and UBSan's recoverable mode)
+
+- Q: R-1 / T001 said to build each configuration **from clean**, but the matrix never builds from clean:
+  it builds the interop driver targets inside the per-configuration trees that already exist. Which does
+  T001 measure? → A: **The targeted build as the matrix performs it — incrementally, in the existing
+  per-configuration trees** (user decision). A configuration whose tree is absent or partial is built from
+  whatever exists, which is then the measured cost. The four binaries the new cells name do not exist
+  until T052, so the measurement uses the interop driver targets the existing cells name, and T095
+  re-derives it once T052's targets exist.
+- Q: The `ubsan` configuration runs cells through `run_interop_cell.py`, which launches the gtest binary
+  directly and so never receives the test preset's `UBSAN_OPTIONS=halt_on_error=1` (#268). Fix it here?
+  → A: **Yes, in this feature** (user decision). FR-021a now requires each cell to run with its
+  configuration's test-preset environment, read from `CMakePresets.json`, with a forced-miss arm, a
+  spurious-hit arm and a mutation in `quickstart.md` § *Step 4*.
+
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -981,6 +996,15 @@ claiming a pass with no corroborating run artifact.
   `spec/behaviors-and-limitations.md` and `spec/feature-catalogue.md` — now state the preset that
   actually ran while keeping the historical label. **A record that was true when written is left alone;
   a record that overclaims is fixed.** See *External obligations* in `plan.md`.
+  ⛔ **A SANITIZER FINDING MUST FAIL THE CELL, IN EVERY CONFIGURATION.** Each cell's process MUST run with
+  the environment its configuration's **test preset** in `CMakePresets.json` carries — **read from that
+  file, never copied**, so the value that makes a sanitizer's finding fatal lives in one place. ⚠️ Why this
+  is not already true: UBSan's default mode is recoverable — a finding prints `runtime error:` and the
+  process exits 0 — and #268 fixed that for ctest by putting `UBSAN_OPTIONS` in the test preset, which
+  only ctest reads. `run_interop_cell.py` launches the gtest binary directly, so without this clause the
+  `ubsan` configuration this feature adds could not fail a cell on a UBSan finding: the label-vs-substance
+  error this clause exists to remove, reintroduced under a new name. Its arms are in `quickstart.md`
+  § *Step 4*.
 - **FR-022**: The `tsan` configuration MUST be treated as **bring-up, not a config flip**. TSan has never
   been run on the paired live matrix, so the feature MUST establish that the TSan arm actually executes
   the conversation — a TSan run that skips, aborts during setup, or produces no witnesses MUST NOT be

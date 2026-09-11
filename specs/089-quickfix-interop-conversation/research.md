@@ -61,7 +61,9 @@ full tree refuses targeted builds that would have succeeded.
 `/dev/sde`, a separate 64 G VHD whose backing file is not on `E:`, while `/` is `/dev/sdd`. Its growth
 consumes neither ceiling, and sampling it into either predicate would inflate both.
 
-**The experiment**: build **each** of the four configurations from clean, **targeted**, while sampling
+**The experiment**: build **each** of the four configurations **targeted** — ⚠️ *amended 2026-09-11 (user
+decision): incrementally, in the existing per-configuration trees, as the matrix performs it; not from
+clean* — while sampling
 **both** `df -k /` and `df -k /mnt/e` before, during and after; record the delta in each. Derive **two**
 per-configuration values with headroom, and record each **with its date**:
 

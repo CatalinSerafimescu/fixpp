@@ -251,6 +251,7 @@ rather than a matter of where a paragraph happened to sit.
 | Delete a business step from the script | the census's 100 keys disagree with the script-derived projection ⇒ RED | FR-015d · W-2a |
 | Add a script step that produces no witness | census disagrees ⇒ RED, in the other direction | FR-015d · W-2a |
 | **Re-derive W-2a's expected population from the script file instead of from the census table** | both arms above go GREEN — the derivation agrees with itself. ⚠️ Assert this: it is the check that the census is a **second opinion** and not a second reading of the same source | FR-015d · W-2a |
+| **Plant a UBSan finding** in one cell (a test-only hook in the cell's gtest that executes undefined behaviour UBSan reports) and run it under `ubsan` | cell **FAILS**, and the cell's own log carries UBSan's `runtime error:` line — assert that line, not merely a non-pass status (rule 2). ⚠️ **Then remove the runner's preset-derived environment and run the same planted cell again: it must PASS** — that mutation is what proves the injected environment, and not the plant, is what reddens the cell | FR-021a · FR-017 |
 | `ci/disk-preflight.sh` arms A-1, A-1a, A-3, A-5, A-5a, A-6 | see [contracts/disk-preflight.md](./contracts/disk-preflight.md) | — |
 
 ### Spurious-hit arms — the guard reports PASS for the wrong reason
@@ -276,6 +277,7 @@ here. Two of the arms below were previously listed with no observable at all.
 | **A `validation_pairs:` section carrying 15 of the 16 conformance pairs** | one `(combo_id, config)` pair is absent; the other 15 are well-formed and E-7 passes on every one of them | **E-7a RED** — equality, not containment. ⚠️ The empty fixture alone cannot tell an existence check from a completeness check | E-7a · W-3d · SC-009d |
 | Disk gate: threshold **unset or unparseable** with both mounts nearly full | `proceed` is true while the predicates measure nothing | RED (arm A-7) | D-9 |
 | Disk gate: host mount **resolves to the build mount** | the host predicate is satisfied by the build reading | RED (arm A-8) | D-10 |
+| The UBSan plant **by itself** fails the cell — so the `ubsan` arm above reddens for the plant's reason, not UBSan's | the same planted cell run under **`normal`**, where nothing is UBSan-instrumented: the plant's own marker line is present in the cell log and **no** `runtime error:` line is | cell **PASSES**. If it fails, the `ubsan` arm's RED is not attributable to UBSan and proves nothing | FR-021a · FR-018 |
 
 ### Controls — arms that must stay GREEN
 
