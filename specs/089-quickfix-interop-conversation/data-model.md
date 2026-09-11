@@ -340,6 +340,11 @@ makes the peer→fixpp direction comparable at all.
 
 The unit a catalogue row cites (FR-015a).
 
+**Where the rows go before promotion**: the shared comparator writes them one JSON object per line to
+`witnesses.jsonl` in the run directory, beside `fixpp-readback.jsonl` and `counterparty-readback.jsonl`, and
+the promotion command reads them from there. An absent file is **no witnesses** — the completeness gate
+then fails — never a skip.
+
 | Field | Type | Rules |
 |---|---|---|
 | `witness_id` | string | stable and derivable from the conversation script |
