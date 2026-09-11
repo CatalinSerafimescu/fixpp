@@ -209,6 +209,66 @@ TEST(ReadbackJsonl, TerminalWrittenExactlyOnce)
     EXPECT_NE(lines[1].find("\"readback_count\":1"), std::string::npos) << lines[1];
 }
 
+// ── data-model.md §13 — the disposition record (089 T061a) ─────────────────
+
+TEST(ReadbackJsonl, DispositionAcceptedCarriesNoRejectObject)
+{
+    std::string const path = testing::TempDir() + "disposition_accepted.jsonl";
+    {
+        Stream s(path);
+        s.disposition("D", 7, kDirectionPeerToFixpp, 0, "accepted");
+    }
+    auto const lines = read_lines(path);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(lines[0],
+              "{\"type\":\"disposition\",\"msg_type\":\"D\",\"seq_num\":7,"
+              "\"direction\":\"peer-to-fixpp\",\"occurrence\":0,\"disposition\":\"accepted\"}");
+    EXPECT_EQ(lines[0].find("\"reject\""), std::string::npos) << lines[0];
+}
+
+TEST(ReadbackJsonl, DispositionRejectedCarries45_373_371_58WhenAllPresent)
+{
+    std::string const path = testing::TempDir() + "disposition_rejected_full.jsonl";
+    {
+        Stream s(path);
+        RejectInfo reject;
+        reject.ref_seq_num = 7;
+        reject.reason = 5;
+        reject.ref_tag = 55;
+        reject.text = "out of context";
+        s.disposition("D", 7, kDirectionPeerToFixpp, 0, "rejected", reject);
+    }
+    auto const lines = read_lines(path);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(lines[0],
+              "{\"type\":\"disposition\",\"msg_type\":\"D\",\"seq_num\":7,"
+              "\"direction\":\"peer-to-fixpp\",\"occurrence\":0,\"disposition\":\"rejected\","
+              "\"reject\":{\"ref_seq_num\":7,\"reason\":5,\"ref_tag\":55,"
+              "\"text\":\"out of context\"}}");
+}
+
+// data-model §13: ref_tag(371)/text(58) are absent when the emitting Reject
+// omits them — never a stand-in for a joined-elsewhere value.
+TEST(ReadbackJsonl, DispositionRejectedOmitsRefTagAndTextWhenTheRejectDidnt)
+{
+    std::string const path = testing::TempDir() + "disposition_rejected_partial.jsonl";
+    {
+        Stream s(path);
+        RejectInfo reject;
+        reject.ref_seq_num = 3;
+        reject.reason = 99;
+        s.disposition("D", 3, kDirectionPeerToFixpp, 1, "rejected", reject);
+    }
+    auto const lines = read_lines(path);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(lines[0],
+              "{\"type\":\"disposition\",\"msg_type\":\"D\",\"seq_num\":3,"
+              "\"direction\":\"peer-to-fixpp\",\"occurrence\":1,\"disposition\":\"rejected\","
+              "\"reject\":{\"ref_seq_num\":3,\"reason\":99}}");
+    EXPECT_EQ(lines[0].find("\"ref_tag\""), std::string::npos) << lines[0];
+    EXPECT_EQ(lines[0].find("\"text\""), std::string::npos) << lines[0];
+}
+
 // ── THE CANONICAL PARTITION — is_canonical_header_or_trailer_tag() (089 T039
 // round-b, C-6) ──────────────────────────────────────────────────────────
 //

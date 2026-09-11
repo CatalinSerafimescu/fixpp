@@ -130,6 +130,17 @@ int main(int argc, char** argv)
                 {"60", "UTCTIMESTAMP",
                  fixpp::interop::readback::canonical_typed_value("UTCTIMESTAMP", "20260101-00:00:00")}});
 
+    // data-model.md §13 / T061a: fixpp's OWN disposition record -- fixpp-only,
+    // like the §1a hello, so it is pinned by its OWN committed expected line
+    // (expected-fixpp-disposition.jsonl) and stays OUTSIDE C-7's three-way
+    // byte-identity set (see three_way_check.sh's separate comparison).
+    fixpp::interop::readback::RejectInfo reject;
+    reject.ref_seq_num = 9;
+    reject.reason = 5;
+    reject.ref_tag = 55;
+    reject.text = "out of context";
+    s.disposition("D", 9, "peer-to-fixpp", 0, "rejected", reject);
+
     s.terminal("completed", "run-1", "cell-1", "normal", "abc");
     return 0;
 }

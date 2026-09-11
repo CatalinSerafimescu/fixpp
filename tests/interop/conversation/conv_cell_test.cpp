@@ -376,6 +376,10 @@ public:
                 typed_captures.push_back(TypedCapture{step_id, typed});
             }
             long long const occ = next_occurrence(seq, std::string(rb::kDirectionPeerToFixpp));
+            // data-model §13/T061a: the disposition ordinal is the SAME
+            // arrival counter the readback record above just consumed — one
+            // shared counter serves both, never a second independent count.
+            stream->disposition(mt, seq, rb::kDirectionPeerToFixpp, occ, "accepted");
             stream->readback(mt, seq, rb::kDirectionPeerToFixpp, occ, poss_dup, std::move(fields),
                             std::move(typed));
         }
@@ -433,6 +437,65 @@ public:
                            });
         });
         return {};
+    }
+
+    // data-model §13/T061a: an ADMIN arrival fixpp's session DELIVERED (any
+    // message reaching this callback was accepted — the validator gate that
+    // could have rejected it runs BEFORE FSM delivery, session.hpp/session.cpp
+    // facts in the task brief). Most admin traffic in this conversation
+    // (A-LOGON/A-TESTREQ's Heartbeat reply/A-GAPFILL's SequenceReset) never
+    // has a peer `sent` record to join (both counterparties' writers only
+    // call stream->sent() from toApp — application messages — never from
+    // toAdmin), so these dispositions legitimately "enter no set" per
+    // data-model §13's own text; they are still written because §13 defines
+    // `accepted` at fromApp/fromAdmin delivery, not at "joins something".
+    fixpp::core::expected_t<void> fromAdmin(MessageView<access_mode::Index> const& msg,
+                                            SessionId const& /*id*/) override
+    {
+        if (stream != nullptr) {
+            long long const seq = msg.msg_seq_num();
+            long long const occ = next_occurrence(seq, std::string(rb::kDirectionPeerToFixpp));
+            stream->disposition(std::string(msg.msg_type()), seq, rb::kDirectionPeerToFixpp, occ,
+                                 "accepted");
+        }
+        return {};
+    }
+
+    // data-model §13/T061a: the `rejected` disposition side — observed as
+    // fixpp's OWN outbound session Reject(35=3), inspected here (toAdmin is
+    // inspect-only; the message is always sent regardless of this override's
+    // body, FR-008). RefSeqNum(45) names the rejected inbound arrival, which
+    // never reached fromApp/fromAdmin above (the validator gate runs BEFORE
+    // FSM delivery) -- so this call site and the two above are mutually
+    // exclusive per arrival, and next_occurrence's shared counter assigns the
+    // correct ordinal whichever of the three fires.
+    void toAdmin(MessageView<access_mode::Index> const& msg, SessionId const& /*id*/) override
+    {
+        if (stream == nullptr || msg.msg_type() != "3") {
+            return;
+        }
+        auto ref_seq_fv = msg.get(45);
+        if (!ref_seq_fv.has_value()) {
+            return;  // malformed Reject -- nothing to join a disposition to
+        }
+        long long const ref_seq = std::stoll(std::string(ref_seq_fv->as_string()));
+        std::string ref_msg_type;
+        if (auto fv = msg.get(372); fv.has_value()) {
+            ref_msg_type = std::string(fv->as_string());
+        }
+        rb::RejectInfo reject;
+        reject.ref_seq_num = ref_seq;
+        if (auto fv = msg.get(373); fv.has_value()) {
+            reject.reason = std::stoi(std::string(fv->as_string()));
+        }
+        if (auto fv = msg.get(371); fv.has_value()) {
+            reject.ref_tag = std::stoi(std::string(fv->as_string()));
+        }
+        if (auto fv = msg.get(58); fv.has_value()) {
+            reject.text = std::string(fv->as_string());
+        }
+        long long const occ = next_occurrence(ref_seq, std::string(rb::kDirectionPeerToFixpp));
+        stream->disposition(ref_msg_type, ref_seq, rb::kDirectionPeerToFixpp, occ, "rejected", reject);
     }
 };
 

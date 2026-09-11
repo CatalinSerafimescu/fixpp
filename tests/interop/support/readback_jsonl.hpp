@@ -38,6 +38,7 @@
 #include <fstream>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -293,6 +294,17 @@ struct TypedEntry {
     std::string value;     // canonical_typed_value()-rendered
 };
 
+// data-model.md §13's `reject` sub-object: present iff `disposition == "rejected"`.
+// `ref_tag`/`text` are OPTIONAL on the wire (RefTagID(371)/Text(58) are both
+// `required='N'` on Reject(35=3), FIX44.xml) — absent means the emitting
+// Reject omitted them, never a stand-in for a joined-elsewhere value.
+struct RejectInfo {
+    long long ref_seq_num = 0;    // 45
+    int reason = 0;               // 373
+    std::optional<int> ref_tag;   // 371
+    std::optional<std::string> text;  // 58
+};
+
 // Parse a path into its integer tuple: "453[1].802[0].523" -> {453,1,802,0,523}.
 // Sorting by this tuple — element-wise numerically, a shorter tuple sorting
 // before a longer one sharing its prefix — is what removes the ENGINE'S WALK
@@ -427,6 +439,40 @@ public:
         line += "}";
         write_line(line);
         ++readback_count_;
+    }
+
+    // data-model.md §13 — fixpp's OWN observation of what its session did with
+    // one inbound arrival: `accepted` at fromApp/fromAdmin delivery,
+    // `rejected` from fixpp's own outbound Reject(35=3) seen through toAdmin.
+    // fixpp-only (no counterparty writes this record) — OUTSIDE C-7's
+    // byte-identity set, pinned by its own committed expected line, exactly
+    // as hello() above is (§1a). `occurrence` is the SAME shared arrival
+    // counter readback()/sent() use for (seq_num, direction) — never a
+    // second, independent count.
+    void disposition(std::string const& msg_type, long long seq_num,
+                      std::string const& direction, long long occurrence,
+                      std::string const& disp, std::optional<RejectInfo> const& reject = std::nullopt)
+    {
+        std::string line = "{\"type\":\"disposition\"";
+        line += ",\"msg_type\":\"" + json_escape(msg_type) + "\"";
+        line += ",\"seq_num\":" + std::to_string(seq_num);
+        line += ",\"direction\":\"" + json_escape(direction) + "\"";
+        line += ",\"occurrence\":" + std::to_string(occurrence);
+        line += ",\"disposition\":\"" + json_escape(disp) + "\"";
+        if (reject.has_value()) {
+            line += ",\"reject\":{";
+            line += "\"ref_seq_num\":" + std::to_string(reject->ref_seq_num);
+            line += ",\"reason\":" + std::to_string(reject->reason);
+            if (reject->ref_tag.has_value()) {
+                line += ",\"ref_tag\":" + std::to_string(*reject->ref_tag);
+            }
+            if (reject->text.has_value()) {
+                line += ",\"text\":\"" + json_escape(*reject->text) + "\"";
+            }
+            line += "}";
+        }
+        line += "}";
+        write_line(line);
     }
 
     // data-model.md §12 — written LAST, whatever the outcome, exactly once
