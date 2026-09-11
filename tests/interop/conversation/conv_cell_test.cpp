@@ -46,6 +46,7 @@
 
 #include <openssl/sha.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/post.hpp>
@@ -228,9 +229,38 @@ std::vector<rb::TypedEntry> typed_reads_for(std::string const& mt,
     return out;
 }
 
+// T054 (FR-007/SC-002): the peer-to-fixpp `stage` order (inbound_business_count
+// at the moment fromApp captures it) is exactly the six peer-originated steps
+// in wire order -- B-02/B-04/B-06 (replies to B-01/B-03/B-05), then B-07/B-09/
+// B-11 (which fixpp itself replies to with B-08/B-10/B-12, see the reply_step
+// switch in fromApp below). Named here so the T054 typed-read assertion can
+// look up each capture's script-declared intent by step_id.
+std::string peer_step_id_for_stage(int stage)
+{
+    switch (stage) {
+        case 0: return "B-02";
+        case 1: return "B-04";
+        case 2: return "B-06";
+        case 3: return "B-07";
+        case 4: return "B-09";
+        case 5: return "B-11";
+        default: return {};
+    }
+}
+
 struct PendingSent {
     std::string script_step_id;
     std::vector<rb::FieldEntry> fields;
+};
+
+// T054: fixpp's OWN typed-accessor output for one peer-originated step,
+// captured at read time so the TEST body can assert it against the peer's
+// declared intent (data-model.md §2's `typed_reads`, previously written to
+// the readback stream but never compared against anything -- FR-006's
+// witness comparator ranges over the generic `fields` walk only).
+struct TypedCapture {
+    std::string step_id;
+    std::vector<rb::TypedEntry> entries;
 };
 
 // The Application driving BOTH the passive (readback) and reactive-reply
@@ -251,6 +281,12 @@ public:
     std::map<std::pair<long long, std::string>, long long> occurrences;
     std::atomic<int> inbound_business_count{0};
     std::atomic<int> reactive_sends_failed{0};
+    // T054: one entry per peer-originated business step, appended from
+    // fromApp only (single-exec confined -- "fromApp(N+1) never begins
+    // before fromApp(N) returns" -- so no lock is needed, matching how
+    // `stream`/`pending_sent` are already written unlocked from the same
+    // callback). Read back in the TEST body after the conversation settles.
+    std::vector<TypedCapture> typed_captures;
     // B-08/B-10/B-12's runtime_generated OrderID(37)/ExecID(17) (spec.md's
     // own per-step notes: B-08 mints fresh; B-10 ECHOES B-08's OrderID; B-12
     // mints a second, independent fresh pair) — both only ever touched from
@@ -293,15 +329,27 @@ public:
         bool poss_dup = false;
         if (auto fv = msg.get(43); fv.has_value()) poss_dup = (fv->as_string() == "Y");
 
+        // Hoisted above the readback/typed-capture block: `stage` names WHICH
+        // peer-originated step this inbound message is (peer_step_id_for_stage),
+        // needed for the T054 typed capture below, in addition to its existing
+        // use for the reactive-reply decision.
+        int const stage = inbound_business_count.fetch_add(1);
+
         if (stream != nullptr) {
             auto fields = conv::collect_body_fields(msg);
             auto typed = typed_reads_for(mt, msg);
+            // T054: capture BEFORE the std::move into stream->readback() below
+            // hands the vector away -- the TEST body asserts this copy against
+            // the peer's declared intent (FR-007/SC-002).
+            std::string const step_id = peer_step_id_for_stage(stage);
+            if (!step_id.empty()) {
+                typed_captures.push_back(TypedCapture{step_id, typed});
+            }
             long long const occ = next_occurrence(seq, std::string(rb::kDirectionPeerToFixpp));
             stream->readback(mt, seq, rb::kDirectionPeerToFixpp, occ, poss_dup, std::move(fields),
                             std::move(typed));
         }
 
-        int const stage = inbound_business_count.fetch_add(1);
         std::string reply_step;
         if (stage == 3) reply_step = "B-08";       // reply to B-07
         else if (stage == 4) reply_step = "B-10";  // reply to B-09
@@ -671,6 +719,52 @@ TEST(Conversation, Cell)
     }
     EXPECT_EQ(rows.size(), 12u) << "expected 12 business-step witness rows (12 census keys for combo "
                                 << combo << ", spec.md § Conversation census)";
+
+    // ── T054: fixpp's typed-read tier must return the peer's DECLARED values
+    // (FR-007/SC-002) ────────────────────────────────────────────────────────
+    // `typed_reads_for()` above (fromApp) captures fixpp's OWN generated
+    // typed-accessor output for every peer-to-fixpp business step, and until
+    // now nothing compared it against anything: witness_comparator.hpp's
+    // FR-006 comparator ranges over the generic `fields` body walk only,
+    // never `typed_reads` (that field is written to the stream as
+    // descriptive evidence, per its own header comment). Assert here,
+    // explicitly, that every CAPTURED typed value equals the script's
+    // declared value for that (step, tag) -- canonicalized the SAME way
+    // typed_reads_for() itself canonicalizes (rb::canonical_typed_value),
+    // so a PRICE/QTY spelling difference ("190.50" vs "190.5") cannot read
+    // as a false mismatch.
+    //
+    // Iterates over what was CAPTURED, never the reverse: typed_reads_for()
+    // is explicitly best-effort (its own header comment — "a field the
+    // message declares but this cell's script does not exercise is simply
+    // omitted"), and several captured tags (ExecID(17)/OrderID(37) on
+    // B-02/B-04/B-06, the peer engine's own free-form IDs) have no
+    // script-declared counterpart at all — skipped, not asserted absent.
+    // EXPECT_GT below guards the OTHER direction: an empty capture for a
+    // step would otherwise satisfy an empty for-loop vacuously.
+    ASSERT_FALSE(app->typed_captures.empty())
+        << "T054: zero typed-read captures for the whole conversation -- "
+           "the assertion below would be vacuous";
+    for (auto const& cap : app->typed_captures) {
+        auto it = intent_index.find({cap.step_id, "peer"});
+        ASSERT_NE(it, intent_index.end())
+            << "T054: no peer intent entry declared for step " << cap.step_id;
+        EXPECT_GT(cap.entries.size(), 0u)
+            << "T054: zero typed fields captured for step " << cap.step_id;
+        for (auto const& te : cap.entries) {
+            auto declared = std::find_if(
+                it->second.fields.begin(), it->second.fields.end(),
+                [&](intent::FieldEntry const& f) { return f.path == te.path; });
+            if (declared == it->second.fields.end()) {
+                continue;  // no script-declared counterpart (e.g. peer-engine-minted ID) --
+                           // nothing to compare against, not an assertable absence.
+            }
+            std::string const expected = rb::canonical_typed_value(te.fix_type, declared->value);
+            EXPECT_EQ(te.value, expected)
+                << "T054: step " << cap.step_id << " tag " << te.path
+                << " typed-read=" << te.value << " declared=" << expected;
+        }
+    }
 
     hp::expect_graceful_stop(fx);
 }
