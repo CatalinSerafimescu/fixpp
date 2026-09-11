@@ -168,6 +168,73 @@ TEST(BuilderFailClosed067, LengthDataCoupling_AutoDerivedLengthBothEmitted) {
     EXPECT_LT(pos354, pos355) << "Length(354) must be emitted BEFORE Data(355), coupled";
 }
 
+// ── #418: EncodedText(355), a DATA field, is rejected for every byte
+// outside 0x20-0x7E, not only control bytes — pinning the limitation AS IT
+// BEHAVES TODAY. L-067-2 (spec/behaviors-and-limitations.md) undersold this
+// gap; no test before #418 exercised a DATA field with a non-clean byte
+// (LengthDataCoupling_AutoDerivedLengthBothEmitted above only ever used
+// ASCII text). These four cases MUST flip to a build-succeeds /
+// verbatim-bytes / EncodedTextLen-equals-byte-count assertion once #418's
+// emit path lands (design: .specify/418-data-field-bytes.md) — until then
+// they pin the reject. SohInValue_RejectedBeforeAnyByteReachesOut above is
+// a STRING field (ClOrdID(11)) and stays exactly as written: INV-2's guard
+// there is correct, permanent behaviour, not part of this gap.
+TEST(BuilderFailClosed067, DataField_EncodedText_SOH_RejectedOutOfRange_418) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+    auto args = make_valid_new_order_single_args(&arena);
+    args.encoded_text = "\x01";  // SOH, inside a DATA field (EncodedText/355)
+
+    std::array<std::byte, 1024> out{};
+    out.fill(kSentinel);
+    auto r = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
+    ASSERT_FALSE(r.has_value())
+        << "#418 pin: EncodedText(355) holding SOH must fail-closed pre-fix";
+    EXPECT_EQ(r.error(), fixpp::core::error::wire_field_value_out_of_range);
+    assert_unchanged(out, "EncodedText SOH byte");
+}
+
+TEST(BuilderFailClosed067, DataField_EncodedText_ControlByte_RejectedOutOfRange_418) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+    auto args = make_valid_new_order_single_args(&arena);
+    args.encoded_text = "\x1f";  // Unit Separator, a control byte other than SOH
+
+    std::array<std::byte, 1024> out{};
+    out.fill(kSentinel);
+    auto r = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
+    ASSERT_FALSE(r.has_value())
+        << "#418 pin: EncodedText(355) holding a control byte must fail-closed pre-fix";
+    EXPECT_EQ(r.error(), fixpp::core::error::wire_field_value_out_of_range);
+    assert_unchanged(out, "EncodedText control byte");
+}
+
+TEST(BuilderFailClosed067, DataField_EncodedText_0x80_RejectedOutOfRange_418) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+    auto args = make_valid_new_order_single_args(&arena);
+    args.encoded_text = "\x80";  // high-bit byte, NOT a control byte — #418's actual gap
+
+    std::array<std::byte, 1024> out{};
+    out.fill(kSentinel);
+    auto r = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
+    ASSERT_FALSE(r.has_value())
+        << "#418 pin: EncodedText(355) holding 0x80 must fail-closed pre-fix";
+    EXPECT_EQ(r.error(), fixpp::core::error::wire_field_value_out_of_range);
+    assert_unchanged(out, "EncodedText 0x80 byte");
+}
+
+TEST(BuilderFailClosed067, DataField_EncodedText_0xFF_RejectedOutOfRange_418) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+    auto args = make_valid_new_order_single_args(&arena);
+    args.encoded_text = "\xff";  // top of the byte range — #418's actual gap
+
+    std::array<std::byte, 1024> out{};
+    out.fill(kSentinel);
+    auto r = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
+    ASSERT_FALSE(r.has_value())
+        << "#418 pin: EncodedText(355) holding 0xff must fail-closed pre-fix";
+    EXPECT_EQ(r.error(), fixpp::core::error::wire_field_value_out_of_range);
+    assert_unchanged(out, "EncodedText 0xff byte");
+}
+
 // ── W-vs-X per-occurrence NoMDEntries(268) delimiter discrimination
 // (RC#1) ────────────────────────────────────────────────────────────────
 TEST(BuilderFailClosed067, WvsXPerOccurrenceDelimiterDiscrimination) {
