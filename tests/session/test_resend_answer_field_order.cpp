@@ -461,6 +461,31 @@ protected:
         }
         (void)fut.get();
     }
+
+    // Sends a minimal bodyless NewOrderSingle via the public API (so the store
+    // records it and the outbound seqnum advances normally), returns the
+    // assigned MsgSeqNum(34), and clears captured_frames. Shared by the
+    // build_replay_frame tests below, which then overwrite the just-stored
+    // record's bytes in place (CapturingStore::outbound_records) to feed a
+    // hand-crafted stored frame through the real resend-reply path.
+    seqnum_t send_and_capture_seq(Session& sess, const char* label) {
+        auto payload = to_payload("35=D\x01");
+        auto fut =
+            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, label)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, label);
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << label;
+            return 0;
+        }
+        EXPECT_TRUE(fut.get().has_value()) << label;
+        EXPECT_FALSE(captured_frames.empty()) << label;
+        const auto tag34_opt =
+            extract_field(std::span<const std::byte>(captured_frames.back()), 34);
+        EXPECT_TRUE(tag34_opt.has_value()) << label;
+        const auto seq = static_cast<seqnum_t>(std::stoul(std::string(*tag34_opt)));
+        captured_frames.clear();
+        return seq;
+    }
 };
 
 }  // namespace
@@ -678,6 +703,387 @@ TEST_F(ResendAnswerReplayTest, Replay_NoBodyFallback_StillCarries43And122) {
     }
     EXPECT_EQ(replay_matches, 1u) << "ResendRequest for the bodyless stored frame (seq=" << app_seq
                                   << ") must produce exactly one replayed frame";
+}
+
+// ── build_sequence_reset_gapfill: the append_raw(43, ...) / append_raw(122,
+// ...) failure branches ──────────────────────────────────────────────────────
+//
+// Buffer-boundary witness. wire::Writer (writer.cpp) reserves a fixed 6-digit
+// BodyLength(9) placeholder right after the first field (BeginString(8)) and
+// writes every following field at a byte position that is a deterministic
+// function of the tag/value lengths below -- independent of whether the call
+// ultimately succeeds, since a truncated call never reaches commit()'s
+// memmove/backpatch. field_bytes(tag, value_len) models one "tag=value\x01"
+// field's on-wire cost; kPlaceholderBytes models the fixed "9=000000\x01"
+// reservation.
+//
+// Every boundary asserted below is DERIVED from field_bytes/kPlaceholderBytes
+// rather than a hardcoded literal, so the test fails loud -- not silently
+// retargets a different field's failure branch -- if the Writer's placeholder
+// width or the builder's field order ever changes.
+TEST(ResendAnswerFieldOrder, GapFill_AppendFailureBranches43And122ArePinned) {
+    constexpr std::string_view kSender = "ISLD";
+    constexpr std::string_view kTarget = "TW";
+    constexpr std::string_view kBeginString = "FIX.4.4";
+    constexpr std::string_view kSendingTime = "20260614-12:00:00.000";
+    constexpr fixpp::session::seqnum_t kSeq = 5;
+    constexpr fixpp::session::seqnum_t kNewSeqno = 10;
+
+    const auto field_bytes = [](std::uint32_t tag, std::size_t value_len) -> std::size_t {
+        return std::to_string(tag).size() + 1 /* '=' */ + value_len + 1 /* SOH */;
+    };
+    constexpr std::size_t kPlaceholderBytes = 9;  // "9=000000\x01"
+
+    const std::size_t body_start = field_bytes(8, kBeginString.size()) + kPlaceholderBytes;
+    const std::size_t pos_after_35 = body_start + field_bytes(35, 1);
+    const std::size_t pos_after_34 = pos_after_35 + field_bytes(34, std::to_string(kSeq).size());
+    const std::size_t pos_after_49 = pos_after_34 + field_bytes(49, kSender.size());
+    const std::size_t pos_after_52 = pos_after_49 + field_bytes(52, kSendingTime.size());
+    const std::size_t pos_after_56 = pos_after_52 + field_bytes(56, kTarget.size());
+    const std::size_t pos_after_43 = pos_after_56 + field_bytes(43, 1);
+    const std::size_t pos_after_122 = pos_after_43 + field_bytes(122, kSendingTime.size());
+    const std::size_t pos_after_36 =
+        pos_after_122 + field_bytes(36, std::to_string(kNewSeqno).size());
+    const std::size_t pos_after_123 = pos_after_36 + field_bytes(123, 1);
+
+    const std::size_t body_length = pos_after_123 - body_start;
+    const std::size_t actual_digits = std::to_string(body_length).size();
+    ASSERT_LE(actual_digits, 6u) << "body exceeds the 6-digit BodyLength placeholder reservation";
+    const std::size_t gap = 6 - actual_digits;  // over-reservation memmove'd away at commit()
+    const std::size_t minimal_success_size = (pos_after_123 - gap) + 7;  // trailer "10=NNN\x01"
+
+    // NOTE: `buf` must outlive the returned span (build_sequence_reset_gapfill
+    // returns a subspan of its `out` argument), so each call site owns its own
+    // buffer rather than a lambda-local one.
+    auto build = [&](std::vector<std::byte>& buf) {
+        return fixpp::session::build_sequence_reset_gapfill(std::span<std::byte>{buf}, kSeq,
+                                                            kSender, kTarget, kNewSeqno,
+                                                            kBeginString, kSendingTime);
+    };
+
+    // Room for everything through TargetCompID(56) but not PossDupFlag(43):
+    // the append_raw(43, ...) call must fail there.
+    std::vector<std::byte> buf_before_43(pos_after_56);
+    EXPECT_FALSE(build(buf_before_43).has_value())
+        << "buffer sized one field short of PossDupFlag(43) must fail";
+
+    // Room through 43 but not OrigSendingTime(122): the append_raw(122, ...)
+    // call must fail there.
+    std::vector<std::byte> buf_before_122(pos_after_43);
+    EXPECT_FALSE(build(buf_before_122).has_value())
+        << "buffer sized one field short of OrigSendingTime(122) must fail";
+
+    // Model pin: one byte short of the full frame fails; the exact minimal
+    // size succeeds and returns a frame of exactly that length.
+    std::vector<std::byte> buf_short(minimal_success_size - 1);
+    EXPECT_FALSE(build(buf_short).has_value())
+        << "one byte short of the modeled minimal size must fail";
+    std::vector<std::byte> buf_full(minimal_success_size);
+    auto full = build(buf_full);
+    ASSERT_TRUE(full.has_value()) << "modeled minimal_success_size must be sufficient";
+    EXPECT_EQ(full->size(), minimal_success_size);
+    {
+        const auto full_check = check_resend_answer_field_order(*full);
+        EXPECT_TRUE(full_check.ok) << full_check.reason;
+    }
+}
+
+// ── build_replay_frame: malformed stored field skipped in both scans ────────
+//
+// scan_field flags a field malformed when a non-digit character appears
+// before its '=' (e.g. "4X=..."). The pre-scan pass (looking for stored
+// SendingTime(52)) and the write loop (copying fields into the replay) share
+// scan_field, so the malformed field is skipped identically in both -- they
+// can never desync. Placed BEFORE the stored 52 field so the pre-scan's
+// `if (!fr.ok) continue;` is exercised too: the pre-scan breaks as soon as it
+// finds 52, so a malformed field placed AFTER 52 would never reach it.
+TEST_F(ResendAnswerReplayTest, Replay_MalformedStoredField_SkippedInBothScans) {
+    auto factory = std::make_shared<CapturingStoreFactory>();
+    auto cfg = make_cfg(factory);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const seqnum_t app_seq =
+        send_and_capture_seq(sess, "Replay_MalformedStoredField_SkippedInBothScans/send");
+
+    ASSERT_NE(factory->last_store, nullptr);
+    ASSERT_FALSE(factory->last_store->outbound_records.empty());
+    // build_replay_frame never requires tags 9/10 to be present -- it only
+    // ever skips them if seen -- so the hand-crafted stored bytes below omit
+    // them.
+    std::string stored;
+    stored += "8=FIX.4.4\x01";
+    stored += "35=D\x01";
+    stored += "34=" + std::to_string(app_seq) + "\x01";
+    stored += "49=ISLD\x01";
+    stored += "4X=SENTINEL_MALFORMED_VALUE\x01";  // malformed: non-digit tag char
+    stored += "52=20260614-12:00:00.000\x01";
+    stored += "56=TW\x01";
+    stored += "11=ORD-MALFORMED\x01";
+    factory->last_store->outbound_records.back().frame = to_payload(stored);
+
+    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    feed(sess, rr);
+
+    std::size_t replay_matches = 0;
+    for (const auto& f : captured_frames) {
+        const std::span<const std::byte> fs(f);
+        if (extract_field(fs, 35) != "D") continue;
+        if (extract_field(fs, 34) != std::to_string(app_seq)) continue;
+        ++replay_matches;
+
+        const auto check = check_resend_answer_field_order(f);
+        EXPECT_TRUE(check.ok) << check.reason;
+        EXPECT_EQ(check.count_43, 1u);
+        EXPECT_EQ(check.count_122, 1u);
+        EXPECT_EQ(extract_field(fs, 11), "ORD-MALFORMED")
+            << "the well-formed body field after the malformed one must still be replayed";
+
+        const std::string_view f_sv(reinterpret_cast<const char*>(f.data()), f.size());
+        EXPECT_EQ(f_sv.find("SENTINEL_MALFORMED_VALUE"), std::string_view::npos)
+            << "a malformed stored field must be dropped, not copied into the replay";
+    }
+    EXPECT_EQ(replay_matches, 1u);
+}
+
+// ── build_replay_frame: no stored SendingTime(52) ────────────────────────────
+//
+// When no stored field carries tag 52, the pre-scan `while (i < n)` loop
+// exits normally (its only other exit is the `break` on finding 52), leaving
+// orig_sending_time at its default (empty) string_view. The write loop still
+// inserts PossDupFlag(43)/OrigSendingTime(122) at the header/body boundary;
+// wire::Writer::append_raw accepts an empty value span (write_span
+// early-returns on an empty span, still writing "tag=" and the terminating
+// SOH), so 122 is emitted PRESENT but EMPTY rather than omitted.
+//
+// FINDING (observed at this commit, not fixed here -- out of this PR's
+// scope): OrigSendingTime is a UTCTimestamp field; an empty value is not a
+// valid one. Every OTHER append-failure branch in this file fails CLOSED (no
+// frame at all); this path fails OPEN (a frame carrying a field the FIX spec
+// requires to be a real timestamp, empty instead). Reachable only via a
+// custom/corrupted MessageStore -- Session::send_impl always stamps 52.
+// Tracked in fixpp issue #424; a fix flips this test.
+TEST_F(ResendAnswerReplayTest, Replay_NoStoredSendingTime_Emits122PresentButEmpty) {
+    auto factory = std::make_shared<CapturingStoreFactory>();
+    auto cfg = make_cfg(factory);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const seqnum_t app_seq =
+        send_and_capture_seq(sess, "Replay_NoStoredSendingTime_Emits122PresentButEmpty/send");
+
+    ASSERT_NE(factory->last_store, nullptr);
+    ASSERT_FALSE(factory->last_store->outbound_records.empty());
+    std::string stored;
+    stored += "8=FIX.4.4\x01";
+    stored += "35=D\x01";
+    stored += "34=" + std::to_string(app_seq) + "\x01";
+    stored += "49=ISLD\x01";
+    stored += "56=TW\x01";
+    stored += "11=ORD-NO52\x01";
+    factory->last_store->outbound_records.back().frame = to_payload(stored);
+
+    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    feed(sess, rr);
+
+    std::size_t replay_matches = 0;
+    for (const auto& f : captured_frames) {
+        const std::span<const std::byte> fs(f);
+        if (extract_field(fs, 35) != "D") continue;
+        if (extract_field(fs, 34) != std::to_string(app_seq)) continue;
+        ++replay_matches;
+
+        const auto check = check_resend_answer_field_order(f);
+        EXPECT_TRUE(check.ok) << check.reason;
+        EXPECT_EQ(check.count_43, 1u);
+        EXPECT_EQ(check.count_122, 1u);
+
+        const auto ost = extract_field(fs, 122);
+        ASSERT_TRUE(ost.has_value()) << "OrigSendingTime(122) must be present (count_122==1)";
+        EXPECT_TRUE(ost->empty())
+            << "FINDING: with no stored SendingTime(52), OrigSendingTime(122) is emitted "
+               "present but EMPTY rather than omitted -- see the TEST_F comment above";
+    }
+    EXPECT_EQ(replay_matches, 1u);
+}
+
+namespace {
+
+// Shared by the three build_replay_frame overflow tests below. Walks
+// captured_frames for any frame identified as this resend slot's answer --
+// either the replay itself (35=D, 34==app_seq) or a substituted GapFill
+// (35=4) -- and asserts it is well-formed per check_resend_answer_field_order.
+// Does NOT assert that nothing was transmitted: per issue #424,
+// replay_outbound_range_ currently skips a slot silently when
+// build_replay_frame fails (no replay AND no GapFill for it); pinning that
+// silence here would pin #424's defect rather than test this PR's overflow
+// handling. What IS asserted, unconditionally: whatever ships for this slot,
+// if anything, is never a malformed/partial build_replay_frame result.
+void expect_no_malformed_or_partial_frame_for_slot(
+    const std::vector<std::vector<std::byte>>& captured_frames, seqnum_t app_seq) {
+    std::size_t candidates = 0;
+    for (const auto& f : captured_frames) {
+        const std::span<const std::byte> fs(f);
+        const auto mt = extract_field(fs, 35);
+        const bool is_replay_candidate =
+            (mt == "D" && extract_field(fs, 34) == std::to_string(app_seq));
+        const bool is_gapfill_candidate = (mt == "4");
+        if (!is_replay_candidate && !is_gapfill_candidate) continue;
+        ++candidates;
+        const auto check = check_resend_answer_field_order(f);
+        EXPECT_TRUE(check.ok) << "any frame transmitted for this resend slot must be well-formed "
+                                 "(never a partial/malformed build_replay_frame result): "
+                              << check.reason;
+    }
+    // Observation, not an assertion (see the function comment): at this
+    // commit, `candidates` is 0 for every overflow scenario below -- the slot
+    // is skipped silently, matching #424.
+    (void)candidates;
+}
+
+}  // namespace
+
+// ── build_replay_frame: overflow AT the PossDupFlag(43)/OrigSendingTime(122)
+// insertion ───────────────────────────────────────────────────────────────
+//
+// The replay buffer (Session::replay_outbound_range_'s kRpBufSize) is the
+// capture buffer (CaptureVisitor::kCapBufSize) plus a fixed headroom, and
+// OrigSendingTime(122) duplicates the stored SendingTime(52) value. A stored
+// 52 long enough that its duplication alone exceeds that fixed headroom
+// overflows the replay buffer while still fitting (with room to spare) in
+// the capture buffer -- so retrieve() succeeds (no truncation) but
+// build_replay_frame fails. Here the stored SendingTime is long enough that
+// the overflow happens appending 122 itself, at the header/body-boundary
+// insertion point, before any stored body field is even reached.
+TEST_F(ResendAnswerReplayTest, Replay_Overflow_AtPossDupInsertion) {
+    auto factory = std::make_shared<CapturingStoreFactory>();
+    auto cfg = make_cfg(factory);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const seqnum_t app_seq = send_and_capture_seq(sess, "Replay_Overflow_AtPossDupInsertion/send");
+
+    ASSERT_NE(factory->last_store, nullptr);
+    ASSERT_FALSE(factory->last_store->outbound_records.empty());
+
+    constexpr std::size_t kCapBufSize = 4096;       // mirrors CaptureVisitor::kCapBufSize
+    constexpr std::size_t kRpBufSize = 4096 + 256;  // mirrors replay_outbound_range_'s kRpBufSize
+    const std::string huge_sending_time(3900, 'S');
+
+    std::string stored;
+    stored += "8=FIX.4.4\x01";
+    stored += "35=D\x01";
+    stored += "34=" + std::to_string(app_seq) + "\x01";
+    stored += "49=ISLD\x01";
+    stored += "52=" + huge_sending_time + "\x01";
+    stored += "56=TW\x01";
+    stored += "11=X\x01";  // one small body field; never reached before overflow
+    ASSERT_LE(stored.size(), kCapBufSize) << "precondition: must fit the capture buffer";
+    // Conservative lower bound on the replayed size: duplicating the huge 52
+    // as 122 alone adds at least huge_sending_time.size() new bytes.
+    ASSERT_GT(stored.size() + huge_sending_time.size(), kRpBufSize)
+        << "precondition: the duplicate-52 growth alone must exceed the replay buffer";
+    factory->last_store->outbound_records.back().frame = to_payload(stored);
+
+    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    feed(sess, rr);
+
+    expect_no_malformed_or_partial_frame_for_slot(captured_frames, app_seq);
+}
+
+// ── build_replay_frame: insertion fits, a LATER stored field overflows ──────
+//
+// Same headroom mechanism as above, but the stored SendingTime is short
+// enough that inserting 43/122 (including the 122 duplicate) fits well
+// within the replay buffer; the overflow instead happens re-appending a
+// later, large stored body field -- a DIFFERENT append_raw call from the
+// insertion's.
+TEST_F(ResendAnswerReplayTest, Replay_Overflow_AtLaterStoredField) {
+    auto factory = std::make_shared<CapturingStoreFactory>();
+    auto cfg = make_cfg(factory);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const seqnum_t app_seq = send_and_capture_seq(sess, "Replay_Overflow_AtLaterStoredField/send");
+
+    ASSERT_NE(factory->last_store, nullptr);
+    ASSERT_FALSE(factory->last_store->outbound_records.empty());
+
+    constexpr std::size_t kCapBufSize = 4096;       // mirrors CaptureVisitor::kCapBufSize
+    constexpr std::size_t kRpBufSize = 4096 + 256;  // mirrors replay_outbound_range_'s kRpBufSize
+    const std::string moderate_sending_time(600, 'S');
+    const std::string huge_body_field(3300, 'B');
+
+    std::string header;
+    header += "8=FIX.4.4\x01";
+    header += "35=D\x01";
+    header += "34=" + std::to_string(app_seq) + "\x01";
+    header += "49=ISLD\x01";
+    header += "52=" + moderate_sending_time + "\x01";
+    header += "56=TW\x01";
+    // Predicted pos_ once 43 and the 122-duplicate of the moderate 52 are
+    // appended, starting from an empty replay buffer: header bytes copied
+    // verbatim + "43=Y\x01" (5 bytes) + "122=<value>\x01" (3+1+len+1 bytes).
+    const std::size_t predicted_pos_after_insertion =
+        header.size() + 5 + (3 + 1 + moderate_sending_time.size() + 1);
+    ASSERT_LE(predicted_pos_after_insertion, kRpBufSize)
+        << "precondition: the 43/122 insertion itself must FIT the replay buffer";
+
+    std::string stored = header;
+    stored += "11=SMALL\x01";
+    stored += "58=" + huge_body_field + "\x01";
+    ASSERT_LE(stored.size(), kCapBufSize) << "precondition: must fit the capture buffer";
+    ASSERT_GT(stored.size() + moderate_sending_time.size(), kRpBufSize)
+        << "precondition: total replayed size must exceed the replay buffer";
+    factory->last_store->outbound_records.back().frame = to_payload(stored);
+
+    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    feed(sess, rr);
+
+    expect_no_malformed_or_partial_frame_for_slot(captured_frames, app_seq);
+}
+
+// ── build_replay_frame: overflow in the no-body fallback ────────────────────
+//
+// When every stored tag is in the header set (kReplayHeaderTags), the
+// insertion branch inside the loop never triggers (nothing is ever "the
+// first body tag"), so the loop copies the whole stored frame directly; the
+// fallback `if (!inserted_pd) { append_possdup(...); }` after the loop is
+// what inserts 43/122 for a header-only stored frame. A long enough stored
+// 52 overflows there instead.
+TEST_F(ResendAnswerReplayTest, Replay_Overflow_InNoBodyFallback) {
+    auto factory = std::make_shared<CapturingStoreFactory>();
+    auto cfg = make_cfg(factory);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const seqnum_t app_seq = send_and_capture_seq(sess, "Replay_Overflow_InNoBodyFallback/send");
+
+    ASSERT_NE(factory->last_store, nullptr);
+    ASSERT_FALSE(factory->last_store->outbound_records.empty());
+
+    constexpr std::size_t kCapBufSize = 4096;       // mirrors CaptureVisitor::kCapBufSize
+    constexpr std::size_t kRpBufSize = 4096 + 256;  // mirrors replay_outbound_range_'s kRpBufSize
+    const std::string huge_sending_time(3900, 'S');
+
+    // No tag outside kReplayHeaderTags = {8,34,35,49,52,56} -- no body field
+    // at all, so the loop's insertion branch is never reached.
+    std::string stored;
+    stored += "8=FIX.4.4\x01";
+    stored += "35=D\x01";
+    stored += "34=" + std::to_string(app_seq) + "\x01";
+    stored += "49=ISLD\x01";
+    stored += "52=" + huge_sending_time + "\x01";
+    stored += "56=TW\x01";
+    ASSERT_LE(stored.size(), kCapBufSize) << "precondition: must fit the capture buffer";
+    ASSERT_GT(stored.size() + huge_sending_time.size(), kRpBufSize)
+        << "precondition: the duplicate-52 growth alone must exceed the replay buffer";
+    factory->last_store->outbound_records.back().frame = to_payload(stored);
+
+    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    feed(sess, rr);
+
+    expect_no_malformed_or_partial_frame_for_slot(captured_frames, app_seq);
 }
 
 }  // namespace fixpp::session::test
