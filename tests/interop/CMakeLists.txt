@@ -224,6 +224,25 @@ fixpp_add_interop_test(
     TLS
 )
 
+# ── 089 Phase 5 (US3): combo C1 conversation driver (fixpp initiator vs
+# QuickFIX-cpp), both arms selected at runtime via INTEROP_FIXPP_ARM. Needs the
+# generated FIX 4.4 read flyweights (fixpp::v44::*) — same codegen-include
+# pattern as interop_business_message_interop_test above.
+if(TARGET fixpp_codegen_generate)
+    fixpp_add_interop_test(
+        NAME interop_conversation_c1_test
+        GROUP happy
+        LABEL "interop;089;interop-conversation;us3"
+        SOURCES conversation/conv_c1_test.cpp
+        TLS
+        EXTRA_LIBS fixpp_dictionary
+    )
+    add_dependencies(interop_conversation_c1_test fixpp_codegen_generate)
+    target_include_directories(interop_conversation_c1_test PRIVATE
+        "${CMAKE_BINARY_DIR}/_codegen/include"
+    )
+endif()
+
 # ── US3 parity GAP-closure witnesses (T023-T025) — 068 grouped bucket ────────
 # Standalone (no counterparty, no live transport): drive crafted admin frames
 # through Session::on_inbound_frame() over the sync transport_send_ path and
