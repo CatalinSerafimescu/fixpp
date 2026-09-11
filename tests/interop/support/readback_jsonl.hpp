@@ -71,8 +71,8 @@ inline bool is_canonical_header_or_trailer_tag(
     int tag, std::function<bool(int)> const& dictionary_header_tag = {})
 {
     // QuickFIX-cpp's built-in isHeaderField(int) ∪ QuickFIX-J's built-in
-    // isHeaderField(int) -- the union is QuickFIX-cpp's 29-member list plus
-    // ApplExtID(1156), the one member QuickFIX-J's built-in list adds.
+    // isHeaderField(int). Which members the two lists disagree on is the
+    // recipe's output above, not something to read off this comment.
     static const std::vector<int> kUnionHeaderTags = {
         8,    // BeginString
         9,    // BodyLength
