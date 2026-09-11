@@ -245,6 +245,19 @@ if(TARGET fixpp_codegen_generate)
     )
 endif()
 
+# ── 089 T062a/T062b: the FR-010a divergence probe -- a SEPARATE binary from
+# interop_conversation_test (see probe_cell_test.cpp's header comment for
+# why a branch inside Conversation.Cell was rejected). No codegen typed
+# accessors needed (the probe asserts nothing about typed reads), so no
+# fixpp_codegen_generate dependency.
+fixpp_add_interop_test(
+    NAME interop_probe_test
+    GROUP happy
+    LABEL "interop;089;interop-conversation;us4"
+    SOURCES conversation/probe_cell_test.cpp
+    TLS
+)
+
 # ── US3 parity GAP-closure witnesses (T023-T025) — 068 grouped bucket ────────
 # Standalone (no counterparty, no live transport): drive crafted admin frames
 # through Session::on_inbound_frame() over the sync transport_send_ path and

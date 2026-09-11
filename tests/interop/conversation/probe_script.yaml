@@ -1,0 +1,52 @@
+# probe_script.yaml — FR-010a's divergence probe (T062a). NOT the
+# conversation (conversation_script.yaml is untouched, still the
+# `CONV-C1..C4` cells' script). This is a SEPARATE, minimal, committed
+# script driving exactly one thing: a message the loaded FIX44 dictionary
+# should reject when validation is on, so the two `CONV-PROBE-{off,on}`
+# runs (T062b) diverge on ONE well-understood cause, not an accident of the
+# full 12-step conversation.
+#
+# ⭐ Mechanism pinned 2026-09-11 (user decision, library commit c7f96b1d):
+# Logon -> one peer-originated NewOrderSingle (35=D) whose declared intent
+# OMITS TransactTime(60), a FIX44-required field on 35=D
+# (dictionaries/FIX44.xml: `<field name='TransactTime' required='Y' />`
+# inside the NewOrderSingle message def) -> end. fixpp initiates Logout
+# (data-model §9/§11: T062b's driver, not this file — this file carries no
+# admin_steps at all, unlike conversation_script.yaml's A-LOGON/A-TESTREQ/
+# A-GAPFILL/A-REJECT repertoire; the probe's Logon and Logout are both pure
+# session-layer, nothing here to declare).
+#
+# `applicable_combos: [C1]` only — T062a scopes the probe to combo C1
+# (fixpp initiator vs QuickFIX-cpp acceptor); it is not part of the census
+# (census.yaml) and contributes no conformance completeness key (T062a:
+# "Not in the census; no conformance slot").
+#
+# step_id P-01 (not "A-*"/"B-0N"): conv_cell_test.cpp's
+# peer_step_id_for_stage() maps stage -> literal "B-0N" ids and census.yaml
+# is keyed on step ids from the SAME namespace — "P-01" cannot collide with
+# either. Self-describing: T062's `divergence_findings` names the probe
+# step by this id in the constructed control pair.
+business_steps:
+  - step_id: P-01
+    step: 1
+    phase: business
+    msg_type: "D"        # NewOrderSingle
+    originator: peer
+    direction: peer-to-fixpp
+    expects_witness: false   # not a conformance witness -- see the header note above
+    applicable_combos: [C1]
+    occurrences:
+      C1: [0]
+    depends_on: []
+    intent_fields:
+      # Deliberately mirrors conversation_script.yaml's B-07 (peer-originated
+      # NewOrderSingle) MINUS path "60" (TransactTime) -- the one omission
+      # this probe exists to make.
+      - { path: "11", value: "PROBE-P01-0001" }
+      - { path: "54", value: "2" }    # Side = SELL
+      - { path: "40", value: "2" }    # OrdType = LIMIT
+      - { path: "55", value: "MSFT" }
+      - { path: "38", value: "50" }
+      - { path: "44", value: "410.75" }
+    typed_reads: []
+    runtime_generated: []
