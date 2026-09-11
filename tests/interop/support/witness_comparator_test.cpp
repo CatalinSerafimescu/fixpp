@@ -820,3 +820,47 @@ TEST(WitnessComparator, EmptyIntentVsEmptyReadbackRejectsRatherThanPassing)
     // record genuinely exists at the correct key.
     EXPECT_EQ(rows[0].mismatch[0].sent_value, "<empty intent vs empty readback>");
 }
+
+// ── 089 T053a — the FR-008d (b) spurious-hit arm's discriminating half ─────
+// quickstart.md FR-008d (b) row: "A counterparty that ignores the intent
+// file and originates from literals equal to the script's values" -- checked
+// against a copy of the script with one peer-declared value changed, the
+// intent-realization check (check_script_intent_realized,
+// run_interop_cell.py) goes RED naming the path. "Also assert FR-006's
+// comparator would be GREEN on the same sent-vs-readback pair, which is what
+// makes the arm discriminating": a hardcoded-literal counterparty's `sent`
+// record and its OWN readback of what it actually put on the wire agree
+// with EACH OTHER (both carry the stale value) -- FR-006 alone cannot see
+// that the value disagrees with the SCRIPT, only that sent and readback
+// disagree with EACH OTHER. Without this test, FR-008d (b) could be
+// (wrongly) argued redundant with FR-006; this is the proof it is not.
+TEST(WitnessComparator, T053aHardcodedLiteralAgreesWithItselfFr006StaysGreen)
+{
+    std::string const dir = testing::TempDir();
+    // The counterparty's OWN sent record: whatever it actually built --
+    // here, the STALE hardcoded literal "ACCT0001" a script-ignoring
+    // implementation would emit even after the script changed to "ACCT0009".
+    {
+        Stream sender(dir + "wc_t053a_sender.jsonl");
+        sender.sent("F", 9, kDirectionPeerToFixpp, 0, "B-03", {{"1", "ACCT0001"}});
+    }
+    // fixpp's readback of what actually crossed the wire: necessarily the
+    // SAME stale value -- a readback cannot report a value the sender never
+    // sent.
+    {
+        Stream receiver(dir + "wc_t053a_receiver.jsonl");
+        receiver.readback("F", 9, kDirectionPeerToFixpp, 0, false, {{"1", "ACCT0001"}}, {});
+    }
+    auto const a = parse_stream(dir + "wc_t053a_sender.jsonl");
+    auto const b = parse_stream(dir + "wc_t053a_receiver.jsonl");
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "pass")
+        << "FR-006 compares sent against readback, and a hardcoded-literal counterparty's "
+           "own readback of what it actually sent necessarily agrees with its own sent record "
+           "-- FR-006 alone cannot detect that BOTH disagree with the SCRIPT. That is exactly "
+           "why FR-008d (b) (run_interop_cell.py::check_script_intent_realized) exists as a "
+           "SEPARATE check, comparing the sent record against the SCRIPT rather than against "
+           "the readback.";
+    EXPECT_TRUE(rows[0].mismatch.empty());
+}

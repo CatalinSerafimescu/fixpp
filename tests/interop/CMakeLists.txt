@@ -140,6 +140,7 @@ fixpp_add_interop_test(
     LABEL "interop;089;interop-support"
     SOURCES support/readback_jsonl_test.cpp support/witness_comparator_test.cpp
             happy/hp_support_dictionary_seam_test.cpp
+            support/intent_file_test.cpp
 )
 # Self-contained fallback dictionary path for the decimal-type resolver when
 # FIXPP_FIX44_DICT_XML is unset (a plain, non-shim `ctest` run) — same pattern
