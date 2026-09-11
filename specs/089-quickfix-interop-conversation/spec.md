@@ -660,16 +660,20 @@ claiming a pass with no corroborating run artifact.
   every run's hello record**, so a result can be bound to the exact script that produced it.
 - **FR-008d**: Every message the script declares a process originates MUST be built from that message's
   declared `intent_fields`, read at run time — for a counterparty, never from literals in its own source.
-  (a) **Delivery to both processes**: the shim renders every message's declarations into a flat per-run
-  intent file — one line per field, `step_id` TAB `originator` TAB `path` TAB `value` — which both
-  counterparties and fixpp's conversation cell parse with hand-rolled code, each building the messages its
-  own `originator` value names, so none of the three carries a YAML parser (the same precedent as FR-025's
-  three hand-rolled JSON emitters). It is rendered from the same script bytes whose digest FR-008c records, and
+  (a) **Delivery to both processes**: the shim renders, for one cell, the messages of every step that applies
+  to the cell's combo, in script step order, into a flat per-run intent file — one line per field,
+  `step_id` TAB `originator` TAB `msg_type` TAB `path` TAB `value` — which both counterparties and fixpp's
+  conversation cell parse with hand-rolled code, each building the messages its own `originator` value
+  names, so none of the three carries a YAML parser (the same precedent as FR-025's three hand-rolled JSON
+  emitters). ⚠️ A message the **engine** generates in reply — the Heartbeat answering a TestRequest,
+  SequenceReset-GapFill, Reject — is not built by application code, so (a) does not apply to it; (b) does,
+  and there it checks what the engine produced. It is rendered from the same script bytes whose digest FR-008c records, and
   the shim **refuses to render** a value containing TAB, LF or SOH rather than escaping it. (b) **The check
   that makes (a) observable**: for every `sent` record of either process, each path the script declares
   for that step MUST be present with the declared value; a missing or different one FAILS the cell. Paths
-  the script does not declare are outside this check — the run-time-minted `OrderID`/`ExecID` (FR-003a)
-  among them — and remain covered by FR-006's sent-versus-readback comparison. ⚠️ **Without (b), (a) has
+  the script does not declare, and paths it lists as `runtime_generated`, are outside this check — the
+  run-time-minted `OrderID`/`ExecID` (FR-003a) among them — and remain covered by FR-006's
+  sent-versus-readback comparison. ⚠️ **Without (b), (a) has
   no witness**: FR-006 compares each `sent` record against the *readback* of the same message, and both
   are derived from what the originator actually built, so an originator that ignored the script agrees
   with itself and passes.
