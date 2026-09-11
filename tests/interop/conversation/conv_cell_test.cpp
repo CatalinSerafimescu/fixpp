@@ -2,13 +2,15 @@
 //
 // tests/interop/conversation/conv_cell_test.cpp — 089 Phase 5 (US3): the
 // combo-neutral conversation driver. ONE gtest binary/TEST body for every
-// combo C1-C4 (only C1 -- fixpp INITIATOR vs QuickFIX-cpp -- is implemented
-// so far; C2-C4 join in later rounds), selected/configured entirely by the
-// shim's environment (INTEROP_FIXPP_*): `combo` (INTEROP_FIXPP_COMBO_ID)
-// picks the combo, `arm` decides `validate_inbound_messages`, everything
-// else is run-identity metadata (data-model.md §1/§9). An unrecognised or
-// not-yet-implemented combo value fails closed (ASSERT_EQ below) rather
-// than silently running C1's script under the wrong identity. The control
+// combo C1-C4 (C1 -- fixpp INITIATOR vs QuickFIX-cpp -- and C2 -- fixpp
+// ACCEPTOR vs QuickFIX-cpp -- are implemented so far; C3-C4 join in later
+// rounds), selected/configured entirely by the shim's environment
+// (INTEROP_FIXPP_*): `combo` (INTEROP_FIXPP_COMBO_ID) picks the combo (and,
+// via `role` below, the transport role), `arm` decides
+// `validate_inbound_messages`, everything else is run-identity metadata
+// (data-model.md §1/§9). An unrecognised or not-yet-implemented combo value
+// fails closed (the ASSERT_TRUE set-membership check below) rather than
+// silently running the wrong script under the wrong identity. The control
 // FLOW below (which step follows which) is hardcoded per FR-008d(a) — no
 // side may carry a YAML parser — but every FIELD VALUE fixpp sends is read
 // at run time from the shim-rendered intent file (FR-008d), never a
@@ -396,11 +398,21 @@ TEST(Conversation, Cell)
     ASSERT_FALSE(readback_path.empty()) << "INTEROP_FIXPP_READBACK_PATH absent";
     ASSERT_FALSE(intent_path.empty()) << "INTEROP_FIXPP_INTENT_PATH absent";
     // Fail closed on an unrecognised/not-yet-implemented combo: this driver
-    // hardcodes C1's step sequence below (FR-008d(a): no side may carry a
-    // YAML parser), so silently running that sequence under a C2-C4 label
-    // would be a lying observable, not a skip.
-    ASSERT_EQ(combo, "C1") << "combo " << combo
-                           << " is not implemented by this driver (only C1 so far)";
+    // hardcodes the step sequence below (FR-008d(a): no side may carry a YAML
+    // parser), so silently running that sequence under a combo label this
+    // driver does not actually implement would be a lying observable, not a
+    // skip. Admits exactly the combos this driver implements so far — widen
+    // this SET, never loosen it to an inequality (an inequality admits every
+    // future not-yet-implemented combo too).
+    ASSERT_TRUE(combo == "C1" || combo == "C2")
+        << "combo " << combo << " is not implemented by this driver (only C1/C2 so far)";
+    // C1 = fixpp INITIATOR vs QuickFIX-cpp acceptor; C2 = fixpp ACCEPTOR vs
+    // QuickFIX-cpp initiator (spec.md § Conversation census, role x flavour
+    // combinations). Every business/admin STEP's originator is combo-
+    // independent (conversation_script.yaml: every step_id's
+    // applicable_combos lists C1..C4 uniformly) -- only the TRANSPORT role
+    // flips, so the driver below is otherwise unchanged between the two.
+    Role const role = (combo == "C2") ? Role::fixpp_acceptor : Role::fixpp_initiator;
 
     std::string const actual_digest = sha256_hex_file(script_path);
     ASSERT_EQ(actual_digest, script_digest_expected) << "script_digest mismatch";
@@ -415,7 +427,7 @@ TEST(Conversation, Cell)
     ASSERT_NE(dir, nullptr) << "FIXPP_TLS_FIXTURE_DIR unset";
     auto factory = hp::make_interop_tls_factory(dir);
     ASSERT_NE(factory, nullptr) << "baseline TLS factory build failed";
-    auto const endpoint = hp::cell_endpoint(Counterparty::quickfix_cpp, Role::fixpp_initiator);
+    auto const endpoint = hp::cell_endpoint(Counterparty::quickfix_cpp, role);
     ASSERT_TRUE(endpoint.has_value()) << "cell endpoint unresolved";
 
     auto app = std::make_shared<ConvApp>();
@@ -423,7 +435,7 @@ TEST(Conversation, Cell)
     ecfg.application = app;
     fixpp::interop::InteropEngineFixture fx{std::move(ecfg)};
 
-    auto cfg = hp::make_session_config(Role::fixpp_initiator, "FIX.4.4", factory,
+    auto cfg = hp::make_session_config(role, "FIX.4.4", factory,
                                        fx.ioc().get_executor(), *endpoint);
     cfg.dictionary = prod.dictionary;
     cfg.validate_inbound_messages = (arm == "validation-on");
@@ -658,7 +670,7 @@ TEST(Conversation, Cell)
         }
     }
     EXPECT_EQ(rows.size(), 12u) << "expected 12 business-step witness rows (12 census keys for combo "
-                                   "C1, spec.md § Conversation census)";
+                                << combo << ", spec.md § Conversation census)";
 
     hp::expect_graceful_stop(fx);
 }
