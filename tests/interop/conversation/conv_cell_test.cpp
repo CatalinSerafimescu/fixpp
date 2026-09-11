@@ -72,6 +72,7 @@
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/engine.hpp>
+#include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
 
@@ -512,6 +513,20 @@ TEST(Conversation, Cell)
                                        fx.ioc().get_executor(), *endpoint);
     cfg.dictionary = prod.dictionary;
     cfg.validate_inbound_messages = (arm == "validation-on");
+    // A-RESEND / A-GAPFILL: give fixpp a persistent outbound store so it can
+    // REPLAY a stored application body (35=D, 43=Y) in answer to a
+    // ResendRequest, rather than collapse every range to a SequenceReset-
+    // GapFill (a storeless session cannot replay app bodies -- Session::
+    // replay_outbound_range_'s `if (!store_ || our_last == 0 ...)` early
+    // branch, session.cpp ~5387). Same precedent as
+    // hp_fix44_recovery_outbound_answer_test.cpp (~line 268): unbounded
+    // policy, exempt from the bounded-store DoS construction guard that
+    // would otherwise abort session open under the engine's default
+    // max_store_memory_bytes. Test-only store; applies to every combo (the
+    // guard/policy choice is not combo-specific), so this is NOT gated on
+    // qfj_combo_probe.
+    cfg.store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>(
+        fixpp::session::MemoryStore::Config{.policy = fixpp::session::capacity_policy::unbounded});
     std::string const sender_id = cfg.sender_comp_id;
     std::string const target_id = cfg.target_comp_id;
     std::string const begin_string = cfg.begin_string;
