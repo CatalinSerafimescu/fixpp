@@ -1756,17 +1756,24 @@ struct SendingTimeStamp {
 // Assumptions section called tail placement "order-safe"; that claim was never
 // checked against a strict peer.
 //
-// Header-tag set: {8,34,35,49,52,56} — every standard-header tag `send_impl`
-// (this file, the outbound app-frame builder) ever emits when assembling a
-// frame this function could later be asked to replay: 8/9/35/34/49/52/56, then
-// body, then 10. 9 and 10 never reach this classification (skipped by the
-// `continue` below); no other header tag is ever produced by fixpp's own
-// outbound path. This is NOT a reusable session/wire-layer header-tag list:
-// no such list exists in this codebase reachable from src/session/ (the two
-// candidates — codegen's `kFramingTags` and `orchestra_loader`'s
-// `is_header_trailer_tag` — are both codegen-side / dictionary-provenance,
-// unusable at session runtime without a dictionary). This set is scoped to
-// this function's actual input domain instead.
+// Header-tag set S = {8,34,35,49,52,56} (9/10/43/122 are skipped before
+// classification by the `continue` below, so they never reach it). Deviates
+// from the issue's Fix bullet ("the stored frame's header set comes from the
+// canonical header partition, not a positional guess") deliberately: S is
+// NOT the full FIX standard header, and is not meant to be. The insertion
+// point below is the first stored tag NOT in S. Correctness needs only that
+// S is a SUBSET of the real standard header, in every FIX version from 4.0 to
+// FIXT.1.1 — every real body tag then lies outside S, so the insertion point
+// is at or before the first body field, and every field before it is a
+// header field. This holds even when the stored payload carries a header
+// tag outside S (115, 128, 97, NoHops, …) that `send_impl` does not forbid:
+// such a tag is classified as "body" by S and 43/122 land before it — still
+// header-before-body, just earlier within the header than that tag. It also
+// holds for the degenerate case (nothing outside S — the fallback below).
+// A wider S (the true standard header) would be neutral for interop —
+// neither QuickFIX-J nor QuickFIX-cpp validates order WITHIN the header —
+// and strictly worse here: it would need a dictionary or a private,
+// FIXT-scoped table, for no behavioural gain. Keep S as it is.
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_replay_frame(
     std::span<std::byte> out, std::span<const std::byte> stored) noexcept {
     fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
@@ -1866,11 +1873,14 @@ struct SendingTimeStamp {
         }
         if (auto r = w.append_raw(fr.tag, fr.value); !r) return std::unexpected(r.error());
     }
-    // Degenerate fallback: a stored frame consisting of ONLY header tags (no
-    // body at all) never hits the insertion point above. Every real fixpp
-    // outbound application frame has a body, so this should not occur; if it
-    // does, still emit 43/122 rather than silently dropping them (matches the
-    // pre-#419 tail-placement behavior for this one unreachable-in-practice case).
+    // Fallback for a stored frame with no tag outside S: the insertion point
+    // above is never reached (nothing to insert BEFORE), so emit 43/122 here.
+    // For a frame with no body, "at the header/body boundary" and "at the
+    // tail" are the same position, so this is not a special case of the rule
+    // above — it follows from it. Reachable: `Session::send("35=D\x01")`
+    // (a bare MsgType, no other field) stores exactly 8,9,35,34,49,52,56,10 —
+    // see tests/session/test_resend_answer_field_order.cpp
+    // Replay_NoBodyFallback_StillCarries43And122.
     if (!inserted_pd) {
         if (auto r = append_possdup(orig_sending_time); !r) return std::unexpected(r.error());
     }

@@ -9,35 +9,44 @@
 // — that claim was never checked against a strict peer; the live QuickFIX-J run that
 // would have caught it was deferred in 037's own disposition. [issue #419]
 //
-// Regression witness: a strict FIELD-ORDER property over every resend-answer frame
-// fixpp emits (GapFill via build_sequence_reset_gapfill, replay via build_replay_frame):
-//   - no standard-header tag (8/9/35/34/49/52/56/43/122) appears AFTER the first
-//     body (non-header) tag;
-//   - CheckSum(10) is the last field;
-//   - PossDupFlag(43) and OrigSendingTime(122) each appear exactly once.
+// Regression witness for the two resend-answer builders (GapFill via
+// build_sequence_reset_gapfill, replay via build_replay_frame). The scanner
+// (check_resend_answer_field_order, below) checks, on whatever frame it is
+// given:
+//   - the frame's first three fields are exactly 8, 9, 35 in that order (the
+//     preamble both QuickFIX-J and QuickFIX-cpp parse before anything else —
+//     see the scanner's own comment for the exact source citation);
+//   - no standard-header tag (QuickFIX-J's `Message.isHeaderField` set) appears
+//     AFTER the first body (non-header, non-trailer) tag;
+//   - the trailer (10, and 89/93 if ever present) comes last, with CheckSum(10)
+//     the final field;
+//   - PossDupFlag(43) and OrigSendingTime(122) each appear exactly once (this
+//     count is reported, not folded into the pass/fail verdict — see the
+//     struct comment).
 //
 // The scanner walks fields with fixpp::wire::accumulate_tag_digit — the bounded
 // tag-digit accumulator shared by fixpp's production wire scanners (tag_scan.hpp,
 // 040-inbound-tag-overflow-hardening research.md D-1) — rather than ad hoc substring
-// matching. Its header-tag set is defined independently of any production header-tag
-// set: no reusable session/wire-layer header set exists in this codebase (see the
-// equivalent note above `build_replay_frame` in src/session/session.cpp), so a
-// wrong production set cannot hide from this witness.
+// matching.
 //
 // Cell 1 (GapFill): direct build_sequence_reset_gapfill() call.
-// Cell 2 (Replay): a Session-driven resend of a stored NewOrderSingle carrying a
-//   NoPartyIDs(453)/NoPartySubIDs(802) repeating group, so the header/body boundary
-//   search must not stop inside a group (a substring-position scan could).
+// Cell 2 (Replay): a Session-driven resend of a stored NewOrderSingle. The payload
+//   carries a NoPartyIDs(453)/NoPartySubIDs(802) repeating group because it mirrors
+//   the live evidence quoted in issue #419 — it does NOT exercise the boundary
+//   search walking into the group (insertion happens at the first body tag, 11,
+//   before the group starts; see O3/O4 in the #419 Gate-B triage for why a
+//   contrary claim was removed from this comment).
 //
-// RED (pre-#419-fix): Cell 1 fails because the builder emits
+// RED (pre-#419-fix, `2e853adf`): Cell 1 fails because the builder emits
 // ...52,56,36,123,43,122 (43/122 after body tags 36/123); Cell 2 fails because
-// build_replay_frame appends 43/122 after the full stored body (groups included).
-// Reproduce: `git stash` the two builder fixes (admin_messages.cpp, session.cpp),
-// rebuild this target, and re-run — both cells fail with "header tag 43 appears
-// AFTER a body tag".
+// build_replay_frame appends 43/122 after the full stored body. Reproduce by
+// reverting the two builder hunks of `2e853adf` (admin_messages.cpp,
+// session.cpp) — both cells fail with "header tag 43 appears AFTER a body tag".
 //
 // Anchors: issue #419; specs/037-resend-reply-possdup-tags/spec.md (superseded tail
-// placement, Assumptions section); specs/013-session-reconnect-binding/spec.md FR-010.
+// placement, Assumptions section) — 037's spec.md was never checked against a
+// strict peer, which is history and does not go stale; specs/013-session-reconnect-
+// binding/spec.md FR-010.
 //
 // Build: cmake --build build/linux-clang-debug --target session_resend_answer_field_order -j2
 // Run:   ctest --test-dir build/linux-clang-debug -R session_resend_answer_field_order -V
@@ -85,14 +94,34 @@ constexpr auto kWindow = 200ms;
 
 // ── Field-order witness scanner ──────────────────────────────────────────────
 
-// FIX standard-header tags relevant to a resend-answer frame. Defined
-// independently of any production header-tag set — no reusable session/
-// wire-layer header-tag list exists in this codebase (see the equivalent
-// note above `build_replay_frame` in src/session/session.cpp).
-constexpr std::array<std::uint32_t, 9> kWitnessHeaderTags = {8, 9, 35, 34, 49, 52, 56, 43, 122};
+// FIX standard-header tags, per QuickFIX-J 3.0.1's `quickfix.Message.
+// isHeaderField(int)` — the exact switch the strict peer applies before
+// SessionRejectReason=14 is even reached. Verified 2026-09-11 by
+// disassembling `quickfixj-base-3.0.1.jar` with `javap -p -c`
+// (~/.m2/repository/org/quickfixj/quickfixj-base/3.0.1/) — this worktree has
+// no quickfixj source tree to cite by file:line. Defined independently of
+// fixpp's own production header-tag set (`kReplayHeaderTags`,
+// src/session/session.cpp): see that constant's comment for why fixpp's set
+// is deliberately narrower and still correct.
+constexpr std::array<std::uint32_t, 30> kWitnessHeaderTags = {
+    8,   9,   34,  35,  43,  49,  50,  52,  56,  57,  90,  97,  115,  116,  122,
+    128, 129, 142, 143, 144, 145, 212, 213, 347, 369, 370, 627, 1128, 1129, 1156};
+
+// FIX trailer tags, per the same jar's `isTrailerField(int)`.
+constexpr std::array<std::uint32_t, 3> kWitnessTrailerTags = {10, 89, 93};
+
+// The first three fields of any FIX frame must be exactly BeginString(8),
+// BodyLength(9), MsgType(35) in that order — both QFJ (`Message.parseHeader`)
+// and QuickFIX-cpp (`Message::extractHeader`) enforce this before any other
+// check; a violation is a parse-level rejection, not merely 373=14.
+constexpr std::array<std::uint32_t, 3> kWitnessPreamble = {8, 9, 35};
 
 [[nodiscard]] bool is_witness_header_tag(std::uint32_t tag) noexcept {
     return std::ranges::find(kWitnessHeaderTags, tag) != kWitnessHeaderTags.end();
+}
+
+[[nodiscard]] bool is_witness_trailer_tag(std::uint32_t tag) noexcept {
+    return std::ranges::find(kWitnessTrailerTags, tag) != kWitnessTrailerTags.end();
 }
 
 struct OrderCheckResult {
@@ -109,6 +138,7 @@ OrderCheckResult check_resend_answer_field_order(std::span<const std::byte> fram
     OrderCheckResult r;
     std::size_t i = 0;
     const std::size_t n = frame.size();
+    std::size_t field_index = 0;
     bool seen_body_tag = false;
     bool seen_trailer = false;
     while (i < n) {
@@ -132,8 +162,16 @@ OrderCheckResult check_resend_answer_field_order(std::span<const std::byte> fram
         while (i < n && frame[i] != std::byte{0x01}) ++i;
         if (i < n) ++i;  // skip SOH
 
-        if (tag == 10) {
-            seen_trailer = true;
+        if (field_index < kWitnessPreamble.size() && tag != kWitnessPreamble[field_index]) {
+            r.reason = "preamble out of order: field #" + std::to_string(field_index) + " is tag " +
+                       std::to_string(tag) + ", expected " +
+                       std::to_string(kWitnessPreamble[field_index]);
+            return r;
+        }
+        ++field_index;
+
+        if (is_witness_trailer_tag(tag)) {
+            if (tag == 10) seen_trailer = true;
             continue;
         }
         if (tag == 43) ++r.count_43;
@@ -191,9 +229,9 @@ TEST(ResendAnswerFieldOrder, GapFill_NoHeaderTagAfterBody) {
 namespace {
 
 // A MessageStore that records each outbound store call and serves as a real
-// retrieve() source for the resend-reply store-walk. Mirrors the CapturingStore
-// used by test_send_allow_pos_dup_strip.cpp / test_sending_time_precision.cpp
-// (each resend-adjacent test file carries its own copy; no shared header exists).
+// retrieve() source for the resend-reply store-walk. Byte-for-byte mirrors the
+// CapturingStore in test_send_allow_pos_dup_strip.cpp (as of `c8c0b256`; each
+// resend-adjacent test file currently carries its own copy).
 class CapturingStore final : public MessageStore {
 public:
     struct Record {
@@ -201,6 +239,16 @@ public:
         std::vector<std::byte> frame;
     };
     std::vector<Record> outbound_records;
+
+    // O1 fault-injection knob: when true, retrieve() visits nothing, regardless
+    // of what is in outbound_records. Simulates the class of regression O1
+    // describes (a store whose retrieve stops visiting, a CaptureVisitor
+    // change, a msg-type misclassification) without needing to reproduce any
+    // ONE of those specific production changes — replay_outbound_range_ folds
+    // an unvisited slot into a SequenceReset-GapFill (session.cpp,
+    // "Absent slot or admin message -> fold into a GapFill run"). Default
+    // false: every other test in this file is unaffected.
+    bool force_empty_retrieve = false;
 
     explicit CapturingStore() noexcept : MessageStore(flush_thunk_for<CapturingStore>()) {}
 
@@ -215,6 +263,7 @@ public:
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
         seqnum_t from, seqnum_t to, direction_t dir, retrieve_visitor& visitor) noexcept override {
+        if (force_empty_retrieve) co_return fixpp::core::expected_t<void>{};
         if (dir == direction_t::outbound) {
             for (auto& rec : outbound_records) {
                 if (rec.seq >= from && rec.seq <= to) {
@@ -247,10 +296,17 @@ private:
 
 class CapturingStoreFactory final : public MessageStoreFactory {
 public:
+    // Raw, non-owning pointer to the store created by the last make() call
+    // (Session owns it via unique_ptr). Lets a test reach in after Session
+    // construction to arm force_empty_retrieve (O1). Null until make() runs.
+    CapturingStore* last_store = nullptr;
+
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
         std::string_view, std::string_view, std::pmr::memory_resource*, std::size_t,
         asio::any_io_executor) noexcept override {
-        return std::make_unique<CapturingStore>();
+        auto store = std::make_unique<CapturingStore>();
+        last_store = store.get();
+        return store;
     }
 };
 
@@ -323,7 +379,10 @@ protected:
         engine.executor = ioc.get_executor();
     }
 
-    SessionConfig make_cfg() {
+    // `factory`, when supplied, lets the caller reach into `factory->last_store`
+    // after Session construction (O1: to arm force_empty_retrieve). Defaults to
+    // a fresh factory for tests that don't need that access.
+    SessionConfig make_cfg(std::shared_ptr<CapturingStoreFactory> factory = nullptr) {
         SessionConfig cfg;
         cfg.sender_comp_id = "ISLD";
         cfg.target_comp_id = "TW";
@@ -333,7 +392,8 @@ protected:
         cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
-        cfg.store_factory = std::make_shared<CapturingStoreFactory>();
+        cfg.store_factory =
+            factory ? std::move(factory) : std::make_shared<CapturingStoreFactory>();
         cfg.transport_send = [this](std::span<const std::byte> frame) {
             captured_frames.emplace_back(frame.begin(), frame.end());
         };
@@ -384,10 +444,7 @@ protected:
 }  // namespace
 
 // RED (pre-#419-fix): build_replay_frame copies the stored frame's header +
-// full body (groups included) verbatim, then appends 43=Y+122 after the loop
-// — i.e. after the NoPartySubIDs(802) group nested inside NoPartyIDs(453).
-// A substring/position-oblivious scan could miss this; check_resend_answer_field_order
-// walks real fields via accumulate_tag_digit so it cannot.
+// full body verbatim, then appends 43=Y+122 after the loop.
 TEST_F(ResendAnswerReplayTest, Replay_NoHeaderTagAfterBody_WithNestedRepeatingGroup) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
@@ -395,8 +452,8 @@ TEST_F(ResendAnswerReplayTest, Replay_NoHeaderTagAfterBody_WithNestedRepeatingGr
 
     // NewOrderSingle with NoPartyIDs(453)=2, the first party entry carrying a
     // nested NoPartySubIDs(802)=1 group — mirrors the issue's live evidence
-    // (453=2, 448=BROKER01, ..., 803=3). The boundary search must not stop
-    // inside this group.
+    // (453=2, 448=BROKER01, ..., 803=3).
+    constexpr std::string_view kClOrdId = "FXCL-B01-0001";
     const char kPayloadStr[] =
         "35=D\x01"
         "11=FXCL-B01-0001\x01"
@@ -455,24 +512,150 @@ TEST_F(ResendAnswerReplayTest, Replay_NoHeaderTagAfterBody_WithNestedRepeatingGr
     auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
     feed(sess, rr);
 
-    // Find the replayed frame (carries PossDupFlag(43)) and assert its field order.
-    // Identification uses count_43 >= 1 (not ==1) so a dedup regression that
-    // duplicates 43 doesn't silently drop the frame from consideration — the
-    // exactly-once requirement is asserted explicitly below instead.
-    bool found_replayed = false;
+    // Identify the replayed frame UNAMBIGUOUSLY: 35=D, 34==app_seq, and
+    // 11==the original ClOrdID. [O1] count_43>=1 alone is NOT sufficient — a
+    // SequenceReset-GapFill also carries a well-ordered 43=Y/122 (Cell 1), so
+    // a witness that treats "any frame with 43" as "the replay" would be
+    // fooled by a GapFill substituted for a genuine regression elsewhere (see
+    // GapFillOnly_IsNotMistakenForTheAppReplay below, which proves this
+    // discriminates). Assert exactly one such frame, and that no GapFill
+    // (35=4) was emitted for this single, present, non-admin slot.
+    std::size_t replay_matches = 0;
+    std::size_t gapfill_matches = 0;
     for (const auto& f : captured_frames) {
+        const std::span<const std::byte> fs(f);
+        const auto mt = extract_field(fs, 35);
+        if (mt == "4") {
+            ++gapfill_matches;
+            continue;
+        }
+        if (mt != "D") continue;
+        if (extract_field(fs, 34) != std::to_string(app_seq)) continue;
+        if (extract_field(fs, 11) != kClOrdId) continue;
+        ++replay_matches;
+
         const auto check = check_resend_answer_field_order(f);
-        if (check.count_43 >= 1) {
-            found_replayed = true;
-            EXPECT_TRUE(check.ok) << check.reason;
-            EXPECT_EQ(check.count_43, 1u) << "replayed frame must carry PossDupFlag(43) exactly once";
-            EXPECT_EQ(check.count_122, 1u)
-                << "replayed frame must carry OrigSendingTime(122) exactly once";
+        EXPECT_TRUE(check.ok) << check.reason;
+        EXPECT_EQ(check.count_43, 1u) << "replayed frame must carry PossDupFlag(43) exactly once";
+        EXPECT_EQ(check.count_122, 1u)
+            << "replayed frame must carry OrigSendingTime(122) exactly once";
+    }
+    EXPECT_EQ(replay_matches, 1u) << "ResendRequest for the stored NewOrderSingle (seq=" << app_seq
+                                  << ", ClOrdID=" << kClOrdId
+                                  << ") must produce EXACTLY ONE replayed frame identified by "
+                                  << "35=D + 34==seq + 11==ClOrdID";
+    EXPECT_EQ(gapfill_matches, 0u)
+        << "a single present, non-admin slot must be replayed, not gap-filled";
+}
+
+// [O1] Negative counterpart: force the store to visit nothing for the resend
+// range (force_empty_retrieve), so replay_outbound_range_ answers with a
+// SequenceReset-GapFill only — the exact substitution the identification
+// above must not be fooled by. Proves the discrimination directly, rather
+// than relying on the positive cell never happening to hit this case.
+TEST_F(ResendAnswerReplayTest, GapFillOnly_IsNotMistakenForTheAppReplay) {
+    auto factory = std::make_shared<CapturingStoreFactory>();
+    auto cfg = make_cfg(factory);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const char kPayloadStr[] =
+        "35=D\x01"
+        "11=ORD-O1\x01"
+        "54=1\x01";
+    auto payload = to_payload(kPayloadStr);
+    auto fut_send =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, fut_send, kWindow, "GapFillOnly_IsNotMistakenForTheAppReplay/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "GapFillOnly_IsNotMistakenForTheAppReplay/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "GapFillOnly_IsNotMistakenForTheAppReplay/send";
+        return;
+    }
+    ASSERT_TRUE(fut_send.get().has_value()) << "Session::send must succeed";
+    ASSERT_FALSE(captured_frames.empty());
+    const auto tag34_opt = extract_field(std::span<const std::byte>(captured_frames.back()), 34);
+    ASSERT_TRUE(tag34_opt.has_value());
+    const seqnum_t app_seq = static_cast<seqnum_t>(std::stoul(std::string(*tag34_opt)));
+    captured_frames.clear();
+
+    ASSERT_NE(factory->last_store, nullptr) << "store must have been created by open()";
+    factory->last_store->force_empty_retrieve = true;
+
+    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    feed(sess, rr);
+
+    std::size_t replay_matches = 0;
+    std::size_t gapfill_matches = 0;
+    for (const auto& f : captured_frames) {
+        const std::span<const std::byte> fs(f);
+        const auto mt = extract_field(fs, 35);
+        if (mt == "4") ++gapfill_matches;
+        if (mt == "D" && extract_field(fs, 34) == std::to_string(app_seq) &&
+            extract_field(fs, 11) == "ORD-O1") {
+            ++replay_matches;
         }
     }
-    ASSERT_TRUE(found_replayed)
-        << "ResendRequest for the stored NewOrderSingle (seq=" << app_seq
-        << ") must produce a replayed frame carrying PossDupFlag(43)";
+    EXPECT_EQ(gapfill_matches, 1u)
+        << "sanity: force_empty_retrieve must actually produce a GapFill, or this "
+           "cell proves nothing";
+    EXPECT_EQ(replay_matches, 0u)
+        << "no 35=D frame identified as the app replay may appear when the store "
+           "could not retrieve it — a GapFill must not be mistaken for the replay";
+}
+
+// [C6] build_replay_frame's degenerate fallback (no stored tag outside the
+// header set, so the header/body-boundary insertion point in the main loop
+// is never reached): send a payload whose ENTIRE stored frame is
+// 8,9,35,34,49,52,56,10 — no body field at all — and confirm the replay
+// still carries 43/122 exactly once, well-ordered. Reachable via the public
+// API: Session::send("35=D\x01") passes T008 validation (payload leads with
+// "35=", ends with SOH, non-empty MsgType) and appends no other field, so the
+// stored frame has nothing outside {8,34,35,49,52,56}.
+TEST_F(ResendAnswerReplayTest, Replay_NoBodyFallback_StillCarries43And122) {
+    auto cfg = make_cfg();
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const char kPayloadStr[] = "35=D\x01";
+    auto payload = to_payload(kPayloadStr);
+    auto fut_send =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut_send, kWindow,
+                                                    "Replay_NoBodyFallback/send")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Replay_NoBodyFallback/send");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Replay_NoBodyFallback/send";
+        return;
+    }
+    ASSERT_TRUE(fut_send.get().has_value()) << "Session::send must succeed";
+    ASSERT_FALSE(captured_frames.empty());
+    const auto tag34_opt = extract_field(std::span<const std::byte>(captured_frames.back()), 34);
+    ASSERT_TRUE(tag34_opt.has_value());
+    const seqnum_t app_seq = static_cast<seqnum_t>(std::stoul(std::string(*tag34_opt)));
+    captured_frames.clear();
+
+    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    feed(sess, rr);
+
+    // No ClOrdID(11) exists in this payload, so identification drops that
+    // clause; 35=D + 34==app_seq is unambiguous here (no GapFill carries 35=D).
+    std::size_t replay_matches = 0;
+    for (const auto& f : captured_frames) {
+        const std::span<const std::byte> fs(f);
+        if (extract_field(fs, 35) != "D") continue;
+        if (extract_field(fs, 34) != std::to_string(app_seq)) continue;
+        ++replay_matches;
+
+        const auto check = check_resend_answer_field_order(f);
+        EXPECT_TRUE(check.ok) << check.reason;
+        EXPECT_EQ(check.count_43, 1u) << "fallback-path replay must carry PossDupFlag(43) once";
+        EXPECT_EQ(check.count_122, 1u)
+            << "fallback-path replay must carry OrigSendingTime(122) once";
+    }
+    EXPECT_EQ(replay_matches, 1u) << "ResendRequest for the bodyless stored frame (seq=" << app_seq
+                                  << ") must produce exactly one replayed frame";
 }
 
 }  // namespace fixpp::session::test
