@@ -615,14 +615,23 @@ def _check_w2a(census_doc, script_doc):
         f"missing={sorted(missing)} unexpected={sorted(unexpected)}")
 
 
-def _check_w2a_self_referential_WEAK(script_doc):
+def _check_w2a_script_derived_expected_WRONG(census_doc, script_doc):
     """⚠️ NOT a real check — exists ONLY as T087's third arm operand: the
-    WRONG implementation quickstart.md Step 4 warns against, deriving BOTH
-    operands of the equality from the SAME script file, so it agrees with
-    itself by construction and cannot redden on a script mutation. Proves
-    _check_w2a's census operand is load-bearing, by contrast."""
-    keys = _full_keys(script_doc)
-    assert keys == _full_keys(script_doc)  # trivially true, always
+    SAME signature and call shape as _check_w2a, but the WRONG
+    implementation quickstart.md Step 4 warns against — the `expected` side
+    is (re-)derived from the SCRIPT rather than the CENSUS (`census_doc` is
+    accepted, matching the real signature, but never consulted), so the
+    equality agrees with itself by construction and CANNOT redden on any
+    script mutation. ⚠️ Unlike _check_completeness_union_only/_collapsed,
+    this one has NO other input that could make it fail — that unfalsifiability
+    IS the defect being demonstrated, not a gap in this arm's own proof."""
+    expected = _full_keys(script_doc)  # ⛔ should be census_doc
+    observed = _full_keys(script_doc)
+    missing = expected - observed
+    unexpected = observed - expected
+    assert not missing and not unexpected, (
+        f"W-2a (WRONG, script-derived expected): missing={sorted(missing)} "
+        f"unexpected={sorted(unexpected)}")
 
 
 def _check_completeness_union_only(doc, census_doc):
@@ -661,17 +670,24 @@ def _check_w3a(doc, census_doc):
     expected = _full_keys(census_doc)
     per_config = {config: _project_identity2(_witness_rows_for(doc, config))
                   for config in CONFIGS}
+    # ⚠️ Pairwise agreement FIRST: with the census check ahead of it, every
+    # config is already forced equal to `expected` individually, so the
+    # pairwise loop could never fire (transitivity makes it unreachable).
+    # Ordered this way, two IDENTICAL-but-wrong projections (e.g. every
+    # config agreeing on a set that omits a step) still trip the census leg
+    # below, and two DISAGREEING configs are caught here, by the clause
+    # actually meant to catch them.
+    ordered = sorted(per_config)
+    for i, a in enumerate(ordered):
+        for b in ordered[i + 1:]:
+            assert per_config[a] == per_config[b], (
+                f"W-3a: config {a!r} projection != config {b!r} projection")
     for config, keys in per_config.items():
         missing = expected - keys
         unexpected = keys - expected
         assert not missing and not unexpected, (
             f"W-3a: config {config!r} witness projection != census; "
             f"missing={sorted(missing)} unexpected={sorted(unexpected)}")
-    ordered = sorted(per_config)
-    for i, a in enumerate(ordered):
-        for b in ordered[i + 1:]:
-            assert per_config[a] == per_config[b], (
-                f"W-3a: config {a!r} projection != config {b!r} projection")
 
 
 def _check_run_slot_completeness(doc):
@@ -739,6 +755,12 @@ def _ledger_slot_index(doc):
 
 
 def _census_slot_witness_count(census_doc, combo_id):
+    if combo_id not in CONV_COMBO_IDS:
+        # fail CLOSED on an unrecognised combo rather than silently
+        # returning the empty-set count (0) that _expand_business_steps_combo
+        # gives for a combo_id it has never heard of -- a bogus cell_id
+        # combined with a ledger witness_count of 0 must not satisfy E-1.
+        return None
     return len(_expand_business_steps_combo(census_doc, combo_id))
 
 
@@ -757,6 +779,14 @@ def _check_e1_and_e5(conv_rows, doc, census_doc):
         sk = status.split(":", 1)[0]
         entry = ledger_idx.get(slot)
         if sk == "pass":
+            # data-model §5: `ledger_ref` is the row's OWN pointer to its
+            # ledger entry — a row whose ledger_ref names a DIFFERENT slot
+            # than its own (cell_id, config) identity must not silently
+            # resolve against ITS identity's entry instead.
+            ledger_ref = row.get("ledger_ref")
+            assert ledger_ref is not None and tuple(ledger_ref) == slot, (
+                f"E-1: {row.get('id')!r} ledger_ref {ledger_ref!r} != this "
+                f"row's own (cell_id, config) {slot!r}")
             assert entry is not None, (
                 f"E-1: {row.get('id')!r} status:pass names no runs: ledger "
                 f"entry for slot {slot!r}")
@@ -765,6 +795,9 @@ def _check_e1_and_e5(conv_rows, doc, census_doc):
                 f"terminal_state {entry.get('terminal_state')!r} != completed")
             combo_id = cell_id.split("-")[1] if cell_id else None
             expected_count = _census_slot_witness_count(census_doc, combo_id)
+            assert expected_count is not None, (
+                f"E-1: {row.get('id')!r} cell_id {cell_id!r} names an "
+                f"unrecognised combo {combo_id!r}")
             assert entry.get("witness_count") == expected_count, (
                 f"E-1: {row.get('id')!r} status:pass but ledger witness_count "
                 f"{entry.get('witness_count')!r} != census figure "
@@ -843,6 +876,24 @@ def test_w3a_complete_artifact_passes(census_doc):
     _check_w3a(_w_fixture_complete(census_doc), census_doc)
 
 
+def test_w3a_pairwise_clause_fires_before_the_census_clause(census_doc):
+    # The pairwise loop is ordered BEFORE the census-equality loop
+    # specifically so it is reachable: with census checked first, every
+    # config that survives is already == census, so two surviving configs
+    # are already equal to each other by transitivity and the pairwise loop
+    # could never fail. Add ONE extra witness to exactly one config: that
+    # config now disagrees with its siblings (pairwise, checked first) AND
+    # with the census (checked second) -- assert the diagnostic that fires
+    # is the PAIRWISE one, proving this clause is not dead code.
+    doc = _w_fixture_complete(census_doc)
+    extra = dict(doc["witnesses"][0])
+    extra["config"] = "asan" if extra["config"] != "asan" else "ubsan"
+    extra["occurrence"] = 999  # a key no config's real projection carries
+    doc["witnesses"].append(extra)
+    with pytest.raises(AssertionError, match=r"config '.*' projection != config '.*' projection"):
+        _check_w3a(doc, census_doc)
+
+
 def test_run_slot_completeness_complete_artifact_passes():
     _check_run_slot_completeness(_w_fixture_complete(_load_census()))
 
@@ -856,11 +907,34 @@ def test_e4_complete_manifest_passes():
 
 
 # ── T086: forced-miss arms on the schema check (E-1 / E-5) ─────────────────
+#
+# "a falsified cell_results.yaml row (pass, no evidence)" is the pre-existing
+# test_conversation_row_missing_new_field_goes_red (T027, above) — a
+# kind:conversation row missing `ledger_ref` (or any other new evidence
+# field) is already REQUIRED_FIELDS-rejected before it ever reaches E-1.
 
 def _e1_manifest_row(cell_id, config, status, ledger_ref=None):
     return {"id": f"{cell_id}@{config}", "cell_id": cell_id, "config": config,
             "kind": "conversation", "status": status, "matrix_disposition": "live",
             "spec_ref": "FR-013", "ledger_ref": ledger_ref or (cell_id, config)}
+
+
+def test_e1_ledger_ref_naming_a_different_slot_goes_red():
+    # data-model §5's own field, distinct from the "no ledger entry at all"
+    # arm below: the ledger entry for THIS row's (cell_id, config) DOES
+    # exist and is well-formed, but the row's ledger_ref points somewhere
+    # else -- presence is not agreement.
+    census = _load_census()
+    expected = _census_slot_witness_count(census, "C1")
+    doc = {"schema_version": 1, "witnesses": [], "runs": [
+        {"cell_id": "CONV-C1-off", "config": "normal", "kind": "conformance",
+         "authoritative": True, "terminal_state": "completed",
+         "witness_count": expected},
+    ], "validation_pairs": []}
+    rows = [_e1_manifest_row("CONV-C1-off", "normal", "pass",
+                              ledger_ref=("CONV-C1-on", "normal"))]
+    with pytest.raises(AssertionError, match="ledger_ref"):
+        _check_e1_and_e5(rows, doc, census)
 
 
 def test_e1_pass_with_no_ledger_entry_goes_red():
@@ -928,6 +1002,21 @@ def test_e1_pass_row_backed_by_a_real_ledger_entry_passes():
     _check_e1_and_e5(rows, doc, census)  # must not raise
 
 
+def test_e1_bogus_combo_with_zero_witness_count_goes_red():
+    # ⚠️ fail-CLOSED guard: an unrecognised combo_id must not resolve to the
+    # empty-set expansion (count 0) and let a witness_count: 0 ledger entry
+    # satisfy E-1 -- a bogus cell_id combined with zero witnesses would
+    # otherwise pass silently.
+    census = _load_census()
+    doc = {"schema_version": 1, "witnesses": [], "runs": [
+        {"cell_id": "CONV-C99-off", "config": "normal", "kind": "conformance",
+         "authoritative": True, "terminal_state": "completed", "witness_count": 0},
+    ], "validation_pairs": []}
+    rows = [_e1_manifest_row("CONV-C99-off", "normal", "pass")]
+    with pytest.raises(AssertionError, match="unrecognised combo"):
+        _check_e1_and_e5(rows, doc, census)
+
+
 # ── T087: forced-miss arms on the completeness gate (W-3/W-2a) ─────────────
 
 def test_w3a_delete_one_witness_goes_red(census_doc):
@@ -955,21 +1044,24 @@ def test_w2a_add_a_script_step_with_no_witness_goes_red(census_doc, script_doc):
         _check_w2a(census_doc, mutant)
 
 
-def test_w2a_self_referential_check_stays_green_on_both_mutants_above(script_doc):
-    # T087's third arm: the WRONG implementation (both operands derived from
-    # the SAME script file) stays green on the exact two mutations that
+def test_w2a_self_referential_check_stays_green_on_both_mutants_above(census_doc, script_doc):
+    # T087's third arm: the WRONG implementation (the `expected` side
+    # re-derived from the SCRIPT instead of the CENSUS, same call shape as
+    # the real _check_w2a) stays green on the exact two mutations that
     # redden the real _check_w2a above — proving the census operand is
-    # load-bearing, not decorative.
+    # load-bearing, not decorative. ⚠️ It cannot go RED on ANY script
+    # mutation (its `expected`/`observed` sides are the same document) — that
+    # unfalsifiability is what this arm demonstrates, not a gap in it.
     import copy
     deleted = copy.deepcopy(script_doc)
     deleted["business_steps"] = [s for s in deleted["business_steps"] if s["step_id"] != "B-01"]
-    _check_w2a_self_referential_WEAK(deleted)  # must not raise
+    _check_w2a_script_derived_expected_WRONG(census_doc, deleted)  # must not raise
 
     added = copy.deepcopy(script_doc)
     extra = copy.deepcopy(added["business_steps"][0])
     extra["step_id"] = "B-EXTRA-NOT-IN-CENSUS"
     added["business_steps"].append(extra)
-    _check_w2a_self_referential_WEAK(added)  # must not raise
+    _check_w2a_script_derived_expected_WRONG(census_doc, added)  # must not raise
 
 
 # ── T088: a slot with no authoritative run ⇒ W-3b RED (equality, not
