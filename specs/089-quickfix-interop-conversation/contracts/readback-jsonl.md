@@ -76,8 +76,9 @@ all three. A difference between any two of the three is a contract violation, no
 
 ## Records
 
-Four `type`s: `hello` (exactly one, first), `sent` (zero or more), `readback` (zero or more) and
-`terminal` (exactly one, **last**). ⚠️ `terminal` was added because the `hello` is written *before any
+Five `type`s: `hello` (exactly one, first), `sent` (zero or more), `readback` (zero or more),
+`disposition` (zero or more, **fixpp's stream only** — data-model §13) and `terminal` (exactly one,
+**last**). ⚠️ `terminal` was added because the `hello` is written *before any
 message is processed*: a counterparty that starts, announces itself and conversates not at all satisfies
 every field a hello-only corroboration reads (data-model §12).
 Field-level definitions live in [data-model.md](../data-model.md) §1–§3 and are not restated here.
@@ -288,6 +289,7 @@ FR-019's re-capture obligation covers set **membership**, not only serialization
 | C-10 | Each stream carries a `hello` **first** and a `terminal` **last**, whatever the outcome | a stream with a `hello` and no `terminal` is an incomplete run, never a pass — the pre-conversation hello alone does not corroborate anything |
 | **C-12** | **`typed_accessor_arm` ≥ the minimum declared for this cell by the harness capability-minimums artifact** — the same operand C-2 runs on, from the same artifact, whose **normative home** is `plan.md` § *External obligations* → the capability-minimums row. ⛔ **No minimum is written into this bundle.** The peer announces, in its `hello`, the version of the typed-accessor compile arm **its own build was gated by** (data-model §1, FR-003b) | **absent or older ⇒ cell FAILS** — ⛔ **and so does a cell for which no minimum is declared**, on C-2's rule — not skip, not pass, on FR-016a's standing rule. ⚠️ An image published **before** the arm existed announces nothing, which is exactly the case this closes: pinning such a digest satisfies FR-016b while attesting nothing, and it does so in the shape a correct pin has. ⛔ **Provenance is part of the obligation**: the announced value MUST originate in the arm's own build step (compile definition / generated constant) and the source MUST fail to compile without it — a hand-written literal satisfies the announcement and attests nothing. ⚠️ **Attests that the ARM RAN on the build that produced this peer — NOT that any typed accessor is called**; see the note above the witness table |
 | C-11 | An invalid byte survives the **live** decode → re-encode round trip, per § *C-11 — the live-path charset arm* | `value_b64` for path `355` on step `B-05` differing from the base64 of the wire bytes is a violation. ⚠️ The synthetic C-7 fixture **cannot** discharge this: it constructs the message inside the emitter and never enters the engine's decoder |
+| **C-13** | **fixpp's stream carries one `disposition` record per inbound arrival its session delivered or rejected** (data-model §13) — `accepted` observed at `fromApp`/`fromAdmin`, `rejected` observed as fixpp's own outbound Reject(35=3) whose `RefSeqNum(45)` names it. ⛔ **Every peer `sent` record joins exactly one disposition** on `(seq_num, direction, occurrence)`. ⚠️ fixpp-only, so **outside C-7's byte-identity set** and pinned by its own committed expected line, as the §1a hello is | a peer `sent` record joining **no** disposition, or two ⇒ pair extraction **RED naming its `script_step_id`** — never read as `rejected`: *neither delivered nor rejected* is an extraction failure (data-model §13's third state) |
 
 **C-4 and C-5 are silent failures.** Neither is caught by a green run: C-4 yields a populated-looking
 record missing exactly the structure under test, and C-5 corrupts the subject while observing it. Both
@@ -333,4 +335,5 @@ forbids**: no field of this format can witness typed-accessor *invocation*, and 
 | escaping | each byte class, **each of the three emitters**, including a non-UTF-8 value routed to `value_b64`. ⚠️ Synthetic — emitter-level only; the live path is C-11's, not this row's |
 | C-11 | a `0xff` byte declared in `EncodedText(355)` on step `B-05`, driven **over the wire** on C3/C4, arrives with `value_b64` equal to the base64 of the original wire bytes; and the QuickFIX-J counterparty **asserts `CharsetSupport.getCharset() == ISO-8859-1` at startup** (the charset in effect — never `getDefaultCharset()`, a literal), failing loudly otherwise |
 | C-8 | an intent/sent record derived from the serialized frame ⇒ RED (FR-018's first spurious-hit arm) |
+| **C-13** | ⛔ **two arms, because the defect has two shapes.** *Forced miss*: a persisted bundle whose fixpp stream drops the disposition for one peer `sent` record ⇒ extraction RED naming that step. *Spurious hit*: a bundle where one peer→fixpp witness is `verdict: fail` (a wrong field value) while **both** arms' dispositions say `accepted` ⇒ the conformance pair is **`identical`** — an extractor reading `verdict` goes RED here for the wrong reason, which is the defect this arm exists to expose |
 | R-4 | stale **append-mode** readback ⇒ RED — this is a load-bearing decision, not a formatting choice |

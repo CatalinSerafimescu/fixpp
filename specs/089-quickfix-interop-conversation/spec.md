@@ -750,6 +750,11 @@ claiming a pass with no corroborating run artifact.
   disposition per message, and the cross-arm verdict. The witness `mismatch` vocabulary
   (`value_mismatch` / `missing` / `spurious`) is field-level and cannot express *"the on arm rejected a
   message the off arm accepted, and here is the objection"*.
+  - ⛔ **Each arm's accepted set and dispositions MUST be read from fixpp's per-arrival `disposition`
+    record (data-model §13), joined to the peer's `sent` records — never from the witness `verdict`**,
+    which measures field fidelity: a message the validator accepted with one wrong field would read as
+    rejected. An arrival fixpp neither delivered nor rejected is an **extraction failure**, never a
+    rejection (C-13).
   - ⛔ **The `kind: conformance` pair set MUST EQUAL the 16-pair inventory** — set equality, not
     containment — checked by the committed schema check (`contracts/witness-evidence.md` **E-7a** / W-3d).
     **16 is derived, never an independent count**: the 32 conformance slots quotiented by the arm axis
@@ -985,6 +990,7 @@ claiming a pass with no corroborating run artifact.
   | Script-intent check (FR-008d (b)) | A counterparty that **ignores the intent file** and originates from literals equal to the script's values | only with a copy of the script whose peer-declared value is changed: the peer's `sent` record keeps the old value — against the unmodified script nothing differs |
   | Completeness gate (FR-015b/FR-015c) | **Drop one whole configuration** | the per-config projection π for that config is empty while the other three are the census's 100 keys ⇒ RED. Deleting a single witness row leaves the union unchanged and therefore cannot discriminate |
   | Arm attestation (FR-011a) | Launch a **validation-on** cell with `validate_inbound_messages` forced **false** | fixpp's `hello` carries `has_validator: false` while the row claims `arm: validation-on` ⇒ RED. ⚠️ FR-011's *"a dictionary is loaded"* is true in **both** arms and cannot produce this observable |
+  | Validation-pair extraction (FR-012a) | Two bundles where one peer→fixpp witness is `verdict: fail` while **both** arms' dispositions say `accepted` | the pair must be **`identical`**; an extractor that reads `verdict` yields `diverged` — a divergence no validator behaviour caused (C-13) |
   | Level-1 corroboration (FR-014) | A stream carrying a `hello` and **no `terminal` record** | promotion RED — a counterparty that starts, writes its hello and conversates not at all supplies everything a hello-only check inspects |
   | Validation-arm equality (SC-004) | The **empty-arm** mutation — a validator that never runs | FR-010a's divergence probe reports `identical` where `expected_verdict: diverged` ⇒ RED |
   | Disk gate (`proceed`) | Threshold **unset or unparseable** with both mounts nearly full; and, separately, the host reading **falling back** to the build reading (the same mount resolved twice) | `proceed` is true while `required_internal_free`/`required_host_growth` measure nothing, or while the host predicate is satisfied by the build number. Both require RED |

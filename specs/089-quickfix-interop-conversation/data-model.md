@@ -692,6 +692,9 @@ copy is the next round's finding.
   ARTIFACTS, AND `verdict` MUST BE COMPUTED FROM THEM** — exact set equality over `accepted_off` /
   `accepted_on`. A `conformance` pair MUST yield `verdict: identical`; a `validator-positive-control` pair
   MUST yield `diverged` and match its `expected_verdict`.
+  ⭐ **The source is fixpp's `disposition` records (§13), joined to the peer's `sent` records, read from
+  each run's PERSISTED evidence bundle** — never the witness rows, whose `verdict` is field fidelity (§13
+  says why that is a spurious divergence). An extractor with no disposition source **fails closed**.
   ⚠️ **This is a SPURIOUS HIT, not a missing check**: with the result merely *carried* rather than
   *derived*, a producer that hard-codes `identical` for conformance pairs passes E-7, E-7a **and** FR-010a's
   divergence probe — the pair reports the expected answer without ever measuring the property, and the whole
@@ -828,4 +831,53 @@ counted, which is what SC-009b demands.
   first line, emitted before any message is processed — a counterparty that starts, announces itself, and
   conversates not at all satisfies every field a hello-only check reads. Requiring `terminal_state:
   completed` on **both** streams is what closes it.
-- The record vocabulary is therefore **`{hello, sent, readback, terminal}`**.
+- The record vocabulary is therefore **`{hello, sent, readback, terminal, disposition}`** —
+  `disposition` (§13) is written by **fixpp's stream only**. ⚠️ `terminal` gains **no**
+  `disposition_count`: §13's join rule is the completeness check on dispositions, and a count here would
+  be a second, weaker statement of it.
+
+---
+
+## 13. Disposition record — what fixpp's session did with each inbound message (FR-010 · FR-012a)
+
+The source §10 extracts `accepted_off` / `accepted_on` / `dispositions` from. ⚠️ Before this record
+existed §10 required those sets to be *extracted from the run artifacts* while no record in the vocabulary
+carried a disposition — an extraction with no source. ⛔ **It is not the witness `verdict`** (§4): that
+measures field fidelity, and a message the validator accepted with one wrong field would read as rejected
+— a spurious divergence with no validator behaviour behind it.
+
+| Field | Type | Rules |
+|---|---|---|
+| `type` | string | literal `"disposition"` |
+| `msg_type` | string | the inbound message's 35 |
+| `seq_num` · `direction` · `occurrence` | as §2 | `direction` is always `peer-to-fixpp` (the spelling `readback_jsonl.hpp` emits). `occurrence` is the ordinal of this `(seq_num, direction)` **arrival** at fixpp's session, counted over accepted and rejected arrivals alike |
+| `disposition` | enum | `accepted` · `rejected` |
+| `reject` | object \| absent | **present iff `rejected`**: `ref_seq_num` (45), `reason` (373), `ref_tag` (371, absent when the Reject omits it), `text` (58, absent when the Reject omits it) — read from fixpp's **own** outbound Reject |
+
+**Validation rules**
+
+- **Written by fixpp's conversation cell**, one per inbound arrival it observes: `accepted` when the
+  session **delivered** the message to the application (`fromApp` / `fromAdmin`); `rejected` when fixpp
+  **emitted a session Reject (35=3) whose `RefSeqNum(45)` names it**, observed on the outbound path through
+  `toAdmin`. Both are direct observations of what the session did; neither is inferred from the absence of
+  the other.
+- ⛔ **THE THIRD STATE — NEITHER DELIVERED NOR REJECTED — IS AN EXTRACTION FAILURE, NEVER `rejected`.** A
+  message can arrive and produce neither: `build_reject` can fail, the session can disconnect, a guard can
+  drop the frame. The cell writes **no** disposition for such an arrival, and §10's extractor **fails
+  closed** on it (the join rule below). ⚠️ Otherwise the quiet path lands in whichever bucket the
+  implementation happens to choose: read as `rejected` on a conformance pair it is a divergence nothing
+  caused, and on a control pair it is the expected answer arriving for the wrong reason.
+- ⛔ **THE JOIN — HOW A DISPOSITION BECOMES A `script_step_id`.** fixpp does **not** write a step id: it
+  cannot know one without guessing. §10's extractor resolves each disposition through the **peer's**
+  `sent` record on `(seq_num, direction, occurrence)` — the comparator's key (§2), and a record that exists
+  even when fixpp rejected the message. **Every peer `sent` record MUST join exactly one disposition**; a
+  peer `sent` record with none, or with two, is extraction RED **naming its `script_step_id`**. A
+  disposition joining no peer `sent` record (engine-generated admin traffic — Heartbeat, a replayed
+  GapFill) is admitted and enters no set.
+- **Set membership**: a step is in `accepted_*` iff **at least one** of its arrivals was `accepted` and
+  **none** was `rejected`. `dispositions` carries every joined arrival, so a replay's disposition is kept
+  rather than folded away.
+- ⛔ **fixpp-only, like the §1a hello, so it is OUTSIDE C-7's byte-identity set.** The three-emitter
+  fixture compares records all three emitters write; a record one of them writes is pinned by its **own**
+  committed expected line, exactly as the §1a hello is. ⚠️ Otherwise the next round tries to make three
+  emitters agree on a record only one of them produces.
