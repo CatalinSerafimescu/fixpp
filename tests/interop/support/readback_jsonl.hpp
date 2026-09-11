@@ -36,11 +36,94 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
 
 namespace fixpp::interop::readback {
+
+// ── THE CANONICAL PARTITION (contract § THE CANONICAL PARTITION; C-6;
+// 089 T039/T040) ─────────────────────────────────────────────────────────────
+//
+// header = (QuickFIX-cpp built-in) ∪ (QuickFIX-J built-in) ∪ (the fields
+// declared in the <header> block of the dictionary loaded for that cell).
+// trailer = SignatureLength/Signature/CheckSum (identical on both vendored
+// engines — Message::isTrailerField(int), verified byte-for-byte below).
+// This is the SAME classification production code needs for ANY top-level
+// tag: 089 T052's inbound readback builder is meant to CALL this, not
+// reimplement it — it is written here, not local to emit_fixpp_fixture.cpp,
+// for exactly that reason.
+//
+// RE-DERIVATION RECIPE (run it; do not trust this comment's numbers): diff
+// the case labels of
+//   reference-engines/quickfix-cpp/src/C++/Message.cpp   Message::isHeaderField(int) / isTrailerField(int)
+//   reference-engines/quickfixj/.../quickfix/Message.java isHeaderField(int) / isTrailerField(int)
+// Re-derived 2026-09-11 against the pinned trees: the two engines' built-in
+// HEADER switches enumerate identical FIELD NAMES except QuickFIX-J's carries
+// `ApplExtID` (case ApplExtID.FIELD) where QuickFIX-cpp's does not; the
+// TRAILER switches are byte-for-byte identical (SignatureLength, Signature,
+// CheckSum, both engines). The integers below are read off
+// reference-engines/quickfix-cpp/include/quickfix/FixFieldNumbers.h for
+// exactly those field names — not invented, not copied from a paraphrase.
+// ⚠️ ENGINE-PIN-BOUND: re-run the diff on any re-pin of either vendored engine.
+inline bool is_canonical_header_or_trailer_tag(
+    int tag, std::function<bool(int)> const& dictionary_header_tag = {})
+{
+    // QuickFIX-cpp's built-in isHeaderField(int) ∪ QuickFIX-J's built-in
+    // isHeaderField(int) -- the union is QuickFIX-cpp's 29-member list plus
+    // ApplExtID(1156), the one member QuickFIX-J's built-in list adds.
+    static const std::vector<int> kUnionHeaderTags = {
+        8,    // BeginString
+        9,    // BodyLength
+        35,   // MsgType
+        49,   // SenderCompID
+        56,   // TargetCompID
+        115,  // OnBehalfOfCompID
+        128,  // DeliverToCompID
+        90,   // SecureDataLen
+        34,   // MsgSeqNum
+        50,   // SenderSubID
+        142,  // SenderLocationID
+        57,   // TargetSubID
+        143,  // TargetLocationID
+        116,  // OnBehalfOfSubID
+        144,  // OnBehalfOfLocationID
+        129,  // DeliverToSubID
+        145,  // DeliverToLocationID
+        43,   // PossDupFlag
+        97,   // PossResend
+        52,   // SendingTime
+        122,  // OrigSendingTime
+        212,  // XmlDataLen
+        213,  // XmlData
+        347,  // MessageEncoding
+        369,  // LastMsgSeqNumProcessed
+        370,  // OnBehalfOfSendingTime
+        1128, // ApplVerID
+        1129, // CstmApplVerID
+        627,  // NoHops
+        1156, // ApplExtID -- QuickFIX-J's built-in list only (T039/T040)
+    };
+    // Message::isTrailerField(int) -- byte-for-byte identical on both engines.
+    static const std::vector<int> kTrailerTags = {
+        93,  // SignatureLength
+        89,  // Signature
+        10,  // CheckSum
+    };
+    if (std::find(kUnionHeaderTags.begin(), kUnionHeaderTags.end(), tag) != kUnionHeaderTags.end()) {
+        return true;
+    }
+    if (std::find(kTrailerTags.begin(), kTrailerTags.end(), tag) != kTrailerTags.end()) {
+        return true;
+    }
+    // Third term of the canonical partition: the dictionary's <header> block
+    // for this cell. Not every caller has a dictionary in scope (this
+    // fixture has none) -- the predicate is a caller-supplied optional so a
+    // std-library-only header (see the file header comment) never has to
+    // depend on fixpp's dictionary type.
+    return dictionary_header_tag && dictionary_header_tag(tag);
+}
 
 // ── escaping / encoding (contract § Escaping and encoding) ─────────────────
 

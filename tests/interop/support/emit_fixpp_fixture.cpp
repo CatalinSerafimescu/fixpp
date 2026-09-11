@@ -7,31 +7,34 @@
 // — gitignored parent tree, contract:parent-harness-gate-contract.md). Mirrors
 // emit_fixture.cpp / EmitFixture.java: invokes fixpp's own readback_jsonl.hpp
 // Stream directly on the SAME constructed record those two drivers use, so
-// its `readback` and `terminal` lines can be diffed against the committed
-// expected.jsonl.
+// its `sent`/`readback`/`terminal` lines can be diffed against the committed
+// expected.jsonl. Its C-6 classification (which top-level tags are excluded
+// from `fields`) calls the PRODUCTION function
+// is_canonical_header_or_trailer_tag() in readback_jsonl.hpp, not a
+// fixture-local restatement (089 T040 round-b) — 089 T052's inbound readback
+// builder is meant to call the same function.
 //
 // ⚠️ NOT wired into CMakeLists.txt / ctest. expected.jsonl lives in the
 // gitignored parent phase-9-harness tree, which this submodule's own CI does
 // not check out — a ctest entry depending on it would be a false-green (or a
 // spurious CI failure) depending on which tree happens to be present. This is
-// a MANUAL verification artifact for T018's own report and for whoever picks
-// up T040 (the three-way fixture extension owns wiring this — or a
-// successor — into the committed fixture properly). Build/run it directly:
+// a MANUAL verification artifact, run by phase-9-harness/interop-readback-
+// fixture/three_way_check.sh (089 T040). Build/run it directly:
 //
 //   g++ -std=c++23 -I tests/interop/support \
 //       tests/interop/support/emit_fixpp_fixture.cpp -o /tmp/fixpp_fixture
 //   /tmp/fixpp_fixture /tmp/fixpp.jsonl
-//   tail -n +2 /tmp/fixpp.jsonl > /tmp/fixpp_lines23.jsonl
+//   tail -n +2 /tmp/fixpp.jsonl > /tmp/fixpp_lines234.jsonl
 //   tail -n +2 <path-to-parent>/interop-readback-fixture/expected.jsonl \
-//       > /tmp/expected_lines23.jsonl
-//   cmp /tmp/fixpp_lines23.jsonl /tmp/expected_lines23.jsonl
+//       > /tmp/expected_lines234.jsonl
+//   cmp /tmp/fixpp_lines234.jsonl /tmp/expected_lines234.jsonl
 //
 // ⚠️ Line 1 (`hello`) is EXPECTED to differ. fixpp's hello follows
 // data-model.md §1a, not §1 (readback_jsonl.hpp's Stream::hello() doc
 // comment) — the counterparties' hello carries `engine`/`engine_version`/
 // `readback_protocol`/`dictionary_enabled`/`counterparty_digest`/
-// `typed_accessor_arm`, none of which describe fixpp. Only lines 2
-// (`readback`) and 3 (`terminal`) are C-7-bound across all three emitters.
+// `typed_accessor_arm`, none of which describe fixpp. Only lines 2-4
+// (`sent`/`readback`/`terminal`) are C-7-bound across all three emitters.
 #include "readback_jsonl.hpp"
 
 #include <algorithm>
@@ -56,6 +59,35 @@ int main(int argc, char** argv)
     // and EmitFixture.java write. See file header.
     s.hello("run-1", "cell-1", "normal", "abc", "validation-on", true, "sha256:dict-d");
 
+    // 089 T040 round-b: `sent` is one of the records C-7 shares across all
+    // three emitters (data-model §3) and shares the SAME path grammar, sort
+    // and escaping rule as `readback` -- so it needs the same escape classes
+    // and nested group exercised, not a smaller stand-in. Reuses the
+    // identical scrambled field content `readback` below uses (minus tag
+    // 1156, which is a readback-only C-6 probe, not a `sent`-record concern).
+    std::vector<fixpp::interop::readback::FieldEntry> sent_f = {
+        {"453[1].448", "second"},
+        {"453[0].802[0].523", "nested"},
+        {"453[0].448", "first"},
+        {"55", std::string("quote\" back\\slash \x01 SOH")},
+        // ⚠️ 089 T040 round-b: was tag "9" -- collides with BodyLength(9), a
+        // genuine header field in both engines' built-in lists. Wiring in the
+        // PRODUCTION is_canonical_header_or_trailer_tag() (below) correctly
+        // excludes it, exposing that the counterparty fixture drivers never
+        // exercised the full built-in union (only the QuickFIX-J-only delta)
+        // and so never noticed the collision. Fixed at the data, not the
+        // function: "11" (ClOrdID) is body on both engines and matches this
+        // codebase's existing convention for a body-field probe (see
+        // witness_comparator_test.cpp's ClOrdId tests). This is the reason
+        // emit_fixture.cpp / EmitFixture.java (the counterparties) must make
+        // the identical substitution -- see interop-readback-fixture/README.md.
+        {"11", "ignored-order"},
+        {"355", std::string("\xff\xfe", 2)},
+        {"58", "e\xcc\x81 utf8 multi-byte"},
+        {"453", "2"},
+    };
+    s.sent("D", 7, "fixpp-to-peer", 0, "B-01", sent_f);
+
     // The SAME field set emit_fixture.cpp / EmitFixture.java construct
     // (deliberately scrambled — README: "paths given to the emitter in
     // scrambled order so the canonical sort is load-bearing"), so the sort
@@ -65,7 +97,7 @@ int main(int argc, char** argv)
         {"453[0].802[0].523", "nested"},
         {"453[0].448", "first"},
         {"55", std::string("quote\" back\\slash \x01 SOH")},
-        {"9", "ignored-order"},
+        {"11", "ignored-order"},  // was "9" -- see sent_f's comment above
         {"355", std::string("\xff\xfe", 2)},
         {"58", "e\xcc\x81 utf8 multi-byte"},
         {"453", "2"},
@@ -74,20 +106,22 @@ int main(int argc, char** argv)
         // fixture is the only place it can be exercised. It is a CANDIDATE
         // field here; the filter below must remove it before the record is
         // written, or fixpp would diverge from both counterparties on C-6.
-        // ⚠️ This is a FIXTURE-ONLY restatement of the canonical partition's
-        // 1156 entry (contracts/readback-jsonl.md § THE CANONICAL PARTITION),
-        // hardcoded because fixpp's live walker has no general C-6 partition
-        // yet (089 T038, out of scope here) — there is no production function
-        // to call. The two counterparty drivers apply the identical tag
-        // through their own shared cross_engine_header_delta() /
-        // RECONCILED_HEADER_TAGS; this is fixpp's twin of that one entry.
         {"1156", "should-be-excluded-as-header"},
     };
     // THE CANONICAL PARTITION: applies at TOP LEVEL only (a bare numeric
-    // path) -- group members are body by construction.
+    // path) -- group members are body by construction. Calls the PRODUCTION
+    // function (readback_jsonl.hpp: is_canonical_header_or_trailer_tag) --
+    // not a fixture-local restatement -- so this fixture proves fixpp's
+    // ACTUAL C-6 classification, the same function 089 T052's inbound
+    // readback builder is meant to call.
     f.erase(std::remove_if(f.begin(), f.end(),
                             [](fixpp::interop::readback::FieldEntry const& e) {
-                                return e.path == "1156";
+                                bool const top_level = !e.path.empty()
+                                    && std::all_of(e.path.begin(), e.path.end(),
+                                                    [](char c) { return c >= '0' && c <= '9'; });
+                                return top_level
+                                    && fixpp::interop::readback::is_canonical_header_or_trailer_tag(
+                                           std::stoi(e.path));
                             }),
             f.end());
     s.readback("D", 7, "fixpp-to-peer", 0, false, f,

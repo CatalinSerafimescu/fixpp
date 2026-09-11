@@ -208,3 +208,60 @@ TEST(ReadbackJsonl, TerminalWrittenExactlyOnce)
     EXPECT_NE(lines[1].find("\"sent_count\":0"), std::string::npos) << lines[1];
     EXPECT_NE(lines[1].find("\"readback_count\":1"), std::string::npos) << lines[1];
 }
+
+// ── THE CANONICAL PARTITION — is_canonical_header_or_trailer_tag() (089 T039
+// round-b, C-6) ──────────────────────────────────────────────────────────
+//
+// This is the production function 089's C-7 fixture driver
+// (emit_fixpp_fixture.cpp) calls, and the one 089 T052's inbound readback
+// builder is meant to call — not a fixture-local restatement. Four cells,
+// each a distinct branch of the canonical partition (contract §
+// THE CANONICAL PARTITION): ApplExtID(1156) is the QuickFIX-J-only built-in
+// addition; MsgType(35) is on BOTH engines' built-in lists; CheckSum(10) is
+// trailer, not header; ClOrdID(11) is body — in neither list.
+
+TEST(ReadbackJsonl, CanonicalPartitionClassifiesApplExtIdAsHeader)
+{
+    // Tag 1156 is not in QuickFIX-cpp's built-in isHeaderField(int) switch
+    // (verified against reference-engines/quickfix-cpp/src/C++/Message.cpp)
+    // but IS in QuickFIX-J's (case ApplExtID.FIELD) — the one engine-delta
+    // member the canonical partition's union adds. C-6: 1156 is header on
+    // BOTH emitters regardless.
+    EXPECT_TRUE(is_canonical_header_or_trailer_tag(1156));
+}
+
+TEST(ReadbackJsonl, CanonicalPartitionClassifiesMsgTypeAsHeader)
+{
+    // MsgType(35) is header on BOTH engines' own built-in lists — the union's
+    // first two terms agreeing, not the engine-delta term 1156 exercises.
+    EXPECT_TRUE(is_canonical_header_or_trailer_tag(35));
+}
+
+TEST(ReadbackJsonl, CanonicalPartitionClassifiesCheckSumAsTrailerNotHeader)
+{
+    // CheckSum(10) is TRAILER (Message::isTrailerField(int) on both engines,
+    // byte-for-byte identical), a different exclusion set from `header` but
+    // the same observable here: excluded from `fields`.
+    EXPECT_TRUE(is_canonical_header_or_trailer_tag(10));
+}
+
+TEST(ReadbackJsonl, CanonicalPartitionClassifiesClOrdIdAsBody)
+{
+    // ClOrdID(11) is in neither engine's built-in header list, neither
+    // engine's built-in trailer list, and (no dictionary predicate supplied
+    // here) not header via the dictionary's <header> block either --
+    // genuinely body, and must NOT be excluded.
+    EXPECT_FALSE(is_canonical_header_or_trailer_tag(11));
+}
+
+TEST(ReadbackJsonl, CanonicalPartitionConsultsTheSuppliedDictionaryPredicate)
+{
+    // The third term (the dictionary's <header> block) is a caller-supplied
+    // predicate, since this std-library-only header has no fixpp dictionary
+    // dependency. A tag neither built-in list carries (ClOrdID(11) again)
+    // still becomes header when the caller's dictionary predicate says so --
+    // and the predicate is NOT consulted when a built-in term already
+    // decided (1156 must not require it).
+    EXPECT_TRUE(is_canonical_header_or_trailer_tag(11, [](int tag) { return tag == 11; }));
+    EXPECT_FALSE(is_canonical_header_or_trailer_tag(12, [](int tag) { return tag == 11; }));
+}
