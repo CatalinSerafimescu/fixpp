@@ -37,7 +37,8 @@ A parallel session implemented part of the counterparty side ahead of this task 
 
 | Branch | Tip | Carries |
 |---|---|---|
-| parent `counterparty-rebuild` | `0aa5cf0` | readback/sent/hello/terminal emitters in both counterparties, the six `INTEROP_CP_*` consumers with `script_digest` recomputed, the QuickFIX-J `ISO-8859-1` assert, the typed-accessor compile arm in `CMakeLists.txt` + `pom.xml`, Dockerfile capability markers, the **two-way** cross-language fixture |
+| parent `counterparty-rebuild` | `3a42ca4` *(was `0aa5cf0` when this table was written; the extra commit is report-only; 3 commits were unpushed as of 2026-09-11 — re-derive with `git branch -vv`)* | readback/sent/hello/terminal emitters in both counterparties, the six `INTEROP_CP_*` consumers with `script_digest` recomputed, the QuickFIX-J `ISO-8859-1` assert, the typed-accessor compile arm in `CMakeLists.txt` + `pom.xml`, Dockerfile capability markers, the **two-way** cross-language fixture |
+| parent `089-harness` (worktree `~/Work/Programming/antreprenoriat-089`) | *cut from `counterparty-rebuild`* | **089's own parent-side work lands here** (from T008 on). The worktree reaches the library checkout and `reference-engines/` through local symlinks, since `run_interop_cell.py` derives both from its own location. ⛔ A commit to parent `main` touching the harness paths **is** the GHCR publish (T003) |
 | fixpp `089-pin-counterparty-digest` | `5ef6e88b` | ⛔ **OBSOLETE — do not land.** It pins `interop-smoke.yml` to the pre-089 digest, which FR-026 no longer asks for and which would make FR-020 undischargeable. Kept only as a record |
 
 Tasks below marked **[INHERITED]** are substantially implemented there. They are still tasks: each
@@ -68,10 +69,10 @@ and the configuration-vocabulary correction that four artifacts currently get wr
 - [X] T005 [P] Implement `ci/test-disk-preflight.sh` with the RED arms `contracts/disk-preflight.md` § *Required RED arms* enumerates — A-1, A-1a, A-3, A-5, A-5a, A-6 — plus the spurious-hit arms A-7 (threshold unset/unparseable with both mounts nearly full ⇒ `proceed` true while the predicates measure nothing) and A-8 (host mount resolves to the build mount ⇒ the host predicate satisfied by the build reading), and the GREEN controls A-2 (both comfortable) and A-4 (not WSL, no host mount — proving A-3 is not merely *"no host mount ⇒ fail"*)
 - [X] T006 [P] Register `ci/disk-preflight.sh` and `ci/test-disk-preflight.sh` in the `ci-script-pins` fixture so the gate's own scripts are pinned like every other CI script
 - [X] T007 Resolve D-9a's bootstrap: R-1's measurement cannot run under its own gate, since D-7 sources both thresholds from it. Implement the documented bootstrap path in `ci/disk-preflight.sh` and prove it cannot be used to bypass the gate in ordinary operation
-- [ ] T008 [P] Correct `CONFIG_TO_PRESET` in `phase-9-harness/tools/run_interop_cell.py` to `{normal→linux-clang-debug, asan→linux-clang-asan, ubsan→linux-clang-ubsan, tsan→linux-clang-tsan}`, retiring the `asan-ubsan` key (FR-021 · FR-021a)
+- [X] T008 [P] Correct `CONFIG_TO_PRESET` in `phase-9-harness/tools/run_interop_cell.py` to `{normal→linux-clang-debug, asan→linux-clang-asan, ubsan→linux-clang-ubsan, tsan→linux-clang-tsan}`, retiring the `asan-ubsan` key (FR-021 · FR-021a)
 - [X] T009 [P] Extend `CONFIGS` in `tests/interop/cell_results_schema_check_test.py` to gain `asan` and `ubsan` and lose `asan-ubsan` (FR-021a)
-- [ ] T010 [P] Correct the config vocabulary `normal|asan-ubsan|tsan` to the four-config set in `phase-9-harness/INTEROP-016-DESIGN.md` (FR-021a)
-- [ ] T011 [P] Correct the claim that the charter's ASan+UBSan requirement is met by `asan-ubsan` in `phase-9-harness/INTEROP-COVERAGE-REPORT.md` (FR-021a)
+- [X] T010 [P] Correct the config vocabulary `normal|asan-ubsan|tsan` to the four-config set in `phase-9-harness/INTEROP-016-DESIGN.md` (FR-021a)
+- [X] T011 [P] Correct the claim that the charter's ASan+UBSan requirement is met by `asan-ubsan` in `phase-9-harness/INTEROP-COVERAGE-REPORT.md` (FR-021a)
 
 **Checkpoint**: The disk gate exists and is proven able to refuse a build; the republish ordering is
 decided rather than assumed; the four-config vocabulary is consistent across all four artifacts.
