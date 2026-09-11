@@ -80,6 +80,7 @@ environment before launch, extending the `cp_env` dict `launch_counterparty` alr
 | `INTEROP_CP_IMAGE_DIGEST` | `counterparty_digest` | verbatim |
 | `INTEROP_CP_SCRIPT_PATH` | the conversation script the counterparty drives from | — |
 | `INTEROP_CP_SCRIPT_DIGEST` | the shim's own digest of that file | **not copied** — see below |
+| `INTEROP_CP_INTENT_PATH` | the per-cell intent file the counterparty builds its messages from (FR-008d (a)), rendered by the shim from the same script bytes it digests | — |
 
 ⚠️ **`script_digest` in the hello is RECOMPUTED by the counterparty over the file it actually opened**, and
 the shim compares it to `INTEROP_CP_SCRIPT_DIGEST` before launching the gtest. A verbatim copy would prove
@@ -108,6 +109,7 @@ binary named by the cell:
 | `INTEROP_FIXPP_SCRIPT_PATH` | the conversation script fixpp drives from | — |
 | `INTEROP_FIXPP_SCRIPT_DIGEST` | the shim's digest of that file | **not copied** — recomputed, as below |
 | `INTEROP_FIXPP_READBACK_PATH` | where fixpp writes its own stream | — |
+| `INTEROP_FIXPP_INTENT_PATH` | the per-cell intent file fixpp's cell builds its messages from (FR-008d (a)) | — |
 
 ⚠️ **Same rule as the counterparty**: `script_digest` in fixpp's hello is **recomputed by fixpp over the
 file it actually opened** and compared against `INTEROP_FIXPP_SCRIPT_DIGEST`. Both sides recomputing
