@@ -34,6 +34,7 @@ endif()
 add_library(interop_support STATIC
     support/golden_diff.cpp
     support/interop_fixture.cpp
+    support/witness_comparator.cpp
 )
 target_include_directories(interop_support PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"            # consumers: #include "support/..."
@@ -125,6 +126,17 @@ fixpp_add_interop_test(
     GROUP happy
     LABEL "interop;016;interop-support"
     SOURCES support_smoke_test.cpp support/interop_fixture_test.cpp
+)
+
+# ── 089 T018: the witness producer — fixpp's readback_jsonl Stream + the
+# shared comparator (data-model.md §4). Standard-library only (see both
+# files' headers); linked into interop_support like golden_diff.cpp above,
+# and registered here the same way support tests are (interop_support_smoke_test).
+fixpp_add_interop_test(
+    NAME interop_readback_witness_test
+    GROUP happy
+    LABEL "interop;089;interop-support"
+    SOURCES support/readback_jsonl_test.cpp support/witness_comparator_test.cpp
 )
 
 # ── US1 happy-path drivers (T010, T016) ───────────────────────────────────────
