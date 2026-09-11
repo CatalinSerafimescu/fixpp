@@ -24,11 +24,14 @@
 #include <string>
 #include <string_view>
 
+#include "conversation/support/conv_wire.hpp"
+#include "support/intent_file.hpp"
 #include "support/readback_jsonl.hpp"
-#include "support/sent_record_intent.hpp"
 #include "support/witness_comparator.hpp"
 
 using namespace fixpp::interop::readback;
+namespace conv = fixpp::interop::conversation;
+namespace intent = fixpp::interop::intent;
 
 namespace {
 
@@ -70,8 +73,8 @@ DecimalTagResolver const& test_resolver()
     return resolver;
 }
 
-// Test-only, and kept OUT of sent_record_intent.hpp on purpose: that header is
-// what a real cell includes, and this is the derivation C-8 forbids for a cell.
+// Test-only, and kept LOCAL to this file on purpose: conv_wire.hpp is what a
+// real cell includes, and this is the derivation C-8 forbids for a cell.
 // Used twice below: as the peer's parse of the (mutated) frame, and as the
 // mirror mutant of the sent-record builder.
 //
@@ -698,34 +701,48 @@ TEST(WitnessComparator, AppendModeAcrossTwoRunsWronglyPassesOnRunNMinus1sStaleRe
 }
 
 // ── 089 T048 — C-8 spurious-hit: sent.fields MUST be builder-derived ───────
-// Exercises the PRODUCTION functions in sent_record_intent.hpp (built on
-// fixpp::wire::body_builder, the shipped 061 body-only serializer), not a
-// test-local re-implementation -- see that file's header for why they had
-// to be added: no such seam existed anywhere in the tree before this arm.
+// Exercises conv_wire.hpp::build_body_from_intent -- the PRODUCTION function
+// the C1 cell actually calls (conv_c1_test.cpp's send_fixpp_business
+// lambda), not a test-local re-implementation. `intent_fields` is built the
+// SAME two-step way that lambda derives its `sent` record: convert the
+// declared intent fields verbatim, then append derive_group_count_fields()'s
+// output (empty here -- OrderCancelRequest is flat -- but called anyway so
+// this arm's composition cannot silently diverge from the cell's the first
+// time someone adds a group to this message shape). The three fields are a
+// LOCAL literal, not read from the shim-rendered intent file: this binary
+// runs under a plain, shim-less `ctest`, so it must stay self-contained.
 TEST(WitnessComparator, SpuriousHitFrameDerivedSentMasksPostCaptureMutation_C8)
 {
     std::string const cl_ord_id = "ORD0001";
     std::string const orig_cl_ord_id = "ORIG0001";
     std::string const account = "ACCT0001";
+    std::vector<intent::FieldEntry> const decl_fields = {
+        {"11", cl_ord_id}, {"41", orig_cl_ord_id}, {"1", account}};
 
     // The REAL production write path.
     std::array<std::byte, 256> buf{};
-    auto built = build_order_cancel_request(buf, cl_ord_id, orig_cl_ord_id, account);
+    auto built = conv::build_body_from_intent(buf, "F", decl_fields);
     ASSERT_TRUE(built.has_value());
     std::span<std::byte> const frame = *built;
 
     // Stage-1 intent capture -- BEFORE the frame is mutated (C-8: "reading
     // MsgSeqNum(34) and direction from the outbound seam is required... the
-    // restriction is on WHAT is read there, not on WHERE").
-    auto const intent_fields =
-        order_cancel_request_sent_fields_from_intent(cl_ord_id, orig_cl_ord_id, account);
+    // restriction is on WHAT is read there, not on WHERE") -- same
+    // derivation as conv_c1_test.cpp's send_fixpp_business lambda.
+    std::vector<FieldEntry> intent_fields;
+    intent_fields.reserve(decl_fields.size());
+    for (auto const& f : decl_fields) intent_fields.push_back({f.path, f.value});
+    for (auto const& f : conv::derive_group_count_fields(decl_fields)) {
+        intent_fields.push_back({f.path, f.value});
+    }
 
     // Test-only hook: rewrite Account(1) in the ALREADY-SERIALIZED frame,
     // AFTER intent capture -- same length ("ACCT0001" -> "ACCT0009"),
     // nothing else touched. quickstart.md's C-8 arm names B-03/Account(1) on
-    // the live conversation script; that script has no support-layer
-    // equivalent yet (T052), so this uses the same message shape
-    // (OrderCancelRequest/Account(1)) built directly here.
+    // the live conversation script -- this arm keeps the same message shape
+    // (OrderCancelRequest/Account(1)) as a local literal rather than reading
+    // the script (see the TEST's header comment: this binary must stay
+    // self-contained under a plain, shim-less `ctest`).
     {
         std::string_view const view(reinterpret_cast<char const*>(frame.data()), frame.size());
         std::size_t const pos = view.find("1=ACCT0001\x01");
