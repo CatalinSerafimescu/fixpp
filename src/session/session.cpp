@@ -1771,7 +1771,8 @@ struct SendingTimeStamp {
 // header-before-body, just earlier within the header than that tag. It also
 // holds for the degenerate case (nothing outside S — the fallback below).
 // A wider S (the true standard header) would be neutral for interop —
-// neither QuickFIX-J nor QuickFIX-cpp validates order WITHIN the header —
+// neither QuickFIX-J nor QuickFIX-cpp validates the relative order of header
+// fields after the mandatory 8,9,35 preamble —
 // and strictly worse here: it would need a dictionary or a private,
 // FIXT-scoped table, for no behavioural gain. Keep S as it is.
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_replay_frame(

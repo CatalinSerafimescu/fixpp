@@ -140,6 +140,7 @@ OrderCheckResult check_resend_answer_field_order(std::span<const std::byte> fram
     const std::size_t n = frame.size();
     std::size_t field_index = 0;
     bool seen_body_tag = false;
+    bool seen_trailer_tag = false;
     bool seen_trailer = false;
     while (i < n) {
         if (seen_trailer) {
@@ -171,8 +172,13 @@ OrderCheckResult check_resend_answer_field_order(std::span<const std::byte> fram
         ++field_index;
 
         if (is_witness_trailer_tag(tag)) {
+            seen_trailer_tag = true;
             if (tag == 10) seen_trailer = true;
             continue;
+        }
+        if (seen_trailer_tag) {
+            r.reason = "tag " + std::to_string(tag) + " appears AFTER a trailer tag";
+            return r;
         }
         if (tag == 43) ++r.count_43;
         if (tag == 122) ++r.count_122;
@@ -205,6 +211,22 @@ OrderCheckResult check_resend_answer_field_order(std::span<const std::byte> fram
 //
 // RED (pre-#419-fix): builder emits ...52,56,36,123,43,122 — 43/122 land after
 // the body tags 36 (NewSeqNo) / 123 (GapFillFlag).
+// The scanner's own trailer arm: a trailer tag (93 SignatureLength) before a
+// body field must fail, not only a field after CheckSum(10).
+TEST(ResendAnswerFieldOrder, Scanner_RejectsBodyFieldAfterATrailerTag) {
+    const std::string f =
+        "8=FIX.4.4\x01"
+        "9=20\x01"
+        "35=0\x01"
+        "93=1\x01"
+        "58=x\x01"
+        "10=000\x01";
+    const auto r =
+        check_resend_answer_field_order(std::as_bytes(std::span<const char>{f.data(), f.size()}));
+    EXPECT_FALSE(r.ok);
+    EXPECT_NE(r.reason.find("AFTER a trailer tag"), std::string::npos) << r.reason;
+}
+
 TEST(ResendAnswerFieldOrder, GapFill_NoHeaderTagAfterBody) {
     constexpr std::string_view kSender = "ISLD";
     constexpr std::string_view kTarget = "TW";
@@ -229,9 +251,9 @@ TEST(ResendAnswerFieldOrder, GapFill_NoHeaderTagAfterBody) {
 namespace {
 
 // A MessageStore that records each outbound store call and serves as a real
-// retrieve() source for the resend-reply store-walk. Byte-for-byte mirrors the
-// CapturingStore in test_send_allow_pos_dup_strip.cpp (as of `c8c0b256`; each
-// resend-adjacent test file currently carries its own copy).
+// retrieve() source for the resend-reply store-walk. Based on the CapturingStore
+// in test_send_allow_pos_dup_strip.cpp, extended here with the
+// `force_empty_retrieve` fault-injection knob and a factory exposing `last_store`.
 class CapturingStore final : public MessageStore {
 public:
     struct Record {
