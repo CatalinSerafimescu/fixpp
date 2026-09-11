@@ -293,6 +293,13 @@ public:
     // `exec` (fromApp / the posted reply lambdas), single-exec confined.
     std::atomic<int> id_mint_counter{0};
     std::string last_b08_order_id;
+    // A-RESEND (C3/C4 only): B-01's fixpp-outbound seq_num, captured in
+    // toApp() below at the moment B-01's own PendingSent is consumed. The
+    // TEST body needs this to write B-01 occurrence 1's `sent` record once
+    // it observes the peer's replay-readback land (C-8: the record must
+    // still be builder-derived from intent, not re-read from the replayed
+    // frame -- this seq_num is header identity, not a body field).
+    std::atomic<long long> b01_seq{-1};
 
     long long next_occurrence(long long seq, std::string const& dir)
     {
@@ -314,6 +321,9 @@ public:
             PendingSent p = std::move(*pending_sent);
             pending_sent.reset();
             long long const seq = msg.msg_seq_num();
+            if (p.script_step_id == "B-01") {
+                b01_seq.store(seq);
+            }
             long long const occ = next_occurrence(seq, std::string(rb::kDirectionFixppToPeer));
             stream->sent(std::string(msg.msg_type()), seq, rb::kDirectionFixppToPeer, occ,
                         p.script_step_id, std::move(p.fields));
@@ -423,7 +433,18 @@ TEST(Conversation, Cell)
     // IS listening this binary is being driven by the shim, and everything
     // past this point is data-model.md §1/§9's "absent is a hard failure,
     // never a skip" territory.
-    INTEROP_REQUIRE_COUNTERPARTY("quickfix-cpp");
+    // FR-023: the standard interop skip-with-reason convention -- a bare
+    // ctest run with no counterparty listening SKIPS here, never reaching
+    // the hard-failure env checks below. Which counterparty token to probe
+    // depends on the combo (C1/C2 -> quickfix-cpp, C3/C4 -> quickfix-j), so
+    // `combo` must be read (bare, no assertion yet) before the skip gate.
+    std::string const combo = env_or_empty("INTEROP_FIXPP_COMBO_ID");
+    bool const qfj_combo_probe = (combo == "C3" || combo == "C4");
+    if (qfj_combo_probe) {
+        INTEROP_REQUIRE_COUNTERPARTY("quickfix-j");
+    } else {
+        INTEROP_REQUIRE_COUNTERPARTY("quickfix-cpp");
+    }
 
     // ── Run-identity env (data-model.md §1/§9) — hard failure, never a skip:
     // this binary exists ONLY to be launched as an 089 conversation cell. ──
@@ -431,7 +452,6 @@ TEST(Conversation, Cell)
     std::string const cell_id = env_or_empty("INTEROP_FIXPP_CELL_ID");
     std::string const config = env_or_empty("INTEROP_FIXPP_CONFIG");
     std::string const arm = env_or_empty("INTEROP_FIXPP_ARM");
-    std::string const combo = env_or_empty("INTEROP_FIXPP_COMBO_ID");
     std::string const script_path = env_or_empty("INTEROP_FIXPP_SCRIPT_PATH");
     std::string const script_digest_expected = env_or_empty("INTEROP_FIXPP_SCRIPT_DIGEST");
     std::string const readback_path = env_or_empty("INTEROP_FIXPP_READBACK_PATH");
@@ -452,15 +472,20 @@ TEST(Conversation, Cell)
     // skip. Admits exactly the combos this driver implements so far — widen
     // this SET, never loosen it to an inequality (an inequality admits every
     // future not-yet-implemented combo too).
-    ASSERT_TRUE(combo == "C1" || combo == "C2")
-        << "combo " << combo << " is not implemented by this driver (only C1/C2 so far)";
+    ASSERT_TRUE(combo == "C1" || combo == "C2" || combo == "C3" || combo == "C4")
+        << "combo " << combo << " is not implemented by this driver (only C1-C4)";
     // C1 = fixpp INITIATOR vs QuickFIX-cpp acceptor; C2 = fixpp ACCEPTOR vs
-    // QuickFIX-cpp initiator (spec.md § Conversation census, role x flavour
-    // combinations). Every business/admin STEP's originator is combo-
-    // independent (conversation_script.yaml: every step_id's
-    // applicable_combos lists C1..C4 uniformly) -- only the TRANSPORT role
-    // flips, so the driver below is otherwise unchanged between the two.
-    Role const role = (combo == "C2") ? Role::fixpp_acceptor : Role::fixpp_initiator;
+    // QuickFIX-cpp initiator; C3 = fixpp INITIATOR vs QuickFIX-J acceptor;
+    // C4 = fixpp ACCEPTOR vs QuickFIX-J initiator (spec.md § Conversation
+    // census, role x flavour combinations). Every business/admin STEP's
+    // originator is combo-independent (conversation_script.yaml: every
+    // step_id's applicable_combos lists C1..C4 uniformly) -- only the
+    // TRANSPORT role and the COUNTERPARTY engine flip, so the driver below
+    // is otherwise unchanged across all four.
+    bool const acceptor_combo = (combo == "C2" || combo == "C4");
+    Role const role = acceptor_combo ? Role::fixpp_acceptor : Role::fixpp_initiator;
+    Counterparty const counterparty =
+        qfj_combo_probe ? Counterparty::quickfix_j : Counterparty::quickfix_cpp;
 
     std::string const actual_digest = sha256_hex_file(script_path);
     ASSERT_EQ(actual_digest, script_digest_expected) << "script_digest mismatch";
@@ -475,7 +500,7 @@ TEST(Conversation, Cell)
     ASSERT_NE(dir, nullptr) << "FIXPP_TLS_FIXTURE_DIR unset";
     auto factory = hp::make_interop_tls_factory(dir);
     ASSERT_NE(factory, nullptr) << "baseline TLS factory build failed";
-    auto const endpoint = hp::cell_endpoint(Counterparty::quickfix_cpp, role);
+    auto const endpoint = hp::cell_endpoint(counterparty, role);
     ASSERT_TRUE(endpoint.has_value()) << "cell endpoint unresolved";
 
     auto app = std::make_shared<ConvApp>();
@@ -686,6 +711,54 @@ TEST(Conversation, Cell)
     // Settle for the peer's own last readback/transcript writes.
     fx.run_until([] { return false; }, 300ms);
 
+    // ── A-RESEND (C3/C4 only, script step 13): the peer (QuickFIX-J) sends a
+    // ResendRequest covering B-01's fixpp-outbound seq once the whole
+    // conversation settles (InteropCounterparty.java's induceResendForB01,
+    // fired at its own stage 5 -- see its header comment for why not
+    // immediately after B-08 despite depends_on: ['B-08']). fixpp's engine
+    // answers via replay_outbound_range_ -- confirmed by direct source
+    // reading NOT to invoke Application::toApp (session.cpp) -- so B-01
+    // occurrence 1's `sent` record cannot come from the usual toApp seam and
+    // is written HERE directly, mirroring B-05's hand-built-frame route.
+    // C-8: the fields are the SAME declared intent as occurrence 0 (a replay
+    // resends the identical message), never re-read from anything; the
+    // occurrence number comes from the SAME shared counter occurrence 0 used
+    // (app->next_occurrence), so the two can never disagree by construction.
+    if (qfj_combo_probe) {
+        ASSERT_GE(app->b01_seq.load(), 0) << "A-RESEND: B-01's fixpp-outbound seq_num was never captured";
+        std::string const cp_path_early = run_dir_of(readback_path) + "/counterparty-readback.jsonl";
+        bool replay_observed = fx.run_until(
+            [&] {
+                auto const cp_records_poll = rb::parse_stream(cp_path_early);
+                for (auto const& r : cp_records_poll) {
+                    if (r.kind == rb::ParsedRecord::Kind::Readback && r.msg_type == "D" &&
+                        r.direction == std::string(rb::kDirectionFixppToPeer) && r.occurrence == 1) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+            5s);
+        EXPECT_TRUE(replay_observed)
+            << "A-RESEND: no B-01 occurrence 1 readback observed on the peer within 5s";
+        if (replay_observed) {
+            auto it = intent_index.find({"B-01", "fixpp"});
+            ASSERT_NE(it, intent_index.end()) << "no fixpp intent entry for B-01";
+            intent::Message const& decl = it->second;
+            std::vector<rb::FieldEntry> sent_fields;
+            sent_fields.reserve(decl.fields.size());
+            for (auto const& f : decl.fields) sent_fields.push_back({f.path, f.value});
+            for (auto const& f : conv::derive_group_count_fields(decl.fields)) {
+                sent_fields.push_back({f.path, f.value});
+            }
+            long long const seq = app->b01_seq.load();
+            long long const occ = app->next_occurrence(seq, std::string(rb::kDirectionFixppToPeer));
+            stream.sent("D", seq, rb::kDirectionFixppToPeer, occ, "B-01", std::move(sent_fields));
+        }
+        // Let the peer write its own terminal-adjacent state before proceeding.
+        fx.run_until([] { return false; }, 200ms);
+    }
+
     stream.terminal("completed", run_id, cell_id, config, actual_digest);
 
     // ── Witnesses (data-model.md §4) ─────────────────────────────────────────
@@ -717,8 +790,28 @@ TEST(Conversation, Cell)
                           << " sent=" << m.sent_value << " readback=" << m.readback_value;
         }
     }
-    EXPECT_EQ(rows.size(), 12u) << "expected 12 business-step witness rows (12 census keys for combo "
-                                << combo << ", spec.md § Conversation census)";
+    // census.yaml: 12 business_steps rows, each with occurrence {0} on
+    // C1/C2 -- 12 keys. On C3/C4, B-01 additionally declares occurrence 1
+    // (A-RESEND's replay, "declared_inapplicable" excludes it on C1/C2 only)
+    // -- 13 keys. Derived from census.yaml, not an independent literal.
+    std::size_t const expected_rows = qfj_combo_probe ? 13u : 12u;
+    EXPECT_EQ(rows.size(), expected_rows)
+        << "expected " << expected_rows << " business-step witness rows (census.yaml keys for combo "
+        << combo << ", spec.md § Conversation census)";
+    if (qfj_combo_probe) {
+        // A-RESEND's whole point is B-01 occurrence 1 (spec.md's declared_
+        // inapplicable note); rows.size()==13 alone is satisfied by ANY 13th
+        // row (e.g. a duplicate elsewhere), so assert the specific key too.
+        bool found_b01_occ1 = false;
+        for (auto const& row : rows) {
+            if (row.script_step_id == "B-01" && row.occurrence == 1) {
+                found_b01_occ1 = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(found_b01_occ1)
+            << "A-RESEND: no witness row for B-01 occurrence 1 (the PossDup replay)";
+    }
 
     // ── T054: fixpp's typed-read tier must return the peer's DECLARED values
     // (FR-007/SC-002) ────────────────────────────────────────────────────────
