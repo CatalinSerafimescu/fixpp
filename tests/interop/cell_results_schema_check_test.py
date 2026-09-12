@@ -524,6 +524,46 @@ EIGHT_LOGICAL_CELL_IDS = frozenset(
 THIRTY_TWO_SLOT_INVENTORY = frozenset(
     (cell, cfg) for cell in EIGHT_LOGICAL_CELL_IDS for cfg in CONFIGS)
 
+# gate-b r2 FQ-7 (Codex r2 #1): _full_keys(census_doc) has no independent
+# cardinality invariant of its own -- census.yaml and conversation_script.yaml
+# can shrink TOGETHER (an ordinary scope edit: drop one business step from
+# both files, delete its witnesses, recompute each run's witness_count), and
+# every gate in this file -- including _check_w0_content's own
+# census-derived `expected_count` -- stays green. Reproduced: dropping ONE
+# business step (100 -> 88 keys, 400 -> 352 witnesses) leaves all thirteen
+# committed-artifact gates passing; a coherent zero (0 keys, 0 witnesses)
+# leaves all thirteen passing too. A non-vacuity floor (`> 0`) does not close
+# this -- it passes the shrink-by-one exactly like the zero. Only an
+# independently pinned figure catches it.
+#
+# spec.md § "Conversation census" § "Arithmetic, stated once, here only":
+#   C1/C2 cells (4) x 12 steps = 48 ; C3/C4 cells (4) x 13 steps = 52 ; total 100.
+# This is a POINTER to that table, in the sense spec.md mandates ("the
+# arithmetic is derived once, here; where 100 or 32 appears elsewhere it is a
+# pointer") -- it is the SECOND transcription of the spec table, the first
+# being census.yaml itself. ⛔ NEVER re-derive this from census_doc by any
+# route: it would then agree with the census by construction, and this gate
+# would be unfalsifiable on the exact mutation it exists to catch (a coherent
+# shrink of both files). An intentional scope change updates spec.md §
+# "Conversation census", census.yaml, conversation_script.yaml AND this pin
+# in the same edit, and regenerates the matrix -- that is the price of the
+# number meaning anything.
+CENSUS_KEY_COUNT = 100
+WITNESS_ROW_COUNT = CENSUS_KEY_COUNT * len(CONFIGS)  # 400
+
+
+def _check_census_cardinality(census_doc):
+    """FQ-7: the census's identity-2 key COUNT must equal the independently
+    pinned CENSUS_KEY_COUNT -- not merely be non-empty. Its own gate (rather
+    than an assertion folded into _check_w0_content) so a coherent shrink
+    reddens here, at its cause, instead of arriving as a downstream count
+    mismatch three gates later."""
+    observed = len(_full_keys(census_doc))
+    assert observed == CENSUS_KEY_COUNT, (
+        f"census cardinality: {observed} identity-2 keys in census.yaml, expected "
+        f"{CENSUS_KEY_COUNT} -- confirm spec.md § 'Conversation census' agrees before "
+        f"touching CENSUS_KEY_COUNT")
+
 
 def _load_census():
     with open(CENSUS, encoding="utf-8") as fh:
@@ -694,6 +734,13 @@ def _check_w0_content(doc, census_doc):
     W-3c, reproduced here by a typo'd `kind`/`authoritative` that would
     otherwise shrink the population this gate still reports complete over."""
     expected_count = len(_full_keys(census_doc)) * len(CONFIGS)
+    # FQ-7 defense in depth: a shrunken census must not silently redefine
+    # this gate's own population, even if _check_census_cardinality is ever
+    # skipped -- the derived figure must still agree with the pinned one.
+    assert expected_count == WITNESS_ROW_COUNT, (
+        f"W-0: census-derived expected_count {expected_count} != pinned "
+        f"WITNESS_ROW_COUNT {WITNESS_ROW_COUNT} -- census.yaml has drifted from the "
+        f"pinned cardinality (see CENSUS_KEY_COUNT)")
     rows = [w for w in doc.get("witnesses", [])
             if w.get("kind") == "conformance" and w.get("authoritative") is True]
     assert len(rows) == expected_count, (
@@ -785,6 +832,15 @@ def _check_w3a(doc, census_doc):
     expected = _full_keys(census_doc)
     per_config = {config: _project_identity2(_witness_rows_for(doc, config))
                   for config in CONFIGS}
+    # SC-011, discharged literally: "A configuration yielding no witnesses is
+    # a failure." With a pinned (non-zero) census ahead of this in the call
+    # chain (_check_census_cardinality), an empty projection is unreachable
+    # via the equality checks below on their own -- this assertion exists so
+    # the diagnostic names SC-011's own condition when that clause fires.
+    for config, keys in per_config.items():
+        assert keys, (
+            f"SC-011: configuration {config!r} yielded NO witnesses -- a configuration "
+            f"yielding no witnesses is a failure")
     # ⚠️ Pairwise agreement FIRST: with the census check ahead of it, every
     # config is already forced equal to `expected` individually, so the
     # pairwise loop could never fire (transitivity makes it unreachable).
@@ -1239,7 +1295,11 @@ def test_w3a_one_combo_of_one_config_is_red_but_collapsed_gate_is_a_spurious_gre
 def test_w3a_dropped_config_is_red_but_union_only_gate_is_a_spurious_green(census_doc):
     doc = _w_fixture_complete(census_doc)
     doc["witnesses"] = [w for w in doc["witnesses"] if w["config"] != "tsan"]
-    with pytest.raises(AssertionError, match="W-3a"):
+    # gate-b r2 FQ-7: a whole config with ZERO witnesses now names SC-011's
+    # own condition (_check_w3a's non-empty-projection assert, ahead of the
+    # pairwise/census loops this used to fall through to) rather than the
+    # generic "W-3a: ... != census" message.
+    with pytest.raises(AssertionError, match="SC-011"):
         _check_w3a(doc, census_doc)
     _check_completeness_union_only(doc, census_doc)  # spurious GREEN
 
@@ -1852,6 +1912,43 @@ def test_t095a_witness_run_join_goes_red_when_all_witnesses_for_a_run_are_delete
     doc["witnesses"] = [w for w in doc["witnesses"] if w["run_id"] != victim_run_id]
     with pytest.raises(AssertionError, match="witness_count"):
         _check_witness_run_join(doc)
+
+
+def test_t095a_census_cardinality_over_the_committed_census(census_doc):
+    _check_census_cardinality(census_doc)
+
+
+def test_t095a_census_cardinality_goes_red_on_a_coherent_zero(census_doc):
+    # FQ-7 RED proof 1: business_steps emptied -- 0 keys, mirroring a
+    # coherent zero of both census.yaml and conversation_script.yaml.
+    # Reproduced pre-fix: this leaves W-0, W-1, W-2a, W-3a, the witness/run
+    # join, run-slot completeness and E-1/E-5 all PASSING (13/13 gates).
+    doc = copy.deepcopy(census_doc)
+    doc["business_steps"] = []
+    with pytest.raises(AssertionError, match="census cardinality"):
+        _check_census_cardinality(doc)
+
+
+def test_t095a_census_cardinality_goes_red_on_a_coherent_shrink_by_one(census_doc):
+    # FQ-7 RED proof 2 -- the arm that distinguishes an independent pin from
+    # a non-vacuity floor: drop ONE business step (still non-empty, still
+    # < 100 keys), which a bare `assert expected_count > 0` would NOT catch.
+    # Reproduced pre-fix (dropping a step this way): this leaves all thirteen
+    # committed-artifact gates PASSING.
+    doc = copy.deepcopy(census_doc)
+    doc["business_steps"].pop()
+    with pytest.raises(AssertionError, match="census cardinality"):
+        _check_census_cardinality(doc)
+
+
+def test_t095a_w0_content_cardinality_pin_goes_red_on_a_coherent_shrink(census_doc):
+    # FQ-7 defense in depth: even if _check_census_cardinality is ever
+    # skipped, _check_w0_content's own census-derived expected_count must
+    # not silently redefine the population when the census shrinks.
+    shrunk = copy.deepcopy(census_doc)
+    shrunk["business_steps"].pop()
+    with pytest.raises(AssertionError, match="census-derived expected_count"):
+        _check_w0_content({"witnesses": []}, shrunk)
 
 
 def test_t095a_w0_content_over_the_committed_ledger(witness_evidence_doc, census_doc):
