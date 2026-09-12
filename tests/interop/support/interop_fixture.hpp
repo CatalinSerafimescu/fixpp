@@ -249,7 +249,7 @@ private:
     // UPPER — HISTORICAL, and no longer the binding constraint (gate-b/r6 P2-2).
     // When interop_business_message_interop_test carried `TIMEOUT 30`, that ONE
     // ctest entry covered FOUR parameterized cells, each able to spend 3 s in
-    // expect_graceful_stop (hp_support.hpp:317) plus `bound` in its destructor:
+    // expect_graceful_stop (hp_support.hpp) plus `bound` in its destructor:
     // 4*(3+bound), which forced bound < 4.5 s. This PR raised that entry to
     // `TIMEOUT 120` (tests/interop/CMakeLists.txt) precisely because the 30 s
     // aggregate was already smaller than the cells' own declared budgets, so it
