@@ -1120,7 +1120,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
         compute_record_crc32(counter_hdr, reinterpret_cast<const std::uint8_t*>(&counter_pl),
                              static_cast<std::uint32_t>(kCounterPayloadSize));
 
-    // Flush-policy decision (mirrors :900–914); index sizes are strand-only.
+    // Flush-policy decision (the only one in this file); index sizes are strand-only.
     const auto policy_kind = impl_->cfg.policy.which;
     bool do_flush = false;
     if (policy_kind == FileStorePolicy::kind::commit_per_message) {
