@@ -182,11 +182,18 @@ RE_D = re.compile(r"\]`?\s*:\d+")
 # tree, and checked), off `std::`, and off `key: 123` YAML (colon-then-space is
 # the opposite order). Every match's left context is prose: `at :N`, `guard at
 # :N`, `comment at :N`.
-# The lookbehind sits on the char before the SPACE and excludes only `]`, so a
+# The separator before the colon is a space OR a BACKTICK. The backticked cell
+# spelling -- a markdown table whose whole cell is `` `:616` `` -- is how this
+# repo tabulates per-symbol line numbers, and it is invisible to form C (needs
+# `(`), to form D (needs `]`) and to the space-only form F. It was found the
+# same way as every other spelling here: by reading text a sweep had already
+# rewritten, not by running the detector.
+#
+# The lookbehind sits on the char before the SPACE/BACKTICK and excludes only `]`, so a
 # `[2h §6.6] :1167` is counted once (as form D) rather than twice. The trailing
 # guard drops a C++ bit-field `unsigned x :16;` -- zero in this tree today, so
 # the guard is precaution rather than a measured need, and is marked as such.
-RE_F = re.compile(r"(?<!\])\s:\d{2,}(?!\d*\s*;)")
+RE_F = re.compile(r"(?<!\])[\s`]:\d{2,}(?!\d*\s*;)")
 
 # Form A's target pattern, WIDENED with `md` -- used ONLY by --shift-audit, to
 # decide which changed files are cited by line number. RE_A is deliberately left
@@ -1225,6 +1232,8 @@ FORM_CASES = [
     ("// discriminating the 036 site at :2953",                      ["F"]),
     ("// not the NewSeqNo-too-low path at :4589.",                   ["F"]),
     ("#   OpenSSL            3.6.2     :69            ABI-stable",   ["F"]),
+    ("| `add_group_required_member` | `:616` |",                     ["F"]),
+    ("the thunk **`std::abort()`s** (`:1249`). Moving a genuinely",   ["F"]),
     # Form F near-misses, each a REAL shape from this tree. Colon-then-space is
     # the opposite order from a citation, and a C++ bit-field has no preceding
     # space-colon pair of this shape (surveyed: zero in src/ include/ tests/).
