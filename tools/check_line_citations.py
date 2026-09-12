@@ -101,15 +101,49 @@ SCAN_DIRS = [
 # `[0-9]`, not `\d`: `\d` also matches Unicode decimal digits, which --shift-audit's
 # ASCII `git grep` prefilter drops. A decider that out-matches its own prefilter
 # is a silent drop; keeping the two in step costs nothing here.
+# The separator is `:` OR ` L` -- `reify_dispatch.hpp L15-24` is the same claim
+# as `reify_dispatch.hpp:15`, spelled the way a GitHub permalink reads, and it
+# was ungated until 2026-09-12. Found by sweeping for spellings rather than by
+# running the detector, which is the only way a detector's own blind spot is ever
+# found. `\s+L` cannot collide with the adjacent hash/version text in this tree:
+# it needs a literal capital L followed IMMEDIATELY by a digit, so `Messages.hpp
+# 827a9bd0` and `foo.cpp Line 12` are both non-matches.
 RE_A = re.compile(
-    r"(?<![\w/.-])([A-Za-z0-9_.][A-Za-z0-9_/.-]*\.(?:hpp|cpp|ipp|hh|hxx|cc|h|md)):([0-9]+)"
+    r"(?<![\w/.-])([A-Za-z0-9_.][A-Za-z0-9_/.-]*\.(?:hpp|cpp|ipp|hh|hxx|cc|h|md))(?::|\s+L)([0-9]+)"
 )
 # Form B. {2,} digits: a deliberate recall/precision trade -- one-digit forms
 # are not gated, since they collide with prose about test data (`line 5`) far
 # more often than a real citation would.
-RE_B = re.compile(r"~?\blines?\s+\d{2,}", re.IGNORECASE)
+# The tilde is accepted on EITHER side of the word. `~line 3232` was the spelling
+# issue #310 quoted, so that is the one the original pattern took -- and `line
+# ~960` (tilde INSIDE, after the word) went unmatched for the life of the gate.
+# 26 non-frozen instances survived that way, one of them in the shipped header
+# `include/fixpp/session/session.hpp` ("the private member at line ~958"). A
+# pattern written from the example in the ticket matches the example in the ticket.
+RE_B = re.compile(r"~?\blines?\s+~?\d{2,}", re.IGNORECASE)
 # Form C.
 RE_C = re.compile(r"\(:\d+")
+# Form D: a bracketed DOC-ALIAS anchor carrying a line number -- `[2h §6.6]:1167`,
+# `[2d §4.7]:830-832`, `[const §XVI.4]:91`. This repo's design docs are cited by
+# alias, not by path, so form A's `file.ext:` pattern cannot see form D AT ALL:
+# there is no extension to match. It was therefore ungated and uncounted from
+# #326 through #336 while being, by census, the form that reaches SHIPPED
+# HEADERS -- `include/fixpp/core/error.hpp` carried 22 of them.
+#
+# Issue #310's own thread named three confirmed form-D rots (`[2h §6.6]:1167-1204`,
+# `[2h §6.4.1]:1124`, `[2h §6.6]:1191`) and each was found INCIDENTALLY, by
+# unrelated work -- never by a sweep, because no sweep could see them. That is the
+# issue's "blind on an axis" thesis landing on the instrument built to test it.
+#
+# Precision: surveyed tree-wide before taking it, every match was a doc alias --
+# `[2h §...]`, `[2d]`, `[const §...]`. Zero false positives. The shape is narrow
+# because a `]` immediately followed by `:` and a digit has no other use here:
+# markdown link definitions (`[1]: https://`) put a space and a scheme after the
+# colon, and code indexing (`a[i]`) is never followed by `:\d`.
+# The optional backtick covers the `[2d §4.7]`:864 spelling -- the alias closes
+# its code span before the colon. Surveyed: it adds recall and NO new shape, every
+# match is still a doc alias.
+RE_D = re.compile(r"\]`?\s*:\d+")
 
 # Form A's target pattern, WIDENED with `md` -- used ONLY by --shift-audit, to
 # decide which changed files are cited by line number. RE_A is deliberately left
@@ -140,8 +174,8 @@ CITE_SCAN_SKIP = ("tests/fuzz/corpus/", "tests/abi/baseline/")
 # over-supply costs nothing because Python re-decides. `--self-test` pins the
 # superset relation, so editing a decider without editing this fails loudly.
 CITE_PREFILTER = [
-    r"\.(hpp|cpp|ipp|hh|hxx|cc|h|md):[0-9]",
-    r"lines?[[:space:]]+[0-9][0-9]",
+    r"\.(hpp|cpp|ipp|hh|hxx|cc|h|md)(:|[[:space:]]+L)[0-9]",
+    r"lines?[[:space:]]+~?[0-9][0-9]",
     r"\(:[0-9]",
 ]
 
@@ -329,6 +363,8 @@ def forms_on(line, files=None, by_base=None):
         found.append("B")
     if RE_C.search(line):
         found.append("C")
+    if RE_D.search(line):
+        found.append("D")
     return found
 
 
@@ -348,7 +384,7 @@ def census(root, json_out, quiet=False):
     resolve_by_base = basename_map(resolve_files)
     cache = {}
     resolved, foreign, ambiguous = [], [], []
-    b_hits, c_hits, pragma_hits = [], [], []
+    b_hits, c_hits, d_hits, pragma_hits = [], [], [], []
 
     for p in files:
         src = read_lines(root, p, cache)
@@ -363,6 +399,8 @@ def census(root, json_out, quiet=False):
                 b_hits.append({"cf": p, "cl": i + 1, "text": ln.strip()})
             if "C" in forms:
                 c_hits.append({"cf": p, "cl": i + 1, "text": ln.strip()})
+            if "D" in forms:
+                d_hits.append({"cf": p, "cl": i + 1, "text": ln.strip()})
             for m in RE_A.finditer(ln):
                 target, num = m.group(1), int(m.group(2))
                 rec = {"cf": p, "cl": i + 1, "text": ln.strip(),
@@ -393,6 +431,7 @@ def census(root, json_out, quiet=False):
         print(f"            of which OUT OF RANGE    : {len(oor)}   <-- mechanically certain")
         print(f"form B  prose `line NNN` candidates : {len(b_hits)}   [no filename: unresolvable]")
         print(f"form C  bare `(:NNN)`     candidates : {len(c_hits)}   [no filename: unresolvable]")
+        print(f"form D  `[alias]:NNN`     candidates : {len(d_hits)}   [doc alias: no path to resolve]")
         print(f"`citation-ok` exemptions in force   : {len(pragma_hits)}")
         print()
         for r in pragma_hits:
@@ -413,11 +452,13 @@ def census(root, json_out, quiet=False):
         with open(json_out, "w") as f:
             json.dump({"resolved": resolved, "foreign": foreign,
                        "ambiguous": ambiguous, "form_b": b_hits,
-                       "form_c": c_hits, "exempt": pragma_hits}, f, indent=1)
+                       "form_c": c_hits, "form_d": d_hits,
+                       "exempt": pragma_hits}, f, indent=1)
         if not quiet:
             print(f"\nadjudication table -> {json_out}")
     return {"resolved": resolved, "oor": oor, "foreign": foreign,
-            "ambiguous": ambiguous, "b": b_hits, "c": c_hits, "exempt": pragma_hits}
+            "ambiguous": ambiguous, "b": b_hits, "c": c_hits, "d": d_hits,
+            "exempt": pragma_hits}
 
 
 def added_lines(root, args):
@@ -1119,8 +1160,25 @@ FORM_CASES = [
     # A `#line` directive is not a citation -- form B's {2,}-digit rule would
     # otherwise match its line number.
     ('#line 86 "generated.cpp"',                                     []),
+    # Form D -- the bracketed doc-alias anchor. This repo cites its design docs by
+    # ALIAS, so there is no `.ext` for form A to key on and form D was invisible to
+    # every sweep from #326 through #336 -- including in SHIPPED headers.
+    ("// 22 transport_* variants per [2h §6.6]:1167-1204",           ["D"]),
+    ("//    `[2d §4.7]`:830-832 two-phase close",                    ["D"]),
+    ("- per [const §XVI.4]:91 the amendment rule",                   ["D"]),
+    # Form D and form A on one line are BOTH reported: the alias rots independently
+    # of the path, so reporting one and stopping would hide the other.
+    ("// session.cpp:140 mirrors [2d §4.7]:830",                     ["A", "D"]),
     # Exemptions and near-misses that must NOT fire.
     ("// session.cpp:1258 citation-ok reviewed 2026-08-28",          []),
+    ("// per [2h §6.6]:1167 citation-ok reviewed 2026-09-12",        []),
+    # Form D near-misses. A markdown link-reference definition, a section anchor
+    # whose colon is followed by prose, and array indexing all end in `]:` -- none
+    # is a citation, and the digit-immediately-after-colon rule is what separates
+    # them. Each of these is a REAL line from this tree.
+    ("[run 31247987579]: https://github.com/o/r/actions/runs/31247987579", []),
+    ("// Per [FIX-SL §4.2]: 9= and 10= computed here",               []),
+    ("        // QuoteSets[0]: 1 QuoteEntry, that entry holds 2 Legs.", []),
     ("// the ratio is 3:2 across the board",                         []),
     ("// see line 9 of the fixture",                                 []),
     ("// std::array<std::uint16_t, 16> group_view",                  []),
@@ -1224,6 +1282,11 @@ PREFILTER_LINES = [
     "// bare self-citation (:532-534) returns status",
     "// two digits is the floor: line 99 counts",
     "// doc.md:10 and target.hpp:2 on one line",
+    # The two spellings widened 2026-09-12. Both were live in the tree and
+    # matched by NO decider, so no prefilter arm could have caught them either:
+    # a prefilter is only ever proven against the deciders it feeds.
+    "// tilde INSIDE the phrase: the private member at line ~958",
+    "// permalink separator: reify_dispatch.hpp L15-24 is the shape oracle",
 ]
 
 
@@ -1884,7 +1947,12 @@ def self_test():
             "// foreign: DataDictionary.cpp:271 via QuickFIX\n"
             "// exempted: target.hpp:99 citation-ok\n"
             "// line zero is not a line: target.hpp:0\n"
-            "// empty target file: empty.hpp:1\n")
+            "// empty target file: empty.hpp:1\n"
+            # Form D. It resolves to no PATH, so it can never reach the
+            # out-of-range verdict -- it must still be COUNTED. A form that is
+            # seen but uncounted is the #336 blindness in a new place.
+            "// 22 variants per [2h §6.6]:1167-1204\n"
+            "// and the backticked spelling [2d §4.7]`:864\n")
         for a in (["init", "-q"], ["add", "-A"]):
             subprocess.run(["git"] + a, cwd=d, capture_output=True, check=True)
         r = census(d, None, quiet=True)
@@ -1897,6 +1965,9 @@ def self_test():
                                             for x in r["oor"])),
             ("empty target is out of range",
              any(x["target"] == "empty.hpp" and x["n"] == 1 for x in r["oor"])),
+            ("form D counted (both spellings)", len(r["d"]) == 2),
+            ("form D did not inflate form A",
+             len(r["resolved"]) + len(r["foreign"]) + len(r["ambiguous"]) == 5),
         ]
         for label, ok in checks:
             bad += not ok
@@ -1972,7 +2043,7 @@ def self_test():
     shift_bad, shift_total = shift_self_test()
     bad += shift_bad
 
-    total = len(FORM_CASES) + 6 + gate_checks + shift_total
+    total = len(FORM_CASES) + 8 + gate_checks + shift_total
     print(f"\nself-test: {total - bad}/{total} pass")
     if bad:
         print("SELF-TEST FAILED -- the instrument does not behave as documented.")

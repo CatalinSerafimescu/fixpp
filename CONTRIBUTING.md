@@ -74,8 +74,16 @@ pre-commit run --all-files
 
 ## The line-number citation gate (issue #310)
 
-`check-line-citations` blocks a commit that ADDS a line-number citation —
-`file.cpp:1258`, `at line 2234`, or a bare `(:64)`. <!-- citation-ok: worked example, not a real citation -->
+`check-line-citations` blocks a commit that ADDS a line-number citation in any of
+its four spellings:
+`file.cpp:1258`, `at line 2234`, a bare `(:64)`, a `[2h §6.6]:1167-1204`. <!-- citation-ok: worked example, not a real citation -->
+
+That fourth form is the one to watch, and it was ungated until 2026-09-12. This
+repo cites its design documents by **alias**, not by path, so there is no `.md`
+for the filename-keyed sweep to match — form D was invisible to every audit from
+#326 through #336 while being, by census, the form that reached **shipped public
+headers**. `include/fixpp/core/error.hpp` carried 22 of them, all pointing ~60
+lines short of the table they named.
 
 A line number is a claim about a file that keeps moving. Nobody has to touch the
 citing file for it to become false: the target drifts and the citation rots in
@@ -105,6 +113,14 @@ being retired opportunistically, not in one sweep. To survey it:
 python3 tools/check_line_citations.py --census          # candidates + out-of-range
 python3 tools/check_line_citations.py --self-test       # prove the detector fires
 ```
+
+⚠️ **Before believing any clean run, check that the instrument can report
+non-zero.** `--self-test` carries an arm per form on a throwaway repo — including
+a seeded out-of-range citation, a `:0`, a citation into an empty file, and both
+spellings of form D — so a zero from `--census` is a measured zero rather than a
+form the detector could not see. That distinction is the whole history of this
+issue: the census once reported `0 out of range` while scoped to seven directory
+trees that held almost none of this repo's line-cited documents.
 
 The gate above catches citations you ADD. It cannot catch an edit that
 INVALIDATES the ones already there — inserting a paragraph near the top of a
