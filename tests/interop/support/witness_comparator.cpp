@@ -492,7 +492,15 @@ std::vector<ParsedRecord> parse_stream(std::string const& path)
                 }
                 has_script_step_id = true;
             } else if (key == "fields") {
-                r.parse_field_array(rec.fields);
+                // FQ-9 (gate-b r2, Codex r2 #3): propagate the result instead
+                // of discarding it -- a `fields` array truncated mid-parse
+                // (a missing `]`, a missing entry `}`) must not be admitted
+                // as a complete record carrying whatever prefix happened to
+                // parse before the truncation.
+                if (!r.parse_field_array(rec.fields)) {
+                    malformed = true;
+                    break;
+                }
             } else {
                 r.skip_value();
             }
@@ -502,6 +510,13 @@ std::vector<ParsedRecord> parse_stream(std::string const& path)
                 continue;
             }
             break;
+        }
+        // FQ-9: require the record's closing `}` -- without this, a line
+        // that runs out of well-formed content immediately after `fields`
+        // (no closing brace, trailing garbage instead) is silently admitted
+        // with the successfully parsed prefix.
+        if (!malformed && !r.consume('}')) {
+            malformed = true;
         }
         if (malformed || !got_type) {
             continue;

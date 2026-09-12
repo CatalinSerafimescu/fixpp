@@ -1056,6 +1056,77 @@ TEST(WitnessComparator, ParseStreamReportsMissingFieldNotDuplicateOnTwoIncomplet
     EXPECT_TRUE(threw);
 }
 
+// FQ-9 (gate-b r2, Codex r2 #3) RED proof (a): a valid first `fields` entry
+// followed by a MISSING `]` -- parse_field_array's discarded return let this
+// truncated record through, admitted with the successfully parsed prefix
+// (1 record, fields.size()==1). It must now yield ZERO records: a truncated
+// `fields` array is syntactically malformed (witness_comparator.hpp's own
+// contract: syntactically malformed lines are silently skipped, never
+// thrown -- unlike a missing CORRELATION field, which throws, above).
+TEST(WitnessComparator, TruncatedFieldsArrayMissingClosingBracketYieldsNoRecords)
+{
+    std::string const path = unique_test_dir() + "wc_fq9_missing_bracket.jsonl";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "{\"type\":\"sent\",\"msg_type\":\"D\",\"seq_num\":80,\"direction\":\"fixpp-to-peer\","
+               "\"occurrence\":0,\"script_step_id\":\"B-01\","
+               "\"fields\":[{\"path\":\"1\",\"value\":\"ACCT0001\"}}\n";
+        ASSERT_TRUE(out.is_open() && !out.fail()) << "fixture write failed";
+    }
+    auto const records = parse_stream(path);
+    EXPECT_TRUE(records.empty())
+        << "a fields array missing its closing ']' was admitted with the parsed prefix instead of "
+           "being dropped as malformed";
+}
+
+// FQ-9 RED proof (b): a COMPLETE `fields` array (parses fine on its own) but
+// no closing `}` on the record, trailing garbage instead. Pre-fix, nothing
+// after the key/value loop required the record's own closing brace, so this
+// was admitted with fields.size()==1 -- the garbage was simply never read.
+TEST(WitnessComparator, RecordMissingClosingBraceYieldsNoRecords)
+{
+    std::string const path = unique_test_dir() + "wc_fq9_missing_brace.jsonl";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "{\"type\":\"sent\",\"msg_type\":\"D\",\"seq_num\":81,\"direction\":\"fixpp-to-peer\","
+               "\"occurrence\":0,\"script_step_id\":\"B-01\","
+               "\"fields\":[{\"path\":\"1\",\"value\":\"ACCT0001\"}]GARBAGE\n";
+        ASSERT_TRUE(out.is_open() && !out.fail()) << "fixture write failed";
+    }
+    auto const records = parse_stream(path);
+    EXPECT_TRUE(records.empty())
+        << "a record missing its closing '}' (trailing garbage instead) was admitted with the "
+           "parsed prefix instead of being dropped as malformed";
+}
+
+// FQ-10 (gate-b r2, Codex r2 #5): seq_num 0 must be treated as a PRESENT,
+// valid value, never as absence -- every existing positive comparator record
+// uses a nonzero seq_num, so a regression to value-inference
+// (`has_seq_num = (rec.seq_num != 0)`) was invisible to the whole suite
+// (proved by mutation: 61/61 passed under that exact mutant). This arm pairs
+// seq_num:0 with occurrence:0 (already exercised elsewhere) on an otherwise
+// ordinary matching pair, and must still report a clean pass.
+TEST(WitnessComparator, SeqNumZeroIsAValidValueNotAbsence)
+{
+    std::string const dir = unique_test_dir();
+    {
+        Stream sender(dir + "wc_fq10_sender.jsonl");
+        sender.sent("0", 0, "fixpp-to-peer", 0, "B-Heartbeat", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
+    }
+    {
+        Stream receiver(dir + "wc_fq10_receiver.jsonl");
+        receiver.readback("0", 0, "fixpp-to-peer", 0, false, {{"1", "ACCT0001"}}, {});
+        ASSERT_TRUE(receiver.ok());
+    }
+    auto const a = parse_stream(dir + "wc_fq10_sender.jsonl");
+    auto const b = parse_stream(dir + "wc_fq10_receiver.jsonl");
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "pass");
+    EXPECT_TRUE(rows[0].mismatch.empty());
+}
+
 // RED proof arm 1: wrong msg_type, otherwise byte-identical body, at the
 // same (seq_num, direction, occurrence) -- must be `fail` naming `msg_type`.
 // Pre-fix this was `pass` (Key omits msg_type and nothing compared it).
