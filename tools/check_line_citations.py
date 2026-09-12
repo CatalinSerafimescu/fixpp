@@ -209,11 +209,26 @@ RE_D = re.compile(r"\]`?\s*:\d+")
 # same way as every other spelling here: by reading text a sweep had already
 # rewritten, not by running the detector.
 #
+# THE TILDE IS ACCEPTED ON EITHER SIDE OF THE COLON, and it was not always.
+# `~:1250` was gated from the start; `:~1910` -- the same claim with the
+# approximation mark on the other side of the colon -- was not, and lived in
+# `session.cpp` untouched through the whole #310 sweep. This is form B's defect
+# recurring in a DIFFERENT regex: `RE_B` was `~?\blines?`, taking `~line 3232`
+# (the spelling the ticket quoted) and missing `line ~958` for the life of the
+# gate. Twice now, a tilde has been gated on the side the example happened to
+# use. When a pattern admits an optional mark ANYWHERE, write it on both sides
+# and let the self-test carry an arm for each -- the cost is one `?`, and the
+# omission is invisible to every instrument including this one.
+#
+# Surveyed before taking it, over the tool's own 6265-file enumeration (pass
+# SCAN_DIRS as argv -- interpolating it into a shell `git grep` silently
+# returns nothing): 11 hits, 2 live and 9 frozen, and ZERO false positives.
+#
 # The lookbehind sits on the char before the SPACE/BACKTICK and excludes only `]`, so a
 # `[2h §6.6] :1167` is counted once (as form D) rather than twice. The trailing
 # guard drops a C++ bit-field `unsigned x :16;` -- zero in this tree today, so
 # the guard is precaution rather than a measured need, and is marked as such.
-RE_F = re.compile(r"(?<!\])[\s`]~?:\d{2,}(?!\d*\s*;)")
+RE_F = re.compile(r"(?<!\])[\s`]~?:~?\d{2,}(?!\d*\s*;)")
 
 # Form A's target pattern, WIDENED with `md` -- used ONLY by --shift-audit, to
 # decide which changed files are cited by line number. RE_A is deliberately left
@@ -246,6 +261,7 @@ CITE_SCAN_SKIP = ("tests/fuzz/corpus/", "tests/abi/baseline/")
 CITE_PREFILTER = [
     r"\.(hpp|cpp|ipp|hh|hxx|cc|h|md|xml|txt|yml|yaml|sh|py|json|toml|cmake)(:~?|[[:space:]]+L|[[:space:]]+~:?)[0-9]",
     r"~:[0-9]",
+    r":~[0-9]",
     r"lines?[[:space:]]+~?[0-9][0-9]",
     r"\(:[0-9]",
 ]
@@ -1245,6 +1261,11 @@ FORM_CASES = [
     ("// mirrors the owned table_view (session.cpp ~:929)",           ["A"]),
     # Bare, no filename -- form F, since there is nothing to resolve.
     ("// 058 Gate-B MAJOR-2 (contended-acquire loop, ~:1250):",       ["F"]),
+    # ...and the SAME claim with the tilde on the other side of the colon.
+    # Both spellings are live in this tree; only the first was gated until
+    # 2026-09-12. Keep BOTH arms: dropping either lets the asymmetry back in.
+    ("// (the existing mTLS-gated authorize() at :~1910+ is unrelated)",  ["F"]),
+    ("// `result` is always valid here (returned early at :~1730).",     ["F"]),
     # An explicit extension list keeps a host:port and an image tag out.
     ("// endpoint is http://collector.example.com:4318/v1/logs",     []),
     ("// image: ghcr.io/o/r/fixpp-conan:1.26.0",                     []),
@@ -1282,6 +1303,9 @@ FORM_CASES = [
     # the opposite order from a citation, and a C++ bit-field has no preceding
     # space-colon pair of this shape (surveyed: zero in src/ include/ tests/).
     ("key: 123 in a yaml block",                                     []),
+    # Colon-tilde inherits every form-F near-miss, including the span rule:
+    # a resolving form-A match swallows its own tilde, either side.
+    ("// mirrors the owned table_view (session.cpp:~929)",           ["A"]),
     ("    unsigned flags :1;  // bit-field",                         []),
     ("    using T = std::vector<int>;",                              []),
     ("// the ratio is 3:2 and the port is 8080",                     []),
@@ -1404,6 +1428,9 @@ PREFILTER_LINES = [
     "// approximation mark: the guard in session.cpp:~555 suppresses it",
     "// space-tilde: the trap_throw fence (writer.hpp ~182-187) catches it",
     "// tilde-colon: the contended-acquire loop (async_mutex.hpp ~:1250)",
+    # The tilde on the OTHER side of the colon, widened 2026-09-12. `~:` was
+    # gated from the start and `:~` was not -- form B's defect in a new regex.
+    "// colon-tilde: the mTLS-gated authorize() at :~1910+ is unrelated",
 ]
 
 

@@ -2626,9 +2626,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             // 033 T023 (US2): surface 553/554 as logon_credentials to authorize_logon.
             // Fired on the acceptor inbound-Logon path INDEPENDENTLY of mTLS
-            // (the existing mTLS-gated authorize() at :~1910+ is unrelated to credentials).
+            // (the mTLS-gated compid_authorization_policy.authorize() is unrelated).
             // Default implementation: accept. A future FR-008a validator may reject here.
-            // `result` is always valid here (invalid result returned early at :~1730).
+            // `result` is always valid here -- the earlier `if (!result)` returned.
             // [033 contracts C7; research R6; data-model E5; FR-008/FR-008a]
             {
                 fixpp::session::logon_credentials creds;
