@@ -102,7 +102,7 @@
 #   `interop_counterparty_main.cpp:502-531`), driven by pre-089 cells (BM-*,
 #   PR-*, RR-*) that do not set `INTEROP_CP_RUN_ID` and so never enter the
 #   089 readback path at all. The shim (`run_interop_cell.py`) is the same:
-#   `script_digest_hex()` (line 642-649) is `hashlib.sha256(script_path.read_bytes())`
+#   `script_digest_hex()` is `hashlib.sha256(script_path.read_bytes())`
 #   — raw bytes, no structural read — and `ConversationMeta.script_path` (line
 #   636) is a bare `Path`, not wired to any fixed cell today.
 #   No `tests/interop/` gtest source references `conversation_script` at all
@@ -249,7 +249,7 @@ business_steps:
       # EncodedText(355) carries the raw byte 0xff, which is not valid UTF-8,
       # so it is declared via value_b64 (§2: exactly one of value/value_b64).
       # EncodedTextLen(354) is the DECODED byte count (12), never a literal
-      # guess — plan.md:657, "derived from the value's octet count".
+      # guess — plan.md's C-11 row, "derived from the value's octet count".
       # value_b64 decodes to bytes 45 4e 43 4f 44 45 44 ff 54 45 58 54
       # ("ENCODED" + 0xFF + "TEXT"), 12 octets.
       - { path: "354", value: "12" }
