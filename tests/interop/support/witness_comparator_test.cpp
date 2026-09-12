@@ -13,11 +13,13 @@
 // is wrong in BOTH directions: ClOrdID(11)/Text(58) are STRING fields whose
 // values may legitimately contain '.', and PRICE(44) may legitimately have
 // no fractional part at all.
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstddef>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <span>
 #include <stdexcept>
@@ -73,6 +75,26 @@ DecimalTagResolver const& test_resolver()
     return resolver;
 }
 
+// FQ-8 (gate-b r2, Codex r2 #4) — every TEST below used to share fixed
+// filenames under the bare testing::TempDir(): a failed write left the
+// PRIOR run's file in place with its mtime unchanged, and nothing checked
+// that the write had actually happened, so the test silently re-read stale
+// content and reported PASS. Giving every test its own directory, wiped
+// before use, removes the stale content a setup failure could fall back
+// to; each Stream/ofstream site below additionally asserts the write
+// itself succeeded, so a setup failure is now a loud test failure instead
+// (see UnwritableFixtureTargetFailsTheTestInsteadOfStaleContent below).
+std::string unique_test_dir()
+{
+    auto const* info = testing::UnitTest::GetInstance()->current_test_info();
+    std::string const dir =
+        testing::TempDir() + std::string(info->test_suite_name()) + "_" + info->name() + "/";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    return dir;
+}
+
 // Test-only, and kept LOCAL to this file on purpose: conv_wire.hpp is what a
 // real cell includes, and this is the derivation C-8 forbids for a cell.
 // Used twice below: as the peer's parse of the (mutated) frame, and as the
@@ -117,14 +139,16 @@ std::vector<FieldEntry> order_cancel_request_sent_fields_from_frame(
 
 TEST(WitnessComparator, ExactMatchPasses)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_pass_sender.jsonl");
         sender.sent("D", 7, "fixpp-to-peer", 0, "B-01", {{"1", "ACCT0001"}, {"55", "AAPL"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_pass_receiver.jsonl");
         receiver.readback("D", 7, "fixpp-to-peer", 0, false, {{"1", "ACCT0001"}, {"55", "AAPL"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_pass_sender.jsonl");
     auto const b = parse_stream(dir + "wc_pass_receiver.jsonl");
@@ -146,15 +170,17 @@ TEST(WitnessComparator, ExactMatchPasses)
 // FR-006 class 1: both declare the path; values differ.
 TEST(WitnessComparator, ForcedValueMismatchNamesThePath)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_vm_sender.jsonl");
         sender.sent("D", 7, "fixpp-to-peer", 0, "B-03", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         // Forced miss: the peer reports a DIFFERENT value for the same path.
         Stream receiver(dir + "wc_vm_receiver.jsonl");
         receiver.readback("D", 7, "fixpp-to-peer", 0, false, {{"1", "ACCT0009"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_vm_sender.jsonl");
     auto const b = parse_stream(dir + "wc_vm_receiver.jsonl");
@@ -171,15 +197,17 @@ TEST(WitnessComparator, ForcedValueMismatchNamesThePath)
 // FR-006 class 2: intent declares the path; the peer did not report it.
 TEST(WitnessComparator, ForcedMissingNamesThePath)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_missing_sender.jsonl");
         sender.sent("D", 7, "fixpp-to-peer", 0, "B-01", {{"1", "ACCT0001"}, {"55", "AAPL"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         // Forced miss: the peer never reports path "1" at all.
         Stream receiver(dir + "wc_missing_receiver.jsonl");
         receiver.readback("D", 7, "fixpp-to-peer", 0, false, {{"55", "AAPL"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_missing_sender.jsonl");
     auto const b = parse_stream(dir + "wc_missing_receiver.jsonl");
@@ -194,10 +222,11 @@ TEST(WitnessComparator, ForcedMissingNamesThePath)
 // FR-006 class 3: the peer reported a path the intent does not declare.
 TEST(WitnessComparator, ForcedSpuriousNamesThePath)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_spurious_sender.jsonl");
         sender.sent("D", 7, "fixpp-to-peer", 0, "B-01", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         // Forced miss: the peer reports an extra field the sender never declared
@@ -205,6 +234,7 @@ TEST(WitnessComparator, ForcedSpuriousNamesThePath)
         // FR-006 requires exact-set (not subset) comparison to catch.
         Stream receiver(dir + "wc_spurious_receiver.jsonl");
         receiver.readback("D", 7, "fixpp-to-peer", 0, false, {{"1", "ACCT0001"}, {"11", "extra"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_spurious_sender.jsonl");
     auto const b = parse_stream(dir + "wc_spurious_receiver.jsonl");
@@ -227,10 +257,11 @@ TEST(WitnessComparator, ForcedSpuriousNamesThePath)
 // not discriminate the two implementations).
 TEST(WitnessComparator, AbsentReadbackFailsEvenWithNoDeclaredFields)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_absent_sender.jsonl");
         sender.sent("0", 3, "fixpp-to-peer", 0, "B-Heartbeat", {});
+        ASSERT_TRUE(sender.ok());
     }
     auto const a = parse_stream(dir + "wc_absent_sender.jsonl");
     std::vector<ParsedRecord> const no_readback_at_all;  // peer stream never wrote this key
@@ -255,14 +286,16 @@ TEST(WitnessComparator, AbsentReadbackFailsEvenWithNoDeclaredFields)
 // value_mismatch.
 TEST(WitnessComparator, DecimalValuesCompareNumerically)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_decimal_sender.jsonl");
         sender.sent("D", 8, "fixpp-to-peer", 0, "B-02", {{"44", "190.500"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_decimal_receiver.jsonl");
         receiver.readback("D", 8, "fixpp-to-peer", 0, false, {{"44", "190.5"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_decimal_sender.jsonl");
     auto const b = parse_stream(dir + "wc_decimal_receiver.jsonl");
@@ -279,14 +312,16 @@ TEST(WitnessComparator, DecimalValuesCompareNumerically)
 // Account genuinely is not a decimal type.
 TEST(WitnessComparator, AccountStringDoesNotCollapseOnLeadingZero)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_int_sender.jsonl");
         sender.sent("D", 9, "fixpp-to-peer", 0, "B-03", {{"1", "0100"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_int_receiver.jsonl");
         receiver.readback("D", 9, "fixpp-to-peer", 0, false, {{"1", "100"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_int_sender.jsonl");
     auto const b = parse_stream(dir + "wc_int_receiver.jsonl");
@@ -303,14 +338,16 @@ TEST(WitnessComparator, AccountStringDoesNotCollapseOnLeadingZero)
 // shape ("0100" vs "100"), opposite verdict, because the TYPE differs.
 TEST(WitnessComparator, QtyLeadingZeroPasses)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_qty_sender.jsonl");
         sender.sent("D", 11, "fixpp-to-peer", 0, "B-06", {{"38", "0100"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_qty_receiver.jsonl");
         receiver.readback("D", 11, "fixpp-to-peer", 0, false, {{"38", "100"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_qty_sender.jsonl");
     auto const b = parse_stream(dir + "wc_qty_receiver.jsonl");
@@ -324,14 +361,16 @@ TEST(WitnessComparator, QtyLeadingZeroPasses)
 // pre-fix heuristic) would have reported this as a value_mismatch.
 TEST(WitnessComparator, PriceWithAndWithoutFractionalZeroPasses)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_price_int_sender.jsonl");
         sender.sent("D", 12, "fixpp-to-peer", 0, "B-07", {{"44", "190"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_price_int_receiver.jsonl");
         receiver.readback("D", 12, "fixpp-to-peer", 0, false, {{"44", "190.0"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_price_int_sender.jsonl");
     auto const b = parse_stream(dir + "wc_price_int_receiver.jsonl");
@@ -344,14 +383,16 @@ TEST(WitnessComparator, PriceWithAndWithoutFractionalZeroPasses)
 // be exact comparison, not a trapdoor that makes every PRICE pass.
 TEST(WitnessComparator, PriceDifferingValuesMismatch)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_price_diff_sender.jsonl");
         sender.sent("D", 13, "fixpp-to-peer", 0, "B-08", {{"44", "190.5"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_price_diff_receiver.jsonl");
         receiver.readback("D", 13, "fixpp-to-peer", 0, false, {{"44", "190.6"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_price_diff_sender.jsonl");
     auto const b = parse_stream(dir + "wc_price_diff_receiver.jsonl");
@@ -368,14 +409,16 @@ TEST(WitnessComparator, PriceDifferingValuesMismatch)
 // "190.5" on any IEEE-754 double and wrongly pass).
 TEST(WitnessComparator, PriceNearMissDoesNotCollapseViaFloatRounding)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_price_nearmiss_sender.jsonl");
         sender.sent("D", 14, "fixpp-to-peer", 0, "B-09", {{"44", "190.5"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_price_nearmiss_receiver.jsonl");
         receiver.readback("D", 14, "fixpp-to-peer", 0, false, {{"44", "190.50000000000001"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_price_nearmiss_sender.jsonl");
     auto const b = parse_stream(dir + "wc_price_nearmiss_receiver.jsonl");
@@ -393,14 +436,16 @@ TEST(WitnessComparator, PriceNearMissDoesNotCollapseViaFloatRounding)
 // PASS FR-006's exact-set equality must not produce.
 TEST(WitnessComparator, ClOrdIdWithDotIsNotTreatedAsDecimal)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_clordid_sender.jsonl");
         sender.sent("D", 15, "fixpp-to-peer", 0, "B-10", {{"11", "ORD.10"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_clordid_receiver.jsonl");
         receiver.readback("D", 15, "fixpp-to-peer", 0, false, {{"11", "ORD.1"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_clordid_sender.jsonl");
     auto const b = parse_stream(dir + "wc_clordid_receiver.jsonl");
@@ -416,14 +461,16 @@ TEST(WitnessComparator, ClOrdIdWithDotIsNotTreatedAsDecimal)
 // a value that looks even MORE like a decimal ("1.50" vs "1.5").
 TEST(WitnessComparator, TextWithDotIsNotTreatedAsDecimal)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_text_sender.jsonl");
         sender.sent("D", 16, "fixpp-to-peer", 0, "B-11", {{"58", "1.50"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_text_receiver.jsonl");
         receiver.readback("D", 16, "fixpp-to-peer", 0, false, {{"58", "1.5"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_text_sender.jsonl");
     auto const b = parse_stream(dir + "wc_text_receiver.jsonl");
@@ -447,14 +494,16 @@ TEST(WitnessComparator, TextWithDotIsNotTreatedAsDecimal)
 // guard for that mutation.
 TEST(WitnessComparator, MutationProofAlwaysDecimalResolverWronglyPassesClOrdId)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_mutant_sender.jsonl");
         sender.sent("D", 15, "fixpp-to-peer", 0, "B-10", {{"11", "ORD.10"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_mutant_receiver.jsonl");
         receiver.readback("D", 15, "fixpp-to-peer", 0, false, {{"11", "ORD.1"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_mutant_sender.jsonl");
     auto const b = parse_stream(dir + "wc_mutant_receiver.jsonl");
@@ -472,7 +521,7 @@ TEST(WitnessComparator, MutationProofAlwaysDecimalResolverWronglyPassesClOrdId)
 // the JSON-key level (§4's "decoded values" rule, generalized past decimals).
 TEST(WitnessComparator, ValueAndValueB64OverSameBytesCompareEqual)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     std::string const raw_bytes(1, static_cast<char>(0xff));
     {
         // "\xff" alone is not valid UTF-8 -> this Stream also writes it as
@@ -482,10 +531,12 @@ TEST(WitnessComparator, ValueAndValueB64OverSameBytesCompareEqual)
         // path independent of which key either side chose.
         Stream sender(dir + "wc_b64_sender.jsonl");
         sender.sent("D", 10, "fixpp-to-peer", 0, "B-05", {{"355", raw_bytes}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_b64_receiver.jsonl");
         receiver.readback("D", 10, "fixpp-to-peer", 0, false, {{"355", raw_bytes}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_b64_sender.jsonl");
     auto const b = parse_stream(dir + "wc_b64_receiver.jsonl");
@@ -513,16 +564,18 @@ TEST(WitnessComparator, ValueAndValueB64OverSameBytesCompareEqual)
 // bytes from a one-byte-different copy, that whole path would be decorative.
 TEST(WitnessComparator, ValueB64DifferingByOneByteIsAMismatch)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     std::string const sent_bytes(1, static_cast<char>(0xff));
     std::string const readback_bytes(1, static_cast<char>(0xfe));
     {
         Stream sender(dir + "wc_b64_neg_sender.jsonl");
         sender.sent("D", 10, "fixpp-to-peer", 0, "B-05", {{"355", sent_bytes}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_b64_neg_receiver.jsonl");
         receiver.readback("D", 10, "fixpp-to-peer", 0, false, {{"355", readback_bytes}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_b64_neg_sender.jsonl");
     auto const b = parse_stream(dir + "wc_b64_neg_receiver.jsonl");
@@ -548,16 +601,18 @@ TEST(WitnessComparator, ValueB64DifferingByOneByteIsAMismatch)
 // dropped by either direction shows up by name, not as an opaque `false`.
 TEST(WitnessComparator, WitnessRowsRoundTripThroughFile)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_rt_sender.jsonl");
         sender.sent("D", 20, "fixpp-to-peer", 0, "B-20", {{"1", "ACCT0001"}});
         sender.sent("D", 21, "fixpp-to-peer", 0, "B-21", {{"1", "ACCT0002"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_rt_receiver.jsonl");
         receiver.readback("D", 20, "fixpp-to-peer", 0, false, {{"1", "ACCT0001"}}, {});  // pass
         receiver.readback("D", 21, "fixpp-to-peer", 0, false, {{"1", "ACCT0009"}}, {});  // fail
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_rt_sender.jsonl");
     auto const b = parse_stream(dir + "wc_rt_receiver.jsonl");
@@ -611,7 +666,7 @@ TEST(WitnessComparator, WitnessRowsRoundTripThroughFile)
 // silently parse into a WitnessRow with kind=="".
 TEST(WitnessComparator, ParseWitnessRowsThrowsOnMissingRequiredField)
 {
-    std::string const path = testing::TempDir() + "wc_missing_kind_witnesses.jsonl";
+    std::string const path = unique_test_dir() + "wc_missing_kind_witnesses.jsonl";
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         // Byte-for-byte a well-formed row per write_witness_rows()'s own
@@ -621,6 +676,7 @@ TEST(WitnessComparator, ParseWitnessRowsThrowsOnMissingRequiredField)
                "\"config\":\"normal\",\"arm\":\"validation-on\","
                "\"script_step_id\":\"B-20\",\"msg_type\":\"D\",\"direction\":\"fixpp-to-peer\","
                "\"occurrence\":0,\"verdict\":\"pass\",\"mismatch\":[]}\n";
+        ASSERT_TRUE(out.is_open() && !out.fail()) << "fixture write failed";
     }
     bool threw = false;
     try {
@@ -644,15 +700,17 @@ TEST(WitnessComparator, ParseWitnessRowsThrowsOnMissingRequiredField)
 // not `pass`.
 TEST(WitnessComparator, DirectionIsPartOfTheJoinKeyNotDecorative)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_dir_sender.jsonl");
         sender.sent("D", 40, kDirectionFixppToPeer, 0, "T037-dir", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         // Same seq_num/occurrence, WRONG direction spelling.
         Stream receiver(dir + "wc_dir_receiver.jsonl");
         receiver.readback("D", 40, kDirectionPeerToFixpp, 0, false, {{"1", "ACCT0001"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_dir_sender.jsonl");
     auto const b = parse_stream(dir + "wc_dir_receiver.jsonl");
@@ -673,12 +731,13 @@ TEST(WitnessComparator, DirectionIsPartOfTheJoinKeyNotDecorative)
 // hand-written appended fixture.
 TEST(WitnessComparator, ReopeningOnSamePathTruncatesRunNMinus1sStaleReadback)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     std::string const receiver_path = dir + "wc_r4_receiver.jsonl";
     // Run n-1: peer answers seq_num=50 with "ACCT0001".
     {
         Stream receiver(receiver_path);
         receiver.readback("D", 50, kDirectionFixppToPeer, 0, false, {{"1", "ACCT0001"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     // Run n reuses the SAME path (a fresh process, same run directory) but
     // the peer never answers this time -- no readback() call at all. The
@@ -686,11 +745,13 @@ TEST(WitnessComparator, ReopeningOnSamePathTruncatesRunNMinus1sStaleReadback)
     {
         Stream receiver(receiver_path);
         (void)receiver;
+        ASSERT_TRUE(receiver.ok());
     }
     std::string const sender_path = dir + "wc_r4_sender.jsonl";
     {
         Stream sender(sender_path);
         sender.sent("D", 50, kDirectionFixppToPeer, 0, "T047-run-n", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
     }
     auto const a = parse_stream(sender_path);
     auto const b = parse_stream(receiver_path);
@@ -715,11 +776,12 @@ TEST(WitnessComparator, ReopeningOnSamePathTruncatesRunNMinus1sStaleReadback)
 // FIXPP_TEST_HOOKS and reachable only from test code).
 TEST(WitnessComparator, AppendModeAcrossTwoRunsWronglyPassesOnRunNMinus1sStaleReadback)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     std::string const receiver_path = dir + "wc_r4_append_receiver.jsonl";
     {
         Stream receiver(receiver_path);
         receiver.readback("D", 51, kDirectionFixppToPeer, 0, false, {{"1", "ACCT0001"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     {
         // The mode a defect would flip -- real open() path, real write path,
@@ -727,11 +789,13 @@ TEST(WitnessComparator, AppendModeAcrossTwoRunsWronglyPassesOnRunNMinus1sStaleRe
         // still never answers run n).
         auto receiver = Stream::append_mode_for_test(receiver_path);
         (void)receiver;
+        ASSERT_TRUE(receiver.ok());
     }
     std::string const sender_path = dir + "wc_r4_append_sender.jsonl";
     {
         Stream sender(sender_path);
         sender.sent("D", 51, kDirectionFixppToPeer, 0, "T047-append-mutant", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
     }
     auto const a = parse_stream(sender_path);
     auto const b = parse_stream(receiver_path);
@@ -799,16 +863,18 @@ TEST(WitnessComparator, SpuriousHitFrameDerivedSentMasksPostCaptureMutation_C8)
     auto const readback_fields = order_cancel_request_sent_fields_from_frame(frame);
     ASSERT_EQ(readback_fields.size(), 3u);
 
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
 
     // -- half 1: BUILDER-DERIVED sent (the correct, mandated derivation) --
     {
         Stream sender(dir + "c8_builder_sender.jsonl");
         sender.sent("F", 60, kDirectionFixppToPeer, 0, "T048-builder", intent_fields);
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "c8_builder_receiver.jsonl");
         receiver.readback("F", 60, kDirectionFixppToPeer, 0, false, readback_fields, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const rows1 = compare_streams(parse_stream(dir + "c8_builder_sender.jsonl"),
                                         parse_stream(dir + "c8_builder_receiver.jsonl"),
@@ -832,10 +898,12 @@ TEST(WitnessComparator, SpuriousHitFrameDerivedSentMasksPostCaptureMutation_C8)
     {
         Stream sender2(dir + "c8_frame_sender.jsonl");
         sender2.sent("F", 61, kDirectionFixppToPeer, 0, "T048-frame-mutant", frame_derived_sent);
+        ASSERT_TRUE(sender2.ok());
     }
     {
         Stream receiver2(dir + "c8_frame_receiver.jsonl");
         receiver2.readback("F", 61, kDirectionFixppToPeer, 0, false, readback_fields, {});
+        ASSERT_TRUE(receiver2.ok());
     }
     auto const rows2 = compare_streams(parse_stream(dir + "c8_frame_sender.jsonl"),
                                         parse_stream(dir + "c8_frame_receiver.jsonl"),
@@ -857,14 +925,16 @@ TEST(WitnessComparator, SpuriousHitFrameDerivedSentMasksPostCaptureMutation_C8)
 // would wrongly accept, since an empty set trivially equals an empty set.
 TEST(WitnessComparator, EmptyIntentVsEmptyReadbackRejectsRatherThanPassing)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_empty_intent_sender.jsonl");
         sender.sent("0", 4, kDirectionFixppToPeer, 0, "T049-empty", {});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_empty_intent_receiver.jsonl");
         receiver.readback("0", 4, kDirectionFixppToPeer, 0, false, {}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_empty_intent_sender.jsonl");
     auto const b = parse_stream(dir + "wc_empty_intent_receiver.jsonl");
@@ -896,13 +966,14 @@ TEST(WitnessComparator, EmptyIntentVsEmptyReadbackRejectsRatherThanPassing)
 // (wrongly) argued redundant with FR-006; this is the proof it is not.
 TEST(WitnessComparator, T053aHardcodedLiteralAgreesWithItselfFr006StaysGreen)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     // The counterparty's OWN sent record: whatever it actually built --
     // here, the STALE hardcoded literal "ACCT0001" a script-ignoring
     // implementation would emit even after the script changed to "ACCT0009".
     {
         Stream sender(dir + "wc_t053a_sender.jsonl");
         sender.sent("F", 9, kDirectionPeerToFixpp, 0, "B-03", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
     }
     // fixpp's readback of what actually crossed the wire: necessarily the
     // SAME stale value -- a readback cannot report a value the sender never
@@ -910,6 +981,7 @@ TEST(WitnessComparator, T053aHardcodedLiteralAgreesWithItselfFr006StaysGreen)
     {
         Stream receiver(dir + "wc_t053a_receiver.jsonl");
         receiver.readback("F", 9, kDirectionPeerToFixpp, 0, false, {{"1", "ACCT0001"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_t053a_sender.jsonl");
     auto const b = parse_stream(dir + "wc_t053a_receiver.jsonl");
@@ -934,11 +1006,12 @@ TEST(WitnessComparator, T053aHardcodedLiteralAgreesWithItselfFr006StaysGreen)
 // Stream, which cannot express an incomplete record).
 TEST(WitnessComparator, ParseStreamThrowsOnMissingSeqNum)
 {
-    std::string const path = testing::TempDir() + "wc_fq4_missing_seqnum.jsonl";
+    std::string const path = unique_test_dir() + "wc_fq4_missing_seqnum.jsonl";
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out << "{\"type\":\"readback\",\"msg_type\":\"D\",\"direction\":\"fixpp-to-peer\","
                "\"occurrence\":0,\"poss_dup\":false,\"fields\":[],\"typed_reads\":[]}\n";
+        ASSERT_TRUE(out.is_open() && !out.fail()) << "fixture write failed";
     }
     bool threw = false;
     try {
@@ -961,13 +1034,14 @@ TEST(WitnessComparator, ParseStreamThrowsOnMissingSeqNum)
 // closed at all -- this arm pins that it stays that way.
 TEST(WitnessComparator, ParseStreamReportsMissingFieldNotDuplicateOnTwoIncompleteRecords)
 {
-    std::string const path = testing::TempDir() + "wc_fq4_two_missing_seqnum.jsonl";
+    std::string const path = unique_test_dir() + "wc_fq4_two_missing_seqnum.jsonl";
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out << "{\"type\":\"readback\",\"msg_type\":\"D\",\"direction\":\"fixpp-to-peer\","
                "\"occurrence\":0,\"poss_dup\":false,\"fields\":[],\"typed_reads\":[]}\n";
         out << "{\"type\":\"readback\",\"msg_type\":\"G\",\"direction\":\"fixpp-to-peer\","
                "\"occurrence\":0,\"poss_dup\":false,\"fields\":[],\"typed_reads\":[]}\n";
+        ASSERT_TRUE(out.is_open() && !out.fail()) << "fixture write failed";
     }
     bool threw = false;
     try {
@@ -987,14 +1061,16 @@ TEST(WitnessComparator, ParseStreamReportsMissingFieldNotDuplicateOnTwoIncomplet
 // Pre-fix this was `pass` (Key omits msg_type and nothing compared it).
 TEST(WitnessComparator, WrongMsgTypeIsAMismatchEvenWithIdenticalBody)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_fq4_msgtype_sender.jsonl");
         sender.sent("D", 70, "fixpp-to-peer", 0, "B-01", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_fq4_msgtype_receiver.jsonl");
         receiver.readback("G", 70, "fixpp-to-peer", 0, false, {{"1", "ACCT0001"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_fq4_msgtype_sender.jsonl");
     auto const b = parse_stream(dir + "wc_fq4_msgtype_receiver.jsonl");
@@ -1017,15 +1093,17 @@ TEST(WitnessComparator, WrongMsgTypeIsAMismatchEvenWithIdenticalBody)
 // (correct) record silently WON the last-wins overwrite and the row passed.
 TEST(WitnessComparator, DuplicateReadbackRecordWrongThenRightStillFails)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_fq4_duprec_wr_sender.jsonl");
         sender.sent("D", 71, "fixpp-to-peer", 0, "B-01", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_fq4_duprec_wr_receiver.jsonl");
         receiver.readback("D", 71, "fixpp-to-peer", 0, false, {{"1", "ACCT0009"}}, {});  // wrong
         receiver.readback("D", 71, "fixpp-to-peer", 0, false, {{"1", "ACCT0001"}}, {});  // right
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_fq4_duprec_wr_sender.jsonl");
     auto const b = parse_stream(dir + "wc_fq4_duprec_wr_receiver.jsonl");
@@ -1042,15 +1120,17 @@ TEST(WitnessComparator, DuplicateReadbackRecordWrongThenRightStillFails)
 // proving the fix is `emplace`-with-rejection, not a re-ordered assignment.
 TEST(WitnessComparator, DuplicateReadbackRecordRightThenWrongStillFails)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_fq4_duprec_rw_sender.jsonl");
         sender.sent("D", 72, "fixpp-to-peer", 0, "B-01", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_fq4_duprec_rw_receiver.jsonl");
         receiver.readback("D", 72, "fixpp-to-peer", 0, false, {{"1", "ACCT0001"}}, {});  // right
         receiver.readback("D", 72, "fixpp-to-peer", 0, false, {{"1", "ACCT0009"}}, {});  // wrong
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_fq4_duprec_rw_sender.jsonl");
     auto const b = parse_stream(dir + "wc_fq4_duprec_rw_receiver.jsonl");
@@ -1066,15 +1146,17 @@ TEST(WitnessComparator, DuplicateReadbackRecordRightThenWrongStillFails)
 // silently overwrote the map entry and the row passed.
 TEST(WitnessComparator, DuplicateFieldPathWrongThenRightStillFails)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_fq4_duppath_wr_sender.jsonl");
         sender.sent("D", 73, "fixpp-to-peer", 0, "B-02", {{"44", "190.5"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_fq4_duppath_wr_receiver.jsonl");
         receiver.readback("D", 73, "fixpp-to-peer", 0, false,
                            {{"44", "190.6"}, {"44", "190.5"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_fq4_duppath_wr_sender.jsonl");
     auto const b = parse_stream(dir + "wc_fq4_duppath_wr_receiver.jsonl");
@@ -1096,15 +1178,17 @@ TEST(WitnessComparator, DuplicateFieldPathWrongThenRightStillFails)
 // violation, independent of which occurrence happens to be correct).
 TEST(WitnessComparator, DuplicateFieldPathRightThenWrongStillFails)
 {
-    std::string const dir = testing::TempDir();
+    std::string const dir = unique_test_dir();
     {
         Stream sender(dir + "wc_fq4_duppath_rw_sender.jsonl");
         sender.sent("D", 74, "fixpp-to-peer", 0, "B-02", {{"44", "190.5"}});
+        ASSERT_TRUE(sender.ok());
     }
     {
         Stream receiver(dir + "wc_fq4_duppath_rw_receiver.jsonl");
         receiver.readback("D", 74, "fixpp-to-peer", 0, false,
                            {{"44", "190.5"}, {"44", "190.6"}}, {});
+        ASSERT_TRUE(receiver.ok());
     }
     auto const a = parse_stream(dir + "wc_fq4_duppath_rw_sender.jsonl");
     auto const b = parse_stream(dir + "wc_fq4_duppath_rw_receiver.jsonl");
@@ -1119,4 +1203,47 @@ TEST(WitnessComparator, DuplicateFieldPathRightThenWrongStillFails)
         }
     }
     EXPECT_TRUE(found_dup_path) << "no mismatch entry named the duplicate path";
+}
+
+// FQ-8 (gate-b r2, Codex r2 #4) — the setup-failure arm. Proves the
+// `ASSERT_TRUE(stream.ok())` sites added throughout this file are a LIVE
+// check, not decoration: an unwritable fixture target must fail the test
+// loudly, naming the assertion, rather than silently falling through to
+// whatever content happens to already be on disk. Runs the real Stream
+// open()/write path against a target it has made unwritable, so this is
+// the same mechanism every other TEST above depends on.
+//
+// `path` is declared `static` because EXPECT_FATAL_FAILURE's nested helper
+// class cannot reference an enclosing automatic-storage local (only static
+// locals, namespace-scope names, and enumerators) -- the same restriction
+// tests/interop/support/interop_fixture_test.cpp works around for
+// EXPECT_NONFATAL_FAILURE by capturing into an immediately-invoked lambda;
+// EXPECT_FATAL_FAILURE has no such capture escape hatch, so `static` is the
+// only option.
+TEST(WitnessComparator, UnwritableFixtureTargetFailsTheTestInsteadOfStaleContent)
+{
+    static std::string path;
+    path = unique_test_dir() + "wc_fq8_unwritable.jsonl";
+    {
+        Stream sender(path);
+        sender.sent("D", 1, "fixpp-to-peer", 0, "B-01", {{"1", "ACCT0001"}});
+        ASSERT_TRUE(sender.ok());
+    }
+    // Strip write permission from the file a rerun would reopen -- the exact
+    // shape of a permissions/disk-space setup failure, not a missing-parent
+    // failure (which fopen would report differently).
+    std::filesystem::permissions(path, std::filesystem::perms::owner_read,
+                                  std::filesystem::perm_options::replace);
+    EXPECT_FATAL_FAILURE(
+        {
+            Stream sender(path);
+            sender.sent("D", 2, "fixpp-to-peer", 0, "B-02", {{"1", "ACCT0002"}});
+            ASSERT_TRUE(sender.ok());
+        },
+        "sender.ok()");
+    // Restore write permission so unique_test_dir()'s remove_all can clean up
+    // on a later run.
+    std::filesystem::permissions(
+        path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace);
 }
