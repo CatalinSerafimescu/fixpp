@@ -148,7 +148,7 @@ invocation. The mechanism lives in `plan.md` § *External obligations*; the requ
 (`InteropCounterparty.java:104`), which reflectively loads `quickfix.fix44.MessageFactory`
 (`DefaultMessageFactory.java:92-94`), and `quickfixj-messages-fix44` is already a compile dependency
 (`pom.xml:31-34`). **The object handed to `fromApp` is already a `quickfix.fix44.NewOrderSingle` at
-runtime.** Lines 461-464 can be replaced outright.
+runtime.** The block right after that false comment can be replaced outright.
 
 **Cost**: **zero** — no config change, no new dependency, no new link deps. `src/C++/fix44/` contains no
 `.cpp` files (header-only); the counterparty's `CMakeLists.txt:29-35` already links what is needed and
@@ -420,7 +420,7 @@ is opened purely as a `Popen` sink (`run_interop_cell.py:992`, `:1025-1026`, `:1
 **never read back**.
 
 **What exists and what does not.** Readiness detection exists and is already wired to the verdict:
-`probe_counterparty()` (`tests/interop/support/counterparty_probe.hpp:178`) checks env tokens and TCP
+`probe_counterparty()` (`tests/interop/support/counterparty_probe.hpp`) checks env tokens and TCP
 connectability and emits `"<cp> unavailable: ..."` strings that `parse_gtest_status`
 (`run_interop_cell.py:645`) greps. **Identity and version reporting do not exist** — neither
 counterparty prints a startup banner (C++ `main` `:226-286` prints only usage and errors; Java `main`
