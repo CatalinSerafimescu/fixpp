@@ -40,6 +40,17 @@ import sys
 import pytest
 import yaml
 
+# PyYAML's pure-Python loader is 7-9x slower than libyaml's C loader, and YAML
+# parsing dominates this file's wall clock (it re-reads four committed
+# artifacts). Prefer the C loader; fall back when PyYAML was built without
+# libyaml, which is a packaging property of the environment and not something
+# this suite can assume. Nothing here asserts on yaml exception CLASSES, so the
+# two loaders are interchangeable for our purposes.
+try:
+    _YamlLoader = yaml.CSafeLoader
+except AttributeError:  # PyYAML built without libyaml
+    _YamlLoader = yaml.SafeLoader
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 MANIFEST = os.path.join(HERE, "cell_results.yaml")
 WITNESS_EVIDENCE = os.path.join(HERE, "witness_evidence.yaml")
@@ -172,7 +183,7 @@ def _status_kind(status):
 
 def _load_cells():
     with open(MANIFEST, encoding="utf-8") as fh:
-        doc = yaml.safe_load(fh)
+        doc = yaml.load(fh, Loader=_YamlLoader)
     assert doc.get("schema_version") == 1, "manifest must declare schema_version: 1"
     rows = doc.get("cells")
     assert isinstance(rows, list) and rows, "manifest must carry a non-empty `cells` list"
@@ -186,7 +197,7 @@ def cells():
 
 def _load_witness_evidence():
     with open(WITNESS_EVIDENCE, encoding="utf-8") as fh:
-        doc = yaml.safe_load(fh)
+        doc = yaml.load(fh, Loader=_YamlLoader)
     assert doc.get("schema_version") == 1, \
         "witness_evidence.yaml must declare schema_version: 1"
     return doc
@@ -522,12 +533,12 @@ THIRTY_TWO_SLOT_INVENTORY = frozenset(
 
 def _load_census():
     with open(CENSUS, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        return yaml.load(fh, Loader=_YamlLoader)
 
 
 def _load_script():
     with open(SCRIPT, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        return yaml.load(fh, Loader=_YamlLoader)
 
 
 def _expand_business_steps_combo(doc, combo_id):

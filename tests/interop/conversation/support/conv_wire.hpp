@@ -33,7 +33,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-#include <vector>
 
 namespace fixpp::interop::conversation {
 
