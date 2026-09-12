@@ -129,8 +129,28 @@ SCAN_DIRS = [
 # found. `\s+L` cannot collide with the adjacent hash/version text in this tree:
 # it needs a literal capital L followed IMMEDIATELY by a digit, so `Messages.hpp
 # 827a9bd0` and `foo.cpp Line 12` are both non-matches.
+# EXTENSIONS. The original list was C++ plus `md`, which silently declared that
+# only C++ and markdown rot. Derived by COMPLEMENT (see the note above RE_B on
+# how), the tree also line-cites, and these are measured counts, not guesses:
+#
+#   .xml   435   `dictionaries/FIX44.xml:2805-2824` -- and the dictionaries DO
+#                move; feature 082 changed group registration across all of them
+#   .yml    62   `tier1.yml:392`, `cache-cleanup.yml:207`
+#   .txt    45   `CMakeLists.txt:401`, `ci/expected-eligible-tests.txt:13-19`
+#   .cmake  20 · .sh 19 · .py 16 · .json 7 · .toml 3
+#
+# The list stays EXPLICIT rather than becoming `\.\w+`: a generic extension turns
+# every `host.com:8080` and `image:1.2` into a citation. Precision here is worth
+# more than catching an extension nobody has used yet, because a gate that cries
+# wolf gets narrowed by the next person and the narrowing is what rots.
+#
+# The `:~` form is accepted too: `session.cpp:~555` is the same claim wearing an
+# approximation mark, and the tree had three of them, one in a test's RED-proof
+# mutation instruction -- where following the wrong line means proving nothing.
 RE_A = re.compile(
-    r"(?<![\w/.-])([A-Za-z0-9_.][A-Za-z0-9_/.-]*\.(?:hpp|cpp|ipp|hh|hxx|cc|h|md))(?::|\s+L)([0-9]+)"
+    r"(?<![\w/.-])([A-Za-z0-9_.][A-Za-z0-9_/.-]*"
+    r"\.(?:hpp|cpp|ipp|hh|hxx|cc|h|md|xml|txt|yml|yaml|sh|py|json|toml|cmake))"
+    r"(?::~?|\s+L)([0-9]+)"
 )
 # Form B. {2,} digits: a deliberate recall/precision trade -- one-digit forms
 # are not gated, since they collide with prose about test data (`line 5`) far
@@ -224,7 +244,7 @@ CITE_SCAN_SKIP = ("tests/fuzz/corpus/", "tests/abi/baseline/")
 # over-supply costs nothing because Python re-decides. `--self-test` pins the
 # superset relation, so editing a decider without editing this fails loudly.
 CITE_PREFILTER = [
-    r"\.(hpp|cpp|ipp|hh|hxx|cc|h|md)(:|[[:space:]]+L)[0-9]",
+    r"\.(hpp|cpp|ipp|hh|hxx|cc|h|md|xml|txt|yml|yaml|sh|py|json|toml|cmake)(:~?|[[:space:]]+L)[0-9]",
     r"lines?[[:space:]]+~?[0-9][0-9]",
     r"\(:[0-9]",
 ]
@@ -1204,6 +1224,16 @@ FORM_CASES = [
     ("// see .specify/2d-threading.md:448 for the block",            ["A"]),
     # Leading dot AND the parent-repo spelling of this submodule.
     ("(`.specify/constitution.md:335`) is normative",                ["A"]),
+    # Non-C++ targets rot exactly like C++ ones. `.xml` alone is 435 hits, and
+    # the dictionaries it names are edited by dictionary features.
+    ("// (dictionaries/FIX44.xml:3153-3159, PosUndInstrmtGrp)",      ["A"]),
+    ("# gate on `add_subdirectory(bench)` (CMakeLists.txt:339)",     ["A"]),
+    ("# see tier1.yml:392 for the cache key",                        ["A"]),
+    # The approximation mark does not make it less of a line number.
+    ("//   Mutation: drop the kind check in session.cpp:~555",       ["A"]),
+    # An explicit extension list keeps a host:port and an image tag out.
+    ("// endpoint is http://collector.example.com:4318/v1/logs",     []),
+    ("// image: ghcr.io/o/r/fixpp-conan:1.26.0",                     []),
     # Genuinely foreign: no such file in this tree.
     ("// mirroring QuickFIX's DataDictionary.cpp:271-273",           []),
     ("// upstream README.md:12 in another repo",                     []),
@@ -1356,6 +1386,8 @@ PREFILTER_LINES = [
     # a prefilter is only ever proven against the deciders it feeds.
     "// tilde INSIDE the phrase: the private member at line ~958",
     "// permalink separator: reify_dispatch.hpp L15-24 is the shape oracle",
+    "// non-C++ target: dictionaries/FIX44.xml:2805-2824 declares ExecAllocGrp",
+    "// approximation mark: the guard in session.cpp:~555 suppresses it",
 ]
 
 
@@ -1991,8 +2023,14 @@ def shift_self_test():
 
 
 def self_test():
+    # The resolve universe for these cases. Form A is decided per match by
+    # whether the target RESOLVES, so a non-C++ target must be present here or
+    # its case reads "foreign" and the extension widening looks broken when it
+    # is the FIXTURE that is short.
     files = ["src/session/session.cpp", "src/wire/offset_table.cpp",
-             ".specify/constitution.md", ".specify/2d-threading.md"]
+             ".specify/constitution.md", ".specify/2d-threading.md",
+             "dictionaries/FIX44.xml", "CMakeLists.txt",
+             ".github/workflows/tier1.yml"]
     by_base = basename_map(files)
     bad = 0
     print("forms_on() -- the decision the GATE makes:")
