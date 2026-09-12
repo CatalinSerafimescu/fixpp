@@ -25,14 +25,14 @@ tree as of `main` @ `e798a0f9` (2026-09-10). Each was verified against source, n
 | # | Gap | Evidence |
 |---|---|---|
 | 1 | **No peer-side field readback.** Both counterparties emit one unstructured text line per message — the whole message, SOH replaced by `\|`. No field is named, no value is reported, nothing is compared peer-side. | `phase-9-harness/quickfix-cpp/counterparty/interop_counterparty_main.cpp:211-218`; `phase-9-harness/quickfixj/src/main/java/io/fixpp/phase9harness/quickfixj/InteropCounterparty.java:493-495` |
-| 2 | **The interop sessions run against a sentinel dictionary.** Every cell except one gets `make_minimal_dictionary()` — a **FIX 4.2** dictionary containing a **single Heartbeat message**, whose own header reads *"Do NOT use for dictionary-semantic tests."* These are FIX 4.4 cells. Peer side: `UseDataDictionary=N` on every plain TLS config; `=Y` only on the FIXT variants (`*-tls-fixt*.cfg.in`), which set it through the `TransportDataDictionary`/`AppDataDictionary` pair rather than the single `DataDictionary` key. | `tests/interop/happy/hp_support.hpp:184`; `tests/support/minimal_dictionary.hpp:1-12`; `phase-9-harness/configs/*.cfg.in` |
+| 2 | **The interop sessions run against a sentinel dictionary.** Every cell except one gets `make_minimal_dictionary()` — a **FIX 4.2** dictionary containing a **single Heartbeat message**, whose own header reads *"Do NOT use for dictionary-semantic tests."* These are FIX 4.4 cells. Peer side: `UseDataDictionary=N` on every plain TLS config; `=Y` only on the FIXT variants (`*-tls-fixt*.cfg.in`), which set it through the `TransportDataDictionary`/`AppDataDictionary` pair rather than the single `DataDictionary` key. | `tests/interop/happy/hp_support.hpp`; `tests/support/minimal_dictionary.hpp`; `phase-9-harness/configs/*.cfg.in` |
 | 3 | **`cell_results.yaml` carries no evidence.** `REQUIRED_FIELDS = {id, config, kind, status, matrix_disposition, spec_ref}` — no timestamp, no run identifier, no transcript pointer, no counterparty version. A hand-edited `status: pass` satisfies all nine schema tests. | `tests/interop/cell_results_schema_check_test.py:23` |
 | 4 | **The full live matrix is not gated anywhere.** Only `interop-smoke.yml` exists; it runs **one** cell (`HP-QFcpp-init-fix44-logon-hb-logout`), QuickFIX-cpp only, initiator only. The `interop-full-matrix` / `interop-release-prep` named checks the contract references **do not exist as workflows** — the strings occur only inside `interop-smoke.yml` as a forward reference. | `.github/workflows/`; `.github/workflows/interop-smoke.yml:5-8` |
 
 A fifth finding sizes the actual fidelity deficit. The existing business-message test asserts field
 values **in one direction only**:
 
-- **fixpp-initiator** (`tests/interop/test_business_message_interop.cpp:317-405`) — real value equality
+- **fixpp-initiator** (`test_business_message_interop.cpp`'s `NosExecRptRoundTrip`) — real value equality
   on seven fields of the ExecutionReport the peer built (`cap_exec_type`, `cap_ord_status`,
   `cap_symbol`, `cap_side`, `cap_cum_qty`, `cap_avg_px`, `cap_leaves_qty`).
 - **fixpp-acceptor** (`:407-443`) — **counters only**: `EXPECT_GE(nos_received, 1)`,
@@ -49,12 +49,12 @@ fixpp's typed message tier carries **no per-message business logic**, so there i
 behaviour to assert — only shape, and shape is only meaningfully proven against another engine:
 
 - `validate_<Msg>` is a required-field-presence walk with exactly two rejection sites
-  (`include/fixpp/wire/builder_validate.hpp:74-96`), and its body is a fixed string the emitter
-  writes identically for every message (`tools/codegen/fixpp-codegen/emit_builders.cpp:587-596`).
+  (`validate_required` in `include/fixpp/wire/builder_validate.hpp`), and its body is a fixed string the emitter
+  writes identically for every message (`emit_validate_fn_def` in `tools/codegen/fixpp-codegen/emit_builders.cpp`).
 - `build_<Msg>` never calls it — enforced at generation time by
-  `assert_builder_surface_validator_free` (`emit_builders.cpp:1250-1265`), which throws if a builder
+  `assert_builder_surface_validator_free` (`emit_builders.cpp`), which throws if a builder
   file so much as mentions `validate_`.
-- Read accessors decode the FIX datatype and stop (`include/fixpp/dict/field_traits.hpp:50-98`);
+- Read accessors decode the FIX datatype and stop (`include/fixpp/dict/field_traits.hpp`);
   `ord_type()` returns `char`, not an enum.
 - The generated banner states the design intent verbatim (`Validator.hpp:4-5`): *"Shape/exhaustiveness
   only; behavioural validation is out of scope."*
@@ -368,11 +368,11 @@ inbound validation off (the shipped default) and once with it on — and learns 
 accept identical traffic.
 
 **Why this priority**: `validate_inbound_messages` defaults to `false`
-(`include/fixpp/session/session_config.hpp:477`), and the dictionary-driven validator it gates
-(`include/fixpp/wire/validator.hpp:175-216`, wired at `src/session/session.cpp:2024`) checks enum
+(`include/fixpp/session/session_config.hpp`), and the `dictionary_driven_validator` it gates
+(`include/fixpp/wire/validator.hpp`, wired in `Session::open()` in `src/session/session.cpp`) checks enum
 validity, datatype structure, required fields and group structure — strictly more than the typed tier
 checks. Today it is exercised by exactly one interop cell
-(`tests/interop/happy/hp_fix44_reject_invalid_admin_test.cpp:204-208`). Against a real peer it is
+(`HappyRejectInvalidAdmin.RejectInvalidAdminSurvives` in `tests/interop/happy/hp_fix44_reject_invalid_admin_test.cpp`). Against a real peer it is
 otherwise untested.
 
 **Independent Test**: Run both arms of one combo and assert the accepted-message sets are identical;
@@ -742,7 +742,7 @@ claiming a pass with no corroborating run artifact.
   `validate_inbound_messages` **as the live session resolved it**, not as the cell definition declared it —
   and the gate MUST assert it equals the arm the row claims. ⚠️ Without this the entire US4 deliverable can
   go **vacuously green**: US4 settles that the arm axis is fixpp's `validate_inbound_messages`
-  (`include/fixpp/session/session_config.hpp:477`), and today the only attestation of which arm ran is the
+  (`include/fixpp/session/session_config.hpp`), and today the only attestation of which arm ran is the
   `arm` label the harness writes from its own cell definition — the row asserts what the harness *intended*,
   not what the session *did*. A validation-on arm launched with the flag false produces trivially identical
   accepted sets and passes SC-004 and US4 AC-1/AC-3 with nothing able to detect it.
@@ -1471,7 +1471,7 @@ one that makes US1's dictionary flip observable at all (both engines gate group 
 dictionary):
 
 - **`[FIX50SP2 §3.2] Repeating groups (NoXxx delimiter, ordered field list, nested groups)`** —
-  `spec/coverage-index.md:184`, catalogue rows **W-006 / W-007 / D-010**. The *nested groups* clause is why
+  `spec/coverage-index.md`, catalogue rows **W-006 / W-007 / D-010**. The *nested groups* clause is why
   FR-008b requires a **nested** instance rather than a flat one, and it is what gives the readback
   contract's C-4 (the C++ `m_groups`/`m_fields` trap) and C-5 (the QFJ `computeIfAbsent` trap) a subject.
   089 adds no behaviour to this row; it produces interop evidence for it.
