@@ -114,8 +114,8 @@ decimal_t parse_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
 // readers cross-referencing T008.
 
 // Hand-built CORRECT MassQuote group membership (FIX44.xml component defs:
-// QuotSetGrp:3350-3358 for NoQuoteSets(296); QuotEntryGrp:3219-3247 for
-// NoQuoteEntries(295); InstrumentLeg:2436+ for NoLegs(555)'s InstrumentLeg
+// the QuotSetGrp component for NoQuoteSets(296); QuotEntryGrp for
+// NoQuoteEntries(295); InstrumentLeg for NoLegs(555)'s InstrumentLeg
 // fields). `OffsetTable::group()`'s per-top-level-occurrence boundary walk
 // (src/wire/offset_table.cpp) needs the OUTER group(296)'s member set to
 // include every tag transitively nested under a QuoteSet occurrence (302

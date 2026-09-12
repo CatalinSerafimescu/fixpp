@@ -2069,8 +2069,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // ── 041-validation-gate-wiring FIX-2 + per-message-alloc fix:
 //    validate_inbound_ (synchronous, no sub-coroutine frame)
 //
-// Extracted from the three verbatim validate-gate blocks (NotConnected:1839,
-// Active:2462, LogonSent:3528). Each block built the same kInboundParseArena
+// Extracted from the three verbatim validate-gate blocks (the NotConnected,
+// Active and LogonSent arms). Each block built the same kInboundParseArena
 // stack arena, re-framed, parsed, ran validator_->validate, and emitted a Reject.
 // Now collapsed here; emit_session_reject_ is inlined at each call site so the
 // PASS path (returns nullopt) is coroutine-frame-free and alloc-free.
