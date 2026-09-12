@@ -144,7 +144,7 @@ carries ten keys, so the cost it was priced at was never real. Leaving the rejec
   with **no** declared minimum FAILS rather than defaulting. Newer is permitted only if the format is
   backward-compatible; the contract states which changes are.
 - ⚠️ **This is distinct from the existing availability probe.** `probe_counterparty()`
-  (`tests/interop/support/counterparty_probe.hpp:178`) answers *is a peer listening* and yields a
+  (`tests/interop/support/counterparty_probe.hpp`) answers *is a peer listening* and yields a
   **skip**. The hello answers *is it the right peer* and yields a **failure**. Collapsing the two
   reintroduces exactly the silence this feature exists to remove.
 - ⚠️ `dictionary_enabled == false` on a cell whose witnesses include repeating groups ⇒ **FAIL**. Under
