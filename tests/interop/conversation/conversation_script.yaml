@@ -1,0 +1,517 @@
+# conversation_script.yaml — the EXECUTABLE conversation (spec.md FR-008a, T012).
+#
+# ⛔ INDEPENDENT PROVENANCE. This file is authored FROM spec.md ONLY — its
+# Requirements section and its "Conversation census" section (the B-01..B-12 /
+# A-* tables, the applicability table, the expansion rule). It is NOT generated
+# from, diffed against, or read alongside `census.yaml`: plan.md's own table
+# ("SC-009a's two operands are FILES, and they have separate provenance") says
+# a script derived from the census (or vice versa) turns SC-009a's equality
+# into a tautology and deletes the requirement rather than implementing it.
+#
+# Content-addressing (FR-008c): this file's digest is computed by the shim
+# (`phase-9-harness/tools/run_interop_cell.py::script_digest_hex`, lowercase-hex
+# SHA-256 over the raw bytes) and pinned into every hello record. Nothing about
+# digest computation is encoded in this file itself — see data-model.md §1.
+#
+# `direction` wire values are `fixpp-to-peer` / `peer-to-fixpp` (hyphens),
+# absolute from fixpp's point of view regardless of which process emits the
+# record — spec.md § Conversation census, confirmed byte-for-byte against the
+# constants both counterparties already emit
+# (`interop_counterparty_main.cpp:81-82`: kDirFixppToPeer/kDirPeerToFixpp).
+#
+# ── SCHEMA — data-model.md §7 plus two documented extensions ────────────────
+#
+# §7's literal table (step_id, step, phase, msg_type, originator,
+# expects_witness, intent_fields, typed_reads, depends_on, runtime_generated)
+# is used EXACTLY for every `business_steps[]` entry's message content.
+#
+# Two extensions beyond §7's literal table, both load-bearing and both
+# necessary for THIS file (not census.yaml) to be the independent
+# script-derived operand of SC-009a — without them the expansion rule
+# (spec.md § "The expansion rule — one census row to N completeness keys")
+# has no per-step combo-applicability or per-combo-occurrence input to consume
+# on the script side, and FR-009's "declared with a reason, not silently
+# skipped" would have nowhere to live on this side of the equality:
+#
+#   1. `applicable_combos` (list of combo_id) and, for business steps,
+#      `occurrences` (map combo_id -> list of declared occurrence ints) are
+#      added per step. Every business step below states these EXPLICITLY
+#      (not "default all four, override on exception") because that is the
+#      literal shape the expansion rule consumes ("for each combo c in s's
+#      applicable combos ... for each o in s's declared occurrence values for
+#      that combo").
+#   2. `admin_steps[]` entries use a `messages: [...]` list (each entry
+#      carrying its own msg_type/originator/direction/intent_fields) instead
+#      of §7's single flat msg_type/originator pair, because an admin
+#      exchange (Logon/Logon, TestRequest->Heartbeat, ResendRequest->GapFill,
+#      the malformed-message->Reject pair) is inherently two messages, and
+#      §7's flat schema models exactly one. FR-008a itself scopes mandatory
+#      concrete-value declaration to "every business step" — admin steps
+#      carry `expects_witness: false` (data-model §7 / § Admin steps) and are
+#      declared only to the extent needed to make each exchange executable
+#      and unambiguous, not because FR-008a compels field-level content there.
+#
+# ── ADMIN-STEP DESIGN NOTES (not stated by data-model.md/spec.md, decided here
+#    to make FR-008's admin repertoire concretely executable) ────────────────
+#
+# * A-GAPFILL and A-REJECT are TWO DISTINCT provocations, deliberately kept
+#   separate from A-RESEND (which spec.md's own admin-steps table scopes to
+#   C3/C4 only — the QuickFIX-J app-replay seam, L-021-3 / deferred:
+#   qfcpp-no-possdup-injection). A-GAPFILL is a fixpp-originated ResendRequest
+#   over a range containing ONLY prior admin traffic (the A-TESTREQ exchange),
+#   which a FIX engine answers with SequenceReset-GapFill rather than a
+#   verbatim resend — this is the same mechanism the existing QuickFIX-J
+#   counterparty already exercises for an unrelated cell
+#   (`InteropCounterparty.java:615-626`, `INTEROP_CP_RECOVERY_OUTBOUND`:
+#   `new ResendRequest(new BeginSeqNo(1), new EndSeqNo(0))` answered by fixpp's
+#   own GapFill), applied here in the direction the census requires it
+#   witness-free on all four combos.
+# * A-REJECT is FIXPP-ORIGINATED (fixpp sends a TestRequest carrying Symbol(55),
+#   a field FIX 4.4 defines but does not declare for TestRequest) so that the
+#   counterparty's own dictionary (FR-002: always UseDataDictionary=Y for this
+#   feature's cells) is what rejects it — independent of fixpp's own
+#   inbound-validation arm toggle (FR-010), which only affects messages FIXPP
+#   receives. This keeps A-REJECT's outcome identical under both arms, as
+#   FR-010 requires for every step in the script. Precedent for the mechanism:
+#   `InteropCounterparty.java:563-580`'s existing (env-gated, pre-089) comment
+#   calls this exact field placement "the very out-of-context property".
+# * BeginSeqNo(7)/EndSeqNo(16) on both ResendRequest messages, and NewSeqNo(36)
+#   on the GapFill reply, are declared `runtime_generated` rather than literal
+#   integers: the exact wire sequence number depends on how many prior admin
+#   messages were exchanged, which this file does not hardcode (Logon always
+#   consumes 1 per direction, but pinning the rest as literals here would silently
+#   break under any timing/retry variation). This mirrors the existing
+#   QuickFIX-J counterparty's own pattern for a resend range it cannot
+#   pre-declare either: `InteropCounterparty.java:791-811`,
+#   `new ResendRequest(new BeginSeqNo(nosSeq), new EndSeqNo(nosSeq))` — computed
+#   from the actually-observed inbound seq_num, never a literal.
+#
+# ── READER CENSUS (T012 due diligence, recorded here so the next task does not
+#    have to re-derive it) ────────────────────────────────────────────────────
+#
+# Neither pinned counterparty parses this file's structure today. Both read it
+# ONLY to compute its SHA-256 for the hello record's `script_digest`:
+#   - C++: `interop_counterparty_main.cpp:423`,
+#     `interop_readback::sha256_file_hex(script_path)`.
+#   - Java: `InteropCounterparty.java:299`, `ReadbackJsonl.sha256FileHex(...)`.
+#   Neither includes a YAML parser (no `yaml`/`Yaml`/`SnakeYaml` import in
+#   either file); neither reacts to `step_id`, `msg_type`, `intent_fields`, or
+#   any other key below — their business/admin message content is today
+#   entirely env-var-gated legacy code with hardcoded literals (e.g.
+#   `Symbol("AAPL")`, `Price(190.5)`, `ClOrdID("CPORD001")` in
+#   `interop_counterparty_main.cpp:502-531`), driven by pre-089 cells (BM-*,
+#   PR-*, RR-*) that do not set `INTEROP_CP_RUN_ID` and so never enter the
+#   089 readback path at all. The shim (`run_interop_cell.py`) is the same:
+#   `script_digest_hex()` is `hashlib.sha256(script_path.read_bytes())`
+#   — raw bytes, no structural read — and `ConversationMeta.script_path` (line
+#   636) is a bare `Path`, not wired to any fixed cell today.
+#   No `tests/interop/` gtest source references `conversation_script` at all
+#   (`grep -rn conversation_script tests/interop/` returns nothing outside this
+#   file and `census.yaml`'s own header comment).
+#   Conclusion: there is no live structural reader on either side today, so
+#   there is no schema-vs-parser disagreement to report for T012 — driving
+#   fixpp and both counterparties from this file's structure is later
+#   implementation work. This file is authoritative for §7's schema plus the
+#   two documented extensions above.
+
+business_steps:
+  - step_id: B-01
+    step: 5
+    phase: business
+    msg_type: "D"        # NewOrderSingle
+    originator: fixpp
+    direction: fixpp-to-peer
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences:
+      # Occurrence 1 is the fixpp-side app replay (PossDupFlag(43)=Y at the
+      # same seq_num) driven by A-RESEND. Not applicable to C1/C2: QuickFIX-cpp
+      # "never resends an already-seen frame" and strips PossDupFlag(43)/
+      # OrigSendingTime(122) (L-021-3, deferred:qfcpp-no-possdup-injection) —
+      # spec.md § Declared inapplicable combinations.
+      C1: [0]
+      C2: [0]
+      C3: [0, 1]
+      C4: [0, 1]
+    depends_on: []
+    intent_fields:
+      - { path: "11",  value: "FXCL-B01-0001" }   # ClOrdID
+      - { path: "54",  value: "1" }               # Side = BUY
+      - { path: "40",  value: "2" }               # OrdType = LIMIT
+      - { path: "60",  value: "20260910-12:00:00.000" }  # TransactTime
+      - { path: "55",  value: "AAPL" }            # Symbol
+      - { path: "38",  value: "100" }             # OrderQty
+      - { path: "44",  value: "190.5" }           # Price
+      # FR-008b: at least one multi-instance NESTED repeating group. Two
+      # NoPartyIDs(453) instances; the first carries two nested
+      # NoPartySubIDs(802) instances, the second carries one — so the
+      # multi-instance property holds at BOTH the outer and inner level.
+      - { path: "453[0].448", value: "BROKER01" }      # PartyID
+      - { path: "453[0].447", value: "D" }             # PartyIDSource = PROPRIETARY
+      - { path: "453[0].452", value: "1" }             # PartyRole = EXECUTING_FIRM
+      - { path: "453[0].802[0].523", value: "SUBA" }   # PartySubID
+      - { path: "453[0].802[0].803", value: "1" }      # PartySubIDType = FIRM
+      - { path: "453[0].802[1].523", value: "SUBB" }
+      - { path: "453[0].802[1].803", value: "2" }      # PartySubIDType = PERSON
+      - { path: "453[1].448", value: "CLIENT01" }
+      - { path: "453[1].447", value: "D" }
+      - { path: "453[1].452", value: "3" }             # PartyRole = CLIENT_ID
+      - { path: "453[1].802[0].523", value: "SUBC" }
+      - { path: "453[1].802[0].803", value: "3" }      # PartySubIDType = SYSTEM
+    typed_reads: ["11", "54", "40", "60", "55", "38", "44"]
+    runtime_generated: []
+
+  - step_id: B-02
+    step: 6
+    phase: business
+    msg_type: "8"        # ExecutionReport (New ack)
+    originator: peer
+    direction: peer-to-fixpp
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: [B-01]
+    intent_fields:
+      - { path: "150", value: "0" }    # ExecType = NEW
+      - { path: "39",  value: "0" }    # OrdStatus = NEW
+      - { path: "54",  value: "1" }    # Side (echo B-01)
+      - { path: "151", value: "100" }  # LeavesQty
+      - { path: "14",  value: "0" }    # CumQty
+      - { path: "6",   value: "0" }    # AvgPx
+      - { path: "55",  value: "AAPL" } # Symbol (echo)
+    typed_reads: ["150", "39", "54", "151", "14", "6", "55", "37", "17"]
+    runtime_generated: ["37", "17"]    # OrderID, ExecID — peer's own counter
+
+  - step_id: B-03
+    step: 7
+    phase: business
+    msg_type: "F"        # OrderCancelRequest
+    originator: fixpp
+    direction: fixpp-to-peer
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: [B-02]
+    intent_fields:
+      - { path: "41", value: "FXCL-B01-0001" }  # OrigClOrdID
+      - { path: "11", value: "FXCL-B03-0001" }  # ClOrdID
+      - { path: "54", value: "1" }
+      - { path: "60", value: "20260910-12:01:00.000" }
+      - { path: "55", value: "AAPL" }
+      # FR-018's frame-derivation spurious-hit arm mutates this value to
+      # ACCT0009 (same length, dictionary-declared for 35=F, nothing else
+      # branches on it) — spec.md § Field content the census presumes. B-03 is
+      # chosen because it has exactly one declared occurrence on all four
+      # combos.
+      - { path: "1", value: "ACCT0001" }        # Account
+    typed_reads: ["41", "11", "54", "60", "55", "1"]
+    runtime_generated: []
+
+  - step_id: B-04
+    step: 8
+    phase: business
+    msg_type: "9"        # OrderCancelReject
+    originator: peer
+    direction: peer-to-fixpp
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: [B-03]
+    intent_fields:
+      - { path: "11",  value: "FXCL-B03-0001" }  # ClOrdID (echo)
+      - { path: "41",  value: "FXCL-B01-0001" }  # OrigClOrdID
+      - { path: "39",  value: "0" }              # OrdStatus = NEW (order stays open)
+      - { path: "434", value: "1" }              # CxlRejResponseTo = ORDER_CANCEL_REQUEST
+      - { path: "102", value: "0" }              # CxlRejReason = TOO_LATE_TO_CANCEL
+    typed_reads: ["11", "41", "39", "434", "102", "37"]
+    runtime_generated: ["37"]   # OrderID — echoes the peer's B-02 value
+
+  - step_id: B-05
+    step: 9
+    phase: business
+    msg_type: "G"        # OrderCancelReplaceRequest
+    originator: fixpp
+    direction: fixpp-to-peer
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: [B-04]
+    intent_fields:
+      - { path: "41", value: "FXCL-B01-0001" }  # OrigClOrdID
+      - { path: "11", value: "FXCL-B05-0001" }  # ClOrdID
+      - { path: "54", value: "1" }
+      - { path: "60", value: "20260910-12:02:00.000" }
+      - { path: "40", value: "2" }
+      - { path: "55", value: "AAPL" }
+      - { path: "38", value: "150" }
+      - { path: "44", value: "191.25" }
+      # C-11 live-path charset arm (contracts/readback-jsonl.md § C-11):
+      # EncodedText(355) carries the raw byte 0xff, which is not valid UTF-8,
+      # so it is declared via value_b64 (§2: exactly one of value/value_b64).
+      # EncodedTextLen(354) is the DECODED byte count (12), never a literal
+      # guess — plan.md's C-11 row, "derived from the value's octet count".
+      # value_b64 decodes to bytes 45 4e 43 4f 44 45 44 ff 54 45 58 54
+      # ("ENCODED" + 0xFF + "TEXT"), 12 octets.
+      - { path: "354", value: "12" }
+      - { path: "355", value_b64: "RU5DT0RFRP9URVhU" }
+    typed_reads: ["41", "11", "54", "60", "40", "55", "38", "44"]
+    runtime_generated: []
+
+  - step_id: B-06
+    step: 10
+    phase: business
+    msg_type: "8"        # ExecutionReport (Replaced)
+    originator: peer
+    direction: peer-to-fixpp
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: [B-05]
+    intent_fields:
+      - { path: "150", value: "5" }    # ExecType = REPLACED
+      - { path: "39",  value: "0" }    # OrdStatus = NEW
+      - { path: "54",  value: "1" }
+      - { path: "151", value: "150" }  # LeavesQty (post-replace)
+      - { path: "14",  value: "0" }
+      - { path: "6",   value: "0" }
+      - { path: "55",  value: "AAPL" }
+      - { path: "41",  value: "FXCL-B05-0001" }  # OrigClOrdID
+    typed_reads: ["150", "39", "54", "151", "14", "6", "55", "41", "37", "17"]
+    runtime_generated: ["37", "17"]   # fresh OrderID/ExecID for the replaced order
+
+  - step_id: B-07
+    step: 11
+    phase: business
+    msg_type: "D"        # NewOrderSingle (peer-originated)
+    originator: peer
+    direction: peer-to-fixpp
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: []
+    intent_fields:
+      - { path: "11", value: "PRCL-B07-0001" }
+      - { path: "54", value: "2" }    # Side = SELL
+      - { path: "40", value: "2" }
+      - { path: "60", value: "20260910-12:03:00.000" }
+      - { path: "55", value: "MSFT" }
+      - { path: "38", value: "50" }
+      - { path: "44", value: "410.75" }
+    typed_reads: ["11", "54", "40", "60", "55", "38", "44"]
+    runtime_generated: []
+
+  - step_id: B-08
+    step: 12
+    phase: business
+    msg_type: "8"        # ExecutionReport (New ack), fixpp-originated
+    originator: fixpp
+    direction: fixpp-to-peer
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: [B-07]
+    intent_fields:
+      - { path: "150", value: "0" }
+      - { path: "39",  value: "0" }
+      - { path: "54",  value: "2" }    # echo B-07
+      - { path: "151", value: "50" }
+      - { path: "14",  value: "0" }
+      - { path: "6",   value: "0" }
+      - { path: "55",  value: "MSFT" }
+    typed_reads: ["150", "39", "54", "151", "14", "6", "55", "37", "17"]
+    runtime_generated: ["37", "17"]   # fixpp's own OrderID/ExecID generation
+
+  - step_id: B-09
+    step: 14
+    phase: business
+    msg_type: "F"        # OrderCancelRequest (peer-originated)
+    originator: peer
+    direction: peer-to-fixpp
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: [B-08]
+    intent_fields:
+      - { path: "41", value: "PRCL-B07-0001" }
+      - { path: "11", value: "PRCL-B09-0001" }
+      - { path: "54", value: "2" }
+      - { path: "60", value: "20260910-12:04:00.000" }
+      - { path: "55", value: "MSFT" }
+      - { path: "1",  value: "ACCT0002" }
+    typed_reads: ["41", "11", "54", "60", "55", "1"]
+    runtime_generated: []
+
+  - step_id: B-10
+    step: 15
+    phase: business
+    msg_type: "9"        # OrderCancelReject, fixpp-originated
+    originator: fixpp
+    direction: fixpp-to-peer
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: [B-09]
+    intent_fields:
+      - { path: "11",  value: "PRCL-B09-0001" }
+      - { path: "41",  value: "PRCL-B07-0001" }
+      - { path: "39",  value: "0" }
+      - { path: "434", value: "1" }
+      - { path: "102", value: "0" }
+    typed_reads: ["11", "41", "39", "434", "102", "37"]
+    runtime_generated: ["37"]   # OrderID — echoes fixpp's own B-08 value
+
+  - step_id: B-11
+    step: 16
+    phase: business
+    msg_type: "G"        # OrderCancelReplaceRequest (peer-originated)
+    originator: peer
+    direction: peer-to-fixpp
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: [B-10]
+    intent_fields:
+      - { path: "41", value: "PRCL-B07-0001" }
+      - { path: "11", value: "PRCL-B11-0001" }
+      - { path: "54", value: "2" }
+      - { path: "60", value: "20260910-12:05:00.000" }
+      - { path: "40", value: "2" }
+      - { path: "55", value: "MSFT" }
+      - { path: "38", value: "75" }
+      - { path: "44", value: "408.1" }
+    typed_reads: ["41", "11", "54", "60", "40", "55", "38", "44"]
+    runtime_generated: []
+
+  - step_id: B-12
+    step: 17
+    phase: business
+    msg_type: "8"        # ExecutionReport (Replaced), fixpp-originated
+    originator: fixpp
+    direction: fixpp-to-peer
+    expects_witness: true
+    applicable_combos: [C1, C2, C3, C4]
+    occurrences: { C1: [0], C2: [0], C3: [0], C4: [0] }
+    depends_on: [B-11]
+    intent_fields:
+      - { path: "150", value: "5" }
+      - { path: "39",  value: "0" }
+      - { path: "54",  value: "2" }
+      - { path: "151", value: "75" }
+      - { path: "14",  value: "0" }
+      - { path: "6",   value: "0" }
+      - { path: "55",  value: "MSFT" }
+      - { path: "41",  value: "PRCL-B11-0001" }
+    typed_reads: ["150", "39", "54", "151", "14", "6", "55", "41", "37", "17"]
+    runtime_generated: ["37", "17"]
+
+# ── Admin steps — mandated by FR-008, carrying no witness (expects_witness:
+# false throughout — data-model.md §7 / spec.md § Admin steps). Part of the
+# script's step inventory so a step deletion/addition is defined over the
+# whole script, not just the business subset.
+admin_steps:
+  - step_id: A-LOGON
+    step: 1
+    phase: logon
+    expects_witness: false
+    applicable_combos: [C1, C2, C3, C4]
+    depends_on: []
+    description: >-
+      Logon / Logon. Which side sends first is a session-ROLE property (the
+      initiator always sends first: C1/C3 fixpp initiates, C2/C4 the peer
+      initiates), not a per-step originator choice — so unlike every other
+      step here it cannot be pinned to a fixed fixpp/peer `originator`.
+      FR-008a scopes mandatory concrete field-value declaration to business
+      steps, so no message content is scripted for this exchange.
+
+  - step_id: A-TESTREQ
+    step: 2
+    phase: admin
+    expects_witness: false
+    applicable_combos: [C1, C2, C3, C4]
+    depends_on: [A-LOGON]
+    messages:
+      - msg_type: "1"      # TestRequest
+        originator: peer
+        direction: peer-to-fixpp
+        intent_fields:
+          - { path: "112", value: "TR-ADMIN-0001" }   # TestReqID
+      - msg_type: "0"      # Heartbeat (reply, echoes TestReqID)
+        originator: fixpp
+        direction: fixpp-to-peer
+        intent_fields:
+          - { path: "112", value: "TR-ADMIN-0001" }
+
+  - step_id: A-GAPFILL
+    step: 3
+    phase: admin
+    expects_witness: false
+    applicable_combos: [C1, C2, C3, C4]
+    depends_on: [A-TESTREQ]
+    messages:
+      - msg_type: "2"      # ResendRequest
+        originator: fixpp
+        direction: fixpp-to-peer
+        runtime_generated: ["7", "16"]   # BeginSeqNo, EndSeqNo
+        note: >-
+          Covers an admin-only range of the peer's outbound sequence, with no
+          application message in it, which the peer answers with
+          SequenceReset-GapFill rather than a verbatim resend. How the gap is
+          induced is the cells' choice; the condition is only that no
+          application message falls inside the requested range.
+      - msg_type: "4"      # SequenceReset (GapFill)
+        originator: peer
+        direction: peer-to-fixpp
+        intent_fields:
+          - { path: "123", value: "Y" }   # GapFillFlag
+        runtime_generated: ["36"]         # NewSeqNo
+
+  - step_id: A-REJECT
+    step: 4
+    phase: admin
+    expects_witness: false
+    applicable_combos: [C1, C2, C3, C4]
+    depends_on: [A-GAPFILL]
+    messages:
+      - msg_type: "1"      # TestRequest carrying an out-of-context field
+        originator: fixpp
+        direction: fixpp-to-peer
+        intent_fields:
+          - { path: "112", value: "TR-ADMIN-0002" }
+          # Symbol(55) is a defined FIX 4.4 tag but is not declared for
+          # TestRequest in FIX44.xml — the counterparty's own data dictionary
+          # (FR-002) rejects it at the session layer.
+          - { path: "55", value: "OUT-OF-CONTEXT" }
+      - msg_type: "3"      # Reject
+        originator: peer
+        direction: peer-to-fixpp
+        runtime_generated: ["45"]   # RefSeqNum — the malformed TestRequest's own seq_num
+        intent_fields:
+          - { path: "371", value: "55" }  # RefTagID
+          - { path: "372", value: "1" }   # RefMsgType = TestRequest
+          - { path: "373", value: "2" }   # SessionRejectReason = TAG_NOT_DEFINED_FOR_THIS_MESSAGE_TYPE
+        typed_reads: ["371", "372", "373"]
+
+  - step_id: A-RESEND
+    step: 13
+    phase: admin
+    expects_witness: false
+    # QuickFIX-cpp "never resends an already-seen frame" and strips
+    # PossDupFlag(43)/OrigSendingTime(122) — L-021-3,
+    # deferred:qfcpp-no-possdup-injection (spec.md § Declared inapplicable
+    # combinations). Only QuickFIX-J drives this induction seam.
+    applicable_combos: [C3, C4]
+    depends_on: [B-08]
+    drives: "B-01 occurrence 1 — the fixpp-side app replay with PossDupFlag(43)=Y at the same seq_num"
+    messages:
+      - msg_type: "2"      # ResendRequest
+        originator: peer
+        direction: peer-to-fixpp
+        runtime_generated: ["7", "16"]   # BeginSeqNo, EndSeqNo — cover B-01's fixpp-outbound seq_num
+
+  - step_id: A-LOGOUT
+    step: 18
+    phase: logout
+    expects_witness: false
+    applicable_combos: [C1, C2, C3, C4]
+    depends_on: [B-12, A-RESEND]
+    description: "Logout / Logout — session teardown, no scripted message content (FR-008a scope, as A-LOGON)."

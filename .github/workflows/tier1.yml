@@ -2397,6 +2397,20 @@ jobs:
       - name: "Regression pin — #289 mock-clock staging sweep controls"
         run: bash ci/mock-clock-staging-sweep.sh
 
+      # 089 (specs/089-quickfix-interop-conversation) T005/T006/T007 — the disk
+      # gate every configure/build task in that feature depends on. Follows
+      # the same ci/<name>.sh + ci/test-<name>.sh convention as every other
+      # pin in this job (contracts/089-quickfix-interop-conversation/
+      # disk-preflight.md § "The gate itself"). Every RED cell asserts its own
+      # diagnostic token, not merely a non-zero exit — same discipline as the
+      # #255 wheel-payload pin this contract names as precedent. Two cells
+      # drive MUTANT copies (never the tracked script) to prove the
+      # spurious-hit arms A-7/A-8 would pass WRONGLY without the D-9/D-10
+      # guards, then RED the real script on the identical fixture. Buildless
+      # — bash + coreutils, no real disk, no /proc reads (both overridden).
+      - name: "Regression pin — 089 disk-preflight gate (D-1..D-11, spurious-hit arms)"
+        run: bash ci/test-disk-preflight.sh
+
       # ci/cxx_blank.py is the SHARED lexer three of the gates above resolve at
       # runtime, and #289 batch 19 moved `blank_unevaluated` into it and replaced
       # ci/pump-census.sh's verbatim second copy of the whole module with an import.

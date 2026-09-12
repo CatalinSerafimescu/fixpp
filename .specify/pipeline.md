@@ -95,7 +95,22 @@ PHASE 3 — IMPLEMENT
                                       converge to SHIP-AS-IS or SHIP-WITH-FIXES + documented waivers
 
 PHASE 4 — PUBLISH + MERGE
-15. git push -u origin <branch>       publish (only after Codex converged)
+15. SecondBrain pass, THEN            TWO PARTS, in this order.
+    git push -u origin <branch>       (a) Apply close-out.md row 3's brain/ update ON
+                                      THE BRANCH, then run BOTH freshness halves
+                                      LOCALLY — neither CI job can cover the other's:
+                                        · in-repo `refs` — run what
+                                          .github/workflows/brain-freshness.yml runs
+                                          (DERIVE it from the workflow; do not copy a
+                                          command list here — that job also carries the
+                                          workflow linter and both line-citation gates)
+                                        · `refs_external` — the parent's
+                                          tools/brain-external-sweep.sh, the WRAPPER,
+                                          never a bare `check_brain.py sweep`. Report
+                                          the execution COUNT.
+                                      (b) publish — only after Codex converged.
+                                      Rationale + the Gate-B-scoping rule: close-out.md
+                                      row 3.
 16. gh pr create                      body links to verify + Gate A + Gate B records
 17. Apply gate-{a,b}-{done,waived}    paired-evidence rule [const §XVII.8]
                                       via gh pr edit OR /gate-b's Post-loop §3 if re-run on PR
@@ -251,6 +266,30 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
   learning; the next 15 should arrive automatically, not from
   recollection. Common case is no-op (mature features re-use known
   patterns); the surface is cheap when there is nothing to capture.
+
+- **[K] APPLIED (user-directed 2026-09-10).** The SecondBrain update moves from
+  close-out (step 19 / `close-out.md` row 3) to **step 15a, on the branch, before
+  the push**, and close-out row 3 becomes a **re-check** with a stated trigger
+  rather than the place the work happens. Root cause: brain/ edits were landing
+  as post-merge direct-to-`main` pushes or separate PRs (`337`: `fcbcf7cb`;
+  `pr367-264`: `89f453ef`; `360-361`: PR #383), so the freshness instruments
+  first ran on a commit **nobody was going to review** — and `brain-freshness.yml`
+  is **not in branch protection's required set** (derived from
+  `repos/.../branches/main/protection`; required = `Gate A`, `Gate B`,
+  `tier{1,2,3}-required`), so a red there does not block anything. It is
+  unobserved, not blocking, which is the argument for running the instruments
+  locally rather than letting CI be the discovery channel. Folded into step 15
+  rather than inserted as a new step or a `14b`: `[G]` normalized this file to
+  integers, and `close-out.md` plus the constitution cite these steps **by
+  number** — a renumber rots every one of those citations (the #310 class).
+  Cost of folding the brain edit into the feature branch is **zero extra CI**:
+  the tiers already run on the PR, and `brain-freshness.yml` triggers on
+  `pull_request: branches: ["**"]` ungated by labels. Two further points carried
+  in `close-out.md` row 3 rather than repeated here: the second trigger arm
+  (close-out itself writes `phases/**` and `decisions/**`, which is exactly what
+  `refs_external` names, so it can dangle a ref **after** the pre-push pass), and
+  the Gate-B scoping question a commit inserted between steps 14 and 15 raises.
+
 
 No conflicts found on: `/clarify` before `/plan` (§XVI.3), Gate A before
 `/tasks` (§XVII.1), `/speckit-verify` mandatory + non-RED (§XVII.8),

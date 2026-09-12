@@ -23,7 +23,7 @@
 // Variant C — bilateral_strict (the DEFAULT policy, no reset knob): NO
 //   durable reset exists on this path; the reconnect Logon carries 34=k
 //   (k>1) WITH 141=Y — the pre-existing, DEFERRED L-029-3 malformed-Logon
-//   limitation (behaviors-and-limitations.md:1252-1265). This variant is a
+//   limitation (behaviors-and-limitations.md's L-029-3). This variant is a
 //   REGRESSION GUARD ONLY: it asserts 059 does not worsen L-029-3 (the
 //   reconciled k is non-1, same as an un-reconciled k+1 would be) — it does
 //   NOT assert clean recovery.

@@ -34,6 +34,7 @@ endif()
 add_library(interop_support STATIC
     support/golden_diff.cpp
     support/interop_fixture.cpp
+    support/witness_comparator.cpp
 )
 target_include_directories(interop_support PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"            # consumers: #include "support/..."
@@ -127,6 +128,27 @@ fixpp_add_interop_test(
     SOURCES support_smoke_test.cpp support/interop_fixture_test.cpp
 )
 
+# ── 089 T018: the witness producer — fixpp's readback_jsonl Stream + the
+# shared comparator (data-model.md §4). readback_jsonl.hpp is standard-library
+# only; witness_comparator.{hpp,cpp} additionally depends on fixpp::dict (the
+# decimal-type resolver, gate-b fix round) — both linked into interop_support
+# like golden_diff.cpp above, and registered here the same way support tests
+# are (interop_support_smoke_test).
+fixpp_add_interop_test(
+    NAME interop_readback_witness_test
+    GROUP happy
+    LABEL "interop;089;interop-support"
+    SOURCES support/readback_jsonl_test.cpp support/witness_comparator_test.cpp
+            happy/hp_support_dictionary_seam_test.cpp
+            support/intent_file_test.cpp
+)
+# Self-contained fallback dictionary path for the decimal-type resolver when
+# FIXPP_FIX44_DICT_XML is unset (a plain, non-shim `ctest` run) — same pattern
+# as tests/dictionary/CMakeLists.txt's FIXPP_DICT_DATA_DIR.
+target_compile_definitions(interop_readback_witness_test PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+
 # ── US1 happy-path drivers (T010, T016) ───────────────────────────────────────
 # All-TLS baseline (FR-025): every cell links OpenSSL/ZLIB (TLS option). Live
 # matrix cells skip-with-reason when the counterparty is absent (FR-023); the
@@ -199,6 +221,40 @@ fixpp_add_interop_test(
     GROUP happy
     LABEL "interop;016;interop-happy;us1;reconnect"
     SOURCES happy/hp_fix44_disconnect_reconnect_noreset_test.cpp
+    TLS
+)
+
+# ── 089 Phase 5 (US3): combo-neutral conversation driver, one binary/gtest
+# for every combo (C1 first; C2-C4 join in later rounds) — the combo is
+# selected at runtime via INTEROP_FIXPP_COMBO_ID, the same env-selection
+# pattern INTEROP_FIXPP_ARM already uses. Needs the generated FIX 4.4 read
+# flyweights (fixpp::v44::*) — same codegen-include pattern as
+# interop_business_message_interop_test above.
+if(TARGET fixpp_codegen_generate)
+    fixpp_add_interop_test(
+        NAME interop_conversation_test
+        GROUP happy
+        LABEL "interop;089;interop-conversation;us3"
+        SOURCES conversation/conv_cell_test.cpp
+        TLS
+        EXTRA_LIBS fixpp_dictionary
+    )
+    add_dependencies(interop_conversation_test fixpp_codegen_generate)
+    target_include_directories(interop_conversation_test PRIVATE
+        "${CMAKE_BINARY_DIR}/_codegen/include"
+    )
+endif()
+
+# ── 089 T062a/T062b: the FR-010a divergence probe -- a SEPARATE binary from
+# interop_conversation_test (see probe_cell_test.cpp's header comment for
+# why a branch inside Conversation.Cell was rejected). No codegen typed
+# accessors needed (the probe asserts nothing about typed reads), so no
+# fixpp_codegen_generate dependency.
+fixpp_add_interop_test(
+    NAME interop_probe_test
+    GROUP happy
+    LABEL "interop;089;interop-conversation;us4"
+    SOURCES conversation/probe_cell_test.cpp
     TLS
 )
 

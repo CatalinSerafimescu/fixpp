@@ -36,6 +36,8 @@
 
 #include <gtest/gtest.h>
 
+#include <openssl/sha.h>
+
 #include <asio/any_io_executor.hpp>
 #include <chrono>
 #include <cstdint>
@@ -46,6 +48,7 @@
 #include <optional>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 
@@ -192,6 +195,81 @@ inline fixpp::session::SessionConfig make_session_config(
     c.reconnect_endpoint = endpoint;
     c.transport_send = [](std::span<const std::byte>) {};  // rebound on attach (E-1/R7(b)).
     return c;
+}
+
+// ---------------------------------------------------------------------------
+// production_dictionary_and_digest — 089 T031 opt-in seam (FR-001, R-5a;
+// data-model.md §1a `dictionary_digest`).
+//
+// make_session_config() above is UNCHANGED and every existing call site keeps
+// `make_minimal_dictionary()` byte-for-byte (FR-001/R-5a scope this feature's
+// own cells only, not existing live cells). A conversation cell that wants the
+// production FIX 4.4 dictionary calls this separately and overwrites
+// SessionConfig::dictionary after construction:
+//
+//   auto c = hp::make_session_config(...);
+//   auto prod = hp::production_dictionary_and_digest();
+//   c.dictionary = prod.dictionary;
+//
+// The digest is the lowercase-hex SHA-256 of the XML bytes actually handed to
+// the loader (hashed from the in-memory buffer read from disk, never
+// re-derived from the path — §1a requires the digest of "the dictionary XML
+// the session loaded"). Throws std::runtime_error if the file cannot be
+// opened — construction-time exception is permitted here per `[arch §5.3]`
+// (this runs at test/session-open time, not on the hot path).
+// ---------------------------------------------------------------------------
+struct ProductionDictionary {
+    std::shared_ptr<const fixpp::dict::Dictionary> dictionary;
+    std::string dictionary_digest;  // lowercase-hex SHA-256, 64 chars
+};
+
+// Resolves the production FIX44.xml FILE PATH: env `FIXPP_FIX44_DICT_XML`
+// first — this is the full-path knob `run_interop_cell.py` actually sets on
+// the gtest's environment (`FIXPP_FIX44_DICT_XML = LIB_ROOT / "dictionaries"
+// / "FIX44.xml"`, threaded into `env["FIXPP_FIX44_DICT_XML"]` at the
+// `_run_initiator_cell`/`_run_acceptor_cell` launch sites) and the SAME file
+// T033's `fix44_dictionary_sha256_hex()` hashes on the harness side — so
+// under the harness this seam and T033's cross-check are guaranteed to name
+// the same file. Falls back to the `FIXPP_DICT_DATA_DIR` compile definition +
+// "/FIX44.xml" for a plain, non-shim `ctest` run (same fallback pattern as
+// tests/interop/support/witness_comparator_test.cpp's test_resolver()).
+inline std::string production_fix44_dict_path() {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe) — single-threaded test setup.
+    if (const char* env = std::getenv("FIXPP_FIX44_DICT_XML"); env != nullptr && env[0] != '\0') {
+        return env;
+    }
+#ifdef FIXPP_DICT_DATA_DIR
+    return std::string(FIXPP_DICT_DATA_DIR) + "/FIX44.xml";
+#else
+    return {};
+#endif
+}
+
+inline ProductionDictionary production_dictionary_and_digest() {
+    const std::string path = production_fix44_dict_path();
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) {
+        throw std::runtime_error("production_dictionary_and_digest: cannot open " + path);
+    }
+    std::ostringstream oss;
+    oss << f.rdbuf();
+    const std::string xml_text = oss.str();
+
+    // SHA-256 over the exact bytes handed to the loader below.
+    unsigned char raw_digest[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(xml_text.data()), xml_text.size(), raw_digest);
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string hex(SHA256_DIGEST_LENGTH * 2, '\0');
+    for (std::size_t i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
+        hex[2 * i] = kHex[raw_digest[i] >> 4U];
+        hex[(2 * i) + 1] = kHex[raw_digest[i] & 0xFU];
+    }
+
+    // Dictionary is move-only; loaded once here and kept alive via shared_ptr
+    // (same pattern as witness_comparator.cpp's make_fix44_decimal_resolver).
+    auto dict = std::make_shared<fixpp::dict::Dictionary>(
+        fixpp::dict::XmlLoader{}.load_from_string(xml_text, std::pmr::get_default_resource()));
+    return ProductionDictionary{std::move(dict), std::move(hex)};
 }
 
 // Drive a registered session to Active (logon complete) within `deadline`.
