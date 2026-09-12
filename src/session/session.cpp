@@ -1840,6 +1840,11 @@ struct SendingTimeStamp {
     // depends on 52 having already been walked by that point. [#419: the old
     // single-pass code appended 122 only after the whole loop, so it could rely
     // on `orig_sending_time` being set by then; inserting mid-loop cannot.]
+    // This scan `break`s at the first tag==52 it finds, and `send_impl`'s
+    // canonical header always emits 52 at a fixed early position -- so on any
+    // frame `send_impl` produced, the scan is bounded by the header prefix,
+    // not by the frame's total size (it degenerates to a full scan only if
+    // 52 is absent, which `send_impl` cannot produce).
     std::string_view orig_sending_time;
     {
         std::size_t i = 0;
@@ -1866,7 +1871,9 @@ struct SendingTimeStamp {
         // #419: insert PossDupFlag(43)=Y + OrigSendingTime(122) at the
         // header/body boundary — before the first tag NOT in the header set —
         // instead of after the loop (which placed them after the full body,
-        // groups included).
+        // groups included). Guarded by `!inserted_pd`, so this linear scan
+        // over the small fixed-size `kReplayHeaderTags` runs at most once per
+        // header field, never once the insertion point has been passed.
         if (!inserted_pd &&
             std::ranges::find(kReplayHeaderTags, fr.tag) == kReplayHeaderTags.end()) {
             if (auto r = append_possdup(orig_sending_time); !r) return std::unexpected(r.error());

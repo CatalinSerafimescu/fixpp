@@ -15,17 +15,10 @@
 # missing/null section, and (T066-T068) implements the E-7a/E-7b/E-7c CHECK
 # LOGIC itself, each proven against the CONSTRUCTED fixtures
 # contracts/witness-evidence.md § Proof obligations prescribes for it.
-# ⚠️ E-7a/E-7b/E-7c are NOT yet wired into test_schema_check_opens_no_
-# artifact_path()'s unconditional sweep over the REAL committed
-# witness_evidence.yaml: that file's `validation_pairs:`/`runs:` sections
-# are still empty (no run has been promoted into the COMMITTED artifact —
-# T061's live evidence went to a scratch ledger, per that task's own
-# instruction), and E-7a's own defect is exactly "zero pairs is green" — so
-# running it unconditionally against today's committed doc would redden the
-# whole schema check. The wiring lands in the SAME COMMIT that first
-# promotes runs into the committed witness_evidence.yaml, never before —
-# the logic exists and is proven now (against constructed fixtures), but is
-# not asserted against the live artifact until that commit exists.
+# `test_schema_check_opens_no_artifact_path()` below runs the shape/
+# `["cells"]`-signature checks against ONE config's per-run emission; the
+# T095a block (further down this file) ranges the SAME check logic over the
+# accumulated COMMITTED witness_evidence.yaml/cell_results.yaml pair.
 #
 # Run via ctest (registered in tests/interop/CMakeLists.txt) or directly:
 #   python3 -m pytest -xvs tests/interop/cell_results_schema_check_test.py
@@ -514,16 +507,15 @@ def test_e7c_fresh_artifact_passes():
 
 # ── T075/T078/T079/T080/T081/T082/T083/T084/T085 (Phase 7 / US5): E-1/E-1a/
 # E-1c/E-4/E-5 and the W-* completeness gate — check LOGIC, proven against
-# CONSTRUCTED fixtures (the E-7a/b/c pattern above). ⚠️ E-1a, E-1c, W-3a,
-# W-3b, W-3c are NOT yet wired into test_schema_check_opens_no_artifact_path
-# below: `runs:`/`witnesses:` are still empty in the COMMITTED witness_
-# evidence.yaml (no run has been promoted into it — T095's matrix), and each
-# of these gates' own defect is "an empty/short population is green", so
-# running them unconditionally today would redden the whole schema check for
-# a reason that has nothing to do with a real defect. T095a wires them, in
-# the SAME commit that first promotes runs. W-2a is DIFFERENT: its two real
-# operands (census.yaml, conversation_script.yaml) are already fully
-# authored content, not run output, so it IS wired below, now. ─────────────
+# CONSTRUCTED fixtures (the E-7a/b/c pattern above). E-1a, E-1c, W-3a, W-3b,
+# W-3c range over the COMMITTED witness_evidence.yaml/cell_results.yaml pair
+# in the T095a block further down this file, not here: each of these gates'
+# own defect is "an empty/short population is green", so they are proven
+# against fixtures first and then re-run over the real accumulated artifact,
+# never unconditionally against a single per-config emission. W-2a is
+# DIFFERENT: its two real operands (census.yaml, conversation_script.yaml)
+# are already fully authored content, not run output, so it IS wired below,
+# now. ───────────────────────────────────────────────────────────────────
 
 EIGHT_LOGICAL_CELL_IDS = frozenset(
     f"CONV-{c}-{a}" for c in CONV_COMBO_IDS for a in ("off", "on"))
@@ -1570,10 +1562,11 @@ def test_schema_check_opens_no_artifact_path():
             check(cells_rows)
         witness_doc = _load_witness_evidence()
         _check_witness_evidence_sections(witness_doc)
-        # W-2a: unlike E-1a/E-1c/W-3a/W-3b/W-3c (deferred to T095a — their
-        # populations are still empty pending T095's matrix), census.yaml
-        # and conversation_script.yaml are already fully-authored content,
-        # so this gate is wired unconditionally now.
+        # W-2a: unlike E-1a/E-1c/W-3a/W-3b/W-3c (which range over the
+        # ACCUMULATED committed artifact in the T095a block, not this
+        # per-config sweep), census.yaml and conversation_script.yaml are
+        # already fully-authored content, so this gate is wired
+        # unconditionally right here.
         _check_w2a(_load_census(), _load_script())
 
 

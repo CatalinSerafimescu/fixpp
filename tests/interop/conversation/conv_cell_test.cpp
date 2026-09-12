@@ -560,20 +560,14 @@ std::string run_dir_of(std::string const& readback_path)
     return slash == std::string::npos ? std::string(".") : readback_path.substr(0, slash);
 }
 
-// A-RESEND (C3/C4) is currently expected to fail: fixpp #419 -- both
-// build_sequence_reset_gapfill (session-admin GapFill emitter) and
-// build_replay_frame (the ResendRequest-answer replay path) append
-// PossDupFlag(43)/OrigSendingTime(122) AFTER every body field instead of in
-// standard-header position, which QuickFIX-J's UseDataDictionary=Y field-
-// order validation rejects (measured: Reject(35=3) 373=14 "Tag specified
-// out of required order, field=43"). Scans the counterparty's plaintext
-// transcript (a sibling of readback_path -- the same file the C++/Java
-// counterparties both write "OUT <msgtype> <fix-with-pipes>" lines to) for
-// that exact signature and, if found, names the known cause explicitly
-// rather than leaving a bare "replay not observed" diagnostic -- per the
-// coordinator's instruction that C3/C4 must fail for THIS reason, visibly,
-// never silently. Returns an empty string if the signature is not found
-// (e.g. #419 has since landed and something else is wrong instead).
+// If the peer rejected fixpp's B-01 replay with Reject(35=3) 373=14 ("Tag
+// specified out of required order", field=43), name that cause explicitly
+// rather than leaving a bare "replay not observed" diagnostic. Scans the
+// counterparty's plaintext transcript (a sibling of readback_path -- the
+// same file the C++/Java counterparties both write "OUT <msgtype>
+// <fix-with-pipes>" lines to) for that exact signature. Returns an empty
+// string when the signature is not found -- the caller's own diagnostic
+// then stands alone, unembellished.
 std::string describe_a_resend_rejection(std::string const& run_dir)
 {
     std::ifstream f(run_dir + "/counterparty-transcript.txt");
@@ -582,12 +576,9 @@ std::string describe_a_resend_rejection(std::string const& run_dir)
         if (line.find("35=3") != std::string::npos &&
             line.find("Tag specified out of required order, field=43") != std::string::npos) {
             return "peer rejected fixpp's B-01 replay with Reject(35=3) 373=14 "
-                   "(\"Tag specified out of required order\") field=43 -- known cause: "
-                   "fixpp #419 (PossDupFlag(43)/OrigSendingTime(122) appended after every "
-                   "body field in build_sequence_reset_gapfill/build_replay_frame instead "
-                   "of standard-header position; QuickFIX-J's UseDataDictionary=Y field-"
-                   "order validation rejects it). A-RESEND stays red until #419 lands. "
-                   "Wire line: " + line;
+                   "(\"Tag specified out of required order\") field=43 -- "
+                   "PossDupFlag(43)/OrigSendingTime(122) landed after a body field instead "
+                   "of standard-header position. Wire line: " + line;
         }
     }
     return {};
@@ -978,7 +969,7 @@ TEST(Conversation, Cell)
             EXPECT_TRUE(replay_observed)
                 << "A-RESEND: no B-01 occurrence 1 readback observed on the peer within 5s"
                 << (known_cause.empty()
-                        ? std::string(" -- cause not the known #419 signature; investigate")
+                        ? std::string(" -- cause not the tag-order-373=14 signature; investigate")
                         : (" -- " + known_cause));
         }
         if (replay_observed) {
@@ -1095,6 +1086,26 @@ TEST(Conversation, Cell)
         EXPECT_TRUE(found_b01_occ1)
             << "A-RESEND: no witness row for B-01 occurrence 1 (the PossDup replay)"
             << known_cause_tail;
+
+        // gate-b fix round, FQ-5: with the replay assertions above having
+        // succeeded, the tag-order-373=14 rejection signature must now be
+        // ABSENT from the peer's transcript -- previously this was only
+        // IMPLIED by the readback assertion passing, never asserted
+        // directly. describe_a_resend_rejection() returning empty is
+        // vacuously true on a missing/empty transcript file, so first
+        // confirm the transcript was actually written and is non-empty
+        // (the peer writes "OUT ..." lines to it on every step -- T062b's
+        // live-run evidence) before trusting its absence.
+        std::ifstream transcript_check(run_dir + "/counterparty-transcript.txt");
+        std::string transcript_first_line;
+        bool const transcript_has_content =
+            static_cast<bool>(std::getline(transcript_check, transcript_first_line));
+        EXPECT_TRUE(transcript_has_content)
+            << "A-RESEND: counterparty-transcript.txt is missing or empty -- the "
+               "signature-absence check below would pass vacuously without this";
+        EXPECT_TRUE(describe_a_resend_rejection(run_dir).empty())
+            << "A-RESEND: the peer's transcript still carries the tag-order-373=14 "
+               "rejection signature even though the replay readback assertions above passed";
     }
 
     // ── T054: fixpp's typed-read tier must return the peer's DECLARED values
