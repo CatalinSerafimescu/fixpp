@@ -39,3 +39,24 @@ tools/quickfix_required_golden/golden.csv -text
 # checked-in copy from a freshly regenerated one (generator opens the stream
 # std::ios::binary) and no git-cleanliness gate reds on a CRLF-converted copy.
 tools/quickfix_required_golden/golden_groups.csv -text
+
+# 089-quickfix-interop-conversation: the conversation + probe scripts are
+# DIGEST-BOUND. `_check_script_digest_binding` (tests/interop/
+# cell_results_schema_check_test.py) SHA-256s the live file's raw bytes and
+# compares against the digest recorded in the committed 400-witness evidence;
+# conv_cell_test.cpp / probe_cell_test.cpp hash the same bytes at run time and
+# compare against INTEROP_FIXPP_SCRIPT_DIGEST. A Windows checkout
+# (core.autocrlf=true on the windows-msvc runners) CRLF-converts them, so the
+# live hash becomes a06a8fc7… where the evidence records 8eada580… and the gate
+# reds with a message that reads like a stale artifact rather than a line-ending
+# conversion. MEASURED on run 34701080734, and reproduced exactly by
+# `sed 's/$/\r/' conversation_script.yaml | sha256sum`.
+#
+# ⚠️ This is the FIFTH instance of this same trap (golden.hpp · Orchestra XML ·
+# the enum-golden dictionaries + generator · the required-golden CSVs). Pin to
+# LF, same class as every stanza above. The pattern to recognise: ANY file whose
+# raw bytes are pinned by a value committed elsewhere needs a line here, and the
+# symptom always names the artifact rather than the line endings.
+# Regression guard: test_t095a_digest_bound_scripts_are_crlf_immune.
+tests/interop/conversation/conversation_script.yaml -text
+tests/interop/conversation/probe_script.yaml -text

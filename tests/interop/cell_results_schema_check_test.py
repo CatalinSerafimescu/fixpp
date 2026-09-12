@@ -2041,6 +2041,90 @@ def test_t095a_script_digest_binding_over_the_committed_artifacts(
     _check_script_digest_binding(witness_evidence_doc, committed_cells)
 
 
+def test_t095a_digest_bound_scripts_are_crlf_immune():
+    """A digest-bound file must have the SAME BYTES on every platform.
+
+    ⭐ This guards a trap the repo has now hit FIVE times, and every previous
+    time the fix was reactive: a `.gitattributes` stanza added after a Windows
+    job went red (`*.golden.hpp`, the Orchestra XML, the enum-golden
+    dictionaries + generator, the required-golden CSVs -- read that file, each
+    one carries its own post-mortem). 089 made it five: `core.autocrlf=true` on
+    the windows-msvc runners CRLF-converted `conversation_script.yaml`, so the
+    live SHA-256 became a06a8fc7... where the committed evidence records
+    8eada580..., and `_check_script_digest_binding` reported it as *evidence
+    attesting a script no longer in the tree*. That diagnostic is correct about
+    the bytes and completely misleading about the cause -- which is why a guard
+    naming the cause is worth more than the fix alone.
+
+    ⚠️ Two arms, because they fail on different platforms:
+
+    1. **The byte arm is native and authoritative but only bites on Windows.**
+       A CR in the checked-out file IS the defect, whatever produced it -- a
+       missing `.gitattributes` line, an editor, a bad merge. On Linux it
+       passes trivially; that is honest, not vacuous, because Linux cannot
+       reproduce the condition.
+    2. **The attribute arm bites on EVERY platform**, so someone adding a third
+       digest-bound script sees it locally instead of discovering it a CI round
+       later on a runner they are not watching. If `git` cannot answer, this
+       arm FAILS rather than skipping -- a skip here would be the exact
+       fail-toward-clean shape this file exists to prevent.
+
+    The population is `SCRIPT_BY_RUN_KIND`, the same mapping the hasher reads,
+    so a script added there is covered automatically. That is not circular: the
+    dict decides WHICH files are byte-pinned, and this test checks an
+    INDEPENDENT property of them (their on-disk bytes and their git attribute).
+    """
+    import subprocess
+
+    assert SCRIPT_BY_RUN_KIND, "no digest-bound scripts to check -- vacuous"
+    # HERE is tests/interop/; the repo root is two levels up. Derived, not a
+    # constant, so this arm cannot silently point at the wrong tree.
+    root = os.path.abspath(os.path.join(HERE, os.pardir, os.pardir))
+    assert os.path.isdir(os.path.join(root, ".git")) or os.path.isfile(
+        os.path.join(root, ".git")), (
+        "expected a git checkout at %s (HERE=%s)" % (root, HERE))
+
+    # ── arm 1: the bytes themselves ────────────────────────────────────────
+    for kind, path in sorted(SCRIPT_BY_RUN_KIND.items()):
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        assert b"\r" not in raw, (
+            "digest-bound script %s (kind=%s) contains CR bytes on disk. Its "
+            "SHA-256 is pinned by the committed evidence, so ANY line-ending "
+            "conversion changes the digest and reds the binding gate with a "
+            "message about stale evidence rather than about line endings. "
+            "Pin it in .gitattributes with `-text` (see the stanzas there) -- "
+            "do NOT regenerate the matrix to match the converted bytes."
+            % (os.path.relpath(path, root), kind))
+
+    # ── arm 2: the CAUSE, checkable from Linux ─────────────────────────────
+    rel = sorted(os.path.relpath(p, root).replace(os.sep, "/")
+                 for p in SCRIPT_BY_RUN_KIND.values())
+    proc = subprocess.run(
+        ["git", "-C", root, "check-attr", "text", "--"] + rel,
+        capture_output=True, text=True)
+    assert proc.returncode == 0, (
+        "could not run `git check-attr` (%s). This arm is NOT optional: "
+        "without it a missing .gitattributes pin is invisible until a Windows "
+        "CI leg fails, which is how this trap recurred five times. Run the "
+        "suite from a git checkout." % (proc.stderr.strip() or proc.returncode))
+    attrs = dict()
+    for line in proc.stdout.splitlines():
+        # format: <path>: text: <value>
+        parts = line.rsplit(": ", 2)
+        if len(parts) == 3:
+            attrs[parts[0]] = parts[2]
+    assert set(attrs) == set(rel), (
+        "git check-attr answered for %r but was asked about %r" % (sorted(attrs), rel))
+    for path, value in sorted(attrs.items()):
+        assert value == "unset", (
+            "digest-bound script %s has git attribute `text: %s`; it must be "
+            "`unset`, i.e. pinned with `-text` in .gitattributes. Without that "
+            "pin a Windows checkout (core.autocrlf=true on the windows-msvc "
+            "runners) rewrites its line endings, changing the very bytes the "
+            "committed evidence records a SHA-256 of." % (path, value))
+
+
 def test_t095a_script_digest_binding_goes_red_on_a_drifted_script(
         witness_evidence_doc, committed_cells, tmp_path):
     # RED arm: simulate the exact drift that occurred -- the script file's
