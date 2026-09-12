@@ -15,6 +15,9 @@ refs:
   - ci/pump-seam-arm.sh
   - ci/pump-label-uniqueness.sh
   - ci/cxx_blank.py
+  - tests/interop/cell_results_schema_check_test.py
+  - tests/interop/support/witness_comparator.cpp
+  - tests/interop/conversation/conversation_script.yaml
 codegraph_entry: [mock_transport, Clock, system_clock_source]
 constitution: ["§VII", "§VII.4", "§VIII.5"]
 ---
@@ -601,6 +604,57 @@ tolerate every typed error and so grade **only** on a sanitizer finding (`fuzz_f
 green. Also note `-runs=0` executes libFuzzer's implicit **empty** input, so a RED arm that fires on
 any input proves the binary ran, *not* that your seeds were delivered — gate the mutant on
 `size > 0` if that is the claim you need.
+
+## The committed interop evidence (089) — a digest-bound artifact, and the two ways it read green
+
+`tests/interop/witness_evidence.yaml` is a **committed** artifact: a matrix run promotes its
+comparison results into the tree, and `tests/interop/cell_results_schema_check_test.py` gates them
+on every build thereafter. That shape — evidence at rest, re-checked by a schema suite — is worth
+understanding before changing anything under `tests/interop/`, because Gate B found **four rounds**
+of defects in it and **not one** in the code it was built to verify.
+
+⭐ **Both headline failures were the same class: the gate could not report failure.** Flipping every
+committed witness to `verdict: fail` left the suite green, because nothing read `verdict`; forging
+every `run_id` to a nonexistent value left it green, because nothing joined the witness rows back to
+the run ledger. Neither is visible by reading the suite — each was found by mutating the artifact and
+watching the suite stay green. **Before believing this suite's green, mutate one row and watch it
+redden.** The suite now has arms for both, plus population arms; the procedure is the durable part,
+not the arm list.
+
+⚠️ **A census-derived expected count cannot disagree with the census.** The population check first
+compared "witnesses present" against "witnesses the census implies", both computed from the same
+committed file — so dropping a whole business step reduced *both* sides and stayed green, and
+dropping a whole config did too. What closed it is an **independent pin** (`CENSUS_KEY_COUNT` ×
+`CONFIGS` ⇒ `WITNESS_ROW_COUNT` in the suite) that the artifact cannot move. Same shape as the
+fuzz-harness rule above: enumerate from something the subject does not write.
+
+⚠️ **The uniqueness key is `(witness_id, config)`, not `witness_id`.** Each census key produces one
+witness per sanitizer config, so a `witness_id`-only uniqueness assertion rejects a correct artifact.
+Re-derive from `_full_keys` rather than assuming either shape.
+
+⭐ **A digest-bound file cannot be edited — not even its comments — and that collides with the
+citation gate.** `conversation_script.yaml` and `probe_script.yaml` are hashed by the cell drivers at
+run time and the hash is recorded into the evidence (`SCRIPT_BY_RUN_KIND`,
+`_check_script_digest_binding`). So a **comment-only** edit changes the SHA-256 and invalidates every
+committed run that attests the old bytes. 089 hit the deadlock head-on: the citation gate wanted two
+comment lines rewritten, the digest gate forbade touching the file at all, and the `citation-ok`
+escape is itself an inline marker that changes bytes. **The only move that satisfies both is
+regenerating the matrix after the edit** — which is cheap when the build trees are warm, and is the
+answer to give rather than reaching for a waiver. Budget for it whenever a cleanup pass sweeps
+`tests/interop/`.
+
+⛔ **`occurrence: 0` is a legitimate value, so a parser must not infer presence from it.** The
+comparator's fail-closed rewrite uses explicit per-field `has_*` seen flags set only after a
+successful parse; the majority of committed witnesses carry `occurrence: 0`, so a zero-means-absent
+reading silently accepts records that never declared the field.
+
+⛔ **What the evidence does NOT attest: the fixpp revision that produced it.** The ledger binds the
+script digest (verified against the live file every run) and records the counterparty flavour,
+version and digest (joined internally, verified against no external truth). It records **no fixpp
+source or binary digest at all**, so an edit to the comparator, the readback writer or
+`build_replay_frame` leaves the committed artifact green while describing a tree that no longer
+exists. That is `L-089-1` in `spec/behaviors-and-limitations.md`, deferred to fixpp#431 — do not
+read a green schema suite as evidence the current tree still passes interop.
 
 ## Related
 
