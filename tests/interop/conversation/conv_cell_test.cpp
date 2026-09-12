@@ -103,6 +103,7 @@
 #include "support/counterparty_probe.hpp"
 #include "support/intent_file.hpp"
 #include "support/readback_jsonl.hpp"
+#include "support/ubsan_plant.hpp"
 #include "support/witness_comparator.hpp"
 
 using namespace std::chrono_literals;
@@ -596,6 +597,10 @@ std::string describe_a_resend_rejection(std::string const& run_dir)
 
 TEST(Conversation, Cell)
 {
+    // T098a (FR-021a): off-by-default UBSan plant, see ubsan_plant.hpp for
+    // the gate and the arms it exists for.
+    fixpp::interop::support::maybe_run_ubsan_plant();
+
     // FR-023: the standard interop skip-with-reason convention (same macro
     // every other interop cell uses) — a bare ctest run with no counterparty
     // listening (the default in library CI, no shim involved) SKIPS here,
