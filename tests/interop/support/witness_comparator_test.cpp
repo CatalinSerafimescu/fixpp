@@ -494,6 +494,49 @@ TEST(WitnessComparator, ValueAndValueB64OverSameBytesCompareEqual)
     EXPECT_EQ(rows[0].verdict, "pass");
 }
 
+// 089 T057 — THE RED HALF OF THE ARM ABOVE, and it is the load-bearing half.
+// `ValueAndValueB64OverSameBytesCompareEqual` proves the comparator does not
+// SPURIOUSLY redden a value/value_b64 pair over identical bytes. It cannot
+// prove the comparator is looking at tag 355 at all: a comparator that
+// skipped the field entirely, or that compared the two JSON *keys* instead of
+// the decoded bytes, would emit `pass` there just the same. So the positive
+// arm alone is satisfiable by an instrument that checks nothing — the shape
+// this repo keeps paying for.
+//
+// This arm perturbs exactly ONE byte on the readback side (0xff -> 0xfe,
+// chosen because neither value is valid UTF-8, so BOTH sides still render
+// `value_b64` and the difference cannot be an artifact of one side switching
+// JSON keys) and requires a `fail` naming path 355. That is the live
+// byte-for-byte assertion's own RED: B-05 drives `ENCODED\xffTEXT` over the
+// wire on C1/C3, and the peer's readback carries it as
+// `value_b64: "RU5DT0RFRP9URVhU"`; if the comparator could not tell those
+// bytes from a one-byte-different copy, that whole path would be decorative.
+TEST(WitnessComparator, ValueB64DifferingByOneByteIsAMismatch)
+{
+    std::string const dir = testing::TempDir();
+    std::string const sent_bytes(1, static_cast<char>(0xff));
+    std::string const readback_bytes(1, static_cast<char>(0xfe));
+    {
+        Stream sender(dir + "wc_b64_neg_sender.jsonl");
+        sender.sent("D", 10, "fixpp-to-peer", 0, "B-05", {{"355", sent_bytes}});
+    }
+    {
+        Stream receiver(dir + "wc_b64_neg_receiver.jsonl");
+        receiver.readback("D", 10, "fixpp-to-peer", 0, false, {{"355", readback_bytes}}, {});
+    }
+    auto const a = parse_stream(dir + "wc_b64_neg_sender.jsonl");
+    auto const b = parse_stream(dir + "wc_b64_neg_receiver.jsonl");
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "fail")
+        << "a one-byte difference inside a value_b64 field compared EQUAL -- the "
+           "comparator is not decoding to raw bytes (or is not consulting tag 355 "
+           "at all), which would make the whole B-05 charset path decorative";
+    ASSERT_FALSE(rows[0].mismatch.empty())
+        << "verdict was 'fail' but no mismatch entry names the offending field";
+    EXPECT_EQ(rows[0].mismatch[0].path, "355");
+}
+
 // ── write_witness_rows / parse_witness_rows — the comparator→promotion
 // hand-off (data-model.md §4, pinned `a7923892`) ────────────────────────────
 
