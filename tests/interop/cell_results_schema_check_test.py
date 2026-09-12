@@ -604,12 +604,58 @@ def _check_w1(doc):
     run_id, arm, authoritative AND kind as fields — W-3a/W-3b/W-3c filter on
     kind/authoritative, so a row missing one is silently DROPPED from the
     population it should have joined, and the gate measures a smaller set
-    and reports complete."""
+    and reports complete. `verdict`/`mismatch` (gate-b fix round, FQ-1) are
+    REQUIRED here too -- the RESULT the witness exists to record, not just
+    its identity -- so a row missing one fails the SAME shape gate rather
+    than surviving to be silently absent-therefore-fine at _check_w0_content
+    below."""
     required = {"combo_id", "cell_id", "config", "run_id", "arm", "kind",
-                "authoritative", "script_step_id", "direction", "occurrence"}
+                "authoritative", "script_step_id", "direction", "occurrence",
+                "verdict", "mismatch"}
     for w in doc.get("witnesses", []):
         missing = required - w.keys()
         assert not missing, f"W-1: witness row missing field(s) {missing!r}: {w!r}"
+
+
+# closed set: this comparator never emits "skip" (data-model.md §4) and a
+# committed conformance witness may never be recorded as anything but pass
+# or fail.
+WITNESS_VERDICTS = {"pass", "fail"}
+
+
+def _check_w0_content(doc, census_doc):
+    """W-0 (gate-b fix round, FQ-1/Codex #1): gates the witness RESULT, not
+    merely its shape/identity -- the thing 400 committed witnesses exist to
+    record, which no other gate in this file reads (grep 'verdict\\|mismatch'
+    over this file, pre-fix, hits only validation_pairs' `expected_verdict`
+    control). Every row in the committed artifact with kind:conformance and
+    authoritative:true must be verdict:pass with an empty mismatch list.
+    ⚠️ The kind/authoritative filter is untested by any OTHER gate (every
+    committed row happens to satisfy it), so the filtered population's SIZE
+    is asserted against the census-derived figure BEFORE the per-row loop --
+    the same silent-drop trap _check_w1's docstring names for W-3a/W-3b/
+    W-3c, reproduced here by a typo'd `kind`/`authoritative` that would
+    otherwise shrink the population this gate still reports complete over."""
+    expected_count = len(_full_keys(census_doc)) * len(CONFIGS)
+    rows = [w for w in doc.get("witnesses", [])
+            if w.get("kind") == "conformance" and w.get("authoritative") is True]
+    assert len(rows) == expected_count, (
+        f"W-0: {len(rows)} authoritative kind:conformance witnesses in the committed "
+        f"artifact, expected {expected_count} (census keys x configs) -- a row with a "
+        f"mismatched kind/authoritative silently dropped out of this population")
+    for w in rows:
+        wid = w.get("witness_id")
+        assert "verdict" in w, f"W-0: witness {wid!r} missing 'verdict' key"
+        assert "mismatch" in w, f"W-0: witness {wid!r} missing 'mismatch' key"
+        assert w["verdict"] in WITNESS_VERDICTS, (
+            f"W-0: witness {wid!r} verdict {w['verdict']!r} not in the closed set "
+            f"{sorted(WITNESS_VERDICTS)!r}")
+        assert w["verdict"] == "pass", (
+            f"W-0: witness {wid!r} verdict {w['verdict']!r} != 'pass' "
+            f"(mismatch={w.get('mismatch')!r})")
+        assert w["mismatch"] == [], (
+            f"W-0: witness {wid!r} verdict is 'pass' but mismatch is non-empty: "
+            f"{w['mismatch']!r}")
 
 
 def _check_w2a(census_doc, script_doc):
@@ -776,6 +822,17 @@ def _census_slot_witness_count(census_doc, combo_id):
     return len(_expand_business_steps_combo(census_doc, combo_id))
 
 
+# gate-b fix round, FQ-2 (Codex #3): the manifest row's OWN provenance
+# fields, distinct from `ledger_ref` (which only names a SLOT). A row could
+# previously carry a FORGED run_id/script_digest/counterparty_* while still
+# resolving to the correct (cell_id, config) slot -- reproduced on the real
+# committed pair (all five forged across all 32 rows, gates stayed green).
+MANIFEST_LEDGER_JOIN_FIELDS = (
+    "run_id", "script_digest", "counterparty_flavour", "counterparty_version",
+    "counterparty_digest",
+)
+
+
 def _check_e1_and_e5(conv_rows, doc, census_doc):
     """E-1: status:pass requires a runs: ledger entry (terminal_state:
     completed, witness_count == the census figure for that slot) — the
@@ -814,6 +871,18 @@ def _check_e1_and_e5(conv_rows, doc, census_doc):
                 f"E-1: {row.get('id')!r} status:pass but ledger witness_count "
                 f"{entry.get('witness_count')!r} != census figure "
                 f"{expected_count!r} for slot {slot!r}")
+            # gate-b fix round, FQ-2: the manifest row's OWN provenance
+            # fields must agree with the resolved ledger entry FIELD-FOR-
+            # FIELD -- previously only ledger_ref's (cell_id, config) tuple
+            # was checked, so a row could carry a forged run_id/
+            # script_digest/counterparty_* while still resolving to a
+            # correct slot (reproduced on the committed pair: all five
+            # forged across all 32 rows, every other gate stayed green).
+            for field in MANIFEST_LEDGER_JOIN_FIELDS:
+                assert row.get(field) == entry.get(field), (
+                    f"E-1: {row.get('id')!r} manifest field {field!r} "
+                    f"{row.get(field)!r} != ledger entry {slot!r}'s {field!r} "
+                    f"{entry.get(field)!r}")
         elif entry is not None and entry.get("terminal_state") != "completed":
             assert status == entry.get("terminal_state"), (
                 f"E-5: {row.get('id')!r} status {status!r} disagrees with "
@@ -842,6 +911,7 @@ def _w_fixture_complete(census_doc):
                         "run_id": run_id, "arm": arm, "kind": "conformance",
                         "authoritative": True, "script_step_id": step_id,
                         "direction": direction, "occurrence": occ,
+                        "verdict": "pass", "mismatch": [],
                     })
     doc["witnesses"] = witnesses
     return copy.deepcopy(doc)
@@ -1610,6 +1680,167 @@ def test_t095a_e4_goes_red_when_one_config_row_is_dropped(committed_cells):
     rows.remove(victim)
     with pytest.raises(AssertionError, match="folded into another config"):
         _check_e4(rows)
+
+
+def test_t095a_e1_and_e5_over_the_committed_ledger(committed_cells, witness_evidence_doc, census_doc):
+    # E-1/E-5 were previously proven only against synthetic single-row docs
+    # (T086 above) -- never against the REAL committed manifest+ledger pair,
+    # so the manifest-field-agreement check added below (FQ-2) would
+    # otherwise gate nothing on the artifact it exists to protect.
+    _check_e1_and_e5(_committed_conversation_rows(committed_cells), witness_evidence_doc, census_doc)
+
+
+def test_t095a_manifest_ledger_join_goes_red_on_forged_provenance_field(
+        committed_cells, witness_evidence_doc, census_doc):
+    # RED proof (gate-b fix round, FQ-2, Codex #3 arm 2): forging any ONE of
+    # the five provenance fields on a real manifest row, while its
+    # ledger_ref still names the correct slot, must redden -- reproduced
+    # GREEN on the unfixed tree (all five forged across all 32 rows at
+    # once, 71/71 still passed).
+    for field, forged in (
+        ("run_id", "FORGED-run"),
+        ("script_digest", "0" * 64),
+        ("counterparty_flavour", "FORGED"),
+        ("counterparty_version", "9.9.9"),
+        ("counterparty_digest", "sha256:" + "f" * 64),
+    ):
+        rows = copy.deepcopy(_committed_conversation_rows(committed_cells))
+        rows[0][field] = forged
+        with pytest.raises(AssertionError, match=re.escape(f"manifest field {field!r}")):
+            _check_e1_and_e5(rows, witness_evidence_doc, census_doc)
+
+
+def _runs_by_id(doc):
+    return {r["run_id"]: r for r in doc.get("runs", [])}
+
+
+WITNESS_RUN_JOIN_IDENTITY_FIELDS = ("cell_id", "config", "combo_id", "arm", "kind", "authoritative")
+
+
+def _check_witness_run_join(doc):
+    """gate-b fix round, FQ-2 (Codex #3): a full relational join between
+    witnesses: and runs:, not merely a shape/count coincidence. Every
+    witness's run_id must resolve to EXACTLY one runs: entry, and that
+    entry's own identity fields must agree with the witness's -- a witness
+    naming a run that EXISTS but belongs to a DIFFERENT slot must not
+    silently resolve against it. The witness_count on each run is then
+    recomputed FROM THE WITNESS LIST and required to equal the ledger's own
+    figure -- previously that count was checked only against the census
+    figure, so a ledger entry could claim a witness_count consistent with
+    the census while ZERO witnesses actually named it, and nothing would
+    notice (reproduced on the committed pair: every witness run_id rewritten
+    to NONEXISTENT, 71/71 still passed).
+    ⚠️ `evidence_relpath`/`evidence_digest` are DELIBERATELY excluded from
+    the identity fields above: they name an artifact in the gitignored
+    parent phase-9-harness tree this submodule's CI does not check out (the
+    same operand problem that keeps emit_fixpp_fixture.cpp out of CTest), so
+    a gate over them would pass by absence of an operand rather than by
+    agreement -- do not add one."""
+    runs_by_id = _runs_by_id(doc)
+    witness_counts = {}
+    for w in doc.get("witnesses", []):
+        run_id = w.get("run_id")
+        witness_counts[run_id] = witness_counts.get(run_id, 0) + 1
+        entry = runs_by_id.get(run_id)
+        assert entry is not None, (
+            f"E-1/join: witness {w.get('witness_id')!r} names run_id {run_id!r} "
+            f"which does not exist in runs:")
+        for field in WITNESS_RUN_JOIN_IDENTITY_FIELDS:
+            assert w.get(field) == entry.get(field), (
+                f"E-1/join: witness {w.get('witness_id')!r} field {field!r} "
+                f"{w.get(field)!r} != resolved run {run_id!r}'s {field!r} "
+                f"{entry.get(field)!r}")
+    for run_id, entry in runs_by_id.items():
+        recomputed = witness_counts.get(run_id, 0)
+        assert recomputed == entry.get("witness_count"), (
+            f"E-1/join: run {run_id!r} witness_count {entry.get('witness_count')!r} "
+            f"!= {recomputed} witnesses actually naming it")
+
+
+def test_t095a_witness_run_join_over_the_committed_ledger(witness_evidence_doc):
+    _check_witness_run_join(witness_evidence_doc)
+
+
+def test_t095a_witness_run_join_goes_red_on_unresolved_run_id(witness_evidence_doc):
+    # RED proof arm 1: one witness run_id -> NONEXISTENT -- reproduced GREEN
+    # on the unfixed tree (all 400 rewritten, 71/71 passed).
+    doc = copy.deepcopy(witness_evidence_doc)
+    doc["witnesses"][0]["run_id"] = "NONEXISTENT"
+    with pytest.raises(AssertionError, match="does not exist in runs"):
+        _check_witness_run_join(doc)
+
+
+def test_t095a_witness_run_join_goes_red_on_spurious_hit_cross_slot(witness_evidence_doc):
+    # RED proof arm 3 (the spurious-hit arm): forge a witness's run_id to a
+    # run that EXISTS but belongs to a DIFFERENT slot, keeping the witness's
+    # own cell_id/config correct -- must redden on the cross-field
+    # disagreement, not silently resolve.
+    doc = copy.deepcopy(witness_evidence_doc)
+    victim = doc["witnesses"][0]
+    other_run = next(r for r in doc["runs"]
+                      if (r["cell_id"], r["config"]) != (victim["cell_id"], victim["config"]))
+    victim["run_id"] = other_run["run_id"]
+    with pytest.raises(AssertionError, match="!= resolved run"):
+        _check_witness_run_join(doc)
+
+
+def test_t095a_witness_run_join_goes_red_when_all_witnesses_for_a_run_are_deleted(witness_evidence_doc):
+    # RED proof arm 4 (anti-vacuity): delete every witness naming one
+    # run_id while leaving that run's witness_count intact -- must redden
+    # on the RECOMPUTED count, not silently agree with the census-derived
+    # figure alone.
+    doc = copy.deepcopy(witness_evidence_doc)
+    victim_run_id = doc["witnesses"][0]["run_id"]
+    doc["witnesses"] = [w for w in doc["witnesses"] if w["run_id"] != victim_run_id]
+    with pytest.raises(AssertionError, match="witness_count"):
+        _check_witness_run_join(doc)
+
+
+def test_t095a_w0_content_over_the_committed_ledger(witness_evidence_doc, census_doc):
+    _check_w0_content(witness_evidence_doc, census_doc)
+
+
+def test_t095a_w0_content_goes_red_on_a_failed_witness(witness_evidence_doc, census_doc):
+    # RED proof arm 1 (gate-b fix round, FQ-1): flip ONE committed witness to
+    # fail with a non-empty mismatch, leaving every count/projection key
+    # untouched -- reproduced GREEN on the unfixed tree (all 400 flipped,
+    # 71/71 still passed) before this gate existed.
+    doc = copy.deepcopy(witness_evidence_doc)
+    victim = doc["witnesses"][0]
+    victim["verdict"] = "fail"
+    victim["mismatch"] = [{"path": "44", "cls": "value_mismatch",
+                            "sent_value": "190.5", "readback_value": "190.6"}]
+    with pytest.raises(AssertionError, match=re.escape(victim["witness_id"])):
+        _check_w0_content(doc, census_doc)
+
+
+def test_t095a_w0_content_goes_red_on_missing_verdict_key(witness_evidence_doc, census_doc):
+    # RED proof arm 2: delete the `verdict` key outright -- must redden on
+    # the missing key, not pass by absence.
+    doc = copy.deepcopy(witness_evidence_doc)
+    del doc["witnesses"][0]["verdict"]
+    with pytest.raises(AssertionError, match="missing 'verdict'"):
+        _check_w0_content(doc, census_doc)
+
+
+def test_t095a_w0_content_goes_red_on_non_closed_verdict(witness_evidence_doc, census_doc):
+    # RED proof arm 3: a typo'd verdict token must redden on the closed set,
+    # not silently compare unequal-to-"pass" alone (WITNESS_VERDICTS is
+    # checked BEFORE the =="pass" comparison so this gets its own diagnostic).
+    doc = copy.deepcopy(witness_evidence_doc)
+    doc["witnesses"][0]["verdict"] = "passed"
+    with pytest.raises(AssertionError, match="not in the closed set"):
+        _check_w0_content(doc, census_doc)
+
+
+def test_t095a_w0_content_goes_red_on_population_count_drift(witness_evidence_doc, census_doc):
+    # RED proof arm 4 (the population arm): corrupt one row's `kind` with a
+    # trailing space, leaving verdict:pass intact -- must redden on the
+    # POPULATION COUNT (399 != 400), not silently pass with 399 rows checked.
+    doc = copy.deepcopy(witness_evidence_doc)
+    doc["witnesses"][0]["kind"] = "conformance "
+    with pytest.raises(AssertionError, match=r"W-0: 399 .* expected 400"):
+        _check_w0_content(doc, census_doc)
 
 
 def test_t095a_run_slot_completeness_over_the_committed_ledger(witness_evidence_doc):
