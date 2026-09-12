@@ -441,7 +441,7 @@ claiming a pass with no corroborating run artifact.
   conversation — timing changes under instrumentation can move heartbeat and test-request cadence enough
   to break a session that passes under `normal`. That outcome is a finding to record and resolve, not a
   reason to mark the arm `n/a`.
-- **Peer disconnects instead of rejecting.** `KNOWN-LIMITATIONS.md:87-106` records that only
+- **Peer disconnects instead of rejecting.** `KNOWN-LIMITATIONS.md`'s session-reject-vs-disconnect section records that only
   QuickFIX-J 3.0.1 is confirmed to emit `Reject(35=3)` on the pinned malformed input; QuickFIX-cpp may
   disconnect. Negative arms must tolerate both without treating either as a fidelity pass.
 - **QuickFIX-cpp cannot inject controllable hostile frames.** `L-021-3`
@@ -1437,7 +1437,7 @@ load-bearing for the anti-vacuity arms and are fixed here so the arms have a sub
   was false within the same day it was written, which is why the numbers are deleted rather than
   corrected.
 - Sanitizer instrumentation covers fixpp only; the counterparties are unmodified production binaries
-  (`tests/interop/KNOWN-LIMITATIONS.md:108-115`). A clean sanitizer run bounds fixpp, not the peer.
+  (`tests/interop/KNOWN-LIMITATIONS.md`'s inherited-parent-harness-obligation section). A clean sanitizer run bounds fixpp, not the peer.
 - The parent harness at `research/G19-fix-fpml-iso20022/phase-9-harness/` is git-tracked in the parent
   repository, so counterparty changes span two repositories — the library submodule and the parent.
 

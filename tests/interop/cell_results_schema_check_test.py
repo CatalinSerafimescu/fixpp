@@ -1203,8 +1203,8 @@ def test_conversation_row_with_all_fields_present_passes():
 
 def test_ids_unique(cells):
     # T029 (089-quickfix-interop-conversation): verified NOT to need replacing.
-    # E-1a (contracts/witness-evidence.md:51) / data-model.md §5 "Validation
-    # rules" (lines 447-450): manifest row identity is (cell_id, config) — 32
+    # E-1a (contracts/witness-evidence.md) / data-model.md §5 "Validation
+    # rules": manifest row identity is (cell_id, config) — 32
     # rows, retries never committed — and the shipped `id` field is RETAINED,
     # derived as "<cell_id>@<config>", so `id` stays unique over exactly those
     # rows. The manifest/ledger split (witness_evidence.yaml's `runs:` ledger

@@ -693,7 +693,7 @@ TEST(Conversation, Cell)
     // GapFill (a storeless session cannot replay app bodies -- Session::
     // replay_outbound_range_'s `if (!store_ || our_last == 0 ...)` early
     // branch, session.cpp ~5387). Same precedent as
-    // hp_fix44_recovery_outbound_answer_test.cpp (~line 268): unbounded
+    // hp_fix44_recovery_outbound_answer_test.cpp's FixppAnswersResendRequestAndPeerResyncs: unbounded
     // policy, exempt from the bounded-store DoS construction guard that
     // would otherwise abort session open under the engine's default
     // max_store_memory_bytes. Test-only store; applies to every combo (the
@@ -800,7 +800,7 @@ TEST(Conversation, Cell)
     // transcript for the SPECIFIC Reject(35=3) signature this exchange
     // produces (RefMsgType=1/TestRequest, SessionRejectReason=2/"Tag not
     // defined for this message type"); tolerate a disconnect as the
-    // documented alternative outcome (KNOWN-LIMITATIONS.md:87-106: only
+    // documented alternative outcome (KNOWN-LIMITATIONS.md's session-reject-vs-disconnect section: only
     // QuickFIX-J 3.0.1 is CONFIRMED to emit Reject(35=3) on this pinned
     // input -- measured here to hold for QuickFIX-cpp too, but the task's
     // own tolerance is kept so a counterparty rebuild that changes this
