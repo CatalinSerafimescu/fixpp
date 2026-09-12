@@ -767,7 +767,14 @@ TEST(Conversation, Cell)
                                                             begin_string, now_utc_ms(), reject_fields);
                 if (!frame_r.has_value()) co_return std::unexpected(frame_r.error());
                 co_return co_await sess->store_then_emit_test_access(*seq_r, *frame_r);
-            }(),
+            },  // ⛔ NO trailing `()` — pass the CALLABLE, never its invocation.
+                // `co_spawn(ex, lambda(), token)` invokes the lambda immediately and
+                // hands co_spawn only the awaitable; the closure itself is a temporary
+                // that dies at the end of this full-expression, so every later resume
+                // touches its `[&]` captures through a dangling `this`. ASan caught it
+                // as `stack-use-after-scope` in `(.resume)` — all 8 conversation cells
+                // aborted under the `asan` config while normal/ubsan/tsan passed.
+                // Passing the callable makes co_spawn OWN it for the coroutine's life.
             asio::use_future);
         fx.run_until([&] { return send_fut.wait_for(0ms) == std::future_status::ready; }, 3s);
         ASSERT_EQ(send_fut.wait_for(0ms), std::future_status::ready)
@@ -887,7 +894,7 @@ TEST(Conversation, Cell)
                                                             decl.fields);
                 if (!frame_r.has_value()) co_return std::unexpected(frame_r.error());
                 co_return co_await sess->store_then_emit_test_access(*seq_r, *frame_r);
-            }(),
+            },  // ⛔ NO trailing `()` — see the A-REJECT site above for why.
             asio::use_future);
         fx.run_until([&] { return send_fut.wait_for(0ms) == std::future_status::ready; }, 3s);
         if (send_fut.wait_for(0ms) != std::future_status::ready) {

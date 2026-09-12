@@ -31,6 +31,7 @@
 #   python3 -m pytest -xvs tests/interop/cell_results_schema_check_test.py
 
 import contextlib
+import copy
 import inspect
 import os
 import re
@@ -1417,7 +1418,22 @@ def test_per_cell_completeness_no_silent_absence(cells):
     # Assert the exact expected id set — a dropped OR surprise-added cell fails
     # with a clear diff (parent-harness-gate-contract.md:56 missing-row rule /
     # T028 claim in tasks.md:125).
-    present_ids = {c["id"] for c in cells}
+    # 089 T095: EXPECTED_IDS is the NON-conversation inventory. The
+    # kind:conversation rows are governed by _check_e1a's 32-slot
+    # (cell_id, config) set equality instead -- a different population with a
+    # different key (`<cell_id>@<config>`, 32 of them, accumulated one config
+    # at a time), so folding them into this hand-kept id set would mean
+    # restating that inventory in a second place and reddening this check for
+    # every partially-complete sweep. Each keeps its OWN diagnostic.
+    # ⚠️ Anti-vacuity: a filter that emptied this population would make the
+    # set comparison below pass trivially, so the population is re-derived at
+    # run time and asserted non-empty first (same shape as T100's control).
+    non_conversation = [c for c in cells if c.get("kind") != "conversation"]
+    assert non_conversation, (
+        "the non-conversation population is EMPTY -- this check covers nothing; "
+        "the kind filter is wrong, not the manifest"
+    )
+    present_ids = {c["id"] for c in non_conversation}
     missing = EXPECTED_IDS - present_ids
     unexpected = present_ids - EXPECTED_IDS
     assert not missing and not unexpected, (
@@ -1523,3 +1539,124 @@ def test_artifact_path_guard_is_off_outside_guarded_block(tmp_path):
         assert fh.read() == "fine\n"
     fd = os.open(str(outside), os.O_RDONLY)
     os.close(fd)
+
+
+# ===========================================================================
+# 089 T095a — THE COMMITTED-ARTIFACT GATES
+#
+# E-1a, E-4, E-1c/W-3b/W-3c, W-3a and E-7a/E-7b/E-7c were each proven only
+# against a CONSTRUCTED fixture (`_e7_fixture_complete()` and friends). A gate
+# that never reads the committed artifact is not a gate — it cannot fail on
+# anything a real sweep produces. T095's matrix populated both artifacts (32
+# conformance runs + 8 control runs across 4 configs; 400 witness rows; 20
+# validation pairs), so these now range over the REAL files, unconditionally.
+#
+# ⚠️ The parameter is `committed_cells`, NOT `cells`, and that is deliberate.
+# `_discover_cell_checks()` selects every module-level `test_*` whose
+# parameters are exactly ["cells"], and `emit_matrix.validate()` runs that set
+# against ONE configuration's emission. A 32-slot gate with that signature
+# would therefore redden every partial sweep (8 of 32 rows present after the
+# first config). The split is the point: `validate()` checks a per-config
+# emission, these check the accumulated committed artifact.
+#
+# Each gate is paired with a forced-miss arm that removes exactly ONE row from
+# a deep copy of the real artifact and asserts the gate's OWN diagnostic —
+# never a bare "it raised" (rule 2 of quickstart.md § Step 4).
+# ===========================================================================
+
+
+@pytest.fixture(scope="module")
+def committed_cells():
+    return _load_cells()
+
+
+def _committed_conversation_rows(cells_rows):
+    rows = [c for c in cells_rows if c.get("kind") == "conversation"]
+    # Anti-vacuity: every gate below is a set comparison, and an EMPTY
+    # population satisfies most of them trivially. Fail loudly here instead.
+    assert rows, "the committed manifest carries NO kind:conversation rows -- these gates cover nothing"
+    return rows
+
+
+def test_t095a_e1a_over_the_committed_manifest(committed_cells):
+    _check_e1a(_committed_conversation_rows(committed_cells))
+
+
+def test_t095a_e1a_goes_red_with_one_committed_row_removed(committed_cells):
+    rows = copy.deepcopy(_committed_conversation_rows(committed_cells))
+    rows.pop()
+    with pytest.raises(AssertionError, match="32-slot inventory"):
+        _check_e1a(rows)
+
+
+def test_t095a_e4_over_the_committed_manifest(committed_cells):
+    _check_e4(_committed_conversation_rows(committed_cells))
+
+
+def test_t095a_e4_goes_red_when_one_config_row_is_dropped(committed_cells):
+    rows = copy.deepcopy(_committed_conversation_rows(committed_cells))
+    victim = next(r for r in rows if r.get("config") == "tsan")
+    rows.remove(victim)
+    with pytest.raises(AssertionError, match="folded into another config"):
+        _check_e4(rows)
+
+
+def test_t095a_run_slot_completeness_over_the_committed_ledger(witness_evidence_doc):
+    _check_run_slot_completeness(witness_evidence_doc)
+
+
+def test_t095a_run_slot_completeness_goes_red_with_one_run_removed(witness_evidence_doc):
+    doc = copy.deepcopy(witness_evidence_doc)
+    doc["runs"].remove(next(r for r in doc["runs"] if r.get("kind") == "conformance"))
+    with pytest.raises(AssertionError, match="32-slot inventory"):
+        _check_run_slot_completeness(doc)
+
+
+def test_t095a_w3a_over_the_committed_ledger(witness_evidence_doc, census_doc):
+    _check_w3a(witness_evidence_doc, census_doc)
+
+
+def test_t095a_w3a_goes_red_with_one_witness_removed(witness_evidence_doc, census_doc):
+    doc = copy.deepcopy(witness_evidence_doc)
+    doc["witnesses"].pop(0)
+    with pytest.raises(AssertionError, match="projection"):
+        _check_w3a(doc, census_doc)
+
+
+def test_t095a_e7a_over_the_committed_ledger(witness_evidence_doc):
+    _check_e7a(witness_evidence_doc)
+
+
+def test_t095a_e7a_goes_red_with_one_pair_removed(witness_evidence_doc):
+    doc = copy.deepcopy(witness_evidence_doc)
+    doc["validation_pairs"].remove(
+        next(p for p in doc["validation_pairs"] if p.get("kind") == "conformance"))
+    with pytest.raises(AssertionError, match="16-pair inventory"):
+        _check_e7a(doc)
+
+
+def test_t095a_e7b_over_the_committed_ledger(witness_evidence_doc):
+    _check_e7b(witness_evidence_doc)
+
+
+def test_t095a_e7b_goes_red_when_the_control_pairs_are_removed(witness_evidence_doc):
+    # E-7b's whole point: 16 well-formed conformance pairs must NOT satisfy it.
+    doc = copy.deepcopy(witness_evidence_doc)
+    doc["validation_pairs"] = [p for p in doc["validation_pairs"]
+                               if p.get("kind") == "conformance"]
+    with pytest.raises(AssertionError, match="validator-positive-control"):
+        _check_e7b(doc)
+
+
+def test_t095a_e7c_over_the_committed_ledger(witness_evidence_doc):
+    _check_e7c(witness_evidence_doc)
+
+
+def test_t095a_e7c_goes_red_when_a_cited_run_is_superseded(witness_evidence_doc):
+    # Trigger (2): a run is superseded but the pair citing it stays
+    # authoritative — the demotion an implementer omits.
+    doc = copy.deepcopy(witness_evidence_doc)
+    victim = next(r for r in doc["runs"] if r.get("kind") == "conformance")
+    victim["authoritative"] = False
+    with pytest.raises(AssertionError, match="SUPERSEDED"):
+        _check_e7c(doc)
