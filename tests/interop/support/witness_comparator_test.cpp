@@ -924,3 +924,199 @@ TEST(WitnessComparator, T053aHardcodedLiteralAgreesWithItselfFr006StaysGreen)
            "the readback.";
     EXPECT_TRUE(rows[0].mismatch.empty());
 }
+
+// ── gate-b fix round, FQ-4 (Codex #2) — fail-closed correlation parsing,
+// explicit msg_type compare, duplicate-record/duplicate-path rejection ─────
+
+// RED proof arm 0a: a syntactically well-formed `readback` line that simply
+// OMITS `seq_num` must be rejected AT PARSE, naming the missing field --
+// not silently admitted with seq_num defaulted to 0. Hand-written (not via
+// Stream, which cannot express an incomplete record).
+TEST(WitnessComparator, ParseStreamThrowsOnMissingSeqNum)
+{
+    std::string const path = testing::TempDir() + "wc_fq4_missing_seqnum.jsonl";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "{\"type\":\"readback\",\"msg_type\":\"D\",\"direction\":\"fixpp-to-peer\","
+               "\"occurrence\":0,\"poss_dup\":false,\"fields\":[],\"typed_reads\":[]}\n";
+    }
+    bool threw = false;
+    try {
+        (void)parse_stream(path);
+    } catch (std::runtime_error const& e) {
+        threw = true;
+        std::string const what = e.what();
+        EXPECT_NE(what.find("seq_num"), std::string::npos)
+            << "diagnostic did not name the missing field: " << what;
+    }
+    EXPECT_TRUE(threw) << "a readback record missing seq_num must throw, not default it to 0";
+}
+
+// RED proof arm 0b (the precedence arm): TWO records both omitting
+// seq_num -- must report the MISSING FIELD cause, not a duplicate_record
+// diagnostic (part 0's per-field seen-flag check must run before part 2's
+// duplicate detection ever sees a collision at the shared (0, "", 0) key).
+// parse_stream throws on the FIRST malformed record before a second line is
+// ever read, so this is satisfied by construction once part 0 is fail-
+// closed at all -- this arm pins that it stays that way.
+TEST(WitnessComparator, ParseStreamReportsMissingFieldNotDuplicateOnTwoIncompleteRecords)
+{
+    std::string const path = testing::TempDir() + "wc_fq4_two_missing_seqnum.jsonl";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "{\"type\":\"readback\",\"msg_type\":\"D\",\"direction\":\"fixpp-to-peer\","
+               "\"occurrence\":0,\"poss_dup\":false,\"fields\":[],\"typed_reads\":[]}\n";
+        out << "{\"type\":\"readback\",\"msg_type\":\"G\",\"direction\":\"fixpp-to-peer\","
+               "\"occurrence\":0,\"poss_dup\":false,\"fields\":[],\"typed_reads\":[]}\n";
+    }
+    bool threw = false;
+    try {
+        (void)parse_stream(path);
+    } catch (std::runtime_error const& e) {
+        threw = true;
+        std::string const what = e.what();
+        EXPECT_NE(what.find("seq_num"), std::string::npos) << "wrong cause reported: " << what;
+        EXPECT_EQ(what.find("duplicate"), std::string::npos)
+            << "reported duplicate_record instead of the missing-field cause: " << what;
+    }
+    EXPECT_TRUE(threw);
+}
+
+// RED proof arm 1: wrong msg_type, otherwise byte-identical body, at the
+// same (seq_num, direction, occurrence) -- must be `fail` naming `msg_type`.
+// Pre-fix this was `pass` (Key omits msg_type and nothing compared it).
+TEST(WitnessComparator, WrongMsgTypeIsAMismatchEvenWithIdenticalBody)
+{
+    std::string const dir = testing::TempDir();
+    {
+        Stream sender(dir + "wc_fq4_msgtype_sender.jsonl");
+        sender.sent("D", 70, "fixpp-to-peer", 0, "B-01", {{"1", "ACCT0001"}});
+    }
+    {
+        Stream receiver(dir + "wc_fq4_msgtype_receiver.jsonl");
+        receiver.readback("G", 70, "fixpp-to-peer", 0, false, {{"1", "ACCT0001"}}, {});
+    }
+    auto const a = parse_stream(dir + "wc_fq4_msgtype_sender.jsonl");
+    auto const b = parse_stream(dir + "wc_fq4_msgtype_receiver.jsonl");
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "fail");
+    bool found_msg_type = false;
+    for (auto const& m : rows[0].mismatch) {
+        if (m.cls == "msg_type") {
+            found_msg_type = true;
+            EXPECT_EQ(m.sent_value, "D");
+            EXPECT_EQ(m.readback_value, "G");
+        }
+    }
+    EXPECT_TRUE(found_msg_type) << "no mismatch entry named the msg_type disagreement";
+}
+
+// RED proof arm 2: a duplicate readback record at the same key -- the
+// FIRST carries a WRONG value, the SECOND is correct. Pre-fix, the second
+// (correct) record silently WON the last-wins overwrite and the row passed.
+TEST(WitnessComparator, DuplicateReadbackRecordWrongThenRightStillFails)
+{
+    std::string const dir = testing::TempDir();
+    {
+        Stream sender(dir + "wc_fq4_duprec_wr_sender.jsonl");
+        sender.sent("D", 71, "fixpp-to-peer", 0, "B-01", {{"1", "ACCT0001"}});
+    }
+    {
+        Stream receiver(dir + "wc_fq4_duprec_wr_receiver.jsonl");
+        receiver.readback("D", 71, "fixpp-to-peer", 0, false, {{"1", "ACCT0009"}}, {});  // wrong
+        receiver.readback("D", 71, "fixpp-to-peer", 0, false, {{"1", "ACCT0001"}}, {});  // right
+    }
+    auto const a = parse_stream(dir + "wc_fq4_duprec_wr_sender.jsonl");
+    auto const b = parse_stream(dir + "wc_fq4_duprec_wr_receiver.jsonl");
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "fail");
+    ASSERT_EQ(rows[0].mismatch.size(), 1u);
+    EXPECT_EQ(rows[0].mismatch[0].cls, "duplicate_record");
+}
+
+// RED proof arm 4 (ordering half of arm 2): SAME duplicate, correct record
+// FIRST, wrong SECOND. A fix that only checks the last-seen value would
+// pass this while still failing to catch arm 2 above -- both must fail,
+// proving the fix is `emplace`-with-rejection, not a re-ordered assignment.
+TEST(WitnessComparator, DuplicateReadbackRecordRightThenWrongStillFails)
+{
+    std::string const dir = testing::TempDir();
+    {
+        Stream sender(dir + "wc_fq4_duprec_rw_sender.jsonl");
+        sender.sent("D", 72, "fixpp-to-peer", 0, "B-01", {{"1", "ACCT0001"}});
+    }
+    {
+        Stream receiver(dir + "wc_fq4_duprec_rw_receiver.jsonl");
+        receiver.readback("D", 72, "fixpp-to-peer", 0, false, {{"1", "ACCT0001"}}, {});  // right
+        receiver.readback("D", 72, "fixpp-to-peer", 0, false, {{"1", "ACCT0009"}}, {});  // wrong
+    }
+    auto const a = parse_stream(dir + "wc_fq4_duprec_rw_sender.jsonl");
+    auto const b = parse_stream(dir + "wc_fq4_duprec_rw_receiver.jsonl");
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "fail");
+    ASSERT_EQ(rows[0].mismatch.size(), 1u);
+    EXPECT_EQ(rows[0].mismatch[0].cls, "duplicate_record");
+}
+
+// RED proof arm 3: one readback record with path "44" declared TWICE,
+// wrong then right -- must fail. Pre-fix, the second (correct) value
+// silently overwrote the map entry and the row passed.
+TEST(WitnessComparator, DuplicateFieldPathWrongThenRightStillFails)
+{
+    std::string const dir = testing::TempDir();
+    {
+        Stream sender(dir + "wc_fq4_duppath_wr_sender.jsonl");
+        sender.sent("D", 73, "fixpp-to-peer", 0, "B-02", {{"44", "190.5"}});
+    }
+    {
+        Stream receiver(dir + "wc_fq4_duppath_wr_receiver.jsonl");
+        receiver.readback("D", 73, "fixpp-to-peer", 0, false,
+                           {{"44", "190.6"}, {"44", "190.5"}}, {});
+    }
+    auto const a = parse_stream(dir + "wc_fq4_duppath_wr_sender.jsonl");
+    auto const b = parse_stream(dir + "wc_fq4_duppath_wr_receiver.jsonl");
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "fail");
+    bool found_dup_path = false;
+    for (auto const& m : rows[0].mismatch) {
+        if (m.cls == "duplicate_path") {
+            found_dup_path = true;
+            EXPECT_EQ(m.path, "44");
+        }
+    }
+    EXPECT_TRUE(found_dup_path) << "no mismatch entry named the duplicate path";
+}
+
+// RED proof arm 4 (ordering half of arm 3): SAME duplicate path, correct
+// value FIRST, wrong SECOND -- must also fail (the duplicate itself is the
+// violation, independent of which occurrence happens to be correct).
+TEST(WitnessComparator, DuplicateFieldPathRightThenWrongStillFails)
+{
+    std::string const dir = testing::TempDir();
+    {
+        Stream sender(dir + "wc_fq4_duppath_rw_sender.jsonl");
+        sender.sent("D", 74, "fixpp-to-peer", 0, "B-02", {{"44", "190.5"}});
+    }
+    {
+        Stream receiver(dir + "wc_fq4_duppath_rw_receiver.jsonl");
+        receiver.readback("D", 74, "fixpp-to-peer", 0, false,
+                           {{"44", "190.5"}, {"44", "190.6"}}, {});
+    }
+    auto const a = parse_stream(dir + "wc_fq4_duppath_rw_sender.jsonl");
+    auto const b = parse_stream(dir + "wc_fq4_duppath_rw_receiver.jsonl");
+    auto const rows = compare_streams(a, b, test_identity(), test_resolver());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].verdict, "fail");
+    bool found_dup_path = false;
+    for (auto const& m : rows[0].mismatch) {
+        if (m.cls == "duplicate_path") {
+            found_dup_path = true;
+            EXPECT_EQ(m.path, "44");
+        }
+    }
+    EXPECT_TRUE(found_dup_path) << "no mismatch entry named the duplicate path";
+}

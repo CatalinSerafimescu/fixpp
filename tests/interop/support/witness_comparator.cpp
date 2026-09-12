@@ -440,6 +440,11 @@ std::vector<ParsedRecord> parse_stream(std::string const& path)
         ParsedRecord rec;
         bool got_type = false;
         bool malformed = false;
+        bool has_msg_type = false;
+        bool has_seq_num = false;
+        bool has_direction = false;
+        bool has_occurrence = false;
+        bool has_script_step_id = false;
         while (true) {
             std::string key;
             if (!r.parse_string(key)) {
@@ -457,15 +462,35 @@ std::vector<ParsedRecord> parse_stream(std::string const& path)
                 }
                 got_type = true;
             } else if (key == "msg_type") {
-                r.parse_string(rec.msg_type);
+                if (!r.parse_string(rec.msg_type)) {
+                    malformed = true;
+                    break;
+                }
+                has_msg_type = true;
             } else if (key == "seq_num") {
-                r.parse_number(rec.seq_num);
+                if (!r.parse_number(rec.seq_num)) {
+                    malformed = true;
+                    break;
+                }
+                has_seq_num = true;
             } else if (key == "direction") {
-                r.parse_string(rec.direction);
+                if (!r.parse_string(rec.direction)) {
+                    malformed = true;
+                    break;
+                }
+                has_direction = true;
             } else if (key == "occurrence") {
-                r.parse_number(rec.occurrence);
+                if (!r.parse_number(rec.occurrence)) {
+                    malformed = true;
+                    break;
+                }
+                has_occurrence = true;
             } else if (key == "script_step_id") {
-                r.parse_string(rec.script_step_id);
+                if (!r.parse_string(rec.script_step_id)) {
+                    malformed = true;
+                    break;
+                }
+                has_script_step_id = true;
             } else if (key == "fields") {
                 r.parse_field_array(rec.fields);
             } else {
@@ -480,6 +505,35 @@ std::vector<ParsedRecord> parse_stream(std::string const& path)
         }
         if (malformed || !got_type) {
             continue;
+        }
+        if (type == "sent" || type == "readback") {
+            // Fail-closed (gate-b fix round, FQ-4 part 0): seq_num and
+            // occurrence default to 0 and direction defaults to "" (the
+            // struct's own in-class initializers), and 0/"" are LEGITIMATE
+            // values -- occurrence 0 is the common case in the committed
+            // artifact -- so presence is tracked by a seen-flag PER FIELD,
+            // never inferred from the value. A record that is syntactically
+            // well-formed JSON but simply OMITS a required correlation
+            // field is corrupted evidence, not a malformed line, and must
+            // not be silently admitted at key (0, "", 0) -- two such
+            // records would silently COLLIDE there (see compare_streams'
+            // duplicate-record rejection), which is why this check runs
+            // BEFORE that one and names the real cause first.
+            std::vector<std::string> missing;
+            if (!has_msg_type) missing.emplace_back("msg_type");
+            if (!has_seq_num) missing.emplace_back("seq_num");
+            if (!has_direction) missing.emplace_back("direction");
+            if (!has_occurrence) missing.emplace_back("occurrence");
+            if (type == "sent" && !has_script_step_id) missing.emplace_back("script_step_id");
+            if (!missing.empty()) {
+                std::string msg =
+                    "parse_stream: " + type + " record missing required correlation field(s):";
+                for (std::string const& field : missing) {
+                    msg += " " + field;
+                }
+                msg += " -- line: " + line;
+                throw std::runtime_error(msg);
+            }
         }
         if (type == "sent") {
             rec.kind = ParsedRecord::Kind::Sent;
@@ -630,11 +684,27 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
     // the same process as the sender (contracts/readback-jsonl.md §
     // Transport), so there is no risk of double-counting one message twice
     // under the same key.
+    //
+    // FQ-4 part 2 (gate-b fix round): `emplace`, not `operator[]` — the OLD
+    // code silently overwrote on a key collision, so a wrong record followed
+    // by a correct duplicate DISAPPEARED from the verdict. On a collision the
+    // FIRST record stays resident (emplace's own rule) but the key is
+    // remembered as duplicated so the consuming `sent` below fails loudly
+    // instead of comparing against whichever one happened to win.
     std::unordered_map<Key, ParsedRecord const*, KeyHash> readback_by_key;
+    std::unordered_map<Key, std::string, KeyHash> readback_duplicate_reason;
     for (auto const* stream : {&stream_a, &stream_b}) {
         for (ParsedRecord const& rec : *stream) {
             if (rec.kind == ParsedRecord::Kind::Readback) {
-                readback_by_key[Key{rec.seq_num, rec.direction, rec.occurrence}] = &rec;
+                Key const key{rec.seq_num, rec.direction, rec.occurrence};
+                auto const [it, inserted] = readback_by_key.emplace(key, &rec);
+                if (!inserted) {
+                    readback_duplicate_reason[key] = "duplicate readback record at (seq_num="
+                        + std::to_string(rec.seq_num) + ", direction=" + rec.direction
+                        + ", occurrence=" + std::to_string(rec.occurrence)
+                        + "): resident msg_type=" + it->second->msg_type
+                        + ", duplicate msg_type=" + rec.msg_type;
+                }
             }
         }
     }
@@ -674,6 +744,22 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
                 continue;
             }
 
+            // FQ-4 part 2: a collision at this key means there is no single
+            // correct readback record to compare against -- fail loudly
+            // rather than silently comparing against whichever one won the
+            // emplace race above.
+            if (auto const dup_it = readback_duplicate_reason.find(
+                    Key{sent.seq_num, sent.direction, sent.occurrence});
+                dup_it != readback_duplicate_reason.end()) {
+                row.verdict = "fail";
+                row.mismatch.push_back(Mismatch{.path = "",
+                                                 .cls = "duplicate_record",
+                                                 .sent_value = sent.msg_type,
+                                                 .readback_value = dup_it->second});
+                rows.push_back(std::move(row));
+                continue;
+            }
+
             ParsedRecord const& readback = *it->second;
 
             // FR-018 spurious-hit (spec.md's FR-016c empty-intent-vs-empty-readback row): "Emit a message whose
@@ -698,12 +784,53 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
                 continue;
             }
 
-            std::unordered_map<std::string, std::string> readback_fields;
-            for (FieldEntry const& fe : readback.fields) {
-                readback_fields[fe.path] = fe.value;
+            std::vector<Mismatch> mismatches;
+
+            // FQ-4 part 1: `Key` (above) intentionally omits msg_type -- an
+            // EXPLICIT check here, rather than widening the key, because
+            // widening would turn a real msg_type defect into a "missing
+            // readback" diagnostic instead of naming the invariant
+            // data-model.md §3 states ("msg_type — must equal the paired
+            // readback's").
+            if (sent.msg_type != readback.msg_type) {
+                mismatches.push_back(Mismatch{.path = "35",
+                                               .cls = "msg_type",
+                                               .sent_value = sent.msg_type,
+                                               .readback_value = readback.msg_type});
             }
 
-            std::vector<Mismatch> mismatches;
+            // FQ-4 part 3: readback-side duplicate paths (data-model.md §2:
+            // "two entries may not share a `path` within one record").
+            // `emplace` keeps the FIRST value; every collision beyond the
+            // first is reported explicitly rather than silently overwritten
+            // (the OLD code's `operator[]` let a wrong field followed by a
+            // correct duplicate disappear from the verdict).
+            std::unordered_map<std::string, std::string> readback_fields;
+            for (FieldEntry const& fe : readback.fields) {
+                auto const [rf_it, rf_inserted] = readback_fields.emplace(fe.path, fe.value);
+                if (!rf_inserted) {
+                    mismatches.push_back(Mismatch{.path = fe.path,
+                                                   .cls = "duplicate_path",
+                                                   .sent_value = "",
+                                                   .readback_value = fe.value});
+                }
+            }
+            // Same treatment for the `sent` side -- the field loop below
+            // never built a map before, so a duplicate `sent` path was
+            // invisible to every check, not merely to a last-wins hazard.
+            {
+                std::unordered_map<std::string, std::string> seen;
+                for (FieldEntry const& fe : sent.fields) {
+                    auto const [s_it, s_inserted] = seen.emplace(fe.path, fe.value);
+                    if (!s_inserted) {
+                        mismatches.push_back(Mismatch{.path = fe.path,
+                                                       .cls = "duplicate_path",
+                                                       .sent_value = fe.value,
+                                                       .readback_value = ""});
+                    }
+                }
+            }
+
             for (FieldEntry const& fe : sent.fields) {
                 auto const rb_it = readback_fields.find(fe.path);
                 if (rb_it == readback_fields.end()) {

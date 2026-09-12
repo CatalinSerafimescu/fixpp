@@ -56,9 +56,15 @@ struct ParsedRecord {
 };
 
 // Parses one readback-JSONL file (contracts/readback-jsonl.md § Transport).
-// Malformed lines and non-sent/readback record kinds are silently skipped —
-// this is a comparator input reader, not a schema validator (see file-header
-// scope note on C-1/C-10).
+// Syntactically malformed lines and non-sent/readback record kinds are
+// silently skipped — this is a comparator input reader, not a schema
+// validator (see file-header scope note on C-1/C-10). A syntactically
+// well-formed `sent`/`readback` record that OMITS a required correlation
+// field (msg_type/seq_num/direction/occurrence, plus script_step_id on a
+// `sent`) is a DIFFERENT case — corrupted evidence, not a malformed line —
+// and throws std::runtime_error naming the missing field(s) (gate-b fix
+// round, FQ-4 part 0) rather than silently defaulting into the comparator's
+// key space.
 [[nodiscard]] std::vector<ParsedRecord> parse_stream(std::string const& path);
 
 struct Mismatch {
