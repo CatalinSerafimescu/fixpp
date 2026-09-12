@@ -75,7 +75,7 @@ pre-commit run --all-files
 ## The line-number citation gate (issue #310)
 
 `check-line-citations` blocks a commit that ADDS a line-number citation. There
-are **seven spellings** and the gate knows all of them: <!-- citation-ok: worked examples, not real citations -->
+are **eight spellings** and the gate knows all of them: <!-- citation-ok: worked examples, not real citations -->
 
 | | shape | example |
 |---|---|---|
@@ -85,8 +85,9 @@ are **seven spellings** and the gate knows all of them: <!-- citation-ok: worked
 | C | bare, parenthesised | `(:64)`, `(:316-328)` | <!-- citation-ok: worked example -->
 | D | bracketed doc alias | `[2h §6.6]:1167-1204`, `` [2d §4.7]`:864 `` | <!-- citation-ok: worked example -->
 | F | bare or backticked | `at :2953`, `` `:616` ``, `` `constitution.md`:335 `` | <!-- citation-ok: worked example -->
+| F | tilde EITHER side | `` ~:1250 ``, `` :~1910 `` | <!-- citation-ok: worked example -->
 
-**Six of those seven were added on 2026-09-12, and NOT ONE was found by running
+**Seven of those eight were added on 2026-09-12, and NOT ONE was found by running
 the detector.** Each surfaced because a person — or an agent reading like one —
 met it in prose. That is the durable lesson: an instrument keyed on the shapes
 you thought of reports clean about the shapes you did not.
@@ -95,14 +96,30 @@ The blind spots were not small. Form D reached **shipped public headers** —
 `include/fixpp/core/error.hpp` carried 22, all pointing ~60 lines short of the
 table they named. Form B's tilde was accepted only on the OUTSIDE — the <!-- citation-ok: worked example -->
 spelling issue #310 quoted — so the inside form went unmatched for the life of
-the gate — including in a shipped header. The extension list was C++ plus `md`,
+the gate — including in a shipped header. **That same asymmetry then recurred
+in a different regex**: form F gated `` ~:1250 `` and not `` :~1910 ``, and the <!-- citation-ok: worked example -->
+second spelling survived the whole sweep. When a pattern admits an optional
+mark anywhere, write it on **both** sides and carry a self-test arm for each —
+the cost is one `?`, and the omission is invisible to every instrument,
+including the one you are editing. The extension list was C++ plus `md`,
 which silently declared that only C++ and markdown rot, while 435 citations
 pointed into the FIX dictionaries that dictionary features edit wholesale.
 
-**If you are adding an eighth, do not guess it.** Derive the blind set by
+**If you are adding a ninth, do not guess it.** Derive the blind set by
 complement: generate every line-number-ish token in the tree, subtract every line
 the current deciders match, and read the residue. The procedure is written out
-above `RE_A` in `tools/check_line_citations.py`. Guessing has failed seven times.
+above `RE_A` in `tools/check_line_citations.py`. Guessing has failed eight times.
+
+**Two spellings are measured and deliberately NOT gated**, recorded here so the
+next person to notice one finds out it was seen rather than missed:
+`build_replay_frame:1220` and `NotConnected:1839` — a symbol name with a line <!-- citation-ok: worked example -->
+number and no extension. The tree's `identifier:NNN` hits are overwhelmingly
+`collector:4318`, `sha256:…`, `localhost:8080`, `iterations:89261714`; a gate
+that cries wolf gets narrowed by the next person, and **the narrowing is the
+thing that rots**. Restricting to a CamelCase head does separate the classes
+cleanly (7 live hits, zero false positives, measured 2026-09-12) — but seven
+sites are cheaper to fix by hand than a ninth decider is to defend forever, and
+a shape that is absent today is not absent tomorrow. They were fixed by hand.
 
 A line number is a claim about a file that keeps moving. Nobody has to touch the
 citing file for it to become false: the target drifts and the citation rots in
