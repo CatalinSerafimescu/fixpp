@@ -25,6 +25,7 @@
 
 import contextlib
 import copy
+import hashlib
 import inspect
 import os
 import re
@@ -52,6 +53,7 @@ WITNESS_EVIDENCE = os.path.join(HERE, "witness_evidence.yaml")
 # (contracts/witness-evidence.md W-2a; census.yaml's own header comment).
 CENSUS = os.path.join(HERE, "conversation", "census.yaml")
 SCRIPT = os.path.join(HERE, "conversation", "conversation_script.yaml")
+PROBE_SCRIPT = os.path.join(HERE, "conversation", "probe_script.yaml")
 
 REQUIRED_FIELDS = {"id", "config", "kind", "status", "matrix_disposition", "spec_ref"}
 # data-model.md §5 "New — identity and run evidence (FR-013, FR-013a)": required
@@ -612,6 +614,69 @@ def _check_w1(doc):
 # closed set: this comparator never emits "skip" (data-model.md §4) and a
 # committed conformance witness may never be recorded as anything but pass
 # or fail.
+
+# ── FR-008c: the recorded script_digest must equal the script ON DISK ─────────
+#
+# gate-b round 2. `script_digest` exists to detect that the script the cells
+# EXECUTED differs from the script in the tree. Nothing compared the recorded
+# value against the file, so the two drifted silently: a citation-cleanup commit
+# rewrote two COMMENT lines in conversation_script.yaml, changing its bytes and
+# therefore its SHA-256, while all 32 conformance rows kept the pre-edit digest.
+# The evidence still described a real run -- but of a script blob no longer in
+# the tree, so a fresh live run would have failed conv_cell_test's own digest
+# assertion. A drift detector nothing reads is not a detector.
+#
+# ⛔ CONSEQUENCE, and it is the point: these script files are DIGEST-BOUND.
+# Editing one -- even a comment -- invalidates the committed evidence and this
+# gate reddens until the matrix is regenerated against the new bytes. That cost
+# is the feature. The diagnostic below says so, because the file itself cannot:
+# adding a warning comment to it would change the very bytes it warns about.
+SCRIPT_BY_RUN_KIND = {
+    "conformance": SCRIPT,
+    "validator-positive-control": PROBE_SCRIPT,
+}
+
+
+def _file_sha256(path):
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def _check_script_digest_binding(witness_doc, cells_rows):
+    runs = witness_doc.get("runs") or []
+    assert runs, "script-digest binding: no runs to check -- vacuous"
+
+    live = {kind: _file_sha256(path) for kind, path in SCRIPT_BY_RUN_KIND.items()}
+    checked = 0
+    for run in runs:
+        kind = run.get("kind")
+        assert kind in SCRIPT_BY_RUN_KIND, (
+            "script-digest binding: run %r has kind %r, which names no script. "
+            "A new run kind must declare which script it executes, or its digest "
+            "is unbound." % (run.get("run_id"), kind))
+        expected = live[kind]
+        actual = run.get("script_digest")
+        assert actual == expected, (
+            "script-digest binding: run %r (kind=%s) records script_digest %r but "
+            "%s currently hashes to %r. The committed evidence attests a script "
+            "blob that is no longer in the tree -- regenerate the matrix against "
+            "the current script, or restore the script to the bytes the evidence "
+            "was produced from. Do NOT edit the recorded digest: that would claim "
+            "a run happened against a script it never saw."
+            % (run.get("run_id"), kind, actual, os.path.basename(SCRIPT_BY_RUN_KIND[kind]), expected))
+        checked += 1
+    assert checked == len(runs), "script-digest binding: checked %d of %d runs" % (checked, len(runs))
+
+    # the manifest's conversation rows carry the same field and must agree
+    conv = [c for c in cells_rows if c.get("kind") == "conversation"]
+    assert conv, "script-digest binding: no kind:conversation manifest rows -- vacuous"
+    for row in conv:
+        actual = row.get("script_digest")
+        assert actual == live["conformance"], (
+            "script-digest binding: manifest row %r records script_digest %r but "
+            "conversation_script.yaml currently hashes to %r."
+            % (row.get("cell_id"), actual, live["conformance"]))
+
 WITNESS_VERDICTS = {"pass", "fail"}
 
 
@@ -1791,6 +1856,41 @@ def test_t095a_witness_run_join_goes_red_when_all_witnesses_for_a_run_are_delete
 
 def test_t095a_w0_content_over_the_committed_ledger(witness_evidence_doc, census_doc):
     _check_w0_content(witness_evidence_doc, census_doc)
+
+
+def test_t095a_script_digest_binding_over_the_committed_artifacts(
+        witness_evidence_doc, committed_cells):
+    # FR-008c (gate-b round 2): the recorded script_digest must equal the
+    # script ON DISK, for every run and every conversation manifest row.
+    _check_script_digest_binding(witness_evidence_doc, committed_cells)
+
+
+def test_t095a_script_digest_binding_goes_red_on_a_drifted_script(
+        witness_evidence_doc, committed_cells, tmp_path):
+    # RED arm: simulate the exact drift that occurred -- the script file's
+    # bytes change (a comment edit is enough) while the recorded digest stays.
+    # Mutating the real file would race other tests, so redirect the constant
+    # at a byte-modified copy and assert the gate names the drift.
+    import cell_results_schema_check_test as mod
+    original = mod.SCRIPT_BY_RUN_KIND["conformance"]
+    drifted = tmp_path / "conversation_script_drifted.yaml"
+    with open(original, "rb") as fh:
+        drifted.write_bytes(fh.read() + b"\n# one added comment byte-changes the digest\n")
+    mod.SCRIPT_BY_RUN_KIND["conformance"] = str(drifted)
+    try:
+        with pytest.raises(AssertionError, match="script-digest binding"):
+            _check_script_digest_binding(witness_evidence_doc, committed_cells)
+    finally:
+        mod.SCRIPT_BY_RUN_KIND["conformance"] = original
+
+
+def test_t095a_script_digest_binding_is_not_vacuous(witness_evidence_doc, committed_cells):
+    # The gate must fail on an EMPTY run list rather than pass with nothing
+    # checked -- the zero-equals-zero shape round 2 found one level up.
+    empty = copy.deepcopy(witness_evidence_doc)
+    empty["runs"] = []
+    with pytest.raises(AssertionError, match="no runs to check"):
+        _check_script_digest_binding(empty, committed_cells)
 
 
 def test_t095a_w0_content_goes_red_on_a_failed_witness(witness_evidence_doc, census_doc):
