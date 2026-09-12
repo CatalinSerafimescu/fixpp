@@ -71,12 +71,33 @@ import tempfile
 # Cost of the widening, measured over the eleven merges 37eb372f..bb22be26 before
 # taking it: 3 of them newly report, 2-3 citations each, all in `spec/*.md` or a
 # checklist. Re-derive rather than trust that -- `--range <merge>~1..<merge>`.
+# ⚠️ The 2026-09-12 widening is the SECOND time this list was the blind spot,
+# and the lesson is that the list itself is the thing to re-derive, not trust.
+# #336 added the four doc trees after the census reported `0 out of range` over
+# a scope holding almost none of this repo's line-cited documents. That fix was
+# correct and still short: `ci/`, `conan/`, `.github/` and every top-level
+# NON-`.md` file were still unscanned, and `ci/` alone holds 33 citations -- in
+# shell scripts that are themselves CI gates, so a rotted pin there misroutes
+# the reader of a gate.
+#
+# Re-derive rather than trusting this list, the way the gap was found:
+#
+#   git ls-files | awk -F/ '{print (NF==1) ? "TOP:"$1 : $1"/"}' | sort -u
+#
+# and diff that against the entries here. A tree that exists and is not listed
+# is invisible, silently, in the direction of clean.
 SCAN_DIRS = [
     "tests/", "src/", "include/",
-    "tools/", "bench/", "bindings/", "cmake/", ":(glob,top)*.md",
+    "tools/", "bench/", "bindings/", "cmake/",
     "specs/", "spec/", "brain/", ".specify/",
+    "ci/", "conan/", ".github/", "docs/", "perf/",
+    # Every top-level tracked file, not only `*.md`: CMakeLists.txt and
+    # .clang-tidy both carry citations and both were unscanned.
+    ":(glob,top)*",
     ":(exclude)tests/fuzz/corpus/",
     ":(exclude)tests/abi/baseline/",
+    # Binary/generated payloads that cannot hold a citation.
+    ":(exclude)dictionaries/",
 ]
 
 # Form A. The negative lookbehind keeps `a/b/c.cpp:12` from also matching as
@@ -144,6 +165,28 @@ RE_C = re.compile(r"\(:\d+")
 # its code span before the colon. Surveyed: it adds recall and NO new shape, every
 # match is still a doc alias.
 RE_D = re.compile(r"\]`?\s*:\d+")
+# Form F: a bare ` :NNN` self-citation with NO opening paren and NO closing
+# bracket -- `the veto path at :2491`, `the enum arm at :172`, `:1594) all leave
+# this pin green`. Form C requires a `(` and form D a `]`, so this spelling fell
+# between them and was ungated.
+#
+# It was NOT found by the detector. It surfaced because sweep agents rewriting
+# form-A/B/C citations kept encountering it in the same sentences and removed it
+# by hand -- i.e. a human-shaped reading found what the pattern could not, which
+# is the same way forms D and E were found. That is the durable lesson here:
+# every one of these spellings was found by looking at the TEXT, never by
+# running the instrument over it.
+#
+# Precision, surveyed tree-wide before taking it: `{2,}` digits and a required
+# preceding SPACE keep it off C++ bit-fields (`unsigned x :16;` -- zero in this
+# tree, and checked), off `std::`, and off `key: 123` YAML (colon-then-space is
+# the opposite order). Every match's left context is prose: `at :N`, `guard at
+# :N`, `comment at :N`.
+# The lookbehind sits on the char before the SPACE and excludes only `]`, so a
+# `[2h §6.6] :1167` is counted once (as form D) rather than twice. The trailing
+# guard drops a C++ bit-field `unsigned x :16;` -- zero in this tree today, so
+# the guard is precaution rather than a measured need, and is marked as such.
+RE_F = re.compile(r"(?<!\])\s:\d{2,}(?!\d*\s*;)")
 
 # Form A's target pattern, WIDENED with `md` -- used ONLY by --shift-audit, to
 # decide which changed files are cited by line number. RE_A is deliberately left
@@ -365,6 +408,8 @@ def forms_on(line, files=None, by_base=None):
         found.append("C")
     if RE_D.search(line):
         found.append("D")
+    if RE_F.search(line):
+        found.append("F")
     return found
 
 
@@ -384,7 +429,7 @@ def census(root, json_out, quiet=False):
     resolve_by_base = basename_map(resolve_files)
     cache = {}
     resolved, foreign, ambiguous = [], [], []
-    b_hits, c_hits, d_hits, pragma_hits = [], [], [], []
+    b_hits, c_hits, d_hits, f_hits, pragma_hits = [], [], [], [], []
 
     for p in files:
         src = read_lines(root, p, cache)
@@ -401,6 +446,8 @@ def census(root, json_out, quiet=False):
                 c_hits.append({"cf": p, "cl": i + 1, "text": ln.strip()})
             if "D" in forms:
                 d_hits.append({"cf": p, "cl": i + 1, "text": ln.strip()})
+            if "F" in forms:
+                f_hits.append({"cf": p, "cl": i + 1, "text": ln.strip()})
             for m in RE_A.finditer(ln):
                 target, num = m.group(1), int(m.group(2))
                 rec = {"cf": p, "cl": i + 1, "text": ln.strip(),
@@ -432,6 +479,7 @@ def census(root, json_out, quiet=False):
         print(f"form B  prose `line NNN` candidates : {len(b_hits)}   [no filename: unresolvable]")
         print(f"form C  bare `(:NNN)`     candidates : {len(c_hits)}   [no filename: unresolvable]")
         print(f"form D  `[alias]:NNN`     candidates : {len(d_hits)}   [doc alias: no path to resolve]")
+        print(f"form F  bare ` :NNN`      candidates : {len(f_hits)}   [no filename: unresolvable]")
         print(f"`citation-ok` exemptions in force   : {len(pragma_hits)}")
         print()
         for r in pragma_hits:
@@ -452,13 +500,13 @@ def census(root, json_out, quiet=False):
         with open(json_out, "w") as f:
             json.dump({"resolved": resolved, "foreign": foreign,
                        "ambiguous": ambiguous, "form_b": b_hits,
-                       "form_c": c_hits, "form_d": d_hits,
+                       "form_c": c_hits, "form_d": d_hits, "form_f": f_hits,
                        "exempt": pragma_hits}, f, indent=1)
         if not quiet:
             print(f"\nadjudication table -> {json_out}")
     return {"resolved": resolved, "oor": oor, "foreign": foreign,
             "ambiguous": ambiguous, "b": b_hits, "c": c_hits, "d": d_hits,
-            "exempt": pragma_hits}
+            "f": f_hits, "exempt": pragma_hits}
 
 
 def added_lines(root, args):
@@ -1172,6 +1220,18 @@ FORM_CASES = [
     # Exemptions and near-misses that must NOT fire.
     ("// session.cpp:1258 citation-ok reviewed 2026-08-28",          []),
     ("// per [2h §6.6]:1167 citation-ok reviewed 2026-09-12",        []),
+    # Form F -- the bare ` :NNN` self-citation, between form C (needs `(`) and
+    # form D (needs `]`). Found by hand during the #310 sweep, not by the tool.
+    ("// discriminating the 036 site at :2953",                      ["F"]),
+    ("// not the NewSeqNo-too-low path at :4589.",                   ["F"]),
+    ("#   OpenSSL            3.6.2     :69            ABI-stable",   ["F"]),
+    # Form F near-misses, each a REAL shape from this tree. Colon-then-space is
+    # the opposite order from a citation, and a C++ bit-field has no preceding
+    # space-colon pair of this shape (surveyed: zero in src/ include/ tests/).
+    ("key: 123 in a yaml block",                                     []),
+    ("    unsigned flags :1;  // bit-field",                         []),
+    ("    using T = std::vector<int>;",                              []),
+    ("// the ratio is 3:2 and the port is 8080",                     []),
     # Form D near-misses. A markdown link-reference definition, a section anchor
     # whose colon is followed by prose, and array indexing all end in `]:` -- none
     # is a citation, and the digit-immediately-after-colon rule is what separates
@@ -1952,7 +2012,9 @@ def self_test():
             # out-of-range verdict -- it must still be COUNTED. A form that is
             # seen but uncounted is the #336 blindness in a new place.
             "// 22 variants per [2h §6.6]:1167-1204\n"
-            "// and the backticked spelling [2d §4.7]`:864\n")
+            "// and the backticked spelling [2d §4.7]`:864\n"
+            # Form F: no paren, no bracket -- it falls between C and D.
+            "// the veto arm at :2491, not the too-low arm\n")
         for a in (["init", "-q"], ["add", "-A"]):
             subprocess.run(["git"] + a, cwd=d, capture_output=True, check=True)
         r = census(d, None, quiet=True)
@@ -1966,6 +2028,7 @@ def self_test():
             ("empty target is out of range",
              any(x["target"] == "empty.hpp" and x["n"] == 1 for x in r["oor"])),
             ("form D counted (both spellings)", len(r["d"]) == 2),
+            ("form F counted", len(r["f"]) == 1),
             ("form D did not inflate form A",
              len(r["resolved"]) + len(r["foreign"]) + len(r["ambiguous"]) == 5),
         ]
@@ -2043,7 +2106,7 @@ def self_test():
     shift_bad, shift_total = shift_self_test()
     bad += shift_bad
 
-    total = len(FORM_CASES) + 8 + gate_checks + shift_total
+    total = len(FORM_CASES) + 9 + gate_checks + shift_total
     print(f"\nself-test: {total - bad}/{total} pass")
     if bad:
         print("SELF-TEST FAILED -- the instrument does not behave as documented.")
