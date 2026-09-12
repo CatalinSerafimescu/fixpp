@@ -34,6 +34,35 @@ namespace {
 
 using fixpp::interop::hp::ProductionDictionary;
 
+// `setenv`/`unsetenv` are POSIX and DO NOT EXIST in the MSVC CRT -- MSVC
+// reports `error C3861: 'setenv': identifier not found`, which is a hard build
+// break on all three windows-msvc-* legs, not a degraded test. The portable
+// pair is `_putenv_s(name, value)`, where passing an EMPTY value REMOVES the
+// variable (that is the documented deletion spelling; there is no `_unsetenv`).
+// Both surfaces write the CRT environment `std::getenv` reads, so the seam
+// under test sees the change either way. The same split already exists in
+// `tests/session/test_file_store_crash_survival.cpp`, which uses the wide
+// `::_wputenv_s` for the same reason -- this is the house idiom, not a new one.
+inline void test_set_env(char const* name, char const* value)
+{
+#ifdef _WIN32
+    ::_putenv_s(name, value);
+#else
+    // NOLINTNEXTLINE(concurrency-mt-unsafe) -- single-threaded test setup.
+    ::setenv(name, value, 1);
+#endif
+}
+
+inline void test_unset_env(char const* name)
+{
+#ifdef _WIN32
+    ::_putenv_s(name, "");  // empty value == delete, per the CRT contract
+#else
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+    ::unsetenv(name);
+#endif
+}
+
 // RAII guard: sets `name` to `value` for the guard's lifetime, restoring
 // whatever the environment held before (unset, if it was unset) on
 // destruction — including on an early ASSERT_* return from the test body.
@@ -45,15 +74,13 @@ public:
             had_prev_ = true;
             prev_value_ = prev;
         }
-        // NOLINTNEXTLINE(concurrency-mt-unsafe)
-        ::setenv(name_, value.c_str(), 1);
+        test_set_env(name_, value.c_str());
     }
     ~ScopedEnvVar() {
-        // NOLINTNEXTLINE(concurrency-mt-unsafe)
         if (had_prev_) {
-            ::setenv(name_, prev_value_.c_str(), 1);
+            test_set_env(name_, prev_value_.c_str());
         } else {
-            ::unsetenv(name_);
+            test_unset_env(name_);
         }
     }
     ScopedEnvVar(ScopedEnvVar const&) = delete;

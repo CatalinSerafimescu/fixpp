@@ -150,7 +150,14 @@ std::string now_utc_ms()
     auto const ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
     std::time_t const t = std::chrono::system_clock::to_time_t(now);
     std::tm tm{};
+    // `gmtime_r` is POSIX and absent from the MSVC CRT; `gmtime_s` is its
+    // Windows spelling and takes the arguments in the OPPOSITE order
+    // (`&tm, &t`). Same split as `src/log/file_sink.cpp:make_iso8601_suffix`.
+#ifdef _WIN32
+    gmtime_s(&tm, &t);
+#else
     gmtime_r(&t, &tm);
+#endif
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%04d%02d%02d-%02d:%02d:%02d.%03d", tm.tm_year + 1900,
                  tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
