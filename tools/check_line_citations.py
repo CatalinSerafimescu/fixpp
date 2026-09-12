@@ -150,7 +150,7 @@ SCAN_DIRS = [
 RE_A = re.compile(
     r"(?<![\w/.-])([A-Za-z0-9_.][A-Za-z0-9_/.-]*"
     r"\.(?:hpp|cpp|ipp|hh|hxx|cc|h|md|xml|txt|yml|yaml|sh|py|json|toml|cmake))"
-    r"(?::~?|\s+L)([0-9]+)"
+    r"(?::~?|\s+L|\s+~:?)([0-9]+)"
 )
 # Form B. {2,} digits: a deliberate recall/precision trade -- one-digit forms
 # are not gated, since they collide with prose about test data (`line 5`) far
@@ -213,7 +213,7 @@ RE_D = re.compile(r"\]`?\s*:\d+")
 # `[2h §6.6] :1167` is counted once (as form D) rather than twice. The trailing
 # guard drops a C++ bit-field `unsigned x :16;` -- zero in this tree today, so
 # the guard is precaution rather than a measured need, and is marked as such.
-RE_F = re.compile(r"(?<!\])[\s`]:\d{2,}(?!\d*\s*;)")
+RE_F = re.compile(r"(?<!\])[\s`]~?:\d{2,}(?!\d*\s*;)")
 
 # Form A's target pattern, WIDENED with `md` -- used ONLY by --shift-audit, to
 # decide which changed files are cited by line number. RE_A is deliberately left
@@ -244,7 +244,8 @@ CITE_SCAN_SKIP = ("tests/fuzz/corpus/", "tests/abi/baseline/")
 # over-supply costs nothing because Python re-decides. `--self-test` pins the
 # superset relation, so editing a decider without editing this fails loudly.
 CITE_PREFILTER = [
-    r"\.(hpp|cpp|ipp|hh|hxx|cc|h|md|xml|txt|yml|yaml|sh|py|json|toml|cmake)(:~?|[[:space:]]+L)[0-9]",
+    r"\.(hpp|cpp|ipp|hh|hxx|cc|h|md|xml|txt|yml|yaml|sh|py|json|toml|cmake)(:~?|[[:space:]]+L|[[:space:]]+~:?)[0-9]",
+    r"~:[0-9]",
     r"lines?[[:space:]]+~?[0-9][0-9]",
     r"\(:[0-9]",
 ]
@@ -425,18 +426,25 @@ def forms_on(line, files=None, by_base=None):
     if RE_LINE_DIRECTIVE.search(line):
         return []
     found = []
+    # Spans of every form-A match whose target RESOLVES. Form F is suppressed
+    # inside them: `session.cpp ~:929` is ONE citation, and counting it as both
+    # A and F would inflate the census for no gain -- the gate fails on either.
+    a_spans = []
     for m in RE_A.finditer(line):
         if files is None or resolve(m.group(1), files, by_base):
-            found.append("A")
-            break
+            a_spans.append(m.span())
+    if a_spans:
+        found.append("A")
     if RE_B.search(line):
         found.append("B")
     if RE_C.search(line):
         found.append("C")
     if RE_D.search(line):
         found.append("D")
-    if RE_F.search(line):
-        found.append("F")
+    for m in RE_F.finditer(line):
+        if not any(a <= m.start() and m.end() <= b for a, b in a_spans):
+            found.append("F")
+            break
     return found
 
 
@@ -1231,6 +1239,12 @@ FORM_CASES = [
     ("# see tier1.yml:392 for the cache key",                        ["A"]),
     # The approximation mark does not make it less of a line number.
     ("//   Mutation: drop the kind check in session.cpp:~555",       ["A"]),
+    # Same claim, two more punctuations. 18 + 22 in the tree, several in
+    # SHIPPED headers (async_mutex.hpp, session.hpp).
+    ("// the trap_throw fence (writer.hpp ~182-187) must catch it",   ["A"]),
+    ("// mirrors the owned table_view (session.cpp ~:929)",           ["A"]),
+    # Bare, no filename -- form F, since there is nothing to resolve.
+    ("// 058 Gate-B MAJOR-2 (contended-acquire loop, ~:1250):",       ["F"]),
     # An explicit extension list keeps a host:port and an image tag out.
     ("// endpoint is http://collector.example.com:4318/v1/logs",     []),
     ("// image: ghcr.io/o/r/fixpp-conan:1.26.0",                     []),
@@ -1388,6 +1402,8 @@ PREFILTER_LINES = [
     "// permalink separator: reify_dispatch.hpp L15-24 is the shape oracle",
     "// non-C++ target: dictionaries/FIX44.xml:2805-2824 declares ExecAllocGrp",
     "// approximation mark: the guard in session.cpp:~555 suppresses it",
+    "// space-tilde: the trap_throw fence (writer.hpp ~182-187) catches it",
+    "// tilde-colon: the contended-acquire loop (async_mutex.hpp ~:1250)",
 ]
 
 
@@ -2030,7 +2046,9 @@ def self_test():
     files = ["src/session/session.cpp", "src/wire/offset_table.cpp",
              ".specify/constitution.md", ".specify/2d-threading.md",
              "dictionaries/FIX44.xml", "CMakeLists.txt",
-             ".github/workflows/tier1.yml"]
+             ".github/workflows/tier1.yml",
+             "include/fixpp/wire/writer.hpp",
+             "include/fixpp/core/sync/async_mutex.hpp"]
     by_base = basename_map(files)
     bad = 0
     print("forms_on() -- the decision the GATE makes:")
