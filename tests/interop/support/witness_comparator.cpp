@@ -676,7 +676,7 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
 
             ParsedRecord const& readback = *it->second;
 
-            // FR-018 spurious-hit (spec.md:954): "Emit a message whose
+            // FR-018 spurious-hit (spec.md's FR-016c empty-intent-vs-empty-readback row): "Emit a message whose
             // declared intent set is empty -- the comparator must reject
             // rather than pass on ∅ == ∅." Distinct from the "readback not
             // found" branch above (T042/FR-016c): here a readback record

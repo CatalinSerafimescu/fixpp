@@ -805,7 +805,7 @@ TEST(WitnessComparator, SpuriousHitFrameDerivedSentMasksPostCaptureMutation_C8)
 }
 
 // ── 089 T049 — ∅ intent vs ∅ readback must reject, not pass ────────────────
-// spec.md:954: "Emit a message whose declared intent set is empty -- the
+// spec.md's FR-016c empty-intent-vs-empty-readback row: "Emit a message whose declared intent set is empty -- the
 // comparator must reject rather than pass on ∅ == ∅." Distinct from
 // AbsentReadbackFailsEvenWithNoDeclaredFields (T042) above: THAT arm's
 // readback record does not exist at all. THIS arm's readback record EXISTS,
