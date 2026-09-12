@@ -74,16 +74,35 @@ pre-commit run --all-files
 
 ## The line-number citation gate (issue #310)
 
-`check-line-citations` blocks a commit that ADDS a line-number citation in any of
-its four spellings:
-`file.cpp:1258`, `at line 2234`, a bare `(:64)`, a `[2h §6.6]:1167-1204`. <!-- citation-ok: worked example, not a real citation -->
+`check-line-citations` blocks a commit that ADDS a line-number citation. There
+are **seven spellings** and the gate knows all of them: <!-- citation-ok: worked examples, not real citations -->
 
-That fourth form is the one to watch, and it was ungated until 2026-09-12. This
-repo cites its design documents by **alias**, not by path, so there is no `.md`
-for the filename-keyed sweep to match — form D was invisible to every audit from
-#326 through #336 while being, by census, the form that reached **shipped public
-headers**. `include/fixpp/core/error.hpp` carried 22 of them, all pointing ~60
-lines short of the table they named.
+| | shape | example |
+|---|---|---|
+| A | filename + line | `session.cpp:1258`, `reify_dispatch.hpp L15-24`, `session.cpp:~555` | <!-- citation-ok: worked example -->
+| A | non-C++ target | `dictionaries/FIX44.xml:2805`, `CMakeLists.txt:401`, `tier1.yml:392` | <!-- citation-ok: worked example -->
+| B | prose, no filename | `at line 2234`, `lines 138-140`, `~line 3232`, `line ~958` | <!-- citation-ok: worked example -->
+| C | bare, parenthesised | `(:64)`, `(:316-328)` | <!-- citation-ok: worked example -->
+| D | bracketed doc alias | `[2h §6.6]:1167-1204`, `` [2d §4.7]`:864 `` | <!-- citation-ok: worked example -->
+| F | bare or backticked | `at :2953`, `` `:616` ``, `` `constitution.md`:335 `` | <!-- citation-ok: worked example -->
+
+**Six of those seven were added on 2026-09-12, and NOT ONE was found by running
+the detector.** Each surfaced because a person — or an agent reading like one —
+met it in prose. That is the durable lesson: an instrument keyed on the shapes
+you thought of reports clean about the shapes you did not.
+
+The blind spots were not small. Form D reached **shipped public headers** —
+`include/fixpp/core/error.hpp` carried 22, all pointing ~60 lines short of the
+table they named. Form B's tilde was accepted only on the OUTSIDE — the <!-- citation-ok: worked example -->
+spelling issue #310 quoted — so the inside form went unmatched for the life of
+the gate — including in a shipped header. The extension list was C++ plus `md`,
+which silently declared that only C++ and markdown rot, while 435 citations
+pointed into the FIX dictionaries that dictionary features edit wholesale.
+
+**If you are adding an eighth, do not guess it.** Derive the blind set by
+complement: generate every line-number-ish token in the tree, subtract every line
+the current deciders match, and read the residue. The procedure is written out
+above `RE_A` in `tools/check_line_citations.py`. Guessing has failed seven times.
 
 A line number is a claim about a file that keeps moving. Nobody has to touch the
 citing file for it to become false: the target drifts and the citation rots in
@@ -106,8 +125,10 @@ Citations into QuickFIX or vendored dependencies are exempt automatically — th
 do not rot when this tree moves. For a deliberate in-tree exception, put a
 `citation-ok` marker on the line; keep that rare.
 
-The gate covers ADDED LINES ONLY. The pre-existing population is large and is
-being retired opportunistically, not in one sweep. To survey it:
+The gate covers ADDED LINES ONLY. The pre-existing population on the LIVE
+surfaces was swept in 2026-09-12's #310 pass; what remains is concentrated in
+frozen `specs/<id>/` feature bundles, which are archival and are reported by the
+gate rather than charged by it. To survey either:
 
 ```bash
 python3 tools/check_line_citations.py --census          # candidates + out-of-range
