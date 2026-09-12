@@ -315,6 +315,7 @@ bool LineReader::parse_field_array(std::vector<FieldEntry>& out)
             return false;
         }
         FieldEntry entry;
+        bool have_path = false;
         bool have_value = false;
         while (true) {
             std::string key;
@@ -326,10 +327,13 @@ bool LineReader::parse_field_array(std::vector<FieldEntry>& out)
             }
             if (key == "path") {
                 if (!parse_string(entry.path)) return false;
+                have_path = true;
             } else if (key == "value") {
+                if (have_value) return false;
                 if (!parse_string(entry.value)) return false;
                 have_value = true;
             } else if (key == "value_b64") {
+                if (have_value) return false;
                 std::string b64;
                 if (!parse_string(b64)) return false;
                 entry.value = base64_decode(b64);
@@ -349,9 +353,10 @@ bool LineReader::parse_field_array(std::vector<FieldEntry>& out)
         if (!consume('}')) {
             return false;
         }
-        if (have_value) {
-            out.push_back(std::move(entry));
+        if (!have_path || !have_value) {
+            return false;
         }
+        out.push_back(std::move(entry));
         skip_ws();
         if (peek() == ',') {
             ++i_;
@@ -445,6 +450,7 @@ std::vector<ParsedRecord> parse_stream(std::string const& path)
         bool has_direction = false;
         bool has_occurrence = false;
         bool has_script_step_id = false;
+        bool has_fields = false;
         while (true) {
             std::string key;
             if (!r.parse_string(key)) {
@@ -456,42 +462,70 @@ std::vector<ParsedRecord> parse_stream(std::string const& path)
                 break;
             }
             if (key == "type") {
+                if (got_type) {
+                    malformed = true;
+                    break;
+                }
                 if (!r.parse_string(type)) {
                     malformed = true;
                     break;
                 }
                 got_type = true;
             } else if (key == "msg_type") {
+                if (has_msg_type) {
+                    malformed = true;
+                    break;
+                }
                 if (!r.parse_string(rec.msg_type)) {
                     malformed = true;
                     break;
                 }
                 has_msg_type = true;
             } else if (key == "seq_num") {
+                if (has_seq_num) {
+                    malformed = true;
+                    break;
+                }
                 if (!r.parse_number(rec.seq_num)) {
                     malformed = true;
                     break;
                 }
                 has_seq_num = true;
             } else if (key == "direction") {
+                if (has_direction) {
+                    malformed = true;
+                    break;
+                }
                 if (!r.parse_string(rec.direction)) {
                     malformed = true;
                     break;
                 }
                 has_direction = true;
             } else if (key == "occurrence") {
+                if (has_occurrence) {
+                    malformed = true;
+                    break;
+                }
                 if (!r.parse_number(rec.occurrence)) {
                     malformed = true;
                     break;
                 }
                 has_occurrence = true;
             } else if (key == "script_step_id") {
+                if (has_script_step_id) {
+                    malformed = true;
+                    break;
+                }
                 if (!r.parse_string(rec.script_step_id)) {
                     malformed = true;
                     break;
                 }
                 has_script_step_id = true;
             } else if (key == "fields") {
+                if (has_fields) {
+                    malformed = true;
+                    break;
+                }
                 // FQ-9 (gate-b r2, Codex r2 #3): propagate the result instead
                 // of discarding it -- a `fields` array truncated mid-parse
                 // (a missing `]`, a missing entry `}`) must not be admitted
@@ -501,6 +535,7 @@ std::vector<ParsedRecord> parse_stream(std::string const& path)
                     malformed = true;
                     break;
                 }
+                has_fields = true;
             } else {
                 r.skip_value();
             }
@@ -517,6 +552,10 @@ std::vector<ParsedRecord> parse_stream(std::string const& path)
         // with the successfully parsed prefix.
         if (!malformed && !r.consume('}')) {
             malformed = true;
+        }
+        if (!malformed) {
+            r.skip_ws();
+            malformed = !r.eof();
         }
         if (malformed || !got_type) {
             continue;

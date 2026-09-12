@@ -634,21 +634,48 @@ def _project_collapsed(rows):
 
 
 def _check_w1(doc):
-    """W-1: one row per identity 1, carrying combo_id, cell_id, config,
-    run_id, arm, authoritative AND kind as fields — W-3a/W-3b/W-3c filter on
-    kind/authoritative, so a row missing one is silently DROPPED from the
-    population it should have joined, and the gate measures a smaller set
-    and reports complete. `verdict`/`mismatch` (gate-b fix round, FQ-1) are
-    REQUIRED here too -- the RESULT the witness exists to record, not just
-    its identity -- so a row missing one fails the SAME shape gate rather
-    than surviving to be silently absent-therefore-fine at _check_w0_content
-    below."""
-    required = {"combo_id", "cell_id", "config", "run_id", "arm", "kind",
+    """W-1: require every witness field and validate the derivable values.
+    W-3a/W-3b/W-3c filter on kind/authoritative, so a row missing one is
+    silently dropped from the population it should have joined. Witness IDs
+    are canonical and unique per config; message types agree with the script
+    selected by the same mapping whose bytes the digest-binding gate hashes.
+    `verdict`/`mismatch` are required here too so a missing result fails the
+    shape gate instead of surviving to be absent-therefore-fine at W-0."""
+    required = {"witness_id", "combo_id", "cell_id", "config", "run_id", "arm", "kind",
                 "authoritative", "script_step_id", "direction", "occurrence",
-                "verdict", "mismatch"}
+                "msg_type", "verdict", "mismatch"}
+    script_steps_by_kind = {}
+    for kind, path in SCRIPT_BY_RUN_KIND.items():
+        with open(path, encoding="utf-8") as fh:
+            script = yaml.load(fh, Loader=_YamlLoader)
+        script_steps_by_kind[kind] = {
+            step["step_id"]: step for step in script.get("business_steps", [])
+        }
+    seen_ids = set()
     for w in doc.get("witnesses", []):
         missing = required - w.keys()
         assert not missing, f"W-1: witness row missing field(s) {missing!r}: {w!r}"
+        canonical_id = "%s:%s:%s:%s" % (
+            w["cell_id"], w["script_step_id"], w["direction"], w["occurrence"])
+        assert w["witness_id"] == canonical_id, (
+            f"W-1: witness_id {w['witness_id']!r} does not equal canonical "
+            f"derivation {canonical_id!r} for row {w!r}")
+        kind = w["kind"]
+        assert kind in script_steps_by_kind, (
+            f"W-1: witness {w['witness_id']!r} has kind {kind!r}, which names no "
+            "digest-bound script")
+        step = script_steps_by_kind[kind].get(w["script_step_id"])
+        assert step is not None, (
+            f"W-1: witness {w['witness_id']!r} names script step "
+            f"{w['script_step_id']!r}, which is absent from the {kind!r} digest-bound script")
+        assert w["msg_type"] == step.get("msg_type"), (
+            f"W-1: witness {w['witness_id']!r} msg_type {w['msg_type']!r} disagrees "
+            f"with digest-bound script step {w['script_step_id']!r} msg_type "
+            f"{step.get('msg_type')!r}")
+        identity = (w["witness_id"], w["config"])
+        assert identity not in seen_ids, (
+            f"W-1: duplicate (witness_id, config) identity {identity!r}")
+        seen_ids.add(identity)
 
 
 # closed set: this comparator never emits "skip" (data-model.md §4) and a
@@ -1012,6 +1039,11 @@ def _w_fixture_complete(census_doc):
     perturbs exactly the one thing its own arm names."""
     import copy
     doc = _e7_fixture_complete()
+    with open(SCRIPT_BY_RUN_KIND["conformance"], encoding="utf-8") as fh:
+        script = yaml.load(fh, Loader=_YamlLoader)
+    msg_type_by_step = {
+        step["step_id"]: step["msg_type"] for step in script.get("business_steps", [])
+    }
     witnesses = []
     for combo_id in CONV_COMBO_IDS:
         for config in CONFIGS:
@@ -1020,9 +1052,11 @@ def _w_fixture_complete(census_doc):
                 run_id = f"{cell_id}-{config}-{arm}-run"
                 for step_id, direction, occ in _expand_business_steps_combo(census_doc, combo_id):
                     witnesses.append({
+                        "witness_id": f"{cell_id}:{step_id}:{direction}:{occ}",
                         "combo_id": combo_id, "cell_id": cell_id, "config": config,
                         "run_id": run_id, "arm": arm, "kind": "conformance",
                         "authoritative": True, "script_step_id": step_id,
+                        "msg_type": msg_type_by_step[step_id],
                         "direction": direction, "occurrence": occ,
                         "verdict": "pass", "mismatch": [],
                     })
@@ -1953,6 +1987,51 @@ def test_t095a_w0_content_cardinality_pin_goes_red_on_a_coherent_shrink(census_d
 
 def test_t095a_w0_content_over_the_committed_ledger(witness_evidence_doc, census_doc):
     _check_w0_content(witness_evidence_doc, census_doc)
+
+
+def test_t095a_w1_over_the_committed_ledger(witness_evidence_doc):
+    _check_w1(witness_evidence_doc)
+
+
+@pytest.mark.parametrize("field", ("witness_id", "msg_type"))
+def test_t095a_w1_goes_red_when_one_witness_omits_required_field(
+        witness_evidence_doc, field):
+    doc = copy.deepcopy(witness_evidence_doc)
+    del doc["witnesses"][0][field]
+    with pytest.raises(AssertionError, match=rf"missing field.*{field}"):
+        _check_w1(doc)
+
+
+def test_t095a_w1_goes_red_on_forged_msg_type(witness_evidence_doc):
+    doc = copy.deepcopy(witness_evidence_doc)
+    victim = doc["witnesses"][0]
+    victim["msg_type"] = "Z"
+    with pytest.raises(AssertionError, match=rf"script step {victim['script_step_id']!r}"):
+        _check_w1(doc)
+
+
+def test_t095a_w1_goes_red_on_forged_witness_id(witness_evidence_doc):
+    doc = copy.deepcopy(witness_evidence_doc)
+    doc["witnesses"][0]["witness_id"] = "BOGUS"
+    with pytest.raises(AssertionError, match="canonical derivation"):
+        _check_w1(doc)
+
+
+@pytest.mark.parametrize("field", ("witness_id", "msg_type"))
+def test_t095a_w1_goes_red_when_all_witnesses_omit_required_field(
+        witness_evidence_doc, field):
+    doc = copy.deepcopy(witness_evidence_doc)
+    for witness in doc["witnesses"]:
+        del witness[field]
+    with pytest.raises(AssertionError, match=rf"missing field.*{field}"):
+        _check_w1(doc)
+
+
+def test_t095a_w1_goes_red_on_duplicate_witness_id_config_pair(witness_evidence_doc):
+    doc = copy.deepcopy(witness_evidence_doc)
+    doc["witnesses"].append(copy.deepcopy(doc["witnesses"][0]))
+    with pytest.raises(AssertionError, match=r"duplicate \(witness_id, config\) identity"):
+        _check_w1(doc)
 
 
 def test_t095a_script_digest_binding_over_the_committed_artifacts(

@@ -1099,6 +1099,63 @@ TEST(WitnessComparator, RecordMissingClosingBraceYieldsNoRecords)
            "parsed prefix instead of being dropped as malformed";
 }
 
+TEST(WitnessComparator, SchemaInvalidRecordsAreSkippedWithoutRejectingWellFormedRecords)
+{
+    std::string const dir = unique_test_dir();
+    auto const parse_line = [&](std::string const& name, std::string const& line) {
+        std::string const path = dir + name + ".jsonl";
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << line << '\n';
+        EXPECT_TRUE(out.is_open() && !out.fail()) << "fixture write failed";
+        out.close();
+        return parse_stream(path);
+    };
+
+    std::string const well_formed_sent =
+        R"({"type":"sent","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-01","fields":[{"path":"1","value":"ACCT0001"}]})";
+    std::string const well_formed_readback =
+        R"({"type":"readback","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"fields":[{"path":"1","value":"ACCT0001"}]})";
+
+    auto const baseline_sent = parse_line("baseline_sent", well_formed_sent);
+    auto const baseline_readback = parse_line("baseline_readback", well_formed_readback);
+    auto const baseline_rows =
+        compare_streams(baseline_sent, baseline_readback, test_identity(), test_resolver());
+    ASSERT_EQ(baseline_rows.size(), 1u);
+    EXPECT_EQ(baseline_rows[0].verdict, "pass");
+    EXPECT_TRUE(baseline_rows[0].mismatch.empty());
+
+    std::array<std::pair<std::string, std::string>, 7> const duplicate_top_level = {{
+        {"duplicate_type", R"({"type":"hello","type":"sent","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-01","fields":[]})"},
+        {"duplicate_msg_type", R"({"type":"sent","msg_type":"G","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-01","fields":[]})"},
+        {"duplicate_seq_num", R"({"type":"sent","msg_type":"D","seq_num":8,"seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-01","fields":[]})"},
+        {"duplicate_direction", R"({"type":"sent","msg_type":"D","seq_num":7,"direction":"peer-to-fixpp","direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-01","fields":[]})"},
+        {"duplicate_occurrence", R"({"type":"sent","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":1,"occurrence":0,"script_step_id":"B-01","fields":[]})"},
+        {"duplicate_script_step_id", R"({"type":"sent","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-99","script_step_id":"B-01","fields":[]})"},
+        {"duplicate_fields", R"({"type":"sent","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-01","fields":[],"fields":[]})"},
+    }};
+    for (auto const& [name, line] : duplicate_top_level) {
+        EXPECT_TRUE(parse_line(name, line).empty()) << name;
+    }
+
+    EXPECT_TRUE(parse_line(
+                    "missing_path",
+                    R"({"type":"sent","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-01","fields":[{"value":"ACCT0001"}]})")
+                    .empty());
+    EXPECT_TRUE(parse_line("trailing_garbage", well_formed_sent + "GARBAGE").empty());
+    EXPECT_TRUE(parse_line(
+                    "combined",
+                    R"({"type":"sent","msg_type":"G","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-01","fields":[{"value":"ACCT0001"}]}GARBAGE)")
+                    .empty());
+    EXPECT_TRUE(parse_line(
+                    "both_value_representations",
+                    R"({"type":"sent","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-01","fields":[{"path":"1","value":"X","value_b64":"WA=="}]})")
+                    .empty());
+    EXPECT_TRUE(parse_line(
+                    "neither_value_representation",
+                    R"({"type":"sent","msg_type":"D","seq_num":7,"direction":"fixpp-to-peer","occurrence":0,"script_step_id":"B-01","fields":[{"path":"1"}]})")
+                    .empty());
+}
+
 // FQ-10 (gate-b r2, Codex r2 #5): seq_num 0 must be treated as a PRESENT,
 // valid value, never as absence -- every existing positive comparator record
 // uses a nonzero seq_num, so a regression to value-inference
