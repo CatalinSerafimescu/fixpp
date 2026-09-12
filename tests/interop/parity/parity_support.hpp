@@ -122,7 +122,7 @@ inline bool frame_is_msg_type(std::span<const std::byte> frame, std::string_view
 
 // Outbound capture with an optional fail-injection: once fail_writes is set, the
 // next transport_send_ throws — the session's transmit_async() wraps the sync
-// send in try/catch and maps the throw to a write failure (session.cpp ~1781).
+// send in try/catch and maps the throw to a write failure (session.cpp).
 struct OutboundCapture {
     std::vector<std::vector<std::byte>> frames;
     bool fail_writes = false;

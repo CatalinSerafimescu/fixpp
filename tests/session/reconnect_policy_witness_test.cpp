@@ -2,7 +2,7 @@
 //
 // tests/session/reconnect_policy_witness_test.cpp — 016 T007 (RED witness).
 //
-// Proves the 015 down-peer carry-forward (CLAUDE.md L2): an initiator aimed at an
+// Proves the 015 down-peer carry-forward (L-015-2): an initiator aimed at an
 // UNREACHABLE peer is not promptly torn down by Engine::stop(), because the in-flight
 // transport::Transport::async_connect is not aborted by cancellation_type::total —
 // stop() blocks until the per-connect timeout runs to completion

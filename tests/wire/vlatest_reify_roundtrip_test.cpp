@@ -35,7 +35,7 @@
 // (V-1 / V-1b) is Phase 4 / US2, out of scope here.
 //
 // Dict-free rationale: Parser<Index>{} default-constructs without a
-// dict::table_view (include/fixpp/wire/parser.hpp:565), and
+// dict::table_view (its defaulted `Parser() noexcept` ctor), and
 // owning_<Msg>::from_view() only deep-copies the already-framed byte span
 // (Reify.hpp:204-214) -- it does not read or validate any field beyond what
 // the accessor the caller invokes decodes. No dictionary/OrchestraLoader
@@ -97,7 +97,7 @@ void check_one(std::string_view code) {
                               std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value() && !framed->empty()) << "Framer::feed failed for " << code;
 
-    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{};  // dict-free (parser.hpp:565)
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{};  // dict-free (defaulted ctor)
     auto src = parser.parse(fvs[0], &arena);
     ASSERT_TRUE(src.has_value()) << "dict-free Parser<Index>::parse failed for " << code;
 

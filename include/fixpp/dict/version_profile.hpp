@@ -63,7 +63,7 @@ enum class application_version : std::uint8_t {
 // ─── 003-OWNED ADDITIONS (RC#1, re-/plan 2026-05-15) ────────────────────────
 // Appended below the unchanged 002 enums, non-renumbering. 002 deferred the
 // `version_profile` struct + `resolve_application_version` free function
-// (specs/002-dictionary-xml-loader/contracts/version_profile.hpp:59-66); 003
+// (specs/002-dictionary-xml-loader/contracts/version_profile.hpp's deferred-struct note); 003
 // owns them. Shapes are verbatim [2c §4.3:408-481]; oracle:
 // specs/003-dictionary-codegen/contracts/version_profile.hpp; data-model
 // Entity 10; spec §4.8 AC-VP1..AC-VP6.

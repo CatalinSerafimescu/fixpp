@@ -45,7 +45,7 @@ fixpp_error_t translate(error e) noexcept {
             return FIXPP_ERR_BUFFER_TOO_SMALL;
 
         // ── dict (slots 20-29) — [2c §6.7]: config-class → DICT_CONFIG;
-        //    *_oom → DICT_OOM ([2i §4.3]:523) ─────────────────────────────────
+        //    *_oom → DICT_OOM ([2i §4.3]'s `FIXPP_ERR_DICT_OOM` mapping) ───────
         case error::dict_xml_parse_failed:
         case error::dict_unknown_version:
         case error::dict_reify_msg_type_mismatch:
@@ -81,7 +81,7 @@ fixpp_error_t translate(error e) noexcept {
             return FIXPP_ERR_DECIMAL_PRECISION_LOSS;
 
         // ── sync (slots 43-46) ─────────────────────────────────────────────
-        case error::sync_lock_aborted:  // "Joins FIXPP_ERR_CANCELLED" (error.hpp:86)
+        case error::sync_lock_aborted:  // "Joins FIXPP_ERR_CANCELLED" (error.hpp's `sync_lock_aborted` comment)
             return FIXPP_ERR_CANCELLED;
         case error::sync_lock_alloc_failed:
         case error::sync_lock_outside_session:
@@ -92,7 +92,7 @@ fixpp_error_t translate(error e) noexcept {
         case error::executor_already_stopped:
         case error::executor_not_serialised:
             return FIXPP_ERR_THREAD_CONFIG;
-        case error::clock_sleeps_cancelled:  // "Joins CANCELLED" (error.hpp:131)
+        case error::clock_sleeps_cancelled:  // "Joins CANCELLED" (error.hpp's `clock_sleeps_cancelled` comment)
             return FIXPP_ERR_CANCELLED;
         case error::strand_dispatch_failed_oom:
             return FIXPP_ERR_THREAD_RUNTIME;
@@ -102,10 +102,10 @@ fixpp_error_t translate(error e) noexcept {
         case error::invalid_session_config:
         case error::clock_not_set:
             return FIXPP_ERR_THREAD_CONFIG;
-        case error::dispatch_aborted:  // "Joins CANCELLED (reused)" (error.hpp:163)
+        case error::dispatch_aborted:  // "Joins CANCELLED (reused)" (error.hpp's `dispatch_aborted` comment)
             return FIXPP_ERR_CANCELLED;
 
-        // ── store (slots 56-65) — grouped ← prose (error.hpp:172-181) ──────
+        // ── store (slots 56-65) — grouped ← prose (error.hpp's FIXPP_ERR_STORE_RUNTIME/CANCELLED grouping) ──
         case error::store_io_failure:
         case error::store_capacity_exhausted:
         case error::store_seqnum_overflow:
@@ -119,7 +119,7 @@ fixpp_error_t translate(error e) noexcept {
             return FIXPP_ERR_STORE_CONFIG;
         case error::store_visitor_aborted:
             return FIXPP_ERR_STORE_VISITOR;
-        case error::store_cancelled:  // reused (error.hpp:181)
+        case error::store_cancelled:  // reused (error.hpp's `store_cancelled` comment)
             return FIXPP_ERR_CANCELLED;
 
         // ── session (slots 66-77 + 116-121) ────────────────────────────────
@@ -149,7 +149,7 @@ fixpp_error_t translate(error e) noexcept {
         case error::session_unknown_acceptor_session:
             return FIXPP_ERR_UNKNOWN;  // remaining session arms: no published code (by design)
 
-        // ── tls (slots 78-93) — grouped ← prose (error.hpp:340-356) ────────
+        // ── tls (slots 78-93) — grouped ← prose (error.hpp's FIXPP_ERR_TLS_CONFIG grouping) ──────
         case error::tls_cert_load_failed:
         case error::tls_cert_parse_failed:
         case error::tls_cipher_not_allowed:
@@ -169,10 +169,10 @@ fixpp_error_t translate(error e) noexcept {
         case error::tls_san_entries_exceeded:
         case error::tls_pin_mismatch:
             return FIXPP_ERR_TLS_HANDSHAKE;
-        case error::tls_load_cancelled:  // reused (error.hpp:355)
+        case error::tls_load_cancelled:  // reused (error.hpp's `tls_load_cancelled` comment)
             return FIXPP_ERR_CANCELLED;
 
-        // ── transport (slots 94-115) — grouped ← prose (error.hpp:450-472) ─
+        // ── transport (slots 94-115) — grouped ← prose (error.hpp's FIXPP_ERR_TRANSPORT_LIFECYCLE grouping) ─
         case error::transport_resolve_failed:
         case error::transport_connect_refused:
         case error::transport_connect_timeout:

@@ -186,8 +186,8 @@ jobs:
 
       # ── sccache (#231) ────────────────────────────────────────────────────
       # ⚠️ CMAKE_{C,CXX}_COMPILER_LAUNCHER is deliberately ABSENT from this
-      # block. A JOB-level launcher is the tier1 exit-127 shape
-      # (tier1.yml:392-404): `conan install --build=missing` runs a dependency's
+      # block. A JOB-level launcher is the tier1 exit-127 shape (tier1.yml's
+      # ccache-before-Conan-install step): `conan install --build=missing` runs a dependency's
       # compiler probe through the launcher, and a launcher not yet on PATH
       # fails the probe with 127 and reddens the lane. Passing it with -D on the
       # Configure step instead scopes it to the fixpp build, so Conan's
@@ -252,7 +252,7 @@ jobs:
         run: choco install ninja --no-progress -y
 
       # sccache is wireable on this lane AT ALL because the Windows presets use
-      # the NINJA generator (CMakePresets.json:9): CMAKE_<LANG>_COMPILER_LAUNCHER
+      # the NINJA generator (CMakePresets.json's `_base` preset): CMAKE_<LANG>_COMPILER_LAUNCHER
       # is honored by Ninja/Makefiles and IGNORED by the Visual Studio generator.
       # Moving this lane to the VS generator would silently disable the cache —
       # the AC3 assertion after Configure is what would catch that.
@@ -460,11 +460,11 @@ jobs:
         # Kept OFF CMakePresets.json deliberately: a local developer's Debug
         # build keeps /Zi and its PDBs.
         #
-        # ⚠️ Scoped risk, recorded: cmake/FixppPackaging.cmake:358 redirects each
-        # static/object target's COMPILER PDB into lib/ so an
+        # ⚠️ Scoped risk, recorded: cmake/FixppPackaging.cmake's `_fixpp_pdb_tgt`
+        # foreach redirects each static/object target's COMPILER PDB into lib/ so an
         # install(... FILES_MATCHING "*.pdb") has something to match — a rule
         # that already shipped a zero-symbol Debug ZIP once (fixed 2026-08-02,
-        # comment at FixppPackaging.cmake:333-353), silently, because a glob
+        # comment there at "NOW MEASURED"), silently, because a glob
         # that matches nothing installs nothing and SUCCEEDS. Under /Z7 there is
         # no compiler PDB at all. It does not bite today: `Build packages` is
         # gated to windows-msvc-release, which the genex leaves on
@@ -597,7 +597,7 @@ jobs:
       # dispatched into the namespace `main` consumes.
       #
       # It bites harder than the Conan equivalent because of what the tag is
-      # keyed on (ci/sccache-cache-key.sh:75):
+      # keyed on (ci/sccache-cache-key.sh's `SCCACHE_CACHE_TAG`):
       #
       #   sccache tag:  sccache-<preset>-<toolset>                     ← no content hash
       #   Conan tag:    <profile>-sha256(conanfile.py+profile+toolset) ← content-derived
@@ -634,8 +634,8 @@ jobs:
       # filter matches NOTHING, so an exit-code-only check reports this lane green
       # having run zero witnesses. fixpp::consumer::install-witness — carrying the
       # 087 system-include gate and 086's reachability matrix — is registered only
-      # inside `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in `if(FIXPP_BUILD_TESTS)`
-      # (CMakeLists.txt:401), so if that option ever goes OFF here the gate stops
+      # inside `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in `if(FIXPP_BUILD_TESTS)`,
+      # so if that option ever goes OFF here the gate stops
       # existing and this lane still passes.
       #
       # ⚠️ `shell: bash` — this file's ctest steps are `shell: cmd`, and this is a
@@ -644,8 +644,8 @@ jobs:
       # tier 1's step. Contract §6b.
       #
       # UNCONDITIONAL — no `if:` guard. The two test steps below are mutually
-      # exclusive by `if:` (`:363` on all but windows-msvc-release, `:389` only on
-      # it) and jointly cover every lane, so one unguarded step covers both.
+      # exclusive by `if:` ("Test (minimal tier...)" on all but windows-msvc-release,
+      # "Test (full tier...)" only on it) and jointly cover every lane, one unguarded step covers both.
       # Placed after Build and before the first test step: `ctest -N` reads
       # CTestTestfile.cmake and needs a configured tree.
       - name: Assert the consumer witness is registered (087 FR-014 gate)

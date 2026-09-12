@@ -113,12 +113,12 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 #
 #   Package            Pin       conanfile.py   ABI character
 #   -----------------  --------  -------------  --------------------------------
-#   OpenSSL            3.6.2     :69            ABI-stable
-#   asio               1.38.0    :67            no ABI surface (header-only)
-#   tomlplusplus       3.4.0     :77            no ABI surface (header-only)
-#   pugixml            1.15      :66            ABI-fragile (compiled C++)
-#   Crc32c             1.1.2     :68            ABI-fragile (compiled C++)
-#   opentelemetry-cpp  1.26.0    :94            ABI-fragile, ACUTE -- largest
+#   OpenSSL            3.6.2     requires       ABI-stable
+#   asio               1.38.0    requires       no ABI surface (header-only)
+#   tomlplusplus       3.4.0     requires       no ABI surface (header-only)
+#   pugixml            1.15      requires       ABI-fragile (compiled C++)
+#   Crc32c             1.1.2     requires       ABI-fragile (compiled C++)
+#   opentelemetry-cpp  1.26.0    requirements() ABI-fragile, ACUTE -- largest
 #                                               surface (7 imported targets on
 #                                               fixpp_otel + 3 on fixpp_log_otlp)
 #                                               and fastest-moving

@@ -184,8 +184,8 @@ private:
     // Held by shared_ptr, not by value: a timer handler captures a copy of
     // this pointer (never `this`), so `*timer_epochs_` outlives the
     // transport unconditionally even when the owner destroys `this` with no
-    // drain (D-4.0 — reconnect_fsm.cpp:250-252 and engine.cpp:841-844 both
-    // destroy synchronously on the failure arm).
+    // drain (D-4.0 — reconnect_fsm.cpp's connect/handshake-failure "release t (RAII)" arms and
+    // engine.cpp's `run_accept_loop` open()-failure arm both destroy synchronously on the failure arm).
     std::shared_ptr<timer_epoch_state> timer_epochs_{std::make_shared<timer_epoch_state>()};
 
     // #346: read/write in-flight flags live in *timer_epochs_, managed by

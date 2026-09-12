@@ -12,7 +12,7 @@
 # entity/invariant authority for the same rules.
 #
 # Two modes, selected by -DFIXPP_087_MODE, both driven entirely by -D variables
-# (project convention — see run_consumer_witness.cmake:5, "no hard-coded paths,
+# (project convention — see run_consumer_witness.cmake's header comment, "no hard-coded paths,
 # everything comes in via -D").
 #
 #   compare  (contract C-6.1) — one leg's observed-vs-expected comparison:
@@ -40,9 +40,9 @@
 # out-of-tree file accounting.
 
 # string(JSON ...) needs CMake >= 3.19; the project floor for this sub-build is
-# 3.28 (tests/consumer/CMakeLists.txt:39) and IN_LIST needs CMP0057, which a
+# 3.28 (tests/consumer/CMakeLists.txt's own `cmake_minimum_required(VERSION 3.28)` call) and IN_LIST needs CMP0057, which a
 # `cmake -P` script (no project()) only gets from cmake_minimum_required itself
-# — see tests/packaging/run_package_contents_witness.cmake:20-21 for the same
+# — see tests/packaging/run_package_contents_witness.cmake's own CMP0057 comment for the same
 # note on the same policy.
 cmake_minimum_required(VERSION 3.28)
 
@@ -296,10 +296,10 @@ if(FIXPP_087_MODE STREQUAL "compare")
               "[INPUT_ERROR] compare_system_includes.cmake compare (${FIXPP_087_LEG}): "
               "${_reply_file} compileGroups[${_gi}].includes[${_ii}] has no 'path'")
           endif()
-          # E1 declares path: string and isSystem: boolean (data-model.md:15-16), so a
+          # E1 declares path: string and isSystem: boolean (data-model.md's E1 section), so a
           # wrong leaf type is "parses without the expected compileGroups structure"
-          # (C-2) — the same TYPE walk applied at the root (:249), compileGroups (:261)
-          # and includes (:280) above, one level deeper. No new C-2 cause.
+          # (C-2) — the same TYPE walk applied at the root (`_root_type`), compileGroups (`_cg_type`)
+          # and includes (`_inc_type`) above, one level deeper. No new C-2 cause.
           if(NOT _path_type STREQUAL "STRING")
             message(FATAL_ERROR
               "[INPUT_ERROR] compare_system_includes.cmake compare (${FIXPP_087_LEG}): "

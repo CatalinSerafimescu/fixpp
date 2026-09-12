@@ -262,7 +262,7 @@ namespace {
 // DIFFERENT declared delimiters. Message "U1" (lexically first in
 // <messages>, so first-seen) declares NoX(600) with delimiter FieldA(610).
 // Message "U2" declares the SAME NoX(600) with delimiter FieldB(620). Per
-// `Dictionary::as_table_view()` (dictionary.cpp :421), the per-context
+// `Dictionary::as_table_view()` (src/dictionary/dictionary.cpp), the per-context
 // `group_first` is populated from `group_first_field(no_tag)` — the
 // dictionary's single GLOBAL, first-seen `GroupRef.first_field_tag` — so
 // BOTH contexts' stored delimiter is 610 (U1's), even though U2's real

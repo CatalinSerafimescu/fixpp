@@ -75,7 +75,7 @@ file(COPY "${_driver_src}" DESTINATION "${_proj}/src")
 # technique already used for the HdrHistogram stand-in (shim/hdr/…). The real
 # tests/support/minimal_dictionary.hpp is a private test-support header and is
 # deliberately NOT copied here: doing so would reach into the fixpp source
-# tree's test-support headers, which spec.md:78 (US1 acceptance scenario 7)
+# tree's test-support headers, which spec.md's User Story 1 acceptance scenario 7
 # forbids. See shim/support/minimal_dictionary.hpp for what the shim loads
 # instead (the SHIPPED FIX42.xml, through the public loader API).
 
@@ -102,7 +102,7 @@ if(EXISTS "${_proj}/src/support/minimal_dictionary.hpp")
     "must satisfy the driver's \"support/minimal_dictionary.hpp\" include with the "
     "witness-local shim (real_client/shim/support/minimal_dictionary.hpp), not by "
     "copying tests/support/minimal_dictionary.hpp -- a private test-support header -- "
-    "into the scratch project (spec.md:78, US1 acceptance scenario 7).")
+    "into the scratch project (spec.md's User Story 1 acceptance scenario 7).")
 endif()
 message(STATUS "F1: no tests/support/minimal_dictionary.hpp copied into the scratch project")
 

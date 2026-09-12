@@ -68,7 +68,7 @@ constexpr std::array<std::string_view, 2> kN002N003PresentInFix44 = {"BE", "BF"}
 // touch VersionIR/build_ir/MessageIR.is_application — the emitter's own IR —
 // so a mis-parsed/defaulted msgcat cannot drop from both sides and pass
 // vacuously. Mirrors the N3-census raw-pugixml precedent in
-// tests/codegen/test_067_emit_builders_unit.cpp (lines 36/221).
+// tests/codegen/test_067_emit_builders_unit.cpp's Group067Census.N3DedupCollapseCensus.
 std::set<std::string> census_all_mode_expected_set() {
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
 

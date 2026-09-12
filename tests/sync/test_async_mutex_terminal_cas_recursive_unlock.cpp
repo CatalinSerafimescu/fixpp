@@ -7,12 +7,12 @@
 // (.specify/decisions/058-async-mutex-hardening-coverage-design.md
 // "EMPIRICAL CORRECTION", 2026-07-03):
 //
-//   - F4 (`async_mutex.hpp` ~:1401, the "fast"/no-waiters path): after
+//   - F4 (`async_mutex.hpp`'s unlock_pre_terminal_cas_fast, the "fast"/no-waiters path): after
 //     `state_.exchange(locked_no_waiters)` observes no waiters were queued,
 //     the immediately-following CAS(locked_no_waiters -> not_locked) can
 //     fail if a waiter's queuing CAS lands in that narrow window; the
 //     failure recurses into `unlock()` to grant the newly-arrived waiter.
-//   - F6 (`async_mutex.hpp` ~:1471, post-FIFO-walk): after a fresh
+//   - F6 (`async_mutex.hpp`'s unlock_pre_terminal_cas_fifo, post-FIFO-walk): after a fresh
 //     LIFO->FIFO walk exhausts an ALL-CANCELLED chain (no grant, so no
 //     early return), the same terminal-CAS-fail -> recursive-unlock shape
 //     recurs at the second call site.

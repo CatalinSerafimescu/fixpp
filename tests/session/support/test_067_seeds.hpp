@@ -283,9 +283,9 @@ inline constexpr AllocationInstructionAckSeed kAllocationInstructionAckSeed{};
 
 // ── 5 group-bearing messages (R5/G6 mandatory insurance) ───────────────────
 
-// E NewOrderList: ListOrdGrp NoOrders(73) REQUIRED (FIX44.xml:2944);
-// order-level Parties NoPartyIDs(453) OPTIONAL (FIX44.xml:2508); entry-level
-// PtysSubGrp NoPartySubIDs(802) OPTIONAL (FIX44.xml:3701). 3-level nest.
+// E NewOrderList: ListOrdGrp NoOrders(73) REQUIRED (dictionaries/FIX44.xml's <group>);
+// order-level Parties NoPartyIDs(453) OPTIONAL (dictionaries/FIX44.xml's <group>); entry-level
+// PtysSubGrp NoPartySubIDs(802) OPTIONAL (dictionaries/FIX44.xml's <group>). 3-level nest.
 struct NewOrderListPartySubIdSeed {
     std::string_view party_sub_id = "SUB1";
     std::int64_t party_sub_id_type = 1;
@@ -339,7 +339,7 @@ struct AllocationReportSeed {
 inline constexpr AllocationReportSeed kAllocationReportSeed{};
 
 // W MarketDataSnapshotFullRefresh: MDFullGrp NoMDEntries(268) REQUIRED,
-// delimiter MDEntryType(269) (FIX44.xml:3022-3024) — RC#1 pin, W half.
+// delimiter MDEntryType(269) (dictionaries/FIX44.xml's MDFullGrp) — RC#1 pin, W half.
 struct MarketDataEntrySeedW {
     char md_entry_type = '0';           // Bid
     std::string_view md_entry_px = "99.5";
@@ -353,7 +353,7 @@ struct MarketDataSnapshotFullRefreshSeed {
 inline constexpr MarketDataSnapshotFullRefreshSeed kMarketDataSnapshotFullRefreshSeed{};
 
 // X MarketDataIncrementalRefresh: MDIncGrp NoMDEntries(268) REQUIRED,
-// delimiter MDUpdateAction(279) (FIX44.xml:3059-3061) — RC#1 pin, X half.
+// delimiter MDUpdateAction(279) (dictionaries/FIX44.xml's MDIncGrp) — RC#1 pin, X half.
 // SAME no_tag(268) as W, DIFFERENT delimiter/member set (the discriminator).
 struct MarketDataEntrySeedX {
     char md_update_action = '0';        // New
@@ -368,7 +368,7 @@ inline constexpr MarketDataIncrementalRefreshSeed kMarketDataIncrementalRefreshS
 
 // i MassQuote: QuotSetGrp NoQuoteSets(296) REQUIRED, delimiter
 // QuoteSetID(302); nested QuotEntryGrp NoQuoteEntries(295) REQUIRED,
-// delimiter QuoteEntryID(299) (FIX44.xml:3219-3221,3350-3352). 2-level nest,
+// delimiter QuoteEntryID(299) (dictionaries/FIX44.xml's QuotEntryGrp). 2-level nest,
 // BOTH levels required (deep-nested insurance, research R5).
 struct MassQuoteEntrySeed {
     std::string_view quote_entry_id = "QE1";

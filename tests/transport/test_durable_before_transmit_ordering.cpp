@@ -44,7 +44,7 @@ namespace fc = fixpp::core;
 TEST(DurableBeforeTransmit, ErrorCodeContract) {
     // transport_write_cancelled is the correct result when async_write is
     // cancelled; transport_write_short is the result for partial writes under
-    // cancellation per [2h §6.6]:1182.
+    // cancellation per `Transport::async_write`'s doc-comment in .specify/2h-transport.md.
     EXPECT_EQ(static_cast<int>(fixpp::core::error::transport_write_cancelled), 113);
     EXPECT_EQ(static_cast<int>(fixpp::core::error::transport_write_short), 105);
     // These are distinct (short-write ≠ cancelled).
@@ -87,7 +87,7 @@ TEST(DISABLED_DurableBeforeTransmit, CancelledWriteDoesNotRollbackStore) {
 }
 
 // Cell 2: partial write then cancel → transport_write_short, frame still durable.
-// [2h §6.6]:1182 Edge Cases — torn write under cancellation.
+// `Transport::async_write`'s doc-comment — torn write under cancellation.
 TEST(DISABLED_DurableBeforeTransmit, PartialWriteThenCancelFrameStillDurable) {
     // Flow:
     //   1. Same as Cell 1 but slow-write peer: peer reads only N/2 bytes

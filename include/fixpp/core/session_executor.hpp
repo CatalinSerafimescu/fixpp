@@ -52,7 +52,7 @@ public:
     session_executor() noexcept = default;
 
     // Direct constructor — bypasses the threading_mode-vs-attestation
-    // validation done by `make_session_executor` ([2d §4.8]:913-915 / I-06 /
+    // validation done by `make_session_executor` ([2d §4.8]'s direct ctor declaration / I-06 /
     // FR-009 / slot 48). Prefer the factory for any new construction: it
     // enforces the `direct_executor && !already_serialized_executor` →
     // `error::executor_not_serialised` invariant. This constructor exists
@@ -64,7 +64,7 @@ public:
 
     // ── project-specific accessors ──────────────────────────────────────
     [[nodiscard]] fixpp::session::Session* session_ptr() const noexcept { return session_; }
-    // true when constructed under per_session_strand ([2d §4.8]:947-950).
+    // true when constructed under per_session_strand ([2d §4.8]'s `is_strand_wrapped()` declaration).
     // Used by debug-build asserts + the seam-16 re-entrancy guard; NOT on
     // the runtime hot path.
     [[nodiscard]] bool is_strand_wrapped() const noexcept { return strand_wrapped_; }
@@ -136,7 +136,7 @@ static_assert(!std::is_trivially_copyable_v<session_executor>,
               "(holds asio::any_io_executor) — E6; do not imply otherwise");
 
 // THE SINGLE ENFORCEMENT POINT for error::executor_not_serialised (slot 48 /
-// FR-009 / I-06 / [2d §4.8]:996). From a resolved (already-override-applied)
+// FR-009 / I-06 / [2d §4.8]'s make_session_executor unification note). From a resolved (already-override-applied)
 // executor + threading_mode + the already_serialized_executor attestation +
 // the owning Session*: under per_session_strand the inner executor is
 // asio::make_strand(resolved_exec); under direct_executor +
@@ -201,7 +201,7 @@ struct adopt_strand_t {};
                                                      asio::any_io_executor strand_exec,
                                                      fixpp::session::Session* session) noexcept;
 
-// The [2d §6.5]:1153-1154 arena-derivation bridge: recovers the never-null
+// The [2d §6.5] cancellable_dispatch-template arena-derivation bridge: recovers the never-null
 // session PMR arena THROUGH the wrapper (== exec.session_ptr()->
 // session_arena(), the [2d §4.5] chain). DECLARED here (core leaf) so
 // cancellable_dispatch.hpp can derive the dispatch-node arena without core/

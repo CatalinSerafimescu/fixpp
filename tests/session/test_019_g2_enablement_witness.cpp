@@ -187,7 +187,7 @@ static std::vector<std::byte> make_nos_payload() {
     // NewOrderSingle body fields. MsgType (35=D) MUST be included in the
     // payload so the receiver's frame-scanner extracts it for fromApp dispatch.
     // Session::send_impl writes 8=/9=/34=/49=/52=/56= then appends app_payload;
-    // it does NOT stamp 35=. The payload must carry it. [send_impl lines 2775-2822]
+    // it does NOT stamp 35=. The payload must carry it. [send_impl]
     static const char k[] =
         "35=D\x01""11=ORD001\x01""54=1\x01""55=AAPL\x01""40=2\x01""44=100.0\x01";
     std::vector<std::byte> v;

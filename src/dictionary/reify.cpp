@@ -73,7 +73,7 @@ struct owning_message_handle::impl {
     // (data-model.md "Reify owning handle owned table_view" degenerate case).
     // Heap-owned (table_view's own containers use the default/global
     // allocator, independent of `bytes_`'s mr) and self-contained — safe to
-    // outlive the source session/Dictionary (table_view.hpp:185-192/204/221).
+    // outlive the source session/Dictionary (table_view.hpp's "may legally outlive the Dictionary" note).
     std::optional<table_view> owned_tv_;
     mutable std::optional<wire::MessageView<wire::access_mode::Index>> view_cache_;
 

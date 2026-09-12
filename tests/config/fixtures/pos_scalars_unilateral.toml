@@ -1,6 +1,6 @@
 # pos_scalars_unilateral.toml
-# Covers reset_seqnum_policy = "unilateral" (line 458 scalar_mappers.cpp)
-# and sending_time_precision = "nanos" (line 484)
+# Covers reset_seqnum_policy = "unilateral" (map_scalars, scalar_mappers.cpp)
+# and sending_time_precision = "nanos" (map_scalars, scalar_mappers.cpp)
 # Uses plaintext transport, acceptor role (no host/port required).
 
 [clock]

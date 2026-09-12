@@ -1,7 +1,7 @@
 # neg_p1s1_transport_kind_nonstring.toml
 # Two sessions: session[0] uses plaintext (engine default), session[1] has
 # transport.kind = 42 (integer, not a string).
-# Hits the "present but not a string" arm (lines 799-804) in the plaintext-default
+# Hits the "present but not a string" arm (validate_per_session_transport_kinds) in the plaintext-default
 # per-session validation loop.
 # Expected: missing_required at "session[1].transport.kind"
 

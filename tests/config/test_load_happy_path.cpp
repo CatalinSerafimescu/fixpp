@@ -318,17 +318,17 @@ TEST(LoadHappyPath, Cov_ScalarsExtra) {
     EXPECT_EQ(cfg.mode, fixpp::session::threading_mode::direct_executor);
     EXPECT_TRUE(cfg.already_serialized_executor);
 
-    // reset_seqnum_policy=bilateral_strict (line 454 scalar_mappers.cpp)
+    // reset_seqnum_policy=bilateral_strict (map_scalars, scalar_mappers.cpp)
     EXPECT_EQ(cfg.reset_seqnum_policy_field, fixpp::session::reset_seqnum_policy::bilateral_strict);
 
-    // sending_time_precision=seconds (line 478 scalar_mappers.cpp)
+    // sending_time_precision=seconds (map_scalars, scalar_mappers.cpp)
     EXPECT_EQ(cfg.sending_time_precision, fixpp::core::fix_time_precision::seconds);
 
-    // heartbeat_interval = "2m" → 120s (unit 'm' arm, line 165)
+    // heartbeat_interval = "2m" → 120s (parse_duration_to_ms's "m" unit arm)
     ASSERT_TRUE(cfg.heartbeat_interval.has_value());
     EXPECT_EQ(*cfg.heartbeat_interval, std::chrono::seconds{120});
 
-    // test_request_threshold = "1h" → 3600000ms (unit 'h' arm, line 167)
+    // test_request_threshold = "1h" → 3600000ms (parse_duration_to_ms's "h" unit arm)
     ASSERT_TRUE(cfg.test_request_threshold.has_value());
     EXPECT_EQ(*cfg.test_request_threshold, std::chrono::milliseconds{3600000});
 
@@ -373,10 +373,10 @@ TEST(LoadHappyPath, Cov_ScalarsUnilateral) {
     ASSERT_EQ(result->sessions.size(), std::size_t{1});
     const fixpp::session::SessionConfig& cfg = result->sessions[0].config;
 
-    // reset_seqnum_policy=unilateral (line 458)
+    // reset_seqnum_policy=unilateral (map_scalars, scalar_mappers.cpp)
     EXPECT_EQ(cfg.reset_seqnum_policy_field, fixpp::session::reset_seqnum_policy::unilateral);
 
-    // sending_time_precision=nanos (line 484)
+    // sending_time_precision=nanos (map_scalars, scalar_mappers.cpp)
     EXPECT_EQ(cfg.sending_time_precision, fixpp::core::fix_time_precision::nanos);
 }
 
@@ -410,8 +410,8 @@ TEST(LoadHappyPath, Cov_FixtApplVerIds) {
 }
 
 // ── pos_multisession_profile_diverges.toml: per-session divergence scan ───────
-//    session[0] matches engine default (continue at line 635)
-//    session[1] profile diverges but same cert → reuse engine cert (line 649)
+//    session[0] matches engine default (resolve_transport's match-engine-default continue)
+//    session[1] profile diverges but same cert → reuse engine cert (resolve_transport's cert-reuse arm)
 
 TEST(LoadHappyPath, Cov_MultisessionProfileDiverges) {
     auto result = load_fixture("pos_multisession_profile_diverges.toml");
@@ -437,7 +437,7 @@ TEST(LoadHappyPath, Cov_MultisessionProfileDiverges) {
 }
 
 // ── Absolute dictionary path: triggers resolve_path absolute-return arm ────────
-//    (loader_internal.cpp line 46: if (rel.is_absolute()) return rel;)
+//    (resolve_path's absolute-return arm, loader_internal.cpp: if (rel.is_absolute()) return rel;)
 //    We generate a TOML file at runtime with an absolute path to FIXT11.xml.
 
 TEST(LoadHappyPath, Cov_AbsoluteDictPath) {
@@ -583,7 +583,7 @@ TEST(LoadHappyPath, Cov_ScalarsMoreEnums) {
 }
 
 // ── load_toml_config with a nonexistent file: hits std::exception arm ─────────
-//    (toml_config_loader.cpp lines 388-393: catch(const std::exception& e))
+//    (load_toml_config's parse-phase catch(const std::exception& e))
 
 TEST(LoadHappyPath, Cov_NonexistentFile) {
     const std::filesystem::path nonexistent{"/tmp/this_file_does_not_exist_fixpp_044.toml"};
@@ -609,11 +609,11 @@ TEST(LoadHappyPath, Cov_NonexistentFile) {
 //
 // These tests cover branch arms that are structurally unreachable through the
 // public load_toml_config() API:
-//   • display_value() non-credential passthrough (line 36 loader_internal.cpp,
+//   • display_value() non-credential passthrough (loader_internal.cpp,
 //     branch 33-False + branch 28:39-False)
 //   • is_credential_key() with a bare key (no dot) → branch 26-True
 //
-// loader_internal.cpp line 58-59 (weakly_canonical OS error) is genuinely
+// loader_internal.cpp's resolve_path OS-error fallback arm is genuinely
 // unreachable without OS-level fault injection and remains uncovered.
 
 namespace fixpp::config::detail {
@@ -624,8 +624,8 @@ namespace fixpp::config::detail {
 
 TEST(LoadHappyPath, Cov_DisplayValueNonCredential) {
     // A key that is NOT a credential: display_value must return the value
-    // verbatim (covers line 36 in loader_internal.cpp and the False branch
-    // of "if (is_credential_key(key_path))" at line 33).
+    // verbatim (covers display_value's non-credential return in loader_internal.cpp and the False branch
+    // of "if (is_credential_key(key_path))").
     std::string_view v = fixpp::config::detail::display_value("session[0].host", "fix.example.com");
     EXPECT_EQ(v, "fix.example.com")
         << "display_value must pass through the value for a non-credential key";
@@ -633,7 +633,7 @@ TEST(LoadHappyPath, Cov_DisplayValueNonCredential) {
 
 TEST(LoadHappyPath, Cov_IsCredentialKeyBareNoDoc) {
     // A bare key (no dot) such as "username" or "password":
-    // rfind('.') returns npos → the True branch of the ternary at line 26.
+    // rfind('.') returns npos → the True branch of is_credential_key's ternary.
     // The final segment IS "username" → returns true.
     EXPECT_TRUE(fixpp::config::detail::is_credential_key("username"))
         << "bare 'username' with no dot must be a credential key";

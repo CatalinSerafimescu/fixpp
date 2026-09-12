@@ -9,7 +9,7 @@
 // ── T016 CELL ENUMERATION TABLE ──────────────────────────────────────────────
 //
 // Source: 005/data-model.md §E2 Transition Matrix + session.cpp switch cascade.
-// Events (15 per session_fsm.hpp:52-67):
+// Events (15, per session_fsm.hpp's Event-alphabet comment):
 //   E01  open_initiator          → open() called as initiator
 //   E02  inbound_logon_valid     → Logon(35=A) valid CompID/BeginString/HeartBtInt
 //   E03  inbound_logon_refused   → Logon(35=A) refused (BeginString/CompID mismatch)
@@ -26,7 +26,7 @@
 //   E14  initiate_logout         → Session::close(graceful)
 //   E15  close_terminal_or_fatal → Session::close(terminal) or fatal error
 //
-// States (6 per session_fsm.hpp:30-46):
+// States (6, the fsm_state enum):
 //   S0  NotConnected
 //   S1  LogonSent
 //   S2  LogonReceived (synchronous-transient in acceptor path)
@@ -58,7 +58,7 @@
 //
 // Cross-check confirmed: NO escalation required.
 //
-// Anchors: 005/data-model.md §E2 matrix; session_fsm.hpp:30-67; FR-006; SC-002.
+// Anchors: 005/data-model.md §E2 matrix; session_fsm.hpp's fsm_state enum + Event-alphabet comment; FR-006; SC-002.
 
 #include <gtest/gtest.h>
 
@@ -981,9 +981,9 @@ TEST_F(FsmMatrixWitness, Active_InvalidAppMsgType_SessionReject_StaysActive) {
 
     // W3.3 — gated-emit contract: matrix says "session Reject"; assert the
     // Reject(35=3) was actually emitted via transport_send. The impl at
-    // session.cpp:977-998 builds + emits the Reject for any non-session-admin
-    // MsgType in Active (binding behavior, distinct from the dup-Logon /
-    // OOSA spec-vs-impl gap tracked in verify-record line 134-135).
+    // on_inbound_frame's Active-row non-session-admin MsgType Reject arm builds + emits
+    // the Reject (binding behavior, distinct from the dup-Logon /
+    // OOSA spec-vs-impl gap tracked in the SC-002 row of .specify/decisions/010-session-cfg-lifetime-verify.md).
     EXPECT_EQ(count_admin_frames_with_type("3"), 1U)
         << "Active×InvalidAppMsgType: exactly 1 Reject(35=3) must be emitted "
            "(matrix Active row E12 — invalid MsgType for state)";

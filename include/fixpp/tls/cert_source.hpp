@@ -11,7 +11,7 @@
 // EXACTLY 2 pure-virtuals per [const §XIV.2] (cap = 5).
 //
 // §6.4 Cancellation contract — load_credentials recipe (verbatim from
-// contracts/cert_source.hpp lines 200-247 / [2g §6.4] lines 903-944):
+// contracts/cert_source.hpp's load_credentials recipe / [2g §6.4]'s load_credentials recipe):
 //
 //   asio::awaitable<core::expected_t<local_credentials>>
 //   my_cert_source::load_credentials() {
@@ -134,7 +134,7 @@ struct async_signer_ref {
 //
 // CRITICAL: leaf is a VALUE-typed Certificate (its view fields alias cert_source
 // storage). chain is a std::span<const Certificate> VIEW — NOT an owning vector.
-// Per [2g §4.1] lines 252-254; data-model E-2.
+// Per [2g §4.1]'s `local_credentials::chain` field; data-model E-2.
 // NOTE: [[clang::lifetimebound]] only applies to function parameters and implicit
 // object parameters, not data members. The lifetime invariants are:
 //   leaf.* fields alias *this-owned cert_source storage.
@@ -151,7 +151,7 @@ struct local_credentials {
 
 // ── cert_source ───────────────────────────────────────────────────────────────
 // Pluggable credential source — exactly 2 pure-virtuals per FR-001 /
-// [const §XIV.2] (cap = 5). Re-emitted verbatim from [2g §4.1] lines 259-290.
+// [const §XIV.2] (cap = 5). Re-emitted verbatim from [2g §4.1]'s `class cert_source` block.
 // Abstract interface; defaulted dtor + Liskov-safe non-copy/non-move is intentional.
 // NOLINTNEXTLINE(hicpp-special-member-functions,cppcoreguidelines-special-member-functions)
 class cert_source {

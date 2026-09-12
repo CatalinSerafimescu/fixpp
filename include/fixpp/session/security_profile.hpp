@@ -3,12 +3,12 @@
 // include/fixpp/session/security_profile.hpp
 //
 // fixpp::session::SecurityProfile — MINIMAL stub that ships the no-implicit-default
-// sentinel ([const §XII.5] / [2d §4.5] / N-P2-3 / [arch §6 line 243]). SessionConfig
+// sentinel ([const §XII.5] / [2d §4.5] / N-P2-3 / architecture.md's SecurityProfile enum row). SessionConfig
 // holds a value-typed member `fixpp::session::SecurityProfile security_profile;`;
 // the default-constructed sentinel (`kind::unset`) is REJECTED by Session::open()
 // with error::invalid_session_config (slot 53 / FR-018).
 //
-// Lives in `fixpp::session` per `architecture.md:243` (NOT `fixpp::tls`, which was
+// Lives in `fixpp::session` per architecture.md's SecurityProfile enum row (NOT `fixpp::tls`, which was
 // the post-merge layer-violation hotfix on 2026-05-20). The `tls/` module is for
 // the concrete TLS implementation (2g) — the KIND discriminant is a session-owned
 // closed-enum sentinel, not a TLS-impl artifact, so it lives with the other

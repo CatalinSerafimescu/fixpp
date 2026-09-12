@@ -9,11 +9,11 @@
 // 066's correctness witnesses MUST drive real dispatch through a dictionary
 // that actually registers groups (research.md Decision 1/2/6): the shipped
 // FIX44.xml's `ExecutionReport`(35=8) declares `<component
-// name='InstrmtLegExecGrp' required='N' />` (dictionaries/FIX44.xml:251),
-// which expands (dictionaries/FIX44.xml:2830-2845) to
+// name='InstrmtLegExecGrp' required='N' />` (dictionaries/FIX44.xml's ExecutionReport declaration),
+// which expands (dictionaries/FIX44.xml's InstrmtLegExecGrp component) to
 // `<group name='NoLegs' required='N'>` (field 555, NUMINGROUP,
-// dictionaries/FIX44.xml:5561) containing the `InstrumentLeg` component
-// (LegSymbol=600, LegSide=624, LegQty=687, ... dictionaries/FIX44.xml:2436+)
+// dictionaries/FIX44.xml's NoLegs group field) containing the `InstrumentLeg` component
+// (LegSymbol=600, LegSide=624, LegQty=687, ... dictionaries/FIX44.xml's InstrumentLeg component)
 // — a real dict-registered group on a real app message. (The six-dictionary
 // "group-registering scope" this comment used to enumerate — FIX43/FIX44/FIX50/
 // FIX50SP1/FIX50SP2/FIXT.1.1 — was RETIRED by 082-structural-group-detection

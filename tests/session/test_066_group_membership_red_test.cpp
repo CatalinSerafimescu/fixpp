@@ -9,7 +9,7 @@
 //
 // Both assertions below MUST be observed RED against the current
 // dict-free positional parse (`Session::parse_and_dispatch_`,
-// src/session/session.cpp:316, default `Parser<access_mode::Index>` with
+// default `Parser<access_mode::Index>` with
 // no dictionary) — this file does NOT flip that site (T006's job).
 //
 // Anchors: tasks.md T004; spec.md US1 Independent Test; contracts/

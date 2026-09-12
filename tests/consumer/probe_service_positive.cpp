@@ -7,7 +7,7 @@
 //
 // The C-ABI half is not incidental. `fixpp::service` declares NO C-ABI include
 // root of its own — it reaches <fix/c_api.h> transitively through its existing
-// link to fixpp::capi (src/service/CMakeLists.txt:30, contract §2). Narrowing
+// link to fixpp::capi (src/service/CMakeLists.txt's `target_link_libraries(fixpp_service INTERFACE fixpp_capi)`, contract §2). Narrowing
 // fixpp::capi is exactly the change that could sever that path, so this TU is
 // what keeps FR-011a honest.
 //

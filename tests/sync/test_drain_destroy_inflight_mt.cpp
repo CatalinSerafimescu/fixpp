@@ -10,10 +10,10 @@
 // delivery runner onto the WAITER's OWN stored executor — genuinely
 // cross-executor, cross-core, per store_executor()'s resume_fn_). That runner
 // pushes the freed slot into the mutex-owned free-list pool storage
-// (release_ref, async_mutex.hpp:790-828) and, as its LAST statement,
+// (`release_ref`, the resume runner in async_mutex.hpp) and, as its LAST statement,
 // decrements in_flight_resumers_ with RELEASE ordering (T016,
-// async_mutex.hpp:672). The drain's terminal condition observes
-// in_flight_resumers_==0 via an ACQUIRE load (T016, async_mutex.hpp:1399) —
+// its `fetch_sub` in async_mutex.hpp). The drain's terminal condition observes
+// in_flight_resumers_==0 via an ACQUIRE load (T016, `cancel_and_drain()`'s terminal check) —
 // establishing the happens-before that makes destroying the mutex
 // immediately after drain-return memory-safe even though the pool write ran
 // on a different core/thread.
@@ -102,7 +102,7 @@ void run_one_cycle() {
         co_await yield_n(N * 20);
         // `g` destructs here -> the REAL unlock(). By now draining_ is long
         // since true, so this unlock() takes the draining_ short-circuit
-        // path (async_mutex.hpp:1159) and does NOT touch the waiter list —
+        // path (`async_mutex::unlock()`'s `draining_` short-circuit) and does NOT touch the waiter list —
         // the parked-then-reaped waiter below is exclusively the drain's
         // concern, never granted by this unlock().
     };

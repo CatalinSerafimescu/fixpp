@@ -5,7 +5,7 @@
 // round-trip (T020) and independent inbound-read (T022) witnesses.
 //
 // Factors the proven DICT-AWARE (5-arg) parse path out of
-// tests/codegen/group_entry_read_test.cpp:224-249 (XmlLoader ->
+// GroupEntryRead.AbsentVsPresentButEmptyField (XmlLoader ->
 // Dictionary::as_table_view() -> Framer -> Parser<Index>{tv} -> MessageView<Index>).
 // The dict-aware Parser<Index>{tv} ctor installs the context-scoped
 // group_member_fn, so grouped/nested typed reads (062/063) enumerate correctly —
@@ -15,7 +15,7 @@
 // non-v44 exemplar can reuse the scaffold; the 5 exemplars are all "FIX.4.4".
 //
 // Consuming test targets MUST define FIXPP_DICT_DATA_DIR (the dictionaries/ path;
-// mirror tests/codegen/CMakeLists.txt:47) so load_fix44() resolves FIX44.xml.
+// mirror tests/codegen/CMakeLists.txt's per-target FIXPP_DICT_DATA_DIR definition) so load_fix44() resolves FIX44.xml.
 #pragma once
 
 #include <gtest/gtest.h>
@@ -68,7 +68,7 @@ inline std::vector<std::byte> make_frame(std::string_view begin_string, std::str
 
 // Load the real FIX 4.4 dictionary. The returned Dictionary OWNS the metadata;
 // it MUST outlive any table_view / MessageView derived from it (caller keeps it
-// in scope). Mirrors group_entry_read_test.cpp:230-231.
+// in scope). Mirrors GroupEntryRead.AbsentVsPresentButEmptyField.
 inline fixpp::dict::Dictionary load_fix44(std::pmr::memory_resource* mr) {
     fixpp::dict::XmlLoader loader;
     return loader.load(std::string(FIXPP_DICT_DATA_DIR) + "/FIX44.xml", mr);

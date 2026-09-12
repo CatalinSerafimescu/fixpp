@@ -18,10 +18,10 @@
 // fail-closed at `Session::open()` (a runtime pointer-identity compare
 // against `source()`, not a construction closure — see the design doc §3).
 //
-// `Dictionary::as_table_view()` (dictionary.hpp:212) stays public and keeps
+// `Dictionary::as_table_view()` (dictionary.hpp's own declaration) stays public and keeps
 // returning a mutable `table_view` BY VALUE — `dictionary_driven_validator`
 // still holds one by value under the frozen SC-007 design point
-// (validator.hpp:112) — so this type does not make `table_view` itself
+// (validator.hpp's `dictionary_driven_validator` ctor) — so this type does not make `table_view` itself
 // immutable. It makes the session-config injection point stop admitting a
 // mutable alias.
 #pragma once

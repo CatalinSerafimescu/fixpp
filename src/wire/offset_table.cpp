@@ -614,8 +614,8 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // 085: the flat per-instance cap loop that used to run here
     // unconditionally, after what was then a dict-aware/dict-free if/else,
     // was removed from the dictionary path. Why it could go: consume_group_extent's per-instance
-    // cap check (`:521-524` as-of `ae65c36a`) already caps the same nesting-aware instances whose
-    // extent its normal exit (`:527` as-of `ae65c36a`) returns; the flat partition that used to run
+    // cap check (the `max_group_entries_per_instance` comparison) already caps the same nesting-aware instances whose
+    // extent its own return, immediately after that check, returns; the flat partition that used to run
     // here merely refined that one, and consume_group_extent returns as soon as its own check
     // breaches — so the flat loop's cap comparison could never be the first to fire on this path.
     //
@@ -628,9 +628,9 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // function's entire per-instance DoS defence is now
     // consume_group_extent's cap over the instances whose extent it
     // returns. Any future change to that walk (the
-    // instance-opening rule at `:477-478` as-of `ae65c36a`, the cap
+    // instance-opening rule at `consume_one`'s position-1 call, the cap
     // check itself, or the delimiter consume_group_extent resolves at
-    // `:458` as-of `ae65c36a`) MUST re-verify the cap still measures the
+    // its `delim` assignment) MUST re-verify the cap still measures the
     // partition the function's return describes, or re-introduce an
     // independent per-instance cap in this function.
     return group_index{no_tag, first, group_end - first};
@@ -710,7 +710,7 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                 // coincidental.
                 //
                 // NOT `group_context_for(no_tag)`: that returns
-                // `stored_group_context().pushed(no_tag)` (:424-426) and would
+                // `stored_group_context().pushed(no_tag)` and would
                 // query one path element too long, violating Entity 1's
                 // "parent_path EXCLUDES no_tag" invariant.
                 //
@@ -889,7 +889,7 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
 // 062 T005: dict-aware sub-view-over-slice builder (see offset_table.hpp for
 // the ownership/lifetime/RC1 contract). Placement-constructs into `mr`,
 // mirroring the established `mr->allocate(size, align)` + placement-new
-// arena pattern (include/fixpp/core/sync/async_mutex.hpp:1160-1164).
+// arena pattern (`async_mutex::async_lock`'s `mr->allocate` call).
 OffsetTable* OffsetTable::build_nested_subview(
     std::byte const* data, std::size_t len, std::pmr::memory_resource* mr, void const* opaque_dict,
     group_member_fn_t group_member_fn, detail::generation_token gen, group_context const& ctx,
@@ -930,7 +930,7 @@ OffsetTable* OffsetTable::build_nested_subview(
 // bug the T004 checklist audit caught (cache-hit vs final exit diverging).
 //   (a) t == nullptr           — shell alloc failed / cached failed build;
 //   (c) build_status() OOM     — ctor build() degraded to out_of_memory
-//                                (offset_table.cpp:366-370); scoped to OOM so
+//                                (`OffsetTable::build`'s `catch (std::bad_alloc const&)`); scoped to OOM so
 //                                a malformed-data degradation stays not-failed
 //                                (FR-007 disjointness);
 //   (b) group_slices_status()  — the sub-table's own slice materialization
@@ -963,7 +963,7 @@ nested_slices_result OffsetTable::nested_group_slices(
     // without ever touching `gen` again, so a stale token would otherwise be
     // served silently instead of fault-closing. `.bytes()` -> check_alive()
     // traps in debug on a stale token; no-op in release. Mirrors the mint at
-    // ~:540 (build_nested_subview) but with len=0 so it never builds/allocs
+    // build_nested_subview, but with len=0 so it never builds/allocs
     // — must not regress the FR-004b zero-alloc-on-repeat gate.
     (void)frame_view_slice_access::make(slice_data, 0, gen).bytes();
     // Single pass over the flat cache:

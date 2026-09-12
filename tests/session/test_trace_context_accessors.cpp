@@ -9,7 +9,7 @@
 //      initial_trace_context at open() (feeds TS-6a).
 //   2. Exactly ONE canonical session trace-context accessor exists —
 //      grep-regression scoped over src/ + include/ + tests/ so the migrated
-//      session_executor.cpp:80 caller is covered; no lingering
+//      session_executor.cpp's `session_trace_context_of` caller is covered; no lingering
 //      trace_context_value() references anywhere.
 //   3. Engine::engine_trace_context() returns the seeded snapshot (TS-6b).
 //

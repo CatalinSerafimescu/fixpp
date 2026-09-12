@@ -6,7 +6,7 @@
 // happy-path matrix and NOT counterparty-paired: it proves Engine::stop() returns
 // within a stated bound when a fixpp initiator is aimed at a peer that never
 // accepts. This is the interop-suite guard for the 015 down-peer L2 carry-forward
-// (CLAUDE.md L2), discharged by the Phase-2 T008 fix (SessionConfig reconnect
+// (L-015-2), discharged by the Phase-2 T008 fix (SessionConfig reconnect
 // policy + promptly-cancellable in-flight connect).
 //
 // Unlike the matrix cells this runs WITHOUT a counterparty (the point is a peer

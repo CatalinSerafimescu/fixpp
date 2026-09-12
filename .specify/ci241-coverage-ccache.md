@@ -296,7 +296,7 @@ It is Debug like the matrix debug leg, but the coverage profile folds
 `~/.conan2/p/<hash>` paths ⇒ different `-isystem` ⇒ a different hash on every dependency-touching
 TU. Sharing the debug leg's key would be a permanent ~0 % hit rate, not a saving.
 
-⚠️ `cmake/Codegen.cmake:190-209` does **not** forward `CMAKE_{C,CXX}_COMPILER_LAUNCHER` to the
+⚠️ `cmake/Codegen.cmake`'s codegen-bootstrap `_bootstrap_args` list does **not** forward `CMAKE_{C,CXX}_COMPILER_LAUNCHER` to the
 `_codegen_bootstrap/` nested sub-configure — it forwards `-DCMAKE_CXX_COMPILER` / `-DCMAKE_C_COMPILER`
 only. The 25 bootstrap objects (§4) reach ccache purely by process-env inheritance from the
 job-level `env:` block. Moving the launcher from job-level `env:` to a `-D` on the top-level
@@ -366,7 +366,7 @@ The Actions cache pool is **10 GB per repository**, shared by every lane.
 
 ⚠️ **Methodology, corrected on measurement.** `gh api …/actions/cache/usage` is *not* the
 authority — it is eventually consistent and lags deletes, as this repo already recorded at
-`.github/workflows/cache-cleanup.yml:207-209` ("verify by RE-LISTING, not by reading
+`.github/workflows/cache-cleanup.yml`'s own comment ("verify by RE-LISTING, not by reading
 `actions/cache/usage`… lagged several minutes behind confirmed deletes during the 2026-08-02
 sweep"). This section previously cited the API figure (6.92 GiB) as authoritative against a
 per-entry `gh cache list` sum of 6.04 GiB and called the list "under-reporting" — backwards. The
@@ -401,7 +401,7 @@ entries grow with the tree.
 
 `hendrikmuhs/ccache-action` writes `<key>-<ISO8601 stamp>` and never deletes its predecessor; the
 keep-newest sweep that collapses old stamps to one per namespace fires on `workflow_run: completed`
-for the tier workflows (`.github/workflows/cache-cleanup.yml:96-105`), i.e. *after* every save. So
+for the tier workflows (`.github/workflows/cache-cleanup.yml`'s `workflow_run` trigger's tier-workflow list), i.e. *after* every save. So
 each `main` Tier-1 cycle asks the pool to absorb a **second full generation** of ccache writes
 before the sweep runs — measured today at **~6.0 GB**, projected **~7.0 GB post-#241**, against the
 10 GB cap. This is *not* a peak-pool-size claim: GitHub evicts on write, so the 12.5 / 14.4 GB

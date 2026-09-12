@@ -11,10 +11,10 @@
 // reproduces on the VALIDATION path, read back through the **read** path
 // instead: `Parser<Index>{tv}.parse()` -> `offsets().group(100)`. This is a
 // second scanner with the same asymmetry, in a different subsystem
-// (`OffsetTable::consume_group_extent`, src/wire/offset_table.cpp:438-503):
-// it consumes the instance-opening delimiter with a bare `++k` (:475) and
+// (`OffsetTable::consume_group_extent`):
+// it consumes the instance-opening delimiter with a bare `++k` (consume_one's position-1 call) and
 // descends into a nested group only for members scanned AFTER the delimiter
-// (:485-488), never AT the delimiter position itself. Outer group 100
+// (consume_one's position-2 call), never AT the delimiter position itself. Outer group 100
 // (NoOuter) is delimited by 200 — which is itself nested group 200's
 // (NoInner's) own count tag — so the second instance's opening tag (the
 // second `200=1`) is never reached via a nesting-aware descent, and the
@@ -117,9 +117,9 @@ table_view make_bare_nested_delim_dict() {
 // as if it buys probe-key discrimination, and it cannot:
 //   * PROVES: a loader-produced dictionary really does register this shape,
 //     so the descent is not an artifact of a hand-built `table_view` whose
-//     `group_ctx_` is empty (table_view.hpp:346-349).
+//     `group_ctx_` is empty (table_view.hpp).
 //   * Does NOT prove the probe uses the RIGHT key. `add_group_member` unions
-//     with dedup into the bare store (table_view.hpp:528-536), so bare ⊇ every
+//     with dedup into the bare store (table_view.hpp's add_group_member), so bare ⊇ every
 //     per-context member set. A wrong key MISSES and falls back to bare, which
 //     can only ever answer a false POSITIVE relative to the context answer —
 //     never a false negative. W-10a's descent probe must answer TRUE, so no
@@ -208,8 +208,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg1Exten
     // Dict-AWARE parser (constructed over `tv`, not the default dict-free
     // ctor) — offsets().group() only exercises consume_group_extent's
     // membership-driven descent when opaque_dict_/group_member_fn_ are
-    // threaded; the dict-free fallback degrades to rest-of-message (offset_
-    // table.hpp:150-157) and would not exercise the defect at all.
+    // threaded; the dict-free fallback (consume_group_extent's `opaque_dict_
+    // == nullptr` early return) degrades to rest-of-message and would not exercise the defect at all.
     Parser<access_mode::Index> parser{tv};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parser.parse(*fv, &arena);
@@ -281,8 +281,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg1Exten
         << "W-10a leg 1 (C-8.0c, FR-021e): group(100)'s reported extent must span ALL "
            "declared instances (hand-derived = 4 entries: {200,201,200,201}), not just the "
            "first instance's opening delimiter. TODAY this is expected RED — "
-           "consume_group_extent's bare `++k` at the instance-opening delimiter (offset_"
-           "table.cpp:475) never descends into the nested group headed by that same "
+           "consume_group_extent's bare `++k` at the instance-opening delimiter (consume_"
+           "one's position-1 call) never descends into the nested group headed by that same "
            "delimiter, so the second instance's opening tag is never reached. observed="
         << gi->entry_count();
 }
@@ -307,7 +307,7 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg2Insta
 
     auto const res = mv->offsets().group_slices_status(100);
     // Guard the attribution: a bad_alloc degrade returns an EMPTY span with
-    // alloc_failed set (offset_table.hpp:224-232). Without this, an arena
+    // alloc_failed set (`group_slices_result::alloc_failed`). Without this, an arena
     // exhaustion would read as "0 slices" and be misattributed to C-8.0c.
     ASSERT_FALSE(res.alloc_failed)
         << "group_slices_status degraded on allocation — this case's slice count would be "
@@ -319,8 +319,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg2Insta
     ASSERT_EQ(res.slices.size(), kDeclared)
         << "W-10a leg 2 (C-8.0c, SC-016): group_slices_status(100) must materialize one slice "
            "per DECLARED instance. TODAY this is expected RED at 1 — consume_group_extent's "
-           "bare `++k` at the instance-opening delimiter (offset_table.cpp:475) truncates the "
-           "extent to entries [4,5), so the boundary loop (offset_table.cpp:658-660) has only "
+           "bare `++k` at the instance-opening delimiter (consume_one's position-1 call) truncates the "
+           "extent to entries [4,5), so the boundary loop (group_slices_status's is_boundary lambda) has only "
            "the first delimiter to split on. observed=" << res.slices.size();
 
     // Boundaries, not merely the count: two different splits can yield the
@@ -492,7 +492,7 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Populated
 //
 // ── Why this leg cannot be observed RED, and what stands in for that ────────
 // Pre-C-8.0c there is no delimiter-position descent at all, so the branch this
-// leg discriminates — the `if (overflow) { return k; }` MIRROR of :489-491 —
+// leg discriminates — the `if (overflow) { return k; }` MIRROR of consume_one's position-1 step —
 // does not yet exist. Its control is therefore the ASSERTION ITSELF (an
 // invariance that fails deterministically against an un-mirrored
 // implementation), demonstrated to be discriminating by T023, which deletes
@@ -500,21 +500,21 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Populated
 //
 // ── Why the error code is NOT the discriminator ─────────────────────────────
 // `overflow` is a `bool&` threaded from `group()`'s `bool overflow = false`
-// (offset_table.cpp:549), so the depth-cap branch's `overflow = true` (:443)
-// reaches `group()`'s check at :551-553 and `err_group_too_large` is returned
+// (`group()`'s local overflow flag), so the depth-cap branch's `overflow = true` (consume_group_extent's kMaxGroupDepth guard)
+// reaches `group()`'s overflow check and `err_group_too_large` is returned
 // WHETHER OR NOT the mirror is present. The mirror controls *when* the walk
 // returns, never *what* it reports. The error code is asserted below because
 // the contract requires it, but it decides nothing.
 //
 // ── The discriminator: a `group_member_fn_` invocation count ────────────────
 // Supplied through the EXISTING construction-time `group_member_fn_t` seam
-// (offset_table.hpp:79-80, :119-121) — a plain function pointer, so no
+// (`OffsetTable::group_member_fn_t`) — a plain function pointer, so no
 // production change and no new seam.
 //
 // The arithmetic, derived in the frame whose descent hits the cap (the frame
 // at depth 15, which processes chain tag base+15): the depth-16 recursion
-// returns at :442-444 BEFORE any probe call and leaves `k` unadvanced, and the
-// inner member loop at :476 contributes nothing because `entries_[k].tag ==
+// returns at the kMaxGroupDepth guard BEFORE any probe call and leaves `k` unadvanced, and the
+// position-2 inner member loop contributes nothing because `entries_[k].tag ==
 // delim` still holds on entry. So each wasted outer iteration costs EXACTLY
 // ONE further `group_member_fn_` evaluation — the delimiter-position descent
 // probe. A mirrored implementation performs it once and returns; an
@@ -543,7 +543,7 @@ namespace {
 constexpr std::uint16_t kChainBase = 2000;
 // 17 groups (base+0 .. base+16) + a leaf at base+17. The frame at depth 15
 // (tag base+15) descends with depth = 16 = kMaxGroupDepth and trips the guard
-// at offset_table.cpp:442-445, so THAT is the cap-hitting frame.
+// at consume_group_extent's kMaxGroupDepth guard, so THAT is the cap-hitting frame.
 constexpr std::size_t kChainGroups = 17;
 constexpr std::size_t kCapHittingIndex = 15;
 
@@ -585,7 +585,7 @@ std::size_t g_probe_calls = 0;
 bool counting_group_member(void const* d, fixpp::wire::group_context const& ctx,
                            std::uint16_t no_tag, std::uint16_t tag) noexcept {
     ++g_probe_calls;
-    // Same body as the production lambda at parser.hpp:601-612 (which is not
+    // Same body as the production `group_member_fn_` initializer lambda (which is not
     // reachable from here) — context-keyed lookup with the table_view's own
     // bare fallback.
     auto const* tv = static_cast<table_view const*>(d);
@@ -673,7 +673,7 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg4Depth
     // chain stops at the first delimiter, 3 probe calls, no cap reached), so
     // this assertion is RED until T022 and is what pins the shape.
     // It is NOT the discriminator: `overflow` is a `bool&` that reaches
-    // group()'s check at offset_table.cpp:551-553 with or without the mirror.
+    // group()'s overflow check with or without the mirror.
     EXPECT_TRUE(run2.group_too_large)
         << "leg 4 fixture: a chain nested to kMaxGroupDepth must trip the depth guard and report "
            "err_group_too_large. TODAY this is expected RED — the delimiter-position descent does "
@@ -687,7 +687,7 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg4Depth
            "vacuous. The fixture is not reaching consume_group_extent.";
     EXPECT_EQ(run2.probe_calls, run8.probe_calls)
         << "W-10a leg 4 (C-8.0c.3): once the depth cap trips, consume_group_extent must RETURN "
-           "— mirroring the `if (overflow) { return k; }` at offset_table.cpp:489-491 — not burn "
+           "— mirroring the `if (overflow) { return k; }` in consume_one's position-1 step — not burn "
            "`declared` no-op outer iterations. Each wasted iteration costs exactly one further "
            "group_member_fn_ evaluation (the delimiter-position descent probe), so an un-mirrored "
            "implementation's total GROWS with the cap-hitting frame's declared count while a "
@@ -703,9 +703,9 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg4Depth
 // bare global one), exactly ONE of the four wire-side probes may move:
 //
 //   MOVES     `group_slices_status(no_tag)`'s split          (C-8.2 / T058)
-//   UNCHANGED `consume_group_extent`'s extent bound          (C-8.0, `:454`)
+//   UNCHANGED `consume_group_extent`'s extent bound          (C-8.0)
 //   UNCHANGED `group(no_tag)`'s group_index (no_tag, first_entry, entry_count)
-//   [RETIRED]  `group_slices_reserve_bound()`                 (C-8.0, `:597`)
+//   [RETIRED]  `group_slices_reserve_bound()`                 (C-8.0)
 //              — #389 DELETED that function. See the retirement note at probe
 //              3 below for why the probe was TRUE and the property it was read
 //              as certifying was not.
@@ -734,7 +734,7 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg4Depth
 //
 //   Exclusion 2 — the member sets are identical pre/post-083: this context's
 //     own AND every nested context the extent walk descends through. The
-//     `table_view.hpp:645` injection of the global first field is what
+//     `set_group_first`'s `add_group_member` injection of the global first field is what
 //     pollutes a member set; on the 52 polluted contexts removing it MOVES the
 //     extent, and that movement is #210 Consequence 2, pinned as a change by
 //     T009. Here the injected tag is already a declared member, so the
@@ -798,7 +798,7 @@ constexpr std::string_view kDivergentDelimXml =
     R"(</group></message>)"
     R"(</messages></fix>)";
 
-// The Parser's own membership lambda (parser.hpp:605-618), lifted to a named
+// The Parser's own `group_member_fn_` initializer lambda, lifted to a named
 // function so the PRE-083 oracle table can be constructed by hand with the
 // IDENTICAL membership oracle and a null delimiter callback. Copied rather
 // than shared because the Parser's is an unnamed closure with no other
@@ -876,7 +876,7 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
            "#210 Consequence 2 (pinned as a CHANGE by T009), not something to assert unchanged.";
     ASSERT_EQ(ctx_sorted, (std::vector<std::uint16_t>{201, 202}))
         << "exclusion 2: the declared member set, hand-derived from the fixture XML.";
-    // (c) The pre-083 `table_view.hpp:645` injection would have added the
+    // (c) The pre-083 `set_group_first`/`add_group_member` injection would have added the
     //     GLOBAL first field (201) to E's member set. It is already a declared
     //     member, so the injection was provably a no-op on this fixture — the
     //     precise statement of "divergent but not polluted".
@@ -911,7 +911,7 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     std::pmr::monotonic_buffer_resource oracle_arena;
     fixpp::wire::OffsetTable pre{*fv, &oracle_arena, &tv, &divergent_member_fn, nullptr};
     ASSERT_TRUE(pre.build_status().has_value()) << "oracle table failed to build";
-    // The ROOT context MessageView seeds unconditionally (parser.hpp:139-147);
+    // The ROOT context MessageView seeds unconditionally (its dict-aware ctor's `set_group_context` call);
     // reproduce it so the two tables differ in the delimiter callback ALONE.
     pre.set_group_context(fixpp::wire::group_context{.msg_type = "E"});
 
@@ -938,7 +938,7 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     EXPECT_FALSE(pre_overflow);
     EXPECT_EQ(post_extent, pre_extent)
         << "C-8.0: consume_group_extent's bound is membership-driven and its local `delim` stays "
-           "WIRE-derived (offset_table.cpp:454). With both exclusions asserted above, 083 must "
+           "WIRE-derived (consume_group_extent's `delim` lookup). With both exclusions asserted above, 083 must "
            "not move it. pre=" << pre_extent << " post=" << post_extent;
 
     // ── UNCHANGED probe 2: group(no_tag)'s group_index ──────────────────────
@@ -1250,7 +1250,7 @@ TEST(TypedReadSplitAgreement, ArenaConsumptionIsIndependentOfGroupMaterializatio
 // A splitter MIS-SPLIT needs the outer group's delimiter tag `D` to reappear
 // INSIDE one of that group's own nested groups, so a deep `D` reads as a new
 // outer instance to the flat `entries_[k].tag == delim` boundary test at
-// `src/wire/offset_table.cpp:678-680`.
+// `group_slices_status`'s `is_boundary` lambda.
 //
 // ── Measured: that precondition occurs ZERO times ───────────────────────────
 // Swept all ten shipped dictionaries under the POST-FIX (per-context)

@@ -625,8 +625,8 @@ TEST(AdminMessagesInterpret, NonNumericHeartBtIntReturnsInvalidLogon) {
 //
 // build_logon writes 8 fields sequentially. Different out-buffer sizes fail
 // the Writer at different positions, hitting distinct error-propagation arms
-// in admin_messages.cpp (lines 80-82 / 87-89 / 97-99 / 103-105 / 120-122 /
-// 126-128 / 132-135 / 143-146). This parametric test calibrates several
+// in build_logon's sequential per-field Writer calls in admin_messages.cpp.
+// This parametric test calibrates several
 // sizes that progressively fail at different points.
 
 class BuildLogonCalibratedBufferSizes : public ::testing::TestWithParam<std::size_t> {};

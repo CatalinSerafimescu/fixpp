@@ -327,8 +327,8 @@ TEST_F(ReconnectHappyPathTest, ReconnectFsmAccessorsCompile) {
 //   T014-A/B/C do NOT cover (those test FR-009 gap-detection, not the
 //   reconnect loop itself). Anchors: FR-001, FR-002, plan.md T014.
 //
-// RED witness: the Phase 2 stub in reconnect_fsm.cpp returns co_return {} at
-//   line 46 WITHOUT calling factory_->make(). make_call_count stays 0 after
+// RED witness: the Phase 2 stub in reconnect_fsm.cpp returns co_return {}
+//   WITHOUT calling factory_->make(). make_call_count stays 0 after
 //   one drive_reconnect_attempt() call, never reaching 1 → EXPECT_GE(1) FAILS.
 // ─────────────────────────────────────────────────────────────────────────────
 

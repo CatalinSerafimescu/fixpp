@@ -167,8 +167,8 @@ using fixpp::session::fsm_state;
 
 // ── test-access helper for asio_tls_transport::socket_ ───────────────────────
 // `friend class asio_tls_transport_test_access;` is declared in
-// src/transport/asio_tls_transport.hpp:214. Same pattern as
-// tests/perf/test_socket_option_defaults.cpp:46-51.
+// src/transport/asio_tls_transport.hpp. Same pattern as
+// tests/perf/test_socket_option_defaults.cpp's `asio_tls_transport_test_access`.
 // Returns a MUTABLE ref because asio::ip::tcp::socket::get_executor() is not const.
 namespace fixpp::transport {
 class asio_tls_transport_test_access {
@@ -830,7 +830,7 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
 //   5. Check socket_.get_executor().target<asio::strand<asio::any_io_executor>>() != nullptr.
 //
 // Pre-T011 RED (definitive, not pass-by-luck):
-//   Engine loops are spawned on bare exec_ (engine.cpp:689/694).
+//   Engine loops (run_accept_loop/run_connect_loop) are spawned on bare exec_.
 //   asio_listener builds the accepted socket using `co_await this_coro::executor`
 //   which IS the bare exec_ (the loop runs on it). Hence the socket is associated
 //   with the bare io_context executor, NOT a strand.
@@ -961,7 +961,7 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
     EXPECT_NE(acc_strand_ptr, nullptr)
         << "V-10 RED (pre-T011): acceptor socket is NOT bound to a strand.\n"
         << "  socket_.get_executor() == bare io_context executor (loops on bare exec_).\n"
-        << "  run_accept_loop spawned on exec_ (engine.cpp:689), so this_coro::executor\n"
+        << "  run_accept_loop spawned on exec_, so this_coro::executor\n"
         << "  inside the loop IS the bare executor — the accepted socket inherits it.\n"
         << "  Post-T011: loop spawns on entry.session_strand → socket is strand-bound.\n"
         << "  This is the R8 lynchpin: one un-fixed site re-opens the per-session race.";
@@ -970,7 +970,7 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
     EXPECT_NE(ini_strand_ptr, nullptr)
         << "V-10 RED (pre-T011): initiator socket is NOT bound to a strand.\n"
         << "  socket_.get_executor() == bare io_context executor (loops on bare exec_).\n"
-        << "  run_connect_loop spawned on exec_ (engine.cpp:694), so this_coro::executor\n"
+        << "  run_connect_loop spawned on exec_, so this_coro::executor\n"
         << "  inside the loop IS the bare executor — connected socket inherits it.\n"
         << "  Post-T011: loop spawns on entry.session_strand → socket is strand-bound.\n"
         << "  This is the R8 lynchpin: one un-fixed site re-opens the per-session race.";
@@ -998,7 +998,7 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
 //     Thread-reader (raw std::thread): calls engine.acceptor_bound_endpoint(acc_id)
 //       and/or engine.lookup(acc_id) in a tight loop — these read listener_endpoints_
 //       and registry_ DIRECTLY WITHOUT any synchronisation (no strand, no mutex,
-//       no atomic).  [pre-T026 engine.cpp:1227-1230, 134-136]
+//       no atomic).  [pre-T026, before acceptor_bound_endpoint()/lookup() gained synchronisation]
 //
 //     Engine executor threads: the accept loop WRITES listener_endpoints_[id] at
 //       run_accept_loop startup; stop() CLEARS both maps.
@@ -1248,7 +1248,7 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
 //   pump (no live transport published).
 //
 // How the INV-2a check already exists (from T013 / publish_entry):
-//   publish_entry (engine.cpp ~:483) checks stopped_.load(acquire) FIRST on the
+//   publish_entry (engine.cpp) checks stopped_.load(acquire) FIRST on the
 //   control strand.  If stopped_=true, it co_returns false without writing
 //   entry.session or entry.live_transport.  The caller (run_accept_loop step 7a)
 //   observes published=false and immediately calls local_session->close(terminal)
@@ -1586,12 +1586,12 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
 TEST(EngineSessionStrand, V4V5_SingleThreadedBaselineAndAbiGate) {
     // V-4: compile-time assertion that lookup() returns Session* (pre-T024 signature).
     // This pinned static_assert is the V-5 "one diff" compile-time gate:
-    //   - GREEN now: lookup() → Session* (raw pointer, as declared in engine.hpp:249)
+    //   - GREEN now: lookup() → Session* (raw pointer, as declared in engine.hpp)
     //   - compile-FAIL after T024: lookup() → std::shared_ptr<Session>
     //     → that compile failure is the expected single ABI change for V-5
     //   - T026 updates this to shared_ptr<Session> (GREEN again)
     //
-    // [anchor: engine.hpp:249 "Session* lookup(SessionId const& id) const"]
+    // [anchor: engine.hpp "Session* lookup(SessionId const& id) const"]
     // [anchor: contracts C-4 "one intended, recorded change only"]
     // T024 (FR-008/SC-004/D-SNAP): lookup() return type changed from Session* to
     // std::shared_ptr<Session>.  This static_assert is flipped to verify the new
@@ -1768,9 +1768,9 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     //   - lookup(ini_id):                  reads registry_ (entry NOT found — but find() runs)
     //
     // Race window 1 (write): accept loop writes listener_endpoints_[acc_id] at startup
-    //   (engine.cpp ~:617) while t_reader reads it.  TSan: WRITE vs READ.
+    //   (in run_accept_loop's endpoint write) while t_reader reads it.  TSan: WRITE vs READ.
     // Race window 2 (clear): stop() clears listener_endpoints_ and registry_
-    //   (engine.cpp ~:1128-1130) while t_reader reads them.  TSan: CLEAR vs READ.
+    //   (in Engine::stop()'s clear) while t_reader reads them.  TSan: CLEAR vs READ.
     //
     // ⚠️ THE ENUMERATION BELOW IS NO LONGER COMPLETE, and the arming wait added
     // to this test is why. The main thread now reads `reader_iters` mid-window,
@@ -2063,7 +2063,7 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
 // ── Historical RED mechanism (pre-fix) ───────────────────────────────────────
 //   Engine::send() Step B (on control_strand_) called:
 //     if (!kl || kl->state() != fsm_state::Active) { reject; }
-//   Session::state() reads fsm_state_ (session.hpp:560) which is single-writer on
+//   Session::state() reads fsm_state_, which is single-writer on
 //   the per-session strand.  Any concurrent FSM transition (e.g. stop()-induced
 //   terminal-close) from the session strand raced this control-strand read.
 //   TSan with halt_on_error=1: DATA RACE on fsm_state_ → process aborts → RED.
@@ -2084,7 +2084,7 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
 // Anti-hang: 15s worst case (5s arming + 10s stop); senders stop on
 // sender_stop flag.
 //
-// [contracts C-0/C-1; gate-b/r1 #1; research D6/R7; session.hpp:556/560]
+// [contracts C-0/C-1; gate-b/r1 #1; research D6/R7; session.hpp's fsm_state_ member]
 
 TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
     const char* fixture_dir = get_fixture_dir();

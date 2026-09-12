@@ -141,7 +141,7 @@ TEST(FileStoreCoverageUplift, NextSeqnumIncrementWritesCounterRecord) {
 
         // next_seqnum(true) should return current value and advance counter.
         // This writes a counter record to disk (the increment=true path in
-        // file_store.cpp lines 904-923).
+        // FileStore::next_seqnum).
         auto r2 = co_await store->next_seqnum(d, true);
         EXPECT_TRUE(r2.has_value());
         if (!r2) co_return;

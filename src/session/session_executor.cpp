@@ -3,7 +3,7 @@
 // src/session/session_executor.cpp
 //
 // fixpp::core::make_session_executor — THE SINGLE ENFORCEMENT POINT for
-// error::executor_not_serialised (slot 48 / FR-009 / I-06 / [2d §4.8]:996).
+// error::executor_not_serialised (slot 48 / FR-009 / I-06 / [2d §4.8]'s "Round 2 + round 3 unification" note).
 // Defined in a session/ TU (NOT the core header) so the complete
 // fixpp::session::threading_mode enum is visible without core/ back-edging
 // into session/ ([arch §2.3] leaf rule — the core header only declares it).
@@ -63,12 +63,12 @@ session_executor make_session_executor(adopt_strand_t, asio::any_io_executor str
     // Precondition (INV-3a / D3-B): strand_exec IS a strand created by the engine.
     // Store it directly — no re-wrap. strand_wrapped=true is truthful here because
     // the engine-created strand IS a strand; the public per_session_strand path
-    // still unconditionally wraps (byte-unchanged at session_executor.cpp:35).
+    // still unconditionally wraps (byte-unchanged at the `per_session_strand` case above).
     return session_executor{std::move(strand_exec), session, /*strand_wrapped=*/true};
 }
 // NOLINTEND(bugprone-exception-escape)
 
-// [2d §6.5]:1153-1154 arena bridge — defined HERE (session TU) so
+// [2d §6.5]'s `cancellable_dispatch` arena bridge — defined HERE (session TU) so
 // fixpp::session::Session is complete; the core header only declares it.
 std::pmr::memory_resource* session_arena_of(const session_executor& exec) noexcept {
     auto* const s = exec.session_ptr();

@@ -153,7 +153,7 @@ TEST(SeamDestructorReleaseDeath, DestroyWhileHeldTerminates) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 058 T013/T014/T041 — research.md D-3 destructor-guard extension witnesses.
 //
-// The CURRENT destructor (`async_mutex.hpp:695-700`) checks only
+// The CURRENT destructor (`~async_mutex()`) checks only
 // `state_ != not_locked` and `next_drain_head_ != nullptr`. It does NOT check
 // `in_flight_resumers_` (D-3's load-bearing barrier: incremented BEFORE every
 // posted resume, decremented as the LAST statement of the resume runner,

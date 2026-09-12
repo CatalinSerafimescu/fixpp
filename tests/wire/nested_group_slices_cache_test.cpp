@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/wire/nested_group_slices_cache_test.cpp — 062 coverage witnesses
-// (/speckit-verify follow-up) for OffsetTable::nested_group_slices()
-// (src/wire/offset_table.cpp:557-599) branches not hit by
+// (/speckit-verify follow-up) for OffsetTable::nested_group_slices()'s
+// branches not hit by
 // group_slice_trailing_soh_test.cpp (T008) or fuzz_wire_nested_slice.cpp:
 //
 //  - NullSliceDataReturnsEmptySpan: the `slice_data == nullptr` guard
-//    (:561-563).
+//    (nested_group_slices' own early return).
 //  - DifferentSliceContinuesThenSameSliceReusesSubTable: the flat cache
-//    loop's `row.slice_data != slice_data` -> continue (:576-577), and the
-//    same-slice/different-no_tag sub-table REUSE branch (:583-586) — one
+//    loop's `row.slice_data != slice_data` -> continue, and the
+//    same-slice/different-no_tag sub-table REUSE branch (`!found_slice`) — one
 //    outer occurrence containing TWO DISTINCT nested groups (single-entry
 //    each, per the 062/063 scoping note — a multi-entry nested group is
 //    blocked by a separate defect and out of scope here).
 //  - BuildNestedSubviewAllocFailureDegradesToEmpty /
 //    CacheInsertAllocFailureServesWithoutCaching: the two defensive
-//    bad_alloc degrade paths (:548-550 build_nested_subview itself, and
-//    :595-598 the cache-row push_back), driven via a call-counted
+//    bad_alloc degrade paths (build_nested_subview's own catch, and
+//    nested_group_slices' cache-row push_back catch), driven via a call-counted
 //    `failing_pmr_resource` (Nth-allocate-call injection) rather than a
 //    tight arena — nested_group_slices()'s `resource()` is fixed to the
 //    ROOT table's own arena, so a byte-budget arena cannot isolate a single
@@ -95,7 +95,7 @@ fixpp::wire::group_context const kTestCtx{.msg_type = "D"};
 }  // namespace
 
 // ─────────────────────────────────────────────────────────────────
-// 1) Null-slice guard (:561-563)
+// 1) Null-slice guard (`slice_data == nullptr` early return)
 // ─────────────────────────────────────────────────────────────────
 
 TEST(NestedGroupSlicesCache, NullSliceDataReturnsEmptySpan) {
@@ -116,7 +116,7 @@ TEST(NestedGroupSlicesCache, NullSliceDataReturnsEmptySpan) {
 
 // ─────────────────────────────────────────────────────────────────
 // 2) + 3) Flat-cache-loop `continue` (different slice) and sub-table REUSE
-// (same slice, different no_tag) — offset_table.cpp:576-577 / :583-586.
+// (same slice, different no_tag) — the cache loop's `continue` and `!found_slice` branches.
 // ─────────────────────────────────────────────────────────────────
 
 TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable) {
@@ -179,7 +179,7 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     // (sliceB, 802): the ONE existing cache row is keyed on sliceA, a
     // DIFFERENT slice_data pointer than sliceB — the loop's
     // `row.slice_data != slice_data` guard fires `continue`
-    // (offset_table.cpp:576-577) before falling through to build a fresh
+    // (the cache loop's `continue`) before falling through to build a fresh
     // sub-table for sliceB.
     auto b802 = root.nested_group_slices(sliceB.data, sliceB.len, /*nested_no_tag=*/802, &dict,
                                          &dict_group_member, fv->token(), kTestCtx).slices;
@@ -191,7 +191,7 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     // (sliceA, 900): SAME slice_data as the first row, a DIFFERENT
     // nested_no_tag. The loop encounters the sliceA row first (same slice,
     // no_tag mismatch) and takes the "remember this slice's sub-table"
-    // branch (offset_table.cpp:583-586), then the sliceB row (different
+    // branch (`!found_slice`), then the sliceB row (different
     // slice -> continue) — reusing sliceA's already-built sub-table
     // WITHOUT rebuilding, and resolving 900/901 correctly from it (the one
     // sub-OffsetTable over sliceA indexes every nested group in that
@@ -206,7 +206,7 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
 
 // ─────────────────────────────────────────────────────────────────
 // 4) + 5) Defensive bad_alloc degrade paths — build_nested_subview's own
-// object allocation (:548-550) and the cache-row push_back (:595-598).
+// object allocation (its own bad_alloc catch) and the cache-row push_back (its own catch).
 //
 // nested_group_slices()'s allocator is fixed to `resource()` (the ROOT
 // table's own arena), so these are driven via a call-counted
@@ -272,10 +272,10 @@ TEST(NestedGroupSlicesCache, BuildNestedSubviewAllocFailureDegradesToEmpty) {
     }
 
     // build_nested_subview's own top-level object allocation
-    // (offset_table.cpp:541, `mr->allocate(sizeof(OffsetTable), ...)`) is
+    // (`mr->allocate(sizeof(OffsetTable), ...)`) is
     // deterministically the FIRST allocate() call inside the nested
     // sequence (nested_group_slices() itself allocates nothing before
-    // calling it) — failing exactly there exercises the :548-550 catch and
+    // calling it) — failing exactly there exercises build_nested_subview's catch and
     // must degrade to an empty span, never crash/UB.
     std::pmr::monotonic_buffer_resource backing;  // bulk-frees (see baseline note above)
     fixpp::test_support::failing_pmr_resource mr{&backing, baseline_calls + 1};
@@ -285,7 +285,7 @@ TEST(NestedGroupSlicesCache, BuildNestedSubviewAllocFailureDegradesToEmpty) {
     auto inner = root.nested_group_slices(outer[0].data, outer[0].len, /*nested_no_tag=*/802,
                                           &dict, &dict_group_member, fv->token(), kTestCtx).slices;
     EXPECT_TRUE(inner.empty()) << "build_nested_subview's object allocation failing must "
-                                  "degrade to an empty span (offset_table.cpp:548-550)";
+                                  "degrade to an empty span (build_nested_subview's bad_alloc catch)";
 }
 
 TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
@@ -295,7 +295,7 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
     // `_Container_proxy` through its resource AT CONSTRUCTION — i.e. in the
     // sub-OffsetTable's member-init list, which runs BEFORE the ctor body and
     // OUTSIDE build()'s internal bad_alloc try/catch. Because the OffsetTable
-    // ctors are noexcept (offset_table.hpp:65-77), a failing_pmr_resource
+    // ctors are noexcept (its ctor declarations, all `noexcept`), a failing_pmr_resource
     // injection that lands on one of those proxy allocations escapes the
     // noexcept boundary and std::terminates before build_nested_subview's
     // catch can fire. This k-sweep inevitably hits such an index, so the test
@@ -325,7 +325,7 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
     }
 
     // The exact allocate() index at which `nested_cache_.push_back(...)`
-    // (offset_table.cpp:593-594) itself runs is not analytically obvious
+    // itself runs is not analytically obvious
     // (it depends on how many PMR allocations the sub-table's OWN internal
     // build needs, which is an implementation detail this test must not
     // assume). Sweep candidate failure points and behaviorally identify the
@@ -370,12 +370,12 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
             found = true;
             EXPECT_GT(calls_after_second, calls_after_first)
                 << "second same-key lookup rebuilt instead of being served from cache -- proves "
-                   "the cache-insert push_back failed and was caught (offset_table.cpp:595-598)";
+                   "the cache-insert push_back failed and was caught (nested_group_slices' own catch)";
         }
         // Otherwise this k produced a fully successful call (push_back also
         // succeeded, second call is a pure cache hit) — not the boundary;
         // keep scanning.
     }
     ASSERT_TRUE(found) << "no injected allocation offset within the search bound produced a "
-                          "serve-without-caching result (offset_table.cpp:595-598 unreached)";
+                          "serve-without-caching result (nested_group_slices' own catch unreached)";
 }

@@ -134,7 +134,7 @@ TEST(PublicRoundtrip, SetResetSeqnumPolicyNullCfg) {
 // value, so the CALLER performs the UB, whatever the callee does. This file's
 // version reported it on every run —
 //
-//     public_roundtrip_test.cpp:129:5: runtime error: load of value 99, which is
+//     runtime error: load of value 99, which is
 //     not a valid value for type 'fixpp_reset_seqnum_policy'
 //
 // — and went unnoticed because the ubsan lane ran in UBSan's default RECOVERABLE

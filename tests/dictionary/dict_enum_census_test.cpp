@@ -18,10 +18,10 @@
 // Anchors:
 //   tasks:      specs/075-live-wire-enum-validation/tasks.md T021
 //   spec:       specs/075-live-wire-enum-validation/spec.md SC-010/SC-011
-//               (:289-301), FR-016/FR-022
+//               FR-016/FR-022
 //   T016 pin:   specs/075-live-wire-enum-validation/tasks.md T016
 //   research:   specs/075-live-wire-enum-validation/research.md R-11
-//   production: src/dictionary/dictionary.cpp:459-511 (as_table_view() —
+//   production: src/dictionary/dictionary.cpp (as_table_view() —
 //               the store-driven enum-domain build + T016's multi_value
 //               default, mirrored below field-for-field so the census asks
 //               the SAME "message-unreachable" question production answers)
@@ -33,7 +33,7 @@
 // description=>` is a QuickFIX-XML-specific element/attribute shape that
 // does not exist in Orchestra's `fixr:codeSet`/`fixr:code value= name=>`
 // schema. The SPACE-CODE exact-set check is the one leg SC-011 explicitly
-// measures across all TEN (spec.md:292-299 — "including the Orchestra one,
+// measures across all TEN (SC-011's exact-set sub-bullet — "including the Orchestra one,
 // 5708 fixr:code values, zero with a space"), so it alone spans both
 // schemas. The T016 store-only-multi-value pin is likewise scoped to the
 // nine — T016's own task text names "35 such tags across FIX50/SP1/SP2, the
@@ -324,7 +324,7 @@ TEST(DictEnumCensus, SC011_ZeroDuplicateZeroMissingEnumZeroMissingDescription) {
 
 // ============================================================================
 // SC-011 / FR-022 leg 2 — the EXACT-SET of declared codes containing a
-// SPACE, across ALL TEN shipped dictionaries (spec.md:292-299; the one leg
+// SPACE, across ALL TEN shipped dictionaries (SC-011's exact-set sub-bullet; the one leg
 // SC-011 explicitly measures across both schemas — Orchestra included).
 //
 // This is an EXACT-SET predicate, not subset/presence
@@ -415,7 +415,7 @@ TEST(DictEnumCensus, SC011_StoreOnlyEnumBackedTagsAreNeverMultiValueTyped) {
         auto const raw_fields = scan_quickfix_fields(dict_path);
         ASSERT_FALSE(raw_fields.empty()) << fname << ": raw <fields> scan found nothing";
 
-        // "message expansion" — mirrors dictionary.cpp:467-480 exactly.
+        // "message expansion" — mirrors Dictionary::as_table_view() exactly.
         std::set<std::uint16_t> reached_tags;
         for (auto const& msg : dict.messages()) {
             for (auto const& fr : dict.message_fields(msg.msg_type)) {

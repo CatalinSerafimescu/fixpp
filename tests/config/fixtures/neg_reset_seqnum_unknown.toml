@@ -1,6 +1,6 @@
 # neg_reset_seqnum_unknown.toml
 # reset_seqnum_policy has an unrecognised token — triggers unknown_enum at
-# session[0].reset_seqnum_policy (lines 461-468 scalar_mappers.cpp).
+# session[0].reset_seqnum_policy (map_scalars's reset_seqnum_policy unknown-token arm, scalar_mappers.cpp).
 
 [clock]
 kind = "system"

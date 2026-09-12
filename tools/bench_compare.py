@@ -268,7 +268,7 @@ def validate_results(name: str, data: dict) -> list[str]:
         # ⚠️ THIS CELL USED TO REQUIRE ONE UNIT PER BINARY AND WOULD HAVE
         # REDDENED A CORRECT TREE. `bench/dictionary/table_view_footprint_bench.cpp`
         # deliberately mixes units: five benchmarks carry
-        # `->Unit(benchmark::kMicrosecond)` (:118, :134, :193, :218, :231) while
+        # `->Unit(benchmark::kMicrosecond)` (the three Build* and two Copy* rows) while
         # `BM_TableView_Sizeof` uses the default ns. A per-binary uniformity rule
         # makes the cell itself the defect — exactly the failure mode the GREEN
         # controls in ci/test-bench-gate.sh exist to catch.

@@ -647,7 +647,7 @@ TEST(LoaderDisposition, ScalarReuseOfGroupTagIsNotACompletenessViolation) {
         << "V1 declares NoGood(600) as a real group; its context must resolve.";
     // V2 contributes NO context for 600 — it is a scalar there. The context
     // store has no V2 entry, so this query MISSES and falls through to the bare
-    // global (table_view.hpp:361-364). That fall-through is the documented
+    // global (the legacy bare group_first_field(no_tag) fallback). That fall-through is the documented
     // behaviour, not a registration: what this case pins is that the load
     // SUCCEEDED, i.e. the scalar reuse did not trip C-3.4.
     SUCCEED() << "load succeeded with a NumInGroup-typed tag reused as a scalar";
@@ -658,7 +658,7 @@ TEST(LoaderDisposition, ScalarReuseOfGroupTagIsNotACompletenessViolation) {
 // `detail::find_incomplete_group_context()` on a hand-built handle with one
 // `group_ctx_delim_pool_` record simply never populated. Needs no loader, no
 // XML, and no test seam: it covers the detector's found-branch
-// (dictionary_internal.hpp:265/:534) in complete isolation from whether the
+// (find_incomplete_group_context()'s found-branch) in complete isolation from whether the
 // loaders' throw is reachable.
 // ============================================================================
 TEST(LoaderDisposition, FindIncompleteGroupContextDetectsMissingRecord) {
@@ -751,7 +751,7 @@ TEST(LoaderDisposition, FindIncompleteGroupContextDetectsMissingRecordIntTyped) 
 // this RED).
 //
 // The assertion discriminates the FR-023 throw from 072's
-// `group_delimiter_collision_error` (also an `xml_parse_error`, `error.hpp:67`)
+// `group_delimiter_collision_error` (also an `xml_parse_error`, dict/error.hpp)
 // by BOTH catch type (caught separately, ADD_FAILURE if it fires instead) AND
 // the FR-023 message text — never the base class alone
 // (`feedback_witness_asserts_named_postcondition_not_proxy`).

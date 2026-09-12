@@ -46,7 +46,7 @@ target_link_libraries(fixpp-codegen PRIVATE fixpp::dictionary)
 # 067 T003/RC-B: pugixml build home for ir.cpp's codegen-tool-local re-parse
 # (MessageIR.group_order). No version pin — inherit the project-resolved
 # pugixml (fixpp_dictionary already depends on it project-wide, see
-# src/dictionary/CMakeLists.txt:9). PRIVATE, build-only host-tool dep, never
+# src/dictionary/CMakeLists.txt's fixpp_dictionary target). PRIVATE, build-only host-tool dep, never
 # installed, zero ABI surface.
 find_package(pugixml CONFIG REQUIRED)
 target_link_libraries(fixpp-codegen PRIVATE pugixml::pugixml)

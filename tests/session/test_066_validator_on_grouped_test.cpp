@@ -7,12 +7,12 @@
 // (session.cpp `vg_parser`, a locally default-constructed dict-FREE
 // `Parser<Index>`) is NOT re-wired to `inbound_tv_`. `dictionary_driven_
 // validator::validate()`'s repeating-group structure check (Step 3,
-// validator.hpp ~177-278) does NOT rely on the passed MessageView's own
+// validator.hpp) does NOT rely on the passed MessageView's own
 // `opaque_dict_`/group_slices()/consume_group_extent() machinery at all: it
 // walks `msg.offsets().entries()` (the flat, dict-INDEPENDENT entry list)
 // directly and resolves membership via the validator's OWN held `table_view
 // dict_` member (`dict_.group_first_field(...)`, `dict_.group_member_tags(...)`,
-// validator.hpp:207/232) — a fully self-contained walk, exactly the
+// validator.hpp) — a fully self-contained walk, exactly the
 // pre-existing L-063-3 note already inline in validator.hpp documents. So
 // `vg_parser`'s dict-backing status is irrelevant to validate()'s own
 // group-structure correctness; Option B (record, don't change) applies.

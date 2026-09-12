@@ -4,7 +4,7 @@
 // NoSides / NoLegs both populated; NoSides carries a nested NoPartyIDs entry).
 // OFFLINE TOOLING, not checked in to the main build (see gen/README.md).
 //
-// Required='Y' fields (dictionaries/FIX44.xml:1435-1494): TradeReportID(571),
+// Required='Y' fields (dictionaries/FIX44.xml's `TradeCaptureReport` message): TradeReportID(571),
 // PreviouslyReported(570), Instrument(component, no individually-required
 // sub-field — Symbol(55) seeded for a sane instrument identity), LastQty(32),
 // LastPx(31), TradeDate(75), TransactTime(60), TrdCapRptSideGrp/NoSides(552)

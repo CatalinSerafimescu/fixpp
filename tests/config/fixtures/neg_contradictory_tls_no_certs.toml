@@ -1,7 +1,7 @@
 # neg_contradictory_tls_no_certs.toml
 # transport.kind="tls" with NO cert material ([cert_source] section removed).
 # Triggers missing_required at "cert_source" — already handled by Phase 3b
-# selector_resolver.cpp (line ~469: cert_source == nullptr).
+# selector_resolver.cpp's default_cert_source == nullptr check (E-3).
 
 [clock]
 kind = "system"

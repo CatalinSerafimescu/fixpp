@@ -788,7 +788,7 @@ TEST(FixtLogonEstablishment, W1_FullRoundTrip_BothActive_NegotiatedV50sp2) {
 // {session=Unknown, default_appl=Unknown}.
 //
 // This witness (039 US3, FR-010/SC-004) covers negotiated_version_profile's
-// Unknown-fallback arm (session.cpp:189-192) — a 033-introduced line previously
+// Unknown-fallback arm (negotiated_version_profile()) — a 033-introduced line previously
 // unexercised by the FIXT corpus (every other FIXT witness negotiates a known
 // version) — AND validates the L-033-3 / B-033-1 documented behavior (039 US5).
 // Discriminator: pre-fix none — the arm is simply reached for the first time;
@@ -823,7 +823,7 @@ TEST(FixtLogonEstablishment, InitiatorAbsent1137Ack_ReachesActive_NegotiatedUnkn
     ASSERT_EQ(initiator.state(), fsm_state::Active)
         << "Initiator must reach Active on a 1137-less ack (L-033-3 deferred-by-design)";
 
-    // The unnegotiated fallback (session.cpp:189-192): no application version recorded.
+    // The unnegotiated fallback (negotiated_version_profile()'s Unknown branch): no application version recorded.
     auto profile = initiator.negotiated_version_profile();
     EXPECT_EQ(profile.default_appl, application_version::Unknown)
         << "Absent 1137-ack → negotiated_appl_version_ stays Unknown";
@@ -1160,7 +1160,7 @@ TEST(FixtLogonEstablishment, W8_1128Tolerance_DeliveredDictFree_StaysActive) {
 //     Isolates the "registry==nullptr" OR-arm of the guard.
 //
 // Both must FAIL (open() succeeds and emits garbage) before the fix;
-// PASS after.  [FQ-1; FR-003; data-model E3; session_config.hpp:440]
+// PASS after.  [FQ-1; FR-003; data-model E3; Session::open()'s FIXT-serviceability guard]
 
 TEST(FixtOpenValidation, FQ1a_MissingDefaultApplVerId_ReturnsInvalidConfig_NoLogon) {
     // Use a non-null registry so only the default_appl_ver_id arm can trip.
@@ -1229,7 +1229,7 @@ TEST(FixtOpenValidation, FQ1b_NullRegistry_ReturnsInvalidConfig) {
 
 // ── 038 T013 [US3] — FIXT DefaultApplVerID(1137) reject witnesses ────────────
 //
-// The existing acceptor 1137 reject arms (session.cpp:~2146-2208: absent → Reject
+// The existing acceptor 1137 reject arms (session.cpp's DefaultApplVerID(1137) gate: absent → Reject
 // 373=1; non-conformant → Reject 373=5, both RefTagID=1137, then Disconnected)
 // are fail-closed by code-read but had zero session-level negative witnesses with
 // toAdmin observation (W2/W3 cover wire shape + state only). These cells add the
@@ -1241,8 +1241,8 @@ TEST(FixtOpenValidation, FQ1b_NullRegistry_ReturnsInvalidConfig) {
 //     + Disconnected. 373=5 DISCRIMINATES from (a)'s 373=1.
 // (c) [US1 Judge-pass carry-over] — Ordering witness: FIXT + stale-52 +
 //     missing-1137 → Reject(371=52, 373=10) wins; NO 371=1137 on wire;
-//     Disconnected. Proves the SendingTime guard (session.cpp:~1939) pre-empts
-//     the FIXT 1137 gate (session.cpp:~2146). NOTE: FixtSetup has an active
+//     Disconnected. Proves the SendingTime guard (session.cpp's check_sending_time call) pre-empts
+//     the FIXT 1137 gate (session.cpp's DefaultApplVerID(1137) gate). NOTE: FixtSetup has an active
 //     mock_clock (engine.clock = clock); the 52 guard is gated on
 //     effective_clock_ != null, so the clock MUST be present. A stale sending_time
 //     is used (far outside the 120s default threshold).
@@ -1415,7 +1415,7 @@ TEST(FixtLogonEstablishment,
 //   52 guard: gated on (effective_clock_ != nullptr) — TRUE here.
 //   Stale timestamp: "20200101-00:00:00.000" is 4 years before the clock's UTC →
 //   |52 - now| >> 120s default threshold → sending_time_ok = false → reject fires.
-// 1137 gate: session.cpp:~2146, unreachable on the 52-reject path (52 returns
+// 1137 gate: session.cpp's DefaultApplVerID(1137) gate, unreachable on the 52-reject path (52 returns
 //   Disconnected before reaching the 1137 block).
 //
 // Discriminating assertion: 371=52 present AND 371=1137 ABSENT on wire.

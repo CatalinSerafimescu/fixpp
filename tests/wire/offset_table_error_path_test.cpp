@@ -2,17 +2,17 @@
 // tests/wire/offset_table_error_path_test.cpp — T055 coverage hardening.
 // Targeted error-path tests for fixpp::wire::OffsetTable covering uncovered
 // branches in src/wire/offset_table.cpp. Sites are named by function and role
-// first; line numbers are appended as-of 085-fold-flat-cap-loop's delivered
-// tree and are the perishable part of the reference.
-//   - build()'s bad_alloc degrade — the catch block (:370-374)
-//   - find() on a RED table returns the status error (:379-381)
-//   - group() on a RED table returns the status error (:532-534)
+// first; no line numbers are pinned (issue #310), since a citing line drifts
+// as the tree changes and the citation would silently rot.
+//   - build()'s bad_alloc degrade — the catch block
+//   - find() on a RED table returns the status error (its `!status_` guard)
+//   - group() on a RED table returns the status error (its `!status_` guard)
 //   - group_slices_status()'s bad_alloc degrade — catch block, empty span +
-//     alloc_failed (:755-759)
+//     alloc_failed (its catch block)
 //
-// Lines NOT covered here (documented as unreachable/waived):
-//   - build()'s kMaxBuildProbe DoS bound (:361-363) — adversarial-only, waived
-//   - find()'s probe-cap break (:394-396) — unreachable under load-factor < 1,
+// Sites NOT covered here (documented as unreachable/waived):
+//   - build()'s kMaxBuildProbe DoS bound (its insertion probe-cap break) — adversarial-only, waived
+//   - find()'s probe-cap break (its lookup probe-cap break) — unreachable under load-factor < 1,
 //     waived
 //
 // REPAIRED by 085-fold-flat-cap-loop (2026-08-03), research.md R-3; AMENDED by
@@ -76,7 +76,7 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
     return out;
 }
 
-// ── ctor bad_alloc degrade (lines 134-137) ───────────────────────────────────
+// ── ctor bad_alloc degrade (build()'s catch block) ───────────────────────────
 // When the PMR resource throws bad_alloc during the first push_back into
 // entries_, the catch block degrades the table: entries_.clear(),
 // overlay_.clear(), status_ = fail(error::out_of_memory).
@@ -86,7 +86,7 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 //   - size() == 0 (empty)
 //
 // fail_on_call_n=1: the very first PMR allocation (entries_ push_back for the
-// first field) throws → catch fires → lines 134-137 covered.
+// first field) throws → catch fires → build()'s catch block covered.
 
 TEST(OffsetTableErrorPath, CtorBadAllocDegradeCoversLines134to137) {
     FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
@@ -103,7 +103,7 @@ TEST(OffsetTableErrorPath, CtorBadAllocDegradeCoversLines134to137) {
     auto s = t.build_status();
     ASSERT_FALSE(s.has_value()) << "OOM on first alloc must degrade to out_of_memory";
     EXPECT_EQ(s.error(), error::out_of_memory)
-        << "lines 134-137: catch(bad_alloc) must set status_ = out_of_memory";
+        << "build()'s catch(bad_alloc) must set status_ = out_of_memory";
 
     // Table must be empty.
     EXPECT_EQ(t.size(), 0U) << "OOM-degraded table must be empty";
@@ -115,10 +115,10 @@ TEST(OffsetTableErrorPath, CtorBadAllocDegradeCoversLines134to137) {
         << "find() on OOM-degraded table must propagate out_of_memory";
 }
 
-// ── find() on RED table (lines 142-143) ──────────────────────────────────────
+// ── find() on RED table (its `!status_` guard) ───────────────────────────────
 // A RED table has status_ set to a non-ok error (e.g. wire_invalid_field_format
 // for a malformed frame). find() checks `!status_` first and returns the status
-// error — lines 141-143 in offset_table.cpp.
+// error — its `!status_` guard in offset_table.cpp.
 //
 // "nofieldsep\x01" has no '=' separator → wire_invalid_field_format.
 
@@ -140,12 +140,12 @@ TEST(OffsetTableErrorPath, FindOnRedTableReturnsStatusErrorCoversLines142to143) 
     auto found = t.find(35);
     ASSERT_FALSE(found.has_value());
     EXPECT_EQ(found.error(), error::wire_invalid_field_format)
-        << "lines 142-143: find() on RED table must return fail<entry>(status_.error())";
+        << "find()'s `!status_` guard: find() on RED table must return fail<entry>(status_.error())";
 }
 
-// ── group() on RED table (lines 165-166) ─────────────────────────────────────
+// ── group() on RED table (its `!status_` guard) ──────────────────────────────
 // group() has the same RED-guard as find(): checks `!status_` first.
-// Lines 164-166 in offset_table.cpp.
+// Its `!status_` guard in offset_table.cpp.
 
 TEST(OffsetTableErrorPath, GroupOnRedTableReturnsStatusErrorCoversLines165to166) {
     FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
@@ -161,12 +161,12 @@ TEST(OffsetTableErrorPath, GroupOnRedTableReturnsStatusErrorCoversLines165to166)
     auto g = t.group(453);
     ASSERT_FALSE(g.has_value());
     EXPECT_EQ(g.error(), error::wire_invalid_field_format)
-        << "lines 165-166: group() on RED table must return fail<group_index>(status_.error())";
+        << "group()'s `!status_` guard: group() on RED table must return fail<group_index>(status_.error())";
 }
 
-// ── group_slices() bad_alloc degrade (lines 231-232) ─────────────────────────
+// ── group_slices() bad_alloc degrade (its catch block) ───────────────────────
 // group_slices() is noexcept and catches bad_alloc internally, returning an
-// empty span on failure (lines 230-232).
+// empty span on failure (its bad_alloc catch block).
 //
 // Strategy: build an OffsetTable successfully with a failing_pmr_resource that
 // only fails on the Nth call, where N > the number of allocations needed for

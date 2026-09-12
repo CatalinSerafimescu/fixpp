@@ -22,7 +22,7 @@
 //
 // ── EVERY CASE CARRIES A POSITIVE CONTROL, AND IT IS LOAD-BEARING ────────────
 // `validate_required` returns `wire_required_field_missing` for BOTH a missing
-// required scalar AND an empty required group (`builder_validate.hpp:77` and `:86` —
+// required scalar AND an empty required group (`validate_required`'s two `wire_required_field_missing` returns —
 // the same enum value from two different causes). So "it rejected" proves nothing on
 // its own: a case that forgot a required scalar would reject for the wrong reason and
 // read as a pass. Each case therefore asserts the OK direction first — same Args,

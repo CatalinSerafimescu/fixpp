@@ -15,19 +15,19 @@
 //     Cell 1b independently tests the is_mtls gate (positive control). Flipping Cell 1
 //     alone requires TWO simultaneous mutations (remove D-10 guard AND remove is_mtls
 //     check) — any SINGLE mutation is caught by Cell 2a or Cell 1b independently.
-//     [SC-004; D-10; session.cpp:2207 is_mtls gate; session.cpp:~555 D-10 guard]
+//     [SC-004; D-10; on_inbound_frame's is_mtls gate; attach_accepted_transport's D-10 guard]
 //
 //   Cell 1b (TLS positive control: authorize IS called on mTLS):
 //     On mtls_ca + live peer_id, authorize() succeeds → peer_identity_bound event.
 //     Proves the observable (event presence) is real on the TLS path.
-//     [SC-004; session.cpp:2207 is_mtls gate]
+//     [SC-004; on_inbound_frame's is_mtls gate]
 //
 //   Cell 2a (live_peer_id_ nullopt — accepted handoff):
 //     attach_accepted_transport called with a NON-EMPTY sentinel handshake_result
 //     (sentinel CN="SENTINEL-MUST-NOT-STICK") on an insecure_plain_tcp session →
 //     live_peer_id_has_value_for_test() == false. The D-10 #3 guard must suppress
 //     assignment. Single-mutation discriminating: drop the guard → sentinel sticks
-//     → live_peer_id_has_value_for_test()==true → FAIL (RED). [D-10; session.cpp:~555]
+//     → live_peer_id_has_value_for_test()==true → FAIL (RED). [D-10; attach_accepted_transport's guard]
 //
 //   Cell 2b (TLS positive control: sentinel DOES stick on one_way_ca):
 //     Same sentinel on a one_way_ca session → live_peer_id_has_value_for_test()==true.
@@ -51,7 +51,7 @@
 // No GTEST_SKIP() — plaintext sessions need no cert files.
 //
 // Anchors: spec.md SC-004 / FR-008a / FR-009; research.md D-10; tasks.md T008;
-//          session.cpp:2207 (is_mtls gate) / :~555 (D-10 guard);
+//          on_inbound_frame's is_mtls gate / attach_accepted_transport's D-10 guard;
 //          session_event.hpp (session_event_peer_identity_bound /
 //          session_event_compid_authorization_failed).
 
@@ -239,12 +239,12 @@ static bool has_event(const fixpp::session::Session& sess) {
 //
 // Discrimination: this cell is a COMPOSITE witness. Flipping it alone requires
 // TWO simultaneous mutations:
-//   (a) Remove D-10 guard in attach_accepted_transport (session.cpp:~555), AND
-//   (b) Remove the `&& is_mtls` check (session.cpp:2207).
+//   (a) Remove D-10 guard in attach_accepted_transport, AND
+//   (b) Remove the `&& is_mtls` check (on_inbound_frame).
 //   Cell 2a catches (a) independently; Cell 1b catches (b) as a positive control.
 // Any single mutation is discriminated by one of the sibling cells.
 //
-// Anchors: SC-004; D-10; session.cpp:2207 (is_mtls gate); session.cpp:~555 (D-10 guard)
+// Anchors: SC-004; D-10; on_inbound_frame's is_mtls gate; attach_accepted_transport's D-10 guard
 
 TEST(PlaintextAuthzTest, AuthorizeNotCalledOnPlaintext) {
     asio::io_context ioc;
@@ -292,7 +292,7 @@ TEST(PlaintextAuthzTest, AuthorizeNotCalledOnPlaintext) {
 
     // SC-004 / D-10: authorize() must NOT have been called. No peer_identity_bound
     // AND no compid_authorization_failed in recent_events() — both are exclusively
-    // emitted through the authorize() code path (session.cpp:2207).
+    // emitted through the authorize() code path (on_inbound_frame).
     EXPECT_FALSE(
         has_event<fixpp::session::session_event_peer_identity_bound>(sess))
         << "Cell 1 (SC-004): no session_event_peer_identity_bound expected on "
@@ -391,7 +391,7 @@ TEST(PlaintextAuthzTest, AuthorizeCalledOnMtlsPositiveControl) {
 // insecure_plain_tcp. The D-10 #3 guard must suppress assignment.
 //
 // Single-mutation discriminating:
-//   Mutation: drop `if (k != insecure_plain_tcp)` in session.cpp:~555
+//   Mutation: drop `if (k != insecure_plain_tcp)` in attach_accepted_transport
 //             → sentinel sticks → live_peer_id_has_value_for_test()==true → FAIL (RED).
 
 TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
@@ -425,7 +425,7 @@ TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
     EXPECT_FALSE(sess.live_peer_id_has_value_for_test())
         << "Cell 2a (D-10 MUST): attach_accepted_transport on insecure_plain_tcp must "
            "leave live_peer_id_ == nullopt even when called with a non-empty sentinel "
-           "handshake_result. Guard in session.cpp:~555 must suppress the assignment. "
+           "handshake_result. Guard in attach_accepted_transport must suppress the assignment. "
            "Mutation: drop the guard → sentinel sticks → has_value()==true → RED.";
 
     {

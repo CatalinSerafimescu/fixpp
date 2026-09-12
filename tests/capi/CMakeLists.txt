@@ -61,7 +61,7 @@ set(FIXPP_CAPI_FEATURE_B_INCLUDES
   # dictionary header, mirroring the fixpp_capi::detail live-state-counter
   # precedent. This is the first tests/capi -> src/dictionary include.
   # tools/check_layers.py has no opinion here: it scans src/** and bindings/**
-  # only (:172-176), never tests/.
+  # only (its main() glob patterns), never tests/.
   "${CMAKE_SOURCE_DIR}/src/dictionary"   # dictionary_internal.hpp (083 T049)
 )
 
@@ -444,7 +444,7 @@ set_tests_properties(capi_dict066_group_loopback_smoke PROPERTIES
 
 # ── 066-dict-backed-inbound-parse T005 — RED-first group-membership witness ──
 # (C-ABI engine loopback). MUST be observed RED against the current
-# dict-free parse (src/session/session.cpp:316) — T006 flips the parse site
+# dict-free parse (Session::validate_inbound_'s dict-free Parser) — T006 flips the parse site
 # later. See the file header comment for the discriminating assertion.
 add_executable(capi_dict066_group_membership_red_test dict066_group_membership_red_test.cpp)
 target_link_libraries(capi_dict066_group_membership_red_test PRIVATE
@@ -488,7 +488,7 @@ set_tests_properties(capi_dict066_nested_membership_red PROPERTIES
 # (C-ABI engine loopback). fixpp_msg_get_group(msg, 55, ...) on scalar tag
 # Symbol(55) must return FIXPP_ERR_TYPE_MISMATCH, never OK-with-a-spurious-
 # instance. GREEN on the current dict-backed parse; RED under the T006
-# mutation (session.cpp:316 reverted to the default dict-free Parser).
+# mutation (Session::validate_inbound_'s Parser reverted to the default dict-free ctor).
 add_executable(capi_dict066_scalar_as_group_test dict066_scalar_as_group_test.cpp)
 target_link_libraries(capi_dict066_scalar_as_group_test PRIVATE
   fixpp_capi

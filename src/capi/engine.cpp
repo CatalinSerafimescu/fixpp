@@ -5,7 +5,7 @@
 // [2i §4.2/§4.10] / specs/050-c-abi-session-send-recv/contracts/{lifecycle-surface,
 // send-and-receive}.md.
 //
-// The structural novelty: the C++ Engine owns NO worker threads (engine.hpp:222);
+// The structural novelty: the C++ Engine owns NO worker threads (engine.hpp — "the engine owns NO worker threads");
 // the C-ABI boundary owns an internal io_context + worker thread(s) + a work-guard
 // (research D-2). Lifecycle = register-then-start-once:
 //   create → session_open ×N (= register_session, pre-start) → start (= Engine::start)

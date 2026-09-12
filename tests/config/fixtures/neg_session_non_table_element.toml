@@ -1,6 +1,6 @@
 # neg_session_non_table_element.toml
 # The "session" key is an array of integers (not array-of-tables) — triggers
-# parse_error at "session" (lines 483-490 toml_config_loader.cpp).
+# parse_error at "session" (load_toml_config's non-table-session-element arm, toml_config_loader.cpp).
 # In TOML, [[session]] is an array-of-tables; `session = [1, 2]` is an inline
 # array of integers, so each element.is_table() == false.
 #

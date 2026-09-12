@@ -3,8 +3,8 @@
 # session[1] has a per-session [cert_source] with kind="file" but NO cert_file.
 # session[2] uses transport.kind="websocket" to add an independent unknown_enum.
 # In the divergence scan: session[1] diverges (has per-session cert_source),
-# calls build_file_cert_source, which hits line 433 (absent cert_file key →
-# get_path_str returns {}) and then lines 443-449 (make_file_cert_source fails).
+# calls build_file_cert_source, which hits its get_path_str lambda (absent cert_file key →
+# get_path_str returns {}) and then build_file_cert_source's cs_result-failure arm (make_file_cert_source fails).
 
 [clock]
 kind = "system"

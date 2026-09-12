@@ -87,7 +87,7 @@ namespace fixpp::config::detail {
 // IMPORTANT (Phase 3 rule — prefer noexcept factories, no trap_throw):
 //   The following factories already return expected_t (noexcept) and MUST be
 //   called directly with a check-the-expected pattern, NOT via trap_throw:
-//     make_file_cert_source(cfg, mr)         — file_cert_source.hpp:56
+//     make_file_cert_source(cfg, mr)         — file_cert_source.hpp
 //     make_asio_tls_transport_factory(...)   — returns expected_t
 //     make_asio_plain_transport_factory(...) — returns expected_t
 //     make_ssl_ctx_config(...)               — returns expected_t

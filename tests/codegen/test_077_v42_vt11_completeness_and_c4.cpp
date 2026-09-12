@@ -19,7 +19,7 @@
 //     census is a POLICY exclusion (issue #196 / L-063-1: FIX 4.2 types
 //     NumInGroup as legacy INT, so emit_builders would materialize zero
 //     typed groups for it and silently omit required='Y' groups -- see
-//     main.cpp:93-111's driver-level `if (ir.ns != "v42")` skip). This test
+//     tools/codegen/fixpp-codegen/main.cpp's since-removed driver-level `if (ir.ns != "v42")` skip). This test
 //     asserts BOTH numbers (39 real app messages, 0 builder-completeness
 //     expectation) so the distinction is pinned, not conflated.
 //

@@ -52,8 +52,8 @@ only one that holds.
 
 ⚠️ **The reason r1 gave was false and is corrected here.** r1 claimed "exactly four `add_test`
 registrations, none of the ~28 Google-Benchmark executables among them." There are four *textual*
-`add_test(` call sites, but `bench/tls/CMakeLists.txt:8-20` defines one inside the function
-`fixpp_add_tls_bench`, which is invoked **three times** (`:23`, `:26`, `:31`). The configured suite
+`add_test(` call sites, but `bench/tls/CMakeLists.txt` defines one inside the function
+`fixpp_add_tls_bench`, which is invoked **three times** (once per registered TLS bench target). The configured suite
 therefore registers **six** CTest entries, and **three of them ARE Google-Benchmark executables**:
 
 | configured CTest entry | kind |
@@ -92,7 +92,7 @@ outright: it performs a real handshake.
 ### 1a-bis. What an unexecuted budget rots into — a measured instance
 
 While #263 was diagnosing the load-path regression it found this at
-`bench/dictionary/xml_loader_bench.cpp:5`, the header comment of the very benchmark this gate's
+`bench/dictionary/xml_loader_bench.cpp`, the header comment of the very benchmark this gate's
 tier 2 exists to protect:
 
 ```cpp
@@ -116,9 +116,9 @@ claimed as this PR's fix.
 
 ### 1b. `v44` is not the only pre-breached ceiling
 
-Splitting the compile-time ceiling out is not a `v44` accommodation. `bench/REPORT.md:103-114` records
+Splitting the compile-time ceiling out is not a `v44` accommodation. `bench/REPORT.md`'s `Validator::validate` ceiling section records
 the `[2b §6.6]` **≤ 200 ns** `Validator::validate` ceiling currently measured at **253–434 ns** (the
-568–1265 ns figures at `:51-75` are the historical pre-fix set — r1 quoted those as current, also
+568–1265 ns figures (the historical pre-fix set) — r1 quoted those as current, also
 corrected). A blanket "turn every recorded ceiling hard" reddens on that too. **Ceilings are a
 different axis from regression-vs-baseline** and are out of scope here (§6).
 
@@ -227,7 +227,7 @@ There is no non-circular seed available while the known regression is unfixed.
 Read in full, this fixes a **review discipline** and a **re-baselining rule**. It does not say CI shall
 `exit 1` at 5 %, and says nothing about enforcement mechanism. **No amendment is required.** Recorded
 because "the constitution pins 5 %" would otherwise look like a blocker and it is not. Codex
-independently verified this at `.specify/constitution.md:192-200` and added the fair caveat that the
+independently verified this at `.specify/constitution.md`'s Article VIII §2 and added the fair caveat that the
 obligation *cannot be deferred indefinitely* — §6 is the answer to that.
 
 ---
@@ -445,5 +445,5 @@ discovered later.
 | 1 — gate inert, no CI job runs it | **fixed** for the runtime benches; compile-time ceiling deliberately **not** wired (§1a/§6) |
 | 2 — flat 3 s ceiling not meaningful | **deferred**, #209 stays open |
 | 3 — proposed per-class model | **deferred**, and #209's own n=4 caveat is the reason |
-| 5 — `FINDINGS.md` cited, never existed | **fixed by re-pointing, not by authoring.** `bench/codegen/compile_time_bench/README.md` is titled *"T046 — Compile-time bench known findings (NFR-003-2)"* and already contains the v50sp2 record; the citation was misspelled, not missing. Three sites: the script ×2 and `bench/codegen/CMakeLists.txt:41`. |
+| 5 — `FINDINGS.md` cited, never existed | **fixed by re-pointing, not by authoring.** `bench/codegen/compile_time_bench/README.md` is titled *"T046 — Compile-time bench known findings (NFR-003-2)"* and already contains the v50sp2 record; the citation was misspelled, not missing. Three sites: the script ×2 and `bench/codegen/CMakeLists.txt`'s "Known finding (T046)" comment block. |
 | 6 — decide whether this runs in CI | **decided:** runtime benches yes (per-binary allowlist), compile-time ceiling no, with the exit criteria in §6 |

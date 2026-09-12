@@ -24,7 +24,7 @@
 // present validates clean, proving the failure is specifically the omitted
 // field, not a broken validator.
 //
-// Anchors: specs/078-precompiled-builder-libs/spec.md US2 (lines 64-67),
+// Anchors: specs/078-precompiled-builder-libs/spec.md US2,
 // FR-003/FR-004 AC2; quickstart.md Scenario 2;
 // tests/session/test_067_builder_validate.cpp (expected error shape --
 // fixpp::core::error::wire_required_field_missing).

@@ -7,12 +7,12 @@
 // build is forced to fail by a tiny arena, per research.md §D2's three
 // arena-exhaustion origins:
 //   (a) build_nested_subview's own shell allocation fails -> nullptr
-//       (offset_table.cpp:722-724).
+//       (its own bad_alloc catch).
 //   (b) the sub-table builds non-null, but its OWN group_slices_status()
-//       materialization throws bad_alloc (offset_table.cpp:684-689).
+//       materialization throws bad_alloc (its own catch block).
 //   (c) the sub-table builds non-null, but its ctor's internal build()
 //       degrades on bad_alloc (status_ = out_of_memory,
-//       offset_table.cpp:366-370) — the mode found at /speckit-implement
+//       build()'s own catch block) — the mode found at /speckit-implement
 //       (feedback_status_origin_must_cover_all_alloc_catch_sites).
 //
 // Exhaustion is driven by a genuinely faithful tiny-capacity

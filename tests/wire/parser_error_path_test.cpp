@@ -248,7 +248,7 @@ TEST(ParserErrorPath, GetDecimalTagAbsentReturnsFieldMissingError) {
 // ── get_decimal() — value fails decimal parse ─────────────────────────────────
 // When the tag is present but its value cannot be parsed as decimal, the inner
 // expected returned by decimal_t::parse carries an error; get_decimal propagates
-// that inner error (*wrapped path, lines 191-192 of parser.hpp).
+// that inner error (its `!wrapped` propagation path).
 
 TEST(ParserErrorPath, GetDecimalInvalidValueReturnsDecimalError) {
     // Tag 44 with a value that pod_decimal's from_chars rejects.
@@ -272,7 +272,7 @@ TEST(ParserErrorPath, GetDecimalInvalidValueReturnsDecimalError) {
 
 // ── field_iterator Iter malformed-stop: non-digit tag char ───────────────────
 // advance() reads tag digits; a non-digit-non-EQ-non-SOH char before '='
-// triggers `done_=true; return;` at line ~257-259. Iteration must set done_
+// triggers `done_=true; return;` in field_iterator::advance()'s non-digit tag-char guard. Iteration must set done_
 // and the cur_ field must NOT have been updated to reflect the garbage tag.
 //
 // Note on operator== semantics: both done_=true AND pos_==end.pos_ must hold

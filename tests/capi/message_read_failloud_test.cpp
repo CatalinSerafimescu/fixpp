@@ -11,7 +11,7 @@
 // build_nested_subview` allocates the nested sub-table from
 // `OffsetTable::resource()`, which is `entries_.get_allocator().resource()`,
 // i.e. the *same* arena the top-level table was built with
-// (src/wire/offset_table.cpp:698,758; include/fixpp/wire/offset_table.hpp:195-196).
+// (both `OffsetTable::build_nested_subview` and `OffsetTable::resource()` themselves).
 // This is NOT a hand-built 16 KiB-exhausting message and NOT a post-hoc
 // "alloc failed" flag flip — it reproduces the exact failure the fixed
 // null-upstream arena exhibits at its cap ([[feedback_fault_injection_posthoc_flag_unfaithful]]).
@@ -133,7 +133,7 @@ struct InboundHandle {
 // kNestedInstances-instance nested group (539=<N>/524=.../525=C each)" —
 // shared by both the main SC-001 witness and the repeated-read witness
 // below. `MessageView` is move-CONSTRUCTION-only (move-assignment is
-// deleted — see include/fixpp/wire/parser.hpp:96-107, the per-message-arena
+// deleted — see `MessageView`'s own class comment, the per-message-arena
 // allocator leak guard), so each call site parses inline into its own
 // `auto mv_res` rather than threading a MessageView through an
 // out-parameter.
@@ -163,7 +163,7 @@ std::vector<std::byte> present_nested_group_frame() {
 //
 // Mutation-proof: removing the `if (r.alloc_failed) return
 // WIRE_LIMIT_EXCEEDED;` arm in `fixpp_group_get_nested_group`
-// (src/capi/message_read.cpp:489-499) makes this go RED — it falls through
+// (that arm in `fixpp_group_get_nested_group`) makes this go RED — it falls through
 // to `scan_slice_for_tag` finding "539" present in the raw slice bytes and
 // returns FIXPP_ERR_OK / nc=0 (the exact silent-truncation bug #184/L-065-2
 // this witness exists to close).
@@ -203,7 +203,7 @@ TEST(MessageReadFailloud, PresentNestedGroup_ArenaExhausted_ReturnsWireLimitExce
 //
 // A repeated read of the SAME exhausted nested group must signal failure on
 // BOTH reads — the second read is served from `nested_cache_`'s cached
-// (possibly null) row (offset_table.cpp:744-750) and must not silently serve
+// (possibly null) row (`OffsetTable::nested_group_slices`'s cache-hit branch) and must not silently serve
 // a stale "empty" result that hides the earlier failure (spec.md Edge Case
 // "Repeated read after a failed build").
 TEST(MessageReadFailloud, RepeatedReadAfterArenaExhaustion_SignalsFailureBothTimes) {

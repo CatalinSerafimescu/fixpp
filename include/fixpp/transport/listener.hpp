@@ -4,7 +4,7 @@
 // fixpp::transport::Listener — abstract multi-session acceptor.
 // Re-emitted from `specs/012-2h-transport/contracts/listener.hpp` per T035.
 //
-// Surface mirrors [2h §4.6]:810 verbatim: EXACTLY 1 pure-virtual
+// Surface mirrors [2h §4.6]'s Listener code block verbatim: EXACTLY 1 pure-virtual
 // (`async_accept`), well under the [const §XIV.2] ≤ 5 cap.
 //
 // `cancel()` is NOT a pure-virtual on the abstract base. The engine-scoped
@@ -33,7 +33,7 @@ namespace fixpp::transport {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Listener — abstract acceptor interface. EXACTLY 1 pure-virtual method per
-// [2h §4.6]:810. Each accepted connection MUST produce a freshly-minted
+// [2h §4.6]'s Listener code block. Each accepted connection MUST produce a freshly-minted
 // Transport instance per spec FR-023. Lifetime is engine lifetime (outlives
 // many Transport instances).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ public:
     //     issues async_handshake (TLS) immediately.
     //
     //     Cancellation: cancellation_type::total → transport_accept_cancelled
-    //     per [2h §6.6]:1191.
+    //     per [2h §6.6] `transport_accept_cancelled` row.
     [[nodiscard]] virtual asio::awaitable<core::expected_t<std::unique_ptr<Transport>>>
     async_accept() = 0;
 };

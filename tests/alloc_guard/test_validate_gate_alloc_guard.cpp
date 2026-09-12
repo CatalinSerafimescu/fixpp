@@ -10,7 +10,7 @@
 //
 // WHAT IS MEASURED
 // ----------------
-// The production path in validate_inbound_() (session.cpp ~1748):
+// The production path in validate_inbound_() (session.cpp):
 //   (1) Framer::feed()               — stack-local pmr_carry_buffer
 //   (2) Parser<Index>::parse()       — PMR-arena backed (vg_buf: stack array)
 //   (3) Validator::validate()        — zero-heap per [2b §6.5] spec
@@ -227,7 +227,7 @@ std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::
 
 // ── ValidateGateAllocGuard / HotPathNoGlobalHeapAlloc ─────────────────────────
 //
-// Replicates the exact sequence of validate_inbound_() (session.cpp ~1748) with
+// Replicates the exact sequence of validate_inbound_() (session.cpp) with
 // stack-local arenas.  The measured window covers one parse→validate cycle on a
 // conformant Heartbeat(35=0) frame.
 //

@@ -134,7 +134,7 @@ ccache_cache_key() {
 
   # OCI tags allow [A-Za-z0-9._-] and must NOT contain '+', so `libc++` has to
   # be sanitized — `linux-clang-libc++-asan` → `linux-clang-libcxx-asan`. Same
-  # substitution and the same reason as conan-cache-key.sh:101; keep the two in
+  # substitution and the same reason as conan-cache-key.sh's `CONAN_CACHE_TAG` line; keep the two in
   # agreement if either ever changes.
   CCACHE_CACHE_TAG="ccache-${preset//+/x}-${CCACHE_CACHE_TOOLSET}"
 }

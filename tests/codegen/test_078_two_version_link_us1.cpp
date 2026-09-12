@@ -20,7 +20,7 @@
 // Uses v44 + v50sp2 (both built locally) per the orchestrator brief --
 // NOT vlatest, whose lib is CI-deferred.
 //
-// Anchors: specs/078-precompiled-builder-libs/spec.md US1 AC3 (line 60);
+// Anchors: specs/078-precompiled-builder-libs/spec.md US1 AC3;
 // contracts/cmake-targets.md (physically disjoint per-version namespaces).
 
 #include <gtest/gtest.h>

@@ -36,11 +36,11 @@ namespace fixpp::wire {
 // `group_context` by value, to avoid a header cycle back into this file).
 //
 // Trivially copyable, fixed-size (K=16 mirrors codegen's kMaxGroupDepth,
-// emit_messages.cpp:137) — no allocation, by-value ride-along in
+// emit_messages.cpp's `kMaxGroupDepth`) — no allocation, by-value ride-along in
 // entry_context (FR-004).
 struct group_context {
     std::string_view msg_type{};  // On the PARSE path: aliases the MESSAGE WIRE BUFFER
-                                   // (data-model.md:28) — NOT dictionary scratch; outlives every
+                                   // (specs/063-nested-group-parse-correctness/data-model.md's `msg_type` entry) — NOT dictionary scratch; outlives every
                                    // nested entry (one-parse, ROOT-owned lifetime, same as
                                    // entry_context::span).
                                    // fixpp#215 item 3 — on the C-ABI COMMIT path

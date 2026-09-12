@@ -6,7 +6,7 @@
 // including the two headers this feature republishes at isolated roots.
 //
 // Why a separate TU and not two more #includes in consumer_witness.cpp:
-// consumer_witness.cpp:34-37 includes neither <fix/c_api.h> nor the service
+// consumer_witness.cpp's #include block includes neither <fix/c_api.h> nor the service
 // plugin header, so FR-004's C-ABI leg, US3 acceptance scenario 2 and FR-011c
 // are witnessed by nothing today — and SC-003 trades on consumer_witness.cpp
 // remaining BYTE-UNCHANGED, which is precisely why the new coverage lands here

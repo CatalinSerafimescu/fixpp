@@ -51,7 +51,7 @@ namespace fixpp::session {
 // Acquires `m` by recovering the per-session PMR resource from the awaiter's
 // bound executor and forwarding into m.async_lock(mr).
 //
-// EXACT declaration per design-doc §4.3.2 (lines 843-844):
+// EXACT declaration per design-doc §4.3.2's session-side-helper block:
 //   [[nodiscard]] asio::awaitable<expected_t<fixpp::sync::async_lock_guard>>
 //       async_lock_via_session_executor(fixpp::sync::async_mutex& m) noexcept;
 //

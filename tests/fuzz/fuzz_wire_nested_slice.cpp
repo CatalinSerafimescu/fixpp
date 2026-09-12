@@ -5,7 +5,7 @@
 // shape 062 introduces: a NON-ENVELOPED, mid-frame slice-scoped `{data,
 // len+1}` byte range fed into `OffsetTable::build_nested_subview()` (T005)
 // via the dict-aware nested-build entry point `OffsetTable::nested_group_
-// slices()` (T006, `src/wire/offset_table.cpp:527/554`). The existing
+// slices()` (T006, `OffsetTable::consume_group_extent`'s max_group_entries_per_instance cap). The existing
 // fuzz_wire_parser.cpp only ever generates FULL, checksum-terminated frames
 // (via the `frame_view_access` friend factory) — it never drives this
 // slice-scoped shape, which skips frame envelope validation entirely and

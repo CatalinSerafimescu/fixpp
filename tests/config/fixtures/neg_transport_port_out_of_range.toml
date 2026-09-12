@@ -1,6 +1,6 @@
 # neg_transport_port_out_of_range.toml
 # transport.port is 99999 (> 65535) — triggers out_of_range at
-# session[0].transport.port (lines 676-682 scalar_mappers.cpp).
+# session[0].transport.port (map_structured_members's port range-check arm, scalar_mappers.cpp).
 
 [clock]
 kind = "system"

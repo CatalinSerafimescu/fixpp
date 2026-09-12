@@ -70,7 +70,7 @@ constexpr AppVersion kAppVersions[] = {
 // Emits _dispatch/reify_dispatch_fixt.hpp: exactly the 7 FIXT admin MsgTypes.
 // On hit → fixpp::vt11::owning_<Msg>. Fail-loud default (I-11 / R3).
 //
-// Shape oracle: specs/003-dictionary-codegen/contracts/reify_dispatch.hpp L15-24.
+// Shape oracle: reify_dispatch.hpp's `_dispatch/reify_dispatch_fixt.hpp` section.
 //
 // IMPORTANT (layering): this header is INCLUDED by the dispatch-consuming TU
 // (e.g. tests/dictionary/reify_dispatch_test.cpp, tests/integration/...). It
@@ -163,7 +163,7 @@ std::string emit_dispatch_fixt(std::vector<VersionIR> const& all) {
 // Emits _dispatch/reify_dispatch_application.hpp: one case per
 // (codegen application_version, MsgType) across v42/v44/v50sp2 (~470 cases).
 // Runtime-XML-only resolved versions fall to the fail-loud outer default.
-// Shape oracle: specs/003-dictionary-codegen/contracts/reify_dispatch.hpp L26-47.
+// Shape oracle: reify_dispatch.hpp's `_dispatch/reify_dispatch_application.hpp` section.
 //
 // Outer switch: resolved application_version enum.
 //   - v42, v44, v50sp2: inner switch over msg_type.
@@ -179,7 +179,7 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
     w.line("// _dispatch/reify_dispatch_application.hpp — per-(application_version,MsgType)");
     w.line("// dispatch cases for v42/v44/v50sp2. Runtime-XML-only versions fall to the");
     w.line("// fail-loud outer default (AC-D5). Shape oracle:");
-    w.line("// specs/003-dictionary-codegen/contracts/reify_dispatch.hpp L26-47.");
+    w.line("// reify_dispatch.hpp's _dispatch/reify_dispatch_application.hpp section.");
     w.line("// Data-model Entity 8 / Invariant I-11 / R3. AC-D1 / AC-D3 / AC-D7 / seam #15b.");
     w.line("//");
     w.line("// LAYERING NOTE ([2c §4.8] / contracts/reify_dispatch.hpp): included ONCE by");

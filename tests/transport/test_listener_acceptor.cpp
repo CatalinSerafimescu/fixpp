@@ -420,7 +420,7 @@ TEST(ListenerAcceptor, CancelIsIdempotent) {
 //
 // Spawns async_accept; before any client connects, calls listener.cancel().
 // The acceptor's close() surfaces operation_aborted; the listener maps to
-// transport_accept_cancelled per [2h §6.6]:1191. FR-025 Option-A action (2).
+// transport_accept_cancelled per [2h §6.6] `transport_accept_cancelled` row. FR-025 Option-A action (2).
 // ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, CancelCompletesInflightAcceptWithCancelled) {
     asio::io_context ioc;

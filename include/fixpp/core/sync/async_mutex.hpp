@@ -194,7 +194,7 @@ public:
     // ─────────────────────────────────────────────────────────────────────────
 
     // async_lock — acquire the mutex asynchronously.
-    // EXACT signature per [2f §4.1] lines 505-506, contracts/async_mutex.hpp.
+    // EXACT signature per [2f §4.1]'s async_lock declaration, contracts/async_mutex.hpp.
     // mr == nullptr → embedded awaiter (HALO-eligible); mr != nullptr → PMR.
     //
     // Erratum E-1 conformance: async_lock is itself an asio::awaitable<>
@@ -208,7 +208,7 @@ public:
     // ─────────────────────────────────────────────────────────────────────────
 
     // cancel_and_drain — drain the mutex of all current and future acquisitions.
-    // EXACT signature per [2f §4.1] lines 579-580, contracts/async_mutex.hpp.
+    // EXACT signature per [2f §4.1]'s cancel_and_drain declaration, contracts/async_mutex.hpp.
     //
     // NARROWED contract (Erratum E-5 / 048):
     //   - Must be called on the owning strand, co-located with all
@@ -609,7 +609,7 @@ struct alignas(std::max_align_t) waiter_record {
     // only record that would ever reach destroy_executor() with a null
     // destroy_exec_fn_ was a record whose store_executor() call had failed;
     // no such record is ever constructed. (Every record between construction
-    // at :1154 and a successful store_executor() at :1162 is released via
+    // at construction (placement-new) and a successful store_executor() call is released via
     // the explicit two release_ref() calls in the store_executor()-fail arm
     // above it, not via destroy_executor(); destroy_executor() is reached
     // only along paths where store_executor() already succeeded and set
@@ -749,7 +749,7 @@ bool waiter_record::store_executor(Executor&& ex) noexcept {
                 } else {
                     // 058 T024 (research.md D-6, spec FR-006 / AM-P3-2):
                     // attached_awaiter_ is nulled ONLY at the async_lock()
-                    // coroutine tail (`:1187`), strictly AFTER this runner
+                    // coroutine tail (just before co_return result), strictly AFTER this runner
                     // invokes the handler for THIS SAME schedule (each record
                     // is resumed at most once — the single-schedule
                     // invariant: every schedule_record_resume() call site
@@ -810,7 +810,7 @@ bool waiter_record::store_executor(Executor&& ex) noexcept {
             // destructor guard, the T023/T024 traps above). This is NOT
             // closed the way the pre-grant slot-assign allocation is
             // (`store_executor`/`inherited_slot.assign` failures above fail
-            // CLOSED with `sync_lock_alloc_failed`, `:1106-1127`): the
+            // CLOSED with `sync_lock_alloc_failed` (the pool-exhaustion / store_executor / inherited_slot.assign failure arms): the
             // difference is grant ORDERING, not an oversight. Slot-assign
             // runs pre-commitment — no waiter has been granted yet, so
             // returning an error is a legitimate outcome. This post runs
@@ -878,10 +878,10 @@ enum class async_mutex_seam_phase : std::uint8_t {
     // CAS-back-to-`not_locked`. Both arms are reachable in-contract but not
     // reliably organic on the seam-OFF coverage lane (F4 flaky ~0.3-1.5%;
     // F6 0/all-trials) — see test_async_mutex_terminal_cas_recursive_unlock.cpp.
-    unlock_pre_terminal_cas_fast,  // F4: no-waiters fast path (:1379 CAS)
-    unlock_pre_terminal_cas_fifo,  // F6: FIFO walk exhausted, all cancelled (:1439 CAS)
+    unlock_pre_terminal_cas_fast,  // F4: no-waiters fast path (unlock()'s terminal CAS)
+    unlock_pre_terminal_cas_fifo,  // F6: FIFO walk exhausted, all cancelled (unlock()'s terminal CAS)
 
-    // 058 Gate-B MAJOR-2 (async_mutex.hpp contended-acquire loop, ~:1250):
+    // 058 Gate-B MAJOR-2 (async_mutex.hpp's async_lock contended-acquire loop):
     // deterministic reproduction of the pre-fix `old_state` staleness
     // livelock. Two cooperating phases pin the SAME acquirer thread twice:
     //   - acq_pre_state_reload: immediately BEFORE the loop's initial
@@ -901,7 +901,7 @@ enum class async_mutex_seam_phase : std::uint8_t {
     acq_pre_notlocked_cas,
 
     // 058 Gate-B MAJOR-1 (unlock() chain-walk CAS-loss, residual walk
-    // ~:1345 / fresh FIFO walk ~:1426): pin unlock() immediately AFTER it
+    // (see unlock_pre_grant_cas_residual/_fifo): pin unlock() immediately AFTER it
     // loads a waiter's `phase_` as `queued`, BEFORE the `queued -> granted`
     // CAS, so a concurrent `on_cancel()` can win the `queued -> cancelled`
     // race first — the `ph = expected_ph` arm the coverage-design doc had
@@ -940,7 +940,7 @@ inline void (*async_mutex_test_seam)(async_mutex_seam_phase) noexcept = nullptr;
 //
 // Deliberately NOT gated on active_holders_count_ (research.md D-3, Gate-A
 // both reviewers): active_holders_count_ is not a valid teardown barrier — it
-// is decremented EARLY in unlock() (:961-ish), before unlock() finishes
+// is decremented EARLY in unlock() (its active_holders_count_.fetch_sub), before unlock() finishes
 // touching state_/draining_, so a ==0 reading does not prove the mutex is
 // untouched. A holders-based OR-term would also be REDUNDANT with the
 // existing `state_ != not_locked` term, not merely "not a barrier": every
@@ -1582,7 +1582,7 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
 //
 // The drain is UNINTERRUPTIBLE: co_await disable_cancellation() at entry so
 // teardown always runs to completion (contract E-5; matches Session::close's
-// disable_cancellation, session.cpp:1334).
+// disable_cancellation, Session::close in session.cpp).
 // ─────────────────────────────────────────────────────────────────────────────
 inline asio::awaitable<fixpp::sync::expected_t<void>>
 fixpp::sync::async_mutex::cancel_and_drain() noexcept {
@@ -1624,7 +1624,7 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     }
 
     // Step 4: set draining_ — gates new acquirers (fast-fail sync_lock_drained
-    // at async_lock entry :780/:868). Published BEFORE the reap so a new
+    // at async_lock's entry check and its pre-enrol re-check). Published BEFORE the reap so a new
     // acquirer entering after this store is guaranteed to fast-fail.
     auto bound_ex = co_await asio::this_coro::executor;
     draining_.store(true, std::memory_order_release);
@@ -1692,7 +1692,7 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     // Must NOT terminate on active_holders_count_==0 alone — in_flight_resumers_
     // is the UAF barrier (research.md D-2; fixes P1-1).
     // 058 T016 (research.md D-2): ACQUIRE — paired with the RELEASE decrement
-    // in the resume runner (:626-ish, `fetch_sub(..., release)`). Observing 0
+    // in the resume runner (`in_flight_resumers_.fetch_sub(..., release)`). Observing 0
     // here happens-before every write the runner made into mutex-owned pool
     // storage, so a caller that destroys the mutex immediately after this
     // drain returns cannot race those writes (contracts/async_mutex-

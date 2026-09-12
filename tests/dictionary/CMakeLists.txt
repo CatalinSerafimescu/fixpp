@@ -74,7 +74,7 @@ target_compile_definitions(dictionary_pure_tests PRIVATE
   # 083 T035 (W-6): loader_disposition_test.cpp loads all TEN shipped
   # dictionaries under the fail-closed default, Orchestra included. Spelled out
   # rather than reusing FIXPP_ORCHESTRA_DATA_DIR, which this file sets further
-  # down (line ~98) and so would expand empty here.
+  # down via a `set(FIXPP_ORCHESTRA_DATA_DIR ...)` and so would expand empty here.
   "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
   # Gate B r2 (fixpp#216 P1-A downgraded): loader_disposition_test.cpp calls the
   # FR-023 test seam `detail::set_force_incomplete_group_context_for_testing`,
@@ -88,7 +88,7 @@ target_compile_definitions(dictionary_pure_tests PRIVATE
   # support/context_group_member_fn.hpp) — friend declarations only, no gated
   # data members, so OffsetTable's layout matches the non-hooks
   # fixpp_dictionary/fixpp_wire archives (same reasoning as
-  # tests/capi/CMakeLists.txt:153-155).
+  # tests/capi/CMakeLists.txt's capi_send_recv_test layout-match comment, same pattern as capi_error_live_test).
   FIXPP_TEST_HOOKS)
 add_test(NAME dictionary_pure_tests COMMAND dictionary_pure_tests)
 # 083 joins this bucket with loader_disposition_test (T035/T042, the FR-006 /

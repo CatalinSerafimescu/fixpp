@@ -1,6 +1,6 @@
 # neg_clock_kind_unknown.toml
 # clock.kind is an unrecognised value — triggers unknown_enum at "clock.kind"
-# (lines 88-95 selector_resolver.cpp).
+# (resolve_engine_clock's unknown-kind arm, selector_resolver.cpp).
 
 [clock]
 kind = "ntp"

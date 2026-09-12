@@ -9,7 +9,7 @@
 //
 // Copy-constructible per 010 W-5 — satisfies the
 //   static_assert(std::is_copy_constructible_v<SessionConfig>)
-// at session_config.hpp:176. Storage is pimpl so the include cost is minimal.
+// at session_config.hpp's own declaration. Storage is pimpl so the include cost is minimal.
 // Body lives in src/session/compid_authorization_policy.cpp.
 #pragma once
 

@@ -1,7 +1,7 @@
 # neg_reconnect_schedule_not_string.toml
 # reconnect_policy.schedule contains an integer entry instead of a duration string —
 # triggers malformed_value at session[0].reconnect_policy.schedule
-# (lines 701-709 scalar_mappers.cpp).
+# (map_structured_members's reconnect_policy.schedule entry-type-check arm, scalar_mappers.cpp).
 
 [clock]
 kind = "system"

@@ -7,8 +7,8 @@
 // test_store_fail_reconcile_breadth.cpp only exercises the three FileStore-
 // reachable codes (store_io_failure, store_seqnum_out_of_order,
 // store_capacity_exhausted). Pre-fix, Session::send's guard was a CLOSED
-// 3-code set (session.cpp ~:4064) that disagreed with store_then_emit's own
-// durability-classified gate (session.cpp ~:4804: any non-cancelled error on
+// 3-code set that disagreed with store_then_emit's own
+// durability-classified gate (session.cpp's is_persistent_retain_fatal: any non-cancelled error on
 // a persistent store). A custom persistent MessageStore whose store() returns
 // a store-block code OUTSIDE that 3-set (e.g. store_seqnum_gap=57,
 // store_seqnum_invalid=63 — see opus_pr163_1_triage.md RC#1) got the fatal

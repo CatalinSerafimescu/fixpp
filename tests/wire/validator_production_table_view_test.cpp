@@ -11,7 +11,7 @@
 //  (2) T009a: Float garbage value (e.g. "abc") → validate() returns
 //      `wire_field_value_out_of_range` (slot 40, SessionRejectReason=5),
 //      NOT a raw decimal error (decimal_invalid_input=10). Proves the remap
-//      in `validator.hpp:307-313` (data-model E-4 / FR-004).
+//      in validator.hpp's T009a remap (data-model E-4 / FR-004).
 //
 // Anchors:
 //   spec: 041-validation-gate-wiring/spec.md FR-003/FR-004

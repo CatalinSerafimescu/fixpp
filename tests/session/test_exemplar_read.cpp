@@ -349,12 +349,12 @@ TEST(ExemplarReadE, ReadE_ThreeLevelNested) {
 }
 
 // Missing-required-field -> fail-closed typed error (FR-007). ListID(66) is
-// required='Y' for NewOrderList (dictionaries/FIX44.xml:405). Omitting it
+// required='Y' for NewOrderList (dictionaries/FIX44.xml's ListID field). Omitting it
 // from the wire and reading it back via the flyweight accessor must yield a
 // typed error, not a crash or a silently-defaulted value. Verified against
 // the real flyweight/parser behavior (get() on a missing tag ->
 // err_required_field_missing -> core::error::wire_required_field_missing,
-// include/fixpp/wire/parser.hpp:453-475) rather than assumed.
+// MessageView::get's missing-tag path) rather than assumed.
 TEST(ExemplarReadE, ReadE_MissingRequired_TypedError) {
     std::pmr::monotonic_buffer_resource arena{8192};
     fixpp::dict::Dictionary dict = fixpp_test_support::load_fix44(&arena);

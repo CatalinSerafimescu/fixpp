@@ -26,7 +26,7 @@ Sync Impact Report — v0.11 → v1.0 (2026-08-21) — RATIFIED
       baselines are reclassified as informational and do not gate the per-PR budget. The budget is
       stated ONE-SIDED throughout ("a slowdown greater than +5%", "must not exceed +50%") to match
       the shipped comparator, which rejects only `delta > band` and passes an improvement
-      (`tools/bench_compare.py:1017`); the previous revision's two-sided "±" wording would have
+      (`tools/bench_compare.py`'s `run_suite`, the `delta > band` regression branch); the previous revision's two-sided "±" wording would have
       required approval for a 10% speed-up (Gate A round 2, P2). The +50% sentinel is expressed as
       a CONSTITUTIONAL CEILING on how weak CI may become — widening it needs an amendment — while
       the current threshold/paired-set/sample-count/promotion-state are delegated to the bench-gate
@@ -54,17 +54,17 @@ Sync Impact Report — v0.11 → v1.0 (2026-08-21) — RATIFIED
       lesson of this amendment.
       Gate A round 2 (P1) — the first draft made EVERY missing measurement a failure, which would
         have outlawed the candidate-only-addition path PR #272 had just spent Gate B rounds 4 and 5
-        building (`tools/bench_compare.py:671-673` "must never be an error"; `:823` excludes those
-        rows; `tier1.yml:2393-2395` classifies them before the base build).
+        building (`check_paired_not_narrowed`'s docstring "must never be an error"; `run_paired`'s base-run-manifest filter excludes those
+        rows; the merge-base build step's candidate-only-addition exemption classifies them before the base build).
       Gate A round 3 (P1 ×3) — the replacement then (i) asserted a BUILDABILITY predicate the
         classifier does not implement: it tests MANIFEST MEMBERSHIP, and `bench/transport/*` are
         real CMake targets absent from the manifest, so a buildable base binary would be exempted
         anyway; (ii) declared the paired set "non-decreasing" AND permitted approved narrowing —
-        incompatible, and the comparator (`bench_compare.py:765-779`) has no approval path at all,
+        incompatible, and the comparator (`check_paired_not_narrowed`) has no approval path at all,
         failing removal unconditionally; (iii) left a resurrection hole where an approved removal
         followed by a re-add collects the addition exemption again.
       Gate A round 4 (P1 ×1) — the round-3 text then permitted "retiring a benchmark entirely" as
-        a separate act. To the comparator that IS removal (`bench_compare.py:765-779` fails removal
+        a separate act. To the comparator that IS removal (`check_paired_not_narrowed` fails removal
         and downgrade alike, with no retirement input), so the clause once more permitted what the
         code forbids — AND reopened the resurrection hole it claimed to close, since a retired row
         re-added later collects the candidate-only exemption again.
@@ -107,7 +107,7 @@ Sync Impact Report — v0.11 → v1.0 (2026-08-21) — RATIFIED
     2026-08-20) and were re-verified against that tree, not against the branch this amendment was
     first drafted on: `PAIRED_BAND_PCT = 50.0`; `bench/ci-suite.txt` has 23 rows, 5 `paired`, 6
     `gb-json:`; the job is `bench` with no `continue-on-error` (the string "bench (soft)" survives
-    only inside a historical timing comment at `tier1.yml:2241`); `.specify/ci209-bench-gate.md`
+    only inside the `bench` job's own ccache-history comment (#273)); `.specify/ci209-bench-gate.md`
     exists. Gate A round 1's first P1 — that the amendment described CI absent from its own tree —
     is closed by that merge plus this rebase.
   Templates / dependents reviewed: plan-template.md / spec-template.md / tasks-template.md — no
@@ -122,27 +122,27 @@ Sync Impact Report — v0.11 → v1.0 (2026-08-21) — RATIFIED
     exists to fix. Historical `specs/NNN-*` bundles are deliberately out of scope.
     Known members, by claim (none fixed in this PR):
       ±5%-vs-previous-tagged-release, a comparand that was never implemented at all:
-        .specify/2b-wire.md:661 · .specify/2c-codegen.md + .draft-r1.md:718 ·
-        .specify/2d-threading.md:1093 · .specify/2e-msgstore.md:1136 (also asserts >2x for
-        FileStore rows) · .specify/2f-async-mutex.md:1704 + .draft-r1.md:872
+        .specify/2b-wire.md · .specify/2c-codegen.md + .draft-r1.md ·
+        .specify/2d-threading.md · .specify/2e-msgstore.md (also asserts >2x for
+        FileStore rows) · .specify/2f-async-mutex.md + .draft-r1.md
       ±5%-vs-bench/baselines, the comparand this amendment retires:
-        .specify/2f-async-mutex.phase4-tests.md:18,156-157 · .specify/2j-controlplane.md:902 ·
-        .specify/2l-tap.md:1056 · .specify/2k-log-otel.md:57 · .specify/2g-tls.md:897 ·
-        .specify/2m-pybind.md:1265 · .specify/2i-capi.md · bench/README.md:5 ·
-        bench/REPORT.md:6,74,125 · bench/session/CMakeLists.txt:4,29 · bench/sync/CMakeLists.txt:4 ·
-        bench/threading/CMakeLists.txt:5 · bench/threading/bench_threading.cpp:18 ·
-        bench/session/{bench_heartbeat_cadence.cpp:10, fix_time_bench.cpp:13, fsm_bench.cpp:35,
-        heartbeat_bench.cpp:37, seqnum_bench.cpp:17, bench_compid_authorize.cpp:21} ·
-        bench/sync/bench_async_mutex_{contended.cpp:6, uncontended.cpp:7} ·
-        bench/tls/bench_pinset_snapshot_acquire.cpp:128 · bench/dictionary/xml_loader_bench.cpp
+        .specify/2f-async-mutex.phase4-tests.md · .specify/2j-controlplane.md ·
+        .specify/2l-tap.md · .specify/2k-log-otel.md · .specify/2g-tls.md ·
+        .specify/2m-pybind.md · .specify/2i-capi.md · bench/README.md ·
+        bench/REPORT.md · bench/session/CMakeLists.txt · bench/sync/CMakeLists.txt ·
+        bench/threading/CMakeLists.txt · bench/threading/bench_threading.cpp ·
+        bench/session/{bench_heartbeat_cadence.cpp, fix_time_bench.cpp, fsm_bench.cpp,
+        heartbeat_bench.cpp, seqnum_bench.cpp, bench_compid_authorize.cpp} ·
+        bench/sync/bench_async_mutex_{contended.cpp, uncontended.cpp} ·
+        bench/tls/bench_pinset_snapshot_acquire.cpp · bench/dictionary/xml_loader_bench.cpp
       claims about binaries that are NOT in the 23-row manifest at all, so no CI gate of any kind
       applies to them — a stronger defect than a stale comparand:
-        bench/transport/bench_async_read_some_dispatch.cpp:10 ·
-        bench/transport/bench_async_write_issue.cpp:10
+        bench/transport/bench_async_read_some_dispatch.cpp ·
+        bench/transport/bench_async_write_issue.cpp
       asserts a THIRD threshold, neither +5% nor +50%:
-        bench/session/bench_file_store.cpp:8 and bench/session/CMakeLists.txt:4 ("> 2x regression")
-      bench/session/bench_heartbeat_cadence.cpp:10 · bench/session/fix_time_bench.cpp:13 ·
-        bench/session/fsm_bench.cpp:35 · bench/dictionary/xml_loader_bench.cpp (header comment)
+        bench/session/bench_file_store.cpp and bench/session/CMakeLists.txt ("> 2x regression")
+      bench/session/bench_heartbeat_cadence.cpp · bench/session/fix_time_bench.cpp ·
+        bench/session/fsm_bench.cpp · bench/dictionary/xml_loader_bench.cpp (header comment)
   Process: standalone amendment PR per Article XX §2 — NOT folded into PR #272, which carries a Gate
     A WAIVER, and §2 mandates Codex Gate A review on EVERY amendment. Gate A therefore runs on this
     PR and must not be waived; the Gate-A-fold deviation used by 035/043/068/069/075-078/082 applies
@@ -193,7 +193,7 @@ Sync Impact Report — v0.7 → v0.8 (2026-07-16) — RATIFIED
   Added sections: none. Removed sections: none.
   §XVIII.5 disposition: NO residual conflict. §5 bars early-shipping deferred post-1.0 **protocols** (SOFH, SBE, FIXP, FAST, JSON, GPB, MMT); typed codegen for an already-supported dictionary is not a protocol, so §5 is not engaged. The amendment is what makes the read-tier typed codegen cease to be deferred, not a waiver against §5.
   Rationale: feature 076 (fix-latest-typed-codegen) generates the typed read/reify/args/validator surface for all 181 FIX Latest messages from 074's native OrchestraLoader, with a two-leg non-circular completeness census (no QuickFIX peer). The typed BUILDER tier was descoped mid-implementation (user-decided 2026-07-16, spec.md Clarifications) on discovering the 137 MB uncompilable Builders.hpp; `emit_builders` stays v44-only so the v44 golden and the additive guarantee are untouched. Narrowing the carve-out to "typed BUILDER codegen" (not all "typed codegen") records exactly what shipped.
-  Templates / dependents reviewed: plan-template.md / spec-template.md / tasks-template.md — no change. Affected catalogue rows: the 076 read-tier typed-codegen delivery is recorded once, authoritatively, on the **tier row `D-011`** (`spec/feature-catalogue.md:130` / `spec/coverage-index.md:704`) — 076 delivers typed read/reify/args/validator classes for **all 181** FIX Latest messages, not the 31 new A-035..A-065 MsgTypes specifically. The A-035..A-065 application-message rows (:425-455) stay `backlog` (their FULL delivery — builders + ApplExtID(1156)=303 wire-differentiation — is v1.2/post-1.0 per Article XVIII §2) with a one-line partial-progress cross-ref to D-011; NOT flipped to `done` (076 T026).
+  Templates / dependents reviewed: plan-template.md / spec-template.md / tasks-template.md — no change. Affected catalogue rows: the 076 read-tier typed-codegen delivery is recorded once, authoritatively, on the **tier row `D-011`** (in `spec/feature-catalogue.md` and `spec/coverage-index.md`) — 076 delivers typed read/reify/args/validator classes for **all 181** FIX Latest messages, not the 31 new A-035..A-065 MsgTypes specifically. The A-035..A-065 application-message rows stay `backlog` (their FULL delivery — builders + ApplExtID(1156)=303 wire-differentiation — is v1.2/post-1.0 per Article XVIII §2) with a one-line partial-progress cross-ref to D-011; NOT flipped to `done` (076 T026).
   Process: Rides feature 076's branch per the established Gate-A-fold deviation from Article XX §2 (precedents: 035, 043, 068, 069, 075). Ratified: 2026-07-16 pending user sign-off.
 
 Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
@@ -204,7 +204,7 @@ Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
   Added sections: none. Removed sections: none.
   §XVIII.5 disposition: NO residual conflict once §1 is narrowed. §5 bars early-shipping deferred post-1.0 **protocols**; Article XVIII §2's roadmap enumerates protocols (SOFH, SBE, FIXP, FAST, JSON, GPB, MMT). Dictionary-driven wire validation is not a protocol, so §5 is not engaged on its own terms — the amendment is what makes the scope cease to be deferred, not a waiver against §5.
   Rationale: feature 075 (live-wire-enum-validation) makes `table_view::enum_valid()` real, discharging the long-standing Phase-1 stub (L-041-1) for the nine legacy dictionaries — squarely in-scope v1.0 work, independent of FIX Latest. But the check is dictionary-generic: a FIX Latest dictionary loaded into a validating session gets enum-domain checking as an automatic consequence of the same store-driven projection (FR-002/FR-003), with no FIX-Latest-specific code. That touches the letter of the pre-amendment Article I §1 carve-out (which listed "live wire validation" as post-1.0) and Article XVIII §5. Narrowing the carve-out resolves the conflict by construction rather than shipping a silent violation. User-dispositioned at `/clarify` (spec.md Clarifications, "Which dictionaries get enum-domain validation" — all ten).
-  Templates / dependents reviewed: plan-template.md / spec-template.md / tasks-template.md — no change. Affected catalogue rows: `spec/coverage-index.md` :581/:189/:68/:704, `spec/feature-catalogue.md` D-011 (:130) / W-014 (:111) — landed alongside this amendment (075 T035/T036).
+  Templates / dependents reviewed: plan-template.md / spec-template.md / tasks-template.md — no change. Affected catalogue rows: `spec/coverage-index.md`'s 074-orchestra-native-reader note / W-014 row / §4.5.4 row / D-011 row, `spec/feature-catalogue.md`'s D-011 row / W-014 row — landed alongside this amendment (075 T035/T036).
   Process: Appendix-A mandatory-trigger feature (wire-format/parser: validator changes) → Codex Gate A required (converged round 5, user-signed-off 2026-07-14, submodule `8c8ec699`). Rides feature 075's branch per the established Gate-A-fold deviation from Article XX §2's standalone-PR letter (precedents: 035, 043, 068, 069). Ratified: 2026-07-14 pending user sign-off at Gate A / `/plan`.
 
   Prior: Sync Impact Report — v0.5 → v0.6 (2026-07-13) — RATIFIED

@@ -1,6 +1,6 @@
 # neg_duration_overflow.toml
 # Duration string where the numeric portion overflows long long — std::from_chars
-# fails → "duration numeric part could not be parsed" (lines 140-147 scalar_mappers.cpp).
+# fails → "duration numeric part could not be parsed" (parse_duration_to_ms, loader_internal.cpp).
 # The number is valid decimal digits (non-empty num_end) but exceeds LLONG_MAX.
 
 [clock]

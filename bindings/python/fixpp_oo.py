@@ -248,10 +248,10 @@ class Session(_Finalizable, _LiveHandle):
             msg._dead = True
         self._application = None
         try:
-            # session.h:204 — handle is invalidated on return-or-raise, so dispatch
-            # has stopped; releasing userdata in finally is safe per contract C-4.
-            # session.cpp:246-250 — concurrent THREAD_SAFE sends are atomically
-            # guarded (valid release/acquire), so send-vs-close is not a UAF.
+            # fixpp_session_close's doc — handle is invalidated on return-or-raise, so
+            # dispatch has stopped; releasing userdata in finally is safe (contract C-4).
+            # check_session's valid.load(acquire) vs close's valid.store(release):
+            # concurrent THREAD_SAFE sends are atomically guarded, not a send-vs-close UAF.
             session_close(self._handle)
         finally:
             if self._application_registered:

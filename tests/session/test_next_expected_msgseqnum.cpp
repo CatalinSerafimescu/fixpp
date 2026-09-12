@@ -1319,7 +1319,7 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery) {
 // Knob on. Behind-side: session goes Active with next_inbound_=X=2. The peer
 // fails to send its resend. The next live frame from the peer arrives at seq=6
 // (which is too-high relative to our next_inbound_=2). The Active arm
-// (`:1968-2009`) issues a ResendRequest — the recovery-of-last-resort path.
+// (`Session::on_inbound_frame`'s I-NEX-10/D-11 guard) issues a ResendRequest — the recovery-of-last-resort path.
 TEST(BehindSide, LostResend_SelfHealsViaActiveArm) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;

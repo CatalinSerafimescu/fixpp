@@ -28,7 +28,7 @@
 // 066-dict-backed-inbound-parse T003: MessageView::membership_copy() (below)
 // returns an OWNED table_view by value, needing it complete. table_view.hpp
 // has a deliberately minimal include graph (no mutex, no heavy asio — see
-// its own file header / validator.hpp:23,41's identical confirmation).
+// its own file header / validator.hpp's own identical §XV.9 confirmation).
 // [arch §2.3]: wire -> dictionary is an explicitly allowed edge; no cycle
 // (table_view.hpp includes nothing from wire/). MUST stay at file scope
 // (outside `namespace fixpp::wire { ... }` below) — see the mid-namespace
@@ -362,8 +362,8 @@ template <std::uint16_t NoTag, class GroupT>
     // owning handle to propagate this view's dictionary membership into an
     // OWNED, independently-lifetimed `table_view` — safe to outlive the
     // source session/Dictionary (`table_view`'s copy ctor deep-copies its
-    // owned tables; table_view.hpp:185-192, spans "stable for lifetime"
-    // :204,221). Re-concretizes `opaque_dict_` back to a `table_view`
+    // owned tables; table_view.hpp's copy-ctor note, spans "stable for lifetime"
+    // per its own accessor comments). Re-concretizes `opaque_dict_` back to a `table_view`
     // (sound: every production dict-backed parse binds a real `table_view` —
     // data-model.md "Reify owning handle" accessor precondition). A
     // dict-free source (`opaque_dict_ == nullptr`) yields a
@@ -372,7 +372,7 @@ template <std::uint16_t NoTag, class GroupT>
     // C4). Defined out-of-line below (mirrors this file's existing
     // out-of-line-in-header convention for `field_iterator::advance`).
     // gate-b/r1 FQ-1 (PR #181 round 1): NOT noexcept — the copy-construction
-    // below can throw std::bad_alloc (table_view.hpp:188-189, "copy may throw
+    // below can throw std::bad_alloc (table_view.hpp's own note, "copy may throw
     // on allocation failure"). A noexcept here would convert that catchable
     // throw into std::terminate BEFORE either production caller's catch runs
     // (src/capi/message_write.cpp `catch (...)` -> FIXPP_ERR_CAPI_CONFIG_INVALID;
@@ -545,7 +545,7 @@ fixpp::dict::table_view MessageView<Mode>::membership_copy() const {
     if (opaque_dict_ == nullptr) {
         return fixpp::dict::table_view{};
     }
-    // Copy-constructs (deep-copies the owned tables, table_view.hpp:185-192)
+    // Copy-constructs (deep-copies the owned tables, table_view.hpp's copy-ctor note)
     // — the result is self-contained and outlives the source session/
     // Dictionary/table_view.
     return *static_cast<fixpp::dict::table_view const*>(opaque_dict_);
@@ -556,10 +556,10 @@ fixpp::dict::table_view MessageView<Mode>::membership_copy() const {
 // field_iterator to locate `tag` within an arbitrary in-frame slice (e.g. a
 // repeating-group entry's own bytes) and mints a field_view carrying the
 // caller-supplied generation token via field_view_access::make — mirrors
-// MessageView<Index>::get(tag) (:212-219) minus the OffsetTable. No
+// MessageView<Index>::get(tag) (above) minus the OffsetTable. No
 // sub-index, zero heap allocation; tolerates a missing final SOH (the
-// underlying field_iterator::advance() already falls through end==size,
-// :399/:405-406). On a miss, returns the SAME field-not-found error
+// underlying field_iterator::advance() above already falls through end==size).
+// On a miss, returns the SAME field-not-found error
 // MessageView::get returns (wire_required_field_missing, via table_.find).
 [[nodiscard]] inline core::expected_t<field_view> get(std::span<const std::byte> span
                                                       [[clang::lifetimebound]],

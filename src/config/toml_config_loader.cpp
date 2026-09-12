@@ -360,7 +360,7 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     // LoadOptions::resource defaults to std::pmr::get_default_resource() (non-null)
     // but the public struct allows LoadOptions{..., nullptr}.  XmlLoader::load and
     // make_file_cert_source both document mr!=nullptr as a caller-precondition with
-    // release UB (xml_loader.hpp:51-54).  Substitute the default resource BEFORE any
+    // release UB (xml_loader.hpp's `mr != nullptr` caller-precondition note).  Substitute the default resource BEFORE any
     // use so the noexcept "every input → ConfigBundle or diagnostics, never UB"
     // contract holds unconditionally (FR-012 / validation rule 9).
     if (opts.resource == nullptr) {
@@ -458,8 +458,8 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     // engine, [default], and per-session scopes in one pass.
     //
     // A missing [dictionary] is NOT a prerequisite: resolve_engine_dictionary
-    // returns silently on an absent dict (selector_resolver.cpp:288-292) and the
-    // missing-dict diagnostic was already accumulated above at :431-438.  Returning
+    // returns silently on an absent dict (`resolve_engine_dictionary`'s `!dict_tbl` arm) and the
+    // missing-dict diagnostic was already accumulated above (T022's check).  Returning
     // here for the dictionary case truncated root/default/per-session diagnostics
     // (breaking FR-018 collect-ALL).
     if (!sessions_arr || sessions_arr->empty()) {

@@ -108,7 +108,7 @@ Engine::Engine(asio::any_io_executor exec, fixpp::core::EngineConfig cfg)
       // .value() is safe and never throws here. Initialized before
       // engine_trace_ctx_snapshot_ to match declaration order in engine.hpp
       // (avoids -Wreorder under CI's -Werror).
-      // [033 data-model.md E2; research R2 threading; engine_config.hpp:211]
+      // [033 data-model.md E2; research R2 threading; `build_version_registry`]
       app_version_registry_{fixpp::core::build_version_registry(engine_cfg_).value()},
       // 017 owned amendment #2: seed the engine-level trace_context snapshot
       // from EngineConfig::engine_trace_context at construction time.
@@ -738,7 +738,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
     // the Session is constructed and open()'d ONLY after CompID resolution
     // confirms a match — no-match closes the transport and loops without
     // constructing any Session (lookup() stays nullptr until a peer matches).
-    // [realized-behavior.md C1 step 6; engine.hpp:200-204; gate-b/r1]
+    // [realized-behavior.md C1 step 6; engine.hpp's `SessionEntry` doc (Gate A New-3); gate-b/r1]
     while (!engine.stopped()) {
         // Step 1: accept the next TCP connection.
         auto accept_r = co_await raw_listener->async_accept();
@@ -802,7 +802,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         constexpr std::size_t kFirstFrameMaxBytes = 4096;
         // Contract P3 (contracts/read_first_frame_bounded.md): 1 <= max_bytes <
         // SIZE_MAX — the upper bound keeps max_bytes + 1 representable
-        // (read_first_frame_bounded.hpp:105,113 both wrap at SIZE_MAX otherwise).
+        // (read_first_frame_bounded's two `max_bytes + 1` computations both wrap at SIZE_MAX otherwise).
         static_assert(kFirstFrameMaxBytes >= 1 && kFirstFrameMaxBytes < SIZE_MAX);
         constexpr auto kFirstFrameDeadline = std::chrono::milliseconds{5000};
 
@@ -1038,7 +1038,7 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     // to the session strand. Auto-satisfied because:
     //   - The loop runs on *entry.session_strand (T010 — co_spawn on strand).
     //   - drive_reconnect() → drive_reconnect_attempt() → co_await this_coro::executor
-    //     = the session strand (reconnect_fsm.cpp:117) → factory_->make(exec, ...) uses it.
+    //     = the session strand (`ReconnectFsm::drive_reconnect_attempt`) → factory_->make(exec, ...) uses it.
     //   - The factory-path ctor stores exec as socket_'s executor.
     // This assert fires if reconnect_fsm.cpp regresses to bare exec_ (R8 lynchpin).
     // session_strand is invariantly emplaced in start() before the loop spawns (T005).
@@ -1519,7 +1519,7 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // Capture send_counter_ by value (shared_ptr copy): this keeps the counter
     // object alive even after Engine destruction so the guard's decrement is
     // always safe — the decrement never touches `this`.
-    // [gate-b/r2 P1; spec.md FR-012/R7; engine.cpp ~1376 contract]
+    // [gate-b/r2 P1; spec.md FR-012/R7; Engine::stop()'s send_counter_ drain contract]
     auto sc = send_counter_;   // shared_ptr copy — keepalive on counter object
     sc->fetch_add(1, std::memory_order_seq_cst);
     counter_guard send_guard{sc};
@@ -1564,7 +1564,7 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
 
             // Session null (loop not yet published) → reject on the control strand.
             // NOTE: kl->state() (fsm_state_) is single-writer on the per-session
-            // strand ([session.hpp:556]); reading it here (control strand) would be a
+            // strand (`state()`'s single-writer-per-session-strand contract); reading it here (control strand) would be a
             // data race under MT. The Active check is moved entirely into Step C
             // (session-strand lambda) where fsm_state_ is owned.
             // [#1 gate-b/r1: data race fix — spec.md §C-1/C-0/D0]

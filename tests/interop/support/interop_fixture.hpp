@@ -128,8 +128,8 @@ public:
 
     // NOTE (#292): this forwards Engine::stopped(), which is NOT a completion
     // predicate — Engine::stop() stores stopped_=true at STEP 1 of its teardown
-    // (src/session/engine.cpp:1196) and then goes on to cancel loops, join them,
-    // close sessions and clear the registry (through engine.cpp:1343). So
+    // (`Engine::stop()`'s inner Step-1 store) and then goes on to cancel loops, join them,
+    // close sessions and clear the registry (through `Engine::stop()`'s Step 5 `registry_.clear()`). So
     // stopped()==true means "stop was ADMITTED", not "stop has FINISHED", and a
     // stop suspended anywhere in steps 2-5 reports true. The fixture must not
     // use it to decide teardown safety; see stop_completed() below.
@@ -197,7 +197,7 @@ private:
     // Issue #292 suggests declaring this BEFORE ioc_ so the Engine outlives the
     // context. DO NOT DO THAT. Engine holds
     // `asio::strand<asio::any_io_executor> control_strand_` as a VALUE member
-    // (engine.hpp:395) built from this fixture's own executor (engine.cpp:121),
+    // (its member declaration in engine.hpp) built from this fixture's own executor (`Engine`'s ctor `control_strand_` initializer),
     // and a strand handle destroyed after its io_context dereferences an
     // already-destroyed service: ~strand_impl unlinks through `service_`
     // (asio strand_executor_service.ipp:83-94) which ~execution_context has
@@ -262,7 +262,7 @@ private:
     // when stop() is already misbehaving: a cell that calls expect_graceful_stop
     // successfully leaves stop_completed_ true and the destructor returns without
     // pumping. For cells that rely on the destructor for a HEALTHY stop, a
-    // loopback stop completes in single-digit ms (support_smoke_test.cpp:114
+    // loopback stop completes in single-digit ms (`InteropSupportSmoke.IdleEngineStopsPromptly`
     // bounds an idle engine at 2 s and passes instantly). 2 s is ~2 orders of
     // magnitude of headroom, and keeping it small keeps a regressed run's total
     // teardown cost low now that the ctest ceiling is no longer doing that job.

@@ -593,7 +593,7 @@ void OrchestraLoaderState::expand_field_list(
 
             // FR-023 (082) is NOT implemented here — the Orchestra sibling of
             // the same removal in xml_loader.cpp. It is satisfied by 083's
-            // T036 `captured == 0` disposition below (:659-680), which rejects
+            // T036 `captured == 0` disposition below, which rejects
             // the same input class with the policy layering FR-023 owes
             // (fail-closed default / tolerant skip / zero-context exempt).
             // See implementation-notes.md § RESUMED 2026-08-11 and spec.md FR-023.
@@ -659,7 +659,7 @@ void OrchestraLoaderState::expand_field_list(
                 // under a non-null sink, i.e. only in the message-scoped walk.
                 // 082 FR-023: the diagnostic MUST name the group's `name`
                 // attribute as well as its `no_tag` — "the facts an operator
-                // needs to fix the offending dialect" (`error.hpp:73`). The
+                // needs to fix the offending dialect" (`group_delimiter_collision_error::make`'s doc comment). The
                 // `<fix>` twin already names it (`xml_loader.cpp`'s
                 // `<group name="...">`); this one did not, which is the ONE
                 // gap found when FR-023's own pins were re-pointed onto this
@@ -939,7 +939,7 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
             "record (FR-023 completeness invariant)");
     }
 
-    // Emit components (PMR ComponentRef array) — mirrors xml_loader.cpp:751-795.
+    // Emit components (PMR ComponentRef array) — mirrors xml_loader.cpp's "Emit components" block.
     h.components_.reserve(components_.size());
     for (std::size_t i = 0; i < components_.size(); ++i) {
         auto const& def = components_[i];
@@ -981,7 +981,7 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         h.components_.push_back(cr);
     }
 
-    // T017 — load-time delimiter guard (mirrors xml_loader.cpp:797-819 /
+    // T017 — load-time delimiter guard (mirrors xml_loader.cpp's "Load-time delimiter guard" /
     // 072-nested-group-hardening FR-003): reject a dialect in which a nested
     // group's delimiter (first_field_tag) equals its immediate parent group's
     // delimiter. Runs BEFORE groups_ is sorted by no_tag (which would stale
@@ -1000,7 +1000,7 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         }
     }
 
-    // Emit groups sorted by no_tag — mirrors xml_loader.cpp:821-851.
+    // Emit groups sorted by no_tag — mirrors xml_loader.cpp's "Emit groups sorted by no_tag" block.
     std::ranges::sort(groups_, [](OrchestraGroupDef const& a, OrchestraGroupDef const& b) noexcept {
         return a.no_tag < b.no_tag;
     });

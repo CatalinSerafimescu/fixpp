@@ -4,7 +4,7 @@
 // gate-b/r1 FQ-1 (PR #181 round 1, Finding 1) — OOM hardening witness for
 // MessageView::membership_copy() (include/fixpp/wire/parser.hpp), now NOT
 // noexcept: `fixpp_msg_clone()`'s production caller
-// (src/capi/message_write.cpp:446, inside the function's single
+// (`fixpp_msg_clone()`'s src/capi/message_write.cpp definition, inside the function's single
 // `catch (...)` block) must translate a bad_alloc thrown during the
 // table_view deep-copy into FIXPP_ERR_CAPI_CONFIG_INVALID, NOT
 // std::terminate.
@@ -25,7 +25,7 @@
 // feedback_operator_new_witness_breaks_sanitizers) is armed to throw
 // bad_alloc on a specific call number.
 //
-// Calibration: source-verified (src/capi/message_write.cpp:370-476), the
+// Calibration: source-verified (`fixpp_msg_clone()`'s full body in src/capi/message_write.cpp), the
 // ENTIRE fixpp_msg_clone() body is one try/catch(...). After the dict-backed
 // branch's `clone->owned_tv_ = h->view->membership_copy();`, exactly ONE
 // further global-new call remains before the try block ends (the

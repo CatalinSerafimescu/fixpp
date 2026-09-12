@@ -16,7 +16,7 @@
 #include <asio/cancellation_signal.hpp>
 #include <asio/cancellation_state.hpp>
 #include <asio/cancellation_type.hpp>
-#include <asio/co_spawn.hpp>  // NOLINT(misc-include-cleaner) — asio::co_spawn used at session.cpp:916 (cancellable_dispatch fan-out); clang-tidy doesn't see the use through templates
+#include <asio/co_spawn.hpp>  // NOLINT(misc-include-cleaner) — asio::co_spawn used to spawn run_liveness_loop(); clang-tidy doesn't see the use through templates
 #include <asio/detached.hpp>
 #include <asio/error.hpp>  // asio::error::operation_aborted — F5 noexcept-throw absorption
 #include <asio/experimental/awaitable_operators.hpp>
@@ -47,7 +47,7 @@
 #include <fixpp/session/message_store.hpp>          // 008-message-store — store_ unique_ptr dtor
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
 #include <fixpp/session/retrieve_visitor.hpp>       // 013 FR-010/FR-012: resend store-walk visitor
-#include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6 line 243])
+#include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6]'s `SecurityProfile` bullet)
 #include <fixpp/session/sending_time.hpp>  // 005 US5: check_sending_time (T055)
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2: SeqnumManager (T031)
@@ -323,7 +323,7 @@ template <class CB>
     if (!feed_r || feed_r->empty()) return fixpp::core::expected_t<void>{};  // parse error — skip
 
     // 066-dict-backed-inbound-parse T006: dict-backed parse — inbound_tv_ is
-    // GUARANTEED (see hpp comment above the member + open() ~:929/:942): both
+    // GUARANTEED (see hpp comment above the member + Session::open()): both
     // callers (fire_to_admin_ and the receive loop) run only post-open.
     assert(inbound_tv_ != nullptr);
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{*inbound_tv_};
@@ -420,7 +420,7 @@ void Session::install_reconnected_transport(std::unique_ptr<fixpp::transport::Tr
                                             fixpp::transport::handshake_result hr) noexcept {
     // 1. Store live peer identity for arm (1-live) in the Logon-ack guard.
     //    The peer_id is moved out of hr (hr.peer_id is owning-by-value per
-    //    tls_transport.hpp:52-53). [data-model §E-2; contracts C2; FR-006]
+    //    handshake_result::peer_id is owning-by-value). [data-model §E-2; contracts C2; FR-006]
     //
     //    043 T013 (D-10 #2 MUST): for insecure_plain_tcp, live_peer_id_ MUST stay
     //    nullopt — the handshake was skipped so there is no peer identity. Passing a
@@ -488,7 +488,7 @@ std::shared_ptr<fixpp::transport::Transport> Session::live_transport_shared_() c
 
 // FQ-A (gate-b/r2): one serialized live write.
 // Acquires write_gate_ so at most one async_write is ever in-flight on the
-// live Transport (satisfies transport.hpp:47-50 ≤1-in-flight contract).
+// live Transport (satisfies transport.hpp's [2h §4.1] RC#3 in-flight exclusivity contract).
 // Holds a shared_ptr<Transport> keepalive across the co_await so the
 // transport cannot be freed mid-write (restores Q-1 keepalive).
 // Releases the gate on completion (success or error) via RAII.
@@ -499,7 +499,7 @@ std::shared_ptr<fixpp::transport::Transport> Session::live_transport_shared_() c
 //   - async_write returns !has_value() (any transport error).
 // If no live transport is present, returns ok (no-op; pre-live path).
 // NEVER holds the gate across any read (write-submit→complete window only).
-// [transport.hpp:47-50; FQ-A D-6; gate-b/r2]
+// [transport.hpp's [2h §4.1] RC#3 in-flight contract; FQ-A D-6; gate-b/r2]
 asio::awaitable<fixpp::core::expected_t<void>> Session::live_write_serialized_(
     std::span<const std::byte> frame) noexcept {
     auto live = live_transport_shared_();
@@ -549,17 +549,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::live_write_serialized_(
 // 015 T011 — Acceptor attach primitive.
 // Called by run_accept_loop STRICTLY-BEFORE the first on_inbound_frame (E-4).
 // Two actions (distinct from install_reconnected_transport):
-//   1. Store live peer identity for arm (1-live) at the acceptor gate (:1048).
+//   1. Store live peer identity for arm (1-live) at on_inbound_frame's NotConnected gate.
 //   2. Take ownership of the transport.
 // Does NOT rebind transport_send_ — live writes go through live_write_serialized_()
 // which reads live_transport_shared_() at call time (FQ-A gate-b/r2).
 // Does NOT transition the FSM — the acceptor stays NotConnected; the gate at
-// :1048 fires when on_inbound_frame processes the first Logon.
+// the acceptor's live-binding CompID-authorization gate (arm 1-live) fires when on_inbound_frame processes the first Logon.
 // [data-model §E-2; T011; FR-005/006/008; contracts C1 step 5; T-041; FQ-A]
 void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transport> transport,
                                         fixpp::transport::handshake_result hr) noexcept {
     // 1. Store live peer identity for the acceptor authorization gate (E-4).
-    //    Consumed one-shot by the gate at :1048 in on_inbound_frame.
+    //    Consumed one-shot by the acceptor's live-binding CompID-authorization gate (arm 1-live) in on_inbound_frame.
     //
     //    043 T013 (D-10 #3 MUST): for insecure_plain_tcp, live_peer_id_ MUST stay
     //    nullopt — the acceptor handshake was skipped; there is no peer identity.
@@ -575,7 +575,7 @@ void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transp
     // up accepted_transport_ via live_transport_shared_() at call time.
     accepted_transport_ = std::move(transport);
     // FSM NOT advanced — the NotConnected→LogonReceived transition fires at
-    // the acceptor gate (:1048) when the first inbound Logon is processed.
+    // on_inbound_frame's NotConnected gate when the first inbound Logon is processed.
 }
 
 // 024 T003 — shared durable-reset helper.
@@ -584,12 +584,12 @@ void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transp
 //   fatal  → a store failure propagates → caller can block reaching Active (C2.6
 //             knob-driven Logon path).
 //   logged → store failure swallowed (I-07 logged-then-proceed; matching the
-//             existing :1589-1592 inline pattern for the 013-only 141 path and
+//             existing store_is_persistent_-ternary disposition pattern for the 013-only 141 path and
 //             all teardown paths).
 // seqnum_mgr_.reset_to_one() failure always propagates regardless of disposition
 // (the live-counter reset is the primary gate; a store failure is I-07-able but
 // a seqnum-manager failure is not).
-// store_ is null-checked to match the existing :1589 null-guard pattern.
+// store_ is null-checked to match the null-guard pattern used below in this helper.
 // NOT wired to any trigger in this slice (T003 foundational only); wired in
 // T007 (initiator Logon), T008 (acceptor Logon), T014 (teardown).
 // [024 data-model §"Durable reset helper"; C2.6; research D2]
@@ -891,7 +891,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         // Session-fatal — initiator handshake never reached the wire; transition
         // to Disconnected to match the acceptor send-throw symmetry promised by
         // FR-009 + the "session-fatal → Disconnected" precedent set by the
-        // liveness loop (assign_outbound failure at session.cpp:~1466) and the
+        // liveness loop (assign_outbound failure inside run_liveness_loop) and the
         // Active send-throw witness in send_path_test.
         // [W3.4 / /simplify B-8 fix; FR-009 "symmetric to acceptor witness";
         //  [FIX-SL §4.3] initiator handshake failure semantics]
@@ -985,7 +985,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // table_view"): resolve the once-built inbound dict-membership table
     // HERE, immediately after the guard above — cfg_.dictionary is
     // guaranteed non-null at this point. Mirrors the strict validator's own
-    // owned table_view build below (~:1171-1173/now further down). Lands the
+    // owned table_view build below (validator_'s construction, further down). Lands the
     // invariant that inbound_tv_ is non-null whenever a successfully-opened
     // session later reaches parse_and_dispatch_ (both callers run post-open
     // only).
@@ -999,7 +999,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // producer) → build one here, exactly as before.
     //
     // Provenance (C4) is REJECTED FAIL-CLOSED here, before any observable
-    // mutation (state_ = lifecycle::open happens later, at :1266): a supplied
+    // mutation (state_ = lifecycle::open happens later, further down in open()): a supplied
     // snapshot whose source() is not cfg_.dictionary would silently drive
     // inbound parsing/validation from the wrong grammar (§2b of the design
     // doc). shared_dictionary_view() is the sole production alias-formation
@@ -1061,14 +1061,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     //    returns false, so the session silently routes to the FIX.4.x path and emits
     //    a FIXT.1.1 Logon with no 1137 field — a malformed wire frame. Enforcing here
     //    fails-closed before any observable state mutation.
-    //    [session_config.hpp:440; data-model.md E3; FR-001/FR-003]
+    //    [session_config.hpp's `default_appl_ver_id` field; data-model.md E3; FR-001/FR-003]
     //
     // #2 (P2-defensive): begin_string=="FIXT.1.1" with is_fixt()=true but
     //    app_version_registry_==nullptr → the acceptor serviceability gate at
-    //    inbound Logon (session.cpp:2195) is skipped. Structurally unreachable in
+    //    inbound Logon (the 033 T018 DefaultApplVerID(1137) gate) is skipped. Structurally unreachable in
     //    production (engine always passes non-null), but the test-ctor default is null.
     //    Closing here at open()-time is cheaper than carrying a documented fail-open.
-    //    [session_config.hpp:440; data-model.md E3; FR-004/FR-004a]
+    //    [session_config.hpp's `default_appl_ver_id` field; data-model.md E3; FR-004/FR-004a]
     //
     // #3 (042, production-reachable): begin_string=="FIXT.1.1" with a non-null
     //    registry that does NOT carry an application dictionary for the configured
@@ -1077,7 +1077,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     //    arm IS production-reachable: a real engine can hold a non-null registry that
     //    simply lacks the dict for this session's configured default. Closes L-033-5:
     //    without this guard, open() succeeds and every inbound FIXT Logon is silently
-    //    rejected (the inbound serviceability gate at session.cpp:2195 catches it at
+    //    rejected (the inbound 033 T018 DefaultApplVerID(1137) gate catches it at
     //    runtime but the operator has no config-load failure). The third disjunct is
     //    short-circuit-safe: *cfg_.default_appl_ver_id is only dereffed when #1 is
     //    false (has_value()=true), and ->get() is only called when #2 is false
@@ -1095,7 +1095,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // gate-b/r1 FQ-3 (finding #3): credential delimiter injection validation.
     //
     // username/password are copied verbatim into append_raw() in build_logon
-    // (admin_messages.cpp:171-180) with no SOH/= validation. A configured value
+    // (admin_messages.cpp's `build_logon`, 553/554 append_raw calls) with no SOH/= validation. A configured value
     // containing SOH (\x01) or '=' can inject arbitrary FIX fields. This is the
     // known feedback_delimiter_injection_verbatim_field_copy anti-pattern.
     //
@@ -1244,7 +1244,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // table_view (built once here, zero per-message heap — [const §VIII.5]/§XV.1).
     // Guard: cfg_.validate_inbound_messages && cfg_.dictionary non-null.
     // cfg_.dictionary is guaranteed non-null by this point: the null-dict check
-    // at line ~903 above returns invalid_session_config before reaching here.
+    // the null-dict guard above (T050 US5) returns invalid_session_config before reaching here.
     // A directly-constructed Session (bypassing register_session's T004 gate)
     // that sets validate_inbound_messages=true with a null dictionary is
     // therefore caught by open()'s own null-dict guard too. The additional
@@ -1292,11 +1292,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // drive_reconnect_attempt and invokes this lambda, which calls emit_event()
     // (private, defined in session.cpp) to push the event into recent_events_.
     // The lambda captures `this` by pointer; lifetime is guaranteed because the
-    // FSM is a value member of Session (reconnect_fsm_, session.hpp:517) and is
+    // FSM is a value member of Session (reconnect_fsm_'s member declaration) and is
     // destroyed before Session is — so `this` is always valid when the callback fires.
     // §XI.4: emit_event() is always called from the session strand (the FSM
     //   coroutine runs on the session executor set in Session::open()).
-    // Resolves the "DEFERRED to 014" comment at session.hpp:274.
+    // Resolves the "DEFERRED to 014" comment at `reload_credentials`'s doc comment.
     // [data-model §E-3; contracts C3; FR-009; §XI.4; T017/T018]
     reconnect_fsm_.set_emit_credentials_rotated(
         [this](fixpp::session::session_event_credentials_rotated ev) noexcept { emit_event(ev); });
@@ -1430,7 +1430,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // was cancelled BEFORE entry — the two fixes are complementary.) [Codex P1]
     co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
 
-    // ── T038: idempotent THREE-STATE model (I-10 / [2d §4.7]:830-832,863) ──
+    // ── T038: idempotent THREE-STATE model (I-10 / [2d §4.7]'s "Idempotency" note) ──
     // never-opened OR already-closed(drained) → session_already_closed
     // (slot 52); no side effects.
     if (state_ == lifecycle::never_opened || state_ == lifecycle::closed_drained) {
@@ -1439,7 +1439,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // already-closing (in-flight) → the SAME in-flight result, NO error, NO
     // side effects: await the first call's shared slot, then mirror it. (The
     // 2d-owned property the seam asserts; the scripted double drives the
-    // interleave deterministically — [2d §6.5]:1172.)
+    // interleave deterministically — [2d §6.5]'s "Idempotency" bullet.)
     if (state_ == lifecycle::closing) {
         auto shared = close_result_;
         while (!shared || !shared->has_value()) {
@@ -1627,7 +1627,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // cancel_and_drain() cancels any pending waiters (they get dispatch_aborted
     // from live_write_serialized_) and waits for the current holder (if any)
     // to unlock — satisfying the async_mutex destructor precondition.
-    // [FQ-A D-6 F1/F3; transport.hpp:47-50]
+    // [FQ-A D-6 F1/F3; transport.hpp's [2h §4.1] RC#3 in-flight contract]
     {
         auto wg_drain_r = co_await write_gate_.cancel_and_drain();
         (void)wg_drain_r;  // I-07 logged-then-proceed.
@@ -2023,7 +2023,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 //
 // 041-validation-gate-wiring T010 — overload that threads the mapped
 // SessionRejectReason (373) and an optional offending RefTagID (371) through
-// to the already-capable build_reject (admin_messages.cpp:613-700, UNCHANGED).
+// to the already-capable build_reject (admin_messages.cpp, UNCHANGED).
 //
 // validate() returns a wire_* error slot; the caller maps it via
 // wire_error_to_session_reject_reason() (T011) and passes the resulting reason
@@ -2233,7 +2233,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             if (!result) {
                 // Refusal — BeginString/CompID mismatch or not-Logon.
-                // Per matrix NotConnected row (data-model.md:19):
+                // Per matrix NotConnected row (005 data-model.md):
                 //   inbound Logon (refused)   → Disconnected (FR-006 / RC#3)
                 //   inbound non-Logon (first) → Disconnected
                 // No MsgType discrimination: every refusal on this row lands in
@@ -2352,7 +2352,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // [[feedback_admin_emit_bypasses_fire_to_admin]]: fire_to_admin_ before emit.
                 // [[feedback_fixed_buffer_build_failure_silent_success]]: ≥512B buffer;
                 // fail-closed. Guard is skipped when effective_clock_ is null (analogous to Q3
-                // guard at :2452).
+                // established-session SendingTime MaxLatency guard, T055/T056).
                 if (effective_clock_) {
                     // Determine if SendingTime is valid: present AND parseable AND in-range.
                     bool sending_time_ok = false;
@@ -2504,7 +2504,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
                 if (live_peer_id_.has_value() && is_mtls) {
                     // (1) Live acceptor path: use real handshake peer_id set by
-                    //     attach_accepted_transport. Mirrors the initiator arm at :1864.
+                    //     attach_accepted_transport. Mirrors the initiator's live-reconnect CompID-authorization arm.
                     const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
                     const std::string_view asserted_compid = cfg_.target_comp_id;
                     auto auth_r =
@@ -2523,7 +2523,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     }
                     // Authorization succeeded: emit peer_identity_bound event.
                     // cn EMPTY: live_peer_id_.reset() frees backing store (UAF guard,
-                    // matching the initiator arm pattern at :1900-1911).
+                    // matching the initiator arm's peer_identity_bound success path).
                     emit_event(fixpp::session::session_event_peer_identity_bound{
                         .cn = {},
                         .sans = {},
@@ -2649,15 +2649,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             // Valid Logon + in-seq: transition to LogonReceived, then emit
             // the acceptor's own Logon reply and transition to Active.
-            // [spec.md FR-005 §US2 AC2; data-model.md:19 matrix row; F1 Round-A drift fix]
+            // [spec.md FR-005 §US2 AC2; 005 data-model.md's `NotConnected` row; F1 Round-A drift fix]
             // RC#B (gate-b/r1-green): gate the LogonReceived→Active transition on
             // successful reply build AND emit. Build/emit failure → Disconnected.
-            // [009 spec.md FR-005; 005 data-model.md:19 matrix row "reply Logon, agreed
+            // [009 spec.md FR-005; 005 data-model.md's `NotConnected` row "reply Logon, agreed
             // HeartBtInt"]
             record_state_transition_(fsm_state::LogonReceived);
 
             // Emit the acceptor reply Logon using the same admin-builder path
-            // as the initiator's open() Logon. [spec.md FR-005 line 112]
+            // as the initiator's open() Logon. [009 spec.md FR-005]
             //
             // 031: the PRE-reply next-outbound (N_pre) the peer's 789 is compared against in
             // the honor below (RC#4 runs honor AFTER the reply consumed a seq). Set from
@@ -2734,7 +2734,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     peer_sent_reset;
                 const seqnum_t reply_seq = seqnum_mgr_.peek_outbound();
                 n_pre_outbound = reply_seq;  // 031: capture N_pre before the reply consumes it
-                // 027 T013 I-NEX-1, E-OBO: acceptor reply is built AFTER check_inbound (`:1571`)
+                // 027 T013 I-NEX-1, E-OBO: acceptor reply is built AFTER check_inbound (above in this handler)
                 // which already advanced next_inbound_. Advertise plain next_inbound_unsafe() —
                 // NO +1 (E-OBO). Value is cause-dependent under 141 reset (data-model Reset table).
                 // [contract C2, I-NEX-1, E-OBO]
@@ -3305,7 +3305,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // Row 8: redeliver opt-in — call fromApp with the original
                             // frame (which carries 43=Y, so fromApp sees it flagged possdup).
                             // Same invocation pattern as the in-sequence fromApp dispatch
-                            // at ~session.cpp:2332-2338. No seqnum advance (INV-1).
+                            // at the 019 T011 in-sequence fromApp dispatch. No seqnum advance (INV-1).
                             auto cb_r = parse_and_dispatch_(
                                 frame, kInboundParseArena, [&](auto& mv, auto& sid) {
                                     return engine_.application->fromApp(mv, sid);
@@ -3597,7 +3597,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 //     session_testreqid_mismatch(118) → Disconnected
                 //     [spec.md FR-006; data-model.md §E-1; T018-D]
                 // Inbound Heartbeat (35=0): per FIX a Heartbeat is NEVER answered
-                // (data-model.md:22 Active row → "advance counter (liveness)", no
+                // (005 data-model.md's `Active` row → "advance counter (liveness)", no
                 // emit). If it carries a TestReqID matching our outstanding
                 // TestRequest it answers that TR (clear the pending flag); a
                 // mismatched TestReqID is session_testreqid_mismatch(118) →
@@ -3653,7 +3653,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         }
                         auto assign_r = co_await seqnum_mgr_.assign_outbound();
                         if (!assign_r) {
-                            // Overflow or closed: session-fatal per data-model.md:30 E3.
+                            // Overflow or closed: session-fatal per 005 data-model.md's E3.
                             // Do NOT emit with unassigned seq — skip and disconnect.
                             record_state_transition_(fsm_state::Disconnected);
                             co_return std::unexpected(assign_r.error());
@@ -4229,7 +4229,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             }
 
             // 027 T015/T021 — initiator 789 honor (BEFORE Active transition).
-            // [gate-b/r1 FQ-1: mirror acceptor ordering at :1827-1831 — C6/C8/D-0]
+            // [gate-b/r1 FQ-1: mirror the acceptor's honor_peer_next_expected_ ordering — C6/C8/D-0]
             // On X>N or invalid-789, honor_peer_next_expected_() records Disconnected
             // and returns false/*h789==false; the session MUST NOT enter Active first.
             // On X<N (resend) or X==N (no-op), returns true and we proceed to Active.
@@ -4318,10 +4318,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 // [const §VIII.5]: no heap allocation on this path.
 //
 // gate-b/r1 FQ-1 (RC#1): the persistent store-retain fatal class, matching
-// store_then_emit's durability-classified gate (session.cpp ~:4804) rather
+// store_then_emit's durability-classified gate (is_persistent_retain_fatal) rather
 // than the closed 3-code set the pre-fix guard hard-coded. Range [56,65) is
 // EVERY store_* code except cancellation-class store_cancelled(65); sound
-// only because of the contiguity static_assert at error.hpp:775 (10 variants
+// only because of error.hpp's FR-021 store_* contiguity static_assert (10 variants
 // 56..65) — an inserted 11th store code would shift store_cancelled and this
 // range must move with it. [contracts/store-then-emit-disposition.md item 3]
 static bool is_persistent_retain_fatal(fixpp::core::error e) noexcept {
@@ -4446,7 +4446,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         // (2a) Payload must end with SOH so the last field is terminated before
         //      checksum append. A trailing-SOH-less payload would cause the checksum
         //      field to be appended without a field boundary. [RC#2: gate-b/r1]
-        // cppcheck-suppress containerOutOfBounds  // FP: pv.empty() guard at :3101 returns first
+        // cppcheck-suppress containerOutOfBounds  // FP: the pv.empty() guard above returns first
         if (pv.back() != '\x01') {
             co_return std::unexpected(error::app_payload_malformed);
         }
@@ -4997,7 +4997,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     }
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
-                        // Overflow or closed: session-fatal per data-model.md:30 E3.
+                        // Overflow or closed: session-fatal per 005 data-model.md §E3 (Sequence-number state).
                         // Liveness loop is fire-and-forget (no expected_t return):
                         // log by transitioning to Disconnected and stopping the loop.
                         record_state_transition_(fsm_state::Disconnected);
@@ -5094,7 +5094,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
             // transmitted in Step 2. Wire-safe: a skipped 35=A store is wire-
             // identical to a stored one (admin→GapFill on resend, session.cpp
             // resend store-walk). Production-UNREACHABLE — kMaxMaskableLogonBytes
-            // == build_logon's logon_buf/reply_buf capacity (session.cpp:755,2145)
+            // == build_logon's logon_buf (emit_initiator_logon_) / reply_buf (on_inbound_frame)
             // and build_logon already fails-closed (wire_frame_too_large) above
             // it; the T007 open()-time credential-length guard adds config-time
             // defense for both roles. This branch is reachable ONLY via the
@@ -5162,7 +5162,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         }
         if (fatal_err.has_value()) {
             // Fail closed BEFORE Step 2 transmit (D3): same shape as the existing
-            // transport-write-failure return below (:4820-4822) — no internal
+            // transport-write-failure return in `send_impl` (co_return emit_r) — no internal
             // record_state_transition_; the Disconnected transition is caller-owned.
             // [contracts/store-then-emit-disposition.md item 3;
             //  feedback_mirror_existing_failclosed_disposition]
@@ -5177,10 +5177,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     // shared_ptr<Transport> keepalive, and returns an error if the write fails.
     // This satisfies three invariants simultaneously:
     //   (a) serialization: write_gate_ ensures ≤1 async_write in-flight
-    //       (transport.hpp:47-50 ≤1-in-flight contract);
+    //       (transport.hpp's [2h §4.1] RC#3 in-flight contract);
     //   (b) error propagation: write error → dispatch_aborted → caller disconnects;
     //   (c) lifetime safety: shared_ptr keepalive prevents UAF (Q-1 fix).
-    // [transport.hpp:47-50; FQ-A D-6; realized-behavior.md C1/C2]
+    // [transport.hpp's [2h §4.1] RC#3 in-flight contract; FQ-A D-6; realized-behavior.md C1/C2]
     //
     // Pre-live (config-time transport_send_): sync std::function set from
     // cfg_.transport_send at open() — used by direct-Session tests.
@@ -5325,7 +5325,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
-            // Overflow or closed: session-fatal per data-model.md:30 E3.
+            // Overflow or closed: session-fatal per 005 data-model.md §E3 (Sequence-number state).
             // Abort logout, force-disconnect with propagated error.
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(assign_r.error());
@@ -5384,7 +5384,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
 
 // ── 027 T005 — replay_outbound_range_ ────────────────────────────────────────
 //
-// Extracted from the inline ResendRequest-reply walk (was session.cpp:2485-2635).
+// Extracted from the inline ResendRequest-reply walk that used to live in on_inbound_frame.
 // Replays [begin, requested_end] (or through-current when end_is_through_current)
 // using the same two-value end model as the original inline block.
 //
@@ -5443,7 +5443,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
             cfg_.target_comp_id, new_seqno, cfg_.begin_string, st52_sr.value);
         if (!gf) {
             // Build failure (buffer too small for configured CompIDs) — fail closed.
-            // Mirrors build_logon fail-closed precedent (session.cpp:811-821): an outbound
+            // Mirrors build_logon fail-closed precedent (emit_initiator_logon_'s reset_on_logon arm): an outbound
             // admin frame that cannot be constructed must NOT report success. Silent
             // success here would leave the peer's ResendRequest silently unfilled (data-loss).
             co_return false;
@@ -5562,7 +5562,7 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
     // live post-reply peek_outbound() — on the acceptor arm honor runs after the reply
     // Logon consumed a seq, so peek_outbound() here is N_post = N_pre+1 and an in-sync
     // peer (789 = N_pre) would mis-classify as behind-by-one. The resend RANGE below
-    // still reads the live peek_outbound() (INV-NEX-RANGE, :4591).
+    // still reads the live peek_outbound() (INV-NEX-RANGE, below in this function).
     const seqnum_t n789 = next_outbound_ref;
     if (x789 == 0) {
         // Present-but-invalid (parse→0: empty / non-digit / overflow).
@@ -5581,7 +5581,7 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
                 lo_st52.value);
             if (lo_result) {
                 // 019 FR-008/010: toAdmin before every engine-originated admin emit.
-                // [gate-b/r1 FQ-2: mirror fire_to_admin_ pattern at :2330-2335]
+                // [gate-b/r1 FQ-2: mirror the file-wide fire_to_admin_-before-assign_outbound admin-emit ordering]
                 if (!fire_to_admin_(*lo_result)) {
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -5624,7 +5624,7 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
                 cfg_.target_comp_id, text_sv, cfg_.begin_string, lo_st52.value);
             if (lo_result) {
                 // 019 FR-008/010: toAdmin before every engine-originated admin emit.
-                // [gate-b/r1 FQ-2: mirror fire_to_admin_ pattern at :2330-2335]
+                // [gate-b/r1 FQ-2: mirror the file-wide fire_to_admin_-before-assign_outbound admin-emit ordering]
                 if (!fire_to_admin_(*lo_result)) {
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -5644,7 +5644,7 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
         // 031 INV-NEX-RANGE: the resend range endpoint reads the LIVE peek_outbound()-1
         // (= N_pre on the acceptor arm), NOT n789-1 (= next_outbound_ref-1). Behaviorally
         // inert at this call site (end_is_through_current=true forces eff_end=our_last,
-        // :4419-4420), but written explicitly for contract-fidelity and robustness.
+        // per replay_outbound_range_'s eff_end formula), but written explicitly for contract-fidelity and robustness.
         auto rr789 = co_await replay_outbound_range_(x789, seqnum_mgr_.peek_outbound() - 1U,
                                                      /*end_is_through_current=*/true);
         if (!rr789) {

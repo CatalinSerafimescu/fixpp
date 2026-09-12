@@ -221,8 +221,8 @@ TEST(StoreSeqnumOutOfOrder, ConcurrentOutOfOrderAndValidStore) {
     fut_valid.get();
     fut_invalid.get();
 
-    // Teardown order matches test_store_shutdown_ordering.cpp canonical pattern
-    // (5 sites: lines 84-86, 131-135, 178-180, 257-259, 346-348): drain the pool
+    // Teardown order matches test_store_shutdown_ordering.cpp's canonical pattern
+    // (used at every teardown site in that file): drain the pool
     // FIRST, destroy the store SECOND.
     //
     // The previous ordering (reset → join) was wrong. `shared_ptr::reset()` does
@@ -232,7 +232,7 @@ TEST(StoreSeqnumOutOfOrder, ConcurrentOutOfOrderAndValidStore) {
     // shared_ptr are already destroyed, leaving main as the only strong-ref holder;
     // reset() then races with any pool worker still inside its scheduler iteration
     // completing a waiter_record::release_ref continuation
-    // (async_mutex.hpp:705). TSan caught this on PR #77 CI attempt 1 (run
+    // (that continuation). TSan caught this on PR #77 CI attempt 1 (run
     // 26237290806, job 77213987837) — local TSan timing happened to mask it.
     //
     // pool.stop() signals workers to exit their run loop; pool.join() waits for

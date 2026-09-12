@@ -708,7 +708,7 @@ class MalformedField131Test : public AllowPosDupStripTest,
 //  (c) "35=D\x014a=x\x0143=Y\x01"      — non-digit tag character
 //  (d) "35=D\x01\x0143=Y\x01"          — zero-length field (stray SOH = empty field)
 //
-// Note: do NOT add a "no final SOH" case — the 020 floor rejects it at session.cpp:2951
+// Note: do NOT add a "no final SOH" case — the 020 floor rejects it in send_impl
 //       (that measures the floor, not the 022 scanner).
 static const MalformedCase kMalformedCases[] = {
     {"MissingEquals",
@@ -936,7 +936,7 @@ TEST_F(AllowPosDupStripTest, W7_ResendIndependence_ReplayAlwaysAdds43And122) {
         if (frame_has_boundary_tag(f, 43)) {
             found_replayed = true;
             EXPECT_EQ(extract_field(std::span<const std::byte>(f), 43), "Y")
-                << "W7: replayed frame must carry 43=Y; [C3; FR-007; build_replay_frame:1220]";
+                << "W7: replayed frame must carry 43=Y; [C3; FR-007; build_replay_frame]";
             EXPECT_TRUE(frame_has_boundary_tag(f, 122))
                 << "W7: replayed frame must carry 122= (OrigSendingTime); [C3; FR-007]";
             break;

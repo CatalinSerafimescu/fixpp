@@ -1,6 +1,6 @@
 # neg_store_kind_not_string.toml
 # store.kind is an integer (not a string) — triggers missing_required at "store.kind"
-# (lines 133-138 selector_resolver.cpp — the else branch when kind is not a string).
+# (resolve_engine_store's not-a-string arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

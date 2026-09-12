@@ -35,7 +35,7 @@
 //
 // Shape follows the repo's established sanitizer-detection idiom (two separate
 // #if blocks, not an #elif chain) — see tests/alloc_guard/
-// test_validate_gate_alloc_guard.cpp:95-105. An #elif chain would skip the
+// test_validate_gate_alloc_guard.cpp's FIXPP_SANITIZER_REPLACES_NEW detection. An #elif chain would skip the
 // __SANITIZE_ADDRESS__ arm on any compiler that defines __has_feature without
 // reporting address_sanitizer through it.
 //
@@ -96,7 +96,7 @@ InteropEngineFixture::InteropEngineFixture(fixpp::core::EngineConfig cfg,
 InteropEngineFixture::~InteropEngineFixture() {
     // (#292) Drive the fixture's own stop() to completion if it has not already
     // completed. Deliberately NOT gated on engine_->stopped(): that flag is set
-    // at step 1 of stop()'s teardown (engine.cpp:1196), so it reports true while
+    // at step 1 of Engine::stop()'s teardown (stopped_=true), so it reports true while
     // steps 2-5 are still suspended. Gating on it would take the "safe" branch
     // for exactly the partially-torn-down case that is least safe.
     // NESTED guards, and the nesting is the point (gate-b/r2 P1-1).

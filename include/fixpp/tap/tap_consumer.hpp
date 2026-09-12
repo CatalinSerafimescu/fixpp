@@ -6,7 +6,7 @@
 // constructable "no tap" sentinel. SessionConfig holds a value-typed member
 // `fixpp::tap::TapConsumer tap_consumer;`; the default-constructed value means
 // "no tap consumer installed" (a null pointer alternative is NOT the contract
-// shape — [arch §5.6] / contracts/session_config.hpp:76).
+// shape — [arch §5.6] / contracts/session_config.hpp's `tap_consumer` field).
 //
 // Pattern: same "minimal real skeleton, downstream extends" as D-15
 // (MessageStoreFactory / ControlPlaneFactory) and the SecurityProfile stub in

@@ -666,7 +666,7 @@ add_threading_test(session_test_request_id_cross_session_race
 # Guard-3 Logout (T023). FIXPP_TEST_HOOKS needed for US3 BMR cells (T027/T028):
 # seqnum_mgr_test_access().peek_outbound() witnesses no outbound seqnum consumed on veto.
 # Cells: EmitSessionReject_FromAdminVeto (T004) + Logout_Guard3LogonAckSendingTime (T013).
-# Anchors: spec.md FR-001/FR-002; plan.md ARM-1; session.cpp:331/1728/3368.
+# Anchors: spec.md FR-001/FR-002; plan.md ARM-1; Session's fromAdmin-veto emit_session_reject_ path and Guard (3) SendingTime check.
 add_threading_test(session_admin_emit_toadmin_coverage test_admin_emit_toadmin_coverage.cpp)
 # FIXPP_TEST_HOOKS exposes seqnum_mgr_test_access() for the T027/T028 BMR outbound-seqnum
 # discriminating witness (INV-COV-5 parity; C2: assign_outbound only on !suppressed).
@@ -1271,7 +1271,7 @@ set_tests_properties(engine_lifecycle PROPERTIES
 # ── gate-b/r1 FQ-1: live outbound serialization + error propagation ──────────
 # Proves (1a) write-error propagates through store_then_emit → FSM → Disconnected
 # and (1b) at most one async_write is in-flight per Transport (≤1-in-flight
-# contract, transport.hpp:47-50). Uses custom transport doubles (no live TLS).
+# contract, transport.hpp). Uses custom transport doubles (no live TLS).
 # CTest filter: ctest -R 'live_outbound_serialized'
 
 # ── 016-interop-harness T007/T008 — reconnect-policy / down-peer stop() witness ──
@@ -1795,7 +1795,7 @@ set_tests_properties(session_reset_on_lifecycle PROPERTIES
 #
 # Witnesses V-1..V-12 (per-session strand binding, control-plane confinement,
 # snapshot readers, bounded-handle).  Mirrors business_messages_roundtrip_test
-# (:1326-1350) in link requirements and TLS fixture wiring.
+# in link requirements and TLS fixture wiring.
 add_executable(engine_session_strand_test
   test_engine_session_strand.cpp
 )
@@ -2310,8 +2310,8 @@ set_tests_properties(session_plaintext_authz PROPERTIES
 
 # ── 043-plaintext-tcp-transport — /speckit-verify coverage witness ───────────
 # Plaintext RECONNECT branch: drive_reconnect_attempt() skips the TLS handshake
-# (reconnect_fsm.cpp:265-271) and installs an empty handshake_result{}, leaving
-# live_peer_id_==nullopt (session.cpp:419 guard / D-10 #2 MUST). FSM-level + mock
+# (reconnect_fsm.cpp) and installs an empty handshake_result{}, leaving
+# live_peer_id_==nullopt (install_reconnected_transport's D-10 #2 guard). FSM-level + mock
 # factory → deterministic, no live socket. Closes the §IX.1 new-line gap on the
 # plaintext reconnect path (unreachable from the single-shot roundtrip witness).
 # CTest filter: ctest -R 'session_plaintext_reconnect'
@@ -2916,7 +2916,7 @@ set_tests_properties(test_066_group_scaffold_smoke PROPERTIES
 
 # ── 066-dict-backed-inbound-parse T004 — RED-first group-membership witness ──
 # (C++ real dispatch). MUST be observed RED against the current dict-free
-# parse (src/session/session.cpp:316) — T006 flips the parse site later.
+# parse (Session::parse_and_dispatch_) — T006 flips the parse site later.
 # See the file header comment for the two discriminating assertions.
 add_executable(test_066_group_membership_red
   test_066_group_membership_red_test.cpp
@@ -2943,7 +2943,7 @@ set_tests_properties(test_066_group_membership_red PROPERTIES
 # (C++ real dispatch). Querying scalar tag Symbol(55) as a group must yield
 # an EMPTY group_slices() span (TYPE_MISMATCH at the C-ABI layer), never a
 # spurious instance. GREEN on the current dict-backed parse; RED under the
-# T006 mutation (session.cpp:316 reverted to the default dict-free Parser).
+# T006 mutation (parse_and_dispatch_ reverted to the default dict-free Parser).
 add_executable(test_066_scalar_as_group
   test_066_scalar_as_group_test.cpp
 )
@@ -3105,7 +3105,7 @@ set_tests_properties(test_082_group_required_member_validation PROPERTIES
 # anonymous namespace to enable direct unit testing — 088 T008). The
 # ${CMAKE_SOURCE_DIR}/src include path is added so
 # "session/read_first_frame_bounded.hpp" resolves correctly (include-path
-# shape copied from the :712-728 scan_first_frame_ids block, not its wiring —
+# shape copied from session_scan_first_frame_ids_overflow's include-path block, not its wiring —
 # this function needs wire::Framer, pmr_carry_buffer, the Transport vtable and
 # asio::steady_timer, so it still links fixpp_session in full via
 # add_threading_test; research.md D-5 withdraws the "keeps witness binaries
@@ -3113,7 +3113,7 @@ set_tests_properties(test_082_group_required_member_validation PROPERTIES
 # FIXPP_ALLOW_MOCK_TRANSPORT is required: include/fixpp/transport/test/
 # mock_transport.hpp is a hard #error without it.
 # TIMEOUT is set explicitly rather than inherited from add_threading_test's
-# default 120 (:92): this target hosts B4 and B5, whose MUTANTS hang rather
+# default 120: this target hosts B4 and B5, whose MUTANTS hang rather
 # than fail (research.md D-6.11's room==0 "loops without bound" case) — same
 # reasoning D-5's table gives for the sibling session_first_frame_stop (T2b)
 # target: a target whose regression mode is a hang may not inherit a default

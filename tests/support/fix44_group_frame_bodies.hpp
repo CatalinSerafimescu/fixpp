@@ -7,10 +7,10 @@
 // harness (tests/capi/).
 //
 // Group: NoLegs(555) — dict-registered for ExecutionReport(35=8) via the
-// `InstrmtLegExecGrp` component (dictionaries/FIX44.xml:251, expanded at
-// dictionaries/FIX44.xml:2830-2845); members used here are LegSymbol(600),
+// `InstrmtLegExecGrp` component (dictionaries/FIX44.xml's ExecutionReport declaration, expanded at
+// dictionaries/FIX44.xml's InstrmtLegExecGrp component); members used here are LegSymbol(600),
 // LegSide(624), LegQty(687) from the `InstrumentLeg` component
-// (dictionaries/FIX44.xml:2436+). See tests/support/fix44_dictionary.hpp for
+// (dictionaries/FIX44.xml's InstrumentLeg component). See tests/support/fix44_dictionary.hpp for
 // the full citation.
 //
 // Two body shapes (spec.md US1 Independent Test; contracts/inbound-parse.md

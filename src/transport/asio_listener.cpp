@@ -7,7 +7,7 @@
 // Design anchors:
 //   [2h §4.6]      — Listener abstract surface (1 pure-virtual).
 //   [2h §6.4.1]   — see the anchor list in asio_listener.hpp.
-//   [2h §6.6]:1191 — transport_accept_cancelled error mapping.
+//   [2h §6.6]'s `transport_accept_cancelled` row — error mapping.
 //   [2a §4.2]     — trap_throw envelope for engine-bootstrap throws.
 //   data-model E-10 — concrete asio_listener field set.
 //   research.md D-17 — co_spawn default cancellation is terminal-only;
@@ -139,7 +139,7 @@ asio_listener::asio_listener(asio::any_io_executor exec, Config cfg)
 // Cancellation: D-17 reset to enable_total_cancellation lets the engine's
 // total-cancel signal flow through `acceptor_.async_accept`; ASIO surfaces
 // `operation_aborted` on the accepted socket result, mapped here to
-// `transport_accept_cancelled` per [2h §6.6]:1191.
+// `transport_accept_cancelled` per [2h §6.6]'s `transport_accept_cancelled` row.
 // ─────────────────────────────────────────────────────────────────────────────
 asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::async_accept() {
     using E = core::error;
@@ -213,8 +213,8 @@ asio::awaitable<core::expected_t<std::unique_ptr<Transport>>> asio_listener::asy
         accept_factory_ = std::shared_ptr<asio_tls_transport_factory>{
             static_cast<asio_tls_transport_factory*>(made->release())};
     }
-    // cppcheck-suppress accessMoved  // FP: the plaintext branch above (:165-183)
-    // always co_returns, so the std::move(accepted_socket) at :175 and this one are
+    // cppcheck-suppress accessMoved  // FP: async_accept()'s plaintext branch above
+    // always co_returns, so its `accept_factory_plain_->make_accepted(std::move(...))` and this one are
     // in mutually-exclusive paths — accepted_socket is moved at most once. cppcheck
     // does not model co_return as a terminator. [043 T015]
     auto minted = accept_factory_->make_accepted(std::move(accepted_socket), nullptr);

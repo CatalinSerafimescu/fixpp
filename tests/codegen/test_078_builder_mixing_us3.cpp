@@ -66,7 +66,7 @@
 //       it ALSO resolves correctly when co-present with a force-inlined
 //       sibling message, i.e. under real mixing, not in isolation).
 //
-// Anchors: specs/078-precompiled-builder-libs/spec.md US3 (lines 80-92),
+// Anchors: specs/078-precompiled-builder-libs/spec.md US3,
 // FR-006/FR-007, SC-004; quickstart.md Scenario 4b;
 // tests/codegen/test_078_odr_sc003_probe.cpp (mock ODR precedent);
 // tests/session/test_078_builder_roundtrip_linked_us1.cpp (literal-input

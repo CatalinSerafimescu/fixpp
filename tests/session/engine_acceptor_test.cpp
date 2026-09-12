@@ -627,9 +627,9 @@ TEST(EngineAcceptorTest, CoalescedFirstFrameSurplusDelivered) {
 // is ever delivered to the gate. Contrast OnList, which reaches Active/LogonReceived.
 
 // ── FR-005 no-match: lookup() must be nullptr after an unmatched Logon ───────
-// (FQ-2 / gate-b/r1: rewritten to assert the engine.hpp:200-204 contract)
+// (FQ-2 / gate-b/r1: rewritten to assert the engine.hpp lookup() contract)
 //
-// Contract (engine.hpp:200-204; realized-behavior.md C1 step 6):
+// Contract (engine.hpp's lookup() doc; realized-behavior.md C1 step 6):
 //   "Returns nullptr if id is … registered but not yet established (e.g.
 //    acceptor with no peer yet)" AND "No match → … create NO session".
 // So after an unmatched Logon is rejected:
@@ -708,7 +708,7 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
     // lookup() must be nullptr (lazy/match-gated construction). [Gate A New-3]
     EXPECT_EQ(engine.lookup(acc_id), nullptr)
         << "lookup() must be nullptr for a registered acceptor with no peer yet "
-        << "(lazy + match-gated construction; engine.hpp:200-204)";
+        << "(lazy + match-gated construction; engine.hpp's lookup() doc)";
 
     fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
                                                        ioc.get_executor()};
@@ -725,7 +725,7 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
     // Contract witness #2 (FQ-2 / gate-b/r1): after the unmatched Logon is
     // rejected, lookup(acc_id) must STILL be nullptr — no session was
     // constructed for a no-match connection per data-model C1 step 6 and
-    // realized-behavior.md C7. [engine.hpp:200-204]
+    // realized-behavior.md C7. [engine.hpp's lookup() doc]
     EXPECT_EQ(engine.lookup(acc_id), nullptr)
         << "FR-005 / C7: no-match → no Session constructed. lookup(acc_id) must "
         << "be nullptr after an unmatched Logon is rejected. "

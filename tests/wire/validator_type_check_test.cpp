@@ -261,7 +261,7 @@ TEST(ValidatorTypeCheck, DataFieldAccepted) {
 
 // ── validate_field(): enum domain checking (075 FR-021 artifact #2, T024) ────
 // FR-020: enum_valid() is now REAL (075 T017); validate_field() calls it as
-// its FIRST statement (validator.hpp:325), so an out-of-domain value is now
+// its FIRST statement, so an out-of-domain value is now
 // genuinely rejected. Previously (Phase-1 stub) this test asserted the
 // OPPOSITE — accept — per FR-012 that re-baseline is called out explicitly
 // here, not silently.
@@ -352,10 +352,10 @@ TEST(ValidatorTypeCheck, ValidateFieldEnumEmptyValueAccepted) {
 //
 // ⚠️ Mutation (T015/C3-1 discriminator): build the enum-domain table only
 // from message_fields() (instead of walking the dictionary's OWN enum store,
-// dictionary.cpp:503-511) ⇒ store-only tags stay unconstrained ⇒ this test's
+// `Dictionary::as_table_view()`'s `enum_runs_` walk) ⇒ store-only tags stay unconstrained ⇒ this test's
 // reject assertion MUST go RED. This is the ONLY witness in the bundle with
 // power against that regression — validate_field() calls enum_valid() as its
-// FIRST statement with NO field_valid_for precheck (validator.hpp:325-330),
+// FIRST statement with NO field_valid_for precheck,
 // so a reachability-built table would silently ACCEPT here.
 Dictionary load_appl_ver_id_store_only_dict(std::pmr::memory_resource* mr) {
     constexpr std::string_view kXml =
@@ -829,7 +829,7 @@ TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportOmitsOptionalGroupAccepted) 
 // header fields BeginString(8)/BodyLength(9)/MsgSeqNum(34)/SenderCompID(49)/
 // SendingTime(52)/TargetCompID(56)/CheckSum(10) live ONLY in FIXT11.xml).
 // `XmlLoader::expand_field_list` walks `header_node_` unconditionally
-// (xml_loader.cpp:850) — with zero children, ZERO header tags are ever
+// (its own null-guarded call site) — with zero children, ZERO header tags are ever
 // registered `valid_` for ANY FIX50SPx message type. `dictionary_driven_-
 // validator::validate()` Step 1(a) then rejects the very first framing
 // field (tag 8, itself guaranteed present by the Framer) with

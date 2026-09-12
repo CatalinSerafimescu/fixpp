@@ -17,7 +17,7 @@
 // enumerate the 33 OFFICIAL messages for any tag appearing at >=2 "levels"
 // (top-level == enclosing group_no_tag 0, or a group's no_tag) within ONE
 // message that xml_loader.cpp's append_run tag-sort+tag-dedup
-// (xml_loader.cpp:695-702) could collapse to a single surviving FieldRef.
+// (`append_run` itself) could collapse to a single surviving FieldRef.
 // This census is INDEPENDENT of MessageIR.group_order (its own small raw-XML
 // declaration walk over group_no_tag context only, not full member order) —
 // deliberately not reusing the group_order walk, so a bug in one does not
@@ -188,7 +188,7 @@ TEST(Group067GroupOrder, MassQuoteNestedNoQuoteEntriesDelimiterIs299) {
 // SCOPE: this census walks each message's BODY only (rooted at the
 // <message> node, same root as MessageIR.group_order/T008), NOT the merged
 // header+body+trailer run xml_loader.cpp's append_run actually dedups
-// (xml_loader.cpp:736-746 concatenates header, message, trailer before the
+// (`append_run`'s own call site concatenates header, message, trailer before the
 // single sort+unique pass). A tag shared between the STANDARD header/trailer
 // and a message body/group is out of this census's detection range. Risk is
 // low in practice (header/trailer fields are framing tags, already excluded

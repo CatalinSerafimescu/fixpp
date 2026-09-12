@@ -782,7 +782,7 @@ else()
 endif()
 
 # ── 078-precompiled-builder-libs Gate B RC#3 [US3]: builder-side SAFE-path
-# counter-test for the inline-XOR-link contract (spec.md Edge Case ~line 128;
+# counter-test for the inline-XOR-link contract (spec.md's "One-definition-rule at the link/inline boundary" Edge Case;
 # quickstart.md Scenario 4d). A 2-TU program that force-inlines
 # build_NewOrderSingle in BOTH TUs -- never link-resolved in this binary, so
 # it deliberately does NOT link fixpp::builders::v44.
@@ -826,7 +826,7 @@ set_tests_properties(test078_validator_mixing_us3 PROPERTIES
   LABELS "codegen;078;us3;validator-mixing")
 
 # ── 078-precompiled-builder-libs Gate B RC#3 [US3]: validator-side SAFE-path
-# counter-test for the inline-XOR-link contract (spec.md Edge Case ~line 128;
+# counter-test for the inline-XOR-link contract (spec.md's "One-definition-rule at the link/inline boundary" Edge Case;
 # quickstart.md Scenario 4d). A 2-TU program that force-inlines
 # validate_Email in BOTH TUs -- never link-resolved in this binary, so it
 # deliberately does NOT link fixpp::validators::v44.

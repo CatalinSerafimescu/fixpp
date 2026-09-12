@@ -12,9 +12,9 @@
 //      build_test_request / build_reject with undersized `out` spans.
 //   B. Malformed-field parser fallback in interpret_logon and
 //      Session::on_inbound_frame: non-digit tag char + tag-without-equals.
-//   C. Logon-ack with msg_seq_num=0 → Disconnected (session.cpp:896-899).
+//   C. Logon-ack with msg_seq_num=0 → Disconnected (Guard (4)'s LogonSent-row seq==0 check).
 //   D. cancel_sleeps() mid-Logout-graceful-sleep → system_error catch
-//      absorbing the operation_aborted exception (session.cpp:1187).
+//      absorbing the operation_aborted exception (run_logout_phase1's wake-early catch).
 #include <gtest/gtest.h>
 
 #include <array>
@@ -235,7 +235,7 @@ protected:
 };
 
 // ── Category B-2: session.cpp inbound parser skip-malformed-field ─────────────
-// Exercises session.cpp:405-422 (tag_ok=false branch + skip-to-SOH path).
+// Exercises scan_frame_header's tag_ok=false branch + skip-to-SOH path.
 
 TEST_F(AdversarialSessionTest, InboundFrameMalformedTagCharSkipped) {
     Session s(engine, make_cfg());
@@ -267,10 +267,10 @@ TEST_F(AdversarialSessionTest, InboundFrameTagWithoutEqualsSkipped) {
 }
 
 // ── Category C: Logon-ack with msg_seq_num=0 → Disconnected ───────────────────
-// Exercises session.cpp:896-899 — `if (seq == 0) { fsm_state_ = Disconnected; }`
+// Exercises Guard (4)'s LogonSent-row — `if (seq == 0) { fsm_state_ = Disconnected; }`
 
 // ── Category C-bis: Logon-ack with out-of-sequence seqnum → Disconnected ──────
-// Exercises session.cpp:904-906 — `if (!chk) { fsm_state_ = Disconnected; }`
+// Exercises Guard (4)'s LogonSent-row — `if (!chk) { fsm_state_ = Disconnected; }`
 // (seqnum_mgr_.check_inbound returns error for too-high or too-low seqnums).
 
 TEST_F(AdversarialSessionTest, LogonAckOutOfSequenceForcesDisconnected) {
@@ -292,7 +292,7 @@ TEST_F(AdversarialSessionTest, LogonAckOutOfSequenceForcesDisconnected) {
 }
 
 // ── Category C-ter: session_arena fallback when both overrides are null ──────
-// Exercises session.cpp:71 — `return std::pmr::get_default_resource();` is the
+// Exercises resolve_session_arena's `return std::pmr::get_default_resource();` — the
 // third-fallback rung of resolve_session_arena's never-null resolution chain.
 
 TEST(AdversarialSessionArena, ResolveArenaThirdFallbackToDefaultResource) {
@@ -325,7 +325,7 @@ TEST_F(AdversarialSessionTest, LogonAckSeqZeroForcesDisconnected) {
 }
 
 // ── Category D: cancel_sleeps() mid-Logout → system_error catch ──────────────
-// Exercises session.cpp:1187 — catch (const std::system_error&) absorbing
+// Exercises run_logout_phase1's catch (const std::system_error&) absorbing
 // operation_aborted thrown by sleep_until when cancel_sleeps fires during
 // the 2-second graceful-close timeout window.
 
@@ -356,7 +356,7 @@ TEST_F(AdversarialSessionTest, LogoutGracefulCancelMidSleep) {
     ioc.restart();
 
     // Cancel all sleeps → sleep_until resumes with system_error(operation_aborted),
-    // which the Logout coroutine's catch block absorbs (session.cpp:1187).
+    // which the Logout coroutine's catch block absorbs (run_logout_phase1's wake-early catch).
     clock->cancel_sleeps();
     if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 100ms,
                                                     "LogoutGracefulCancelMidSleep/close")) {

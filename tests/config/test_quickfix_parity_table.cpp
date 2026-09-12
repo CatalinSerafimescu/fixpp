@@ -228,27 +228,27 @@ struct ParityRow {
 };
 
 // ── The parity table ──────────────────────────────────────────────────────────
-// Source for 044 key spellings: src/config/scalar_mappers.cpp (lines 231–679)
-// and src/config/selector_resolver.cpp (lines 51–652).
+// Source for 044 key spellings: src/config/scalar_mappers.cpp
+// and src/config/selector_resolver.cpp.
 // clang-format off
 const std::vector<ParityRow> kParity = {
     // ── Session identity ──────────────────────────────────────────────────────
     { "BeginString",     Disposition::Mapped,      "begin_string",
-      "scalar_mappers.cpp:239 — SessionConfig::begin_string" },
+      "scalar_mappers.cpp, map_scalars — SessionConfig::begin_string" },
     { "SenderCompID",    Disposition::Mapped,      "sender_comp_id",
-      "scalar_mappers.cpp:231 — SessionConfig::sender_comp_id" },
+      "scalar_mappers.cpp, map_scalars — SessionConfig::sender_comp_id" },
     { "TargetCompID",    Disposition::Mapped,      "target_comp_id",
-      "scalar_mappers.cpp:235 — SessionConfig::target_comp_id" },
+      "scalar_mappers.cpp, map_scalars — SessionConfig::target_comp_id" },
     { "SessionQualifier",Disposition::Gap,         "",
       "No 044 equivalent; fixpp sessions are uniquely identified by "
       "sender_comp_id + target_comp_id + begin_string. The QF qualifier "
       "disambiguates multiple sessions to the same counterparty — a use case "
       "not yet addressed in the v1.0 session model." },
     { "DefaultApplVerID",Disposition::Mapped,      "default_appl_ver_id",
-      "scalar_mappers.cpp:561 — SessionConfig::default_appl_ver_id "
+      "scalar_mappers.cpp, map_scalars — SessionConfig::default_appl_ver_id "
       "(required for FIXT.1.1; omitted for FIX 4.x)" },
     { "ConnectionType",  Disposition::Mapped,      "role",
-      "scalar_mappers.cpp:281 — SessionConfig::role "
+      "scalar_mappers.cpp, map_scalars — SessionConfig::role "
       "(\"initiator\"/\"acceptor\" ↔ QF ConnectionType)" },
 
     // ── Protocol flags ────────────────────────────────────────────────────────
@@ -257,19 +257,19 @@ const std::vector<ParityRow> kParity = {
       "present; there is no separate enable/disable toggle — 'dictionary' "
       "present ↔ enabled, absent ↔ disabled." },
     { "SendResetSeqNumFlag", Disposition::Mapped,  "reset_seqnum_policy",
-      "scalar_mappers.cpp:475 — reset_seqnum_policy enum controls the "
+      "scalar_mappers.cpp, map_scalars — reset_seqnum_policy enum controls the "
       "ResetSeqNumFlag (141) handshake strategy; 'bilateral_strict' / "
       "'bilateral_lenient' / 'unilateral' span the QF yes/no space." },
     { "SendRedundantResendRequests", Disposition::Gap, "",
       "No 044 equivalent. QF allows suppressing duplicate ResendRequest re-sends "
       "when the peer has not advanced. fixpp does not expose this knob in v1.0." },
     { "SendNextExpectedMsgSeqNum", Disposition::Mapped, "enable_next_expected_msg_seq_num",
-      "scalar_mappers.cpp:457 — SessionConfig::enable_next_expected_msg_seq_num; "
+      "scalar_mappers.cpp, map_scalars — SessionConfig::enable_next_expected_msg_seq_num; "
       "controls 789/NextExpectedMsgSeqNum in Logon (FIX 5.0+)" },
 
     // ── Dictionary paths ──────────────────────────────────────────────────────
     { "DataDictionary",           Disposition::Mapped, "dictionary",
-      "selector_resolver.cpp:298 — 'dictionary' selector, kind=\"path\"; "
+      "selector_resolver.cpp, resolve_engine_dictionary — 'dictionary' selector, kind=\"path\"; "
       "the DataDictionary= path maps to [dictionary] kind=\"path\" path=\"…\". "
       "By-version resolution is deferred (OQ-1 option A)." },
     { "TransportDataDictionary",  Disposition::OutOfScope_DdValidationFlags, "",
@@ -308,19 +308,19 @@ const std::vector<ParityRow> kParity = {
 
     // ── Validation ────────────────────────────────────────────────────────────
     { "CheckCompID",      Disposition::Mapped,     "check_comp_id",
-      "scalar_mappers.cpp:460 — SessionConfig::check_comp_id" },
+      "scalar_mappers.cpp, map_scalars — SessionConfig::check_comp_id" },
     { "CheckLatency",     Disposition::Gap,        "",
       "No 044 equivalent for the boolean enable/disable of latency checking; "
       "fixpp uses 'sending_time_threshold' (a Duration) which when set implicitly "
       "enables the check. The QF boolean has no direct mapping." },
     { "MaxLatency",       Disposition::Mapped,     "sending_time_threshold",
-      "scalar_mappers.cpp:411 — SessionConfig::sending_time_threshold "
+      "scalar_mappers.cpp, map_scalars — SessionConfig::sending_time_threshold "
       "(a Duration; when set, enables the SendingTime latency guard). "
       "NOTE: the semantics differ slightly — QF MaxLatency is an integer "
       "(seconds); 044 sending_time_threshold is a duration string (e.g. \"120s\"). "
       "No loss of behavior; the guard fires equivalently." },
     { "HeartBtInt",       Disposition::Mapped,     "heartbeat_interval",
-      "scalar_mappers.cpp:390 — SessionConfig::heartbeat_interval" },
+      "scalar_mappers.cpp, map_scalars — SessionConfig::heartbeat_interval" },
 
     // ── Socket / network ─────────────────────────────────────────────────────
     { "SocketAcceptPort",     Disposition::OutOfScope_ServerInfra, "",
@@ -329,10 +329,10 @@ const std::vector<ParityRow> kParity = {
     { "SocketReuseAddress",   Disposition::OutOfScope_SocketTuning, "",
       "OS socket option: SO_REUSEADDR. Engine/infra knob; no per-session TOML." },
     { "SocketConnectHost",    Disposition::Mapped,  "transport.host",
-      "selector_resolver.cpp:628 — reconnect_endpoint.host; "
+      "scalar_mappers.cpp, map_structured_members — reconnect_endpoint.host; "
       "maps to 'transport.host' in the [transport] selector table." },
     { "SocketConnectPort",    Disposition::Mapped,  "transport.port",
-      "selector_resolver.cpp:628 — reconnect_endpoint.port; "
+      "scalar_mappers.cpp, map_structured_members — reconnect_endpoint.port; "
       "maps to 'transport.port' in the [transport] selector table." },
     { "SocketConnectSourceHost", Disposition::OutOfScope_SocketTuning, "",
       "OS-level bind-before-connect source address; no per-session TOML." },
@@ -379,13 +379,13 @@ const std::vector<ParityRow> kParity = {
       "No exact 044 equivalent; fixpp drives Logon retry/timeout via the "
       "reconnect_policy timers, not a named LogonTimeout scalar." },
     { "LogoutTimeout",    Disposition::Mapped, "logout_disconnect_timeout_ms",
-      "scalar_mappers.cpp:423 — SessionConfig::logout_disconnect_timeout_ms "
+      "scalar_mappers.cpp, map_scalars — SessionConfig::logout_disconnect_timeout_ms "
       "(integer ms; QF LogoutTimeout is integer seconds — different units, "
       "same semantic: how long to wait for peer Logout ACK before hard-close)." },
 
     // ── Store backends ────────────────────────────────────────────────────────
     { "FileStorePath",                    Disposition::Mapped, "store.directory",
-      "selector_resolver.cpp:165 — 'store' selector, kind=\"file\"; "
+      "selector_resolver.cpp, resolve_engine_store — 'store' selector, kind=\"file\"; "
       "FileStorePath= maps to [store] kind=\"file\" directory=\"…\"." },
     { "MySQLStoreUseConnectionPool",      Disposition::OutOfScope_DbStoreBackend, "",
       "MySQL store backend; 044 step-1 stores: {file, memory} only. "
@@ -482,21 +482,21 @@ const std::vector<ParityRow> kParity = {
 
     // ── Reset / refresh ───────────────────────────────────────────────────────
     { "ResetOnLogon",      Disposition::Mapped, "reset_on_logon",
-      "scalar_mappers.cpp:439 — SessionConfig::reset_on_logon" },
+      "scalar_mappers.cpp, map_scalars — SessionConfig::reset_on_logon" },
     { "ResetOnLogout",     Disposition::Mapped, "reset_on_logout",
-      "scalar_mappers.cpp:442 — SessionConfig::reset_on_logout" },
+      "scalar_mappers.cpp, map_scalars — SessionConfig::reset_on_logout" },
     { "ResetOnDisconnect", Disposition::Mapped, "reset_on_disconnect",
-      "scalar_mappers.cpp:445 — SessionConfig::reset_on_disconnect" },
+      "scalar_mappers.cpp, map_scalars — SessionConfig::reset_on_disconnect" },
     { "RefreshOnLogon",    Disposition::Mapped, "refresh_on_logon",
-      "scalar_mappers.cpp:448 — SessionConfig::refresh_on_logon" },
+      "scalar_mappers.cpp, map_scalars — SessionConfig::refresh_on_logon" },
 
     // ── Timestamp ─────────────────────────────────────────────────────────────
     { "MillisecondsInTimeStamp", Disposition::Mapped, "sending_time_precision",
-      "scalar_mappers.cpp:498 — SessionConfig::sending_time_precision "
+      "scalar_mappers.cpp, map_scalars — SessionConfig::sending_time_precision "
       "(QF MillisecondsInTimeStamp=Y ↔ precision=\"millis\"; "
       "044 additionally supports \"micros\" and \"nanos\")." },
     { "TimestampPrecision",      Disposition::Mapped, "sending_time_precision",
-      "scalar_mappers.cpp:498 — Same 044 key as MillisecondsInTimeStamp; "
+      "scalar_mappers.cpp, map_scalars — Same 044 key as MillisecondsInTimeStamp; "
       "TimestampPrecision is the QF successor key (integer: 0=seconds, "
       "3=millis, 6=micros, 9=nanos) — both map to sending_time_precision." },
 
@@ -509,22 +509,22 @@ const std::vector<ParityRow> kParity = {
     { "PersistMessages",   Disposition::Mapped, "store",
       "Indirectly: 'store=memory' implies non-persistent (yields_persistent_store()=false), "
       "mirroring QF PersistMessages=N. 'store=file' gives persistence. "
-      "selector_resolver.cpp:159." },
+      "selector_resolver.cpp, resolve_engine_store's store.directory branch." },
 
     // ── TLS / SSL ─────────────────────────────────────────────────────────────
     { "ServerCertificateFile",             Disposition::Mapped_TlsViaSelectors, "cert_source.cert_file",
-      "selector_resolver.cpp:261 — cert_source selector, kind=\"file\", "
+      "selector_resolver.cpp, resolve_engine_cert_source — cert_source selector, kind=\"file\", "
       "cert_file= path (the server-side leaf certificate)." },
     { "ServerCertificateKeyFile",          Disposition::Mapped_TlsViaSelectors, "cert_source.key_file",
-      "selector_resolver.cpp:262 — cert_source selector, key_file= path." },
+      "selector_resolver.cpp, resolve_engine_cert_source — cert_source selector, key_file= path." },
     { "ClientCertificateFile",             Disposition::Mapped_TlsViaSelectors, "cert_source.cert_file",
-      "selector_resolver.cpp:261 — same cert_source cert_file; QF uses "
+      "selector_resolver.cpp, resolve_engine_cert_source — same cert_source cert_file; QF uses "
       "separate server/client keys, 044 uses a single role-independent cert_source "
       "(the role is determined by security_profile.kind)." },
     { "ClientCertificateKeyFile",          Disposition::Mapped_TlsViaSelectors, "cert_source.key_file",
-      "selector_resolver.cpp:262 — same cert_source key_file." },
+      "selector_resolver.cpp, resolve_engine_cert_source — same cert_source key_file." },
     { "CertificationAuthoritiesFile",      Disposition::Mapped_TlsViaSelectors, "cert_source.ca_file",
-      "selector_resolver.cpp:263 — cert_source selector, ca_file= path." },
+      "selector_resolver.cpp, resolve_engine_cert_source — cert_source selector, ca_file= path." },
     { "CertificationAuthoritiesDirectory", Disposition::OutOfScope_SocketTuning, "",
       "No 044 equivalent; 044 cert_source accepts a single CA bundle file. "
       "A CA directory is not supported in step-1." },
@@ -534,7 +534,7 @@ const std::vector<ParityRow> kParity = {
     { "CertificateRevocationListDirectory",Disposition::Gap, "",
       "No 044 equivalent; same rationale as CertificateRevocationListFile." },
     { "CertificateVerifyLevel",            Disposition::Mapped_TlsViaSelectors, "security_profile.kind",
-      "selector_resolver.cpp:400 — security_profile.kind encodes the "
+      "selector_resolver.cpp, parse_security_profile — security_profile.kind encodes the "
       "verification strategy: "
       "mtls_ca=mutual TLS with CA verification (CertificateVerifyLevel=2), "
       "one_way_ca=server-auth only (CertificateVerifyLevel=1), "

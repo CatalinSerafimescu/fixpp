@@ -334,8 +334,8 @@ TEST(CfgLoaderEdgeCases, NonExistentFileRejected) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // F1: [SESSION] section overrides [DEFAULT] value.
-// Exercises the SESSION branch (line 65 in cfg_loader.cpp) and the SESSION
-// merge path (line 135 ses target + merge logic).
+// Exercises parse_section_tag's SESSION branch and parse_cfg's SESSION
+// merge path (the `ses` target + merge logic).
 TEST(CfgLoaderCoverageUplift, SessionSectionOverridesDefault) {
     auto scratch = make_scratch_dir("session_override");
     const std::string cfg_content =
@@ -359,7 +359,7 @@ TEST(CfgLoaderCoverageUplift, SessionSectionOverridesDefault) {
 }
 
 // F2: [session] (lowercase) → case-insensitive fallback path.
-// Exercises parse_section_tag lines 67-78 (case-fold loop for size-7 tags).
+// Exercises parse_section_tag's case-fold loop (for size-7 tags).
 TEST(CfgLoaderCoverageUplift, LowercaseSessionSectionRecognised) {
     auto scratch = make_scratch_dir("lc_session");
     const std::string cfg_content =
@@ -405,7 +405,7 @@ TEST(CfgLoaderCoverageUplift, LowercaseSessionOverrideRecognised) {
 // F4: Unknown section → keys inside it must be ignored; result depends
 // on whether DEFAULT keys were provided. Here DEFAULT has all keys, so
 // success is expected (unknown section keys are ignored).
-// Exercises Section::other branch (lines 123-125).
+// Exercises parse_cfg's DEFAULT/SESSION-only skip branch (Section::other falls through it).
 TEST(CfgLoaderCoverageUplift, UnknownSectionKeysIgnored) {
     auto scratch = make_scratch_dir("unknown_section");
     const std::string cfg_content =
@@ -427,7 +427,7 @@ TEST(CfgLoaderCoverageUplift, UnknownSectionKeysIgnored) {
     fixpp::store_test::remove_store_dir(scratch);
 }
 
-// F5: Key without '=' → parser skips it via eq == npos branch (line 129).
+// F5: Key without '=' → parser skips it via parse_cfg's eq == npos branch.
 // DEFAULT section has all required keys so result is success.
 TEST(CfgLoaderCoverageUplift, KeyWithoutEqualsIgnored) {
     auto scratch = make_scratch_dir("no_equals");

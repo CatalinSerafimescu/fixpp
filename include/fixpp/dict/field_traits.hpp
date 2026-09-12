@@ -2,9 +2,9 @@
 // include/fixpp/dict/field_traits.hpp
 //
 // 003-OWNED, NET-NEW (RC#1, re-/plan 2026-05-15). Literal materialisation of
-// [2c §4.1.3] (.specify/2c-codegen.md v1.4 §4.1.3, lines 259-313). 002 ships
+// [2c §4.1.3] (.specify/2c-codegen.md v1.4 §4.1.3). 002 ships
 // NO field_traits.hpp (its seven dict headers do not include it —
-// specs/002-dictionary-xml-loader/spec.md:189); this is the 2c-owned
+// specs/002-dictionary-xml-loader/spec.md's §7 files-in-scope bullet); this is the 2c-owned
 // typed-decoding layer on the ≤20 ns typed-accessor hot path, consumed by the
 // generated <vXX>/Messages.hpp string/int/char accessors and dict::reify
 // step 3 ([2c §4.8]). Oracle:

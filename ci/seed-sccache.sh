@@ -171,7 +171,7 @@ note "sccache-cache SEEDED \`$TAG\`"
 # canonical side: a correction made here must be applied there too. The pointer
 # was one-directional until this line existed, which meant whoever edited the
 # canonical copy had no indication the other one existed — reproducing the exact
-# failure the pointer cites (ci/prune-conan-cache.sh:45, "the backport never
+# failure the pointer cites (ci/prune-conan-cache.sh's "FAIL CLOSED ON A FAILED READ" section, "the backport never
 # happened"). Note the asymmetry that makes it bite: the COPY is pinned by
 # ci/test-ccache-scripts.sh; this one is not pinned by anything.
 # Whether it deletes from here depends on the token the caller supplies: with
@@ -193,7 +193,7 @@ note "sccache-cache SEEDED \`$TAG\`"
 # signal that cannot distinguish "nothing to delete" from "nothing could be
 # deleted". Tee to a temp file and cat it: portable, and the file is also what
 # the count is parsed from, so the log and the note can never disagree.
-# Inside the already-trapped $WORK (line 118) rather than a fresh `mktemp`: it is
+# Inside the already-trapped $WORK (this script's `WORK="$(mktemp -d)"`) rather than a fresh `mktemp`: it is
 # cleaned up on interruption too, and it cannot leave an unset path behind if
 # mktemp fails — this script is `set -uo pipefail`, not `set -e`, so a failed
 # `mktemp` would have continued with an empty filename, lost the prune output,

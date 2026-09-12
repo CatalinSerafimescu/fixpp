@@ -12,7 +12,7 @@
 //   enable_total_cancellation() or a total stop silently hangs.
 //
 // TDD RED witness:
-//   Current stub in reconnect_fsm.cpp:53-61 makes ONE make() call then returns
+//   Current stub in reconnect_fsm.cpp makes ONE make() call then returns
 //   success without any co_await on async_handshake. Firing a total-cancel signal
 //   finds nothing to cancel — the awaitable completes before the signal arrives.
 //

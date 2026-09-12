@@ -167,7 +167,7 @@ TEST(RoundTrip, ExhaustiveWalkVisitsEveryMessage) {
 }
 
 // ---------------------------------------------------------------------------
-// T028 — AC-D5 exhaustive-coverage seam (tasks.md:126)
+// T028 — AC-D5 exhaustive-coverage seam (specs/002-dictionary-xml-loader/tasks.md)
 //
 // Direct-parses FIX44.xml via pugixml to build the *expected* set of
 // (msg_type, tag) pairs by recursively expanding <component>/<group> refs,

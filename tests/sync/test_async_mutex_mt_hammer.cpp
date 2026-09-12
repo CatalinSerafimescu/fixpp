@@ -4,7 +4,7 @@
 // H-A MT hammer — organic (seam-OFF, coverage-lane-visible) coverage of the
 // free-list pop CAS-retry (A4), bump-counter CAS-retry (A5), the async_lock
 // slow-path push CAS-retry (A11), release_ref push CAS-retry (C3), and the
-// FIRST unlock() terminal-CAS-fail recursive-unlock arm ("F4", :1382) in
+// FIRST unlock() terminal-CAS-fail recursive-unlock arm ("F4", unlock_pre_terminal_cas_fast) in
 // include/fixpp/core/sync/async_mutex.hpp.
 //
 // CORRECTION vs the original Phase-7.5 coverage-design-gate claim ("T040 is
@@ -15,12 +15,12 @@
 // feedback_coverage_profraw_staleness) on `linux-clang-coverage` found:
 //   - A4/A5/C3/A11 — solidly covered by ORDINARY jittered contention
 //     (hundreds of real CAS retries per run, confirmed).
-//   - F4 (:1382) — NOT hit by the brief-literal jittered design (0 hits
+//   - F4 (unlock()'s terminal-CAS-fail recursive unlock()) — NOT hit by the brief-literal jittered design (0 hits
 //     across 150+ opportunities); IS hit by a jitter-FREE, high-volume burst
 //     (6 total hits observed across 6 independent trial runs) — see the
 //     dual-config note below. The hit rate is low/noisy (~0.3-1.5%), so this
 //     is a probabilistic, not-guaranteed-every-run organic coverage claim.
-//   - F6 (the SECOND terminal-CAS-fail recursive-unlock arm, :1442, reached
+//   - F6 (the SECOND terminal-CAS-fail recursive-unlock arm, unlock_pre_terminal_cas_fifo, reached
 //     only when a FIFO walk exhausts with EVERY queued waiter already
 //     cancelled AND a fresh push lands in the immediately-following terminal
 //     CAS window) — measured UNREACHABLE by every organic combination
@@ -89,7 +89,7 @@
 //     CAS loops T040 targets.
 //   - Each rep uses a FRESH async_mutex + FRESH thread_pool(4), so each rep
 //     is an independent, fully-drained sample (the destructor's
-//     std::terminate() guard — [const-adjacent async_mutex.hpp:894] — is
+//     std::terminate() guard — [const-adjacent ~async_mutex()] — is
 //     itself a live assertion that every rep left the mutex fully drained;
 //     a lost wakeup or a stray in-flight resumer would trip it).
 //   - pool.join() is the real drain barrier (NOT asio::use_future's
@@ -168,7 +168,7 @@ using fixpp::sync::async_mutex;
 // tasks.md T040 evidence): the brief-mandated light config (N=2*hw,
 // cycles=12, randomized 0-2us jitter) reliably covers A4/A5/C3/A11 (verified:
 // hundreds of real CAS retries per run) but was measured to NEVER organically
-// hit the unlock() terminal-CAS-fail recursive-unlock arm at :1382 ("F4") —
+// hit the unlock() terminal-CAS-fail recursive-unlock arm at unlock_pre_terminal_cas_fast ("F4") —
 // the timer-suspension jitter smears the few-instruction race window. A
 // jitter-FREE, much-higher-volume burst was measured to hit it reliably
 // (non-zero across every trial run), at a low/noisy rate (~1-3 hits per

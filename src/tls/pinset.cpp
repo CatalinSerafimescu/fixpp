@@ -119,7 +119,7 @@ core::expected_t<void> Pinset::add(Certificate const& cert) {
 
     auto cur = snapshot_.load(std::memory_order_relaxed);
 
-    // Capacity check (FR-010 / [2g §6.6] line 992).
+    // Capacity check (FR-010 / [2g §6.6] DoS cap row).
     if (cur->size() >= cfg_.max_pins) {
         return std::unexpected(core::error::tls_pinset_capacity_exhausted);
     }

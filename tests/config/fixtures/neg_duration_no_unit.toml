@@ -1,6 +1,6 @@
 # neg_duration_no_unit.toml
 # heartbeat_interval is a bare integer string with no unit suffix — triggers
-# "duration requires an explicit unit suffix" error arm (lines 150-157).
+# "duration requires an explicit unit suffix" error arm (parse_duration_to_ms, loader_internal.cpp).
 
 [clock]
 kind = "system"

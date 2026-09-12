@@ -28,7 +28,7 @@
 //     `std::pmr::vector` constructed from `&arena_`. Nested containers are
 //     wired via EXPLICIT mr-parameter constructors (mirrors the C-ABI
 //     OutboundAccumulator/AccumulatorEntry/GroupInstance model,
-//     src/capi/capi_internal.hpp:356-389 + src/capi/message_write.cpp — those
+//     capi_internal.hpp's GroupInstance/AccumulatorEntry structs + src/capi/message_write.cpp — those
 //     call `entries.emplace_back(mr)`/`instances.emplace_back(arena)`/
 //     `fields.emplace_back(arena)` explicitly, not uses-allocator
 //     construction), so a bug can never silently default to the global-heap
@@ -42,7 +42,7 @@
 //     a body_builder-owned vector element), re-resolved on every access, so
 //     the vector growth triggered by add_entry()/group_begin() never dangles
 //     a held handle. Mirrors the C-ABI fixpp_group_builder/fixpp_entry
-//     parent+index style (src/capi/message_write.cpp:420-434), adapted to a
+//     parent+index style (message_write.cpp's `resolve_group`/`resolve_instance`), adapted to a
 //     flat fixed-depth index-path array since body_builder owns no arena to
 //     heap-allocate builder nodes from.
 //   - commit() enforces: INV-2 (no framing tags — rejected eagerly at
@@ -54,12 +54,12 @@
 //   - Serializes count-precedence (`No<Group>=<N>` before the N instances).
 //   - Fixed internal scratch cap of 3800 B (kBodyCap, TU-local in
 //     body_builder.cpp, value-equal to the C-ABI kFrameCap at
-//     src/capi/message_write.cpp:106, which is file-static and not
+//     message_write.cpp's `kFrameCap`, which is file-static and not
 //     cross-TU referenceable).
 //
 // MUST NOT reuse wire::Writer (writer.hpp): Writer always injects the session
 // header 8=/9= on first append and 10= at commit(); it has no body-only mode
-// (business_messages.cpp precedent, src/session/business_messages.cpp:22-24).
+// (business_messages.cpp's own "no body-only mode" precedent note).
 //
 // Non-copyable / non-movable: group_handle/entry_handle capture a raw
 // `body_builder*` at issue time; relocating (moving) a body_builder would
@@ -195,7 +195,7 @@ private:
     //
     // ZERO-HEAP: both node types are std::pmr containers, constructed with an
     // EXPLICIT `std::pmr::memory_resource*` (mirrors AccumulatorEntry(mr) /
-    // GroupInstance(mr), src/capi/capi_internal.hpp:356-389) so every nested
+    // GroupInstance(mr), capi_internal.hpp's GroupInstance/AccumulatorEntry structs) so every nested
     // vector is unambiguously wired to body_builder::arena_ — never the
     // default global-heap-backed pmr resource.
     struct entry_node;

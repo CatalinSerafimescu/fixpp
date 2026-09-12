@@ -226,7 +226,7 @@ protected:
 //   dispatch_aborted → on_inbound_frame transitions to Disconnected and returns
 //   std::unexpected(dispatch_aborted). Both asserts pass.
 //
-// Anchor: build_logon fail-closed precedent (session.cpp:811-821); fail-closed
+// Anchor: build_logon fail-closed precedent (emit_initiator_logon_()); fail-closed
 //   contract; "silent-loss real until disproven" project rule.
 // ─────────────────────────────────────────────────────────────────────────────
 

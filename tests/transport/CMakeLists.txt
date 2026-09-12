@@ -255,7 +255,7 @@ add_test(NAME transport_factory_paths
 # (4 deterministic cases × 2 executor modes) using a real Session* +
 # session_executor. Requires fixpp_session (for Session + make_session_executor)
 # + fixpp_tls (for file_cert_source fixtures).
-# Design anchors: [2g §6.4]:926-929, [2d §6.5], [2d §4.8].
+# Design anchors: [2g §6.4] (load_credentials cancellation recipe), [2d §6.5], [2d §4.8].
 
 add_executable(transport_load_credentials_seam13_witness
   test_load_credentials_seam13_witness.cpp)
@@ -382,10 +382,10 @@ add_test(NAME transport_asio_tls_transport_error_paths
 
 # ── 088-firstframe-budget-timer-lifetime T036 (US4) — timer-epoch retirement ──
 # Cells T4 (TLS connect) and T5 (TLS handshake) — SC-014. Resolves
-# plan.md:240's "(TLS transport test target)" placeholder: no existing file
+# plan.md's tests/transport/ file-tree "(TLS transport test target)" placeholder: no existing file
 # fits (test_asio_tls_transport_error_paths.cpp above is scoped to error
 # paths; the other TLS files are unrelated). D-5's delivered label row
-# (research.md:972), applied at creation per T010.
+# (research.md's D-5 table, transport_timer_epoch_retire row), applied at creation per T010.
 # Anchors: research.md D-4.1/D-5/D-6.1/D-6.4; tasks.md T036.
 
 add_executable(transport_timer_epoch_retire

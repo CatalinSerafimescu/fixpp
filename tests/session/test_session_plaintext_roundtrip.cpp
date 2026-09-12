@@ -401,7 +401,7 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
 
 // ── T042: SC-001 — full Logon → Logout round trip over plaintext ──────────────
 //
-// SC-001 (spec.md:303) defines the criterion as "Logon → Logout round trip".
+// SC-001 (043's spec.md) defines the criterion as "Logon → Logout round trip".
 // feature-catalogue.md T-042 cites this file as the "Logon/Logout" witness.
 // The above PlainAcceptorAndInitiatorCompleteLogon test covers the Logon half;
 // this test covers the clean Logout path end-to-end (FQ-2, gate-b/r1).

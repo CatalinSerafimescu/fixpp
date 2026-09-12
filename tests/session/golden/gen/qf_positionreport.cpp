@@ -3,7 +3,7 @@
 // C4, family class C-002 Position: NoPositions group).
 // OFFLINE TOOLING, not checked in to the main build (see gen/README.md).
 //
-// Required='Y' fields (dictionaries/FIX44.xml:1815-1843): PosMaintRptID(721),
+// Required='Y' fields (dictionaries/FIX44.xml's `PositionReport` message): PosMaintRptID(721),
 // PosReqResult(728), ClearingBusinessDate(715), Account(1), AccountType(581),
 // SettlPrice(730), SettlPriceType(731), PriorSettlPrice(734) (constructor
 // FIX44::PositionReport args, confirmed against the header). PositionQty

@@ -1,6 +1,6 @@
 # neg_dict_path_empty.toml
 # [dictionary] kind="path" and the "path" key is an empty string — triggers
-# empty_required at "dictionary.path" (lines 349-354 selector_resolver.cpp).
+# empty_required at "dictionary.path" (resolve_engine_dictionary's empty-path arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

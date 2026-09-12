@@ -87,7 +87,7 @@ add_library(fixpp::capi ALIAS fixpp_capi)
 # ⚠️ THE `$<BUILD_INTERFACE:>` LINE IS NOT DECORATION — MEASURED, 2026-08-04.
 # `PRIVATE` alone BREAKS THE IN-TREE BUILD, and the bundle predicted otherwise:
 #
-#     src/capi/capi_internal.hpp:23:10: fatal error:
+#     src/capi/capi_internal.hpp: fatal error:
 #       'asio/executor_work_guard.hpp' file not found
 #     (building tests/capi/capi_group_delimiter_ctx_test.cpp)
 #
@@ -112,7 +112,7 @@ target_link_libraries(fixpp_capi
   PUBLIC  "$<BUILD_INTERFACE:fixpp_capi_objects>")
 
 # The isolated root the consumer DOES get. BUILD stays the whole tree so nothing
-# in-tree changes (CMakeLists.txt:234's directory-scoped include_directories()
+# in-tree changes (the top-level CMakeLists.txt's directory-scoped include_directories()
 # makes everything reachable in-tree by design, and this feature does not touch
 # that); only the INSTALL interface is narrowed.
 #
@@ -120,7 +120,7 @@ target_link_libraries(fixpp_capi
 # so <fix/c_api.h> is spelled EXACTLY as before. §7.4:503's literal prescription
 # — INTERFACE_INCLUDE_DIRECTORIES = include/fix/ — cannot work: every C-ABI
 # header carries the `fix/` component in its own spelling, in both angle-bracket
-# and quoted form (include/fix/c_api.h:40-48), so that root would resolve
+# and quoted form (include/fix/c_api.h's aggregate `#include "fix/c_api/..."` block), so that root would resolve
 # <fix/c_api.h> to include/fix/fix/c_api.h. FR-013 rewrites §7.4 accordingly.
 target_include_directories(fixpp_capi PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"

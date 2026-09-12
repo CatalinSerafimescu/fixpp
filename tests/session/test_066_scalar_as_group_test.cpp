@@ -6,17 +6,17 @@
 // (tests/support/fix44_group_frame_bodies.hpp) through the real Session
 // dispatch harness (tests/session/support/group_dispatch_fixture.hpp) and
 // queries a plain SCALAR tag — Symbol(55), `<field number='55' name='Symbol'
-// type='STRING' />` at dictionaries/FIX44.xml:4028, NOT a NUMINGROUP count
+// type='STRING' />` in dictionaries/FIX44.xml, NOT a NUMINGROUP count
 // field — as if it were a repeating group.
 //
 // Mirrors the C-ABI thunk's own discrimination
-// (src/capi/message_read.cpp:349-361): `offsets().find(55)` must find the
+// (`fixpp_msg_get_group`'s find/group_slices discrimination): `offsets().find(55)` must find the
 // tag present (it is, mid-body), while `offsets().group_slices(55)` must be
 // EMPTY (present-but-not-a-group => TYPE_MISMATCH at the C-ABI layer). This
 // is the distinct documented result C2 describes at the OffsetTable level.
 //
 // GREEN today (T006 already dict-backs the parse site). RED-first is proven
-// by TEMPORARY mutation of src/session/session.cpp:316 (not committed) per
+// by TEMPORARY mutation of parse_and_dispatch_ (not committed) per
 // the phase-implementer brief — this file is unconditionally the same in
 // both configurations.
 //
@@ -78,7 +78,7 @@ TEST(ScalarAsGroup, SymbolTagQueriedAsGroupIsNotASpuriousInstance) {
     EXPECT_TRUE(tag_present) << "Symbol(55) must be present in the delivered message";
 
     // DISCRIMINATING assertion (C2 / SC-002): Symbol(55) is a plain scalar
-    // (FIX44.xml:4028, type='STRING'), never a NUMINGROUP count field.
+    // (dictionaries/FIX44.xml, type='STRING'), never a NUMINGROUP count field.
     // group_slices(55) must be EMPTY — the OffsetTable-level signal the
     // C-ABI thunk maps to FIXPP_ERR_TYPE_MISMATCH — NOT a bogus 1-instance
     // span running to end-of-message (the dict-free-parse symptom).

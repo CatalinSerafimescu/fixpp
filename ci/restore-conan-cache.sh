@@ -45,7 +45,7 @@ if oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>"$WORK/oras.err"; then
   else
     # Pulled, but the payload is not usable. Same disposition as a plain miss: a
     # cache we could not verify is a cache we do not have — mirrors
-    # ci/restore-sccache.sh:91-96. `emit false` here is load-bearing: it
+    # ci/restore-sccache.sh's "Pulled, but the payload is not usable" branch. `emit false` here is load-bearing: it
     # re-arms the `hit == 'false'` save step so an eligible push:main /
     # dispatch-on-main publisher can attempt reseeding instead of leaving the
     # bad artifact published indefinitely. A failed restore may leave the local

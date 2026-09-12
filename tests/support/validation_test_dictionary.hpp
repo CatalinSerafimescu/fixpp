@@ -82,7 +82,7 @@ constexpr std::string_view kValidationTestFix42Xml = R"xml(
          is delimited by NoInner(200) — itself a nested group's own count
          tag, with InnerField(201) as NoInner's delimiter. Exists so
          tests/fuzz/fuzz_wire_validator.cpp's corpus can exercise the new
-         consume_group descent (validator.hpp:376) — the shipped dict above
+         consume_group descent (its definition in validator.hpp) — the shipped dict above
          has zero groups, so consume_group was otherwise unreachable from
          that harness. -->
     <message name="NestedGroupTest" msgtype="N" msgcat="app">

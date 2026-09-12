@@ -10,7 +10,7 @@
 // `fixpp_group_get_field_string`.
 //
 // MUST be observed RED against the current dict-free positional parse
-// (`Session::parse_and_dispatch_`, src/session/session.cpp:316, default
+// (`Session::parse_and_dispatch_` in src/session/session.cpp, default
 // `Parser<access_mode::Index>` with no dictionary) — this file does NOT
 // flip that site (T006's job).
 //

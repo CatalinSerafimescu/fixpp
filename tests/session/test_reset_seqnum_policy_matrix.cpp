@@ -438,7 +438,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y) {
 // The existing cells assert only the reset event; they never inspect the
 // outbound reply Logon captured in `capture.frames`. This closes that hole.
 //
-// RC#C-2 fix (session.cpp:1044-1046): bilateral_lenient now mirrors 141=Y
+// RC#C-2 fix: bilateral_lenient now mirrors 141=Y
 // in its acceptor reply (same as bilateral_strict). unilateral does NOT.
 //
 // For each acceptor cell below:
@@ -724,7 +724,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y_NoOurFlag)
 // sequence_numbers_reset event must have by_peer_request=false (fixpp initiated).
 //
 // RED on main: current code computes we_initiated=(policy==bilateral_strict) at
-// session.cpp:3224, which is false for bilateral_lenient → by_peer_request=true
+// the pre-fix `we_initiated`, which was false for bilateral_lenient → by_peer_request=true
 // (incorrect — fixpp sent 141=Y). Fix: we_initiated=own_logon_sent_reset_flag_
 // (the latch alone — C4 gate, distinct from C1's restore gate). [FR-006, SC-006]
 // ─────────────────────────────────────────────────────────────────────────────

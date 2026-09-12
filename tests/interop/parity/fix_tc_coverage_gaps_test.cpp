@@ -130,9 +130,9 @@ TEST_F(FixTcCoverageGaps, TooHighInboundSeqnum_EmitsResendRequest_StaysActive) {
 // FIX-TC resendRequest_EndSeqNumberLargerThanMessages. A peer asks us to resend
 // a range [1..100] whose EndSeqNo far exceeds anything we have emitted. This
 // fixture attaches NO message store, so replay_outbound_range_ takes the
-// store-absent branch (session.cpp:4838): the entire requested range collapses
+// store-absent branch of Session::replay_outbound_range_: the entire requested range collapses
 // into a SINGLE SequenceReset-GapFill(35=4) whose NewSeqNo(36)=requested_end+1
-// (here 101, session.cpp:4840). The session stays Active — no error/disconnect.
+// (here 101, in that same store-absent branch). The session stays Active — no error/disconnect.
 // (A store WITH stored app messages would instead clamp the effective end to the
 // last stored outbound and walk per-slot — a different cell; not exercised here.)
 TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_StaysActive) {

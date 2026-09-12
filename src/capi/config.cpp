@@ -78,7 +78,7 @@ fixpp_error_t fixpp_session_config_create(fixpp_session_config_t** out_cfg) {
         // setter (v1.0 exposes none; data-model E-3 "engine defaults"). Use the
         // UNBOUNDED policy — a default bounded MemoryStore::Config exceeds the
         // 1 GiB per-session cap and would trip the storage-DoS guard at make()
-        // (memory_store_factory.hpp:88-112 / EngineConfig comment).
+        // (memory_store_factory.hpp's `make()` DoS guard / EngineConfig comment).
         fixpp::session::MemoryStore::Config mcfg{};
         mcfg.policy = fixpp::session::capacity_policy::unbounded;
         h->cfg.store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>(mcfg);
@@ -257,7 +257,7 @@ fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg,
     // violation → fatal-log + abort, never translated.  Mirrors
     // fixpp_session_acceptor_bound_endpoint in session.cpp.
     try {
-        // Mirror the L-050-5 seam (capi_loopback_support.hpp:67-68), now public:
+        // Mirror the L-050-5 seam (tests/capi/capi_loopback_support.hpp's `set_loopback_endpoint`), now public:
         // set the reconnect_endpoint so the engine's auto-derived plaintext factory
         // can connect (initiator) or bind (acceptor), and install the transport_send
         // placeholder that the accept loop rebinds to the live socket.

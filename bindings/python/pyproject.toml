@@ -219,7 +219,7 @@ FIXPP_BUILD_PYTHON = "ON"
 # The wheel is self-contained with NO OTel (FR-002): the Conan dep is dropped via
 # `-o fixpp/*:with_otel=False` in CIBW_BEFORE_ALL, and this PAIRED CMake toggle
 # disables the OTel code so the `opentelemetry-cpp::api`-absent configure does not
-# error (CMakeLists.txt:85). Both halves are required (research D-7 paired toggle).
+# error (CMakeLists.txt's `FIXPP_BUILD_OTEL AND NOT TARGET opentelemetry-cpp::api` guard). Both halves are required (research D-7 paired toggle).
 FIXPP_BUILD_OTEL = "OFF"
 # Build ONLY the binding + its engine deps — the wheel needs neither the test
 # tree (defaults ON) nor bench/fuzz. Without this the wheel build compiles ~1500

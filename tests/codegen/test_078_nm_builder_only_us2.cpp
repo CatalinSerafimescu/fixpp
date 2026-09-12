@@ -41,8 +41,8 @@
 //       used would fail to link; here it is simply never referenced by
 //       generated code, so the linker never needs the validator archive.
 //
-// Anchors: specs/078-precompiled-builder-libs/spec.md US2 (lines 64-67),
-// SC-003 (line 166), FR-005; quickstart.md Scenario 2;
+// Anchors: specs/078-precompiled-builder-libs/spec.md US2,
+// SC-003, FR-005; quickstart.md Scenario 2;
 // contracts/include-layout.md invariant 1 (builder<->validator disjointness);
 // tests/codegen/test_078_odr_sc003_probe.cpp (mock precedent, leg ii).
 

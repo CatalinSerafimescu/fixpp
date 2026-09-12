@@ -65,7 +65,7 @@ TEST(CapiLifecycle, NeverStartedDestroyDoesNotAbort) {
 
 // ── T015: double-destroy of the SAME pointer is a no-op (not UAF) ────────────
 //
-// [2i §4.2.1] / contracts/lifecycle-surface.md:38: "NULL / double-destroy →
+// [2i §4.2.1] / contracts/lifecycle-surface.md's `fixpp_engine_destroy` bullet: "NULL / double-destroy →
 // no-op". The first destroy tombstones the shell (tag_=DEAD) and DOES NOT free
 // it; the second destroy reads the DEAD tag and returns immediately with no
 // UAF/double-free. Without the tombstone, the second call would dereference freed
@@ -88,7 +88,7 @@ TEST(CapiLifecycle, DestroyIsIdempotentSamePointer) {
 
 // ── T015: post-engine-destroy session handle → FIXPP_ERR_INVALID_HANDLE ───────
 //
-// [2i §4.2.1] / contracts/lifecycle-surface.md:43: "dead/corrupted handle →
+// [2i §4.2.1] / contracts/lifecycle-surface.md's "Handle discipline" bullet: "dead/corrupted handle →
 // FIXPP_ERR_INVALID_HANDLE". After fixpp_engine_destroy (WITHOUT closing the
 // session first), any call on a stale session handle must return INVALID_HANDLE,
 // not UAF/UB.  UAF-safety here rests on two complementary mechanisms:
@@ -389,8 +389,8 @@ TEST(CapiLifecycle, Sc007SendAfterTeardownIsTerminalNotUb) {
 // ── Q2: concurrent fixpp_session_send vs fixpp_session_close (TSan witness) ───
 //
 // fixpp_session_send is THREAD_SAFE; the design explicitly models send racing
-// a concurrent close as a defined lifecycle outcome (data-model.md:80 / E-6 /
-// contracts/send-and-receive.md:25: "send raced a concurrent close() drain →
+// a concurrent close as a defined lifecycle outcome (data-model.md's E-6 /
+// contracts/send-and-receive.md's `FIXPP_ERR_THREAD_SESSION_LIFECYCLE` clause: "send raced a concurrent close() drain →
 // session_already_closed → FIXPP_ERR_THREAD_SESSION_LIFECYCLE"). Without
 // `std::atomic<bool> valid` (Q2 fix), the read in check_session (valid load)
 // and the write in fixpp_session_close (valid store) form a C++ data race →

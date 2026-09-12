@@ -12,7 +12,7 @@
 //
 // Why the measurement cannot be taken from fixpp::capi's own property block
 // (which quickstart §3 already diffs): compile definitions reach a C-ABI
-// consumer through fixpp_capi_objects -> fixpp_log (src/capi/CMakeLists.txt:29-38)
+// consumer through fixpp_capi_objects -> fixpp_log (src/capi/CMakeLists.txt's fixpp_capi_objects PUBLIC link)
 // and never appear in fixpp::capi's block, which reads IDENTICALLY whether they
 // propagate or not. Leg 2 is structurally blind to them; this target is where
 // they become observable. Instrument measured in research.md R10.

@@ -1,6 +1,6 @@
 # neg_transport_kind_unknown.toml
 # transport.kind is an unrecognised value — triggers unknown_enum at
-# "session[0].transport.kind" (lines 696-702 selector_resolver.cpp).
+# "session[0].transport.kind" (resolve_transport's unknown-kind arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

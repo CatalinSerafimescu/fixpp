@@ -8,7 +8,7 @@
 // copy that could silently drift from what the census actually finds.
 //
 // Mirrors Dictionary::as_table_view()'s Defect-A membership derivation
-// (src/dictionary/dictionary.cpp:369-422) field-for-field — see
+// (src/dictionary/dictionary.cpp) field-for-field — see
 // reused_tag_census_test.cpp's file header for the full rationale.
 //
 // 082-structural-group-detection T008 (FR-018): `census_for`'s own group-tag
@@ -18,7 +18,7 @@
 // reachability-restricted structural set (contracts/group-detection.md C1/
 // C2), passed in by the caller. NOT `Dictionary::group_first_field()`: that
 // accessor's backing `groups_` table is populated once per DECLARED
-// `<component>` regardless of message-reachability (xml_loader.cpp:954-970),
+// `<component>` regardless of message-reachability (`LoaderState::expand_field_list`'s `groups_.push_back`),
 // so in isolation it is the unrestricted *struct* set (confirmed
 // empirically: it disagrees with the oracle on FIX50/FIX50SP1 by exactly
 // {384, 627}, the two declared-but-unreachable groups C2 documents), and it
@@ -74,7 +74,7 @@ struct DictCensus {
 };
 
 // Mirrors Dictionary::as_table_view()'s Defect-A membership derivation
-// (src/dictionary/dictionary.cpp:369-422) field-for-field, except the
+// (src/dictionary/dictionary.cpp) field-for-field, except the
 // group-tag gate itself: `group_tags` (082 T005/T008) replaces the datatype
 // test with the independent oracle's reachability-restricted structural set
 // — see the file header for why.

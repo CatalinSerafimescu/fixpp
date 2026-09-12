@@ -53,7 +53,7 @@
 
 namespace fixpp::session {
 
-// FileStorePolicy — struct (NOT std::variant) per design-doc §4.3 lines 507–537.
+// FileStorePolicy — struct (NOT std::variant) per design-doc §4.3's `struct FileStorePolicy` block.
 // Per-policy data-loss window documented per FR-011:
 //   commit_per_message = 0% loss (fdatasync per record);
 //   commit_batched(N)  = up to N-1 record loss window since last batch boundary;
@@ -110,7 +110,7 @@ public:
         std::size_t max_frame_bytes = std::size_t{256} * 1024;
 
         // Executor for the file-I/O work (§4.3.2).
-        // REQUIRED at construction per [2e §4.3.2]:665. FileStoreFactory::make()
+        // REQUIRED at construction per [2e §4.3.2]'s required-at-construction decision. FileStoreFactory::make()
         // resolves this with Config-supplied-wins logic (FR-024 / research D-7).
         //
         // CALLER OBLIGATION for direct (non-Session) FileStore use (FR-007 / C5):
@@ -137,7 +137,7 @@ public:
         std::pmr::memory_resource* store_resource = nullptr;
     };
 
-    // 1-arg constructor per design-doc §4.3 line 570.
+    // 1-arg constructor per design-doc §4.3's `FileStore(Config c)` declaration.
     // Passes flush_thunk_for<FileStore>() to the MessageStore base — the A1
     // concept gate selects the typed thunk at compile time (T009).
     explicit FileStore(Config c) noexcept;
@@ -181,7 +181,7 @@ public:
     // runs the restart algorithm. Returns true on success; false → store_factory_failed.
     // Declared public to allow the factory TU to call it without friend gymnastics;
     // the doc-only-internal convention (engine-internal, not for external callers)
-    // applies per plan.md line 88 alternative to friending.
+    // applies per plan.md's public-but-internal convention rationale.
     // engine-internal: do not call directly.
     [[nodiscard]] bool open_log(const std::string& log_path) noexcept;
 

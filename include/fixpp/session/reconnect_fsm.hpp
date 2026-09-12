@@ -163,7 +163,7 @@ public:
     // Session's effective_transport_factory_ (shared_ptr) owns the object.
     // This setter exists because factory_ is set at ctor time to the override-only
     // pointer (nullptr for plaintext/no-override) and drive_reconnect_attempt()
-    // fails closed at reconnect_fsm.cpp:113-115 on null. [data-model §E-5; D-4]
+    // fails closed at drive_reconnect_attempt's null-factory guard. [data-model §E-5; D-4]
     void set_transport_factory(fixpp::transport::TransportFactory* factory) noexcept {
         factory_ = factory;
     }

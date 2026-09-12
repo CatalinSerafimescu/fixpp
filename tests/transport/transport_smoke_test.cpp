@@ -1,7 +1,7 @@
 // tests/transport/transport_smoke_test.cpp
 // Phase 2 compile-only smoke test — verifies all foundational headers parse
 // cleanly and the 22 error::transport_* enum variants occupy contiguous
-// slots 94..115 per T006 + data-model E-13 + [2h §6.6]:1167-1204.
+// slots 94..115 per T006 + data-model E-13 + [2h §6.6]'s error-variant table.
 
 #include <gtest/gtest.h>
 

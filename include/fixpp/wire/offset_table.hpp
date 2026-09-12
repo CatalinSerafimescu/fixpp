@@ -34,7 +34,7 @@ inline constexpr std::size_t default_max_group_entries_per_instance = 4096;
 // parameter — complete type not required for a declaration), and completing it
 // here would require including group_view.hpp, which itself includes THIS
 // header — a cycle the file's one-directional include edge (see
-// group_view.hpp:15-18) must not acquire. OffsetTable stores the constituent
+// group_view.hpp's own 062 T002 include-edge note) must not acquire. OffsetTable stores the constituent
 // fields raw (never a `group_context` member by value) for the same reason;
 // the .cpp includes group_view.hpp for the complete type where it is
 // actually constructed/consumed.
@@ -49,7 +49,7 @@ struct group_context;
 // (b) the sub-table built non-null but its own `group_slices_status()` caught
 // `bad_alloc` during slice materialization, or (c) the sub-table built
 // non-null but its OWN internal `build()` degraded on bad_alloc
-// (`status_ = out_of_memory`, offset_table.cpp:366-370) — a noexcept ctor
+// (`status_ = out_of_memory`, OffsetTable::build()'s catch(bad_alloc) arm) — a noexcept ctor
 // degrade that never returns nullptr, so `nested_group_slices` must check
 // `table->build_status()` explicitly at both resolution exits (mode (c) is
 // otherwise silently indistinguishable from a legitimately absent/count-0
@@ -250,7 +250,7 @@ public:
 
     // 065 T003: public seed accessor for a C-ABI group cursor's OWN context
     // (its container path + its own no_tag) — `stored_group_context().pushed(
-    // no_tag)` (private helper `:257`, out-of-line def next to it in
+    // no_tag)` (the `stored_group_context()` private helper, out-of-line def next to it in
     // offset_table.cpp — `group_context` is only forward-declared above, so
     // an inline `.pushed()` body would not compile). Used by
     // `fixpp_msg_get_group` to seed the top-level cursor's `group_ctx`
@@ -354,7 +354,7 @@ private:
     // well-formed, checksum-terminated frame in which every field is
     // SOH-terminated), so widening THIS build's input span by one byte lets
     // a counted Length+Data last field pass the UNCHANGED whole-frame
-    // `build()` guard (`offset_table.cpp:264-268`) without relaxing it and
+    // `build()` guard (its Length+Data carry-tag check) without relaxing it and
     // without widening the shared `group_slice.len`. Returns nullptr on
     // allocation failure (degrade, never throw).
     // 063 T008: `ctx` seeds the new sub-table's stored context (via
@@ -393,7 +393,7 @@ private:
     // tests/support/pmr_allocation_tracking_resource.hpp against
     // `ArenaFit.NearCapHeadroomProbe`.
 
-    static constexpr std::uint8_t kMaxGroupDepth = 16;  // mirror emit_messages.cpp:137
+    static constexpr std::uint8_t kMaxGroupDepth = 16;  // mirror emit_messages.cpp's `kMaxGroupDepth`
 
     std::byte const* frame_base_ = nullptr;  // for group_slice (ptr,len)
 #ifndef NDEBUG
@@ -506,11 +506,11 @@ private:
 
     // 073 T001 / gate-b/r1 FQ-2: TEST-ONLY nested_cache_ introspection seam,
     // forward-declared here for friendship only. Unlike frame_view_access /
-    // frame_view_slice_access (framer.hpp:104-115), which are PRODUCTION
+    // frame_view_slice_access (framer.hpp's friend declarations), which are PRODUCTION
     // seams the parser/wire layer mints views through at runtime and so
     // cannot be gated, this friend is test-only (the definition itself says
     // "Never called from production code",
-    // tests/support/wire_test_hooks.hpp:38) — it follows the repo's
+    // tests/support/wire_test_hooks.hpp's own note) — it follows the repo's
     // FIXPP_TEST_HOOKS test-only-gating convention instead (see
     // session/file_store.hpp, session/seqnum_manager.hpp, session/session.hpp,
     // core/system_clock_source.hpp; [const §XV.9]). The DEFINITION lives in

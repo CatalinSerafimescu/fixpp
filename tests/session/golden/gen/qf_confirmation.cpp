@@ -3,12 +3,12 @@
 // C4, family class P-005 post-trade confirmation).
 // OFFLINE TOOLING, not checked in to the main build (see gen/README.md).
 //
-// Required='Y' fields (dictionaries/FIX44.xml:1646-1673, confirmed against
+// Required='Y' fields (dictionaries/FIX44.xml's Confirmation message, confirmed against
 // the FIX44::Confirmation ctor): ConfirmID(664), ConfirmTransType(666),
 // ConfirmType(773), ConfirmStatus(665), TransactTime(60), TradeDate(75),
 // AllocQty(80), Side(54), AllocAccount(79), AvgPx(6), GrossTradeAmt(381),
 // NetMoney(118). CpctyConfGrp/NoCapacities(862) is a REQUIRED group
-// (dictionaries/FIX44.xml:2799 group required='Y') — 1 entry,
+// (dictionaries/FIX44.xml's NoCapacities group required='Y') — 1 entry,
 // OrderCapacity(528)+OrderCapacityQty(863), both required='Y' within the
 // group.
 #include <quickfix/fix44/Confirmation.h>

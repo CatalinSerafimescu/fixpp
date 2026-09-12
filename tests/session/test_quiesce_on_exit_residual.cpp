@@ -18,9 +18,9 @@
 // residual was necessarily caused by a session frame.
 // `mock_clock::sleep_until()` registers a new waiter unconditionally
 // whenever the deadline is still in the future
-// (src/core/test/mock_clock.cpp:119), while `cancel_sleeps()` is a
+// (mock_clock's `deadline <= impl_->steady` check), while `cancel_sleeps()` is a
 // one-shot drain of only the waiters present at the moment it runs
-// (src/core/test/mock_clock.cpp:166) — a coroutine whose first run happens
+// (mock_clock::cancel_sleeps()) — a coroutine whose first run happens
 // during the guard's own drain (the session liveness loop's `sleep_until`,
 // `Session::run_liveness_loop`, is the concrete production case) can arm a
 // sleep the one-shot cancel has already missed.
@@ -432,7 +432,7 @@ TEST(DrainOrReportWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
 // zero-budget probe left the whole binary green. Modelled on
 // QuiesceOnExitResidualWitness.ZeroBudgetProbeDispatchesAtMostOneHandler
 // (the QuiesceOnExitResidualWitness cell of that name above -- by name, since the
-// old pin :316-328 now lands on a sibling zero-budget witness), not the
+// old line-number pin now lands on a sibling zero-budget witness), not the
 // DrainOrReportWitness copy, because this drain also needs
 // a mock clock. The matcher is the substring unique to this drain's residual
 // message (the `cancel_and_drain_or_report` branch of the shared residual
@@ -543,7 +543,7 @@ void post_non_std_throwing_handler(asio::io_context& ioc) {
 // implicitly-noexcept frame one level up) was never exercised at all.
 // `~quiesce_on_exit` is the only one of the three that is a destructor itself, and
 // it was the only one that died. These two guards restore the real caller shape:
-// `~Fixture` at test_next_expected_msgseqnum.cpp:374 is exactly this.
+// `~Fixture` in test_next_expected_msgseqnum.cpp is exactly this.
 template <class F>
 struct CallOnDestruct {
     F f;

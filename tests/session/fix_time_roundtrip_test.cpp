@@ -352,7 +352,7 @@ TEST(FixTimeRoundtrip, FormatBufferTooSmallMicrosReturnsError) {
 }
 
 // Negative-epoch handling: before-1970 timestamp should still format correctly
-// (fix_time.cpp:133 `if (time_of_day < 0)` branch — the seconds-modulo-negative
+// (fix_time.cpp's `if (time_of_day < 0)` branch — the seconds-modulo-negative
 // adjustment for dates before Unix epoch).
 TEST(FixTimeRoundtrip, FormatPreEpochTimestampRoundtripsCorrectly) {
     // 1969-12-31T23:59:59Z — one second before epoch.

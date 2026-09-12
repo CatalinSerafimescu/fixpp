@@ -4,7 +4,7 @@
 // fixpp::transport::errors — ergonomic re-exports of the 22 transport_* variants
 // from fixpp::core::error under the fixpp::transport::errors:: namespace.
 //
-// Re-emitted verbatim per T007 from data-model E-13 + [2h §6.6]:1167-1204.
+// Re-emitted verbatim per T007 from data-model E-13 + [2h §6.6]'s errors table.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // C-ABI coalescing groups (for 2i extern "C" surface; NOT exported in v1.0):

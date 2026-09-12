@@ -12,17 +12,17 @@
 // Why this exercises the SAME mutant as T2a (research.md D-6.1/D-6.12b): the
 // accept loop (src/session/engine.cpp run_accept_loop) is spawned with
 // asio::bind_cancellation_slot(entry.session_cancel.slot(), ...); stop()'s
-// Step 1 (engine.cpp ~1182-1216) sets stopped_=true THEN emits
+// Engine::stop()'s Step 1 (engine.cpp) sets stopped_=true THEN emits
 // cancellation_type::total on entry.session_cancel, which propagates through
 // the coroutine's (already-reset-to-total, engine.cpp run_accept_loop) state
 // into the currently-suspended read_first_frame_bounded join. stop()'s Step 3
-// (engine.cpp:1263-1270) JOINS on outstanding_counter_ — it does not return
+// (Engine::stop()'s Step 3) JOINS on outstanding_counter_ — it does not return
 // until run_accept_loop itself has co_return'd, which requires
 // read_first_frame_bounded to have returned. Under the bare-deadline-arm
 // mutant (await_deadline replaced by a raw timer.async_wait(use_awaitable) —
 // same mutant as T2a), the deadline arm's cancel is silently dropped, so
 // read_first_frame_bounded cannot return until the FULL kFirstFrameDeadline
-// (5000ms, engine.cpp:772) elapses — and neither can stop().
+// (5000ms, kFirstFrameDeadline) elapses — and neither can stop().
 //
 // T2b USED TO rest on an inference rather than a barrier, and #237 closed that.
 // As shipped through 2026-09-06, no positive barrier existed at engine scope

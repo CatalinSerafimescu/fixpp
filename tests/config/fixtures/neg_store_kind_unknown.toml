@@ -1,6 +1,6 @@
 # neg_store_kind_unknown.toml
 # store.kind is an unrecognised value — triggers unknown_enum at "store.kind"
-# (lines 175-180 selector_resolver.cpp).
+# (resolve_engine_store's unknown-kind arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

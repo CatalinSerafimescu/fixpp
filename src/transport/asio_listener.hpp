@@ -13,11 +13,11 @@
 //
 // Design anchors:
 //   [2h §4.6]      — Listener abstract surface (1 pure-virtual).
-//   [2h §4.6]:810 — verbatim async_accept signature.
+//   [2h §4.6]'s `async_accept() = 0` — verbatim async_accept signature.
 //   [2h §6.4.1]   — per-mode cancellation effect table; its `async_accept`
 //                   row makes Listener-owned cancel engine-scoped (the
 //                   FR-025 3-action concrete contract binds here).
-//   [2h §6.6]:1191 — transport_accept_cancelled error mapping.
+//   [2h §6.6]'s `transport_accept_cancelled` row — error mapping.
 //   data-model E-10 — concrete asio_listener fields (cfg_/exec_/acceptor_).
 //   [arch §5.3]    — engine-bootstrap throwing-ctor carve-out.
 //   [arch §4.5]    — namespace placement: `fixpp::transport::`.

@@ -233,7 +233,7 @@ TEST(FileCertSourcePmrFail, ParseCertificateDerPmrExhaustionSurfacesCertParseFai
 //
 // The existing ParseCertificateDerPmrExhaustionSurfacesCertParseFailed test
 // uses a 1-byte arena that fires on the FIRST PMR allocation (subject DN copy
-// at certificate.cpp:151), so execution never reaches the SAN block and the
+// at `parse_certificate_der`'s "Subject DN" copy in certificate.cpp), so execution never reaches the SAN block and the
 // GENERAL_NAMES* leak on the SAN code-path was silently undetected.
 //
 // This test uses leaf_san_64.pem (64 DNS SANs, long hostnames ~70 bytes each)

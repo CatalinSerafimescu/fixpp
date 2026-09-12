@@ -7,11 +7,11 @@
 // `populate_orchestra_projection`; empty for `<fix>`-schema versions). NOT
 // sourced from `MessageIR.fields` (tag-deduped, immediate-parent-only
 // `group_no_tag` — lossy) nor the read-side group flyweights
-// (version-wide deduped union, `emit_messages.cpp:403-419`) — see the
+// (version-wide deduped union, `emit_messages()`'s gmm map) — see the
 // `OccurrenceIR` banner in ir.hpp. Emitted for ALL messages in `ir`, ungated
 // by the app-subset builder filter (T012 scope note; the builder tier was
 // descoped, but the census covers all 181 regardless). `write_file`'s
-// empty-string skip (main.cpp:29) means a version with no `occurrences`
+// empty-string skip (its empty-content early return) means a version with no `occurrences`
 // (every legacy `<fix>`-schema tier) gets no `Manifest.txt` at all — by
 // design.
 //
@@ -153,7 +153,7 @@ bool occurrence_less(OccurrenceIR const& a, OccurrenceIR const& b) {
 std::string emit_manifest(VersionIR const& ir) {
     // Non-Orchestra (`<fix>`-schema) versions carry no occurrences (ir.hpp
     // OccurrenceIR banner) — nothing to census; write_file's empty-skip
-    // then writes no Manifest.txt for them (main.cpp:29).
+    // then writes no Manifest.txt for them (its empty-content early return).
     bool any_occurrences = false;
     for (auto const& m : ir.messages) {
         if (!m.occurrences.empty()) {

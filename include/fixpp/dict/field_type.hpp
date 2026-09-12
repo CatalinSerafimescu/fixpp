@@ -2,7 +2,7 @@
 // include/fixpp/dict/field_type.hpp
 //
 // `fixpp::dict::field_type` — the 7-value type-category enum the wire
-// validator switches on (`validator.hpp:295`).
+// validator switches on (validator.hpp's `check_field_type` function).
 //
 // Collapses `field_data_type` (29 values, `field_ref.hpp`) to the 7
 // structural categories that the Phase-1 `dictionary_driven_validator`

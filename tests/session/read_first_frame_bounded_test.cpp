@@ -14,13 +14,13 @@
 // Pre-fix source shape (src/session/read_first_frame_bounded.hpp AS IT STOOD
 // WHEN THESE CELLS WERE WRITTEN — T016-T018 has since replaced it; nothing
 // below describes the current tree):
-//   :56  timer.expires_after(deadline) — armed once, before the loop.
-//   :72  pmr_carry_buffer carry{max_bytes, ...} — capacity max_bytes, NOT max_bytes+1.
-//   :78  site A — `if (buf.size() >= max_bytes)` at the loop top (unreachable pre-frame
+//   pre-fix: timer.expires_after(deadline) — armed once, before the loop.
+//   pre-fix: pmr_carry_buffer carry{max_bytes, ...} — capacity max_bytes, NOT max_bytes+1.
+//   pre-fix site A — `if (buf.size() >= max_bytes)` at the loop top (unreachable pre-frame
 //        on every cell below, since buf starts empty).
-//   :83-84 the read is UNCLAMPED — always requests the full 4096-byte read_buf,
+//   pre-fix: the read is UNCLAMPED — always requests the full 4096-byte read_buf,
 //        regardless of remaining budget ("room").
-//   :96  site B — `if (buf.size() >= max_bytes)`, evaluated AFTER the insert but
+//   pre-fix site B — `if (buf.size() >= max_bytes)`, evaluated AFTER the insert but
 //        BEFORE framer.feed. This was the budget-before-frame defect every cell
 //        below actually hit (site A was unreachable from any of these four
 //        constructions — buf starts empty at every site-A check).
@@ -35,9 +35,9 @@
 //
 // Phase 4 (User Story 2) — T020: cell T1 (SC-005/SC-006, research.md D-6.2/
 // D-6.3/D-6.7). Unlike B1/B2/B3/B5 above, T1's RED basis was the TIMER defect
-// (at the time this cell was written — src/session/read_first_frame_bounded.hpp
-// :59 `bool timed_out`, :65 the by-reference `timer.async_wait` lambda, :68
-// `transport.cancel()`, :83 `while (!timed_out)`), not the budget-before-frame
+// (at the time this cell was written — src/session/read_first_frame_bounded.hpp's
+// `bool timed_out`, the by-reference `timer.async_wait` lambda,
+// `transport.cancel()`, `while (!timed_out)`), not the budget-before-frame
 // defect T012-T015 already fixed. T1's fix (arm-once absolute-expiry timer +
 // the `||` join) landed at T026/T027 — this cell is GREEN under ASan against
 // the delivered tree.
@@ -236,7 +236,7 @@ bool is_cancellation_attributable(expected_t<std::size_t> const& r) {
 // ── B1 (SC-001) ───────────────────────────────────────────────────────────────
 // Single delivery, cumulative EXACTLY max_bytes, complete Logon at its head (the
 // Logon's own frame length IS max_bytes — no surplus). S4/FR-002/INV-B2 requires
-// this be ADMITTED. Pre-fix rejects at site B (:96, `4096 >= 4096`) BEFORE
+// this be ADMITTED. Pre-fix rejects at site B (`4096 >= 4096`) BEFORE
 // framer.feed ever runs, so the complete frame already sitting in `buf` is never
 // discovered. RED here is attributable to the COMPARISON: a strict `>` at
 // cumulative exactly max_bytes would not fire, feed would run, the frame would be
@@ -266,7 +266,7 @@ TEST(ReadFirstFrameBounded, B1) {
     EXPECT_TRUE(result.has_value())
         << "B1 (SC-001): expected the first frame's length (" << kMaxBytes << "), got "
         << describe(result) << " — pre-fix rejects at cumulative == max_bytes BEFORE framing "
-        << "runs (site B, read_first_frame_bounded.hpp:96, `buf.size() >= max_bytes`).";
+        << "runs (site B, `buf.size() >= max_bytes`).";
     if (result.has_value()) {
         EXPECT_EQ(*result, kMaxBytes) << "B1 (SC-001): the admitted frame's exact length.";
     }
@@ -310,7 +310,7 @@ TEST(ReadFirstFrameBounded, B3) {
 
     EXPECT_TRUE(result.has_value())
         << "B3 (SC-002): expected success (frame length " << kLogonLen << "), got "
-        << describe(result) << " — see B1's RED mechanism: site B (:96, `buf.size() >= "
+        << describe(result) << " — see B1's RED mechanism: site B (`buf.size() >= "
         << "max_bytes`) fires before framing runs.";
     if (result.has_value()) {
         EXPECT_EQ(*result, kLogonLen)
@@ -374,7 +374,7 @@ TEST(ReadFirstFrameBounded, B2) {
     EXPECT_TRUE(result.has_value())
         << "B2 (SC-012): expected success (frame length " << kLogonLen << "), got "
         << describe(result) << " — pre-fix rejects on the SECOND read at site B "
-        << "(:96, `4097 >= 4096`) before framer.feed ever runs on the newly-read bytes, "
+        << "(`4097 >= 4096`) before framer.feed ever runs on the newly-read bytes, "
         << "discarding a frame that was already complete in the accumulated buffer.";
     if (result.has_value()) {
         EXPECT_EQ(*result, kLogonLen) << "B2 (SC-012): the admitted frame's exact length.";
@@ -389,7 +389,7 @@ TEST(ReadFirstFrameBounded, B2) {
 // which reaches its outcome after one read regardless). Driven with ioc.run().
 //
 // The delivered design requests exactly `room` bytes per read: {4096, 1}. Pre-fix
-// NEVER clamps the request (:83-84 — always the full 4096-byte read_buf) AND
+// NEVER clamps the request (pre-fix, before today's C1 `room` clamp) AND
 // rejects at site B immediately after the FIRST read (4096 >= 4096, before feed),
 // so it never issues a second read at all. RED here is attributable to the
 // MISSING CLAMP: read_sizes() stays length-1 ({4096}) instead of reaching a
@@ -458,7 +458,7 @@ TEST(ReadFirstFrameBounded, B5) {
 // ── T1 (SC-005 / SC-006) ──────────────────────────────────────────────────────
 // The timer defect: the deadline's `timer.async_wait` handler captures
 // coroutine-frame locals (`timed_out`, `transport`) BY REFERENCE (pre-fix
-// :59-70). When the read completion and the deadline both expire with no
+// read_first_frame_bounded.hpp). When the read completion and the deadline both expire with no
 // handler having run (elapse-then-poll below), asio's timer queue releases
 // them in expiry order — the shorter-latency read first — so the coroutine
 // finds its frame, calls `timer.cancel()` (too late: the deadline handler is
@@ -1223,7 +1223,7 @@ TEST(ReadFirstFrameBounded, CovSharedClockSweep) {
 // error return "genuine by default" — it must be TESTED, not waived.
 //
 // Construction: a payload that does not begin "8=" makes Framer::parse_frame
-// reject with wire_framing_resync (src/wire/framer.cpp:79/:85) rather than
+// reject with wire_framing_resync (parse_frame's `bytes[0]`/`bytes[1]` checks) rather than
 // merely carrying the bytes forward. It is kept far below the budget so the
 // step-5 budget check cannot fire first — this cell must exercise the FRAMER
 // arm specifically, not the budget arm that B1-B4 already cover.
@@ -1275,16 +1275,16 @@ TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
 }
 
 // ── COVERAGE CELL — read-arm error propagation (Article IX §1) ───────────────
-// Gate B (PR #239) B3: `:135`'s `co_return std::unexpected(read_r.error())` is
+// Gate B (PR #239) B3: read_first_frame_bounded's `co_return std::unexpected(read_r.error())` is
 // covered by T2a but T2a's assertion (is_cancellation_attributable) is a
 // two-element SET, not the named postcondition. Contract
-// `contracts/read_first_frame_bounded.md:96-99` states transport-originated
+// `contracts/read_first_frame_bounded.md` states transport-originated
 // read errors are "Propagated verbatim ... No mapping changes" — that must be
 // pinned with an EXACT value, on an error T2a's set does not admit.
 //
 // Construction: an empty Script (no inbound_bytes, no inbound_chunks) makes
 // every async_read_some hit the mock's exhaustion path immediately
-// (mock_transport.hpp:260-261, read_cursor_ >= inbound_bytes.size() == 0 ==>
+// (mock_transport::async_read_some's exhaustion check, read_cursor_ >= inbound_bytes.size() == 0 ==>
 // transport_read_eof) with no latency, so the deadline arm (500ms) cannot
 // win the join.
 TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
@@ -1313,10 +1313,10 @@ TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
         << describe(result);
     EXPECT_EQ(result.error(), error::transport_read_eof)
         << "coverage cell: expected the read arm's error to PROPAGATE VERBATIM "
-           "(read_first_frame_bounded.hpp:135, contracts/read_first_frame_bounded.md:96-99), got "
+           "(read_first_frame_bounded's read-error propagation; contracts/read_first_frame_bounded.md), got "
         << describe(result);
     EXPECT_NE(result.error(), error::transport_read_cancelled)
-        << "coverage cell: :135 mapping every read error to a cancellation-attributable "
+        << "coverage cell: mapping every read error to a cancellation-attributable "
            "value would leave T2a green while breaking verbatim propagation — this cell "
            "must fail if that mapping is reintroduced.";
 }

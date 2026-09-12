@@ -157,9 +157,9 @@ template <class Ready>
 // test-only — an earlier revision of this comment claimed it was, and that
 // claim was wrong. It is prevented by construction only on the C ABI, whose
 // boundary owns an internal io_context and worker thread(s) running ioc_.run()
-// continuously (src/capi/engine.cpp:8-9, 248-255). The C++ API is the opposite:
+// continuously (src/capi/engine.cpp's header + worker-launch loop). The C++ API is the opposite:
 // EngineConfig::executor is consumer-supplied and Engine::start() "does NOT
-// block or run the executor" (include/fixpp/session/engine.hpp:223), so a
+// block or run the executor" (include/fixpp/session/engine.hpp's `start()` doc comment), so a
 // consumer that drives its own io_context with a bounded run, and then blocks
 // on a fixpp awaitable, deadlocks exactly as this test did IF the bounded run
 // returns before the awaitable completes AND no other thread continues driving
@@ -417,7 +417,7 @@ inline constexpr const char* kDrainThrew =
 // `std::terminate` -- no gtest failure, no test name, and no indication of which
 // guard died, which is strictly LESS diagnosable than the `ADD_FAILURE` the guard
 // exists to produce. `drain_or_report` is not itself `noexcept`, but it is called
-// from destructor BODIES (`~Fixture` at test_next_expected_msgseqnum.cpp:374), so
+// from destructor BODIES (`~Fixture` in tests/session/test_next_expected_msgseqnum.cpp), so
 // the exception meets an implicitly-noexcept frame one level up and terminates
 // just the same.
 //
@@ -429,7 +429,7 @@ inline constexpr const char* kDrainThrew =
 // it. That guard's catch is nested so that an exception mid-pump still takes the
 // RELEASE branch -- it exists to fail SAFE. "Do not lose the release" and "do not
 // terminate" are different requirements; `~InteropEngineFixture`
-// (tests/interop/support/interop_fixture.cpp:95-165) records that collapsing them
+// (interop_fixture.cpp's `~InteropEngineFixture()`) records that collapsing them
 // into one outer catch was itself a defect. This helper has no release branch to
 // lose, so a single catch is correct HERE and would not be correct THERE.
 template <class Pump>
@@ -985,8 +985,8 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
         // dead by then.
         //
         // Both shapes exist right now, in one file:
-        //   `test_next_expected_msgseqnum.cpp:393`  `Fixture::feed`'s miss branch — SAFE
-        //   `test_next_expected_msgseqnum.cpp:374`  `~Fixture()`               — NOT
+        //   `Fixture::feed`'s own miss-branch drain — SAFE
+        //   `~Fixture()`'s drain                    — NOT
         // and that is not a hypothetical pairing: deleting the in-`feed` drain while
         // keeping `~Fixture`'s reproduces a `heap-use-after-free` under ASan, because
         // `~Fixture`'s drain is precisely what RESUMES the frame over the dead temporary.
@@ -1190,10 +1190,10 @@ template <class Fut>
 //
 // THE MECHANISM, stated as a chain because no single link is obvious. On the
 // working path `cancel_sleeps()` completes every registered waiter with
-// `asio::error::operation_aborted` (src/core/test/mock_clock.cpp:166-181);
+// `asio::error::operation_aborted` (`mock_clock::cancel_sleeps()`);
 // `mock_clock::sleep_until` initiates with a `void(std::error_code)` signature
 // under `use_awaitable`, which THROWS `std::system_error` on a non-zero code
-// (:99-105); and `run_liveness_loop`'s `catch (const std::system_error&)` sits
+// (same function's `async_initiate` comment); and `run_liveness_loop`'s `catch (const std::system_error&)` sits
 // OUTSIDE its `while (fsm_state_ == fsm_state::Active)` loop
 // (src/session/session.cpp), so the throw crosses the loop boundary and converts
 // to a clean `co_return`. A single cancel therefore DOES terminate a sleeping
@@ -1203,7 +1203,7 @@ template <class Fut>
 //
 // WHAT THE ONE-SHOT PAIR MISSES is therefore only this: `sleep_until` re-registers
 // freely whenever the deadline is still in the future
-// (src/core/test/mock_clock.cpp:119-126), and `cancel_sleeps()` installs nothing to
+// (`mock_clock::sleep_until`'s waiter-registration branch), and `cancel_sleeps()` installs nothing to
 // reject a LATER registration. So a miss branch whose drain itself COMPLETES A
 // STATE TRANSITION that co_spawns a sleeping coroutine -- `run_liveness_loop`'s
 // `sleep_until` and `run_logout_phase1`'s are the two known instances -- arms its
@@ -1232,12 +1232,12 @@ template <class Fut>
 //
 // It terminates, for reasons read from the source rather than inferred from a
 // green suite, and the strongest one is structural, though it covers only five
-// of the seven sites. At those five (`:461`, `:759`, `:829`, `:1087`, `:1174`)
+// of the seven sites. At those five (TestRequestReplyWriteErrorDisconnectsSession, CloseCancelsBlockedPublicSend, GracefulCloseCancelsBlockedPublicSend, CallerCancelledMidCloseDoesNotWedgeSecondClose, BudgetMissQuiescesBeforeSessionTeardown)
 // `teardown_clock` is a freshly-constructed source that nothing but the guard
 // holds, and the guard only ever calls `cancel_sleeps()` on it — so nothing can
 // register a sleep there and `inflight` is empty BY CONSTRUCTION, and the
 // per-slice cancel is INERT at those five sites, with nothing for it to do. The
-// other two (`:706`, `:933`) share their clock with the session (`eng.clock =
+// other two (LivenessHeartbeatWriteErrorStopsLoop, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf) share their clock with the session (`eng.clock =
 // clock`), so the lever is live there, and it rests on two mechanisms that hold
 // in the general case: the map holds `weak_ptr`, and only entries that still
 // lock get a post; and `sleep_until` installs an RAII `dereg` guard that erases
@@ -1435,8 +1435,8 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
 //     the strand after is a heap-use-after-free EVERY TIME, not on a race.
 //     This reaches further than it looks: under the default
 //     `threading_mode::per_session_strand` a Session's bound executor IS such a
-//     strand (session_config.hpp:101,168; core/session_executor.hpp:126,142),
-//     and so is `Engine::control_strand_` (session/engine.hpp:395). A BARE
+//     strand (`SessionConfig::mode`'s `per_session_strand` default; `session_executor`'s private state),
+//     and so is `Engine::control_strand_` (its member declaration in engine.hpp). A BARE
 //     `io_context::executor_type` is NOT affected — it is untracked and its
 //     destructor touches nothing — so an `executor_override` may outlive the
 //     context safely. Measured both arms under ASan; only the strand faults.
@@ -1513,7 +1513,7 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
 // supports the false-negative direction only: for any `io_context` reachable
 // from this caller, the preceding `restart()` clears any prior stopped flag and
 // nothing on this call path calls `stop()` on that same context. The one
-// `tests/support/` exception is `disjoint_session_executor.hpp:71`'s
+// `tests/support/` exception is `disjoint_session_executor`'s `~disjoint_session_executor()`'s
 // `ioc_.stop()`, but that helper owns a private `ioc_` and is included only by
 // `tests/core/test_trace_context_resume.cpp`, so it is out of reach here. The
 // false-positive sweep is separate: for any `io_context` reachable from this
@@ -1540,9 +1540,9 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
 // only observe it", and that stopped being true when #321 landed
 // `cancel_and_drain_or_report`. The mechanism it described is real and unchanged:
 // `mock_clock::sleep_until` registers a new waiter whenever the deadline is still
-// in the future (`src/core/test/mock_clock.cpp:119-126`), and a SINGLE
+// in the future (`mock_clock::sleep_until`'s waiter-registration branch), and a SINGLE
 // `cancel_sleeps()` installs nothing to reject a later registration
-// (`src/core/test/mock_clock.cpp:166-181`), so a coroutine whose first run happens
+// (`mock_clock::cancel_sleeps()` itself), so a coroutine whose first run happens
 // during the drain — the session liveness loop's `sleep_until`,
 // `Session::run_liveness_loop`, is the concrete case — arms a sleep the one-shot
 // cancel has already missed. What changed is the lever: this destructor delegates

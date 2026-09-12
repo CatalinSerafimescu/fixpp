@@ -27,19 +27,19 @@
 // Symbol(55)" as the top-level representative. Verified empirically against
 // this shipped dictionary that claim does NOT hold: Symbol is declared
 // `required='N'` INSIDE the `Instrument` component's own definition
-// (dictionaries/FIX44.xml:2387), and the loader's expand_field_list
-// (src/dictionary/xml_loader.cpp:425-533) reads a <field>/<group>'s OWN
+// (dictionaries/FIX44.xml's Instrument component's Symbol field), and expand_field_list
+// (expand_field_list) reads a <field>/<group>'s OWN
 // `required` attribute only -- the enclosing `<component name='Instrument'
 // required='Y'/>` usage tag's `required` attribute
-// (dictionaries/FIX44.xml:352) is never inspected. Confirmed against the
-// generated build/linux-clang-debug/_codegen/include/fixpp/v44/
+// (NewOrderSingle's Instrument component usage tag) is never inspected.
+// Confirmed against the generated build/linux-clang-debug/_codegen/include/fixpp/v44/
 // Validator.hpp NewOrderSingle_rules row: `{55, field_presence::Optional}`
 // (`static_cast<field_presence>(1)`). Symbol(55) is therefore genuinely
 // OPTIONAL for NewOrderSingle in this dictionary; a required-presence table
 // correctly DERIVED from `FieldRef.rule` (as this feature mandates, R3) must
 // exclude it -- asserting rejection on a missing Symbol would be asserting
 // the table is WRONG. ClOrdID(11) IS genuinely Required
-// (`{11, field_presence::Required}`, dictionaries/FIX44.xml:327) and serves
+// (`{11, field_presence::Required}`, dictionaries/FIX44.xml's NewOrderSingle ClOrdID field) and serves
 // as the discriminating substitute for the SAME top-level-required-field
 // intent. Flagged to the orchestrator; not a design re-derivation (the
 // generation MECHANISM is unchanged) -- just a factual tag correction.
@@ -118,7 +118,7 @@ TEST(BuilderValidate067, NewOrderList_MissingClOrdIdInNoOrdersEntry_GroupDepthFa
     fixpp::v44::groups::G_73_2Args order_args{};
     // cl_ord_id intentionally left unset -- the discriminating missing
     // GROUP-ENTRY required field (list_seq_no/side ARE the entry's other
-    // two required members, dictionaries/FIX44.xml:2945-2947; both set so
+    // two required members, ListOrdGrp's NoOrders group ListSeqNo/Side fields; both set so
     // the failure is unambiguously the ClOrdID omission).
     order_args.list_seq_no = seed.order.list_seq_no;
     order_args.side = seed.order.side;
@@ -150,7 +150,7 @@ TEST(BuilderValidate067, NewOrderList_MissingClOrdIdInNoOrdersEntry_GroupDepthFa
 
 // ── (c) W vs X NoMDEntries(268) per-occurrence required-set divergence:
 // MDEntryType(269) required in W, MDUpdateAction(279) required in X --
-// dictionaries/FIX44.xml:3023-3024 (W) vs :3060-3061 (X) ───────────────────
+// dictionaries/FIX44.xml's MDFullGrp (W) vs MDIncGrp (X) NoMDEntries group ─────
 TEST(BuilderValidate067, WvsXPerOccurrenceRequiredSetDivergence) {
     using namespace fixpp_test_support::seeds067;
 
@@ -248,7 +248,7 @@ TEST(BuilderValidate067, FullyPopulated_ValidatesClean_CommitUnaffectedByValidat
 }
 
 // ── (e) zero-required-field no-op: SecurityStatus (35=f) has zero required
-// application fields at any level (dictionaries/FIX44.xml:889-915 -- no
+// application fields at any level (dictionaries/FIX44.xml's SecurityStatus message -- no
 // field-level required='Y' in the message body; the Instrument/
 // UndInstrmtGrp/InstrmtLegGrp components it references are entirely
 // optional at every one of their own field/group definitions). An EMPTY
@@ -269,13 +269,13 @@ TEST(BuilderValidate067, ZeroRequiredFieldMessage_EmptyArgs_ValidatesSuccess) {
 // group_checks: {false, &QuoteArgs_count_party_i_ds, ...}); engaging it with
 // a zero-length span drives `gc.count(args)` to `optional<size_t>(0)` (NOT
 // nullopt -- that would take the disengaged-skip branch instead) so
-// builder_validate.hpp:85's `gc.required && *n == 0` guard evaluates its
+// validate_required's `gc.required && *n == 0` guard evaluates its
 // `gc.required` (false) leg -- the previously-uncovered BRDA:85,0 outcome --
 // and falls through to the (zero-iteration) entry loop -- clean. This kills
 // the mutant that drops the `gc.required &&` guard (`if (*n == 0) return
 // reject`), which would wrongly reject a legitimately engaged-empty optional
 // group. Anchors: spec.md G5 / Edge Case (engaged-empty optional group is
-// allowed); builder_validate.hpp:85.
+// allowed); validate_required's `gc.required && *n == 0` guard.
 TEST(BuilderValidate067, Quote_EngagedEmptyOptionalGroup_ValidatesClean) {
     fixpp::v44::QuoteArgs args{};
     args.quote_id = "Q1";  // the sole required top-level field (117)

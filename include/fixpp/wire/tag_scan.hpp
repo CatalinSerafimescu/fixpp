@@ -2,8 +2,8 @@
 // include/fixpp/wire/tag_scan.hpp — shared bounded-tag accumulate helper.
 // Single source of the 16-bit FIX tag bound (SC-004): all five live-inbound
 // hand-rolled tag scanners call this helper instead of open-coding the bound.
-// Reference shapes: src/wire/framer.cpp:120 (BodyLength pre-multiply bound)
-//                   src/session/session.cpp:1588 (seqnum pre-multiply bound)
+// Reference shapes: framer.cpp's BodyLength pre-multiply bound check
+//                   session.cpp's `parse_seqnum` overflow guard
 // Dependency-free leaf: std headers only (wire layer, no session/core includes).
 // Contract: contracts/tag-scan-helper.md; research: specs/040-*/research.md D-1.
 #pragma once
@@ -80,7 +80,7 @@ namespace fixpp::wire {
 
 // ---------------------------------------------------------------------------
 // Compile-time boundary correctness (normative — FR-001 / contracts/tag-scan-helper.md).
-// These static_asserts pin the exact property the defective scan_frame_header:1493
+// These static_asserts pin the exact property the defective scan_frame_header
 // guard lacked, evaluated at compile time so a regressing edit is a build error.
 // ---------------------------------------------------------------------------
 

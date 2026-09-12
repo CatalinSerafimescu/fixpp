@@ -64,7 +64,7 @@
 # stack-use-after-return ON PURPOSE, to prove ASan catches it — the
 # canary-proven-RED discipline.  ASan's default `halt_on_error=1` aborts the
 # process, so ctest stays green only because the test is registered as its OWN
-# entry with `WILL_FAIL TRUE` under ASan (`tests/capi/CMakeLists.txt:165-175`).
+# entry with `WILL_FAIL TRUE` under ASan (the `capi_send_recv_uaf_negative` split).
 # That split is itself deliberate: a binary-wide `WILL_FAIL` would invert a REAL
 # ASan failure in the positive round-trip tests into a pass.
 #
@@ -90,8 +90,8 @@
 # ctest entry, and the LANE goes red through ctest — entirely independently of
 # what this allowlist or the report counter decide. The only way an abort does
 # not fail its entry is `WILL_FAIL TRUE`, and of the five WILL_FAIL entries in
-# tests/ exactly ONE runs instrumented code: `capi_send_recv_uaf_negative`
-# (tests/capi/CMakeLists.txt:175). The other four cannot emit a runtime ASan
+# tests/ exactly ONE runs instrumented code: `capi_send_recv_uaf_negative`.
+# The other four cannot emit a runtime ASan
 # report at all — two tls + one session are negative-COMPILE witnesses invoking
 # `cmake --build`, and tests/sync's runs a `bash` census script.
 #
@@ -116,7 +116,7 @@ linux-clang-asan    ERROR: AddressSanitizer: stack-use-after-return
 #   test       `CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan`, via the
 #              `capi_send_recv_uaf_negative` ctest entry.
 #   mechanism  `WILL_FAIL TRUE` is gated on `if(FIXPP_ENABLE_ASAN)`
-#              (`tests/capi/CMakeLists.txt:174-176`) — it keys on ASAN BEING ON,
+#              (the `capi_send_recv_uaf_negative` entry) — it keys on ASAN BEING ON,
 #              not on the standard library, so this lane registers the negative
 #              entry identically and ctest stays green.
 #   observed   run 32024674144, job 95371515426 (2026-08-17) — exactly 1,
@@ -134,7 +134,7 @@ linux-clang-libc++-asan    ERROR: AddressSanitizer: stack-use-after-return
 #
 # In particular `linux-clang-ubsan` has NONE, deliberately. Its 1 report on runs
 # 32003367497/32007171995 is a GENUINE finding —
-# `tests/capi/public_roundtrip_test.cpp:129` loads an out-of-range enum — filed
+# `tests/capi/reset_seqnum_policy_range_test.c`'s out-of-range acceptance test — filed
 # as #268 and NOT allowlisted. Allowlisting a real defect to quiet an instrument
 # is the failure this file must never become.
 #

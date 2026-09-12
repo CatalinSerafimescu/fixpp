@@ -1432,7 +1432,7 @@ TEST(MessageRead, VersionNoTag8) {
 }
 
 // fixpp_msg_get_group on a null msg: exercises the TRUE arm of the
-// `if (view == nullptr)` guard at line 319 (check_inbound_msg returns null).
+// `if (view == nullptr)` guard (from check_inbound_msg) in fixpp_msg_get_group.
 // NullHandleReturnsNullHandle tests get_string/get_int/etc with null msg but
 // NOT get_group — this closes that gap.
 TEST(MessageRead, GetGroupNullMsgReturnsNullHandle) {
@@ -1442,7 +1442,7 @@ TEST(MessageRead, GetGroupNullMsgReturnsNullHandle) {
 }
 
 // fixpp_msg_get_msg_type on a frame that has no 35= tag (empty msg_type()): exercises
-// the `if (sv.empty()) return FIXPP_ERR_TAG_NOT_FOUND` at line 302.
+// the `if (sv.empty()) return FIXPP_ERR_TAG_NOT_FOUND` in fixpp_msg_get_msg_type.
 // The VersionNoTag8 test builds a frame without 8= but still has 35=D; here we
 // explicitly omit 35= from the body.
 TEST(MessageRead, GetMsgTypeEmptyMsgType) {
@@ -1461,7 +1461,7 @@ TEST(MessageRead, GetMsgTypeEmptyMsgType) {
 }
 
 // get_string with a non-null value_out but null len_out: exercises the second
-// operand of the '||' guard at line 157 (covers the short-circuited branch).
+// operand of the '||' guard in fixpp_msg_get_string (covers the short-circuited branch).
 // The NullOutPointerAllAccessors test above passes null,null for get_string,
 // which short-circuits on the first operand — this test drives the second.
 TEST(MessageRead, GetStringNullLenOut) {
@@ -1478,7 +1478,7 @@ TEST(MessageRead, GetStringNullLenOut) {
     EXPECT_EQ(fixpp_msg_get_string(h.ptr(), 49, &sv, nullptr), FIXPP_ERR_NULL_HANDLE);
 }
 
-// get_bytes on an absent tag: exercises line 179 (the if(!res) absent branch).
+// get_bytes on an absent tag: exercises fixpp_msg_get_bytes's if(!res) absent branch.
 TEST(MessageRead, GetBytesAbsentTag) {
     auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
@@ -1490,11 +1490,11 @@ TEST(MessageRead, GetBytesAbsentTag) {
 
     const uint8_t* bp = nullptr;
     size_t len = 0;
-    // tag 56 is absent → TAG_NOT_FOUND (line 179 branch)
+    // tag 56 is absent → TAG_NOT_FOUND (get_bytes's if(!res) branch)
     EXPECT_EQ(fixpp_msg_get_bytes(h.ptr(), 56, &bp, &len), FIXPP_ERR_TAG_NOT_FOUND);
 }
 
-// get_double on an absent tag: exercises line 211 (the if(!res) absent branch).
+// get_double on an absent tag: exercises fixpp_msg_get_double's if(!res) absent branch.
 TEST(MessageRead, GetDoubleAbsentTag) {
     auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
@@ -1505,14 +1505,14 @@ TEST(MessageRead, GetDoubleAbsentTag) {
     h.msg.view = &mv;
 
     double dv = 0.0;
-    // tag 44 is absent → TAG_NOT_FOUND (line 211 branch)
+    // tag 44 is absent → TAG_NOT_FOUND (get_double's if(!res) branch)
     EXPECT_EQ(fixpp_msg_get_double(h.ptr(), 44, &dv), FIXPP_ERR_TAG_NOT_FOUND);
 }
 
 // Group field accessors: v_out == nullptr or len_out == nullptr with a VALID group
 // cursor. The GroupNullHandleAllAccessors test above always passes null_grp which
 // short-circuits on the first '||' operand; here g is non-null so later operands
-// are evaluated (covers lines 359/388 second and third sub-expressions).
+// are evaluated (covers each accessor's null-guard later sub-expressions).
 TEST(MessageReadGroup, GroupNullOutParamWithValidHandle) {
     auto dict = make_group_dict();
     auto buf = make_raw_frame(
@@ -1636,11 +1636,11 @@ TEST(MessageReadGroup, ParseIntAndDoubleEmptyFieldValue) {
     ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
     ASSERT_EQ(count, 1U);
 
-    // Empty string → parse_int64 returns false → WIRE_INVALID_FRAME (line 73 true arm)
+    // Empty string → parse_int64 returns false → WIRE_INVALID_FRAME (its sv.empty() arm)
     int64_t iv = 0;
     EXPECT_EQ(fixpp_group_get_field_int(grp, 0, 38, &iv), FIXPP_ERR_WIRE_INVALID_FRAME);
 
-    // Empty string → parse_double returns false → WIRE_INVALID_FRAME (line 82 true arm)
+    // Empty string → parse_double returns false → WIRE_INVALID_FRAME (its sv.empty() arm)
     double dv = 0.0;
     EXPECT_EQ(fixpp_group_get_field_double(grp, 0, 44, &dv), FIXPP_ERR_WIRE_INVALID_FRAME);
 }
@@ -2039,7 +2039,7 @@ TEST(MessageReadGroup, DictFreeGroupReadReportsTypeMismatch) {
     std::pmr::monotonic_buffer_resource arena;
     // Default ctor — dict-free: opaque_dict_ == nullptr, group_member_fn_ ==
     // nullptr (confirmed constructible; mirrors
-    // tests/wire/message_view_membership_copy_test.cpp:195).
+    // tests/wire/message_view_membership_copy_test.cpp's DictFreeSourceYieldsEmptyCopy).
     Parser<access_mode::Index> parser{};
     auto mv_res = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv_res.has_value());

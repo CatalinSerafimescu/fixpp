@@ -1,7 +1,7 @@
 # neg_compid_auth_non_string_element.toml
 # compid_authorization_policy array contains a non-string element (integer 42) —
 # triggers malformed_value "each CompID in compid_authorization_policy must be a string"
-# (lines 646-654 scalar_mappers.cpp).
+# (map_structured_members's CompID-must-be-string arm, scalar_mappers.cpp).
 
 [clock]
 kind = "system"

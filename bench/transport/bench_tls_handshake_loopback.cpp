@@ -16,7 +16,7 @@
 // Wired to the real asio_tls_transport_factory + loopback acceptor using
 // leaf_rsa2048.pem + ca.pem (mtls_ca profile; clock=null → no expiry check).
 //
-// CMake target: bench_tls_handshake_loopback (bench/transport/CMakeLists.txt:22)
+// CMake target: bench_tls_handshake_loopback (bench/transport/CMakeLists.txt's add_executable)
 //
 // Design anchor: 014 tasks.md T022; FR-013b; plan §Performance; data-model E-5.
 // Baseline: first real 1-RTT number (no regression gate — recording only).

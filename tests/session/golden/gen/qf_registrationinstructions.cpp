@@ -3,7 +3,7 @@
 // C4, family class R-001 registration: NoRegistDtls nested group).
 // OFFLINE TOOLING, not checked in to the main build (see gen/README.md).
 //
-// Required='Y' fields (dictionaries/FIX44.xml:1009-1021, FIX44::
+// Required='Y' fields (dictionaries/FIX44.xml's RegistrationInstructions message, FIX44::
 // RegistrationInstructions ctor): RegistID(513), RegistTransType(514),
 // RegistRefID(508). RgstDtlsGrp/NoRegistDtls(473) is required='N' but
 // populated — 1 entry, RegistDtls(509) — per C4's table note.

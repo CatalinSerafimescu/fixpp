@@ -5,7 +5,7 @@
 //
 // Anchors:
 //   [2h §4.4]      — value-type shape post-Appendix-D §D.5 amendment.
-//   [2h §6.6]:1190 — transport_reconnect_limit_exceeded (FSM-side, not here).
+//   [2h §6.6]'s `transport_reconnect_limit_exceeded` row (FSM-side, not here).
 //   QFJ IoSessionInitiator::computeNextRetryConnectDelay():318-319 — plateau-at-last.
 //   [const §VII.7] — fuzz determinism contract: same (session_id_seed, attempt_n)
 //                    deterministically reproduces the delay.

@@ -62,7 +62,7 @@ target_link_libraries(fixpp_dictionary
 #
 # Forward-reference note (intentional, generate-phase-resolved — NOT a bug):
 # fixpp::dict::dispatch / fixpp_codegen_generate are defined later by
-# include(cmake/Codegen.cmake) (CMakeLists.txt:190), and fixpp_wire by the
+# the root CMakeLists.txt's own `include(cmake/Codegen.cmake)` call, and fixpp_wire by the
 # later src/wire subdir — fixpp_dictionary already forward-links fixpp_wire and
 # builds today. Do NOT "fix" this ordering by restructuring CMake.
 #

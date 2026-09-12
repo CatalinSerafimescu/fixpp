@@ -39,7 +39,7 @@
 cmake_minimum_required(VERSION 3.28)
 # 086 T008: C is enabled so the INSTALLED C-ABI interface can be witnessed from a
 # C compiler (probe_capi_positive_c.c). US1 promises "a C or C++ integrator";
-# in-tree C-cleanliness was already pinned (tests/capi/CMakeLists.txt:13, :23) but
+# in-tree C-cleanliness was already pinned (tests/capi/CMakeLists.txt's capi_version_smoke_c, capi_handles_compile_test) but
 # that says nothing about what the package delivers.
 project(fixpp_consumer_witness C CXX)
 
@@ -74,7 +74,7 @@ target_link_libraries(consumer_witness PRIVATE fixpp::fixpp)
 #
 # NOTHING MECHANICALLY ENFORCES THAT (corrected by 086/FR-014 — this comment used
 # to say tools/check_layers.py did). That script is a source #include-edge lint
-# over src/** and bindings/** (:2-7, :173-176); it parses no CMake and reads no
+# over src/** and bindings/** (its module docstring, its main() glob patterns); it parses no CMake and reads no
 # link interface, and an installed package cannot observe which targets a
 # consumer links together anyway. Keeping these two witnesses separate IS the
 # convention being upheld, which is why the separation is load-bearing here
@@ -127,7 +127,7 @@ set_target_properties(probe_capi_positive_c PROPERTIES
 # US6 / FR-011a — fixpp::service reaches the plugin header AND the C ABI. The
 # C-ABI half is the load-bearing one: fixpp::service declares no C-ABI root of
 # its own and reaches <fix/c_api.h> only through its existing link to
-# fixpp::capi (src/service/CMakeLists.txt:30). Narrowing fixpp::capi is exactly
+# fixpp::capi (src/service/CMakeLists.txt's fixpp_service INTERFACE link to fixpp_capi). Narrowing fixpp::capi is exactly
 # the change that could sever that path.
 add_library(probe_service_positive OBJECT probe_service_positive.cpp)
 target_link_libraries(probe_service_positive PRIVATE fixpp::service)
@@ -138,7 +138,7 @@ target_link_libraries(probe_service_positive PRIVATE fixpp::service)
 # removing anything from the umbrella's, and this is what goes red if that stops
 # being true.
 #
-# A SEPARATE TU, deliberately: consumer_witness.cpp:34-37 includes neither of
+# A SEPARATE TU, deliberately: consumer_witness.cpp's #include block includes neither of
 # those two headers, and SC-003 trades on that file staying byte-unchanged.
 add_library(probe_umbrella OBJECT probe_umbrella.cpp)
 target_link_libraries(probe_umbrella PRIVATE fixpp::fixpp)
@@ -192,7 +192,7 @@ target_link_libraries(probe_service_negative PRIVATE fixpp::service)
 # ── C-3 leg 3 — effective usage requirements at a real consumer target ───────
 # FR-009a(ii). Not a duplicate of quickstart §3's property diff: compile
 # definitions reach a C-ABI consumer through fixpp_capi_objects -> fixpp_log
-# (src/capi/CMakeLists.txt:29-38) and never appear in fixpp::capi's own exported
+# (src/capi/CMakeLists.txt's fixpp_capi_objects PUBLIC link) and never appear in fixpp::capi's own exported
 # block, which reads IDENTICALLY whether they propagate or not. Leg 2 is
 # structurally incapable of seeing them; this target is where they show up.
 #
@@ -224,7 +224,7 @@ target_link_libraries(probe_usage_requirements PRIVATE fixpp::capi)
 # there — include/capi, and include/service-iface — which is precisely why 087's
 # expectations can be non-empty while 086's remain correctly empty.
 # What is thereby lost is enumerated and pre-approved: today AT LEAST
-# FIXPP_LOG_MIN_LEVEL (src/log/CMakeLists.txt:27) and ASIO_STANDALONE (carried by
+# FIXPP_LOG_MIN_LEVEL (src/log/CMakeLists.txt's fixpp_log compile definition) and ASIO_STANDALONE (carried by
 # asio::asio, linked unwrapped inside the closure). Membership in that set is
 # decided by this predicate, not by that list.
 set(FIXPP_086_EXPECTED_COMPILE_DEFINITIONS "")
@@ -288,15 +288,15 @@ OBSERVED_COMPILE_FEATURES=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMP
 # contract §1 exactly on Linux/clang, and R6 on MSVC-under-Conan.
 
 # capi — one entry. The C-ABI root 086 installs, and `fixpp::capi`'s ONLY
-# $<INSTALL_INTERFACE:> (src/capi/CMakeLists.txt:125-128).
+# $<INSTALL_INTERFACE:> (src/capi/CMakeLists.txt's fixpp_capi PUBLIC include-directories block).
 set(FIXPP_087_EXPECTED_CAPI "include/capi|1")
 
 # service — two entries, and each arrives by a DIFFERENT route, which is why
 # this leg is the one that can go LEAK and DROP at once (§5 row #8):
 #   include/service-iface — src/service/CMakeLists.txt's own independently
-#                           declared install interface (:24-27);
+#                           declared install interface (its target_include_directories() call);
 #   include/capi          — INHERITED transitively, through fixpp::service's
-#                           link to fixpp::capi (src/service/CMakeLists.txt:30).
+#                           link to fixpp::capi (src/service/CMakeLists.txt's fixpp_service INTERFACE link).
 #                           Nothing in src/service/ names it.
 # T013 (demonstration #1, the vacuity proof) deliberately omitted the inherited
 # member and observed the resulting LEAK before this line was ever correct.

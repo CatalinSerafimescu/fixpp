@@ -16,7 +16,7 @@
 // Group-tree shape + count-precedence serialization + INV-5 grammar
 // validation mirror src/capi/message_write.cpp's OutboundAccumulator
 // (compute_entries_size/serialise_entries/validate_group_grammar,
-// message_write.cpp:590-701), adapted to a memory_resource-free
+// `compute_entries_size`/`serialise_entries`/`validate_group_grammar`), adapted to a memory_resource-free
 // std::vector accumulator (data-model §1 "Buffer/allocation policy") and an
 // author-supplied delimiter_tag instead of a dictionary lookup (INV-5,
 // contracts/builder-shape-oracle.md C3).
@@ -41,7 +41,7 @@ using fixpp::core::expected_t;
 inline constexpr std::byte kSOH{0x01U};
 
 // Fixed internal scratch cap for commit() serialization. Value-equal to the
-// C-ABI kFrameCap (src/capi/message_write.cpp:106), which is file-static and
+// C-ABI kFrameCap (src/capi/message_write.cpp's `kFrameCap`), which is file-static and
 // NOT referenceable across translation units — body_builder tracks its own
 // copy (data-model §1 "Buffer/allocation policy"; tasks.md T006 notes
 // hoisting a single shared constant as v1.x debt).

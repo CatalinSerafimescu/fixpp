@@ -45,7 +45,7 @@
 // -- result-identity, not byte-identity, per FR-009/SC-004's Gate-A-round-2
 // correction.
 //
-// Anchors: specs/078-precompiled-builder-libs/spec.md US3 (lines 80-92),
+// Anchors: specs/078-precompiled-builder-libs/spec.md US3,
 // FR-006/FR-007, SC-004 (validator leg); quickstart.md Scenario 4a;
 // tests/codegen/test_078_odr_sc003_probe.cpp (mock ODR precedent, leg i);
 // tests/session/test_078_validator_linked_us2.cpp (missing-required-field

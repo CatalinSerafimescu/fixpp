@@ -396,9 +396,9 @@ TEST_F(FsmTransitionMatrixTest, Disconnected_CloseTerminalIsIdempotentAndStaysDi
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
 }
 
-// ── NotConnected refused-Logon arms (session.cpp:489-554) ──────────────────
+// ── NotConnected refused-Logon arms (on_inbound_frame's NotConnected case) ──
 //
-// Matrix row NotConnected has two refusal cells (session.cpp:489-554):
+// Matrix row NotConnected has two refusal cells (on_inbound_frame's NotConnected case):
 //   1. Non-Logon first message → refuse, transition to Disconnected.
 //   2. Logon-shaped but BeginString/CompID mismatch → refuse, stay in
 //      NotConnected (Phase 3 "never reaches Active" contract; full refuse+
@@ -420,7 +420,7 @@ TEST_F(FsmTransitionMatrixTest, NotConnected_NonLogonFirstMessage_TransitionsToD
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "NotConnected + non-Logon first frame must transition to Disconnected "
-        << "(session.cpp:548-550; matrix row 1)";
+        << "(on_inbound_frame's NotConnected case; matrix row 1)";
 }
 
 // Acceptor-shaped NotConnected: a fresh session (no open() called) receives a
@@ -469,7 +469,7 @@ TEST_F(FsmTransitionMatrixTest, NotConnected_ValidLogonFromPeer_LandsInLogonRece
 }
 
 // T013 [US3] — FR-006: refused Logon on NotConnected row → Disconnected (not preserved).
-// Anchors: spec.md FR-006, data-model.md:19 matrix row, opus_pr81_1_triage.md RC#3.
+// Anchors: spec.md FR-006, data-model.md's NotConnected matrix row, opus_pr81_1_triage.md RC#3.
 TEST_F(FsmTransitionMatrixTest, NotConnected_RefusedLogonByBeginString_ReachesDisconnected) {
     // Feed a Logon (35=A) with wrong BeginString — interpret_logon refuses.
     // FR-006 contract: every refusal on the NotConnected row → Disconnected
@@ -506,7 +506,7 @@ TEST_F(FsmTransitionMatrixTest, NotConnected_RefusedLogonByBeginString_ReachesDi
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "NotConnected + Logon-shaped frame with BeginString mismatch must "
-        << "transition to Disconnected per FR-006 / data-model.md:19 matrix row";
+        << "transition to Disconnected per FR-006 / data-model.md's NotConnected matrix row";
 }
 
 }  // namespace fixpp::session::test

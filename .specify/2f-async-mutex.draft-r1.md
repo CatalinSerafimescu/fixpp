@@ -28,7 +28,7 @@
 > - `[2b §6.4]` Lifetime contract on flyweights — 2f's `async_lock_guard` carries `[[clang::lifetimebound]]` per the same precedent.
 > - `[2c §6.7]` Per-doc-prefix discipline (`FIXPP_ERR_DICT_*`) — 2f adopts the same shape with prefix `FIXPP_ERR_SYNC_*`.
 > - `[2d §4.5]` `SessionConfig` — per-session PMR resource (`session_arena`) consumed by 2f's fallback path; `lock_policy` enum recorded but not consumed by 2f directly (the store-write callsite cap in `[const §XI.5]` is what binds 2f to the store path).
-> - `[2d §4.7]` Cancellation propagation API — two-phase close + per-mode effect table; the row at line 804 (`async_mutex::lock`) is 2f's inherited contract: phase-1 graceful runs the wait normally, phase-2 cancels with `operation_aborted`, `terminal` cancels with `operation_aborted`, `partial` is dropped from v1.0.
+> - `[2d §4.7]` Cancellation propagation API — two-phase close + per-mode effect table; the `async_mutex::lock` row is 2f's inherited contract: phase-1 graceful runs the wait normally, phase-2 cancels with `operation_aborted`, `terminal` cancels with `operation_aborted`, `partial` is dropped from v1.0.
 > - `[2d §4.8]` `fixpp::core::session_executor` — project-owned wrapper class (NOT an alias to `any_io_executor`); 2f's awaitable completes on the awaiter's bound `session_executor` for in-session callers.
 > - `[2d §6.5]` `cancellable_dispatch` primitive — 2f's `async_lock` is **NOT** this primitive; it is the lower-level mutex the primitive uses internally for any internal serialisation. 2f's cancellation outcome (`error::sync_lock_aborted`) joins `[2d §6.7]`'s `dispatch_aborted` and `clock_sleeps_cancelled` in the `FIXPP_ERR_CANCELLED` group.
 > - `[2d §6.7]` C-ABI coalescing precedent (`FIXPP_ERR_THREAD_*`); 2f introduces `FIXPP_ERR_SYNC_*` as a peer.
@@ -43,7 +43,7 @@
 > - `[2e §10] Q8` — 2f signature deferred; **2f closes this here in §4.1.**
 > - `[const §VI.5]` Spec Coverage Discipline — exact-citation rule; this appendix's structure obeys it.
 >
-> **Cites:** `[SYN §3.2 Q6a]`, `[SYN §3.2 Q6b]`, `[const §XI.3]`, `[const §XV.9]`, `[const §VIII.5]`, `[const §XI.6]`, `[2d §7.4]`. Per `[const §VI.5]` the Normative References section is bound to spec sources (`[FIX-SL §...]`, `[FIXT §...]`, `[FIXS §...]`); **2f's primary drivers are engineering judgment, not a specific FIX spec section, and no `[FIX-SL]` / `[FIXT]` / `[FIXS]` reference applies.** This is recorded in Appendix B per the precedent set by `architecture.md` Appendix B's closing note (line 678) and `[2d Appendix B] §B.2`.
+> **Cites:** `[SYN §3.2 Q6a]`, `[SYN §3.2 Q6b]`, `[const §XI.3]`, `[const §XV.9]`, `[const §VIII.5]`, `[const §XI.6]`, `[2d §7.4]`. Per `[const §VI.5]` the Normative References section is bound to spec sources (`[FIX-SL §...]`, `[FIXT §...]`, `[FIXS §...]`); **2f's primary drivers are engineering judgment, not a specific FIX spec section, and no `[FIX-SL]` / `[FIXT]` / `[FIXS]` reference applies.** This is recorded in Appendix B per the precedent set by `architecture.md` Appendix B's closing note and `[2d Appendix B] §B.2`.
 >
 > **Catalogue rows owned:** **NFR-016** (NEW row) — Awaitable mutex `fixpp::sync::async_mutex`. Drop-in language for `library/spec/feature-catalogue.md` and `library/spec/coverage-index.md` is in §11; the orchestrator applies the amendment at sign-off per `[2d §11]` precedent (the rewrite agent does not edit those files in this draft). Appendix A claims the row.
 >
@@ -230,7 +230,7 @@ From `[2d §4.5]` (`SessionConfig` field list):
 
 From `[2d §4.7]` (Cancellation propagation API — two-phase close + per-mode effect table):
 
-The row at line 804 (`async_mutex::lock`) is 2f's inherited contract:
+The `async_mutex::lock` row is 2f's inherited contract:
 
 | `graceful` (phase 1) | `graceful` (phase 2) | `terminal` |
 |---|---|---|
@@ -694,7 +694,7 @@ The guard is a flyweight (`sizeof(async_lock_guard) == sizeof(async_mutex*)` = 8
 
 ### 4.5 Cancellation contract (item 3)
 
-The cancellation contract follows `[2d §4.7]`'s per-mode effect table at line 804 (the `async_mutex::lock` row); this section spells the per-`asio::cancellation_type` behaviour 2f's awaiter implements.
+The cancellation contract follows `[2d §4.7]`'s per-mode effect table (the `async_mutex::lock` row); this section spells the per-`asio::cancellation_type` behaviour 2f's awaiter implements.
 
 | `asio::cancellation_type` | 2f awaiter behaviour |
 |---|---|
@@ -1074,7 +1074,7 @@ Per `[arch §10]` requirement (4) and `[const §VII]`. v0.1 ships **14 seams** (
 
 **Catalogue + coverage-index amendments owed at sign-off** (drop-in language pattern from `[2d §11]` / `[2c App D]`; the orchestrator applies these during the sign-off commit, not the 2f rewrite agent):
 
-- Add **NFR-016** to `library/spec/feature-catalogue.md` (one row, mirroring the NFR-015 row format from `feature-catalogue.md` line 225):
+- Add **NFR-016** to `library/spec/feature-catalogue.md` (one row, mirroring the NFR-015 row format from `feature-catalogue.md`):
 
   > **NFR-016** | OFFICIAL | nfr | Awaitable mutex `fixpp::sync::async_mutex` — own implementation (BSL-1.0 algorithm attribution to avast/asio-mutex; cppcoro / Lewis-Baker `std::atomic<uintptr_t>` state with not_locked/locked_no_waiters/pointer-to-LIFO encoding); waiter embedded in the awaiter object inside the caller's coroutine frame (zero global-heap allocation on the contended path); PMR-aware fallback for type-erased completion handlers via `SessionConfig::session_arena`; ASIO `cancellation_type::total` removes the waiter and completes with `error::sync_lock_aborted`; per-mutex `dispatch`/`post` completion policy with default `dispatch`; pre-conditioned destructor (debug `assert`, release UB if violated); the only legal mutex shape in coroutine context per `[const §XI.3]` (CI-enforced via `tools/check_no_std_mutex_in_awaitable_headers.sh` grep gate per `[const §XV.9]`). | all | `[2f §4.1] / [arch §1.1]` | backlog | `.specify/2f-async-mutex.md` v0.1 | — | — | — |
 
@@ -1142,7 +1142,7 @@ Per `[const §VI.5]`, every `/specify` artifact lists the exact `[DocAbbrev §X.
 | `[2b §6.6]` | Allocation, exceptions, threading; three-arena pinning; view-escape rule | §4.4, §8 |
 | `[2c §6.7]` | C-ABI coalescing groups precedent (`FIXPP_ERR_DICT_*`) | §6.5, §3 |
 | `[2d §4.5]` | `SessionConfig` field list — `session_arena`, `lock_policy` | §4.3, §8, §3 |
-| `[2d §4.7]` | Cancellation propagation API — two-phase close + per-mode effect table (the row at line 804 for `async_mutex::lock` is 2f's inherited contract) | §4.5, §3 |
+| `[2d §4.7]` | Cancellation propagation API — two-phase close + per-mode effect table (the `async_mutex::lock` row is 2f's inherited contract) | §4.5, §3 |
 | `[2d §4.8]` | `fixpp::core::session_executor` — project-owned wrapper class | §4.1, §4.3, §6.1, §7.4, §3 |
 | `[2d §6.5]` | `cancellable_dispatch` — higher-level primitive 2f does NOT implement | §1.2, §3 |
 | `[2d §6.7]` | C-ABI coalescing groups precedent (`FIXPP_ERR_THREAD_*`); `dispatch_aborted` is the cancellation peer | §6.5, §3 |
@@ -1155,7 +1155,7 @@ Per `[const §VI.5]`, every `/specify` artifact lists the exact `[DocAbbrev §X.
 
 ### B.2 Engineering-judgment citations (non-normative, inline at point of use)
 
-Per `architecture.md` Appendix B's closing note (line 678) and `[2d Appendix B] §B.2`'s precedent: design decisions whose primary driver is engineering judgment rather than a specific spec section — **the `async_mutex` algorithm itself, the awaiter shape, the destructor pre-condition, the per-mutex completion policy, the LIFO-push + FIFO-drain semantics, the cancellation behaviour per `asio::cancellation_type`, the PMR fallback mechanism, the `[const §XV.9]` CI grep gate** — cite `[const §X.y]` / `[arch §X.y]` / `[SYN §3.x Q#]` / `[2X §X.y]` inline at point of use; they are not spec normatives and are intentionally omitted from §B.1.
+Per `architecture.md` Appendix B's closing note and `[2d Appendix B] §B.2`'s precedent: design decisions whose primary driver is engineering judgment rather than a specific spec section — **the `async_mutex` algorithm itself, the awaiter shape, the destructor pre-condition, the per-mutex completion policy, the LIFO-push + FIFO-drain semantics, the cancellation behaviour per `asio::cancellation_type`, the PMR fallback mechanism, the `[const §XV.9]` CI grep gate** — cite `[const §X.y]` / `[arch §X.y]` / `[SYN §3.x Q#]` / `[2X §X.y]` inline at point of use; they are not spec normatives and are intentionally omitted from §B.1.
 
 **No `[FIX-SL §...]`, `[FIXT §...]`, or `[FIXS §...]` reference applies to 2f's design.** The awaitable-mutex primitive is not described in any FIX session-layer, FIXT, or FIXS spec section; it is a project-owned engineering primitive driven by `[const §XI.3]`'s mandate, `[const §XV.9]`'s ban, `[SYN §3.2 Q6b]`'s six-item design list, and `[2d §7.4]`'s locked executor-compat contract surface.
 

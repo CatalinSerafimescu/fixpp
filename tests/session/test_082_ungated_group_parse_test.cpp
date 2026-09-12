@@ -20,7 +20,7 @@
 // Host message: Allocation(msgtype 'J') / NoOrders(73). Chosen because it is
 // the ONE group tag common to all three dictionaries at a stable, top-level
 // (non-nested) position in the SAME host message across all three versions
-// (dictionaries/FIX40.xml:316, FIX41.xml:452, FIX42.xml:670 -- each declares
+// (dictionaries/FIX40.xml, FIX41.xml, FIX42.xml's Allocation NoOrders group -- each declares
 // `<group name='NoOrders' ...>` directly inside Allocation, immediately
 // followed there by the plain field Side(54) -- confirmed by direct
 // inspection of the vendored XML). Members used: ClOrdID(11), OrderID(37)
@@ -34,7 +34,7 @@
 //       flat/positionally-absorbed-to-end-of-message). RED today: TODAY
 //       none of FIX40/41/42 register NoOrders(73) as a group at all (the
 //       `fr.type == NumInGroup` gate in Dictionary::as_table_view()'s
-//       population loops -- dictionary.cpp:398/441/446 -- filters out
+//       population loops in Dictionary::as_table_view() -- filters out
 //       every group-count tag in these three dictionaries, which type
 //       their group-count fields `INT`, never `NUMINGROUP`), so
 //       group_slices(73) returns an EMPTY span pre-T023.

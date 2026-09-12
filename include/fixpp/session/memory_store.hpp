@@ -10,11 +10,11 @@
 // I-08 (capacity exhausted) / I-09 (no evict_oldest) / I-10 (zero alloc
 // after construction under bounded).
 //
-// HEADER-ONLY per plan.md Project Structure line 187 (T021 decision):
+// HEADER-ONLY per plan.md's Project Structure section (T021 decision):
 // HALO-elision ([const §XI.6]) is friendlier to inline bodies; the 007/006
 // precedent leaned header-inline for hot-path primitives.
 //
-// Fixed-slab layout under capacity_policy::bounded ([2e §4.2] line 486):
+// Fixed-slab layout under capacity_policy::bounded ([2e §4.2]'s fixed-slab layout bullet):
 //   - ONE PMR allocation at ctor for the combined payload slab.
 //   - TWO PMR allocations for the index vectors (reserved to capacity).
 //   - store() performs ZERO allocator calls after construction (FR-007 / I-10).
@@ -84,7 +84,7 @@ public:
           outbound_entries_(std::pmr::polymorphic_allocator<Entry>{mr_}),
           retrieve_scratch_(std::pmr::polymorphic_allocator<std::byte>{mr_}) {
         if (cfg_.policy == capacity_policy::bounded) {
-            // ONE PMR allocation for the fixed payload slab ([2e §4.2] line 486).
+            // ONE PMR allocation for the fixed payload slab ([2e §4.2]'s fixed-slab layout bullet).
             // Layout: first inbound_capacity slots are inbound; next outbound_capacity slots are
             // outbound. Each slot is max_frame_bytes bytes.
             slab_total_bytes_ =
@@ -226,7 +226,7 @@ public:
     // the mutex and re-checked at the top of the visitor loop; a reset() that runs
     // during a visitor suspension makes generation_ != g0 → fail closed with
     // store_io_failure (mirror of FileStore's generation_; contract
-    // message_store.hpp:113-116).
+    // message_store.hpp's retrieve() Mid-traversal-mutation note).
     //
     // PMR-throw boundary: visitor exceptions caught and routed to
     // store_visitor_aborted (T043 / I-21).
@@ -344,10 +344,10 @@ public:
         // per-call local — the session store arena is a monotonic_buffer_resource
         // that never frees, so a per-call local would burn max_frame_bytes of
         // PERMANENT arena memory on every bounded retrieve()); store() rejects
-        // frames larger than max_frame_bytes (see :169), so assign() below never
+        // frames larger than max_frame_bytes (see store()'s size check), so assign() below never
         // reallocates. Safe to share across calls because retrieve() is
         // serialised under the single-session-serialisation-domain contract
-        // (message_store.hpp:98) — only one retrieve() walk runs at a time, and
+        // (message_store.hpp's own discipline note) — only one retrieve() walk runs at a time, and
         // store() never touches this buffer. The unbounded path already
         // snapshots bytes into unbounded_payload_copy under the mutex, so it
         // needs no re-materialisation here.
@@ -550,7 +550,7 @@ private:
     // mutex must still be valid when entries are accessed during drain.
     fixpp::sync::async_mutex mutex_;
 
-    // ── Bounded-policy slab ([2e §4.2] line 486) ─────────────────────────
+    // ── Bounded-policy slab ([2e §4.2]'s fixed-slab layout bullet) ────────
     // ONE PMR allocation at ctor for the fixed-size payload slab.
     // Layout: slots [0, inbound_capacity) = inbound, [inbound_capacity, total) = outbound.
     // Each slot is exactly max_frame_bytes bytes.
@@ -597,7 +597,7 @@ private:
     // reset() that runs during a visitor.on_frame() suspension bumps this, so
     // the next iteration observes generation_ != g0 and retrieve() fails closed
     // with store_io_failure BEFORE reading a slab slot the reset()+store() may
-    // have overwritten (message_store.hpp:113-116 "mid-traversal mutation is
+    // have overwritten (message_store.hpp's retrieve() note: "mid-traversal mutation is
     // detected … without UB"). Plain std::uint64_t (no atomic): mutated and
     // read only on the session strand (same discipline + rationale as FileStore
     // Decision 3); the retrieve() read is off-mutex but strand-confined.

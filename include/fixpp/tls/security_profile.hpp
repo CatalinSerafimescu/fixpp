@@ -29,7 +29,7 @@ namespace fixpp::tls {
 
 // ── SecurityProfile ───────────────────────────────────────────────────────────
 // Explicit-choice enum per [const §XII.5] / FR-013.
-// Re-emitted VERBATIM from 2g §4.5 lines 650-656.
+// Re-emitted VERBATIM from 2g §4.5's `enum class SecurityProfile` block.
 // The `unset = 0` sentinel is the no-implicit-default guard; make_ssl_ctx_config
 // rejects it with tls_invalid_security_profile.
 // The `one_way_ca [[deprecated]]` attribute is on the ENUMERATOR DECLARATION
@@ -58,7 +58,7 @@ struct CertSourceCaps {
 
 // ── SslCtxConfig ─────────────────────────────────────────────────────────────
 // Value-type description of the SSL_CTX configuration the 2h-transport feature
-// must apply. Re-emitted VERBATIM from 2g §4.5 lines 670-677.
+// must apply. Re-emitted VERBATIM from 2g §4.5's `struct SslCtxConfig` block.
 //
 // CRITICAL: `pinset_snapshot` is captured ONCE by 2h's wiring at handshake
 // start per [2g §6.5.1] BINDING CONTRACT. make_ssl_ctx_config leaves this
@@ -87,7 +87,7 @@ struct SslCtxConfig {
 // Validates the SecurityProfile + cert_source + clock + Pinset combination
 // and returns a configured SslCtxConfig ready for 2h to consume.
 //
-// Parameter order per 2g §4.5 lines 681-686 (NEW-P1-2 close):
+// Parameter order per 2g §4.5's `make_ssl_ctx_config` declaration (NEW-P1-2 close):
 //   (profile, cs, clock, pinset = nullptr, mr = nullptr)
 // NO `validation_caps` parameter per NEW-P1-2.
 //

@@ -11,7 +11,7 @@
 //
 // Design anchors:
 //   [2h §4.5] — asio_tls_transport fields, state machine, invariants.
-//   data-model E-9 — canonical field set (lines 270-290).
+//   data-model E-9 — canonical field set.
 //   [arch §5.3] — engine-bootstrap carve-out for the throwing constructor.
 //   [arch §5.6] — frozen-at-open; unique_ptr ownership by Session.
 //
@@ -334,8 +334,8 @@ private:
     // Held by shared_ptr, not by value: a timer handler captures a copy of
     // this pointer (never `this`), so `*timer_epochs_` outlives the
     // transport unconditionally even when the owner destroys `this` with no
-    // drain (D-4.0 — reconnect_fsm.cpp:250-252/284-286 and
-    // engine.cpp:841-844 all destroy synchronously on the failure arm).
+    // drain (D-4.0 — reconnect_fsm.cpp's connect/handshake-failure "release t (RAII)" arms and
+    // engine.cpp's `run_accept_loop` open()-failure arm all destroy synchronously on the failure arm).
     // Safe as a default member initializer: every asio_tls_transport ctor is
     // already throwing ([arch §5.3] carve-out) and one already does a
     // make_shared (ssl_ctx_ above) inside the same trap_throw boundary.

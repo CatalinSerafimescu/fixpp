@@ -96,14 +96,14 @@ TEST(SeamSessionOpenRejectsUnsetSecurityProfile, ExplicitUnsetRejected) {
     EXPECT_EQ(val.error(), error::invalid_session_config);
 }
 
-// ── Additional Session::open() validation arms (session.cpp:100-145) ──────
+// ── Additional Session::open() validation arms ──────
 //
 // Each of the open() validation arms in src/session/session.cpp must be
 // independently exercised so the error-branch coverage of session.cpp is
 // not gated on the security_profile sentinel alone.
 
 // Null EngineConfig::executor (no override either) → invalid_session_config
-// (session.cpp line ~112).
+// (open()'s null-executor guard, slot 53 / FR-018).
 TEST(SessionOpenValidationArms, NullExecutorRejected) {
     asio::io_context ioc;
     EngineConfig engine;
@@ -127,7 +127,7 @@ TEST(SessionOpenValidationArms, NullExecutorRejected) {
 }
 
 // direct_executor + lock_policy::spin combo → invalid_session_config
-// (session.cpp line ~121).
+// (open()'s direct_executor + lock_policy::spin guard).
 TEST(SessionOpenValidationArms, DirectExecutorWithSpinLockRejected) {
     asio::io_context ioc;
     EngineConfig engine;
@@ -153,7 +153,7 @@ TEST(SessionOpenValidationArms, DirectExecutorWithSpinLockRejected) {
 }
 
 // Out-of-range backpressure_mode (FFI/SWIG bypass) → invalid_session_config
-// (session.cpp line ~136 — the I-14 defence-in-depth backstop on the closed enum).
+// (open()'s T048 backpressure_mode range guard — the I-14 defence-in-depth backstop on the closed enum).
 TEST(SessionOpenValidationArms, OutOfRangeBackpressureModeRejected) {
     asio::io_context ioc;
     EngineConfig engine;
@@ -179,7 +179,7 @@ TEST(SessionOpenValidationArms, OutOfRangeBackpressureModeRejected) {
     EXPECT_EQ(val.error(), error::invalid_session_config);
 }
 
-// Null dictionary → invalid_session_config (session.cpp line ~145).
+// Null dictionary → invalid_session_config (open()'s T050 null-dict guard).
 TEST(SessionOpenValidationArms, NullDictionaryRejected) {
     asio::io_context ioc;
     EngineConfig engine;
@@ -203,7 +203,7 @@ TEST(SessionOpenValidationArms, NullDictionaryRejected) {
 }
 
 // Second open() on a session that already opened → session_already_open
-// (session.cpp line ~100).
+// (open()'s state_ != lifecycle::never_opened guard).
 TEST(SessionOpenValidationArms, SecondOpenRejected) {
     asio::io_context ioc;
     EngineConfig engine;

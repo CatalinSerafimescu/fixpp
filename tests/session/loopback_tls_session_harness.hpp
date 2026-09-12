@@ -12,7 +12,7 @@
 //     (FR-026 SSL_CTX cached once) + ReconnectFsm via
 //     SessionConfig::transport_factory_override.
 //   - Inbound bytes delivered to the Session via the existing
-//     Session::on_inbound_frame seam (session.cpp:862).
+//     Session::on_inbound_frame seam.
 //   - Fixture paths resolved via FIXPP_TLS_FIXTURE_DIR env var at
 //     LoopbackTlsSessionHarness construction; GTEST_SKIP() if not set.
 //

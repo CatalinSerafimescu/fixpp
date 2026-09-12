@@ -1,6 +1,6 @@
 # neg_sending_time_precision_unknown.toml
 # session.sending_time_precision with an unknown token — triggers unknown_enum
-# (lines 487-495 scalar_mappers.cpp).
+# (map_scalars's sending_time_precision unknown-token arm, scalar_mappers.cpp).
 
 [clock]
 kind = "system"

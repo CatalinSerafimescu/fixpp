@@ -103,7 +103,7 @@ struct MessageIR {
     // GroupOrderEntry per repeating-group occurrence rooted at THIS
     // message's own XML definition (recursive to every nesting depth). NOT
     // derivable from `fields` above, which the loader tag-sorts + tag-dedups
-    // (xml_loader.cpp:695-702) — declaration order is lost there. Populated
+    // (LoaderState::expand_field_list()'s delim_cap pop) — order is lost there. Populated
     // by build_ir()'s codegen-tool-local pugixml re-parse (ir.cpp, T008).
     // Codegen-tool-local only: no runtime Dictionary/GroupRef/C-ABI change
     // (FR-009 intact).

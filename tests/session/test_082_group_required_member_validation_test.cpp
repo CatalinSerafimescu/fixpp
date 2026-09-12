@@ -8,7 +8,7 @@
 // SC-008a's SECOND leg: with `validate_inbound_messages` ON, the
 // newly-reachable group-REQUIRED-MEMBER rejections
 // (`fixpp::wire::dictionary_driven_validator::consume_group`'s per-instance
-// required-member bitmap check, validator.hpp:308-399) are EXACTLY the set
+// required-member bitmap check) are EXACTLY the set
 // derivable from the dictionary's `required='Y'` group members -- enumerated
 // and pinned, not merely observed.
 //
@@ -22,7 +22,7 @@
 // ("13 are top-level omissions; the 14th ... nested inside the required
 // NoQuoteSets(296)"), reconciled independently here for the SESSION-level
 // validator's own nested-descent mechanism (`consume_group`'s recursive
-// branch, validator.hpp:374-387) rather than the BUILDER tier's
+// branch) rather than the BUILDER tier's
 // `gc.validate_entry` (T034/US2 -- a DIFFERENT enforcement mechanism over
 // the SAME oracle-derived set). No hand-transcribed pair list exists in this
 // file; the test iterates `oracle.group_required` directly and ASSERTS the
@@ -41,7 +41,7 @@
 // silently narrow the case list.
 //
 // ── Why the nested case (14th) needs a DIFFERENT construction ────────────
-// `consume_group`'s nested-descent branch (validator.hpp:374-387) PROPAGATES
+// `consume_group`'s nested-descent branch PROPAGATES
 // a nested failure IMMEDIATELY (`if (!nested) return nested;`) -- it never
 // reaches the enclosing group's OWN required-member completeness check.
 // So testing "NoQuoteEntries(295)'s OWN required member 299 (QuoteEntryID)
@@ -63,7 +63,7 @@
 // hand-read message schemas -- see that helper's comment. A required field
 // that is itself ANOTHER group's no_tag is satisfied with `tag=0` (a
 // present-but-empty group is structurally valid: `consume_group` returns
-// immediately for `declared_count == 0`, validator.hpp:283-285).
+// immediately for `declared_count == 0`).
 //
 // ── Both directions ────────────────────────────────────────────────────
 // Positive: all 14 cases' "omit the chosen required member" frame must
@@ -152,7 +152,7 @@ std::vector<std::uint16_t> const kHeaderTags{8, 9, 10, 34, 35, 49, 52, 56};
 // Generic filler-value chooser (advisor-directed design): probes a small
 // per-field_type candidate list against `tv.enum_valid`, so this test does
 // NOT need to hand-read 12 message schemas' required-field enum domains.
-// check_field_type's structural rules (validator.hpp:469-566) are honored
+// check_field_type's structural rules are honored
 // by construction: Int/Length -> digit strings, Char -> single byte,
 // Boolean -> Y/N, Float -> a decimal-parseable token, String/Data -> no
 // structural constraint beyond enum.
@@ -258,7 +258,7 @@ std::vector<std::byte> build_top_level_frame(fixpp::dict::table_view const& tv, 
                                              GroupContextKey const& key, std::uint16_t omitted_tag,
                                              std::uint32_t seq) {
     // fixpp#210: build against the RUNTIME-resolved delimiter -- what
-    // `consume_group` (validator.hpp:276, `dict_.group_first_field(msg_type,
+    // `consume_group` (`dict_.group_first_field(msg_type,
     // parent_path, no_tag)`) actually scans for -- NOT `kDelimTags`'s
     // hand-verified per-context value. The two can differ under #210's
     // delimiter-pollution mechanism (every context of a reused no_tag
@@ -292,7 +292,7 @@ std::vector<std::byte> build_top_level_frame(fixpp::dict::table_view const& tv, 
 // Correction to the file header comment's claim ("the nested descent into
 // 295 short-circuits validate() before [304, 311] would ever be scanned"):
 // that is true ONLY on the omit_299==true arm, where the nested-descent
-// branch of `consume_group` (validator.hpp:374-387) propagates the nested
+// branch of `consume_group` propagates the nested
 // failure immediately (`if (!nested) return nested;`) before 296's own
 // completeness check runs. On the omit_299==false (baseline) arm, 295's
 // sub-instance is complete, the nested descent succeeds, and 296's OWN
@@ -457,10 +457,10 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
         SCOPED_TRACE(::testing::Message() << "msg_type=" << key.msg_type << " no_tag=" << key.no_tag);
         auto const& required = oracle.group_required.at(key);
         // Deterministic choice: prefer a NON-delimiter required tag (so this
-        // case exercises the seen_mask completeness check, validator.hpp:390-
-        // 399); fall back to the delimiter itself only when it is the SOLE
+        // case exercises the seen_mask completeness check
+        // ; fall back to the delimiter itself only when it is the SOLE
         // required member (exercises the "first instance must open with the
-        // delimiter" check instead, validator.hpp:287-291 -- BOTH set
+        // delimiter" check instead -- BOTH set
         // ref_tag == the omitted tag, so the assertion below is uniform).
         auto const delim_it = kDelimTags.find(key);
         ASSERT_NE(delim_it, kDelimTags.end());
@@ -564,7 +564,7 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
     // at all) must NOT reject via this mechanism, proving the 14-pair
     // enumeration is EXACT, not merely "at least these reject". Holds both
     // today (mechanism entirely unreachable) and post-T023 (`check_required`
-    // gates on a non-empty `req_members`, validator.hpp:327). ──────────────
+    // gates on a non-empty `req_members`). ──────────────
     {
         SCOPED_TRACE("negative control: msg_type=J no_tag=78 (empty required-member set)");
         GroupContextKey const key78{"J", {}, 78};

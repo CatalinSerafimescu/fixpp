@@ -17,7 +17,7 @@
 //
 // Variant A — plain persistent (bilateral_lenient, no reset knob): reconcile
 //   lands the reconnect Logon at seq k, cleanly.
-// Variant B — reset_on_logon=true: the durable reset (session.cpp:776-782)
+// Variant B — reset_on_logon=true: the durable reset (reset_seqnums_to_one_durable)
 //   overrides BOTH counters to {1,1} before the reconnect Logon; the
 //   reconcile is neutral.
 // Variant C — bilateral_strict (the DEFAULT policy, no reset knob): NO
@@ -129,7 +129,7 @@ std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::s
 
 // make_logon_reset: build a Logon with 141=Y (ResetSeqNumFlag). Needed for the
 // Variant C cold-open peer ack — bilateral_strict rejects a peer ack without
-// 141=Y (session.cpp:3733-3744).
+// 141=Y (the RC#C bilateral_strict initiator-path guard).
 std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq,
                                         std::string_view s, std::string_view t, int hbt = 30) {
     std::string extra;
@@ -394,7 +394,7 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
     auto recon_bytes = transport_fac->last_transport->outbound_bytes_seen();
     ASSERT_FALSE(recon_bytes.empty()) << "reconnect must re-emit an initiator Logon";
 
-    // reset_on_logon's durable reset (session.cpp:776-782) runs before the
+    // reset_on_logon's durable reset (reset_seqnums_to_one_durable) runs before the
     // reconnect Logon and overrides the outbound counter to 1 — the
     // reconcile from k is neutral (superseded by the reset). Logon must be
     // 34=1 + 141=Y, well-formed.
@@ -417,7 +417,7 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
 TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNotClean) {
     std::vector<std::vector<std::byte>> wire;
     auto transport_fac = std::make_shared<MockReconnectFactory>();
-    // bilateral_strict IS the production default (session_config.hpp:231) —
+    // bilateral_strict IS the production default (SessionConfig::reset_seqnum_policy_field's default) —
     // pass it explicitly here for test clarity, no reset knob.
     auto cfg = make_initiator_cfg(reset_seqnum_policy::bilateral_strict,
                                   /*reset_on_logon=*/false, transport_fac);
@@ -435,7 +435,7 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
         << "bilateral_strict must unconditionally emit 141=Y on the cold-open Logon";
 
     // bilateral_strict REQUIRES the peer's ack to also carry 141=Y, else the
-    // initiator disconnects with session_seqnum_reset_mismatch (session.cpp:3733-3744).
+    // initiator disconnects with session_seqnum_reset_mismatch (the RC#C bilateral_strict initiator-path guard).
     auto peer_logon = make_logon_reset("FIX.4.2", 1, "ACCEPTR", "INITR");
     auto logon_r =
         asio::co_spawn(sx_, sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),

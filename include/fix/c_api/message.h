@@ -93,8 +93,8 @@ typedef struct fixpp_resolved_msg_version {
 /* ── CA-008 field read accessors ────────────────────────────────────────────
  *
  * Backing: wire::MessageView<Index>::get(tag) → expected_t<field_view>
- *          (parser.hpp:200); get_decimal(tag, mr) (parser.hpp:215); msg_type()
- *          (parser.hpp:143). Steady-state thunks: abort on any escaping C++
+ *          (parser.hpp's `get(tag)`); get_decimal(tag, mr) (parser.hpp's `get_decimal`); msg_type()
+ *          (parser.hpp's `msg_type()`). Steady-state thunks: abort on any escaping C++
  *          exception ([2i §5.2]). Zero global-heap (SC-003).
  *
  * Return codes common to all accessors:
@@ -175,7 +175,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_version(const fixpp_msg_t* msg,
 
 /** Convenience: return the MsgType (tag 35) value aliasing the wire buffer.
  *  Equivalent to fixpp_msg_get_string(msg, 35, value_out, len_out) but optimised
- *  via MessageView::msg_type() (parser.hpp:143).
+ *  via MessageView::msg_type() (parser.hpp's own declaration).
  *
  *  Reentrancy: requires-session-lock
  */

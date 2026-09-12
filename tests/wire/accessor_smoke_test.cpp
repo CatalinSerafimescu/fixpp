@@ -156,7 +156,7 @@ TEST(AccessorSmoke, FrameViewBodyViaFactoryMatchesBodyLength) {
 }
 
 // ── E3: wire::err_group_too_large<void>() helper ─────────────────────────────
-// The err_group_too_large helper (errors.hpp ~51-53) is a thin wrapper that
+// The err_group_too_large helper (errors.hpp) is a thin wrapper that
 // constructs the unexpected side of expected_t<void>. The real caller
 // (group bookkeeping inside OffsetTable) is guarded by a DoS cap and is
 // unreachable in normal test payloads. A direct helper unit test is the

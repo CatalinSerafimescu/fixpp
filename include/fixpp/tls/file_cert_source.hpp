@@ -2,7 +2,7 @@
 // include/fixpp/tls/file_cert_source.hpp
 // fixpp::tls::file_cert_source — default file-path cert_source implementation.
 //
-// Design anchor: .specify/2g-tls.md v0.4 §4.2 lines 314-369.
+// Design anchor: .specify/2g-tls.md v0.4 §4.2's `file_cert_source` section.
 // Spec anchors: FR-004 (file_cert_source default), FR-005 (factory),
 //               FR-021 (ASIO cancellation), FR-022 ([[nodiscard]]),
 //               FR-023 (cold-path PMR), FR-024 (trap_throw routing).
@@ -30,7 +30,7 @@ namespace fixpp::tls {
 // Encrypted PEM passphrase obtained via password_cb, invoked once at
 // construction-time per [arch §5.3] carve-out.
 //
-// Per data-model E-1a verbatim from [2g §4.2] lines 314-369.
+// Per data-model E-1a verbatim from [2g §4.2]'s `file_cert_source` section.
 class file_cert_source final : public cert_source {
 public:
     struct Config {
@@ -75,7 +75,7 @@ public:
     [[nodiscard]] core::expected_t<std::span<const Certificate>> load_trust_anchors()
         [[clang::lifetimebound]] override;
 
-    // Operator-configured Config. Reachable per contracts/security_profile.hpp:153
+    // Operator-configured Config. Reachable per contracts/security_profile.hpp's own note
     // "caps.X is shorthand for the cert_source's Config::X field reachable through
     //  cfg.cs->config()" — security_profile.cpp extracts CertSourceCaps from here
     // via cold-path dynamic_cast per [arch §5.3].

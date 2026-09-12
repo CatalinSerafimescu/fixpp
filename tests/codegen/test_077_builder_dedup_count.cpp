@@ -56,7 +56,7 @@
 // RED before T014: cmake/Codegen.cmake currently deletes
 // vlatest/Builders.hpp unconditionally on every ON configure that does not
 // otherwise trigger a full regen (076 Gate B P2 leftover, cmake/
-// Codegen.cmake:330-342) -- so the file is ABSENT and this test fails to
+// Codegen.cmake's ON-branch file(REMOVE .../vlatest/Builders.hpp)) -- so the file is ABSENT and this test fails to
 // even open it. T014 removes that unconditional delete + wires a proper
 // regen-guard marker, making this GREEN.
 //

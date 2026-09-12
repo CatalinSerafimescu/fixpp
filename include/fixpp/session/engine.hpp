@@ -363,7 +363,7 @@ private:
     // 017 owned amendment #2: engine-held trace_context snapshot seeded at
     // construction from EngineConfig::engine_trace_context ([2k App D §D.2]).
     // The helper TYPE (core::detail::trace_context_snapshot — seqlock/atomic
-    // wrapper) is defined in engine_config.hpp:64.
+    // wrapper) is defined in engine_config.hpp's `trace_context_snapshot` class.
     fixpp::core::detail::trace_context_snapshot engine_trace_ctx_snapshot_;
 
     // Session registry — keyed on SessionId, owned here (join-before-clear E-7).

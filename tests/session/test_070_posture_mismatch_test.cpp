@@ -201,7 +201,7 @@ protected:
     }
 
     // Initiator (sender=TW, target=ISLD) — exercises the S-029 initiator arm
-    // (session.cpp ~3776-3783), untested before Gate B PR #189 FQ-4.
+    // (session.cpp's should_refuse_posture initiator call), untested before Gate B PR #189 FQ-4.
     fixpp::session::SessionConfig make_initiator_cfg(
         std::optional<fixpp::session::session_posture> posture) {
         fixpp::session::SessionConfig cfg;
@@ -300,7 +300,7 @@ TEST_F(PostureTest, ProductionRefusesMalformed464) {
 }
 
 // Gate B PR #189 FQ-4 — initiator-role posture-mismatch witness. The initiator
-// arm (session.cpp ~3776-3783) fires on the peer's inbound Logon-ack; it was
+// arm (session.cpp's should_refuse_posture initiator call) fires on the peer's inbound Logon-ack; it was
 // completely uncovered before this change. Same discriminating assertions as
 // (a) above: exactly one NEW outbound frame (the refusal Logout) with the
 // named 35=5/58=<text> shape, plus Disconnected.
@@ -353,9 +353,9 @@ TEST_F(PostureTest, AcceptorRefusalUsesDurableOutboundSeq) {
 }
 
 // Gate B PR #189 FQ-5 — null-clock refusal witness. EngineConfig::clock is
-// left unset (nullptr default per engine_config.hpp:127); Session::open()
+// left unset (nullptr default per EngineConfig::clock); Session::open()
 // only RESOLVES effective_clock_ = cfg_.clock_override ?: engine_.clock
-// (session.cpp:1160-1165) — validate_engine_config()'s clock_not_set gate is
+// (open()'s effective_clock_ resolution) — validate_engine_config()'s clock_not_set gate is
 // an Engine::open()-level precondition this direct-Session harness never
 // calls, so effective_clock_ == nullptr reaches refuse_logon_with_logout_.
 // Pre-fix, that helper unconditionally dereferenced *effective_clock_ →

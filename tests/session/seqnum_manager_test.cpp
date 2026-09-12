@@ -270,12 +270,12 @@ TEST_F(SeqnumManagerTest, LongRunZeroDrift) {
     run_sync(ioc, mgr.drain());
 }
 
-// ── Drained-mutex paths (seqnum_manager.cpp:51 / :91 — session_already_closed)
+// ── Drained-mutex paths (check_inbound / assign_outbound — session_already_closed)
 //
 // After drain() the async_mutex's next async_lock() resolves to the unexpected
 // branch — the seqnum manager surfaces session_already_closed on both
-// check_inbound and assign_outbound. These two arms (seqnum_manager.cpp:51
-// and :91) are not exercised by the in-seq tests above.
+// check_inbound and assign_outbound. These two arms (their post-drain
+// session_already_closed paths) are not exercised by the in-seq tests above.
 
 TEST_F(SeqnumManagerTest, CheckInboundAfterDrainReturnsSessionAlreadyClosed) {
     SeqnumManager mgr;
@@ -295,7 +295,7 @@ TEST_F(SeqnumManagerTest, AssignOutboundAfterDrainReturnsSessionAlreadyClosed) {
     EXPECT_EQ(r.error(), fixpp::core::error::session_already_closed);
 }
 
-// 039 US3 (FR-008): set_next_outbound's lock-fail arm (seqnum_manager.cpp:188)
+// 039 US3 (FR-008): set_next_outbound's lock-fail arm
 // was previously uncovered. After drain() the async_mutex's next async_lock()
 // resolves to the unexpected branch, so set_next_outbound surfaces
 // session_already_closed without mutating next_outbound_. Deterministic via the

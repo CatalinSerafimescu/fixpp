@@ -195,7 +195,7 @@ TEST(FramerErrorPath, InvalidBodyLengthZeroValue) {
 // Approach: construct a frame where checksum_off+7 fits (full "10=NNN\x01"
 // present and parseable), then directly corrupt the byte at
 // body_off + body_length - 1 to a non-SOH value.
-// The body_length_end check at framer line 158 fires AFTER the checksum_off+7
+// The `bytes[body_off + body_length - 1U] != soh_byte` check fires AFTER the checksum_off+7
 // bounds check passes.
 
 TEST(FramerErrorPath, InvalidBodyLengthBodyLastByteNotSOH) {
@@ -321,7 +321,7 @@ TEST(FramerErrorPath, ChecksumMismatchTrailingSOHAbsent) {
 TEST(FramerErrorPath, FrameTooLargeAtFinalSizeCheck) {
     // Build a frame that fits the default max (256 KiB). Set max_frame_bytes
     // to a value LESS than the frame but GREATER than the body (so the body_length
-    // check at line 137 passes, but the final frame_len check at line 191 fails).
+    // check (`body_length > max_frame_bytes`) passes, but the final `frame_len > max_frame_bytes` check fails).
     //
     // body = "35=D\x01 49=SENDER\x01 56=TARGET\x01" = 6+10+10 = 26 bytes.
     // 8=FIX.4.4\x01 = 10 bytes. 9=26\x01 = 6 bytes. Total frame = 10+6+26+7 = 49 bytes.

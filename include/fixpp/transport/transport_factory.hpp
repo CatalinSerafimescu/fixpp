@@ -110,7 +110,7 @@ public:
     // pointer or weak_ptr per [[feedback_weak_ptr_cache_needs_owning_context]].
     // Called by ReconnectFsm at drive_reconnect_attempt entry to capture the
     // snapshot for the rotation-detect check (data-model E-3). The FSM holds
-    // the abstract TransportFactory* (reconnect_fsm.hpp:152); this method must
+    // the abstract TransportFactory* (reconnect_fsm.hpp's `factory_` member); this method must
     // be on the abstract base for the call to compile through that pointer.
     // noexcept — no state change; atomic load acquire.
     [[nodiscard]] virtual std::shared_ptr<fixpp::tls::cert_source> cert_source_snapshot()
@@ -286,7 +286,7 @@ private:
 //   // Factory is std::shared_ptr<TransportFactory> per 010 FR-001a precedent
 //   // (unique_ptr → shared_ptr for SessionConfig copy semantics; the
 //   // static_assert(std::is_copy_constructible_v<SessionConfig>) at
-//   // session_config.hpp:176 is the forcing constraint). The "no factory
+//   // session_config.hpp's own static_assert is the forcing constraint). The "no factory
 //   // shared across Sessions" invariant is preserved via a Session::open-time
 //   // hygiene assertion (use_count()==1), NOT by storage type.
 //   // Cross-Session sharing is FORBIDDEN; the shared_ptr is for COPY SEMANTICS.

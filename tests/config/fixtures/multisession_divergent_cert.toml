@@ -12,7 +12,7 @@
 # Divergent cert source for session[1]: [session.cert_source] with leaf_rsa2048.pem / leaf_rsa2048.key / ca.pem.
 #
 # Anchor: data-model D-6a — per-session transport_factory_override minted only when
-# cert/profile DIVERGES from the engine default; use_count()==1 per session_config.hpp:298-307.
+# cert/profile DIVERGES from the engine default; use_count()==1 per SessionConfig::transport_factory_override.
 #
 # Relative paths resolve against THIS FILE's parent directory (FR-016a).
 

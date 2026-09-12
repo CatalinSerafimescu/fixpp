@@ -15,7 +15,7 @@
  * invalid enum value, i.e. undefined behaviour in the caller, and UBSan reported
  * it on every run:
  *
- *     public_roundtrip_test.cpp:129:5: runtime error: load of value 99, which is
+ *     public_roundtrip_test.cpp (the moved-from call site): runtime error: load of value 99, which is
  *     not a valid value for type 'fixpp_reset_seqnum_policy'
  *
  * (runs 32003367497 / 32007171995 on linux-clang-ubsan; 32024674144 job

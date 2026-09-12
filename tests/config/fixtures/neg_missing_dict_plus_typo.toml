@@ -8,7 +8,7 @@
 #       (was [session.logger] until 045 FR-022 flipped logger to supported; a
 #        still-deferred key is used to keep error #3 a deferred diagnostic.)
 #
-# Before fix: the early-return at toml_config_loader.cpp:444 fired on the
+# Before fix: load_toml_config's structural guard fired on the
 # non-empty accumulator (from error #1 above), truncating #2 and #3.
 # After fix: the early-return only fires on missing/empty sessions_arr, so
 # all three diagnostics accumulate in a single pass.

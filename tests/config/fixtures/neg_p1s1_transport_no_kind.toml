@@ -1,7 +1,7 @@
 # neg_p1s1_transport_no_kind.toml
 # Two sessions: session[0] uses plaintext (engine default), session[1] has a
 # [session.transport] section but NO `kind` key inside it.
-# Hits the "kind_node==nullptr" arm (lines 792-797) in the plaintext-default
+# Hits the "kind_node==nullptr" arm (validate_per_session_transport_kinds) in the plaintext-default
 # per-session validation loop.
 # Expected: missing_required at "session[1].transport.kind"
 

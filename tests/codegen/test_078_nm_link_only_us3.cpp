@@ -29,7 +29,7 @@
 // substring match is unsafe (fixpp::wire::body_builder carries an unrelated
 // validate_group_grammar() member, pulled in transitively via fixpp_wire).
 //
-// Anchors: specs/078-precompiled-builder-libs/spec.md SC-002 (line 165);
+// Anchors: specs/078-precompiled-builder-libs/spec.md SC-002;
 // quickstart.md Scenario 3; tests/codegen/test_078_nm_builder_only_us2.cpp
 // (nm precedent, demangled/namespace-qualified discrimination).
 

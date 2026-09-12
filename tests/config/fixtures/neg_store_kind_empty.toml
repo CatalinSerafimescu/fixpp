@@ -1,6 +1,6 @@
 # neg_store_kind_empty.toml
 # store.kind is an empty string — triggers empty_required at "store.kind"
-# (lines 141-147 selector_resolver.cpp).
+# (resolve_engine_store's empty-kind arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

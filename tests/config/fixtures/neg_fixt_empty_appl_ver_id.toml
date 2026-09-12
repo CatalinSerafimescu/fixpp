@@ -1,6 +1,6 @@
 # neg_fixt_empty_appl_ver_id.toml
 # begin_string="FIXT.1.1" with default_appl_ver_id="" — triggers empty_required
-# at session[0].default_appl_ver_id (lines 210-216 toml_config_loader.cpp
+# at session[0].default_appl_ver_id (toml_config_loader.cpp
 # check_required_keys).
 
 [clock]

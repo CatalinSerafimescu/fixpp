@@ -200,7 +200,7 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
             // snapshot (opened, never started/connected). A session that WAS published
             // is RETAINED by the engine on peer disconnect: unpublish_entry() resets only
             // entry.live_transport and DELIBERATELY keeps entry.session alive until
-            // Engine::stop()'s registry_.clear() (src/session/engine.cpp:638-650). So an
+            // Engine::stop()'s registry_.clear(). So an
             // established-then-reaped session is NOT on this null branch — it reaches the
             // else branch below with a non-null lookup and a closed_drained Session, where
             // Session::close returns session_already_closed (handled there). Null lookup is
@@ -220,7 +220,7 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
                 // session_executor wrapper's ~impl() is what TSan flagged when the
                 // wrapper was type-erased across the caller thread and the worker
                 // thread.  Using the long-lived underlying strand (the precedent at
-                // engine.cpp:1567 / src/session/engine.cpp) avoids the cross-thread
+                // `Engine::start()`'s per-session strand adoption) avoids the cross-thread
                 // wrapper destruction entirely — the strand's ref-counted impl is
                 // long-lived (Session is alive for the duration of close's .get()).
                 const asio::any_io_executor& close_exec = sess->executor().underlying();

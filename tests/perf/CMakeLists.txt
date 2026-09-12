@@ -69,7 +69,7 @@ fixpp_add_store_test(perf_store_alloc_guard SOURCES test_store_alloc_guard.cpp)
 
 # ── Phase 3a tests (wired by T029): ──────────────────────────────────────────
 
-# T018 — [2h §9 seam #4]:1345 — read-path alloc guard.
+# T018 — [2h §9 seam #4] — read-path alloc guard.
 # Dual-gate: counting_resource + mallocnesia LD_PRELOAD.
 add_executable(perf_transport_read_alloc_guard
   test_transport_read_alloc_guard.cpp)
@@ -132,7 +132,7 @@ set_tests_properties(perf_session_recovery_alloc_guard PROPERTIES
 # T020 DUAL gate companion: mallocnesia interception gate.
 # Runs the same binary through check_alloc.py (LD_PRELOAD interception of global
 # malloc) to confirm zero global-heap allocations on the recovery alloc-guard path.
-# Precedent: tls_handshake_alloc_guard_mallocnesia (tests/tls/CMakeLists.txt:224-234).
+# Precedent: tls_handshake_alloc_guard_mallocnesia (tests/tls/CMakeLists.txt's mallocnesia gate).
 # [[feedback_tracking_pmr_resource_false_pass]] REQUIRES both gates.
 # item 13 (2026-06-19): DISABLED companion — RED (same allocating recovery window). Tracked: REMAINING-WORK item 13.
 if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")

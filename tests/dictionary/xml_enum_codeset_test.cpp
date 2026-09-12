@@ -32,7 +32,7 @@
 // Anchors:
 //   tasks: specs/075-live-wire-enum-validation/tasks.md T028
 //   spec:  specs/075-live-wire-enum-validation/spec.md SC-002/FR-001,
-//          "T001 RE-MEASUREMENT AUDIT" table (:184-195)
+//          "T001 RE-MEASUREMENT AUDIT" table
 
 #include <gtest/gtest.h>
 

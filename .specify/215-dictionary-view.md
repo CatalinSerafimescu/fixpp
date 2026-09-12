@@ -44,7 +44,7 @@
 > module design. It settles the shape of the pre-built-table-view injection point introduced by
 > issue #215 item 1. Items 2–5 of that PR are out of scope and covered by the accepted waiver.
 > Trigger: `[const §XVII.1]` first bullet — *"Touches the public C++ API or C ABI"*
-> (`.specify/constitution.md:335`).
+> (per `[const §XVII.1]`).
 >
 > **Anchor freshness.** All line numbers below were **re-read** from the working tree at
 > `215-simplify-followups` @ **`e0574ee7`** for v0.2, and **every citation in `## Normative
@@ -55,9 +55,9 @@
 > drop the O1(c) test (O1)"* changed `spec/behaviors-and-limitations.md` between the two — the
 > depth-≥17 disposition under `B-215-1` expanded — so this is a rebind by re-verification, not a
 > retyped hash. Three anchors moved against the values v0.1 and the reviews carried and are
-> corrected here: `build_version_registry` is at `engine_config.hpp:211` (`:213` is its body),
-> `Engine::app_version_registry_` at `engine.hpp:353-361`, and the `as_table_view_call_count()`
-> seam block at `dictionary.cpp:420-428`.
+> corrected here: `build_version_registry` is in `engine_config.hpp` (body directly follows),
+> `Engine::app_version_registry_` in `engine.hpp`, and the `as_table_view_call_count()`
+> seam block in `dictionary.cpp`.
 >
 > The Gate B triage (`research/reviews/opus_pr262_1_triage.md`) cites
 > `table_view.hpp:584/:638/:685/:709` and `private:` at `:725`; those are **stale by exactly 7
@@ -65,21 +65,21 @@
 > given in §2 and are the ones to trust. Do not "correct" them back.
 >
 > **v0.4 anchor note — the *plausible twin* class has now bitten this document three times.** Round 2
-> fixed `:1255`→`:1250`; v0.3's log fixed the round-2 review's `:260-262`→`:256-258`; round 3 found
-> seam 1's observable pointing at `session.cpp:2100-2107`, a *different `switch` arm* of the same
+> fixed the `validate_inbound_messages` guard's wrong pairing; v0.3's log fixed the round-2 review's wrong pairing on `config.cpp`'s FR-011 comment; round 3 found
+> seam 1's observable pointing at the `case fsm_state::NotConnected:` arm, a *different `switch` arm* of the same
 > helper. In every case the cited line existed, compiled, and looked right. **v0.4's response is not
 > another rule — it is that every line this revision cites was re-opened in the working tree rather
 > than copied from the review that reported it**, and that anchors naming a `switch`/state-machine
-> arm now cite the `case` label with the line. `emit_session_reject_` has five call sites
-> (`session.cpp:2104`, `:2746`, `:3476`, `:3639`, `:3788`), re-derived here; seam 1 needs `:2746`.
-> Do not "correct" it back to `:2104`.
+> arm now cite the `case` label instead of the line. `emit_session_reject_` has five call sites
+> across `Session::on_inbound_frame`'s FSM-state switch arms, re-derived here; seam 1 needs the
+> `case fsm_state::LogonReceived: case fsm_state::Active:` arm. Do not "correct" it back to the `case fsm_state::NotConnected:` arm.
 
 ---
 
 ## 1. What is actually being decided
 
 **Already settled, not reopened here: the mechanism.** `Dictionary::as_table_view()`
-(`include/fixpp/dict/dictionary.hpp:212`) has no cache — every call is a full walk of every
+(in `include/fixpp/dict/dictionary.hpp`) has no cache — every call is a full walk of every
 message, group and field, plus (since 083) the per-context delimiter store. Letting a caller who
 already paid for that walk hand the result to `Session::open()` removes a duplicate walk. The
 saving is measured, not argued (`bench/dictionary/table_view_footprint_bench.cpp`,
@@ -96,13 +96,13 @@ follows decides only how the pre-built view enters a session.
 Today it enters as a public `SessionConfig` field:
 
 ```cpp
-// include/fixpp/session/session_config.hpp:212
+// include/fixpp/session/session_config.hpp
 std::shared_ptr<const fixpp::dict::table_view> dictionary_view;  // null → open() builds one
 ```
 
-The single in-tree producer is `src/capi/session.cpp:101-103`; `Session::open()`
-(`src/session/session.cpp:1001-1004`) adopts it on a bare null check. `Session::inbound_tv_`
-(`include/fixpp/session/session.hpp:825`) changed from `std::optional<table_view>` to
+The single in-tree producer is `fixpp_session_open` (`src/capi/session.cpp`); `Session::open()`
+(in `src/session/session.cpp`) adopts it on a bare null check. `Session::inbound_tv_`
+(in `include/fixpp/session/session.hpp`) changed from `std::optional<table_view>` to
 `std::shared_ptr<const table_view>` to receive it.
 
 Two questions the field's shape leaves open — C1 (mutability) and C4 (provenance) — are §2.
@@ -112,13 +112,13 @@ Two questions the field's shape leaves open — C1 (mutability) and C4 (provenan
 **The C ABI does not need to break, and the granted latitude is declined.** The user explicitly
 permitted an ABI break ("we don't have any clients"). It buys nothing here: nothing in this design
 touches `include/fix/c_api.h` or `include/fix/c_api/`, `fixpp_session_open`'s signature is
-unchanged, and `fixpp_session::tv_` (`src/capi/capi_internal.hpp:513`) is a member of an internal
+unchanged, and `fixpp_session::tv_` (in `src/capi/capi_internal.hpp`) is a member of an internal
 struct, not a frozen surface. `tools/check_capi_freeze.sh` hashes only the `include/fix/`
 headers — none are touched, so it keeps passing without a manifest edit. An ABI break would be
 paid-for cost with no purchase. **Declined.**
 
 **`load_any` needs no two-argument overload.** The defaulted trailing parameter
-(`include/fixpp/dict/load_any.hpp:33-35`) is sufficient, and the header already records why: it
+(in `include/fixpp/dict/load_any.hpp`) is sufficient, and the header already records why: it
 is *"a plain internal C++ facade"*, while the C ABI's `fixpp_dict_load_from_xml` — the surface
 that *is* GA-frozen at `1.5.0` — deliberately carries no policy parameter. Every existing caller
 compiles unchanged and keeps the `fail_closed` default. Binary compatibility was never engaged.
@@ -133,37 +133,37 @@ today. That bound is what makes this a design question rather than a bug.
 
 ### 2a. C1 — `shared_ptr<const table_view>` does not make the pointee immutable
 
-`table_view` opens `public:` at `include/fixpp/dict/table_view.hpp:250` and does not close until
-`private:` at `:732`. Inside that span sit **fifteen** non-`const` member functions — the entire
+`table_view` opens a `public:` section in `include/fixpp/dict/table_view.hpp` and does not close it
+until the next `private:`. Inside that span sit **fifteen** non-`const` member functions — the entire
 build-time population surface. Verified by enumerating every non-`const` member in the public span:
 
-| mutator | line |
+| mutator | declared in |
 |---|---|
-| `add_valid_tag` | `table_view.hpp:591` |
-| `add_required_tag` | `:595` |
-| `set_field_type` | `:600` |
-| `add_group_member` | `:603` |
-| `add_group_required_member` | `:616` |
-| `add_valid` | `:628` |
-| `add_required` | `:633` |
-| `set_type` | `:638` |
-| `set_group_first` | `:645` |
-| `add_enum` | `:655` |
-| `set_multi_value` | `:681` |
-| `add_group_member_ctx` | `:692` |
-| `add_group_required_member_ctx` | `:703` |
-| `set_group_first_ctx` | `:716` |
-| `add_fixt_framing_tag` | `:727` |
+| `add_valid_tag` | `table_view.hpp` |
+| `add_required_tag` | `table_view.hpp` |
+| `set_field_type` | `table_view.hpp` |
+| `add_group_member` | `table_view.hpp` |
+| `add_group_required_member` | `table_view.hpp` |
+| `add_valid` | `table_view.hpp` |
+| `add_required` | `table_view.hpp` |
+| `set_type` | `table_view.hpp` |
+| `set_group_first` | `table_view.hpp` |
+| `add_enum` | `table_view.hpp` |
+| `set_multi_value` | `table_view.hpp` |
+| `add_group_member_ctx` | `table_view.hpp` |
+| `add_group_required_member_ctx` | `table_view.hpp` |
+| `set_group_first_ctx` | `table_view.hpp` |
+| `add_fixt_framing_tag` | `table_view.hpp` |
 
 `std::shared_ptr<const T>` converts implicitly from `std::shared_ptr<T>`. A caller that builds a
 view into a `shared_ptr<table_view>`, retains that alias, and assigns it to `dictionary_view` keeps
-a mutation handle on the object the session then reads via the parser (`src/session/session.cpp:328`,
-`Parser{*inbound_tv_}`) and the strict validator (`:1255-1258`).
+a mutation handle on the object the session then reads via the parser (`src/session/session.cpp`'s
+`inbound_tv_` null-check + `Parser{*inbound_tv_}` construction) and the strict validator (the `dictionary_driven_validator` construction in `Session::open()`).
 
 **The sharpest form of the argument is the sibling field, one line up.**
-`std::shared_ptr<const fixpp::dict::Dictionary> dictionary` (`session_config.hpp:188`) uses the
+`std::shared_ptr<const fixpp::dict::Dictionary> dictionary` (in `session_config.hpp`) uses the
 identical shape and is genuinely immutable: `Dictionary`'s entire public surface
-(`include/fixpp/dict/dictionary.hpp:75-214`) is ctors/assignment plus `[[nodiscard]] … const`
+(in `include/fixpp/dict/dictionary.hpp`) is ctors/assignment plus `[[nodiscard]] … const`
 accessors, with no non-`const` mutating member. So `shared_ptr<const Dictionary>` is a sound idiom
 and `shared_ptr<const table_view>` is not. The new field silently breaks the convention its
 neighbour sets — a reader who trusts the `const` in the type is wrong about exactly one of the two
@@ -171,13 +171,13 @@ adjacent fields, with nothing to distinguish them.
 
 **Bound on today's exposure, by census.** `grep -rn dictionary_view src/ include/ bindings/ tools/`
 returns 7 hits, and only **one** of them writes the field: the declaration
-(`session_config.hpp:212`); three comment lines (`session.hpp:812`, `session.cpp:996`,
-`capi/session.cpp:97`); the two lines of `open()`'s single read expression (`session.cpp:1001-1002`);
-and one assignment (`capi/session.cpp:103`). That assignment is:
+(in `session_config.hpp`); three comment lines (in `session.hpp`, `session.cpp`,
+`capi/session.cpp`); the two lines of `open()`'s single read expression (in `session.cpp`);
+and one assignment (in `capi/session.cpp`). That assignment is:
 
 ```
-src/capi/session.cpp:102   tv = std::make_shared<const fixpp::dict::table_view>(sc.dictionary->as_table_view());
-src/capi/session.cpp:103   sc.dictionary_view = tv;
+src/capi/session.cpp:  tv = std::make_shared<const fixpp::dict::table_view>(sc.dictionary->as_table_view());
+src/capi/session.cpp:  sc.dictionary_view = tv;
 ```
 
 `make_shared<const table_view>` allocates an **inherently-const** object — no mutable alias to it
@@ -197,15 +197,15 @@ while no mutable alias exists.
 `cfg_.dictionary`:
 
 ```cpp
-// src/session/session.cpp:1001-1004
+// src/session/session.cpp — Session::open()
 inbound_tv_ = cfg_.dictionary_view
                   ? cfg_.dictionary_view
                   : std::make_shared<const fixpp::dict::table_view>(
                         cfg_.dictionary->as_table_view());
 ```
 
-The adopted object then drives inbound parsing (`:328`) and is copied into the strict validator
-(`:1255-1258`). A caller can pair Dictionary A with a view derived from Dictionary B: the session's
+The adopted object then drives inbound parsing (the `Parser{*inbound_tv_}` construction) and is copied into the strict validator
+(the `dictionary_driven_validator` construction). A caller can pair Dictionary A with a view derived from Dictionary B: the session's
 identity, `SessionId::from_config(cfg_)`, says A, while field acceptance, required-field sets, enum
 domains and group boundaries all follow B.
 
@@ -215,7 +215,7 @@ merely reduced diagnosability. It is recorded as `L-215-1`
 
 **No cheap fingerprint exists on the current types.** `table_view` carries no token back to its
 source; `Dictionary`'s public surface exposes no id, version or hash usable as provenance
-(`which_session_version()` at `dictionary.hpp:90` is a FIX version, not a document identity — two
+(`which_session_version()` in `dictionary.hpp` is a FIX version, not a document identity — two
 different FIX 4.4 dictionaries share it). Enforcement therefore requires either new state on
 `table_view` or an object that couples the two fields. §3 takes that as the design fork.
 
@@ -305,20 +305,20 @@ to 83 (`tests/capi/message_read_test.cpp`).
 
 The eight files that (i)'s first step adds over (ii) are **mentions, not calls**, and `comm -23` of
 the two sets returns exactly these eight — `table_view.hpp` itself,
-`include/fixpp/wire/validator.hpp:510`, `src/capi/message_write.cpp:724-725`,
-`tests/support/mock_dict_table.hpp:15-16`, `tests/wire/conformance/w014_validate.csv:21`, and three
+`include/fixpp/wire/validator.hpp`, `src/capi/message_write.cpp`,
+`tests/support/mock_dict_table.hpp`, `tests/wire/conformance/w014_validate.csv`, and three
 test TUs. ⚠️ **Those three are not "comment-only", as v0.2 said — two of the three are string
 literals**, which is why (i)'s comment filter cannot reach them and why it stops at 31:
 
-| file | surviving hit | kind |
-|---|---|---|
-| `tests/dictionary/loader_disposition_test.cpp` | `:555` | comment — (i) *does* drop this one |
-| `tests/dictionary/dict_enum_census_test.cpp` | `:449` | **string literal** — (i) keeps it |
-| `tests/wire/delimiter_divergence_wire_test.cpp` | `:369` | **string literal** — (i) keeps it |
+| file | kind |
+|---|---|
+| `tests/dictionary/loader_disposition_test.cpp` | comment — (i) *does* drop this one |
+| `tests/dictionary/dict_enum_census_test.cpp` | **string literal** — (i) keeps it |
+| `tests/wire/delimiter_divergence_wire_test.cpp` | **string literal** — (i) keeps it |
 
 So (i) drops **5**, not 8, and its residue is the header plus those two string literals. The
 conclusion and the eight-file enumeration are untouched by any of this; only the instrument was
-wrong. The header says why the surface exists (`table_view.hpp:584-589`): the chain methods are there
+wrong. The header says why the surface exists (in `table_view.hpp`): the chain methods are there
 so those TUs *"can drop the mock include and use this production type directly (RC-A closure,
 T009)."* Privatizing them means either friending the test suite — which defeats the point — or
 rewriting 27 TUs. That is a module-scale change, entirely outside a one-field Gate A, and it still
@@ -452,7 +452,7 @@ the two-argument assertion; it pins a real and different thing.
 of `dictionary_view`, and `open()` gains a two-line provenance gate:
 
 ```cpp
-// src/session/session.cpp, replacing :1001-1004
+// src/session/session.cpp, replacing Session::open()'s prior provenance gate
 if (cfg_.dict_snapshot) {
     if (cfg_.dict_snapshot->source() != cfg_.dictionary) {
         co_return std::unexpected(error::invalid_session_config);
@@ -492,9 +492,9 @@ std::shared_ptr<const table_view> shared_dictionary_view(
 }
 ```
 
-So `inbound_tv_` keeps its current type and **`session.cpp:328` and `:1255-1258` are
-byte-unchanged** — no read site moves, and `dictionary_driven_validator`'s by-value ctor
-(`include/fixpp/wire/validator.hpp:112`, `explicit dictionary_driven_validator(table_view dict)`)
+So `inbound_tv_` keeps its current type and **the `Parser{*inbound_tv_}` construction and the
+`dictionary_driven_validator` construction in `session.cpp` are byte-unchanged** — no read site moves, and `dictionary_driven_validator`'s by-value ctor
+(in `include/fixpp/wire/validator.hpp`, `explicit dictionary_driven_validator(table_view dict)`)
 still copy-constructs from the const lvalue `*inbound_tv_` exactly as it does today. The change is
 one new small header, one factory, one config field, and one `open()` block.
 
@@ -503,8 +503,8 @@ one new small header, one factory, one config field, and one `open()` block.
   Dictionary>` itself, compared for pointer equality. O(1), no hashing, no version token on
   `table_view`, no coupling of `table_view` to `Dictionary`.
 - The reject mirrors an existing fail-closed disposition — `invalid_session_config`, the same
-  error `open()` already returns for a null dictionary at `src/session/session.cpp:979-981` and for
-  the `SecurityProfile::kind::unset` sentinel at `:1012-1014` (`[const §XII.5]` / N-P2-3). No new error code, no new class of
+  error `open()` already returns for a null dictionary at its null-dictionary check in `src/session/session.cpp` and for
+  the `SecurityProfile::kind::unset` sentinel at its own check there (`[const §XII.5]` / N-P2-3). No new error code, no new class of
   failure for a caller to learn.
 - `dictionary` and `dict_snapshot` are still two fields a caller must keep in agreement — but the
   agreement is now **checked at `open()`** instead of left to discipline. That is strictly weaker
@@ -573,7 +573,7 @@ allow" — an enforcement with a permanently open default arm. Strictly dominate
 ### Option E — no public injection point; cache the view inside the engine
 
 Delete `dictionary_view` outright. Have `Engine::register_session`
-(`include/fixpp/session/engine.hpp:239`) keep a view cache keyed on the `Dictionary` and hand
+(in `include/fixpp/session/engine.hpp`) keep a view cache keyed on the `Dictionary` and hand
 `Session::open()` a shared view.
 
 - **C1:** closed most completely — nothing is public at all.
@@ -590,9 +590,9 @@ Best projected outcome of the six. Nothing new on the public surface.
 **Cons — priced against the in-tree precedent, which is narrower than v0.1 claimed.** v0.1 rejected
 E on four cons; **three of them do not survive contact with `Engine`'s existing
 `app_version_registry_`**, which is the same shape and already ships.
-`build_version_registry(cfg)` (`include/fixpp/core/engine_config.hpp:211-214`) builds a registry
-from `EngineConfig::dictionaries` (`:129`, a `vector<shared_ptr<const Dictionary>>`), and `Engine`
-holds it as a member built **once at construction** (`include/fixpp/session/engine.hpp:353-361`):
+`build_version_registry(cfg)` (in `include/fixpp/core/engine_config.hpp`) builds a registry
+from `EngineConfig::dictionaries` (a `vector<shared_ptr<const Dictionary>>` field in the same header), and `Engine`
+holds it as a member built **once at construction** (in `include/fixpp/session/engine.hpp`):
 *"engine-lifetime application version registry built once from `engine_cfg_.dictionaries` at
 construction… Sessions hold a non-owning const\* handle; the registry outlives all Sessions because
 `Engine::stop()` drains+joins Sessions before the Engine destructs."* An eager, immutable,
@@ -602,7 +602,7 @@ built-once map of `Dictionary → table_view`, keyed the same way, inherits all 
 |---|---|
 | raw-`Dictionary*` key is a lifetime hazard | **refuted** — it keys the same `shared_ptr` vector |
 | `shared_ptr` key ⇒ owns dictionaries indefinitely ⇒ needs eviction | **refuted** — lifetime is the engine's, exactly as the registry's is |
-| shared mutable config-time state ⇒ needs synchronisation, re-triggers `[const §XVII.1]`'s concurrency bullet (`:336`) | **refuted, conditionally** — built before any session exists, read-only thereafter |
+| shared mutable config-time state ⇒ needs synchronisation, re-triggers `[const §XVII.1]`'s concurrency bullet | **refuted, conditionally** — built before any session exists, read-only thereafter |
 | the C ABI still needs a fetch path | **survives** |
 
 v0.1 costed a **lazy mutable cache** and charged those costs to Option E generally. That was
@@ -610,8 +610,8 @@ estimation, not precedent.
 
 **The two cons that survive, and they are still enough.**
 
-1. **The C ABI still needs its own `tv_`** (`capi_internal.hpp:513`) for the outbound commit path
-   (consumed at `src/capi/message_write.cpp:294`), so the engine must expose a fetch path — public-ish
+1. **The C ABI still needs its own `tv_`** (in `capi_internal.hpp`) for the outbound commit path
+   (consumed in `src/capi/message_write.cpp`), so the engine must expose a fetch path — public-ish
    surface again, reintroducing a diluted form of the question this option claims to dissolve.
 2. **An engine-side map does not cover the general case.** `EngineConfig::dictionaries` is a fixed
    vector, while `SessionConfig::dictionary` may legitimately be a dictionary **not in it**. E
@@ -632,7 +632,7 @@ which makes §7's "revisit E if fan-out grows" a *stronger* standing recommendat
 Delete `SessionConfig::dictionary` and replace it with the snapshot itself:
 
 ```cpp
-// include/fixpp/session/session_config.hpp, replacing :188 and :212
+// include/fixpp/session/session_config.hpp, replacing the `dictionary` and `dictionary_view` fields
 std::shared_ptr<const fixpp::dict::dictionary_snapshot> dictionary;  // required
 ```
 
@@ -651,10 +651,10 @@ compare and nothing to keep in agreement.
 **Cons.**
 
 **(a) Migration, enumerated.** `grep -rnE "\.dictionary\s*=[^=]"` — the `[^=]` matters, since the
-naive pattern also matches `engine.cpp:214`'s `== nullptr`, and a count identity is not proof a
+naive pattern also matches `Engine::register_session`'s `== nullptr` check in `engine.cpp`, and a count identity is not proof a
 scanner does not over-match:
 
-- `src/ include/ bindings/ tools/`: **1** site — `src/capi/config.cpp:208`.
+- `src/ include/ bindings/ tools/`: **1** site — the `cfg->cfg.dictionary = h->dict;` assignment in `src/capi/config.cpp`.
 - `tests/ bench/`: **230** sites across **126** files.
 
 Every one becomes `make_dictionary_snapshot(dict)` — an eager full walk at config-construction time
@@ -663,26 +663,26 @@ in 126 test/bench TUs. Against Option C's **one** production site plus **one** t
 
 The other two interaction axes came back **clean, and that is a checked result rather than an
 unchecked one**: `src/config/` and `bindings/` are unaffected — `resolve_engine_dictionary`
-(`src/config/selector_resolver.cpp:279-370`) populates the *engine-scope*
-`bundle.engine.dictionaries` vector (`include/fixpp/config/config_bundle.hpp:55`), never
+(in `src/config/selector_resolver.cpp`) populates the *engine-scope*
+`bundle.engine.dictionaries` vector (in `include/fixpp/config/config_bundle.hpp`), never
 `SessionConfig::dictionary`; and `bindings/` reaches sessions through the C ABI, never naming
 `SessionConfig`.
 
 **(b) The C-ABI setter becomes a throwing 213 ms walk, on the wrong side of the thunk contract.**
-`fixpp_session_config_set_dictionary` (`src/capi/config.cpp:191-210`, declared at
-`include/fix/c_api/session.h:128`) is today a validated pointer copy: tag gate, null checks, one
+`fixpp_session_config_set_dictionary` (in `src/capi/config.cpp`, declared in
+`include/fix/c_api/session.h`) is today a validated pointer copy: tag gate, null checks, one
 `shared_ptr` assignment. Under F it must mint the snapshot — allocating, walking, throwing. The
 function contains **no `try`**. Two things follow, and they point in opposite directions, so both
 are stated:
 
-- *A barrier exists to copy.* `src/capi/config.cpp` carries five `catch (...)` barriers — `:40`,
-  `:87`, `:103`, `:119`, `:266`. So adding one is the pattern, not an invention.
-- *But the thunk contract says otherwise.* `[2i §5.2]` (`.specify/2i-capi.md:1240`) splits C-ABI
+- *A barrier exists to copy.* `src/capi/config.cpp` carries five `catch (...)` barriers (enumerated
+  in the table below). So adding one is the pattern, not an invention.
+- *But the thunk contract says otherwise.* `[2i §5.2]` splits C-ABI
   thunks into construction-time and steady-state flavours, and the construction-time whitelist is
   **exactly three symbols** — `fixpp_engine_create`, `fixpp_dict_load_from_xml`,
-  `fixpp_msg_create_outbound` (`:1248`). `fixpp_session_config_set_dictionary` is not among them, and
+  `fixpp_msg_create_outbound`. `fixpp_session_config_set_dictionary` is not among them, and
   on the steady-state side *"an escaping exception… implies an `assert` failure at the C++ layer or
-  a memory-corruption… bug"* and the thunk **`std::abort()`s** (`:1249`). Moving a genuinely
+  a memory-corruption… bug"* and the thunk **`std::abort()`s**. Moving a genuinely
   throwing operation into a steady-state setter is therefore not a local edit: it either amends that
   whitelist — a change to the C-ABI error model, which is its own Gate A — or it accepts an
   abort-on-bad-dictionary that the current design deliberately routes to
@@ -693,17 +693,17 @@ is present — instead of by WHAT THE HANDLER DOES, and it reached the opposite 
 the evidence supports. Both errors are corrected here, and the correction runs against this
 document's own earlier framing.** Restated semantically, over the whole file:
 
-| non-whitelisted thunk | barrier | what the handler does |
-|---|---|---|
-| `fixpp_engine_config_create` `:32` | `:40` | **translates** → `FIXPP_ERR_CAPI_CONFIG_INVALID` |
-| `fixpp_session_config_create` `:70` | `:87` | **translates** → `FIXPP_ERR_CAPI_CONFIG_INVALID` |
-| `fixpp_session_config_set_comp_ids` `:92` | `:103` | **translates** → `FIXPP_ERR_CAPI_CONFIG_INVALID` |
-| `fixpp_session_config_set_begin_string` `:109` | `:119` | **translates** → `FIXPP_ERR_CAPI_CONFIG_INVALID` |
-| `fixpp_session_config_set_tcp_endpoint` `:248` | `:266` | **fatal-logs and `std::abort()`s** at `:271` |
+| non-whitelisted thunk | what the handler does |
+|---|---|
+| `fixpp_engine_config_create` | **translates** → `FIXPP_ERR_CAPI_CONFIG_INVALID` |
+| `fixpp_session_config_create` | **translates** → `FIXPP_ERR_CAPI_CONFIG_INVALID` |
+| `fixpp_session_config_set_comp_ids` | **translates** → `FIXPP_ERR_CAPI_CONFIG_INVALID` |
+| `fixpp_session_config_set_begin_string` | **translates** → `FIXPP_ERR_CAPI_CONFIG_INVALID` |
+| `fixpp_session_config_set_tcp_endpoint` | **fatal-logs and `std::abort()`s** |
 
 **Four translate, one aborts.** v0.2 cited the TCP setter as counter-evidence that *"in-tree practice
 is broader than `[2i §5.2]`'s whitelist"*. It is the single strongest in-tree **confirmation** of that
-whitelist: its handler aborts under an in-source comment (`src/capi/config.cpp:256-258`) that names
+whitelist: its handler aborts under an in-source comment (in `src/capi/config.cpp`) that names
 the rule it is obeying —
 
 ```
@@ -713,8 +713,8 @@ the rule it is obeying —
 ```
 
 **And the census was file-scoped for an ABI-wide rule.** `grep -rn "std::abort()" src/capi/` returns
-**five** sites, not one — `engine.cpp:93`, `engine.cpp:126`, `session.cpp:179`, `session.cpp:317`,
-`config.cpp:271`. Restricting the count to `config.cpp` is what made the abort discipline look like a
+**five** sites, not one — `CapiApplication::fromApp` and `CapiApplication::toApp` in `engine.cpp`,
+`fixpp_session_acceptor_bound_endpoint` and `fixpp_session_send` in `session.cpp`, and `fixpp_session_config_set_tcp_endpoint` in `config.cpp`. Restricting the count to `config.cpp` is what made the abort discipline look like a
 one-off exception rather than the shipped norm.
 
 **The ABI-wide view inverts v0.2's conclusion, and that is worse for Option F, not better.** The
@@ -739,10 +739,10 @@ Either way the *semantic* change is not repairable by a barrier: a setter that w
 full walk, and re-setting the dictionary walks again.
 
 **(c) It charges the walk to configs that are never opened — but the premise is narrower than it
-looks, and is reported here at its true width.** `session.cpp:1001` builds `inbound_tv_`
-**unconditionally**: the nearest `validate_inbound_messages` guard is 249 lines later, at
-`:1250` (`if (cfg_.validate_inbound_messages) {`, whose body builds the validator at
-`:1255-1258`). So for every session that *opens*, F does not *add* a walk — it *moves* it earlier, and for
+looks, and is reported here at its true width.** `Session::open()` builds `inbound_tv_`
+**unconditionally**: the nearest `validate_inbound_messages` guard comes later in the same function
+(`if (cfg_.validate_inbound_messages) {`, whose body builds the validator).
+So for every session that *opens*, F does not *add* a walk — it *moves* it earlier, and for
 N sessions sharing one dictionary it strictly *wins*, 1 walk instead of N. The new cost is
 specifically **configs constructed and never opened**, which — given 126 test/bench files and a
 C-ABI setter that may be called more than once per config — is still large, but it is not a
@@ -784,13 +784,13 @@ value type that exists to be a plain table. C addresses both with no change to `
 *Against E — narrowed, and this is the discriminator that moved most between v0.1 and v0.2.* E is
 the better *idea*: it dissolves the question rather than answering it, it generalizes the saving,
 and it is one of the two options that genuinely closes C4 by construction. **Three of v0.1's four
-arguments against it are withdrawn** — `app_version_registry_` (`engine.hpp:353-361`) proves an
+arguments against it are withdrawn** — `app_version_registry_` (in `engine.hpp`) proves an
 eager, immutable, engine-lifetime map needs no raw-pointer key, no eviction policy and no
 synchronisation. Exactly two discriminators survive:
 
-1. the C ABI still needs its own `tv_` (`capi_internal.hpp:513`) for the outbound commit path, so a
+1. the C ABI still needs its own `tv_` (in `capi_internal.hpp`) for the outbound commit path, so a
    fetch path is required regardless — public-ish surface reintroduced; and
-2. `EngineConfig::dictionaries` (`engine_config.hpp:129`) is a fixed vector while
+2. `EngineConfig::dictionaries` (in `engine_config.hpp`) is a fixed vector while
    `SessionConfig::dictionary` may legitimately name a dictionary outside it, so E needs a fallback
    arm and does not cover the general case.
 
@@ -827,7 +827,7 @@ asserted.
 Under the specified path: `as_table_view()`'s prvalue initializes `make_shared`'s forwarding
 reference (no move — guaranteed materialization), that forwards into the constructor's **by-value**
 `table_view` parameter (**move 1**), which is moved into `view_` (**move 2**).
-`table_view`'s move ctor is `noexcept = default` (`include/fixpp/dict/table_view.hpp:260`), and the
+`table_view`'s move ctor is `noexcept = default` (in `include/fixpp/dict/table_view.hpp`), and the
 snapshot object is one `shared_ptr` wider than a bare `table_view`.
 
 **The move count is not an estimate and it did not change.** Compiling §3's sketch (`clang++ 22.1.2
@@ -839,7 +839,7 @@ route instead would trade that move for a second allocation, which is what the p
 avoid.
 
 **The refcount pair is determined by the CALL, not by the body — and v0.2 counted it wrong.**
-Stated precisely, for the one caller Option C creates: `src/capi/session.cpp:102-103` becomes
+Stated precisely, for the one caller Option C creates: the assignment in `src/capi/session.cpp` becomes
 `make_dictionary_snapshot(sc.dictionary)`, and `sc.dictionary` is an **lvalue** there that must
 survive the call — `open()` compares the snapshot's `source()` against it (§3), so the producer
 cannot relinquish it:
@@ -870,8 +870,8 @@ the pair by compilation and by call shape; the 213 ms by measurement (§1).** Ev
 states its benefit on these terms except A's and B's, which are measurements because neither changes
 any construction path.
 
-**No additional benchmark is required under `[const §VIII.3]`** (`.specify/constitution.md:186`,
-*"No perf change merged without a benchmark in the same PR"*). The perf change #262 merges already
+**No additional benchmark is required under `[const §VIII.3]`**
+(*"No perf change merged without a benchmark in the same PR"*). The perf change #262 merges already
 ships with its benchmark in the same PR: `bench/dictionary/table_view_footprint_bench.cpp`, added at
 `6ad84fef` (`git diff --stat main...HEAD -- bench/` → `+39`). §VIII.3 is satisfied on its own terms.
 A second bench arm comparing `make_shared<const table_view>` against `make_dictionary_snapshot` is
@@ -909,14 +909,14 @@ is an aggregate) but breaks the moment any member function names the type unqual
 
 **Bindings that continue to apply**, each pinned to its line — see also `## Normative References`.
 `make_dictionary_snapshot` is config-time only: it allocates and walks, so it is barred from the
-per-message path by `[const §XV.1]` (`.specify/constitution.md:295`), exactly as `as_table_view()`
-already is. Nothing in this design sits between parse and `fromApp`, so `[const §VIII.5]` (`:191`,
-zero `new`/`delete` on that window) and `[arch §5.3]` (`.specify/architecture.md:396`, *"Hot path is
+per-message path by `[const §XV.1]`, exactly as `as_table_view()`
+already is. Nothing in this design sits between parse and `fromApp`, so `[const §VIII.5]` (
+zero `new`/`delete` on that window) and `[arch §5.3]` (*"Hot path is
 exception-free. No `throw` between parse and `fromApp`"*) are not engaged — the provenance check is
 a pointer compare in `open()`, which is neither an allocation nor a throw. No new pure-virtual
-method, so `[const §XIV.2]`'s ≤5 budget (`:285`) is untouched. Unlike Option F, Option C adds no
+method, so `[const §XIV.2]`'s ≤5 budget is untouched. Unlike Option F, Option C adds no
 work to any C-ABI thunk, so `[2i §5.2]`'s construction-time/steady-state split
-(`.specify/2i-capi.md:1240-1251`) is not engaged either. Both view-returning accessors carry
+is not engaged either. Both view-returning accessors carry
 `[[clang::lifetimebound]]`; `make_dictionary_snapshot` and `shared_dictionary_view` are
 `[[nodiscard]]`.
 
@@ -924,7 +924,7 @@ work to any C-ABI thunk, so `[2i §5.2]`'s construction-time/steady-state split
 
 - **Who outlives whom.** The snapshot holds `shared_ptr<const Dictionary>`, so the dictionary
   cannot outlive-die under it. `SessionConfig` holds `shared_ptr<const dictionary_snapshot>`;
-  `register_session` takes the config **by value** (`engine.hpp:239`), so the session's copy keeps
+  `register_session` takes the config **by value** (in `engine.hpp`), so the session's copy keeps
   the snapshot alive independently of the caller's. `Session::inbound_tv_`'s aliasing `shared_ptr` —
   formed by `shared_dictionary_view`, the sole production site — is a third owner of the snapshot's
   control block, so the view stays valid even if the config copy is destroyed first. Every edge is a
@@ -935,13 +935,13 @@ work to any C-ABI thunk, so `[2i §5.2]`'s construction-time/steady-state split
   aliasing site would leave it green.
 - **`register_session` failure.** The by-value config copy is destroyed on the error return, the
   snapshot refcount drops by one, and the caller's `Dictionary` and snapshot are untouched — the
-  C-ABI's "builder untouched on failure" contract (`src/capi/session.cpp:95-98`, enforced at
-  `:113`) is preserved
-  unchanged, and for the same reason it holds today: the snapshot is attached to a **local** copy,
+  C-ABI's "builder untouched on failure" contract (in `src/capi/session.cpp`) is preserved
+  unchanged,
+  and for the same reason it holds today: the snapshot is attached to a **local** copy,
   never to `cfg->cfg`.
 - **Null handling, deliberately.** `make_dictionary_snapshot(nullptr)` returns null. A snapshot
   cannot carry a null `source_` any other way, because the factory is the only constructor. And
-  `open()` already rejects a null `cfg_.dictionary` at `src/session/session.cpp:979-981`, *before*
+  `open()` already rejects a null `cfg_.dictionary` at its null-dictionary check in `src/session/session.cpp`, *before*
   the block being replaced — so a null-carrying snapshot could never reach the identity compare
   anyway. Two independent guards, stated so the redundancy is on purpose rather than accidental.
 - **Threads and strands.** The snapshot exposes only `table_view const&` and a `shared_ptr const&`;
@@ -955,11 +955,11 @@ The row deltas differ sharply by option, and that asymmetry is part of why C win
 
 | row | under A | under C (recommended) |
 |---|---|---|
-| `L-215-1` (provenance unenforceable) `:2001` | **stays** verbatim | **removed** — the mismatch is now *detected and rejected*, so the row's claim ("undetectable") stops being true. Replaced by `B-215-2`, below |
+| `L-215-1` (provenance unenforceable) | **stays** verbatim | **removed** — the mismatch is now *detected and rejected*, so the row's claim ("undetectable") stops being true. Replaced by `B-215-2`, below |
 | C1 mutability hole | **new limitation row required** — currently recorded nowhere | **not needed** — the injection point no longer admits a mutable alias |
 | **`B-215-2`** (NEW behaviour row) | — | *"a snapshot whose `source()` is not the config's `dictionary` is rejected at `open()` with `invalid_session_config`. **The identity rule is `shared_ptr` pointer equality, not value equality:** two independent loads of the same XML produce two `Dictionary` objects, and a snapshot minted from one is refused against the other. The remedy is to share the `shared_ptr`. This is deliberate and fail-closed."* |
-| `L-215-2` (validator copies by value) `:2003` | stays verbatim | **stays verbatim** — SC-007 is untouched, the validator still holds `table_view` by value, and the measured copy/build table stays as the evidence for it |
-| `B-215-1` (C-ABI commit fails closed on context miss) `:1985` | unaffected | unaffected — different code path, item 2 not item 1 |
+| `L-215-2` (validator copies by value) | stays verbatim | **stays verbatim** — SC-007 is untouched, the validator still holds `table_view` by value, and the measured copy/build table stays as the evidence for it |
+| `B-215-1` (C-ABI commit fails closed on context miss) | unaffected | unaffected — different code path, item 2 not item 1 |
 
 **`L-215-1` is not deleted without replacement, and the replacement is narrower than the row it
 replaces — deliberately, and said out loud.** Option C's own cons concede that pointer-identity
@@ -974,19 +974,19 @@ provenance half.
 
 ### 5d. Migration
 
-None externally — there are no clients. Internally: `src/capi/session.cpp:101-103` swaps
+None externally — there are no clients. Internally: the assignment in `src/capi/session.cpp` swaps
 `make_shared<const table_view>` for `make_dictionary_snapshot`, and `fixpp_session::tv_`
-(`capi_internal.hpp:513`) is seated from the same snapshot through **`shared_dictionary_view`** — the
-same helper `Session::open()` uses, which is the point — so `src/capi/message_write.cpp:294`
+(in `capi_internal.hpp`) is seated from the same snapshot through **`shared_dictionary_view`** — the
+same helper `Session::open()` uses, which is the point — so the assignment in `src/capi/message_write.cpp`
 (`h->session_tv_ = …->tv_`) is unchanged. The C ABI itself does not move, so
 `tools/check_capi_freeze.sh` needs no manifest edit.
 
 The migration census that makes this small is the one in §2a: `dictionary_view` has exactly **one**
-in-tree writer (`src/capi/session.cpp:103`), and outside `src/ include/ bindings/ tools/` the field
+in-tree writer (in `src/capi/session.cpp`), and outside `src/ include/ bindings/ tools/` the field
 is named only in `tests/session/test_session_table_view_reuse.cpp` and one `CMakeLists.txt` comment.
 `grep -n dictionary_view` on that test TU returns **five** hits, of which **three are code** and
-must migrate — `:157` (an `ASSERT_EQ(cfg.dictionary_view, nullptr)` precondition), `:188` and `:225`
-(the two assignments) — and two are comments (`:179`, `:210`). Stated as five-of-which-three rather
+must migrate — an `ASSERT_EQ(cfg.dictionary_view, nullptr)` precondition and two assignments —
+and two are comments. Stated as five-of-which-three rather
 than as three, because a census quoted only at its load-bearing subset is how the Option B recipe
 above went wrong.
 
@@ -1003,52 +1003,52 @@ in **two parts**, because the two are different kinds of evidence.
    `Active` proves the mismatched state is *representable*; it does not prove the wrong grammar
    *fires*. The proof that this shape cannot discriminate is already in the tree: the existing W3
    test `SessionTableViewReuse.AdoptedViewDrivesInboundParsingAndValidation`
-   (`tests/session/test_session_table_view_reuse.cpp:222-237`) seats a **matching** view, feeds a
-   group-free `35=A` logon (`make_logon_frame()`, `:65-89` — tags 35/34/49/52/56/98/108, no
+   (in `tests/session/test_session_table_view_reuse.cpp`) seats a **matching** view, feeds a
+   group-free `35=A` logon (`make_logon_frame()` — tags 35/34/49/52/56/98/108, no
    repeating group), and asserts `Active`. By this document's own seam 6, that frame cannot tell two
    grammars apart. An assertion on `Active` would stay green under a mismatched view.
 
    *The fixture.* Two dictionaries that are **separately loaded**, share a `session_version`, and
    **disagree on an observable rule**. In-tree this is a ~10-line addition to
    `tests/support/validation_test_dictionary.hpp`, which already holds the inline XML
-   `kValidationTestFix42Xml` (`:49-119`) and loads it via
-   `XmlLoader{}.load_from_string(kValidationTestFix42Xml, mr)` (`:131`) inside
-   `make_validation_test_dictionary()` (`:125`, returning `shared_ptr<const Dictionary>`). Add a
+   `kValidationTestFix42Xml` and loads it via
+   `XmlLoader{}.load_from_string(kValidationTestFix42Xml, mr)` inside
+   `make_validation_test_dictionary()` (returning `shared_ptr<const Dictionary>`). Add a
    sibling string and factory differing in exactly one field: `OrderQty(38)` on `NewOrderSingle`,
-   `required="N"` in A (`:75`) and `required="Y"` in B. Both declare
-   `<fix major="4" minor="2">` (`:50`), so `which_session_version()` is **equal** — which kills
+   `required="N"` in A and `required="Y"` in B. Both declare
+   `<fix major="4" minor="2">`, so `which_session_version()` is **equal** — which kills
    the insufficient implementation that compares versions instead of identity, per Codex's point,
    and is why the pair must be authored rather than borrowed from `spec/dictionaries/`.
    ⚠️ This fixture **does not exist today** and is part of the cost of adopting Option C.
 
    *The discriminating frame, and how the outcome is observed — both taken from an existing test
    rather than invented.* `tests/session/test_validate_gate_inbound.cpp` is the template: its W3 cell
-   `ValidateGateInbound.RequiredFieldMissing_Reason1` (`:325-344`) already drives this exact shape
-   over this exact dictionary (`:59`, `:174` — the same
-   `make_validation_test_dictionary()`). Reuse its three mechanisms verbatim:
+   `ValidateGateInbound.RequiredFieldMissing_Reason1` already drives this exact shape
+   over this exact dictionary (the same
+   `make_validation_test_dictionary()` call sites). Reuse its three mechanisms verbatim:
 
-   - **Sequencing.** `open_to_active(sess)` (`:184-200`) — open → `LogonSent` → feed a valid peer
+   - **Sequencing.** `open_to_active(sess)` — open → `LogonSent` → feed a valid peer
      `35=A` → `ASSERT_EQ(sess.state(), fsm_state::Active)`. **A `35=D` cannot be fed before Logon
      completes**, so the discriminating frame is the *second* message, not the first. W3 in
      `test_session_table_view_reuse.cpp` never gets this far, which is a second reason it cannot
      discriminate.
    - **The frame.** A `35=D` NewOrderSingle carrying `11`/`54`/`60` but **omitting tag 38**
-     (`make_raw_frame("FIX.4.2", "D", 2, "TW", "ISLD", body)`, `:336`). Dictionary A declares
+     (`make_raw_frame("FIX.4.2", "D", 2, "TW", "ISLD", body)`). Dictionary A declares
      `OrderQty(38)` optional and accepts it; dictionary B declares it required and rejects it.
    - **The observable.** Not `sess.state()` — the session stays `Active` either way, which is the
      whole point. Inbound validation failure emits a session-level **`Reject (35=3)`** through
      `emit_session_reject_`. **Which of its five call sites matters, because the seam's own frame
      reaches exactly one of them.** The discriminating `35=D` is the *second* message (bullet above),
-     so it enters `Session::on_inbound_frame` (`:2069`) and takes that function's `switch` on
-     `fsm_state_` (`:2087`) at the **`case fsm_state::LogonReceived: case
-     fsm_state::Active:`** arm (`src/session/session.cpp`, `Session::on_inbound_frame`), whose 041 T014 validate gate is
-     at **`:2743-2749`** and emits at **`:2746`**. Not `:2100-2107`: that is the *same* 041 T014 gate
-     on the **`case fsm_state::NotConnected:`** arm (`:2088`), which runs validate-first on the
+     so it enters `Session::on_inbound_frame` and takes that function's `switch` on
+     `fsm_state_` at the **`case fsm_state::LogonReceived: case
+     fsm_state::Active:`** arm (`src/session/session.cpp`, `Session::on_inbound_frame`), whose "041-validation-gate-wiring
+     T014: dictionary-driven validate gate" block validates and emits. Not the NotConnected arm's own validate block: that is the *same* 041 T014 gate
+     on the **`case fsm_state::NotConnected:`** arm, which runs validate-first on the
      **first** inbound frame, before `interpret_logon` — a frame this seam has just ruled out. The
      two sites are the same helper with the same reason/`RefTagID` shape on different FSM phases,
      which is precisely why the wrong one reads as correct. The emission is captured by the fixture's
-     `capture_outbound` (`:177`) and read by `has_reject_with_reason(1)` (`:213`) and
-     `reject_ref_tag_id(1)` (`:237`). The assertion is `has_reject_with_reason(1) == false` under A
+     `capture_outbound` and read by `has_reject_with_reason(1)` and
+     `reject_ref_tag_id(1)`. The assertion is `has_reject_with_reason(1) == false` under A
      and `true` with `reject_ref_tag_id(1) == 38` under B — an **acceptance outcome that flips**,
      which `Active` does not.
 
@@ -1056,7 +1056,7 @@ in **two parts**, because the two are different kinds of evidence.
    - **Runtime-RED, today, on the unfixed tree — this is the one that proves the instrument is not
      vacuous.** Written against the *legacy* `dictionary_view` field, which does exist:
      `cfg.dictionary = A`, `cfg.dictionary_view = <view of B>`, drive to `Active`, feed the frame.
-     Today `session.cpp:1001-1004` adopts the mismatched view on a bare null check, so B's grammar
+     Today `Session::open()` adopts the mismatched view on a bare null check, so B's grammar
      fires against A's declared identity: `has_reject_with_reason(1)` is **true** where a
      dictionary-A-only session yields **false**. The instrument's own non-vacuity is checkable the
      same way — the A/A control must be green while the A/B pairing is red, so a broken fixture
@@ -1082,8 +1082,8 @@ in **two parts**, because the two are different kinds of evidence.
    the same reason as seam 1.
 3. **Walk-count regression — the benefit must survive the redesign.** Extend the existing
    `SessionTableViewReuse.*` tests (`tests/session/test_session_table_view_reuse.cpp`) against 083
-   T049's `as_table_view_call_count()` seam (`src/dictionary/dictionary.cpp:420-427`, bumped at
-   `:449`): opening a
+   T049's `as_table_view_call_count()` seam (the counter and its `bump_as_table_view_call_count()` call
+   inside `Dictionary::as_table_view()`, in `src/dictionary/dictionary.cpp`): opening a
    session with a snapshot performs **zero** additional walks, and the C-ABI total stays **1**, not
    3. This is the seam that proves Option C did not give back the §1 measurement.
 4. **Alias lifetime and alias IDENTITY — tested on `shared_dictionary_view`, the production helper,
@@ -1096,8 +1096,8 @@ in **two parts**, because the two are different kinds of evidence.
    written — call the helper, drop `snap`, read the alias, assert `use_count() == 1` — and it
    **passes**: `use_count == 1`, no UAF, seam green. That implementation reintroduces the full
    17 070 µs FIX50SP2 copy this design exists to avoid, and seam 3 does not catch it either, because
-   seam 3 counts `as_table_view_call_count()` (`src/dictionary/dictionary.cpp:420-428`, bumped at
-   `:449`) and a `table_view` **copy** does not bump a walk counter.
+   seam 3 counts `as_table_view_call_count()` (the counter and its `bump_as_table_view_call_count()` call
+   inside `Dictionary::as_table_view()`, in `src/dictionary/dictionary.cpp`) and a `table_view` **copy** does not bump a walk counter.
 
    The fix is to pin identity and shared ownership, not just validity. **The order is load-bearing:
    the first three assertions require `snap` to still be alive, the last two require it dropped.**
@@ -1126,7 +1126,7 @@ in **two parts**, because the two are different kinds of evidence.
    *What v0.1 got wrong.* It instructed the test to *"form the aliasing `shared_ptr` from it"* —
    i.e. **in the test**. That asserts that libstdc++'s aliasing constructor works, which was never
    in doubt. Both production sites — `Session::open()` and `fixpp_session_open` seating
-   `fixpp_session::tv_` (`capi_internal.hpp:513`) — could have stored a non-owning pointer with the
+   `fixpp_session::tv_` (in `capi_internal.hpp`) — could have stored a non-owning pointer with the
    seam still green. It passed for the wrong reason.
 
    *Why the helper is required, not merely convenient.* Making `shared_dictionary_view` the
@@ -1136,7 +1136,7 @@ in **two parts**, because the two are different kinds of evidence.
    argument rests on it.
 
    *Still deliberately not routed through a `Session`:* `register_session` takes `SessionConfig`
-   **by value** (`include/fixpp/session/engine.hpp:239`) and the session retains `cfg_`, so a
+   **by value** (in `include/fixpp/session/engine.hpp`) and the session retains `cfg_`, so a
    session-level "drop the caller's handle" test has a second live owner and passes identically
    under a raw pointer — a canary that can never go red. The helper is the seam that removes that
    problem instead of working around it.
@@ -1238,7 +1238,7 @@ in **two parts**, because the two are different kinds of evidence.
    |---|---|
    | the mismatched pairing stays **representable** — two public authorities survive — but is **detected and refused** at `open()` rather than silently driving the wrong grammar | **seam 1** (a runtime check, executed; not a construction closure) |
 6. **Group-sensitive adoption (inherited gap).** The existing W3 test
-   (`test_session_table_view_reuse.cpp:222-237`) feeds a group-free `35=A` and so cannot witness
+   (in `test_session_table_view_reuse.cpp`) feeds a group-free `35=A` and so cannot witness
    that the adopted view drives *group* boundaries — the Gate B triage's C5. Whichever option is
    chosen, that seam should be re-pointed at a frame with a repeating group so it discriminates.
    Listed here because Option C changes the adoption path it exercises; the fix is independent of
@@ -1587,20 +1587,20 @@ on a legitimate move.
 
 ## Normative References
 
-`[const §VI.5]` (`.specify/constitution.md:164`) requires *"Every `/specify` artifact must include a
+`[const §VI.5]` requires *"Every `/specify` artifact must include a
 **Normative References** section listing the exact `[DocAbbrev §X.Y.Z] Title` entries from the
 coverage index that inform the spec."*
 
 **This section is here by repo convention, not because its absence was a constitutional violation.**
 The distinction is recorded rather than glossed, because v0.1's omission was reviewed as a §VI.5
 breach and that reading does not hold. §VI.5's binding subject is a `/specify` **artifact** —
-`specs/<id>/` pipeline output — and `architecture.md:737` states the in-repo authoritative reading
+`specs/<id>/` pipeline output — and `architecture.md` states the in-repo authoritative reading
 directly: *"Strict reading of `[const §VI.5]` binds the Normative References requirement to
 `/specify` artifacts; this spine document is not a `/specify` artifact in the Spec Kit sense. The
 section is included here **voluntarily** for the same traceability spirit, and sets precedent that
 design docs 2a–2m do the same."* A `.specify/` design doc is therefore not literally in
-scope. What *is* binding is precedent: `ci254-python-fold.md:733` §11 carries the section, and
-`:849` records the same finding being adjudicated **P2 → P3** and applied on exactly that basis.
+scope. What *is* binding is precedent: `ci254-python-fold.md`'s §11 carries the section, and
+its #7 finding row records the same finding being adjudicated **P2 → P3** and applied on exactly that basis.
 This document follows ci254's shape. (The instruction that produced v0.1's omission cited
 `ci241-coverage-ccache.md`, which has no such section — that instruction was **stale**, not wrong
 about the constitution: precedent had moved at ci254.)
@@ -1613,58 +1613,58 @@ behaviour, no session FSM state or transition, no message grammar, no dictionary
 C ABI surface; the grammar a session validates against is identical before and after, and the only
 new runtime behaviour is refusing a configuration that FIX does not describe. **No
 `[DocAbbrev §X.Y.Z]` entry from `spec/coverage-index.md` informs it**, and inventing one would be
-worse than none. The model for this case is `2f-async-mutex.md:50` — *"2f's primary drivers are
+worse than none. The model for this case is `2f-async-mutex.md` — *"2f's primary drivers are
 engineering judgment… and no `[FIX-SL]` / `[FIXT]` / `[FIXS]` reference applies."*
 
 **Process / constitutional references.** v0.2 headed this table *"each opened and verified to resolve
 to the text used here"* — a blanket claim that **two of its own rows falsified**, so it is narrowed
 rather than repeated:
 
-> Every row below was re-opened at `e0574ee7` for **v0.3** and prints the quoted text at the line
-> given. Where a row cites a **section heading** rather than the sentence quoted, that is stated in
+> Every row below was re-opened at `e0574ee7` for **v0.3** and prints the quoted text next to it.
+> Where a row cites a **section heading** rather than the sentence quoted, that is stated in
 > the row.
 
 The two falsifications, recorded because a blanket claim is what a reader is asked to trust and this
 one had not been earned:
 
-1. `[arch §5.3]` cited `.specify/architecture.md:391` while quoting *"Hot path is exception-free…"*.
-   `:391` is the heading `### 5.3 Error model`; the quoted sentence is at **`:396`**. Corrected in
+1. `[arch §5.3]` cited `architecture.md`'s section heading `### 5.3 Error model` while quoting *"Hot path is exception-free…"*.
+   The heading is not the quoted sentence, which sits further down the same section. Corrected in
    the row below and at its second occurrence in §5a. This is the recorded *stale anchor carried
    forward without re-resolution* class, and v0.2's own ⚠️ note two paragraphs down warns against
    exactly it.
-2. The `architecture.md:737` quotation in the paragraph above ended *"included here
+2. The `architecture.md` quotation in the paragraph above ended *"included here
    **voluntarily**."* — a full stop where the source sentence continues *"voluntarily for the same
    traceability spirit, and sets precedent that design docs 2a–2m do the same."* Nothing in the
    argument turns on the tail, but a period is not an ellipsis; the quotation now carries one.
 
-| citation | line | what it says, as used here |
-|---|---|---|
-| `[const §VI.5]` | `.specify/constitution.md:164` | this section's own requirement |
-| `[const §VIII.3]` | `:186` | *"No perf change merged without a benchmark in the same PR"* — §4; satisfied by `6ad84fef` in this PR's own diff |
-| `[const §VIII.5]` | `:191` | *"zero `new`/`delete` between parse and `fromApp`"* — §5a, why the config-time factory does not engage it |
-| `[const §XII.5]` | `:253` | the `SecurityProfile` *"no implicit default"* rule whose `unset` sentinel `open()` rejects at `session.cpp:1012-1014` — the second of the two fail-closed dispositions §3 mirrors |
-| `[const §XIV.2]` | `:285` | *"≤5 pure-virtual methods"* — untouched; this design adds no virtual |
-| `[const §XV.1]` | `:295` | *"Heap-allocate per message or per field on the hot path"* — why `make_dictionary_snapshot` is config-time only |
-| `[const §XVII.1]` | `:335` | *"Touches the public C++ API or C ABI"* — this gate's trigger |
-| `[const §XVII.1]` | `:336` | *"Touches concurrency / threading / cancellation / executor model"* — the bullet Option E was wrongly said to re-trigger (§3, Option E) |
-| `[const §XVII.1]` | `:340` | *"Any new design document under `.specify/` … qualifies by default"* — why this doc goes through Gate A |
-| `[arch §5.3]` | `.specify/architecture.md:396` | *"Hot path is exception-free. No `throw` between parse and `fromApp`"* — §5a. (The **section** `### 5.3 Error model` opens at `:391`; v0.2 cited the heading and quoted the sentence) |
-| `[2i §5.2]` | `.specify/2i-capi.md:1240` | the C-ABI thunk construction-time/steady-state split |
-| `[2i §5.2]` | `:1248` | the construction-time whitelist — *exactly* `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`; load-bearing on Option F(b) |
-| `[2i §5.2]` | `:1249` | steady-state thunks `std::abort()` on an escaping exception |
+| citation | what it says, as used here |
+|---|---|
+| `[const §VI.5]` | this section's own requirement |
+| `[const §VIII.3]` | *"No perf change merged without a benchmark in the same PR"* — §4; satisfied by `6ad84fef` in this PR's own diff |
+| `[const §VIII.5]` | *"zero `new`/`delete` between parse and `fromApp`"* — §5a, why the config-time factory does not engage it |
+| `[const §XII.5]` | the `SecurityProfile` *"no implicit default"* rule whose `unset` sentinel `open()` rejects in `session.cpp` — the second of the two fail-closed dispositions §3 mirrors |
+| `[const §XIV.2]` | *"≤5 pure-virtual methods"* — untouched; this design adds no virtual |
+| `[const §XV.1]` | *"Heap-allocate per message or per field on the hot path"* — why `make_dictionary_snapshot` is config-time only |
+| `[const §XVII.1]` | *"Touches the public C++ API or C ABI"* — this gate's trigger |
+| `[const §XVII.1]` | *"Touches concurrency / threading / cancellation / executor model"* — the bullet Option E was wrongly said to re-trigger (§3, Option E) |
+| `[const §XVII.1]` | *"Any new design document under `.specify/` … qualifies by default"* — why this doc goes through Gate A |
+| `[arch §5.3]` | *"Hot path is exception-free. No `throw` between parse and `fromApp`"* — §5a. (The **section** `### 5.3 Error model`'s heading is not the quoted sentence — v0.2 cited the heading and quoted the sentence) |
+| `[2i §5.2]` | the C-ABI thunk construction-time/steady-state split |
+| `[2i §5.2]` | the construction-time whitelist — *exactly* `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`; load-bearing on Option F(b) |
+| `[2i §5.2]` | steady-state thunks `std::abort()` on an escaping exception |
 
 ⚠️ **Three anchors carried from v0.1 and from the reviews were off and are corrected in this
-revision** — `build_version_registry` `:213`→`:211`, `app_version_registry_` `:349-360`→`:353-361`,
-the call-count seam `:420-427`→`:420-428`. Re-verify before citing; a citation carried forward
+revision** — `build_version_registry`, `app_version_registry_`, and
+the call-count seam all needed re-pointing. Re-verify before citing; a citation carried forward
 without re-resolution is the *stale-anchor-re-pointed-to-a-plausible-twin* shape this project has
 been burned by.
 
 **Inherited design contracts** (not FIX-normative, listed so a reader can tell them apart): 083
-T049's `as_table_view_call_count()` seam (`src/dictionary/dictionary.cpp:420-428`, bumped at `:449`),
+T049's `as_table_view_call_count()` seam (the counter and its `bump_as_table_view_call_count()` call in `src/dictionary/dictionary.cpp`),
 which seam 3 measures against; 083 T052 / `FR-006a`, the group-context commit rule recorded under
 `B-215-1` (`spec/behaviors-and-limitations.md`, cited by ID) and out of scope here; and **SC-007**, the
 frozen *"no virtual edge"* design point that keeps `dictionary_driven_validator`'s `table_view`
-by value (`include/fixpp/wire/validator.hpp:112`) and is the reason `L-215-2` stays.
+by value (in `include/fixpp/wire/validator.hpp`) and is the reason `L-215-2` stays.
 
 **Design-document references:** none. No sibling `.specify/` design doc specifies
 `SessionConfig`'s dictionary fields; `2i-capi.md` is cited above for the C-ABI thunk contract only,
@@ -1685,7 +1685,7 @@ convergence pass — do not rewrite"*). This section records what changed, what 
 **The recommendation did not change.** Option C remains recommended. No finding attacked the spine:
 the two defects are real and correctly bounded, the five-option fork was honestly costed where it
 was costed at all, the §2c cost-asymmetry discriminator is the right argument, the aliasing-ctor
-containment claim holds down to `capi_internal.hpp:513`, and `invalid_session_config` is
+containment claim holds down to `capi_internal.hpp`'s `tv_` member, and `invalid_session_config` is
 provenance-consistent rather than plausibly chosen. **What v0.1 got wrong was language and rigor.**
 
 ### The three root causes
@@ -1729,7 +1729,7 @@ precedent or an enumerated census.** *Collapses findings 5 and the migration hal
 | 3 | Codex #3 | P2 | Seam 5 keeps the shape trait and gains Codex's **three boundary `static_assert`s verbatim**, with a note that the passkey leaves the first one valid. Seam 1 rebuilt: discriminating frame, same-`session_version` pair, and **both REDs stated separately** — runtime-RED today via `dictionary_view`, compile-RED under C. Sequencing and observable pinned to `test_validate_gate_inbound.cpp` rather than asserted (below) | RC#1 |
 | 4 | Codex #4 | P2 | **`shared_dictionary_view` adopted** as a mandatory single production helper at both sites; seam 4 tests the helper, not `std::shared_ptr`. §3, §5a, §5b, §5d updated to route through it | RC#1 |
 | 5 | Opus N-P2-1 | P2 | Option E's cons rewritten against `build_version_registry` / `app_version_registry_`; three of four **withdrawn** in a verdict table, the non-caching-fallback condition stated. §4's *"Against E"* narrowed to the two survivors; §7 upgrades E to a standing follow-up | RC#3 |
-| 6 | Codex #5 | P3 (from P2) | `## Normative References` added on the ci254 template, **explicitly as repo convention rather than as fixing a §VI.5 violation**, with the `architecture.md:737` reading quoted and the stale-instruction provenance recorded | — |
+| 6 | Codex #5 | P3 (from P2) | `## Normative References` added on the ci254 template, **explicitly as repo convention rather than as fixing a §VI.5 violation**, with the `architecture.md` reading quoted and the stale-instruction provenance recorded | — |
 | 7 | Codex #6 | P3 | Header rebound `b9f52145` → **`e0574ee7`** by re-verification. Three anchors were genuinely off and are corrected; the ⚠️ note in Normative References records them | — |
 | 8 | Opus N-P3-1 | P3 | §5c now carries an explicit **`B-215-2`** row stating the identity rule is **pointer, not value** equality, plus a paragraph saying the replacement is narrower than the row it replaces | RC#1 |
 | 9 | Opus N-P3-2 | P3 | Seam 5's justification restated as **evaluated-assertion vs. absence-of-evidence**; the "positive property" framing dropped as wrong on its own terms | RC#1 |
@@ -1741,7 +1741,7 @@ comparing the Codex review against this document would otherwise read an unfixed
 
 **(a) Codex #1's `[const §VIII.3]` half — rejected outright.** Codex's BLOCK rested on the claim
 that the no-benchmark position is *"a direct constitutional contradiction."* It is not.
-`[const §VIII.3]` (`.specify/constitution.md:186`) requires a benchmark **in the same PR**, and
+`[const §VIII.3]` requires a benchmark **in the same PR**, and
 `bench/dictionary/table_view_footprint_bench.cpp` **is in PR #262's own diff** — added at `6ad84fef`
 *"measure table_view copy-vs-walk cost, settle L-215-2 (C6)"*, `git diff --stat main...HEAD --
 bench/` → `+39`. The perf change #262 merges ships with its benchmark. There is no constitutional
@@ -1766,46 +1766,46 @@ forward. Three moved:
 
 | figure | v0.1 / review | v0.2 | why |
 |---|---|---|---|
-| Option B blast radius | 1 production + **29 test TUs** (30 files); the review spot-verified and confirmed 29 | 1 production + **27 test TUs** (28 files) | The confirming grep was a plain `grep -rln`, which counts **mentions**. ⚠️ **v0.3 correction:** the *explanation* given here was wrong — only **one** of the three named TUs is comment-only (`loader_disposition_test.cpp:555`); the other two are **string literals**, so the stated filter does not drop them and yields **31**, not 28. §3 now carries the correct member-call scanner with both forms' executed output. **The 1 + 27 answer and the 8-file enumeration were right all along**; only the recipe was wrong |
-| Option D's "unknown provenance" arm | **41 hand-built fixtures** | **27 test TUs** | 41 was not re-derivable and the obvious scanner over-matches badly: `table_view tv = dict.as_table_view()` (`tests/session/test_exemplar_read.cpp:67`, `tests/consumer/consumer_witness.cpp:75`) and `= mv->membership_copy()` (`tests/wire/message_view_membership_copy_test.cpp:138`) are **not** hand-built and would carry a real token under D. The correct basis is the builder-surface census — views populated through the mutators, which have no `Dictionary` to token from |
+| Option B blast radius | 1 production + **29 test TUs** (30 files); the review spot-verified and confirmed 29 | 1 production + **27 test TUs** (28 files) | The confirming grep was a plain `grep -rln`, which counts **mentions**. ⚠️ **v0.3 correction:** the *explanation* given here was wrong — only **one** of the three named TUs is comment-only (in `loader_disposition_test.cpp`); the other two are **string literals**, so the stated filter does not drop them and yields **31**, not 28. §3 now carries the correct member-call scanner with both forms' executed output. **The 1 + 27 answer and the 8-file enumeration were right all along**; only the recipe was wrong |
+| Option D's "unknown provenance" arm | **41 hand-built fixtures** | **27 test TUs** | 41 was not re-derivable and the obvious scanner over-matches badly: `table_view tv = dict.as_table_view()` (in `tests/session/test_exemplar_read.cpp`, `tests/consumer/consumer_witness.cpp`) and `= mv->membership_copy()` (in `tests/wire/message_view_membership_copy_test.cpp`) are **not** hand-built and would carry a real token under D. The correct basis is the builder-surface census — views populated through the mutators, which have no `Dictionary` to token from |
 | §2a `dictionary_view` census | 7 hits: *"the declaration, **two** doc comments, the two read sites, and one assignment"* | 7 hits: 1 declaration, **3** comment lines, 2 read lines, 1 assignment | Miscount of the breakdown only; the 7 total and the one-writer conclusion both hold |
 
 **Two further corrections made during the rewrite, neither of which either review raised:**
 
-- **The `validate_inbound_messages` guard is at `session.cpp:1250`**, not `:1255`. `:1255-1258` is
-  the validator construction *inside* that guard's body — a plausible twin, and re-pointing an
-  anchor to one is worse than leaving it stale. Option F(c) cites `:1250`.
+- **The `validate_inbound_messages` guard and the validator construction inside its body are two
+  distinct sites** — a plausible twin, and re-pointing an
+  anchor from one to the other is worse than leaving it stale. Option F(c) cites the guard itself, not the constructor call it wraps.
 - **Seam 1's observation mechanism was specified rather than assumed.** The first draft of this
   rewrite asserted an "acceptance outcome" without naming what reads it — the same defect class as
   the finding it was fixing. `sess.state()` stays `Active` on a rejected application message, so it
   is not the observable; the observable is a session-level `Reject (35=3)` emitted at
-  `session.cpp:2100-2107` — **which is the wrong call site, and round 3 caught it; v0.4 re-points it
-  to `:2743-2749` (emitting at `:2746`). See the round-3 section. Left uncorrected here because this
+  the `case fsm_state::NotConnected:` arm — **which is the wrong call site, and round 3 caught it; v0.4 re-points it
+  to the `case fsm_state::LogonReceived: case fsm_state::Active:` arm. See the round-3 section. Left uncorrected here because this
   paragraph records what v0.3 did** — and read through the fixture helpers in
-  `tests/session/test_validate_gate_inbound.cpp` (`:213`, `:237`), whose W3 cell (`:325-344`) already
+  `tests/session/test_validate_gate_inbound.cpp`, whose W3 cell already
   does exactly this over the same dictionary. Seam 1 also now states that the discriminating `35=D`
   must follow a completed Logon — it cannot be the first frame.
 
 Unchanged on re-derivation: **230 sites / 126 files** for Option F, **15** `table_view` mutators at
-the exact lines §2a tabulates, the `public:` `:250` → `private:` `:732` span, `noexcept = default`
-move ctor at `:260`, zero `mutable` in either header, **5** `catch (...)` barriers in
+the exact lines §2a tabulates, the `public:` → `private:` span, `noexcept = default`
+move ctor, zero `mutable` in either header, **5** `catch (...)` barriers in
 `src/capi/config.cpp`, and the §1 benchmark table.
 
 ### One correction to the adversarial review's own citation
 
 The review grounded Option F's C-ABI objection on *"a C++ exception escaping the C ABI is a
 `[const §X.2]` violation."* **`[const §X.2]` says no such thing** — it is *"No C++ symbol leakage…
-CI verifies via `nm` (Linux) and `dumpbin` (Windows)"* (`.specify/constitution.md:221`), which is
+CI verifies via `nm` (Linux) and `dumpbin` (Windows)"*, which is
 about symbol visibility,
-not exceptions. v0.2 does not propagate that citation. The correct grounding is `[2i §5.2]`
-(`.specify/2i-capi.md:1240-1251`), and it makes the point **sharper**:
+not exceptions. v0.2 does not propagate that citation. The correct grounding is `[2i §5.2]`,
+and it makes the point **sharper**:
 `fixpp_session_config_set_dictionary` is not on the three-symbol construction-time whitelist, so it
 sits on the steady-state side where an escaping exception **aborts** rather than translating.
 
 ~~Against that, an honest counter-weight the review did not reach and Option F(b) now states: **the
 tree's actual practice is broader than that whitelist.** Three of the five `catch (...)` barriers in
-`src/capi/config.cpp` guard non-whitelisted setters — `..._set_comp_ids` (`:92`/`:103`),
-`..._set_begin_string` (`:109`/`:119`), `..._set_tcp_endpoint` (`:248`/`:266`). So F does not
+`src/capi/config.cpp` guard non-whitelisted setters — `..._set_comp_ids`,
+`..._set_begin_string`, `..._set_tcp_endpoint`. So F does not
 violate a clean rule; it forces an existing tension between `[2i §5.2]` and the shipped code to be
 resolved.~~
 
@@ -1904,12 +1904,12 @@ pasting its output.**
 | R2-1 | Codex #1 | P2 | §6 seam 5 adds **A5** `!std::is_default_constructible_v<detail::snapshot_key>` (compiles; goes red exactly when the key opens). Prose corrected at all three sites — §3, §5a, §6 — from *"not nameable"* to **"nameable and copyable, but not constructible from nothing outside the friend list."** The key is nameable as `fixpp::dict::detail::snapshot_key` from a foreign namespace **and** copy-constructible there (both measured) — v0.2 was wrong on two counts, not one | R2-RC#1 |
 | R2-2 | Codex #2 | P2 | §6 seam 4 gains `EXPECT_EQ(alias.get(), &snap->view())` and the two `owner_before` assertions, **explicitly ordered before `snap` is dropped** (v0.2's script dropped first, which makes them unwritable). Measured discrimination pasted in: real helper `same_addr=1, shared_owner=1`; impostor `0, 0` | R2-RC#1 |
 | R2-3 | Codex #3 | P2 | §3's factory promoted from comment to compilable code in the sequenced form `auto tv = …; make_shared<…>(key{}, std::move(dict), std::move(tv))`. §4's refcount claim corrected from *"one pair and it is the only one"* to a four-row measured table. *"Unsequenced"* → **"indeterminately sequenced"** (C++17), with the conclusion unchanged and the hazard now removed **by sequencing** rather than by paying for a copy. **Move count NOT retracted — see the split verdict above** | R2-RC#2 |
-| R2-4 | Codex #4 + Opus escalation | P2 | §3 Option F(b)'s census restated **semantically** — four translate, one aborts — and **widened from one file to the five `std::abort()` sites across `src/capi/`**. The TCP setter's abort and its FR-011 comment (`config.cpp:256-258`) quoted. **v0.2's conclusion is INVERTED, against this document's own earlier interest** — see *"Corrections that weaken our own argument"* below. The stale figure in v0.2's own log is struck through in place | R2-RC#3 |
+| R2-4 | Codex #4 + Opus escalation | P2 | §3 Option F(b)'s census restated **semantically** — four translate, one aborts — and **widened from one file to the five `std::abort()` sites across `src/capi/`**. The TCP setter's abort and its FR-011 comment (in `config.cpp`) quoted. **v0.2's conclusion is INVERTED, against this document's own earlier interest** — see *"Corrections that weaken our own argument"* below. The stale figure in v0.2's own log is struck through in place | R2-RC#3 |
 | R2-5 | **Opus N-P2-1** | P2 | The *"so"* at all three sites deleted. v0.3 states the **correct** reason the two-argument form is unconstructible — **no two-argument constructor was ever declared**, which is independent of the passkey and of nameability, and would hold with no passkey at all. Explicitly recorded that **Codex's remedy does not repair this**: *"nameable but not constructible, so the 2-arg form has no ctor"* is still a non-sequitur. A2 is **kept** and re-justified as pinning a real, different property | R2-RC#1 |
 | R2-6 | Codex #5 | P2→P3 | §3 Option B's scanner **swapped** for the member-call `.cpp` form, with **both** forms' executed output shown. *"Comments"* → **"comments and string literals"**, with a three-row table naming which of the three residual TUs is which. The doc's filter drops **5**, not 8. Conclusion and 8-file enumeration untouched — see *"Corrections that weaken our own argument"* | R2-RC#3 |
 | R2-7 | **Opus N-P3-1** | P3 | New **§6 seam 7**: G1 (sole minter of `snapshot_key`) and G2 (sole former of the alias), each with an allowlist, **each proven non-zero on a deliberately violated tree and silent on `e0574ee7`**. Cross-referenced from §3's precise C1 claim and §5b's ownership argument, both of which previously rested on unpinned prose | R2-RC#1 |
 | R2-8 | **Opus N-P3-2** | P3 | Option A's *"only option row for which unchanged is a measurement"* **withdrawn** at both sites. Restated honestly: **A and B both** carry §1's measurement unamended; C, D, E and F state benefit by analysis. Option B's row updated to say so from its own side, so the two cannot drift apart again | R2-RC#3 |
-| R2-9 | **Opus N-P3-3** | P3 | `[arch §5.3]` re-pointed **`:391` → `:396`** in the table and in §5a. The blanket claim *"each opened and verified"* **narrowed rather than re-asserted**, because the v0.3 sweep found a **second** falsification the review did not — see below | R2-RC#3 |
+| R2-9 | **Opus N-P3-3** | P3 | `[arch §5.3]` re-pointed **from its section heading to the quoted sentence** in the table and in §5a. The blanket claim *"each opened and verified"* **narrowed rather than re-asserted**, because the v0.3 sweep found a **second** falsification the review did not — see below | R2-RC#3 |
 | R2-10 | **Opus N-P3-4** | P3 | §6 seam 1 gains an explicit **sequencing constraint**: the runtime-RED is written against the legacy `dictionary_view` field, which Option C **deletes**, so it must be executed and its output recorded in `/speckit-verify` **before** `SessionConfig` is retyped. Cross-referenced from the closing paragraph of §6 | R2-RC#3 |
 
 ### Corrections that weaken an argument this document previously made in its own favour
@@ -1942,7 +1942,7 @@ were correct **despite** the published instrument, not because of it, and that i
 
 **And a third, smaller, in the same spirit:** the v0.3 anchor sweep found that v0.2's blanket *"each
 opened and verified"* was falsified by **two** of its own rows, not the one the review caught — the
-`[arch §5.3]` line offset, and a quotation of `architecture.md:737` that ended in a full stop where
+`[arch §5.3]` line offset, and a quotation of `architecture.md` that ended in a full stop where
 the source sentence continues. The claim is therefore **narrowed** rather than re-pointed and
 re-asserted; re-asserting a blanket that has now failed twice would be the same error a third time.
 
@@ -1951,11 +1951,11 @@ re-asserted; re-asserting a blanket that has now failed twice would be the same 
 Recorded for the same reason v0.2 recorded one: a reader checking this document against the review
 would otherwise flag the correct line as the error.
 
-The review quotes the FR-011 steady-state comment as `src/capi/config.cpp:260-262`. It is at
-**`:256-258`**. `:260-262` is the *"Mirror the L-050-5 seam (capi_loopback_support.hpp:67-68)"*
-comment inside the same `try` block — a four-line offset onto a **different comment**, which is the
+The review quotes the FR-011 steady-state comment, but the line it names actually holds a
+**different comment** — the *"Mirror the L-050-5 seam (capi_loopback_support.hpp:67-68)"* <!-- citation-ok: the sentence QUOTES a review finding verbatim; the number is the quoted text -->
+comment inside the same `try` block in `src/capi/config.cpp` — a few lines off onto that comment, which is the
 recorded *plausible-twin* shape rather than a simple stale line. The quoted text and every word of
-the finding built on it are correct; only the anchor moved. §3 Option F(b) cites `:256-258`.
+the finding built on it are correct; only the anchor moved. §3 Option F(b) cites the FR-011 comment correctly.
 
 ### Where v0.3 records a disagreement rather than a silent drop
 
@@ -1990,19 +1990,19 @@ scanner is printed beside the number it produces. Working tree `e0574ee7`; probe
 | Option B scanner, doc recipe | 28 | **31** | executed |
 | Option B scanner, member-call `.cpp` | 28 | **28 = 1 + 27** | executed; `comm -23` of the two sets returns exactly the 8 enumerated files |
 | `catch (...)` in `src/capi/config.cpp` | 5 | **5** — unchanged, but **4 translate / 1 aborts** | read all five handlers |
-| `std::abort()` in `src/capi/` | 1 (`config.cpp:271`, implied) | **5** — `engine.cpp:93`, `engine.cpp:126`, `session.cpp:179`, `session.cpp:317`, `config.cpp:271` | `grep -rn` ABI-wide |
+| `std::abort()` in `src/capi/` | 1 (`config.cpp`'s TCP setter, implied) | **5** — `CapiApplication::fromApp` and `CapiApplication::toApp` in `engine.cpp`, `fixpp_session_acceptor_bound_endpoint` and `fixpp_session_send` in `session.cpp`, and `fixpp_session_config_set_tcp_endpoint` in `config.cpp` | `grep -rn` ABI-wide |
 | G1 / G2 census gates | — | **5 cases executed**: conforming `exit 0`; G1 violation FAIL; G2 violation FAIL; G1 DEAD; G2 DEAD | the seam-7 script run verbatim against five synthetic trees |
-| `[arch §5.3]` quote | `architecture.md:391` | **`:396`** (`:391` is the heading) | opened |
+| `[arch §5.3]` quote | its section heading | **the quoted sentence, further down the same section** | opened |
 
 **Unchanged on re-derivation for v0.3, and re-opened rather than carried:** **230 sites / 126 files**
-for Option F over `tests/ bench/` plus **1** production site (`src/capi/config.cpp:208`) = 231/127;
-**15** `table_view` mutators at the exact lines §2a tabulates; the `public: :250` → `private: :732`
-span; `noexcept = default` move ctor at `:260`; **12** builder calls in `src/dictionary/dictionary.cpp`;
+for Option F over `tests/ bench/` plus **1** production site (the `cfg->cfg.dictionary = h->dict;` assignment in `src/capi/config.cpp`) = 231/127;
+**15** `table_view` mutators at the exact lines §2a tabulates; the `public:` → `private:`
+span; `noexcept = default` move ctor; **12** builder calls in `src/dictionary/dictionary.cpp`;
 the 7-hit `dictionary_view` census with its 1/3/2/1 breakdown; `[2i §5.2]`'s three-symbol whitelist
-verbatim at `2i-capi.md:1248`; the seam-1 fixture anchors (`validation_test_dictionary.hpp:50`,
-`:72-74`, `:75`, `:125`, `:131`) and observation helpers (`test_validate_gate_inbound.cpp:184`,
-`:213`, `:237`, `:325`, `:336`); `session.cpp:979-981`, `:1001-1004`, `:1012-1014`, `:1250`,
-`:2100-2107`; `bench/dictionary/table_view_footprint_bench.cpp` at `+39` in `git diff --stat
+verbatim in `2i-capi.md`; the seam-1 fixture anchors (in `validation_test_dictionary.hpp`) and observation
+helpers (in `test_validate_gate_inbound.cpp`); the `open()` null-dictionary check, the `inbound_tv_`
+build, the `SecurityProfile::kind::unset` check, the `validate_inbound_messages` guard, and seam 1's
+arm; `bench/dictionary/table_view_footprint_bench.cpp` at `+39` in `git diff --stat
 main...HEAD -- bench/`; and every remaining row of `## Normative References`.
 
 ### The two instruments that failed, and why they are recorded
@@ -2066,7 +2066,7 @@ touches §1–§5's argument."* **v0.4 is those five edits and nothing else.** N
 no recommendation moved, no section that no finding touched was grown. Every figure the review
 re-derived — the factory's 2 moves / 1 alloc / ctor-entry `use_count` 2, seam 4's `1,1,1` vs
 `0,0,1`, Option B's `1 + 27`, the five `std::abort()` sites and their four-translate / one-abort
-split, `architecture.md:396`, the §2a 7-hit census — reproduced exactly, and **no blanket claim was
+split, the `[arch §5.3]` quote, the §2a 7-hit census — reproduced exactly, and **no blanket claim was
 falsified this round**, the first revision of which that is true.
 
 ### The one root cause (round 3), and why it is a narrowing rather than a recurrence
@@ -2094,7 +2094,7 @@ requires, not only the ones it forbids.**
 | 1 | Codex #1 (P2 → **P3**) | P3 | **G1** now asserts **exactly one `friend` declaration** in the passkey's header, that the one entry names `make_dictionary_snapshot`, and **exactly one production key construction**, in the factory TU. **G2** now asserts **exactly one aliasing-ctor expression** tree-wide. New RED rows **F1**, **F2**, **G**, all three `exit 0` under v0.3 | R3-RC#1 |
 | 2 | Opus escalation of #1 (case **H**) | P3 | **G2 gains a REQUIRED-call census**: `src/session/session.cpp` and `src/capi/session.cpp` must each call `shared_dictionary_view` at least once. New RED row **H**, `exit 0` under v0.3 | R3-RC#1 |
 | 3 | Codex #2 | P3 | The `⚠️ What C1's closure rests on` table is **split**: three C1 rows (A1–A4, A5, seam 7 G1) and a **separate C4 table** whose single row is seam 1, labelled *a runtime check, not a construction closure*. The duplicated dangling clause that followed the table (*"Never on a compilation that was expected to fail. C1's closure rests on them plus seam 1 — never on a compilation that was expected to fail."*) is **deleted** | — |
-| 4 | Opus N-P3-1 | P3 | Seam 1's observable **re-pointed** from `session.cpp:2100-2107` to **`:2743-2749`, emitting at `:2746`**, and the arm is now named: `case fsm_state::LogonReceived: case fsm_state::Active:` (`:2727-2728`), inside `Session::on_inbound_frame` (`:2069`), reached via the `switch` at `:2087`. The twin is named too — `:2104` is the same 041 T014 gate on `case fsm_state::NotConnected:` (`:2088`), on the **first** frame, which this seam's second-message `35=D` cannot reach | — |
+| 4 | Opus N-P3-1 | P3 | Seam 1's observable **re-pointed** from the `case fsm_state::NotConnected:` arm to the `case fsm_state::LogonReceived: case fsm_state::Active:` arm, inside `Session::on_inbound_frame`, reached via its FSM-state `switch`. The twin is named too — the same 041 T014 gate on `case fsm_state::NotConnected:`, on the **first** frame, which this seam's second-message `35=D` cannot reach | — |
 | 5 | Opus N-P3-2 | P3 | **G1's liveness is now per allowlisted file** (`>= 1` each) instead of `[ "$g1_all_n" -ge 3 ]` over the union — which the header alone satisfied. New RED row **M**. This also makes G1 do what its own comment always claimed | R3-RC#1 |
 | 6 | Opus N-P3-3 | P3 | **Not "fixed" — bounded and recorded.** G2's regex covers the **listed spellings only**; the four evasions are written into §6 seam 7 with row **P** measuring them against the *repaired* gate. The **scan-scope asymmetry is fixed** (G2 now scans `tools/ tests/` like G1) and all three scopes are justified in one clause each | R3-RC#1 |
 
@@ -2120,19 +2120,19 @@ content** — and both halves matter, so both are recorded rather than collapsed
 
 ### The plausible-twin anchor class, on its third occurrence
 
-Round 2 fixed `:1255`→`:1250`. v0.3's log fixed the round-2 review's `:260-262`→`:256-258`. Round 3
-found seam 1's observable on `session.cpp:2100-2107`. In all three the cited line existed, compiled,
+Round 2 fixed the wrong pairing on the `validate_inbound_messages` guard. v0.3's log fixed the round-2 review's wrong pairing on the FR-011 comment in `config.cpp`. Round 3
+found seam 1's observable on the `case fsm_state::NotConnected:` arm. In all three the cited line existed, compiled,
 and read correctly — a *same helper, same shape, wrong context* substitution, which is strictly worse
 than a stale anchor because a stale anchor usually fails to resolve.
 
 **v0.4's response is deliberately not a fourth rule.** Rules have not stopped it; three revisions of
 this document already carry anchor-freshness discipline and it recurred anyway. The response is a
 practice, recorded in the header: **every line this revision cites was re-opened in the working tree
-rather than copied from the review that reported it.** That is how `:2743-2749` / `:2746` /
-`:2727-2728` / `:2088` / `:2069` and the five `emit_session_reject_` call sites were obtained here,
+rather than copied from the review that reported it.** That is how the correct `case` labels and
+the five `emit_session_reject_` call sites were obtained here,
 and it is how the `case` labels — the thing the twin substitution turns on — entered the citation at
 all. The one habit worth generalising is narrow: **when an anchor names a `switch`/state-machine arm,
-cite the `case` label with the line.**
+cite the `case` label instead of the line.**
 
 ### Gate output measured for v0.4, and what it changed
 

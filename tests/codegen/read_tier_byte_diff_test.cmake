@@ -30,7 +30,7 @@
 # and committing that as a second copy of goldened content would bloat the
 # repo for no additional discriminating power over a hash. This mirrors the
 # existing file(SHA256 ...) content-fingerprint mechanism in
-# cmake/Codegen.cmake:105. The 4 Messages.hpp hashes below are corroborated
+# cmake/Codegen.cmake's `_codegen_source_fingerprint` loop. The 4 Messages.hpp hashes below are corroborated
 # (verified byte-identical) against the already-committed
 # specs/003-dictionary-codegen/contracts/golden/<ns>_Messages.golden.hpp
 # files gated by codegen_determinism_test's GeneratedMatchesGolden -- so this

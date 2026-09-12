@@ -159,7 +159,7 @@ run_case() {
   expected_ref="$(compute_expected_ref "$profile" "$toolset_mode")" \
     || fail "$label: expected conan cache tag must not be empty"
 
-  # GITHUB_OUTPUT MUST be exported: emit() at restore-conan-cache.sh:22 is the
+  # GITHUB_OUTPUT MUST be exported: restore-conan-cache.sh's `emit()` is the
   # last statement on every path and returns 1 when it is unset, which would
   # exit every case 1 for a reason unrelated to what is being tested.
   (
@@ -210,7 +210,7 @@ run_case() {
   # `  | ` puts a non-whitespace character first AFTER the runner's
   # leading-whitespace trim, so no amount of leading-space trimming makes the
   # line start with `::`. Same shape as
-  # restore-conan-cache.sh:69, which prefixes retained oras stderr for exactly
+  # restore-conan-cache.sh's oras-stderr prefix, which prefixes retained oras stderr for exactly
   # this reason. Indenting harder would not have worked.
   replay="$(printf '%s\n' "$OUT" | sed 's/^/  | /')"
   # ASSERTED, not assumed. A prefix that stops neutralising the token (someone
@@ -280,7 +280,7 @@ assert_pull_failure_case() {
   [ "$STATUS" -eq 0 ] || fail "$case_id: expected exit 0, got $STATUS"
   [ "$HIT" = "false" ] || fail "$case_id: expected hit=false, got '${HIT:-<unset>}'"
   echo "$OUT" | grep -q "^::warning::conan-cache MISS" \
-    || fail "$case_id: expected the ::warning:: MISS annotation (anchored — restore-conan-cache.sh:65's plain log line also contains the unanchored substring)"
+    || fail "$case_id: expected the ::warning:: MISS annotation (anchored — restore-conan-cache.sh's plain MISS-fallback log line also contains the unanchored substring)"
   echo "$OUT" | grep -q "^conan-cache: oras: " \
     || fail "$case_id: expected the retained ORAS stderr to be echoed (prefixed 'conan-cache: oras: ')"
   echo "$OUT" | grep -q "falls back to normal Conan resolution" \

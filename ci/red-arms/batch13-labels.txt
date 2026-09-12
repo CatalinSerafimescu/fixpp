@@ -65,8 +65,8 @@
 # drain, ADD_FAILURE.
 #
 # ⚠️ THAT IS A STATEMENT ABOUT THIS BATCH, NOT ABOUT THE TREE. An earlier revision said
-# "the 2x budget shape is gone", which is false: `test_engine_clock_gate.cpp:146` still
-# calls `pump_until_ready(ioc, fut, 5s)` with no site argument and so still spells its
+# "the 2x budget shape is gone", which is false: `stop_engine` in
+# `test_engine_clock_gate.cpp` still calls `pump_until_ready(ioc, fut, 5s)` with no site argument and so still spells its
 # label twice. The script CANNOT refute that sentence either -- its occurrence control
 # iterates `set(now) - set(head)`, so a pre-existing 2x label is outside its population
 # and its clean line is not evidence about the tree. Check the tree, not the script:

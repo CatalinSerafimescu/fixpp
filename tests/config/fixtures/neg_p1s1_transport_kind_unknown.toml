@@ -1,7 +1,7 @@
 # neg_p1s1_transport_kind_unknown.toml
 # Two sessions: session[0] uses plaintext (engine default), session[1] has
 # transport.kind = "websocket" (unknown value).
-# Hits the "unknown enum" arm (lines 832-839) in the plaintext-default
+# Hits the "unknown enum" arm (validate_per_session_transport_kinds) in the plaintext-default
 # per-session validation loop.
 # Expected: unknown_enum at "session[1].transport.kind"
 

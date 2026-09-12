@@ -308,7 +308,7 @@ TEST_P(ValidatorPerVersion, MalformedGroupCountRejected) {
 // (GroupEntryRead.EmptyGroupSizeZeroNoDeref; capi
 // MessageReadGroup.NestedGroupEmptyGroupCountLastField) — not re-witnessed here
 // (do_validate parses dict-FREE, whose group-boundary fallback intentionally
-// differs; see offset_table.cpp:440-443).
+// differs; see consume_group_extent's dict-free early return).
 TEST_P(ValidatorPerVersion, ZeroCountGroupAccepted) {
     auto const& p = GetParam();
     SCOPED_TRACE(p.label);

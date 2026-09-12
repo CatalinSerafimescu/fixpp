@@ -1,6 +1,6 @@
 # neg_clock_kind_empty.toml
 # clock.kind is an empty string — triggers empty_required at "clock.kind"
-# (lines 79-86 selector_resolver.cpp).
+# (resolve_engine_clock's empty-kind arm, selector_resolver.cpp).
 
 [clock]
 kind = ""

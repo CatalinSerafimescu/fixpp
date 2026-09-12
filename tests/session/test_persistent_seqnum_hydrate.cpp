@@ -1575,7 +1575,7 @@ TEST(PersistentSeqnumHydrate, PostGapFill_LowerBound_RecoveryPrecondition) {
     // L-029-1: knob-OFF + too-high peer Logon → Disconnected (fatal at Logon gate).
     EXPECT_EQ(fix2->session->state(), fixpp::session::fsm_state::Disconnected)
         << "W5 (L-029-1): knob-OFF + too-high peer Logon after GapFill restart must "
-           "Disconnect (fatal at Logon gate, :1615). Do NOT call this 'recovers via "
+           "Disconnect (fatal at session.cpp's acceptor Logon check_inbound gate). Do NOT call this 'recovers via "
            "ResendRequest' — the Logon gate has no ResendRequest arm.";
 }
 
@@ -1639,7 +1639,7 @@ TEST(PersistentSeqnumHydrate, Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFa
     // Pre-T011 (no inbound seed): next_inbound=1 → check_inbound(1) in-seq → Active (trivial).
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
         << "W9b (RC-1): acceptor with reset-Logon(141=Y) + store{in=37} must NOT fatal as "
-           "too-low at :1615. Inbound seed MUST be withheld so check_inbound(1) is in-seq. "
+           "too-low at session.cpp's acceptor Logon check_inbound gate. Inbound seed MUST be withheld so check_inbound(1) is in-seq. "
            "If T011 applies inbound seed WITHOUT withheld guard → too-low fatal → Disconnected.";
 
     // The outbound must have been hydrated (34=42 in reply Logon), then RESET to 1 by 141=Y.
@@ -2370,7 +2370,7 @@ TEST(PersistentSeqnumHydrate, INV_H1_Acceptor_789BehindSide_NoOverPersist) {
     // Feed peer Logon at seq=5 (too-high vs manager=2) with NO 789 field.
     // The behind-side tolerance path: check_inbound(5) fails (too-high), knob is on →
     // tolerate, manager stays at 2. Fall through toward Active.
-    // NO 789 field: the honor block at line ~1980 is skipped (peer_789_present=false).
+    // NO 789 field: the acceptor's honor_peer_next_expected_ call is skipped (peer_789_present=false).
     // Pre-fix: unconditional persist fires → durable_inbound 1→3 (next_inbound_ seeded at 2,
     //   write goes 2→3), manager=2. INV-H1 violated.
     // Post-fix: logon_inbound_advanced=false → persist skipped. durable_inbound stays 1. ✓

@@ -3,10 +3,10 @@
 // C4, family class A-019 list-handling: NoOrders group).
 // OFFLINE TOOLING, not checked in to the main build (see gen/README.md).
 //
-// Required='Y' fields (dictionaries/FIX44.xml:628-639, FIX44::ListStatus
+// Required='Y' fields (dictionaries/FIX44.xml's ListStatus message declaration, FIX44::ListStatus
 // ctor): ListID(66), ListStatusType(429), NoRpts(82), ListOrderStatus(431),
 // RptSeq(83), TotNoOrders(68). OrdListStatGrp/NoOrders(73) is a REQUIRED
-// group (dictionaries/FIX44.xml:3138 group required='Y') — 1 entry,
+// group (dictionaries/FIX44.xml's OrdListStatGrp NoOrders group, required='Y') — 1 entry,
 // ClOrdID(11)+CumQty(14)+OrdStatus(39)+LeavesQty(151)+CxlQty(84), all
 // required='Y' within the group.
 #include <quickfix/fix44/ListStatus.h>

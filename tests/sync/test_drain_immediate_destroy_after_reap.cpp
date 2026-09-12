@@ -19,7 +19,7 @@
 //   `in_flight_resumers_` never decrements → the terminal condition is never
 //   satisfied → the test hangs → ASSERT_FALSE(timed_out) RED (5s timeout).
 //
-//   Verified RED: commenting out the yield in async_mutex.hpp:1178 and
+//   Verified RED: commenting out the yield in `cancel_and_drain()`'s quiescence loop and
 //   re-running this test under ASan causes the test to hang indefinitely
 //   (killed by the 5s deadline → FAIL). The yield is load-bearing.
 //
