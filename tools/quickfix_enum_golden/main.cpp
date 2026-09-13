@@ -39,7 +39,7 @@
 //       fixpp actually has, per FR-019's instruction to pin every non-enum
 //       flag to "match fixpp's own validation choices".
 //   m_checkFieldsOutOfOrder  = false
-//       fixpp's Step-1 walk (dictionary_driven_validator's field loop) is a linear scan with no
+//       fixpp's Step-1 walk (validator.hpp:139-158) is a linear scan with no
 //       global field-ordering enforcement as part of enum-domain checking.
 //       Leaving this QuickFIX check on would reject frames for a reason
 //       unrelated to enum domain and conflate two different checks — exactly
@@ -48,7 +48,7 @@
 //       No corpus row uses a tag >= FIELD::UserMin; pinned explicitly and
 //       conservatively. Inert for this corpus either way.
 //   AllowUnknownMsgFields    = false
-//       fixpp's `field_valid_for` (its Step 1 valid_tags.contains hoist) rejects a tag not
+//       fixpp's `field_valid_for` (validator.hpp:143) rejects a tag not
 //       valid for the message type via its own check (reason 2) rather than
 //       silently ignoring it — so QuickFIX must not silently allow unknown
 //       message fields either, or the two engines would diverge on a
@@ -509,7 +509,7 @@ int main() {
     // BOOLEAN, so QuickFIX's checkValidFormat (BoolConvertor,
     // DataDictionary.cpp:171) rejects the malformed value BEFORE checkValue
     // (the enum arm, :172) is ever reached -- MEASURED reject/6. fixpp's own
-    // Boolean type-arm imposes NO constraint (validator.hpp's ft::Boolean case), so
+    // Boolean type-arm imposes NO constraint (validator.hpp:419-425), so
     // fixpp's own enum arm (enum_valid) DOES fire and rejects/5. Both
     // engines reject; only the reason differs, and the DIVERGING MECHANISM
     // is the point: QuickFIX never reaches its enum arm for this field at
