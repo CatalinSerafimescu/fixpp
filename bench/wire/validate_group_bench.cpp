@@ -202,7 +202,7 @@ void run_validate_bench(benchmark::State& state, std::string const& body, char c
         std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                        std::pmr::null_memory_resource()};
         std::uint16_t ref_tag = 0;
-        auto const r = validator.validate(mv, &scratch_mr, &ref_tag);
+        auto r = validator.validate(mv, &scratch_mr, &ref_tag);
         benchmark::DoNotOptimize(r);
     }
     state.SetItemsProcessed(state.iterations());
