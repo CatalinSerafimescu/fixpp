@@ -13,24 +13,26 @@
 // in-process witness).
 //
 // MSVC has no weak-symbol mechanism and there is no mallocnesia port for Windows,
-// so on Windows they are inline no-op definitions: the markers compile and link,
-// and the portable operator-new counter + sanitizer detection (__SANITIZE_ADDRESS__
-// covers MSVC ASan) carry the zero-alloc gate on that platform.
+// so on Windows they are null function pointers: every call site is null-checked,
+// so the markers no-op, and the portable operator-new counter + sanitizer detection
+// (__SANITIZE_ADDRESS__ covers MSVC ASan) carry the zero-alloc gate on that platform.
+// They used to be inline no-op functions, which made the null check test a function
+// name that is never null -- MSVC warning C4551, an error under FIXPP_WERROR (#417).
 //
 // All four symbols are declared here regardless of which a given test uses; an
-// unreferenced weak decl (POSIX) or unused inline (Windows) is harmless.
+// unreferenced weak decl (POSIX) or unused pointer (Windows) is harmless.
 #pragma once
 
-extern "C" {
 #ifdef _WIN32
-inline void alloc_guard_start() {}
-inline void alloc_guard_end() {}
-inline long alloc_guard_count() { return 0; }
-inline long alloc_guard_global_count() { return 0; }
+inline constexpr void (*alloc_guard_start)() = nullptr;
+inline constexpr void (*alloc_guard_end)() = nullptr;
+inline constexpr long (*alloc_guard_count)() = nullptr;
+inline constexpr long (*alloc_guard_global_count)() = nullptr;
 #else
+extern "C" {
 __attribute__((weak)) void alloc_guard_start();
 __attribute__((weak)) void alloc_guard_end();
 __attribute__((weak)) long alloc_guard_count();
 __attribute__((weak)) long alloc_guard_global_count();
-#endif
 }
+#endif

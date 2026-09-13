@@ -37,6 +37,10 @@
     _Pragma("clang diagnostic push")    \
         _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
 #define FIXPP_SUPPRESS_DEPRECATED_END _Pragma("clang diagnostic pop")
+#elif defined(_MSC_VER)
+// MSVC has no GCC/clang diagnostic pragmas (C4068 under /WX); its deprecation warning is C4996.
+#define FIXPP_SUPPRESS_DEPRECATED_BEGIN __pragma(warning(push)) __pragma(warning(disable : 4996))
+#define FIXPP_SUPPRESS_DEPRECATED_END __pragma(warning(pop))
 #else
 #define FIXPP_SUPPRESS_DEPRECATED_BEGIN \
     _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
