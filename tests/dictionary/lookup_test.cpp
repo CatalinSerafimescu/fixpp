@@ -578,7 +578,7 @@ INSTANTIATE_TEST_SUITE_P(
             .parties_expected = std::optional<bool>{false},  // pre-4.3
             .has_instrument =
                 false,  // FIX 4.2 declares Instrument's fields inline,
-                        // not as a <component> entry — see dictionaries/FIX42.xml:1602
+                        // not as a <component> entry — see dictionaries/FIX42.xml's empty `<components />`
         },
         // ---- FIX 4.4 ----
         VersionParam{
@@ -611,7 +611,7 @@ INSTANTIATE_TEST_SUITE_P(
             .required_group_no_tags = {627u},  // NoHops
             .has_clordid = false,              // no application fields in FIXT11
             // R5 fix: FIXT11 only declares HopGrp and MsgTypeGrp components;
-            // no Parties (verified against dictionaries/FIXT11.xml:104–113).
+            // no Parties (verified against dictionaries/FIXT11.xml's `<components>` block: only HopGrp/MsgTypeGrp).
             .parties_expected = std::optional<bool>{false},
             .has_instrument = false,  // session-only; no Instrument
         },

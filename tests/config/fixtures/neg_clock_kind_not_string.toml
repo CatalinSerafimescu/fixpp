@@ -1,6 +1,6 @@
 # neg_clock_kind_not_string.toml
 # clock.kind is an integer (not a string) — triggers malformed_value at "clock.kind"
-# (lines 71-76 selector_resolver.cpp).
+# (resolve_engine_clock's not-a-string arm, selector_resolver.cpp).
 
 [clock]
 kind = 42

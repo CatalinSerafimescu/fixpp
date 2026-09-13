@@ -19,7 +19,7 @@
 // allocates coroutine frames + asio run-loop handlers on the global heap —
 // gating THAT window at max-allocs=0 would be false-red, independent of
 // anything 066 changed. `Session::parse_and_dispatch_` itself
-// (session.cpp:298-330) is a plain `noexcept` function, NOT a coroutine — it
+// (src/session/session.cpp) is a plain `noexcept` function, NOT a coroutine — it
 // is called synchronously from inside the session's coroutines. This file
 // mirrors `parse_and_dispatch_`'s EXACT construction (stack array +
 // `monotonic_buffer_resource` with `fixpp::detail::arena_upstream()` as
@@ -62,7 +62,7 @@
 // GREEN again.
 //
 // Anchors: tasks.md T013; spec.md FR-004/SC-004; contracts/inbound-parse.md
-// C5; src/session/session.cpp:271-330 (parse_and_dispatch_, the construction
+// C5; src/session/session.cpp (parse_and_dispatch_, the construction
 // mirrored here).
 
 #include <gtest/gtest.h>
@@ -134,7 +134,7 @@ using fixpp::wire::frame_view;
 using fixpp::wire::Parser;
 using fixpp::wire::pmr_carry_buffer;
 
-// Mirrors src/session/session.cpp:293-294/302-311 exactly.
+// Mirrors src/session/session.cpp's `parse_and_dispatch_` arena construction exactly.
 constexpr std::size_t kInboundParseArena = 16384;
 
 bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
@@ -216,7 +216,7 @@ TEST(Dict066GroupedReadAllocGuard, TopLevelGroupParseAndReadZeroGlobalHeap) {
 // codegen — avoids pulling the codegen build-tree dependency into
 // tests/alloc_guard purely to prove a nested descent's global-heap
 // discipline). Meets exactly the contract `group_view<GroupT>::operator[]`
-// requires (constructible from `entry_context`, group_view.hpp:143-150) and
+// requires (constructible from `entry_context`, group_view.hpp's `operator[]`) and
 // exposes ONE nested-descent accessor via the same public
 // `OffsetTable::nested_group_slices` entry point a generated `quote_
 // sets()[i].quote_entries()` accessor would call.

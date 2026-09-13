@@ -95,9 +95,9 @@ TEST(SeamArm64WeakMemory, MultiThreadedContentionMutualExclusion) {
 // 058 T045 (US5, closes gap T-5): the D-2 release/acquire discriminator.
 //
 // research.md D-2 pairs the resume runner's `in_flight_resumers_.fetch_sub(1,
-// release)` (async_mutex.hpp:767, the LAST statement after `release_ref`'s
+// release)` (the LAST statement in store_executor's resume runner, after `release_ref`'s
 // pool-slot write) with two ACQUIRE loads: the drain terminal condition
-// (async_mutex.hpp:1613) and the destructor guard (async_mutex.hpp:909). This
+// (cancel_and_drain()'s quiescence loop) and the destructor guard. This
 // is the happens-before edge that makes destroying the mutex immediately
 // after a drain/quiescence observation memory-safe even though the resumer's
 // pool write ran on a different OS thread/core.
@@ -126,11 +126,11 @@ TEST(SeamArm64WeakMemory, MultiThreadedContentionMutualExclusion) {
 // io_contexts have no such shared lock.
 //
 // Channel audit (verified by reading the production code, not assumed):
-// neither the drain terminal loop (async_mutex.hpp:1610-1617) nor the
-// destructor (async_mutex.hpp:906-912) reads or CASes `waiter_pool_free_`
+// neither cancel_and_drain()'s quiescence loop (Step 5) nor the
+// destructor (~async_mutex()) reads or CASes `waiter_pool_free_`
 // (the D-1 free-list head) — both touch only `state_`, `next_drain_head_`,
 // `active_holders_count_` and `in_flight_resumers_`. The resumer runner's
-// pool-slot push (`release_ref`, async_mutex.hpp:940-978) is a RELEASE CAS on
+// pool-slot push (`release_ref`'s free-list CAS loop) is a RELEASE CAS on
 // `waiter_pool_free_` with no corresponding ACQUIRE anywhere on the
 // destroyer side in these epochs (no further pop happens — the mutex is
 // destroyed, not reused) — so it grants no alternate happens-before edge that
@@ -168,8 +168,8 @@ bool wait_ready(std::future<T>& f, std::chrono::steady_clock::time_point deadlin
 // structurally impossible) for `waiter_resolved` before it ever unlocks. This
 // makes cancellation win deterministically by construction, not by timing.
 // `waiter_resolved` is set by the waiter coroutine INSIDE invoke_handler,
-// which the resume runner calls BEFORE `release_ref`/`fetch_sub` (async_
-// mutex.hpp:717-767) — so gating the holder's own unlock on it does not
+// which the resume runner calls BEFORE `release_ref`/`fetch_sub`
+// — so gating the holder's own unlock on it does not
 // observe (and cannot rescue) the risky writes that come after.
 void run_cancellation_epoch() {
     constexpr int N = 4;
@@ -252,7 +252,7 @@ void run_cancellation_epoch() {
 // ── Epoch 2: drain-reaped parked waiter, then destroy ──────────────────────
 //
 // The waiter is still genuinely QUEUED (never self-cancelled) when the drain
-// reaps it: `cancel_and_drain()`'s `reap_chain` (async_mutex.hpp:1558-1576)
+// reaps it: `cancel_and_drain()`'s `reap_chain` lambda
 // CASes the queued waiter to cancelled and calls `schedule_record_resume`
 // FROM thread_a, which posts the actual resumer runner onto the waiter's OWN
 // stored executor (thread_b) — the cross-executor edge D-2 makes safe.

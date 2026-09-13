@@ -12,7 +12,7 @@
 //     table_view" (mechanism (b), accessor precondition).
 //   contracts/inbound-parse.md C4 (clone/reify read identically to source;
 //     the copy is self-contained and safely outlives the source
-//     session/Dictionary — table_view.hpp:185-192, :204,221).
+//     session/Dictionary — table_view.hpp's value-semantic, self-owned storage).
 //
 // Proves:
 //  (a) the copy answers membership identically to the live source.

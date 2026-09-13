@@ -1,7 +1,7 @@
 # neg_session1_transport_no_kind.toml
 # Two sessions: session[0] uses TLS (engine default), session[1] has a
 # [session.transport] section but NO `kind` key inside it.
-# Hits the "kind_node==nullptr" arm (lines 633-638) in the TLS-default
+# Hits the "kind_node==nullptr" arm (validate_per_session_transport_kinds) in the TLS-default
 # per-session validation loop.
 # Expected: missing_required at "session[1].transport.kind"
 

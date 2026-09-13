@@ -22,7 +22,7 @@
 // success/error and offending tag) for the same Args -- FR-009/SC-004's
 // validator equivalence is result-identity, not byte-identity.
 //
-// Anchors: specs/078-precompiled-builder-libs/spec.md Edge Case (~line 128),
+// Anchors: specs/078-precompiled-builder-libs/spec.md's "One-definition-rule at the link/inline boundary" Edge Case,
 // FR-006/FR-007, SC-004 (validator leg); quickstart.md Scenario 4d;
 // tests/codegen/test_078_validator_mixing_us3.cpp (mixed-message precedent,
 // does not cover same-message mixing);

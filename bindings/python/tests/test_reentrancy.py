@@ -80,7 +80,7 @@ def test_engine_close_preflight_raises_without_closing_sibling(monkeypatch):
     # They were built with `object.__new__` and FAKE handles (`_handle =
     # object()`), and the assertions above deliberately leave them with
     # `_dead = False` / `_was_explicitly_closed = False`. That combination is
-    # exactly what makes _Finalizable.__del__ (fixpp_oo.py:99-111) act: at some
+    # exactly what makes _Finalizable.__del__ (fixpp_oo.py's `__del__`) act: at some
     # arbitrary later garbage collection -- plausibly inside a DIFFERENT test
     # file -- it calls close(), which passes the fake `object()` handle to
     # `session_close`/`engine_destroy`. SWIG's pointer-conversion typemap
@@ -125,8 +125,8 @@ def test_session_close_step0_backstop_leaves_state_unmodified(monkeypatch):
         # Session ANYWHERE in this process had its __del__ fire during this
         # ~0.1s window" -- which is not what this test is named for and not
         # something it can control. The path is real: _Finalizable.__del__
-        # (fixpp_oo.py:99-111) calls close() -> _close_impl -> session_close
-        # (fixpp_oo.py:255), and Engine.close() cascades the same way once per
+        # (fixpp_oo.py's `__del__`) calls close() -> _close_impl -> session_close
+        # (fixpp_oo.py's `session_close` call), and Engine.close() cascades the same way once per
         # live session it owns. Any object left unclosed by an EARLIER test and
         # finalized inside this window incremented the counter and failed this
         # test for a reason unrelated to the reentrancy backstop.
@@ -140,7 +140,7 @@ def test_session_close_step0_backstop_leaves_state_unmodified(monkeypatch):
         # teardown, not that SWIG 4.5.0 introduced nothing. Other generated
         # code reachable from this test DID change: the reentrant guard's
         # exception is built via `_make_error` -> `strerror`
-        # (fixpp_oo.py:245, fixpp.i:287-295), whose 4.5.0 wrapper routes
+        # (fixpp_oo.py's `_CALLBACK_REENTRANT_CLOSE` raise, fixpp.i's `_make_error`/`strerror`), whose 4.5.0 wrapper routes
         # through the new `SWIG_FromBinaryCharPtrAndSize` path.
         #
         # Keying on the handle makes the assertion say what the test name says:

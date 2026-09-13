@@ -112,7 +112,7 @@ echo "ccache-cache: compiler $CCACHE_CACHE_COMPILER ($CCACHE_CACHE_TOOLSET) fold
 # /tmp/fixpp-ccache-<preset>. Make the guard local instead: require at least two
 # path components below the root before anything destructive runs.
 # `/tmp/fixpp-ccache-x` → two components, fine. `/tmp` → one, refused.
-# Carried over verbatim in intent from restore-sccache.sh:38-54; the reasoning
+# Carried over verbatim in intent from restore-sccache.sh's `DIR_TRIMMED` guard; the reasoning
 # is not Windows-specific and the failure it prevents is unrecoverable.
 DIR_TRIMMED="${CCACHE_DIR%/}"
 case "$DIR_TRIMMED" in
@@ -143,7 +143,7 @@ if ! oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>&1; then
   # MISS: no cache published for this preset+compiler yet, the package is not
   # readable from this context, or GHCR is unreachable. All three are the same
   # disposition — compile from scratch. Deliberately NOT a ::warning:: (see
-  # restore-sccache.sh:74-80): a miss here is the pre-seed steady state on any
+  # restore-sccache.sh's "Deliberately NOT a `::warning::`" MISS note): a miss here is the pre-seed steady state on any
   # new compiler and costs only the speedup, never correctness — and the stats
   # step reports the resulting 0 % hit rate on the same run, so nothing is
   # hidden by staying quiet.

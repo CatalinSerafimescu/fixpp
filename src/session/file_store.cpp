@@ -180,7 +180,7 @@ static constexpr std::size_t kAlignment = 8;
 //   All impl_ field mutations happen in the OUTER coroutine, on the strand,
 //   before or after the co_await — never inside 'fn'. (data-model §3)
 //
-// Idiom precedent: src/transport/asio_tls_transport.hpp:45–51.
+// Idiom precedent: asio_tls_transport.hpp's D-18 reminder, below.
 // [feedback_asio_post_resume_bounces_to_spawn_executor]
 
 namespace {
@@ -690,7 +690,7 @@ struct FileStoreImpl {
     std::pmr::vector<std::byte> retrieve_scratch_;
 
     // 035: monotonic epoch bumped by reset() on the strand at/after the live-handle
-    // swap (file_store.cpp:1149); snapshotted by retrieve() under the mutex at
+    // swap (`FileStore::reset()`'s "T015: bump epoch"); snapshotted by retrieve() under the mutex at
     // index-snapshot time and re-checked before each per-frame pread in the walk.
     // A mismatch means a reset() ran during a visitor.on_frame() suspension —
     // retrieve() returns store_io_failure (clean-fail, never reads a swapped handle).
@@ -1090,7 +1090,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
     const std::int64_t counter_off =
         frame_off + static_cast<std::int64_t>(record_disk_size(frame_span.size()));
 
-    // Build frame record header (mirrors write_frame:557–563).
+    // Build frame record header (mirrors write_frame).
     RecordHeader frame_hdr{};
     frame_hdr.kind = static_cast<std::uint8_t>(RecordKind::frame);
     frame_hdr.dir = static_cast<std::uint8_t>(dir);
@@ -1107,7 +1107,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
     const seqnum_t no =
         (dir == direction_t::outbound) ? impl_->next_outbound + 1 : impl_->next_outbound;
 
-    // Build counter record header + payload (mirrors write_counter:532–542).
+    // Build counter record header + payload (mirrors write_counter).
     CounterPayload counter_pl{};
     counter_pl.next_inbound = ni;
     counter_pl.next_outbound = no;
@@ -1120,7 +1120,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
         compute_record_crc32(counter_hdr, reinterpret_cast<const std::uint8_t*>(&counter_pl),
                              static_cast<std::uint32_t>(kCounterPayloadSize));
 
-    // Flush-policy decision (mirrors :900–914); index sizes are strand-only.
+    // Flush-policy decision (the only one in this file); index sizes are strand-only.
     const auto policy_kind = impl_->cfg.policy.which;
     bool do_flush = false;
     if (policy_kind == FileStorePolicy::kind::commit_per_message) {
@@ -1246,7 +1246,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
 
-    // Push index entry (mirrors write_frame:583–590, stripped of pwrite).
+    // Push index entry (mirrors write_frame, stripped of pwrite).
     IndexEntry ie;
     ie.seq = seq;
     ie.dir = dir;

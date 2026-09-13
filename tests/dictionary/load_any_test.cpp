@@ -174,7 +174,7 @@ std::filesystem::path write_temp_xml(std::string_view name, std::string_view tex
 }
 
 // The Orchestra twin of kUnresolvableGroupXml above (Gate B r1 F1, fixpp#216 /
-// tests/dictionary/loader_disposition_test.cpp:148): BadGrp(7000) declares
+// loader_disposition_test.cpp's `kUnresolvableGroupXml`): BadGrp(7000) declares
 // NoBad(700) as its NumInGroup with NO fieldRef members, so its delimiter
 // cannot be resolved.
 constexpr std::string_view kOrchestraUnresolvableXml =
@@ -208,13 +208,13 @@ constexpr std::string_view kOrchestraUnresolvableXml =
 // ── fixpp Gate B (PR #262 round 1), C3 — the Orchestra half of load_any's
 // policy forwarding had no test. Both tests above (`DefaultPolicyStaysFail-
 // Closed`, `TolerantPolicyReachesTheConcreteLoader`) build `<fix …>` roots, so
-// `return OrchestraLoader{}.load(path, mr);` at load_any.cpp:53 (dropping the
+// `return OrchestraLoader{}.load(path, mr);` at `load_any()`'s dispatch branch (dropping the
 // policy argument) left every existing test green. These two mirror the XML
 // pair on the `<fixr:repository>` dispatch branch instead.
 
 // Default policy: the Orchestra loader throws the DERIVED orchestra_parse_error,
 // not the base xml_parse_error — the Orchestra fuzz harness catches only the
-// derived type (see loader_disposition_test.cpp:345-364), so asserting the base
+// derived type (see loader_disposition_test.cpp's `OrchestraRejectionIsOrchestraParseError`), so asserting the base
 // type here would be a weaker pin than its XML twin's.
 TEST(LoadAny, OrchestraDefaultPolicyStaysFailClosed) {
     auto const path =

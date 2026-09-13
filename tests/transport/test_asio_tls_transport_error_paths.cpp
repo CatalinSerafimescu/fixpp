@@ -292,7 +292,7 @@ std::unique_ptr<RawClientServerPair> make_raw_client_server_pair() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Case 1: async_connect to a port with no listener → transport_connect_refused
 //
-// Branch covered: async_connect @ asio_tls_transport.cpp ~946-949
+// Branch covered: async_connect's transport_connect_refused mapping in asio_tls_transport.cpp
 //   connect_ec (connection_refused or other non-aborted) → transport_connect_refused
 //
 // We bind an acceptor on 127.0.0.1:0 to get a free port number, then connect
@@ -332,7 +332,7 @@ TEST(AsioTlsTransportErrorPaths, ConnectRefusedMapsToTransportConnectRefused) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Case 2: async_handshake times out mid-handshake → transport_handshake_timeout
 //
-// Branch covered: async_handshake @ asio_tls_transport.cpp ~1048-1053
+// Branch covered: async_handshake's transport_handshake_timeout mapping in asio_tls_transport.cpp
 //   operation_aborted + cancellation_state.cancelled() == none
 //       → transport_handshake_timeout
 //
@@ -405,7 +405,7 @@ TEST(AsioTlsTransportErrorPaths, HandshakeTimeoutMapsToTransportHandshakeTimeout
     //   socket_.cancel() → operation_aborted, cs.cancelled() == none
     //   → transport_handshake_timeout (the sibling branch to transport_handshake_cancelled)
     //
-    // This exercises async_handshake @ asio_tls_transport.cpp ~1046-1053:
+    // This exercises async_handshake's operation_aborted branch in asio_tls_transport.cpp:
     //   if (handshake_ec == operation_aborted)
     //     if (cs.cancelled() != none) → transport_handshake_cancelled   [external cancel]
     //     else                        → transport_handshake_timeout      [internal timer]  ← HERE
@@ -499,7 +499,7 @@ TEST(AsioTlsTransportErrorPaths, HandshakeTimeoutMapsToTransportHandshakeTimeout
 // ─────────────────────────────────────────────────────────────────────────────
 // Case 4: graceful TLS peer shutdown → transport_read_eof
 //
-// Branch covered: async_read_some @ asio_tls_transport.cpp ~1165-1166
+// Branch covered: async_read_some's transport_read_eof mapping in asio_tls_transport.cpp
 //   asio::error::eof → transport_read_eof
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(AsioTlsTransportErrorPaths, GracefulTlsShutdownMapsToTransportReadEof) {
@@ -563,7 +563,7 @@ TEST(AsioTlsTransportErrorPaths, GracefulTlsShutdownMapsToTransportReadEof) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Case 5: write after peer TCP close → transport_write_error
 //
-// Branch covered: async_write @ asio_tls_transport.cpp ~1227
+// Branch covered: async_write's transport_write_error mapping in asio_tls_transport.cpp
 //   any write ec (not aborted) → transport_write_error
 //
 // Protocol:
@@ -647,7 +647,7 @@ TEST(AsioTlsTransportErrorPaths, WriteAfterPeerTcpCloseMapsToTransportWriteError
 // Case 6: TLS handshake failure with incompatible sigalg → transport_handshake_failed
 //         AND does NOT emit session_event_tls_validation_failed
 //
-// Branches covered: async_handshake @ asio_tls_transport.cpp ~1046-1086
+// Branches covered: async_handshake's transport_handshake_failed mapping in asio_tls_transport.cpp
 //   handshake_ec set (OpenSSL-level failure) → transport_handshake_failed
 //   hctx.verify_error not set for sigalg mismatch → no tls_validation_failed event
 //

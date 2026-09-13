@@ -1594,7 +1594,7 @@ int run_many_sessions(const Options& o) {
 // Heartbeat(35=0) echoing 112 (the FR-006 path PR #136 PRESERVED), and (c) does
 // NOT tear the initiator session down (the mismatch→Disconnected arm is guarded
 // on a non-empty pending_test_req_id_, which an app-initiated TR leaves empty —
-// session.cpp:3303). The survival check is the seal against a false-GREEN where
+// src/session/session.cpp's inbound-Heartbeat TestReqID-mismatch guard). The survival check is the seal against a false-GREEN where
 // the acceptor emits the Heartbeat but the initiator session is dying.
 int run_wl07_spike(const Options& o) {
     const char* dir = fixture_dir();

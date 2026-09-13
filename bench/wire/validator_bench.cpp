@@ -71,7 +71,7 @@ constexpr std::size_t kScratchArena = 512;
 }
 
 // Loads the shipped FIX44.xml and returns its table_view. Per
-// dictionary.hpp:193-205, as_table_view() legally outlives the Dictionary it
+// as_table_view()'s own doc comment: it legally outlives the Dictionary it
 // was built from — the enum-domain table OWNS copies of the code bytes — so
 // the temporary Dictionary going out of scope here is safe.
 [[nodiscard]] fixpp::dict::table_view load_fix44_table_view(std::pmr::memory_resource* mr) {
@@ -165,7 +165,7 @@ constexpr std::size_t kScratchArena = 512;
 // (730)/SettlPriceType(731)/PriorSettlPrice(734)); the ONE NoUnderlyings
 // (711) instance carries its two direct group-scoped required members
 // UnderlyingSettlPrice(732)/UnderlyingSettlPriceType(733)
-// (dictionaries/FIX44.xml:3153-3159, PosUndInstrmtGrp) — exercises T004's
+// (dictionaries/FIX44.xml's PosUndInstrmtGrp component declaration) — exercises T004's
 // consume_group per-instance required-member mask build + scan exactly
 // once, at depth 1.
 [[nodiscard]] std::string position_report_shallow_group_body() {
@@ -196,14 +196,14 @@ constexpr std::size_t kScratchArena = 512;
 // path). 079-required-presence-scope T021: reuses the (e) message-level
 // required prefix; each NoUnderlyings(711) instance carries its two direct
 // required members (732/733, PosUndInstrmtGrp) AND a nested optional
-// UndSecAltIDGrp component (dictionaries/FIX44.xml:3676-3681 — tag 457 is
+// UndSecAltIDGrp component (dictionaries/FIX44.xml's UndSecAltIDGrp component declaration — tag 457 is
 // declared EXACTLY ONCE in FIX44.xml, so its delimiter (458) cannot hit the
 // known, tracked L-063-3(b) global-first-seen-delimiter residual that a
 // reused NUMINGROUP tag (e.g. NoQuoteEntries(295), reused 3x with
 // DIVERGENT first children across QuotCxlEntriesGrp/QuotEntryAckGrp/
 // QuotEntryGrp) would hit — as_table_view() derives even the CONTEXT-scoped
 // delimiter from the dictionary's single global first-seen GroupRef
-// (dictionary.cpp:452/460), not a per-real-context one; MassQuote's
+// (as_table_view()'s group_ctx_delimiter_impl call), not per-real-context; MassQuote's
 // NoQuoteEntries(295) was tried first for this row and rejected the
 // warm-up conformance check for exactly this documented, out-of-scope-for-
 // T021 reason). Exercises the recursive per-instance required-member scan

@@ -1100,7 +1100,7 @@ on_overflow = "discard"
 // ── Gate B r1 A: noexcept boundary — throwing PMR resource must NOT terminate ──
 //
 // load_toml_config() is noexcept. resolve_engine_logger() uses opts.resource
-// for a pmr::vector allocation (logger_resolver.cpp:485-486). If the resolve
+// for a pmr::vector allocation (resolve_engine_logger's sinks.reserve() call). If the resolve
 // phase runs OUTSIDE the try/catch, a throwing resource → std::terminate.
 //
 // Design: pass a PMR resource that throws bad_alloc on the FIRST allocation so
@@ -1679,7 +1679,7 @@ drain_cpu_affinity = 2147483648
 //   Post-fix: cfg.directory=base_dir → file lands in base_dir → GREEN.
 //
 // Mutation discriminator: remove the `else if (!sink_tbl.get("directory"))` branch
-// in logger_resolver.cpp (line ~151-158) → cfg.directory stays "." → open() writes
+// in logger_resolver.cpp's `else if (!sink_tbl.get("directory"))` default-dir arm → cfg.directory stays "." → open() writes
 // to CWD → current_path().parent_path() != base_dir → assertion RED.
 
 TEST(GateBR1E_DefaultDirBaseDir, DefaultDirectoryResolvesAgainstBaseDir)
@@ -1899,7 +1899,7 @@ TEST(GateBR1B_WrongTypeOptionals, OtlpExportTimeoutNotString)
 // logger_resolver.cpp included <unistd.h> unconditionally and called ::access()
 // unconditionally. Both are POSIX-only APIs not present on Windows/MSVC.
 // Fix: guard both behind #ifndef _WIN32 (the same guard already used in
-// file_store_factory.cpp:46 for the same reason).
+// file_store_factory.cpp's #ifndef _WIN32 guard around <unistd.h>, for the same reason).
 //
 // The behavioral test for the POSIX path already exists as
 //   T014_NegBattery.FileSinkDirNotWritable (tests the access(W_OK) POSIX arm)

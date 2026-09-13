@@ -509,7 +509,7 @@ TEST_F(HbTrTest, InboundHeartbeatKeepsSessionActive) {
 
 // Regression: an inbound Heartbeat(35=0) MUST NOT trigger an outbound Heartbeat.
 // Per FIX session semantics a Heartbeat is never answered — only a TestRequest
-// gets a Heartbeat reply (data-model.md:22 Active row: inbound Heartbeat =
+// gets a Heartbeat reply (005's data-model.md Active row: inbound Heartbeat =
 // "advance counter (liveness)", NO emit). The retired "T020-A echo" emitted a
 // Heartbeat on every inbound Heartbeat, which storms at RTT cadence when two
 // fixpp sessions are paired (each echoes the other's beat). See the self-paired
@@ -544,7 +544,7 @@ TEST_F(HbTrTest, InboundHeartbeatEmitsNoEcho) {
     }
     EXPECT_EQ(outbound_hb, 0)
         << "inbound Heartbeat(35=0) must NOT trigger an outbound Heartbeat echo "
-           "(FIX: a Heartbeat is never answered; data-model.md:22) — got " << outbound_hb;
+           "(FIX: a Heartbeat is never answered; 005's data-model.md Active row) — got " << outbound_hb;
     EXPECT_TRUE(outbound.empty())
         << "inbound Heartbeat must produce zero outbound frames; got " << outbound.size();
 }

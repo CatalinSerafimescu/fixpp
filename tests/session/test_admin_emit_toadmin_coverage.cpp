@@ -16,11 +16,11 @@
 //
 // Anchors:
 //   spec.md FR-001/FR-002/FR-003/FR-006; plan.md ARM-1; quickstart.md §Per-site cells;
-//   session.cpp:331 (fire_to_admin_); session.cpp:1736 (emit_session_reject_);
-//   session.cpp:2407 (Q3 Reject); session.cpp:2491 (SeqReset veto Reject);
-//   session.cpp:2606 (021ArmC Reject); session.cpp:2651 (021RC1 Reject);
-//   session.cpp:2682 (021ArmD Reject); session.cpp:2953 (Logout veto Reject);
-//   session.cpp:4589 (SeqReset too-low Reject); [const §VII.3];
+//   fire_to_admin_; emit_session_reject_;
+//   on_inbound_frame's Q3 Reject; on_inbound_frame's SeqReset veto Reject;
+//   on_inbound_frame's 021 Arm C Reject; on_inbound_frame's 021 RC#1 Reject;
+//   on_inbound_frame's 021 Arm D Reject; on_inbound_frame's Logout-veto Reject;
+//   apply_inbound_sequence_reset's too-low Reject; [const §VII.3];
 //   [feedback_admin_emit_bypasses_fire_to_admin]
 
 #include <gtest/gtest.h>
@@ -101,7 +101,7 @@ namespace {
 //
 // T011 (LogoutVeto) throw note: the veto-Reject is emitted AFTER the confirming
 // Logout (35=5). Setting throw_on_msg_type="3" lets the confirming Logout pass
-// and causes the throw on the Reject — discriminating the 036 site at :2953.
+// and causes the throw on the Reject — discriminating the 036 site (Logout-veto Reject arm).
 
 struct CoverageApp : Application {
     int toAdmin_calls = 0;
@@ -109,7 +109,7 @@ struct CoverageApp : Application {
 
     // Per-instance control: whether fromAdmin rejects.
     // Default false so cells that use fromAdmin-ACCEPT paths don't accidentally
-    // route through the fromAdmin-veto Reject site at session.cpp:3026.
+    // route through on_inbound_frame's fromAdmin-veto Reject site.
     bool fromAdmin_rejects = false;
 
     // US3: whether fromApp rejects (app_do_not_send) to provoke a BMR(35=j).
@@ -172,8 +172,8 @@ struct CoverageApp : Application {
 // Minimal: only implements the seqnum path; store() and retrieve() are no-ops.
 // Pattern mirrors FaultStore from test_persistent_seqnum_hydrate.cpp.
 //
-// Anchors: C2/INV-COV-5 (veto must still persist inbound); session.cpp:676
-//          (persist_inbound_advance_ only writes when store_is_persistent_==true).
+// Anchors: C2/INV-COV-5 (veto must still persist inbound); persist_inbound_advance_'s
+//          store_is_persistent_ gate (only writes when store_is_persistent_==true).
 
 using fixpp::session::direction_t;
 using fixpp::session::MessageStore;
@@ -712,12 +712,12 @@ protected:
 // T004 — EmitSessionReject_FromAdminVeto
 //
 // Scenario: acceptor Active; fromAdmin veto on inbound Heartbeat →
-//   session.cpp:3026 → emit_session_reject_(session.cpp:1736).
+//   on_inbound_frame's fromAdmin-veto Reject site → emit_session_reject_.
 // Pre-036: fire_to_admin_ NOT called → toAdmin_calls delta = 0 (RED).
 // Post-036: fire_to_admin_ wired (T015) → toAdmin_calls delta = 1 (GREEN).
 //
 // Anchors: spec.md FR-001/FR-002; plan.md ARM-1; quickstart.md EmitSessionReject row;
-//          session.cpp:3026; session.cpp:1736; session.cpp:331 (fire_to_admin_).
+//          on_inbound_frame's fromAdmin-veto Reject site; emit_session_reject_; fire_to_admin_.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
@@ -739,7 +739,7 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
     const auto frames_before = captured_frames.size();
 
     // Feed a valid Heartbeat from TW. CoverageApp::fromAdmin returns app_do_not_send
-    // → session.cpp:3026 → emit_session_reject_.
+    // → on_inbound_frame's fromAdmin-veto Reject site → emit_session_reject_.
     // next-expected inbound seq = 2 (peer Logon was seq=1).
     auto hb = build_heartbeat(2, kTarget, kSender);
     (void)feed_sync(sess, hb);
@@ -772,15 +772,15 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
 //
 // FR-006 / SC-005 byte-identity cell — gate-b/r1 FQ-2.
 // Scenario: acceptor Active, NO application registered; feed app-type MsgType
-//   "D" (NewOrderSingle) at seq=2 → session.cpp:3216 → emit_session_reject_(:1736).
-//   fire_to_admin_ short-circuits at session.cpp:332 (null-app fast-return) — no-op.
+//   "D" (NewOrderSingle) at seq=2 → on_inbound_frame's no-app Reject caller → emit_session_reject_.
+//   fire_to_admin_ short-circuits at its null-app fast-return — no-op.
 //   Result: Reject(35=3) must be byte-for-byte identical to what build_reject()
 //   produces with the same deterministic args (fixed-clock SendingTime; known seqnums).
 //
 // SC-005 correctness basis:
 //   The 036 change wired fire_to_admin_(*rj_r) AFTER assign_outbound and BEFORE
 //   store_then_emit. In no-app mode, fire_to_admin_ returns true immediately at
-//   session.cpp:332 (engine_.application==nullptr short-circuit) — no frame mutation,
+//   fire_to_admin_'s (engine_.application==nullptr short-circuit) — no frame mutation,
 //   no callback side-effect. The byte-identical comparison below witnesses that the
 //   no-app path passes the builder output through unmodified: if a future change
 //   mutated the frame between build_reject and store_then_emit, this assertion FAILS.
@@ -789,8 +789,8 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
 // deterministic; seqnum state is deterministic (Logon consumed seq=1, so
 // peek_outbound()==2 when the Reject is built).
 //
-// Anchors: spec.md SC-005/FR-006; session.cpp:332 (null-app short-circuit);
-//          session.cpp:3216 (no-app emit_session_reject_ caller); FQ-2 triage.
+// Anchors: spec.md SC-005/FR-006; fire_to_admin_'s null-app short-circuit;
+//          on_inbound_frame's no-app emit_session_reject_ caller; FQ-2 triage.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
@@ -803,7 +803,7 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
     const auto frames_before = captured_frames.size();
 
     // Feed an app-type frame (35=D, NewOrderSingle) at seq=2.
-    // No Application registered → session.cpp:3216 → emit_session_reject_.
+    // No Application registered → on_inbound_frame's no-app path → emit_session_reject_.
     // rj_seq=2 (peek_outbound after Logon consumed seq=1).
     auto app_frame = build_frame("D", 2, kTarget, kSender, "FIX.4.2", kGoodSendingTime);
     (void)feed_sync(sess, app_frame);
@@ -821,7 +821,7 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
     //   rj_seq=2 (peek_outbound=2), ref_seq=2 (fed frame seq), ref_msg_type="D",
     //   ref_tag_id=0, reason=3, sender="ISLD", target="TW",
     //   begin_string="FIX.4.2", sending_time=kGoodSendingTime (fixed mock clock).
-    // fire_to_admin_ at session.cpp:332 is a null-app no-op → the captured frame
+    // fire_to_admin_'s null-app short-circuit is a no-op → the captured frame
     // must equal the builder output byte-for-byte.
     //
     // If this fails, the 036 wiring mutated the no-app frame path — SC-005 violated.
@@ -857,7 +857,7 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
                               captured_reject.size()), 0)
             << "SC-005/FR-006: no-app Reject frame must be byte-for-byte identical to "
                "build_reject() output — the 036 fire_to_admin_ wiring must not mutate "
-               "the no-app wire path (session.cpp:332 null-app short-circuit)";
+               "the no-app wire path (fire_to_admin_'s null-app short-circuit)";
     }
 }
 
@@ -867,15 +867,15 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
 // SC-005 / FR-006 byte-identity for the Guard-3 Logout (initiator, no-app).
 // Scenario: initiator (no Application) → open() emits outbound Logon at seq=1
 //   → LogonSent; feed peer Logon-ack with stale SendingTime → Guard-3 fires
-//   (session.cpp:3442-3466) → build_logout(..., "SendingTime(52) accuracy", ...).
-//   fire_to_admin_ at session.cpp:332 is null-app no-op.
+//   (Guard-3) → build_logout(..., "SendingTime(52) accuracy", ...).
+//   fire_to_admin_'s null-app short-circuit is a no-op.
 //   Result: Logout(35=5) must be byte-for-byte identical to build_logout() output.
 //
 // The text "SendingTime(52) accuracy" is the static literal from the stale-time
-// branch (session.cpp:3437). All other args are deterministic with the fixed clock.
+// branch (Guard-3's stale-SendingTime literal). All other args are deterministic with the fixed clock.
 // Seqnum: our outbound Logon used seq=1; Guard-3 Logout peek_outbound()==2.
 //
-// Anchors: spec.md SC-005/FR-006; session.cpp:332 / :3437 / :3448; FQ-2 triage.
+// Anchors: spec.md SC-005/FR-006; fire_to_admin_'s null-app short-circuit / Guard-3's stale-time literal; FQ-2 triage.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitNoAppCoverageTest, Logout_Guard3_NoApp_ByteIdentical) {
@@ -902,14 +902,14 @@ TEST_F(AdminEmitNoAppCoverageTest, Logout_Guard3_NoApp_ByteIdentical) {
 
     // SC-005 / FR-006 byte-identity oracle.
     // Args: lo_seq=2 (Logon used seq=1), sender="ISLD", target="TW",
-    //       text="SendingTime(52) accuracy" (static literal at session.cpp:3437),
+    //       text="SendingTime(52) accuracy" (static literal in Guard-3's stale-time branch),
     //       begin_string="FIX.4.2", sending_time=kGoodSendingTime (fixed clock).
     std::array<std::byte, 256> expected_buf{};
     const seqnum_t lo_seq = 2;
     auto expected_r = fixpp::session::build_logout(
         std::span<std::byte>{expected_buf.data(), expected_buf.size()},
         lo_seq, "ISLD", "TW",
-        "SendingTime(52) accuracy",  // text from session.cpp:3437 stale-time literal
+        "SendingTime(52) accuracy",  // text from Guard-3's stale-time literal
         "FIX.4.2", kGoodSendingTime);
     ASSERT_TRUE(expected_r.has_value())
         << "build_logout oracle must succeed (fixed args; buffer large enough)";
@@ -931,7 +931,7 @@ TEST_F(AdminEmitNoAppCoverageTest, Logout_Guard3_NoApp_ByteIdentical) {
         EXPECT_EQ(std::memcmp(captured_logout.data(), expected_bytes.data(),
                               captured_logout.size()), 0)
             << "SC-005/FR-006: no-app Guard-3 Logout must be byte-for-byte identical to "
-               "build_logout() output — fire_to_admin_ at session.cpp:332 must be a no-op "
+               "build_logout() output — fire_to_admin_'s null-app short-circuit must be a no-op "
                "on the no-app path";
     }
 }
@@ -940,13 +940,13 @@ TEST_F(AdminEmitNoAppCoverageTest, Logout_Guard3_NoApp_ByteIdentical) {
 // T006 — Reject_Q3SendingTimeAccuracy
 //
 // Scenario: acceptor Active (fromAdmin_rejects=false); feed Heartbeat with
-//   stale 52= → Guard Q3 fires → Step-1 Reject(:2407) + Step-2 Logout(:2424).
+//   stale 52= → Guard Q3 fires → Step-1 Reject (on_inbound_frame's Q3 arm) + Step-2 Logout.
 //   Logout step already has fire_to_admin_ from prior wiring.
 //   Reject step needs wiring (T006 site).
 // Pre-036: Reject fire_to_admin_ NOT called → toAdmin_delta==1 (Logout only) → RED.
 // Post-036: Reject + Logout both wired → toAdmin_delta==2 → GREEN.
 //
-// Anchors: spec.md FR-001/FR-002; session.cpp:2402-2451; plan.md Decision-1 Q3.
+// Anchors: spec.md FR-001/FR-002; on_inbound_frame's Q3 guard; plan.md Decision-1 Q3.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
@@ -995,16 +995,16 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
 // T007 — Reject_SequenceResetVeto
 //
 // Scenario: acceptor Active; fromAdmin_rejects=true; feed SequenceReset(35=4)
-//   Reset-mode (123 absent) → fromAdmin veto → Reject(:2491, reason=3).
+//   Reset-mode (123 absent) → fromAdmin veto → Reject (on_inbound_frame's SeqReset-veto arm, reason=3).
 //   Session survives (best-effort site: co_return ok after emit attempt).
 // Pre-036: fire_to_admin_ NOT called → toAdmin_delta==0 → RED.
 // Post-036: fire_to_admin_ wired in `if (assign_r)` block → delta==1 → GREEN.
 //
 // Discriminator: assert 373=3 (InvalidMsgType/Unsupported) NOT 373=5
-//   (ValueIsIncorrect). This distinguishes T007 (fromAdmin veto → 2491)
-//   from T012 (NewSeqNo too-low → 4589, 373=5).
+//   (ValueIsIncorrect). This distinguishes T007 (fromAdmin veto)
+//   from T012 (NewSeqNo too-low, 373=5).
 //
-// Anchors: spec.md FR-001/FR-002; session.cpp:2476-2502; plan.md Decision-1 SeqReset-veto.
+// Anchors: spec.md FR-001/FR-002; on_inbound_frame's SeqReset-veto arm; plan.md Decision-1 SeqReset-veto.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
@@ -1028,11 +1028,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
     EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
         << "SeqReset fromAdmin veto must emit exactly one Reject(35=3) in the window";
 
-    // Discriminator: 373=3 (not 373=5) confirms this is the veto path at :2491,
-    // not the NewSeqNo-too-low path at :4589.
+    // Discriminator: 373=3 (not 373=5) confirms this is the fromAdmin-veto path,
+    // not the NewSeqNo-too-low path.
     EXPECT_TRUE(any_reject_with_reason(captured_frames, "3"))
-        << "SeqReset veto Reject must have SessionRejectReason=3 (site :2491), "
-        << "not 373=5 (NewSeqNo-too-low site :4589)";
+        << "SeqReset veto Reject must have SessionRejectReason=3 (fromAdmin-veto arm), "
+        << "not 373=5 (NewSeqNo-too-low arm)";
 
     // Session must survive (best-effort site returns ok).
     EXPECT_EQ(sess.state(), fsm_state::Active)
@@ -1054,12 +1054,12 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
 // T008 — Reject_021ArmC_Malformed122 (absent 122)
 //
 // Scenario: acceptor Active; fromAdmin_rejects=false; feed PossDup Heartbeat
-//   (43=Y) with 122 ABSENT → 021 Arm C → Reject(:2606, reason=1 RequiredTagMissing).
+//   (43=Y) with 122 ABSENT → 021 Arm C → Reject (021 Arm C arm, reason=1 RequiredTagMissing).
 //   Session survives (Arm C); does NOT disconnect.
 // Pre-036: fire_to_admin_ NOT called → toAdmin_delta==0 → RED.
 // Post-036: fire_to_admin_ wired → delta==1 → GREEN.
 //
-// Anchors: spec.md FR-001/FR-002; session.cpp:2598-2624; plan.md Decision-1 021ArmC.
+// Anchors: spec.md FR-001/FR-002; on_inbound_frame's 021 Arm C arm; plan.md Decision-1 021ArmC.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122) {
@@ -1104,11 +1104,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122) {
 //
 // Scenario: acceptor Active; fromAdmin_rejects=false; feed PossDup Heartbeat
 //   (43=Y) with 122=GARBAGE (present but unparseable) → 021 RC#1 →
-//   Reject(:2651, reason=1 RequiredTagMissing). Session survives.
+//   Reject (021 RC#1 arm, reason=1 RequiredTagMissing). Session survives.
 // Pre-036: fire_to_admin_ NOT called → toAdmin_delta==0 → RED.
 // Post-036: fire_to_admin_ wired → delta==1 → GREEN.
 //
-// Anchors: spec.md FR-001/FR-002; session.cpp:2641-2668; plan.md Decision-1 021RC1;
+// Anchors: spec.md FR-001/FR-002; on_inbound_frame's 021 RC#1 arm; plan.md Decision-1 021RC1;
 //          [feedback_conjunctive_parse_guard_tolerates_malformed_field].
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -1151,12 +1151,12 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122) {
 // T010 — Reject_021ArmD
 //
 // Scenario: acceptor Active; fromAdmin_rejects=false; feed PossDup Heartbeat
-//   (43=Y) with 122 > 52 (strict) → Arm D → Step-1 Reject(:2682) +
+//   (43=Y) with 122 > 52 (strict) → Arm D → Step-1 Reject (021 Arm D arm) +
 //   Step-2 Logout (already wired) + Disconnect.
 // Pre-036: Reject fire_to_admin_ NOT called → toAdmin_delta==1 (Logout only) → RED.
 // Post-036: both wired → toAdmin_delta==2 → GREEN.
 //
-// Anchors: spec.md FR-001/FR-002; session.cpp:2671-2724; plan.md Decision-1 021ArmD.
+// Anchors: spec.md FR-001/FR-002; on_inbound_frame's 021 Arm D arm; plan.md Decision-1 021ArmD.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
@@ -1202,21 +1202,21 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
 //
 // Scenario: acceptor Active; fromAdmin_rejects=true; feed Logout(35=5) →
 //   Active path first emits a CONFIRMING Logout (35=5 outbound) with
-//   fire_to_admin_ already wired (019 T014, session.cpp:2903).
-//   THEN: fromAdmin is dispatched → veto → Reject(:2953, best-effort).
+//   fire_to_admin_ already wired (019 T014, confirming-Logout emit).
+//   THEN: fromAdmin is dispatched → veto → Reject (Logout-veto arm, best-effort).
 //   Session disconnects regardless of fromAdmin result.
 //
 // Breakdown of toAdmin calls on this path:
-//   +1: confirming Logout emit (session.cpp:2903 — already wired pre-036)
-//   +1: Reject emit (session.cpp:2953 — needs wiring in this round)
+//   +1: confirming Logout emit (already wired pre-036)
+//   +1: Reject emit (Logout-veto arm — needs wiring in this round)
 //   Total expected: toAdmin_delta == 2.
 //
-// Pre-036: Reject(:2953) fire_to_admin_ NOT called →
+// Pre-036: Reject (Logout-veto arm) fire_to_admin_ NOT called →
 //          toAdmin_delta==1 (confirming Logout only) → RED.
 // Post-036: fire_to_admin_ wired inside `if (assign_r)` block →
 //           toAdmin_delta==2 → GREEN.
 //
-// Anchors: spec.md FR-001/FR-002; session.cpp:2900-2963; plan.md Decision-1 Logout-veto.
+// Anchors: spec.md FR-001/FR-002; on_inbound_frame's Logout-veto arm; plan.md Decision-1 Logout-veto.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
@@ -1232,8 +1232,8 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
     const auto frames_before = captured_frames.size();
 
     // Feed Logout from peer.
-    // Active path: (1) emits confirming Logout (fire_to_admin_ at :2903 fires toAdmin),
-    // (2) dispatches fromAdmin → our veto → Reject(:2953) emitted (best-effort).
+    // Active path: (1) emits confirming Logout (fire_to_admin_ fires toAdmin),
+    // (2) dispatches fromAdmin → our veto → Reject (Logout-veto arm) emitted (best-effort).
     // Session disconnects regardless.
     auto lo = build_logout_frame(2, kTarget, kSender);
     (void)feed_sync(sess, lo);
@@ -1248,7 +1248,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
     EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "Logout path must disconnect the session";
 
     // toAdmin delta: 2 (confirming Logout + veto Reject).
-    // Pre-036: Reject(:2953) not wired → delta==1 → RED.
+    // Pre-036: Reject (Logout-veto arm) not wired → delta==1 → RED.
     // Post-036: Reject wired → delta==2 → GREEN.
     const int toAdmin_delta = app->toAdmin_calls - toAdmin_before;
     EXPECT_EQ(toAdmin_delta, 2) << "toAdmin must fire for confirming Logout AND veto Reject "
@@ -1265,11 +1265,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
 //
 // Scenario: acceptor Active; fromAdmin_rejects=false (fromAdmin ACCEPTS the
 //   SequenceReset); feed SequenceReset(35=4) Reset-mode with NewSeqNo=1 <
-//   next-expected=2 → apply_inbound_sequence_reset → Reject(:4589, reason=5
+//   next-expected=2 → apply_inbound_sequence_reset → Reject (its too-low arm, reason=5
 //   ValueIsIncorrect). Session survives; counter unchanged.
 //
 // IMPORTANT: fromAdmin_rejects must be FALSE here. If true, the frame routes
-//   to the SeqReset fromAdmin veto site at :2491 (T007) INSTEAD of reaching
+//   to the SeqReset fromAdmin veto arm (T007) INSTEAD of reaching
 //   apply_inbound_sequence_reset. That would be the "right end-state via wrong
 //   matrix row" false-pass trap.
 //
@@ -1277,16 +1277,16 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
 // Post-036: fire_to_admin_ wired → delta==1 → GREEN.
 //
 // Discriminator: assert 373=5 (ValueIsIncorrect) — distinguishes this from
-//   T007 which emits 373=3 (fromAdmin veto path at :2491).
+//   T007 which emits 373=3 (fromAdmin veto path).
 //
-// Anchors: spec.md FR-001/FR-002; session.cpp:4580-4605; plan.md Decision-1 SeqReset-too-low.
+// Anchors: spec.md FR-001/FR-002; apply_inbound_sequence_reset's too-low arm; plan.md Decision-1 SeqReset-too-low.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
     // CRITICAL: fromAdmin_rejects=false so fromAdmin ACCEPTS the SeqReset.
     // This lets the frame fall through to apply_inbound_sequence_reset.
-    // If fromAdmin_rejects=true, the test would pass T007's site (:2491)
-    // instead of T012's site (:4589) — wrong matrix row.
+    // If fromAdmin_rejects=true, the test would pass T007's arm
+    // instead of T012's arm — wrong matrix row.
     app->fromAdmin_rejects = false;
 
     auto cfg = make_acceptor_cfg();
@@ -1309,11 +1309,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
         << "NewSeqNo too-low must emit exactly one Reject(35=3) in the window";
 
     // Discriminator: 373=5 (ValueIsIncorrect) — MUST not be 373=3.
-    // 373=5 confirms the NewSeqNo-too-low path at :4589, not the fromAdmin
-    // veto path at :2491 which emits 373=3.
+    // 373=5 confirms the NewSeqNo-too-low arm, not the fromAdmin
+    // veto arm which emits 373=3.
     EXPECT_TRUE(any_reject_with_reason(captured_frames, "5"))
         << "NewSeqNo too-low Reject must have 373=5 (ValueIsIncorrect), "
-        << "not 373=3 (which would indicate the wrong :2491 fromAdmin-veto path)";
+        << "not 373=3 (which would indicate the wrong fromAdmin-veto arm)";
 
     // Session must survive (apply_inbound_sequence_reset returns ok after Reject).
     EXPECT_EQ(sess.state(), fsm_state::Active) << "NewSeqNo too-low Reject: session must survive";
@@ -1334,12 +1334,12 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
 // T013 — Logout_Guard3LogonAckSendingTime
 //
 // Scenario: initiator LogonSent; peer Logon-ack with stale 52= →
-//   session.cpp Guard-3 → build_logout + emit (session.cpp:3368..3380).
+//   session.cpp Guard-3 → build_logout + emit.
 // Pre-036: fire_to_admin_ NOT called → toAdmin_calls delta = 0 (RED).
 // Post-036: fire_to_admin_ wired (T023) → toAdmin_calls delta = 1 (GREEN).
 //
 // Anchors: spec.md FR-001/FR-002; plan.md ARM-1; quickstart.md Logout_Guard3 row;
-//          session.cpp:3362-3383 (Guard-3 block); session.cpp:331 (fire_to_admin_).
+//          Guard-3 block; fire_to_admin_.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
@@ -1402,9 +1402,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
 // open_acceptor_to_active / open_initiator_to_logon_sent fails (FR-003-shape).
 //
 // Source-read note (T026):
-//   The throw is caught INSIDE invoke_callback_safe (session.hpp:449), which is
-//   called from parse_and_dispatch_ (session.cpp:289), called from fire_to_admin_
-//   (session.cpp:331). fire_to_admin_ is `noexcept`. The throw NEVER crosses
+//   The throw is caught INSIDE invoke_callback_safe, which is
+//   called from parse_and_dispatch_, called from fire_to_admin_.
+//   fire_to_admin_ is `noexcept`. The throw NEVER crosses
 //   the noexcept boundary — invoke_callback_safe's try/catch converts it to
 //   unexpected(app_callback_threw) and returns false. This matches
 //   [feedback_noexcept_boundary_user_callback_terminate]: wrap the throw INSIDE
@@ -1418,9 +1418,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
 
 // T025a — EmitSessionReject_FromAdminVeto — throw variant
 //
-// The 036 site at session.cpp:1736 (emit_session_reject_) emits 35=3.
+// The 036 site emit_session_reject_ emits 35=3.
 // Throw on 35=3 → C1 arm → unexpected(app_callback_threw) + Disconnected.
-// Anchors: spec.md FR-003; plan.md ARM-1; session.cpp:3026→1736.
+// Anchors: spec.md FR-003; plan.md ARM-1; on_inbound_frame's fromAdmin-veto Reject site → emit_session_reject_.
 
 TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto_Throw) {
     app->fromAdmin_rejects = true;
@@ -1444,9 +1444,9 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto_Throw) {
 
 // T025b — Reject_Q3SendingTimeAccuracy — throw variant
 //
-// The 036 site at session.cpp:2407 (Q3 Reject) emits 35=3 (Step-1).
+// The 036 site — on_inbound_frame's Q3 Reject arm — emits 35=3 (Step-1).
 // Throw on 35=3 → C1 arm fires at Step-1; Step-2 Logout is never reached.
-// Anchors: spec.md FR-003; session.cpp:2407.
+// Anchors: spec.md FR-003; on_inbound_frame's Q3 Reject arm.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy_Throw) {
     app->fromAdmin_rejects = false;
@@ -1468,9 +1468,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy_Throw) {
 
 // T025c — Reject_SequenceResetVeto — throw variant
 //
-// The 036 site at session.cpp:2491 (SeqReset veto Reject) emits 35=3.
+// The 036 site — on_inbound_frame's SeqReset veto Reject arm — emits 35=3.
 // Best-effort site (inside `if (assign_r)`); throw → C1 arm → Disconnected.
-// Anchors: spec.md FR-003; session.cpp:2491.
+// Anchors: spec.md FR-003; on_inbound_frame's SeqReset veto Reject arm.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto_Throw) {
     app->fromAdmin_rejects = true;
@@ -1492,9 +1492,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto_Throw) {
 
 // T025d — Reject_021ArmC_Malformed122 — throw variant
 //
-// The 036 site at session.cpp:2606 (021 Arm C Reject) emits 35=3.
+// The 036 site — on_inbound_frame's 021 Arm C Reject arm — emits 35=3.
 // Throw on 35=3 → C1 arm → Disconnected.
-// Anchors: spec.md FR-003; session.cpp:2606.
+// Anchors: spec.md FR-003; on_inbound_frame's 021 Arm C Reject arm.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122_Throw) {
     app->fromAdmin_rejects = false;
@@ -1516,9 +1516,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122_Throw) {
 
 // T025e — Reject_021RC1_Malformed122 — throw variant
 //
-// The 036 site at session.cpp:2651 (021 RC#1 Reject) emits 35=3.
+// The 036 site — on_inbound_frame's 021 RC#1 Reject arm — emits 35=3.
 // Throw on 35=3 → C1 arm → Disconnected.
-// Anchors: spec.md FR-003; session.cpp:2651.
+// Anchors: spec.md FR-003; on_inbound_frame's 021 RC#1 Reject arm.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122_Throw) {
     app->fromAdmin_rejects = false;
@@ -1541,9 +1541,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122_Throw) {
 
 // T025f — Reject_021ArmD — throw variant
 //
-// The 036 site at session.cpp:2682 (021 Arm D Reject) emits 35=3.
+// The 036 site — on_inbound_frame's 021 Arm D Reject arm — emits 35=3.
 // Throw on 35=3 → C1 arm fires at Step-1; Step-2 Logout (35=5) never reached.
-// Anchors: spec.md FR-003; session.cpp:2682.
+// Anchors: spec.md FR-003; on_inbound_frame's 021 Arm D Reject arm.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD_Throw) {
     app->fromAdmin_rejects = false;
@@ -1574,11 +1574,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD_Throw) {
 //   C1 arm: record_state_transition_(Disconnected) + co_return unexpected(app_callback_threw).
 //
 // Discriminating: the confirming Logout (35=5) is allowed through; the throw
-// fires at the 036 site (:2953) on the Reject. Without the 036 wiring at :2953,
+// fires at the 036 site (Logout-veto Reject arm). Without the 036 wiring there,
 // the Reject's fire_to_admin_ is never called and the throw would not occur on
-// this frame → the test correctly witnesses the 036 C1 arm at :2953.
+// this frame → the test correctly witnesses the 036 C1 arm (Logout-veto Reject).
 //
-// Anchors: spec.md FR-003; session.cpp:2953 (036 T011 site).
+// Anchors: spec.md FR-003; on_inbound_frame's Logout-veto Reject arm (036 T011 site).
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto_Throw) {
     app->fromAdmin_rejects = true;  // veto on inbound Logout → triggers the Reject
@@ -1600,11 +1600,11 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto_Throw) {
 
 // T025h — Reject_SeqResetNewSeqNoTooLow — throw variant
 //
-// The 036 site at session.cpp:4589 (apply_inbound_sequence_reset too-low Reject)
+// The 036 site — apply_inbound_sequence_reset's too-low Reject arm —
 // emits 35=3. Throw on 35=3 → C1 arm → Disconnected.
 // fromAdmin_rejects=false so the frame reaches apply_inbound_sequence_reset
-// (not the fromAdmin-veto path at :2491).
-// Anchors: spec.md FR-003; session.cpp:4589.
+// (not the fromAdmin-veto arm).
+// Anchors: spec.md FR-003; apply_inbound_sequence_reset's too-low Reject arm.
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow_Throw) {
     app->fromAdmin_rejects = false;
@@ -1626,12 +1626,12 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow_Throw) {
 
 // T025i — Logout_Guard3LogonAckSendingTime — throw variant
 //
-// The 036 site at session.cpp:3368 (Guard-3 Logout) emits 35=5.
+// The 036 site — Guard-3's Logout emit — emits 35=5.
 // Initiator path: our outbound Logon (35=A) fires toAdmin first (via the
 // existing Logon site). Gate throw_on_msg_type="5" — Logon (35=A) passes;
 // throw fires when Guard-3 Logout (35=5) calls toAdmin.
 // C1 arm: record_state_transition_(Disconnected) + co_return unexpected(app_callback_threw).
-// Anchors: spec.md FR-003; session.cpp:3368-3380 (Guard-3 block).
+// Anchors: spec.md FR-003; Guard-3 block.
 
 TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime_Throw) {
     app->mode = CoverageApp::Mode::Throw;
@@ -1656,7 +1656,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime_Throw) {
 //
 // Anchors: spec.md FR-004/FR-005; contracts/admin-emit-coverage.md C2/C3;
 //          data-model.md INV-COV-2/INV-COV-5; quickstart.md §BMR veto cell;
-//          session.cpp:3288-3307 (BMR site); session.cpp:3320 (persist_inbound_advance_).
+//          build_business_message_reject's call site (BMR site); persist_inbound_advance_.
 // ════════════════════════════════════════════════════════════════════════════
 
 // T027 — BMR_ToApp_Observed
@@ -1739,7 +1739,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
 // but FAILS on durable_inbound. Use persistent ObservableStore to observe.
 //
 // Anchors: FR-004; C2/INV-COV-5; quickstart.md §BMR veto cell;
-//          session.cpp:3320 (persist_inbound_advance_ outside fromApp branch).
+//          persist_inbound_advance_'s call site outside the fromApp branch.
 
 TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
     app->fromApp_rejects = true;          // provoke BMR
@@ -1809,7 +1809,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
 // No durable_inbound assertion: terminal close → persist is moot (C2 spec).
 //
 // Anchors: FR-003; C2 (throw arm → terminal close, persist moot);
-//          session.cpp:3277-3279 (fromApp throw close pattern mirror).
+//          fromApp's throw → terminal-close pattern (mirrors fire_to_admin_'s).
 
 TEST_F(AdminEmitBMRCoverageTest, BMR_Throw_TerminalClose) {
     app->fromApp_rejects = true;           // provoke BMR

@@ -694,8 +694,8 @@ foreach(_artifact IN LISTS _artifacts)
     # FR-010, and the floor that stops equality from holding vacuously: two empty
     # sets are equal. Without this an artifact shipping NO headers under either
     # root passes the comparison below with a perfectly straight face.
-    # ⚠️ FATAL_ERROR, not `list(APPEND _missing …)`. `_missing` is initialised at
-    # :316 and consumed ONCE at :463 — sixty lines ABOVE here — then reset at the
+    # ⚠️ FATAL_ERROR, not `list(APPEND _missing …)`. `_missing` is initialised by
+    # its own `set(_missing "")` and consumed ONCE by the earlier `if(NOT _missing STREQUAL "")` check — then reset at the
     # top of the next artifact's iteration. An append at this point is never read
     # by anything, so routing this branch through it made the floor DEAD CODE:
     # the check that exists to stop a vacuous pass would itself have passed

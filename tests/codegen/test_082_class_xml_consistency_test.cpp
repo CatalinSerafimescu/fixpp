@@ -23,7 +23,7 @@
 //
 // ── CLASS-SIDE EXTRACTION RULE ───────────────────────────────────────────────
 // Ported from the version-agnostic rule documented at
-// `vlatest_manifest_class_consistency_test.cpp:33-63`, and re-verified empirically
+// `vlatest_manifest_class_consistency_test.cpp`'s "CLASS-SIDE EXTRACTION RULE", and re-verified empirically
 // against the real generated `v42` header before this test was written:
 //   - MESSAGE class:   `^class <Name> {$`      (0-indent) … `^};$`
 //   - GROUP flyweight: `^    class G_<N> {$`   (4-indent) … `^    };$`,

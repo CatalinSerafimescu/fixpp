@@ -1,6 +1,6 @@
 # neg_compid_auth_not_array.toml
 # compid_authorization_policy entry value is a string instead of an array —
-# triggers malformed_value (lines 631-641 scalar_mappers.cpp).
+# (map_structured_members's compid_authorization_policy array-check arm, scalar_mappers.cpp).
 
 [clock]
 kind = "system"

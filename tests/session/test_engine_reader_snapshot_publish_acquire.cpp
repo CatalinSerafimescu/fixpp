@@ -47,7 +47,7 @@
 //
 // Anchors: data-model E-7/INV-9/D-SNAP; [2h D-SNAP]; engine.hpp §302-307;
 //          NFR-017; [[feedback_single_threaded_harness_masks_strand_races]];
-//          engine.cpp run_connect_loop step 4 (publish_entry at line ~1079).
+//          engine.cpp run_connect_loop step 4 (its `publish_entry` call).
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"

@@ -334,7 +334,7 @@ jobs:
       # is PRIVATE, so an anonymous pull of fixpp-ccache 401s and every leg reads
       # as a permanent MISS with no other symptom. `|| true` because a fork PR's
       # downgraded token cannot log in, and there the anonymous attempt (public
-      # package) is still the correct fallback. Same shape as tier2.yml:392.
+      # package) is still the correct fallback. Same shape as tier2.yml's sccache restore.
       - name: Restore ccache from GHCR
         id: ccache_restore
         run: |
@@ -535,8 +535,8 @@ jobs:
       # ⚠️ ASSERT THE COUNT, NOT JUST THE EXIT CODE. `ctest -L` exits 0 when the
       # filter matches NOTHING, so an exit-code-only check reports the lane green
       # having run zero witnesses. fixpp::consumer::install-witness is registered
-      # only inside `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in `if(FIXPP_BUILD_TESTS)`
-      # (CMakeLists.txt:401); if that option ever goes OFF here the whole 086/087
+      # only inside `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in `if(FIXPP_BUILD_TESTS)`;
+      # if that option ever goes OFF here the whole 086/087
       # installed-interface gate silently stops existing.
       #
       # WHY THIS FILE MATTERS MOST: contract §1 discharges the UNMEASURED
@@ -547,7 +547,7 @@ jobs:
       # Contract §6a.
       #
       # UNCONDITIONAL — no `if:` guard. The two test steps below are mutually
-      # exclusive by `if:` (`:341` on all but -tsan, `:349` only on it) and jointly
+      # exclusive by `if:` (`libcxx_test` on all but -tsan, `libcxx_tsan_test` on it) jointly
       # cover every lane, so one unguarded step covers both. Placed after Build and
       # before the first test step: `ctest -N` needs a configured tree.
       - name: Assert the consumer witness is registered (087 FR-014 gate)

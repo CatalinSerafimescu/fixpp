@@ -31,7 +31,7 @@ TEST_F(ResendAbortOnFailingWrite, FailedWriteMidResendAbortsAndDisconnects) {
 
     // Arm the transport to fail the next write — the resend reply that the
     // ResendRequest below triggers. transmit_async() wraps the sync send in
-    // try/catch and maps the throw to a write failure (session.cpp ~1781).
+    // try/catch and maps the throw to a write failure (session.cpp).
     capture.fail_writes = true;
 
     // Peer asks us to replay [2..0] (through current outbound). The reply write

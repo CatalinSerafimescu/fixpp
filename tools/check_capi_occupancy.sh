@@ -5,7 +5,7 @@
 #
 # 049-c-abi-handles-errors (T014, FR-013 / data-model E-6) C-ABI occupancy /
 # drift gate. TWO INDEPENDENT CHECKS that measure DIFFERENT quantities and are
-# NEVER compared to each other ([2i §4.3] ~line 608 + P2-5; comparing the 2
+# NEVER compared to each other ([2i §4.3]'s own admonition + P2-5; comparing the 2
 # published decimal #defines against the 4 decimal source variants would always
 # FAIL):
 #

@@ -19,16 +19,16 @@
 //
 // First-seen context, determined empirically (not assumed): `NoExecs(124)`
 // is declared via THREE separate group declarations, one per referencing
-// component (`dictionaries/FIX44.xml:2805-2824` — `ExecAllocGrp`,
+// component (FIX44.xml's three `NoExecs` group declarations — `ExecAllocGrp`,
 // `ExecCollGrp`, `ExecsGrp`). `ExecAllocGrp`'s first field is `LastQty`
 // (tag 32); `ExecCollGrp`/`ExecsGrp`'s sole field is `ExecID` (tag 17).
 // `ExecAllocGrp` is referenced for the first time in document order at
-// `FIX44.xml:552`, inside `AllocationInstruction` (msgtype `J`,
-// `FIX44.xml:539`) — no earlier message references any `NoExecs`-bearing
+// FIX44.xml's `ExecAllocGrp` reference, inside `AllocationInstruction` (msgtype `J`,
+// its own message declaration) — no earlier message references any `NoExecs`-bearing
 // component. So `J` is the first-seen context, and its group's own
 // (correct) delimiter is 32 — exactly the measured `bare_global=32` for
 // tag 124 (research.md T007 sample table). `CollateralRequest` (`AX`,
-// `FIX44.xml:2046`) references `ExecCollGrp` (`:2058`), whose true
+// its own message declaration) references `ExecCollGrp` (its own component reference), whose true
 // (declaration-order) delimiter is 17 — exactly the measured
 // `oracle_delim=17` for the same tag, i.e. AX/124 is the divergent context.
 //
@@ -40,15 +40,15 @@
 // (LastQty) — i.e. the SAME tag that is today's wrongly-resolved delimiter
 // for this no_tag (spec.md's "100% of cases" observation, D-5). Tag 32 is
 // NOT declared anywhere in any Collateral message's OWN dictionary tree
-// (`FIX44.xml:2046-2265` — none of the six reference `ExecAllocGrp`), so it
+// (FIX44.xml's six Collateral message declarations — none reference `ExecAllocGrp`), so it
 // is absent from `table_view::valid_tags_for("AX")` (built solely from
-// `message_fields("AX")`, `dictionary.cpp:378-383` — a per-message-type
+// `message_fields("AX")`, `Dictionary::message_fields` — a per-message-type
 // computation entirely independent of the group-context pollution
-// mechanism at `table_view.hpp:641-646`). `dictionary_driven_validator::
-// validate()`'s Step 1 ("(a) Unexpected tag check", `validator.hpp:176`)
+// mechanism (`set_group_first_ctx`'s `add_group_member_ctx` injection). `dictionary_driven_validator::
+// validate()`'s Step 1 ("(a) Unexpected tag check", its own comment marker)
 // walks EVERY field in the frame — including fields inside a group's body,
 // since `MessageView::begin()/end()` is a flat, dict-free byte scan with no
-// notion of group nesting (`parser.hpp:186-234`) — and runs BEFORE Step 3's
+// notion of group nesting (its `field_iterator`) — and runs BEFORE Step 3's
 // group-structure walk. So ANY AX frame containing tag 32 anywhere is
 // rejected with `wire_unexpected_tag` at Step 1, REGARDLESS of the
 // group-context member-set pollution, both TODAY and AFTER this feature
@@ -156,7 +156,7 @@ Dictionary load_real_dict(char const* file, std::pmr::memory_resource* mr) {
 
 // FIX50SP2 frames are FIXT.1.1-encoded (BeginString="FIXT.1.1"); the session-
 // header fields (34/49/52/56/...) reach validity via the 081 Concern A
-// `kFixtFramingTable` (dictionary.cpp:573-589), keyed off
+// `kFixtFramingTable` (`Dictionary::as_table_view()`'s framing switch), keyed off
 // `which_session_version()` detecting v50sp2 from the loaded dictionary —
 // not via `valid_tags_for`, which stays empty for FIX50SP2's own (FIXT-
 // split) `<header/>`.
@@ -186,7 +186,7 @@ expected_t<void> run_validate(dictionary_driven_validator const& v,
 
 // FIX44 CollateralRequest(AX) message-level required prefix: CollReqID(894),
 // CollAsgnReason(895, enum), TransactTime(60) + standard header
-// (FIX44.xml:2046-2049).
+// (FIX44.xml's `CollateralRequest` message declaration).
 std::string fix44_ax_required_prefix() {
     return "35=AX\x01"
            "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
@@ -196,8 +196,8 @@ std::string fix44_ax_required_prefix() {
 // FIX44 AllocationInstruction(J) message-level required prefix: AllocID(70),
 // AllocTransType(71, enum), AllocType(626, enum), AllocNoOrdersType(857,
 // enum), Side(54, enum), Quantity(53), AvgPx(6), TradeDate(75) + standard
-// header (FIX44.xml:539-576). Instrument(required='Y') carries no required
-// direct fields of its own (FIX44.xml:2386-2401, all required='N').
+// header (FIX44.xml's `AllocationInstruction` message declaration). Instrument(required='Y') carries no required
+// direct fields of its own (FIX44.xml's `Instrument` component declaration, all required='N').
 std::string fix44_j_required_prefix() {
     return "35=J\x01"
            "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
@@ -227,10 +227,10 @@ TEST(DelimiterDivergenceWire, DivergentContextRejectedWhileFirstSeenAccepted) {
 
     // Divergent context: CollateralRequest(AX), NoExecs(124) opened with the
     // group's TRUE declaration-order delimiter, ExecID(17) — the tag the
-    // dictionary actually declares for ExecCollGrp (FIX44.xml:2815-2819).
+    // dictionary actually declares for ExecCollGrp (FIX44.xml's `ExecCollGrp` component declaration).
     // Today the context's REGISTERED delimiter is still the dictionary-wide
     // first-seen value (32, LastQty), so opening with 17 is rejected
-    // (wire_required_field_missing at validator.hpp:287-291 — the first
+    // (wire_required_field_missing at consume_group's `ents[i].tag != delim_tag` guard — the first
     // instance's opening tag doesn't match delim_tag).
     {
         auto buf = make_frame(fix44_ax_required_prefix() +
@@ -302,11 +302,11 @@ TEST(DelimiterDivergenceWire, WrongOpeningTagStillRejected) {
 // the injected/polluted member of every one of FIX44's six polluted
 // NoExecs(124) contexts (AX/AY/AZ/BA/BB/BG) — is absent from
 // `valid_tags_for("AX")`. Given that, `dictionary_driven_validator::
-// validate()`'s Step 1 (`validator.hpp:176`, which runs over EVERY field in
+// validate()`'s Step 1 (its "(a) Unexpected tag check" comment marker, which runs over EVERY field in
 // the frame BEFORE Step 3's group-structure walk, per parser.hpp's flat
 // dict-free field_iterator) rejects any AX frame containing tag 32 anywhere
 // with wire_unexpected_tag, independent of the group-context pollution at
-// table_view.hpp:641-646 (whose scope is `group_ctx_`/`group_member_tags`,
+// `set_group_first_ctx`'s `add_group_member_ctx` injection (whose scope is `group_ctx_`/`group_member_tags`,
 // never `valid_`/`valid_tags_for`). So AX/NoExecs(124) — the "cleanest"
 // divergent context per quickstart.md §1, and FIX44's ONLY polluted
 // NoExecs(124) family — cannot demonstrate FR-010a's over-permissive-
@@ -323,7 +323,7 @@ TEST(DelimiterDivergenceWire, WrongOpeningTagStillRejected) {
 // DEFINITION not declared in the polluted context's own message tree (that
 // is what makes it an injection rather than a genuine member), and
 // `valid_tags_for(mt)` is built solely from `mt`'s own declaration
-// (dictionary.cpp:378-383). So no named polluted context, in any of the
+// (`Dictionary::message_fields`). So no named polluted context, in any of the
 // ten shipped dictionaries, can exhibit "accepted today" for its injected
 // tag through this validation path — the blocking mechanism generalises.
 // ============================================================================
@@ -351,7 +351,7 @@ TEST(DelimiterDivergenceWire, PollutedContextInjectedTagIsNotIndependentlyValid)
 
     // The member set is no longer polluted. NOTE this needed no separate fix:
     // `set_group_first_ctx`'s unconditional `add_group_member_ctx(..., first)`
-    // (table_view.hpp:645) is RETAINED and still runs — but `first` is now
+    // is RETAINED and still runs — but `first` is now
     // this context's real delimiter, which is already a declared member, so
     // the injection is a NO-OP (D-5 / C-3.3). The pollution disappears by
     // construction. That is why SC-002's 48 -> 0 has no implementation task of
@@ -374,14 +374,14 @@ TEST(DelimiterDivergenceWire, PollutedContextInjectedTagIsNotIndependentlyValid)
     // THE FINDING: the injected/polluted tag is NOT independently valid for
     // msg_type AX at all — it is absent from valid_tags_for("AX"), which is
     // built solely from AX's own message_fields() expansion
-    // (dictionary.cpp:378-383) and is entirely untouched by the group-
+    // (`Dictionary::message_fields`) and is entirely untouched by the group-
     // context pollution mechanism. This is TRUE BOTH BEFORE AND AFTER this
     // feature (083's scope never touches add_valid_tag/valid_tags_for), so
     // it is the reason FR-010a's leniency cannot be witnessed on this named
     // context.
     EXPECT_FALSE(tv.field_valid_for("AX", kInjectedTag))
         << "MEASURED: tag 32 (LastQty) is NOT independently valid for msg_type AX — it is not "
-           "declared anywhere in CollateralRequest's own dictionary tree (FIX44.xml:2046-2090; "
+           "declared anywhere in CollateralRequest's own dictionary tree (its message declaration; "
            "none of the six Collateral messages reference ExecAllocGrp). This means Step 1 of "
            "dictionary_driven_validator::validate() rejects ANY AX frame containing tag 32 "
            "as wire_unexpected_tag, independent of and unaffected by the group-context member-"
@@ -511,7 +511,7 @@ TEST(DelimiterDivergenceWire, TrailingMessageFieldNotSwallowedIntoLastInstance) 
 //   41599 NoLegPhysicalSettlTerms -> IOI(6), path {555}                 -> true delim 41604 (research.md T007)
 //   42060 NoUnderlyingPhysicalSettlTerms -> IOI(6), path {711}          -> true delim 42065 (research.md T007)
 //   1499 NoAsgnReqs             -> StreamAssignmentRequest(CC)          -> true delim 453 (NoPartyIDs, research.md T007)
-//   1669 NoRiskLimits           -> PartyRiskLimitsReport(CM), path {1677} -> true delim 1529 (research.md D-model line 494/499)
+//   1669 NoRiskLimits           -> PartyRiskLimitsReport(CM), path {1677} -> true delim 1529 (research.md T007)
 //   1919 NoPriceMovements       -> SecurityList(y), path {146}          -> true delim 1920 (spec.md Baseline: "1919->1920")
 //
 // 1669 and 1919 are nested inside a PARENT group (1677, 146 respectively);

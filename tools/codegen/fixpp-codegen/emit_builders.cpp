@@ -1085,7 +1085,7 @@ void emit_msg_hpp(TemplateWriter& w, std::string const& ns, std::string const& m
     w.line(ns);
     w.line();
 
-    // 078-precompiled-builder-libs contract (spec.md Edge Case ~line 128,
+    // 078-precompiled-builder-libs contract (spec.md's ODR-boundary Edge Case,
     // FR-006/FR-007): FIXPP_BUILDERS_HEADER_ONLY[_<Msg>] is a PROGRAM-WIDE
     // per-message switch, not a per-TU one. Defining it force-inlines an
     // `inline` (weak/COMDAT) build_<Msg> here; the archive's `.builder.cpp`

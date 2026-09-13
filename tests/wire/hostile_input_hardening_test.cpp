@@ -274,7 +274,7 @@ TEST(HostileInputHardening, StalePendingClearedIterYields43) {
 // mix() and overlay_cap_for() are replicated here so the witness can compute a
 // slot-colliding tag set for a KNOWN seed (installed via the test hook). This
 // both exercises the kMaxBuildProbe skip branch deterministically (discharging
-// the standing coverage waiver at offset_table_error_path_test.cpp:11) and
+// the standing coverage waiver at offset_table_error_path_test.cpp's kMaxBuildProbe note) and
 // proves the seed makes a precomputed collision set useless under any other
 // seed.
 

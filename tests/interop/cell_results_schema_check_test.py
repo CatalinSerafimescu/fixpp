@@ -1648,8 +1648,8 @@ EXPECTED_IDS = frozenset({
 
 def test_per_cell_completeness_no_silent_absence(cells):
     # Assert the exact expected id set — a dropped OR surprise-added cell fails
-    # with a clear diff (parent-harness-gate-contract.md:56 missing-row rule /
-    # T028 claim in tasks.md:125).
+    # with a clear diff (parent-harness-gate-contract.md's "Per-cell completeness rule" /
+    # T028 claim in specs/089-quickfix-interop-conversation/tasks.md).
     # 089 T095: EXPECTED_IDS is the NON-conversation inventory. The
     # kind:conversation rows are governed by _check_e1a's 32-slot
     # (cell_id, config) set equality instead -- a different population with a

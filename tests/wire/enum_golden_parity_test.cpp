@@ -229,7 +229,7 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 
 // Loads a real shipped dictionary and returns its table_view — the same
 // production path golden.csv's rows are meant to characterize
-// (Dictionary::as_table_view(), dictionary.hpp:193-205; the enum-domain
+// (Dictionary::as_table_view(); the enum-domain
 // table owns copies of the code bytes, so this legally outlives the
 // Dictionary going out of scope at the end of this function).
 fixpp::dict::table_view load_shipped_table_view(char const* filename) {

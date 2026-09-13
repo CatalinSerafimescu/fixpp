@@ -1,6 +1,6 @@
 # neg_mode_unknown.toml
 # mode has an unrecognised token — triggers unknown_enum at session[0].mode
-# (lines 286-294 scalar_mappers.cpp).
+# (map_scalars's mode unknown-token arm, scalar_mappers.cpp).
 
 [clock]
 kind = "system"

@@ -186,7 +186,7 @@ applicable, all 8 green as authored).
 
 ### `069_tradecapturereport_ae.fix` (AE) — group-heavy/nested (NoSides / NoLegs)
 
-- Required='Y' (`dictionaries/FIX44.xml:1435-1494`): TradeReportID(571),
+- Required='Y' (dictionaries/FIX44.xml's `TradeCaptureReport` message): TradeReportID(571),
   PreviouslyReported(570), Instrument(component — Symbol(55) seeded, no
   individually-required sub-field), LastQty(32), LastPx(31), TradeDate(75),
   TransactTime(60), TrdCapRptSideGrp/NoSides(552) (component required; entry
@@ -209,12 +209,12 @@ applicable, all 8 green as authored).
 
 ### `069_positionreport_ap.fix` (AP) — NoPositions group
 
-- Required='Y' (`dictionaries/FIX44.xml:1815-1843`, `FIX44::PositionReport`
+- Required='Y' (dictionaries/FIX44.xml's `PositionReport` message, `FIX44::PositionReport`
   ctor): PosMaintRptID(721), PosReqResult(728), ClearingBusinessDate(715),
   Account(1), AccountType(581), SettlPrice(730), SettlPriceType(731),
   PriorSettlPrice(734). `PositionQty`/`NoPositions`(702) is required='Y' at
   the component level but the internal group is required='N'
-  (`dictionaries/FIX44.xml:2530-2538`) — populated (1 entry: PosType="TQ",
+  (dictionaries/FIX44.xml's `PositionQty` component) — populated (1 entry: PosType="TQ",
   LongQty=100) per C4's table note.
 - **Root level**: ascending among `1,581,702,715,721,728,730,731,734`.
 - **NoPositions entry level**: `703,704` (PosType, LongQty).
@@ -223,7 +223,7 @@ applicable, all 8 green as authored).
 ### `069_collateralinquiry_bb.fix` (BB) — no required fields
 
 - CollateralInquiry has NO required='Y' fields at all
-  (`dictionaries/FIX44.xml:2231-2273`; confirmed via the QuickFIX header's
+  (dictionaries/FIX44.xml's `CollateralInquiry` message; confirmed via the QuickFIX header's
   default-constructible ctor with no required-args overload). Seeded a sane
   illustrative set: Account(1)="ACCT1", AccountType(581)=1,
   CollInquiryID(909)="COLLINQ1", NoCollInquiryQualifier(938, 1 entry:
@@ -233,7 +233,7 @@ applicable, all 8 green as authored).
 
 ### `069_securitylist_y.fix` (y) — NoRelatedSym group
 
-- Required='Y' (`dictionaries/FIX44.xml:1218-1224`, `FIX44::SecurityList`
+- Required='Y' (dictionaries/FIX44.xml's `SecurityList` message, `FIX44::SecurityList`
   ctor): SecurityReqID(320), SecurityResponseID(322),
   SecurityRequestResult(560). `SecListGrp`/`NoRelatedSym`(146) required='N'
   but populated (1 entry: Symbol(55)="MSFT") per C4's table note.
@@ -243,12 +243,12 @@ applicable, all 8 green as authored).
 
 ### `069_confirmation_ak.fix` (AK) — required NoCapacities group
 
-- Required='Y' (`dictionaries/FIX44.xml:1646-1673`, `FIX44::Confirmation`
+- Required='Y' (dictionaries/FIX44.xml's `Confirmation` message, `FIX44::Confirmation`
   ctor): ConfirmID(664), ConfirmTransType(666), ConfirmType(773),
   ConfirmStatus(665), TransactTime(60), TradeDate(75), AllocQty(80),
   Side(54), AllocAccount(79), AvgPx(6), GrossTradeAmt(381), NetMoney(118).
   `CpctyConfGrp`/`NoCapacities`(862) is a REQUIRED group
-  (`dictionaries/FIX44.xml:2798-2804`, group required='Y') — 1 entry,
+  (dictionaries/FIX44.xml's `CpctyConfGrp` component, group required='Y') — 1 entry,
   OrderCapacity(528)='A' + OrderCapacityQty(863)=100 (both required='Y'
   within the group).
 - **Root level**: ascending among `6,54,60,75,79,80,118,381,664,665,666,773,862(+528,863)`.
@@ -256,7 +256,7 @@ applicable, all 8 green as authored).
 
 ### `069_registrationinstructions_o.fix` (o) — nested NoRegistDtls
 
-- Required='Y' (`dictionaries/FIX44.xml:1009-1021`, `FIX44::
+- Required='Y' (dictionaries/FIX44.xml's `RegistrationInstructions` message, `FIX44::
   RegistrationInstructions` ctor): RegistID(513), RegistTransType(514),
   RegistRefID(508). `RgstDtlsGrp`/`NoRegistDtls`(473) required='N' but
   populated (1 entry: RegistDtls(509)="DETAILS1") per C4's table note.
@@ -265,10 +265,10 @@ applicable, all 8 green as authored).
 
 ### `069_liststatus_n.fix` (N) — required NoOrders group
 
-- Required='Y' (`dictionaries/FIX44.xml:628-639`, `FIX44::ListStatus` ctor):
+- Required='Y' (dictionaries/FIX44.xml's `ListStatus` message, `FIX44::ListStatus` ctor):
   ListID(66), ListStatusType(429), NoRpts(82), ListOrderStatus(431),
   RptSeq(83), TotNoOrders(68). `OrdListStatGrp`/`NoOrders`(73) is a REQUIRED
-  group (`dictionaries/FIX44.xml:3137-3145`, group required='Y') — 1 entry,
+  group (dictionaries/FIX44.xml's `OrdListStatGrp` component, group required='Y') — 1 entry,
   ClOrdID(11)+CumQty(14)+OrdStatus(39)+LeavesQty(151)+CxlQty(84), all
   required='Y' within the group.
 - **Root level**: ascending among `66,68,73(+11,14,39,151,84),82,83,429,431`.
@@ -276,7 +276,7 @@ applicable, all 8 green as authored).
 
 ### `069_businessmessagereject_j.fix` (j) — flat, ref-tag echo
 
-- Required='Y' (`dictionaries/FIX44.xml:956-964`, `FIX44::
+- Required='Y' (dictionaries/FIX44.xml's `BusinessMessageReject` message, `FIX44::
   BusinessMessageReject` ctor): RefMsgType(372), BusinessRejectReason(380).
   No groups (flat message). Seed: RefMsgType="D", BusinessRejectReason=3
   (UnsupportedMessageType).

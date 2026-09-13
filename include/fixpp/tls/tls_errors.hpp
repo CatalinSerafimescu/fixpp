@@ -3,7 +3,7 @@
 // Re-export aliases for the 16 tls_* error variants defined in
 // include/fixpp/core/error.hpp (slots 78–93). All definitions live in
 // core/error.hpp; this header provides the fixpp::tls::errors namespace
-// convenience aliases per data-model.md E-15 / [2g §6.6] lines 1006-1013.
+// convenience aliases per data-model.md E-15 / [2g §6.6]'s C-ABI-mapping list.
 //
 // C-ABI coalescing groups (owned by 2i; no extern "C" surface added here):
 //   FIXPP_ERR_TLS_CONFIG     ← tls_cert_load_failed, tls_cert_parse_failed,

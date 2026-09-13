@@ -184,7 +184,7 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
         //
         // Spawn on the UNDERLYING executor (asio::any_io_executor strand), NOT on
         // the session_executor wrapper — mirroring the R1 fix in session.cpp and the
-        // engine.cpp:1567 precedent.  The wrapper's ~impl() is destroyed across the
+        // engine.cpp's `kl->executor().underlying()` co_spawn precedent.  The wrapper's ~impl() is destroyed across the
         // caller thread and the worker, causing a TSan race at any_executor.hpp:475.
         auto seed_fn = [sess]() -> asio::awaitable<void> {
             auto& mgr = sess->seqnum_mgr_test_access();

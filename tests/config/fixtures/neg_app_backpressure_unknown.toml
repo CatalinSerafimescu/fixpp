@@ -1,6 +1,6 @@
 # neg_app_backpressure_unknown.toml
 # session.app_backpressure with an unknown token — triggers unknown_enum
-# (lines 510-517 scalar_mappers.cpp).
+# (map_scalars's app_backpressure unknown-token arm, scalar_mappers.cpp).
 
 [clock]
 kind = "system"

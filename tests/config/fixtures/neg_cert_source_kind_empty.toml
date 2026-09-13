@@ -1,6 +1,6 @@
 # neg_cert_source_kind_empty.toml
 # [cert_source] kind is an empty string — triggers empty_required at "cert_source.kind"
-# (lines 221-226 selector_resolver.cpp).
+# (resolve_engine_cert_source's empty-kind arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

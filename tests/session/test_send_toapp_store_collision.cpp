@@ -8,7 +8,7 @@
 // VALUE (`is_persistent_retain_fatal(impl_r.error())`, range [56,65)).
 // `Application::toApp` may return `unexpected(<any error>)` — including a
 // store-block code — from `send_impl`'s toApp veto/other-error return
-// (`:4499`, "Session stays Active (INV-5/SC-004)"), BEFORE assign_outbound()
+// (send_impl's toApp veto return, "Session stays Active (INV-5/SC-004)"), BEFORE assign_outbound()
 // or store_then_emit ever run: no seqnum consumed, nothing stored, nothing
 // transmitted. The pre-fix value-based guard cannot distinguish that
 // passthrough from a genuine commit-region store failure carrying the same

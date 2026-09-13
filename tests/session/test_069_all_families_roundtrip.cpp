@@ -15,7 +15,7 @@
 // local scan_slice_for_tag() byte scan (mirrors the C-ABI's own
 // src/capi/message_read.cpp:scan_slice_for_tag mechanism -- fixpp_msg_get_group
 // et al -- the group's root group_context is seeded unconditionally at
-// MessageView construction, parser.hpp:144, so group_slices() works
+// MessageView construction (its constructor seeds the root group_context), so group_slices() works
 // immediately post-parse with no typed group<>() call).
 //
 // Seeds: for each of the 83 registry MsgTypes, the message's own
@@ -23,7 +23,7 @@
 // below); messages with fewer than 2 own-required scalars are topped up with
 // 1-2 adjacent body scalars (not required) so every row has >=2 fields.
 // Required GROUPS are seeded/asserted only for the mandated nested exemplar
-// (TradeCaptureReport/AE, TrdCapRptSideGrp/NoSides -- FIX44.xml:3536-3538);
+// (TradeCaptureReport/AE, TrdCapRptSideGrp/NoSides -- FIX44.xml component);
 // the other 82 messages leave their (possibly-required) groups empty --
 // build_<Msg> never validates group cardinality (that is validate_<Msg>'s
 // job, T013/US3, exercised separately below for exactly 2 discriminating
@@ -36,9 +36,9 @@
 //          precedent); tests/session/test_067_builder_failclosed.cpp (T013
 //          disposition precedent, wire_required_field_missing);
 //          tests/session/test_067_completeness.cpp (set-equality diagnostic
-//          precedent, lines 138-155); include/fixpp/wire/builder_validate.hpp
-//          (validate_required, wire_required_field_missing at :77/:86);
-//          src/capi/message_read.cpp:141 (scan_slice_for_tag precedent).
+//          precedent, ExactSetEqualityOverBuilderRegistryKeys); include/fixpp/wire/builder_validate.hpp
+//          (validate_required, wire_required_field_missing at its scalar and group-empty checks);
+//          src/capi/message_read.cpp's scan_slice_for_tag (precedent).
 
 #include <gtest/gtest.h>
 
@@ -206,11 +206,11 @@ std::pmr::monotonic_buffer_resource* AllFamiliesRoundtrip069::dict_arena_ = null
 fixpp::dict::Dictionary* AllFamiliesRoundtrip069::dict_ = nullptr;
 fixpp::dict::table_view* AllFamiliesRoundtrip069::tv_ = nullptr;
 
-// IOI (6) -- dictionaries/FIX44.xml:64-92
-//   required 'IOIID' (FIX44.xml:65) -> ioiid(tag 23)
-//   required 'IOITransType' (FIX44.xml:66) -> ioi_trans_type(tag 28)
-//   required 'Side' (FIX44.xml:71) -> side(tag 54)
-//   required 'IOIQty' (FIX44.xml:74) -> ioi_qty(tag 27)
+// IOI (6) -- dictionaries/FIX44.xml message
+//   required 'IOIID' (FIX44.xml field) -> ioiid(tag 23)
+//   required 'IOITransType' (FIX44.xml field) -> ioi_trans_type(tag 28)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
+//   required 'IOIQty' (FIX44.xml field) -> ioi_qty(tag 27)
 TEST_F(AllFamiliesRoundtrip069, IOI) {
     fixpp::v44::IOIArgs args{};
     args.ioiid = "6_ioiid";
@@ -226,11 +226,11 @@ TEST_F(AllFamiliesRoundtrip069, IOI) {
     expect_wire_text(mv, 27, "6_ioi_qty", "ioi_qty");
 }
 
-// Advertisement (7) -- dictionaries/FIX44.xml:93-114
-//   required 'AdvId' (FIX44.xml:94) -> adv_id(tag 2)
-//   required 'AdvTransType' (FIX44.xml:95) -> adv_trans_type(tag 5)
-//   required 'AdvSide' (FIX44.xml:100) -> adv_side(tag 4)
-//   required 'Quantity' (FIX44.xml:101) -> quantity(tag 53)
+// Advertisement (7) -- dictionaries/FIX44.xml message
+//   required 'AdvId' (FIX44.xml field) -> adv_id(tag 2)
+//   required 'AdvTransType' (FIX44.xml field) -> adv_trans_type(tag 5)
+//   required 'AdvSide' (FIX44.xml field) -> adv_side(tag 4)
+//   required 'Quantity' (FIX44.xml field) -> quantity(tag 53)
 TEST_F(AllFamiliesRoundtrip069, Advertisement) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v44::AdvertisementArgs args{};
@@ -248,15 +248,15 @@ TEST_F(AllFamiliesRoundtrip069, Advertisement) {
     expect_wire_decimal(mv, 53, "10.5", &read_arena, "quantity");
 }
 
-// ExecutionReport (8) -- dictionaries/FIX44.xml:115-254
-//   required 'OrderID' (FIX44.xml:116) -> order_id(tag 37)
-//   required 'ExecID' (FIX44.xml:135) -> exec_id(tag 17)
-//   required 'ExecType' (FIX44.xml:137) -> exec_type(tag 150)
-//   required 'OrdStatus' (FIX44.xml:138) -> ord_status(tag 39)
-//   required 'Side' (FIX44.xml:155) -> side(tag 54)
-//   required 'LeavesQty' (FIX44.xml:194) -> leaves_qty(tag 151)
-//   required 'CumQty' (FIX44.xml:195) -> cum_qty(tag 14)
-//   required 'AvgPx' (FIX44.xml:196) -> avg_px(tag 6)
+// ExecutionReport (8) -- dictionaries/FIX44.xml message
+//   required 'OrderID' (FIX44.xml field) -> order_id(tag 37)
+//   required 'ExecID' (FIX44.xml field) -> exec_id(tag 17)
+//   required 'ExecType' (FIX44.xml field) -> exec_type(tag 150)
+//   required 'OrdStatus' (FIX44.xml field) -> ord_status(tag 39)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
+//   required 'LeavesQty' (FIX44.xml field) -> leaves_qty(tag 151)
+//   required 'CumQty' (FIX44.xml field) -> cum_qty(tag 14)
+//   required 'AvgPx' (FIX44.xml field) -> avg_px(tag 6)
 TEST_F(AllFamiliesRoundtrip069, ExecutionReport) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v44::ExecutionReportArgs args{};
@@ -282,12 +282,12 @@ TEST_F(AllFamiliesRoundtrip069, ExecutionReport) {
     expect_wire_decimal(mv, 6, "10.5", &read_arena, "avg_px");
 }
 
-// OrderCancelReject (9) -- dictionaries/FIX44.xml:255-277
-//   required 'OrderID' (FIX44.xml:256) -> order_id(tag 37)
-//   required 'ClOrdID' (FIX44.xml:259) -> cl_ord_id(tag 11)
-//   required 'OrigClOrdID' (FIX44.xml:261) -> orig_cl_ord_id(tag 41)
-//   required 'OrdStatus' (FIX44.xml:262) -> ord_status(tag 39)
-//   required 'CxlRejResponseTo' (FIX44.xml:272) -> cxl_rej_response_to(tag 434)
+// OrderCancelReject (9) -- dictionaries/FIX44.xml message
+//   required 'OrderID' (FIX44.xml field) -> order_id(tag 37)
+//   required 'ClOrdID' (FIX44.xml field) -> cl_ord_id(tag 11)
+//   required 'OrigClOrdID' (FIX44.xml field) -> orig_cl_ord_id(tag 41)
+//   required 'OrdStatus' (FIX44.xml field) -> ord_status(tag 39)
+//   required 'CxlRejResponseTo' (FIX44.xml field) -> cxl_rej_response_to(tag 434)
 TEST_F(AllFamiliesRoundtrip069, OrderCancelReject) {
     fixpp::v44::OrderCancelRejectArgs args{};
     args.order_id = "9_order_id";
@@ -306,10 +306,10 @@ TEST_F(AllFamiliesRoundtrip069, OrderCancelReject) {
     expect_wire_text(mv, 434, "1", "cxl_rej_response_to");
 }
 
-// DerivativeSecurityList (AA) -- dictionaries/FIX44.xml:1239-1247
-//   required 'SecurityReqID' (FIX44.xml:1240) -> security_req_id(tag 320)
-//   required 'SecurityResponseID' (FIX44.xml:1241) -> security_response_id(tag 322)
-//   required 'SecurityRequestResult' (FIX44.xml:1242) -> security_request_result(tag 560)
+// DerivativeSecurityList (AA) -- dictionaries/FIX44.xml message
+//   required 'SecurityReqID' (FIX44.xml field) -> security_req_id(tag 320)
+//   required 'SecurityResponseID' (FIX44.xml field) -> security_response_id(tag 322)
+//   required 'SecurityRequestResult' (FIX44.xml field) -> security_request_result(tag 560)
 TEST_F(AllFamiliesRoundtrip069, DerivativeSecurityList) {
     fixpp::v44::DerivativeSecurityListArgs args{};
     args.security_req_id = "AA_security_req_id";
@@ -324,11 +324,11 @@ TEST_F(AllFamiliesRoundtrip069, DerivativeSecurityList) {
     expect_wire_text(mv, 560, "560", "security_request_result");
 }
 
-// NewOrderMultileg (AB) -- dictionaries/FIX44.xml:1248-1320
-//   required 'ClOrdID' (FIX44.xml:1249) -> cl_ord_id(tag 11)
-//   required 'Side' (FIX44.xml:1274) -> side(tag 54)
-//   required 'TransactTime' (FIX44.xml:1280) -> transact_time(tag 60)
-//   required 'OrdType' (FIX44.xml:1283) -> ord_type(tag 40)
+// NewOrderMultileg (AB) -- dictionaries/FIX44.xml message
+//   required 'ClOrdID' (FIX44.xml field) -> cl_ord_id(tag 11)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
+//   required 'OrdType' (FIX44.xml field) -> ord_type(tag 40)
 TEST_F(AllFamiliesRoundtrip069, NewOrderMultileg) {
     fixpp::v44::NewOrderMultilegArgs args{};
     args.cl_ord_id = "AB_cl_ord_id";
@@ -345,12 +345,12 @@ TEST_F(AllFamiliesRoundtrip069, NewOrderMultileg) {
     expect_wire_text(mv, 40, "1", "ord_type");
 }
 
-// MultilegOrderCancelReplace (AC) -- dictionaries/FIX44.xml:1321-1396
-//   required 'OrigClOrdID' (FIX44.xml:1323) -> orig_cl_ord_id(tag 41)
-//   required 'ClOrdID' (FIX44.xml:1324) -> cl_ord_id(tag 11)
-//   required 'Side' (FIX44.xml:1350) -> side(tag 54)
-//   required 'TransactTime' (FIX44.xml:1356) -> transact_time(tag 60)
-//   required 'OrdType' (FIX44.xml:1359) -> ord_type(tag 40)
+// MultilegOrderCancelReplace (AC) -- dictionaries/FIX44.xml message
+//   required 'OrigClOrdID' (FIX44.xml field) -> orig_cl_ord_id(tag 41)
+//   required 'ClOrdID' (FIX44.xml field) -> cl_ord_id(tag 11)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
+//   required 'OrdType' (FIX44.xml field) -> ord_type(tag 40)
 TEST_F(AllFamiliesRoundtrip069, MultilegOrderCancelReplace) {
     fixpp::v44::MultilegOrderCancelReplaceArgs args{};
     args.orig_cl_ord_id = "AC_orig_cl_ord_id";
@@ -370,9 +370,9 @@ TEST_F(AllFamiliesRoundtrip069, MultilegOrderCancelReplace) {
     expect_wire_text(mv, 40, "1", "ord_type");
 }
 
-// TradeCaptureReportRequest (AD) -- dictionaries/FIX44.xml:1397-1434
-//   required 'TradeRequestID' (FIX44.xml:1398) -> trade_request_id(tag 568)
-//   required 'TradeRequestType' (FIX44.xml:1399) -> trade_request_type(tag 569)
+// TradeCaptureReportRequest (AD) -- dictionaries/FIX44.xml message
+//   required 'TradeRequestID' (FIX44.xml field) -> trade_request_id(tag 568)
+//   required 'TradeRequestType' (FIX44.xml field) -> trade_request_type(tag 569)
 TEST_F(AllFamiliesRoundtrip069, TradeCaptureReportRequest) {
     fixpp::v44::TradeCaptureReportRequestArgs args{};
     args.trade_request_id = "AD_trade_request_id";
@@ -386,13 +386,13 @@ TEST_F(AllFamiliesRoundtrip069, TradeCaptureReportRequest) {
     expect_wire_text(mv, 569, "569", "trade_request_type");
 }
 
-// TradeCaptureReport (AE) -- dictionaries/FIX44.xml:1435-1493
-//   required 'TradeReportID' (FIX44.xml:1436) -> trade_report_id(tag 571)
-//   required 'PreviouslyReported' (FIX44.xml:1458) -> previously_reported(tag 570)
-//   required 'LastQty' (FIX44.xml:1468) -> last_qty(tag 32)
-//   required 'LastPx' (FIX44.xml:1469) -> last_px(tag 31)
-//   required 'TradeDate' (FIX44.xml:1474) -> trade_date(tag 75)
-//   required 'TransactTime' (FIX44.xml:1483) -> transact_time(tag 60)
+// TradeCaptureReport (AE) -- dictionaries/FIX44.xml message
+//   required 'TradeReportID' (FIX44.xml field) -> trade_report_id(tag 571)
+//   required 'PreviouslyReported' (FIX44.xml field) -> previously_reported(tag 570)
+//   required 'LastQty' (FIX44.xml field) -> last_qty(tag 32)
+//   required 'LastPx' (FIX44.xml field) -> last_px(tag 31)
+//   required 'TradeDate' (FIX44.xml field) -> trade_date(tag 75)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, TradeCaptureReport) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v44::TradeCaptureReportArgs args{};
@@ -418,7 +418,7 @@ TEST_F(AllFamiliesRoundtrip069, TradeCaptureReport) {
     expect_wire_text(mv, 75, "AE_trade_date", "trade_date");
     expect_wire_text(mv, 60, "AE_transact_time", "transact_time");
     // Nested depth (C3): NoSides(552) entry-level readback, not just top-level
-    // scalars -- Side(54)/OrderID(37) both required per FIX44.xml:3537-3538.
+    // scalars -- Side(54)/OrderID(37) both required per FIX44.xml.
     auto side_slices = mv.offsets().group_slices(552);
     ASSERT_EQ(side_slices.size(), 1u) << "NoSides(552) must carry exactly 1 entry";
     std::span<const std::byte> const entry0{side_slices[0].data, side_slices[0].len};
@@ -430,9 +430,9 @@ TEST_F(AllFamiliesRoundtrip069, TradeCaptureReport) {
     EXPECT_EQ(*order_id_val, "AE_NoSides_OrderID");
 }
 
-// OrderMassStatusRequest (AF) -- dictionaries/FIX44.xml:1494-1505
-//   required 'MassStatusReqID' (FIX44.xml:1495) -> mass_status_req_id(tag 584)
-//   required 'MassStatusReqType' (FIX44.xml:1496) -> mass_status_req_type(tag 585)
+// OrderMassStatusRequest (AF) -- dictionaries/FIX44.xml message
+//   required 'MassStatusReqID' (FIX44.xml field) -> mass_status_req_id(tag 584)
+//   required 'MassStatusReqType' (FIX44.xml field) -> mass_status_req_type(tag 585)
 TEST_F(AllFamiliesRoundtrip069, OrderMassStatusRequest) {
     fixpp::v44::OrderMassStatusRequestArgs args{};
     args.mass_status_req_id = "AF_mass_status_req_id";
@@ -445,9 +445,9 @@ TEST_F(AllFamiliesRoundtrip069, OrderMassStatusRequest) {
     expect_wire_text(mv, 585, "585", "mass_status_req_type");
 }
 
-// QuoteRequestReject (AG) -- dictionaries/FIX44.xml:1506-1514
-//   required 'QuoteReqID' (FIX44.xml:1507) -> quote_req_id(tag 131)
-//   required 'QuoteRequestRejectReason' (FIX44.xml:1509) -> quote_request_reject_reason(tag 658)
+// QuoteRequestReject (AG) -- dictionaries/FIX44.xml message
+//   required 'QuoteReqID' (FIX44.xml field) -> quote_req_id(tag 131)
+//   required 'QuoteRequestRejectReason' (FIX44.xml field) -> quote_request_reject_reason(tag 658)
 TEST_F(AllFamiliesRoundtrip069, QuoteRequestReject) {
     fixpp::v44::QuoteRequestRejectArgs args{};
     args.quote_req_id = "AG_quote_req_id";
@@ -460,8 +460,8 @@ TEST_F(AllFamiliesRoundtrip069, QuoteRequestReject) {
     expect_wire_text(mv, 658, "658", "quote_request_reject_reason");
 }
 
-// RFQRequest (AH) -- dictionaries/FIX44.xml:1515-1519
-//   required 'RFQReqID' (FIX44.xml:1516) -> rfq_req_id(tag 644)
+// RFQRequest (AH) -- dictionaries/FIX44.xml message
+//   required 'RFQReqID' (FIX44.xml field) -> rfq_req_id(tag 644)
 //   filler (not required) -> subscription_request_type(tag 263)
 TEST_F(AllFamiliesRoundtrip069, RFQRequest) {
     fixpp::v44::RFQRequestArgs args{};
@@ -475,8 +475,8 @@ TEST_F(AllFamiliesRoundtrip069, RFQRequest) {
     expect_wire_text(mv, 263, "1", "subscription_request_type");
 }
 
-// QuoteStatusReport (AI) -- dictionaries/FIX44.xml:1520-1582
-//   required 'QuoteID' (FIX44.xml:1523) -> quote_id(tag 117)
+// QuoteStatusReport (AI) -- dictionaries/FIX44.xml message
+//   required 'QuoteID' (FIX44.xml field) -> quote_id(tag 117)
 //   filler (not required) -> account(tag 1)
 TEST_F(AllFamiliesRoundtrip069, QuoteStatusReport) {
     fixpp::v44::QuoteStatusReportArgs args{};
@@ -490,9 +490,9 @@ TEST_F(AllFamiliesRoundtrip069, QuoteStatusReport) {
     expect_wire_text(mv, 1, "AI_account", "account");
 }
 
-// QuoteResponse (AJ) -- dictionaries/FIX44.xml:1583-1645
-//   required 'QuoteRespID' (FIX44.xml:1584) -> quote_resp_id(tag 693)
-//   required 'QuoteRespType' (FIX44.xml:1586) -> quote_resp_type(tag 694)
+// QuoteResponse (AJ) -- dictionaries/FIX44.xml message
+//   required 'QuoteRespID' (FIX44.xml field) -> quote_resp_id(tag 693)
+//   required 'QuoteRespType' (FIX44.xml field) -> quote_resp_type(tag 694)
 TEST_F(AllFamiliesRoundtrip069, QuoteResponse) {
     fixpp::v44::QuoteResponseArgs args{};
     args.quote_resp_id = "AJ_quote_resp_id";
@@ -505,19 +505,19 @@ TEST_F(AllFamiliesRoundtrip069, QuoteResponse) {
     expect_wire_text(mv, 694, "694", "quote_resp_type");
 }
 
-// Confirmation (AK) -- dictionaries/FIX44.xml:1646-1712
-//   required 'ConfirmID' (FIX44.xml:1647) -> confirm_id(tag 664)
-//   required 'ConfirmTransType' (FIX44.xml:1650) -> confirm_trans_type(tag 666)
-//   required 'ConfirmType' (FIX44.xml:1651) -> confirm_type(tag 773)
-//   required 'ConfirmStatus' (FIX44.xml:1654) -> confirm_status(tag 665)
-//   required 'TransactTime' (FIX44.xml:1660) -> transact_time(tag 60)
-//   required 'TradeDate' (FIX44.xml:1661) -> trade_date(tag 75)
-//   required 'AllocQty' (FIX44.xml:1669) -> alloc_qty(tag 80)
-//   required 'Side' (FIX44.xml:1671) -> side(tag 54)
-//   required 'AllocAccount' (FIX44.xml:1675) -> alloc_account(tag 79)
-//   required 'AvgPx' (FIX44.xml:1678) -> avg_px(tag 6)
-//   required 'GrossTradeAmt' (FIX44.xml:1688) -> gross_trade_amt(tag 381)
-//   required 'NetMoney' (FIX44.xml:1699) -> net_money(tag 118)
+// Confirmation (AK) -- dictionaries/FIX44.xml message
+//   required 'ConfirmID' (FIX44.xml field) -> confirm_id(tag 664)
+//   required 'ConfirmTransType' (FIX44.xml field) -> confirm_trans_type(tag 666)
+//   required 'ConfirmType' (FIX44.xml field) -> confirm_type(tag 773)
+//   required 'ConfirmStatus' (FIX44.xml field) -> confirm_status(tag 665)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
+//   required 'TradeDate' (FIX44.xml field) -> trade_date(tag 75)
+//   required 'AllocQty' (FIX44.xml field) -> alloc_qty(tag 80)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
+//   required 'AllocAccount' (FIX44.xml field) -> alloc_account(tag 79)
+//   required 'AvgPx' (FIX44.xml field) -> avg_px(tag 6)
+//   required 'GrossTradeAmt' (FIX44.xml field) -> gross_trade_amt(tag 381)
+//   required 'NetMoney' (FIX44.xml field) -> net_money(tag 118)
 TEST_F(AllFamiliesRoundtrip069, Confirmation) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v44::ConfirmationArgs args{};
@@ -551,14 +551,14 @@ TEST_F(AllFamiliesRoundtrip069, Confirmation) {
     expect_wire_decimal(mv, 118, "10.5", &read_arena, "net_money");
 }
 
-// PositionMaintenanceRequest (AL) -- dictionaries/FIX44.xml:1713-1740
-//   required 'PosReqID' (FIX44.xml:1714) -> pos_req_id(tag 710)
-//   required 'PosTransType' (FIX44.xml:1715) -> pos_trans_type(tag 709)
-//   required 'PosMaintAction' (FIX44.xml:1716) -> pos_maint_action(tag 712)
-//   required 'ClearingBusinessDate' (FIX44.xml:1719) -> clearing_business_date(tag 715)
-//   required 'Account' (FIX44.xml:1723) -> account(tag 1)
-//   required 'AccountType' (FIX44.xml:1725) -> account_type(tag 581)
-//   required 'TransactTime' (FIX44.xml:1731) -> transact_time(tag 60)
+// PositionMaintenanceRequest (AL) -- dictionaries/FIX44.xml message
+//   required 'PosReqID' (FIX44.xml field) -> pos_req_id(tag 710)
+//   required 'PosTransType' (FIX44.xml field) -> pos_trans_type(tag 709)
+//   required 'PosMaintAction' (FIX44.xml field) -> pos_maint_action(tag 712)
+//   required 'ClearingBusinessDate' (FIX44.xml field) -> clearing_business_date(tag 715)
+//   required 'Account' (FIX44.xml field) -> account(tag 1)
+//   required 'AccountType' (FIX44.xml field) -> account_type(tag 581)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, PositionMaintenanceRequest) {
     fixpp::v44::PositionMaintenanceRequestArgs args{};
     args.pos_req_id = "AL_pos_req_id";
@@ -582,16 +582,16 @@ TEST_F(AllFamiliesRoundtrip069, PositionMaintenanceRequest) {
     expect_wire_text(mv, 60, "AL_transact_time", "transact_time");
 }
 
-// PositionMaintenanceReport (AM) -- dictionaries/FIX44.xml:1741-1769
-//   required 'PosMaintRptID' (FIX44.xml:1742) -> pos_maint_rpt_id(tag 721)
-//   required 'PosTransType' (FIX44.xml:1743) -> pos_trans_type(tag 709)
-//   required 'PosMaintAction' (FIX44.xml:1745) -> pos_maint_action(tag 712)
-//   required 'OrigPosReqRefID' (FIX44.xml:1746) -> orig_pos_req_ref_id(tag 713)
-//   required 'PosMaintStatus' (FIX44.xml:1747) -> pos_maint_status(tag 722)
-//   required 'ClearingBusinessDate' (FIX44.xml:1749) -> clearing_business_date(tag 715)
-//   required 'Account' (FIX44.xml:1753) -> account(tag 1)
-//   required 'AccountType' (FIX44.xml:1755) -> account_type(tag 581)
-//   required 'TransactTime' (FIX44.xml:1761) -> transact_time(tag 60)
+// PositionMaintenanceReport (AM) -- dictionaries/FIX44.xml message
+//   required 'PosMaintRptID' (FIX44.xml field) -> pos_maint_rpt_id(tag 721)
+//   required 'PosTransType' (FIX44.xml field) -> pos_trans_type(tag 709)
+//   required 'PosMaintAction' (FIX44.xml field) -> pos_maint_action(tag 712)
+//   required 'OrigPosReqRefID' (FIX44.xml field) -> orig_pos_req_ref_id(tag 713)
+//   required 'PosMaintStatus' (FIX44.xml field) -> pos_maint_status(tag 722)
+//   required 'ClearingBusinessDate' (FIX44.xml field) -> clearing_business_date(tag 715)
+//   required 'Account' (FIX44.xml field) -> account(tag 1)
+//   required 'AccountType' (FIX44.xml field) -> account_type(tag 581)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, PositionMaintenanceReport) {
     fixpp::v44::PositionMaintenanceReportArgs args{};
     args.pos_maint_rpt_id = "AM_pos_maint_rpt_id";
@@ -619,13 +619,13 @@ TEST_F(AllFamiliesRoundtrip069, PositionMaintenanceReport) {
     expect_wire_text(mv, 60, "AM_transact_time", "transact_time");
 }
 
-// RequestForPositions (AN) -- dictionaries/FIX44.xml:1770-1793
-//   required 'PosReqID' (FIX44.xml:1771) -> pos_req_id(tag 710)
-//   required 'PosReqType' (FIX44.xml:1772) -> pos_req_type(tag 724)
-//   required 'Account' (FIX44.xml:1776) -> account(tag 1)
-//   required 'AccountType' (FIX44.xml:1778) -> account_type(tag 581)
-//   required 'ClearingBusinessDate' (FIX44.xml:1783) -> clearing_business_date(tag 715)
-//   required 'TransactTime' (FIX44.xml:1787) -> transact_time(tag 60)
+// RequestForPositions (AN) -- dictionaries/FIX44.xml message
+//   required 'PosReqID' (FIX44.xml field) -> pos_req_id(tag 710)
+//   required 'PosReqType' (FIX44.xml field) -> pos_req_type(tag 724)
+//   required 'Account' (FIX44.xml field) -> account(tag 1)
+//   required 'AccountType' (FIX44.xml field) -> account_type(tag 581)
+//   required 'ClearingBusinessDate' (FIX44.xml field) -> clearing_business_date(tag 715)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, RequestForPositions) {
     fixpp::v44::RequestForPositionsArgs args{};
     args.pos_req_id = "AN_pos_req_id";
@@ -646,12 +646,12 @@ TEST_F(AllFamiliesRoundtrip069, RequestForPositions) {
     expect_wire_text(mv, 60, "AN_transact_time", "transact_time");
 }
 
-// RequestForPositionsAck (AO) -- dictionaries/FIX44.xml:1794-1814
-//   required 'PosMaintRptID' (FIX44.xml:1795) -> pos_maint_rpt_id(tag 721)
-//   required 'PosReqResult' (FIX44.xml:1799) -> pos_req_result(tag 728)
-//   required 'PosReqStatus' (FIX44.xml:1800) -> pos_req_status(tag 729)
-//   required 'Account' (FIX44.xml:1802) -> account(tag 1)
-//   required 'AccountType' (FIX44.xml:1804) -> account_type(tag 581)
+// RequestForPositionsAck (AO) -- dictionaries/FIX44.xml message
+//   required 'PosMaintRptID' (FIX44.xml field) -> pos_maint_rpt_id(tag 721)
+//   required 'PosReqResult' (FIX44.xml field) -> pos_req_result(tag 728)
+//   required 'PosReqStatus' (FIX44.xml field) -> pos_req_status(tag 729)
+//   required 'Account' (FIX44.xml field) -> account(tag 1)
+//   required 'AccountType' (FIX44.xml field) -> account_type(tag 581)
 TEST_F(AllFamiliesRoundtrip069, RequestForPositionsAck) {
     fixpp::v44::RequestForPositionsAckArgs args{};
     args.pos_maint_rpt_id = "AO_pos_maint_rpt_id";
@@ -670,15 +670,15 @@ TEST_F(AllFamiliesRoundtrip069, RequestForPositionsAck) {
     expect_wire_text(mv, 581, "581", "account_type");
 }
 
-// PositionReport (AP) -- dictionaries/FIX44.xml:1815-1844
-//   required 'PosMaintRptID' (FIX44.xml:1816) -> pos_maint_rpt_id(tag 721)
-//   required 'PosReqResult' (FIX44.xml:1822) -> pos_req_result(tag 728)
-//   required 'ClearingBusinessDate' (FIX44.xml:1823) -> clearing_business_date(tag 715)
-//   required 'Account' (FIX44.xml:1827) -> account(tag 1)
-//   required 'AccountType' (FIX44.xml:1829) -> account_type(tag 581)
-//   required 'SettlPrice' (FIX44.xml:1832) -> settl_price(tag 730)
-//   required 'SettlPriceType' (FIX44.xml:1833) -> settl_price_type(tag 731)
-//   required 'PriorSettlPrice' (FIX44.xml:1834) -> prior_settl_price(tag 734)
+// PositionReport (AP) -- dictionaries/FIX44.xml message
+//   required 'PosMaintRptID' (FIX44.xml field) -> pos_maint_rpt_id(tag 721)
+//   required 'PosReqResult' (FIX44.xml field) -> pos_req_result(tag 728)
+//   required 'ClearingBusinessDate' (FIX44.xml field) -> clearing_business_date(tag 715)
+//   required 'Account' (FIX44.xml field) -> account(tag 1)
+//   required 'AccountType' (FIX44.xml field) -> account_type(tag 581)
+//   required 'SettlPrice' (FIX44.xml field) -> settl_price(tag 730)
+//   required 'SettlPriceType' (FIX44.xml field) -> settl_price_type(tag 731)
+//   required 'PriorSettlPrice' (FIX44.xml field) -> prior_settl_price(tag 734)
 TEST_F(AllFamiliesRoundtrip069, PositionReport) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v44::PositionReportArgs args{};
@@ -704,11 +704,11 @@ TEST_F(AllFamiliesRoundtrip069, PositionReport) {
     expect_wire_decimal(mv, 734, "10.5", &read_arena, "prior_settl_price");
 }
 
-// TradeCaptureReportRequestAck (AQ) -- dictionaries/FIX44.xml:1845-1861
-//   required 'TradeRequestID' (FIX44.xml:1846) -> trade_request_id(tag 568)
-//   required 'TradeRequestType' (FIX44.xml:1847) -> trade_request_type(tag 569)
-//   required 'TradeRequestResult' (FIX44.xml:1850) -> trade_request_result(tag 749)
-//   required 'TradeRequestStatus' (FIX44.xml:1851) -> trade_request_status(tag 750)
+// TradeCaptureReportRequestAck (AQ) -- dictionaries/FIX44.xml message
+//   required 'TradeRequestID' (FIX44.xml field) -> trade_request_id(tag 568)
+//   required 'TradeRequestType' (FIX44.xml field) -> trade_request_type(tag 569)
+//   required 'TradeRequestResult' (FIX44.xml field) -> trade_request_result(tag 749)
+//   required 'TradeRequestStatus' (FIX44.xml field) -> trade_request_status(tag 750)
 TEST_F(AllFamiliesRoundtrip069, TradeCaptureReportRequestAck) {
     fixpp::v44::TradeCaptureReportRequestAckArgs args{};
     args.trade_request_id = "AQ_trade_request_id";
@@ -726,9 +726,9 @@ TEST_F(AllFamiliesRoundtrip069, TradeCaptureReportRequestAck) {
     expect_wire_text(mv, 750, "750", "trade_request_status");
 }
 
-// TradeCaptureReportAck (AR) -- dictionaries/FIX44.xml:1862-1900
-//   required 'TradeReportID' (FIX44.xml:1863) -> trade_report_id(tag 571)
-//   required 'ExecType' (FIX44.xml:1870) -> exec_type(tag 150)
+// TradeCaptureReportAck (AR) -- dictionaries/FIX44.xml message
+//   required 'TradeReportID' (FIX44.xml field) -> trade_report_id(tag 571)
+//   required 'ExecType' (FIX44.xml field) -> exec_type(tag 150)
 TEST_F(AllFamiliesRoundtrip069, TradeCaptureReportAck) {
     fixpp::v44::TradeCaptureReportAckArgs args{};
     args.trade_report_id = "AR_trade_report_id";
@@ -741,16 +741,16 @@ TEST_F(AllFamiliesRoundtrip069, TradeCaptureReportAck) {
     expect_wire_text(mv, 150, "1", "exec_type");
 }
 
-// AllocationReport (AS) -- dictionaries/FIX44.xml:1901-1969
-//   required 'AllocReportID' (FIX44.xml:1902) -> alloc_report_id(tag 755)
-//   required 'AllocTransType' (FIX44.xml:1904) -> alloc_trans_type(tag 71)
-//   required 'AllocReportType' (FIX44.xml:1908) -> alloc_report_type(tag 794)
-//   required 'AllocStatus' (FIX44.xml:1909) -> alloc_status(tag 87)
-//   required 'AllocNoOrdersType' (FIX44.xml:1916) -> alloc_no_orders_type(tag 857)
-//   required 'Side' (FIX44.xml:1922) -> side(tag 54)
-//   required 'Quantity' (FIX44.xml:1928) -> quantity(tag 53)
-//   required 'AvgPx' (FIX44.xml:1935) -> avg_px(tag 6)
-//   required 'TradeDate' (FIX44.xml:1941) -> trade_date(tag 75)
+// AllocationReport (AS) -- dictionaries/FIX44.xml message
+//   required 'AllocReportID' (FIX44.xml field) -> alloc_report_id(tag 755)
+//   required 'AllocTransType' (FIX44.xml field) -> alloc_trans_type(tag 71)
+//   required 'AllocReportType' (FIX44.xml field) -> alloc_report_type(tag 794)
+//   required 'AllocStatus' (FIX44.xml field) -> alloc_status(tag 87)
+//   required 'AllocNoOrdersType' (FIX44.xml field) -> alloc_no_orders_type(tag 857)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
+//   required 'Quantity' (FIX44.xml field) -> quantity(tag 53)
+//   required 'AvgPx' (FIX44.xml field) -> avg_px(tag 6)
+//   required 'TradeDate' (FIX44.xml field) -> trade_date(tag 75)
 TEST_F(AllFamiliesRoundtrip069, AllocationReport) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v44::AllocationReportArgs args{};
@@ -778,11 +778,11 @@ TEST_F(AllFamiliesRoundtrip069, AllocationReport) {
     expect_wire_text(mv, 75, "AS_trade_date", "trade_date");
 }
 
-// AllocationReportAck (AT) -- dictionaries/FIX44.xml:1970-1988
-//   required 'AllocReportID' (FIX44.xml:1971) -> alloc_report_id(tag 755)
-//   required 'AllocID' (FIX44.xml:1972) -> alloc_id(tag 70)
-//   required 'TransactTime' (FIX44.xml:1976) -> transact_time(tag 60)
-//   required 'AllocStatus' (FIX44.xml:1977) -> alloc_status(tag 87)
+// AllocationReportAck (AT) -- dictionaries/FIX44.xml message
+//   required 'AllocReportID' (FIX44.xml field) -> alloc_report_id(tag 755)
+//   required 'AllocID' (FIX44.xml field) -> alloc_id(tag 70)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
+//   required 'AllocStatus' (FIX44.xml field) -> alloc_status(tag 87)
 TEST_F(AllFamiliesRoundtrip069, AllocationReportAck) {
     fixpp::v44::AllocationReportAckArgs args{};
     args.alloc_report_id = "AT_alloc_report_id";
@@ -799,11 +799,11 @@ TEST_F(AllFamiliesRoundtrip069, AllocationReportAck) {
     expect_wire_text(mv, 87, "87", "alloc_status");
 }
 
-// ConfirmationAck (AU) -- dictionaries/FIX44.xml:1989-1999
-//   required 'ConfirmID' (FIX44.xml:1990) -> confirm_id(tag 664)
-//   required 'TradeDate' (FIX44.xml:1991) -> trade_date(tag 75)
-//   required 'TransactTime' (FIX44.xml:1992) -> transact_time(tag 60)
-//   required 'AffirmStatus' (FIX44.xml:1993) -> affirm_status(tag 940)
+// ConfirmationAck (AU) -- dictionaries/FIX44.xml message
+//   required 'ConfirmID' (FIX44.xml field) -> confirm_id(tag 664)
+//   required 'TradeDate' (FIX44.xml field) -> trade_date(tag 75)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
+//   required 'AffirmStatus' (FIX44.xml field) -> affirm_status(tag 940)
 TEST_F(AllFamiliesRoundtrip069, ConfirmationAck) {
     fixpp::v44::ConfirmationAckArgs args{};
     args.confirm_id = "AU_confirm_id";
@@ -820,9 +820,9 @@ TEST_F(AllFamiliesRoundtrip069, ConfirmationAck) {
     expect_wire_text(mv, 940, "940", "affirm_status");
 }
 
-// SettlementInstructionRequest (AV) -- dictionaries/FIX44.xml:2000-2016
-//   required 'SettlInstReqID' (FIX44.xml:2001) -> settl_inst_req_id(tag 791)
-//   required 'TransactTime' (FIX44.xml:2002) -> transact_time(tag 60)
+// SettlementInstructionRequest (AV) -- dictionaries/FIX44.xml message
+//   required 'SettlInstReqID' (FIX44.xml field) -> settl_inst_req_id(tag 791)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, SettlementInstructionRequest) {
     fixpp::v44::SettlementInstructionRequestArgs args{};
     args.settl_inst_req_id = "AV_settl_inst_req_id";
@@ -836,18 +836,18 @@ TEST_F(AllFamiliesRoundtrip069, SettlementInstructionRequest) {
     expect_wire_text(mv, 60, "AV_transact_time", "transact_time");
 }
 
-// AssignmentReport (AW) -- dictionaries/FIX44.xml:2017-2045
-//   required 'AsgnRptID' (FIX44.xml:2018) -> asgn_rpt_id(tag 833)
-//   required 'AccountType' (FIX44.xml:2023) -> account_type(tag 581)
-//   required 'SettlPrice' (FIX44.xml:2031) -> settl_price(tag 730)
-//   required 'SettlPriceType' (FIX44.xml:2032) -> settl_price_type(tag 731)
-//   required 'UnderlyingSettlPrice' (FIX44.xml:2033) -> underlying_settl_price(tag 732)
-//   required 'AssignmentMethod' (FIX44.xml:2035) -> assignment_method(tag 744)
-//   required 'OpenInterest' (FIX44.xml:2037) -> open_interest(tag 746)
-//   required 'ExerciseMethod' (FIX44.xml:2038) -> exercise_method(tag 747)
-//   required 'SettlSessID' (FIX44.xml:2039) -> settl_sess_id(tag 716)
-//   required 'SettlSessSubID' (FIX44.xml:2040) -> settl_sess_sub_id(tag 717)
-//   required 'ClearingBusinessDate' (FIX44.xml:2041) -> clearing_business_date(tag 715)
+// AssignmentReport (AW) -- dictionaries/FIX44.xml message
+//   required 'AsgnRptID' (FIX44.xml field) -> asgn_rpt_id(tag 833)
+//   required 'AccountType' (FIX44.xml field) -> account_type(tag 581)
+//   required 'SettlPrice' (FIX44.xml field) -> settl_price(tag 730)
+//   required 'SettlPriceType' (FIX44.xml field) -> settl_price_type(tag 731)
+//   required 'UnderlyingSettlPrice' (FIX44.xml field) -> underlying_settl_price(tag 732)
+//   required 'AssignmentMethod' (FIX44.xml field) -> assignment_method(tag 744)
+//   required 'OpenInterest' (FIX44.xml field) -> open_interest(tag 746)
+//   required 'ExerciseMethod' (FIX44.xml field) -> exercise_method(tag 747)
+//   required 'SettlSessID' (FIX44.xml field) -> settl_sess_id(tag 716)
+//   required 'SettlSessSubID' (FIX44.xml field) -> settl_sess_sub_id(tag 717)
+//   required 'ClearingBusinessDate' (FIX44.xml field) -> clearing_business_date(tag 715)
 TEST_F(AllFamiliesRoundtrip069, AssignmentReport) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v44::AssignmentReportArgs args{};
@@ -879,10 +879,10 @@ TEST_F(AllFamiliesRoundtrip069, AssignmentReport) {
     expect_wire_text(mv, 715, "AW_clearing_business_date", "clearing_business_date");
 }
 
-// CollateralRequest (AX) -- dictionaries/FIX44.xml:2046-2090
-//   required 'CollReqID' (FIX44.xml:2047) -> coll_req_id(tag 894)
-//   required 'CollAsgnReason' (FIX44.xml:2048) -> coll_asgn_reason(tag 895)
-//   required 'TransactTime' (FIX44.xml:2049) -> transact_time(tag 60)
+// CollateralRequest (AX) -- dictionaries/FIX44.xml message
+//   required 'CollReqID' (FIX44.xml field) -> coll_req_id(tag 894)
+//   required 'CollAsgnReason' (FIX44.xml field) -> coll_asgn_reason(tag 895)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, CollateralRequest) {
     fixpp::v44::CollateralRequestArgs args{};
     args.coll_req_id = "AX_coll_req_id";
@@ -897,11 +897,11 @@ TEST_F(AllFamiliesRoundtrip069, CollateralRequest) {
     expect_wire_text(mv, 60, "AX_transact_time", "transact_time");
 }
 
-// CollateralAssignment (AY) -- dictionaries/FIX44.xml:2091-2139
-//   required 'CollAsgnID' (FIX44.xml:2092) -> coll_asgn_id(tag 902)
-//   required 'CollAsgnReason' (FIX44.xml:2094) -> coll_asgn_reason(tag 895)
-//   required 'CollAsgnTransType' (FIX44.xml:2095) -> coll_asgn_trans_type(tag 903)
-//   required 'TransactTime' (FIX44.xml:2097) -> transact_time(tag 60)
+// CollateralAssignment (AY) -- dictionaries/FIX44.xml message
+//   required 'CollAsgnID' (FIX44.xml field) -> coll_asgn_id(tag 902)
+//   required 'CollAsgnReason' (FIX44.xml field) -> coll_asgn_reason(tag 895)
+//   required 'CollAsgnTransType' (FIX44.xml field) -> coll_asgn_trans_type(tag 903)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, CollateralAssignment) {
     fixpp::v44::CollateralAssignmentArgs args{};
     args.coll_asgn_id = "AY_coll_asgn_id";
@@ -918,12 +918,12 @@ TEST_F(AllFamiliesRoundtrip069, CollateralAssignment) {
     expect_wire_text(mv, 60, "AY_transact_time", "transact_time");
 }
 
-// CollateralResponse (AZ) -- dictionaries/FIX44.xml:2140-2183
-//   required 'CollRespID' (FIX44.xml:2141) -> coll_resp_id(tag 904)
-//   required 'CollAsgnID' (FIX44.xml:2142) -> coll_asgn_id(tag 902)
-//   required 'CollAsgnReason' (FIX44.xml:2144) -> coll_asgn_reason(tag 895)
-//   required 'CollAsgnRespType' (FIX44.xml:2146) -> coll_asgn_resp_type(tag 905)
-//   required 'TransactTime' (FIX44.xml:2148) -> transact_time(tag 60)
+// CollateralResponse (AZ) -- dictionaries/FIX44.xml message
+//   required 'CollRespID' (FIX44.xml field) -> coll_resp_id(tag 904)
+//   required 'CollAsgnID' (FIX44.xml field) -> coll_asgn_id(tag 902)
+//   required 'CollAsgnReason' (FIX44.xml field) -> coll_asgn_reason(tag 895)
+//   required 'CollAsgnRespType' (FIX44.xml field) -> coll_asgn_resp_type(tag 905)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, CollateralResponse) {
     fixpp::v44::CollateralResponseArgs args{};
     args.coll_resp_id = "AZ_coll_resp_id";
@@ -942,8 +942,8 @@ TEST_F(AllFamiliesRoundtrip069, CollateralResponse) {
     expect_wire_text(mv, 60, "AZ_transact_time", "transact_time");
 }
 
-// News (B) -- dictionaries/FIX44.xml:294-308
-//   required 'Headline' (FIX44.xml:297) -> headline(tag 148)
+// News (B) -- dictionaries/FIX44.xml message
+//   required 'Headline' (FIX44.xml field) -> headline(tag 148)
 //   filler (not required) -> orig_time(tag 42)
 TEST_F(AllFamiliesRoundtrip069, News) {
     fixpp::v44::NewsArgs args{};
@@ -956,9 +956,9 @@ TEST_F(AllFamiliesRoundtrip069, News) {
     expect_wire_text(mv, 42, "B_orig_time", "orig_time");
 }
 
-// CollateralReport (BA) -- dictionaries/FIX44.xml:2184-2230
-//   required 'CollRptID' (FIX44.xml:2185) -> coll_rpt_id(tag 908)
-//   required 'CollStatus' (FIX44.xml:2187) -> coll_status(tag 910)
+// CollateralReport (BA) -- dictionaries/FIX44.xml message
+//   required 'CollRptID' (FIX44.xml field) -> coll_rpt_id(tag 908)
+//   required 'CollStatus' (FIX44.xml field) -> coll_status(tag 910)
 TEST_F(AllFamiliesRoundtrip069, CollateralReport) {
     fixpp::v44::CollateralReportArgs args{};
     args.coll_rpt_id = "BA_coll_rpt_id";
@@ -971,7 +971,7 @@ TEST_F(AllFamiliesRoundtrip069, CollateralReport) {
     expect_wire_text(mv, 910, "910", "coll_status");
 }
 
-// CollateralInquiry (BB) -- dictionaries/FIX44.xml:2231-2276
+// CollateralInquiry (BB) -- dictionaries/FIX44.xml message
 //   filler (not required) -> account(tag 1)
 //   filler (not required) -> cl_ord_id(tag 11)
 TEST_F(AllFamiliesRoundtrip069, CollateralInquiry) {
@@ -986,9 +986,9 @@ TEST_F(AllFamiliesRoundtrip069, CollateralInquiry) {
     expect_wire_text(mv, 11, "BB_cl_ord_id", "cl_ord_id");
 }
 
-// NetworkCounterpartySystemStatusRequest (BC) -- dictionaries/FIX44.xml:2277-2281
-//   required 'NetworkRequestType' (FIX44.xml:2278) -> network_request_type(tag 935)
-//   required 'NetworkRequestID' (FIX44.xml:2279) -> network_request_id(tag 933)
+// NetworkCounterpartySystemStatusRequest (BC) -- dictionaries/FIX44.xml message
+//   required 'NetworkRequestType' (FIX44.xml field) -> network_request_type(tag 935)
+//   required 'NetworkRequestID' (FIX44.xml field) -> network_request_id(tag 933)
 TEST_F(AllFamiliesRoundtrip069, NetworkCounterpartySystemStatusRequest) {
     fixpp::v44::NetworkCounterpartySystemStatusRequestArgs args{};
     args.network_request_type = 935;
@@ -1002,9 +1002,9 @@ TEST_F(AllFamiliesRoundtrip069, NetworkCounterpartySystemStatusRequest) {
     expect_wire_text(mv, 933, "BC_network_request_id", "network_request_id");
 }
 
-// NetworkCounterpartySystemStatusResponse (BD) -- dictionaries/FIX44.xml:2282-2288
-//   required 'NetworkStatusResponseType' (FIX44.xml:2283) -> network_status_response_type(tag 937)
-//   required 'NetworkResponseID' (FIX44.xml:2285) -> network_response_id(tag 932)
+// NetworkCounterpartySystemStatusResponse (BD) -- dictionaries/FIX44.xml message
+//   required 'NetworkStatusResponseType' (FIX44.xml field) -> network_status_response_type(tag 937)
+//   required 'NetworkResponseID' (FIX44.xml field) -> network_response_id(tag 932)
 TEST_F(AllFamiliesRoundtrip069, NetworkCounterpartySystemStatusResponse) {
     fixpp::v44::NetworkCounterpartySystemStatusResponseArgs args{};
     args.network_status_response_type = 937;
@@ -1018,9 +1018,9 @@ TEST_F(AllFamiliesRoundtrip069, NetworkCounterpartySystemStatusResponse) {
     expect_wire_text(mv, 932, "BD_network_response_id", "network_response_id");
 }
 
-// CollateralInquiryAck (BG) -- dictionaries/FIX44.xml:2304-2337
-//   required 'CollInquiryID' (FIX44.xml:2305) -> coll_inquiry_id(tag 909)
-//   required 'CollInquiryStatus' (FIX44.xml:2306) -> coll_inquiry_status(tag 945)
+// CollateralInquiryAck (BG) -- dictionaries/FIX44.xml message
+//   required 'CollInquiryID' (FIX44.xml field) -> coll_inquiry_id(tag 909)
+//   required 'CollInquiryStatus' (FIX44.xml field) -> coll_inquiry_status(tag 945)
 TEST_F(AllFamiliesRoundtrip069, CollateralInquiryAck) {
     fixpp::v44::CollateralInquiryAckArgs args{};
     args.coll_inquiry_id = "BG_coll_inquiry_id";
@@ -1033,10 +1033,10 @@ TEST_F(AllFamiliesRoundtrip069, CollateralInquiryAck) {
     expect_wire_text(mv, 945, "945", "coll_inquiry_status");
 }
 
-// ConfirmationRequest (BH) -- dictionaries/FIX44.xml:2338-2352
-//   required 'ConfirmReqID' (FIX44.xml:2339) -> confirm_req_id(tag 859)
-//   required 'ConfirmType' (FIX44.xml:2340) -> confirm_type(tag 773)
-//   required 'TransactTime' (FIX44.xml:2345) -> transact_time(tag 60)
+// ConfirmationRequest (BH) -- dictionaries/FIX44.xml message
+//   required 'ConfirmReqID' (FIX44.xml field) -> confirm_req_id(tag 859)
+//   required 'ConfirmType' (FIX44.xml field) -> confirm_type(tag 773)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, ConfirmationRequest) {
     fixpp::v44::ConfirmationRequestArgs args{};
     args.confirm_req_id = "BH_confirm_req_id";
@@ -1051,10 +1051,10 @@ TEST_F(AllFamiliesRoundtrip069, ConfirmationRequest) {
     expect_wire_text(mv, 60, "BH_transact_time", "transact_time");
 }
 
-// Email (C) -- dictionaries/FIX44.xml:309-325
-//   required 'EmailThreadID' (FIX44.xml:310) -> email_thread_id(tag 164)
-//   required 'EmailType' (FIX44.xml:311) -> email_type(tag 94)
-//   required 'Subject' (FIX44.xml:313) -> subject(tag 147)
+// Email (C) -- dictionaries/FIX44.xml message
+//   required 'EmailThreadID' (FIX44.xml field) -> email_thread_id(tag 164)
+//   required 'EmailType' (FIX44.xml field) -> email_type(tag 94)
+//   required 'Subject' (FIX44.xml field) -> subject(tag 147)
 TEST_F(AllFamiliesRoundtrip069, Email) {
     fixpp::v44::EmailArgs args{};
     args.email_thread_id = "C_email_thread_id";
@@ -1068,11 +1068,11 @@ TEST_F(AllFamiliesRoundtrip069, Email) {
     expect_wire_text(mv, 147, "C_subject", "subject");
 }
 
-// NewOrderSingle (D) -- dictionaries/FIX44.xml:326-403
-//   required 'ClOrdID' (FIX44.xml:327) -> cl_ord_id(tag 11)
-//   required 'Side' (FIX44.xml:356) -> side(tag 54)
-//   required 'TransactTime' (FIX44.xml:358) -> transact_time(tag 60)
-//   required 'OrdType' (FIX44.xml:362) -> ord_type(tag 40)
+// NewOrderSingle (D) -- dictionaries/FIX44.xml message
+//   required 'ClOrdID' (FIX44.xml field) -> cl_ord_id(tag 11)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
+//   required 'OrdType' (FIX44.xml field) -> ord_type(tag 40)
 TEST_F(AllFamiliesRoundtrip069, NewOrderSingle) {
     fixpp::v44::NewOrderSingleArgs args{};
     args.cl_ord_id = "D_cl_ord_id";
@@ -1089,10 +1089,10 @@ TEST_F(AllFamiliesRoundtrip069, NewOrderSingle) {
     expect_wire_text(mv, 40, "1", "ord_type");
 }
 
-// NewOrderList (E) -- dictionaries/FIX44.xml:404-424
-//   required 'ListID' (FIX44.xml:405) -> list_id(tag 66)
-//   required 'BidType' (FIX44.xml:409) -> bid_type(tag 394)
-//   required 'TotNoOrders' (FIX44.xml:421) -> tot_no_orders(tag 68)
+// NewOrderList (E) -- dictionaries/FIX44.xml message
+//   required 'ListID' (FIX44.xml field) -> list_id(tag 66)
+//   required 'BidType' (FIX44.xml field) -> bid_type(tag 394)
+//   required 'TotNoOrders' (FIX44.xml field) -> tot_no_orders(tag 68)
 TEST_F(AllFamiliesRoundtrip069, NewOrderList) {
     fixpp::v44::NewOrderListArgs args{};
     args.list_id = "E_list_id";
@@ -1107,11 +1107,11 @@ TEST_F(AllFamiliesRoundtrip069, NewOrderList) {
     expect_wire_text(mv, 68, "68", "tot_no_orders");
 }
 
-// OrderCancelRequest (F) -- dictionaries/FIX44.xml:425-447
-//   required 'OrigClOrdID' (FIX44.xml:426) -> orig_cl_ord_id(tag 41)
-//   required 'ClOrdID' (FIX44.xml:428) -> cl_ord_id(tag 11)
-//   required 'Side' (FIX44.xml:440) -> side(tag 54)
-//   required 'TransactTime' (FIX44.xml:441) -> transact_time(tag 60)
+// OrderCancelRequest (F) -- dictionaries/FIX44.xml message
+//   required 'OrigClOrdID' (FIX44.xml field) -> orig_cl_ord_id(tag 41)
+//   required 'ClOrdID' (FIX44.xml field) -> cl_ord_id(tag 11)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, OrderCancelRequest) {
     fixpp::v44::OrderCancelRequestArgs args{};
     args.orig_cl_ord_id = "F_orig_cl_ord_id";
@@ -1128,12 +1128,12 @@ TEST_F(AllFamiliesRoundtrip069, OrderCancelRequest) {
     expect_wire_text(mv, 60, "F_transact_time", "transact_time");
 }
 
-// OrderCancelReplaceRequest (G) -- dictionaries/FIX44.xml:448-524
-//   required 'OrigClOrdID' (FIX44.xml:453) -> orig_cl_ord_id(tag 41)
-//   required 'ClOrdID' (FIX44.xml:454) -> cl_ord_id(tag 11)
-//   required 'Side' (FIX44.xml:480) -> side(tag 54)
-//   required 'TransactTime' (FIX44.xml:481) -> transact_time(tag 60)
-//   required 'OrdType' (FIX44.xml:484) -> ord_type(tag 40)
+// OrderCancelReplaceRequest (G) -- dictionaries/FIX44.xml message
+//   required 'OrigClOrdID' (FIX44.xml field) -> orig_cl_ord_id(tag 41)
+//   required 'ClOrdID' (FIX44.xml field) -> cl_ord_id(tag 11)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
+//   required 'OrdType' (FIX44.xml field) -> ord_type(tag 40)
 TEST_F(AllFamiliesRoundtrip069, OrderCancelReplaceRequest) {
     fixpp::v44::OrderCancelReplaceRequestArgs args{};
     args.orig_cl_ord_id = "G_orig_cl_ord_id";
@@ -1153,9 +1153,9 @@ TEST_F(AllFamiliesRoundtrip069, OrderCancelReplaceRequest) {
     expect_wire_text(mv, 40, "1", "ord_type");
 }
 
-// OrderStatusRequest (H) -- dictionaries/FIX44.xml:525-538
-//   required 'ClOrdID' (FIX44.xml:527) -> cl_ord_id(tag 11)
-//   required 'Side' (FIX44.xml:537) -> side(tag 54)
+// OrderStatusRequest (H) -- dictionaries/FIX44.xml message
+//   required 'ClOrdID' (FIX44.xml field) -> cl_ord_id(tag 11)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
 TEST_F(AllFamiliesRoundtrip069, OrderStatusRequest) {
     fixpp::v44::OrderStatusRequestArgs args{};
     args.cl_ord_id = "H_cl_ord_id";
@@ -1168,15 +1168,15 @@ TEST_F(AllFamiliesRoundtrip069, OrderStatusRequest) {
     expect_wire_text(mv, 54, "1", "side");
 }
 
-// AllocationInstruction (J) -- dictionaries/FIX44.xml:539-603
-//   required 'AllocID' (FIX44.xml:540) -> alloc_id(tag 70)
-//   required 'AllocTransType' (FIX44.xml:541) -> alloc_trans_type(tag 71)
-//   required 'AllocType' (FIX44.xml:542) -> alloc_type(tag 626)
-//   required 'AllocNoOrdersType' (FIX44.xml:550) -> alloc_no_orders_type(tag 857)
-//   required 'Side' (FIX44.xml:556) -> side(tag 54)
-//   required 'Quantity' (FIX44.xml:562) -> quantity(tag 53)
-//   required 'AvgPx' (FIX44.xml:569) -> avg_px(tag 6)
-//   required 'TradeDate' (FIX44.xml:575) -> trade_date(tag 75)
+// AllocationInstruction (J) -- dictionaries/FIX44.xml message
+//   required 'AllocID' (FIX44.xml field) -> alloc_id(tag 70)
+//   required 'AllocTransType' (FIX44.xml field) -> alloc_trans_type(tag 71)
+//   required 'AllocType' (FIX44.xml field) -> alloc_type(tag 626)
+//   required 'AllocNoOrdersType' (FIX44.xml field) -> alloc_no_orders_type(tag 857)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
+//   required 'Quantity' (FIX44.xml field) -> quantity(tag 53)
+//   required 'AvgPx' (FIX44.xml field) -> avg_px(tag 6)
+//   required 'TradeDate' (FIX44.xml field) -> trade_date(tag 75)
 TEST_F(AllFamiliesRoundtrip069, AllocationInstruction) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v44::AllocationInstructionArgs args{};
@@ -1202,9 +1202,9 @@ TEST_F(AllFamiliesRoundtrip069, AllocationInstruction) {
     expect_wire_text(mv, 75, "J_trade_date", "trade_date");
 }
 
-// ListCancelRequest (K) -- dictionaries/FIX44.xml:604-612
-//   required 'ListID' (FIX44.xml:605) -> list_id(tag 66)
-//   required 'TransactTime' (FIX44.xml:606) -> transact_time(tag 60)
+// ListCancelRequest (K) -- dictionaries/FIX44.xml message
+//   required 'ListID' (FIX44.xml field) -> list_id(tag 66)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, ListCancelRequest) {
     fixpp::v44::ListCancelRequestArgs args{};
     args.list_id = "K_list_id";
@@ -1217,9 +1217,9 @@ TEST_F(AllFamiliesRoundtrip069, ListCancelRequest) {
     expect_wire_text(mv, 60, "K_transact_time", "transact_time");
 }
 
-// ListExecute (L) -- dictionaries/FIX44.xml:613-621
-//   required 'ListID' (FIX44.xml:614) -> list_id(tag 66)
-//   required 'TransactTime' (FIX44.xml:617) -> transact_time(tag 60)
+// ListExecute (L) -- dictionaries/FIX44.xml message
+//   required 'ListID' (FIX44.xml field) -> list_id(tag 66)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, ListExecute) {
     fixpp::v44::ListExecuteArgs args{};
     args.list_id = "L_list_id";
@@ -1232,8 +1232,8 @@ TEST_F(AllFamiliesRoundtrip069, ListExecute) {
     expect_wire_text(mv, 60, "L_transact_time", "transact_time");
 }
 
-// ListStatusRequest (M) -- dictionaries/FIX44.xml:622-627
-//   required 'ListID' (FIX44.xml:623) -> list_id(tag 66)
+// ListStatusRequest (M) -- dictionaries/FIX44.xml message
+//   required 'ListID' (FIX44.xml field) -> list_id(tag 66)
 //   filler (not required) -> text(tag 58)
 TEST_F(AllFamiliesRoundtrip069, ListStatusRequest) {
     fixpp::v44::ListStatusRequestArgs args{};
@@ -1247,13 +1247,13 @@ TEST_F(AllFamiliesRoundtrip069, ListStatusRequest) {
     expect_wire_text(mv, 58, "M_text", "text");
 }
 
-// ListStatus (N) -- dictionaries/FIX44.xml:628-641
-//   required 'ListID' (FIX44.xml:629) -> list_id(tag 66)
-//   required 'ListStatusType' (FIX44.xml:630) -> list_status_type(tag 429)
-//   required 'NoRpts' (FIX44.xml:631) -> no_rpts(tag 82)
-//   required 'ListOrderStatus' (FIX44.xml:632) -> list_order_status(tag 431)
-//   required 'RptSeq' (FIX44.xml:633) -> rpt_seq(tag 83)
-//   required 'TotNoOrders' (FIX44.xml:638) -> tot_no_orders(tag 68)
+// ListStatus (N) -- dictionaries/FIX44.xml message
+//   required 'ListID' (FIX44.xml field) -> list_id(tag 66)
+//   required 'ListStatusType' (FIX44.xml field) -> list_status_type(tag 429)
+//   required 'NoRpts' (FIX44.xml field) -> no_rpts(tag 82)
+//   required 'ListOrderStatus' (FIX44.xml field) -> list_order_status(tag 431)
+//   required 'RptSeq' (FIX44.xml field) -> rpt_seq(tag 83)
+//   required 'TotNoOrders' (FIX44.xml field) -> tot_no_orders(tag 68)
 TEST_F(AllFamiliesRoundtrip069, ListStatus) {
     fixpp::v44::ListStatusArgs args{};
     args.list_id = "N_list_id";
@@ -1274,10 +1274,10 @@ TEST_F(AllFamiliesRoundtrip069, ListStatus) {
     expect_wire_text(mv, 68, "68", "tot_no_orders");
 }
 
-// AllocationInstructionAck (P) -- dictionaries/FIX44.xml:642-659
-//   required 'AllocID' (FIX44.xml:643) -> alloc_id(tag 70)
-//   required 'TransactTime' (FIX44.xml:647) -> transact_time(tag 60)
-//   required 'AllocStatus' (FIX44.xml:648) -> alloc_status(tag 87)
+// AllocationInstructionAck (P) -- dictionaries/FIX44.xml message
+//   required 'AllocID' (FIX44.xml field) -> alloc_id(tag 70)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
+//   required 'AllocStatus' (FIX44.xml field) -> alloc_status(tag 87)
 TEST_F(AllFamiliesRoundtrip069, AllocationInstructionAck) {
     fixpp::v44::AllocationInstructionAckArgs args{};
     args.alloc_id = "P_alloc_id";
@@ -1293,11 +1293,11 @@ TEST_F(AllFamiliesRoundtrip069, AllocationInstructionAck) {
     expect_wire_text(mv, 87, "87", "alloc_status");
 }
 
-// DontKnowTrade (Q) -- dictionaries/FIX44.xml:660-675
-//   required 'OrderID' (FIX44.xml:661) -> order_id(tag 37)
-//   required 'ExecID' (FIX44.xml:663) -> exec_id(tag 17)
-//   required 'DKReason' (FIX44.xml:664) -> dk_reason(tag 127)
-//   required 'Side' (FIX44.xml:668) -> side(tag 54)
+// DontKnowTrade (Q) -- dictionaries/FIX44.xml message
+//   required 'OrderID' (FIX44.xml field) -> order_id(tag 37)
+//   required 'ExecID' (FIX44.xml field) -> exec_id(tag 17)
+//   required 'DKReason' (FIX44.xml field) -> dk_reason(tag 127)
+//   required 'Side' (FIX44.xml field) -> side(tag 54)
 TEST_F(AllFamiliesRoundtrip069, DontKnowTrade) {
     fixpp::v44::DontKnowTradeArgs args{};
     args.order_id = "Q_order_id";
@@ -1314,8 +1314,8 @@ TEST_F(AllFamiliesRoundtrip069, DontKnowTrade) {
     expect_wire_text(mv, 54, "1", "side");
 }
 
-// QuoteRequest (R) -- dictionaries/FIX44.xml:676-685
-//   required 'QuoteReqID' (FIX44.xml:677) -> quote_req_id(tag 131)
+// QuoteRequest (R) -- dictionaries/FIX44.xml message
+//   required 'QuoteReqID' (FIX44.xml field) -> quote_req_id(tag 131)
 //   filler (not required) -> cl_ord_id(tag 11)
 TEST_F(AllFamiliesRoundtrip069, QuoteRequest) {
     fixpp::v44::QuoteRequestArgs args{};
@@ -1329,8 +1329,8 @@ TEST_F(AllFamiliesRoundtrip069, QuoteRequest) {
     expect_wire_text(mv, 11, "R_cl_ord_id", "cl_ord_id");
 }
 
-// Quote (S) -- dictionaries/FIX44.xml:686-746
-//   required 'QuoteID' (FIX44.xml:688) -> quote_id(tag 117)
+// Quote (S) -- dictionaries/FIX44.xml message
+//   required 'QuoteID' (FIX44.xml field) -> quote_id(tag 117)
 //   filler (not required) -> account(tag 1)
 TEST_F(AllFamiliesRoundtrip069, Quote) {
     fixpp::v44::QuoteArgs args{};
@@ -1343,10 +1343,10 @@ TEST_F(AllFamiliesRoundtrip069, Quote) {
     expect_wire_text(mv, 1, "S_account", "account");
 }
 
-// SettlementInstructions (T) -- dictionaries/FIX44.xml:747-758
-//   required 'SettlInstMsgID' (FIX44.xml:748) -> settl_inst_msg_id(tag 777)
-//   required 'SettlInstMode' (FIX44.xml:750) -> settl_inst_mode(tag 160)
-//   required 'TransactTime' (FIX44.xml:756) -> transact_time(tag 60)
+// SettlementInstructions (T) -- dictionaries/FIX44.xml message
+//   required 'SettlInstMsgID' (FIX44.xml field) -> settl_inst_msg_id(tag 777)
+//   required 'SettlInstMode' (FIX44.xml field) -> settl_inst_mode(tag 160)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, SettlementInstructions) {
     fixpp::v44::SettlementInstructionsArgs args{};
     args.settl_inst_msg_id = "T_settl_inst_msg_id";
@@ -1361,10 +1361,10 @@ TEST_F(AllFamiliesRoundtrip069, SettlementInstructions) {
     expect_wire_text(mv, 60, "T_transact_time", "transact_time");
 }
 
-// MarketDataRequest (V) -- dictionaries/FIX44.xml:759-773
-//   required 'MDReqID' (FIX44.xml:760) -> md_req_id(tag 262)
-//   required 'SubscriptionRequestType' (FIX44.xml:761) -> subscription_request_type(tag 263)
-//   required 'MarketDepth' (FIX44.xml:762) -> market_depth(tag 264)
+// MarketDataRequest (V) -- dictionaries/FIX44.xml message
+//   required 'MDReqID' (FIX44.xml field) -> md_req_id(tag 262)
+//   required 'SubscriptionRequestType' (FIX44.xml field) -> subscription_request_type(tag 263)
+//   required 'MarketDepth' (FIX44.xml field) -> market_depth(tag 264)
 TEST_F(AllFamiliesRoundtrip069, MarketDataRequest) {
     fixpp::v44::MarketDataRequestArgs args{};
     args.md_req_id = "V_md_req_id";
@@ -1379,7 +1379,7 @@ TEST_F(AllFamiliesRoundtrip069, MarketDataRequest) {
     expect_wire_text(mv, 264, "264", "market_depth");
 }
 
-// MarketDataSnapshotFullRefresh (W) -- dictionaries/FIX44.xml:774-785
+// MarketDataSnapshotFullRefresh (W) -- dictionaries/FIX44.xml message
 //   filler (not required) -> security_id_source(tag 22)
 //   filler (not required) -> security_id(tag 48)
 TEST_F(AllFamiliesRoundtrip069, MarketDataSnapshotFullRefresh) {
@@ -1395,7 +1395,7 @@ TEST_F(AllFamiliesRoundtrip069, MarketDataSnapshotFullRefresh) {
     expect_wire_text(mv, 48, "W_security_id", "security_id");
 }
 
-// MarketDataIncrementalRefresh (X) -- dictionaries/FIX44.xml:786-791
+// MarketDataIncrementalRefresh (X) -- dictionaries/FIX44.xml message
 //   filler (not required) -> md_req_id(tag 262)
 //   filler (not required) -> appl_queue_depth(tag 813)
 TEST_F(AllFamiliesRoundtrip069, MarketDataIncrementalRefresh) {
@@ -1411,8 +1411,8 @@ TEST_F(AllFamiliesRoundtrip069, MarketDataIncrementalRefresh) {
     expect_wire_text(mv, 813, "813", "appl_queue_depth");
 }
 
-// MarketDataRequestReject (Y) -- dictionaries/FIX44.xml:792-799
-//   required 'MDReqID' (FIX44.xml:793) -> md_req_id(tag 262)
+// MarketDataRequestReject (Y) -- dictionaries/FIX44.xml message
+//   required 'MDReqID' (FIX44.xml field) -> md_req_id(tag 262)
 //   filler (not required) -> text(tag 58)
 TEST_F(AllFamiliesRoundtrip069, MarketDataRequestReject) {
     fixpp::v44::MarketDataRequestRejectArgs args{};
@@ -1426,9 +1426,9 @@ TEST_F(AllFamiliesRoundtrip069, MarketDataRequestReject) {
     expect_wire_text(mv, 58, "Y_text", "text");
 }
 
-// QuoteCancel (Z) -- dictionaries/FIX44.xml:800-812
-//   required 'QuoteID' (FIX44.xml:802) -> quote_id(tag 117)
-//   required 'QuoteCancelType' (FIX44.xml:803) -> quote_cancel_type(tag 298)
+// QuoteCancel (Z) -- dictionaries/FIX44.xml message
+//   required 'QuoteID' (FIX44.xml field) -> quote_id(tag 117)
+//   required 'QuoteCancelType' (FIX44.xml field) -> quote_cancel_type(tag 298)
 TEST_F(AllFamiliesRoundtrip069, QuoteCancel) {
     fixpp::v44::QuoteCancelArgs args{};
     args.quote_id = "Z_quote_id";
@@ -1441,7 +1441,7 @@ TEST_F(AllFamiliesRoundtrip069, QuoteCancel) {
     expect_wire_text(mv, 298, "298", "quote_cancel_type");
 }
 
-// QuoteStatusRequest (a) -- dictionaries/FIX44.xml:813-827
+// QuoteStatusRequest (a) -- dictionaries/FIX44.xml message
 //   filler (not required) -> account(tag 1)
 //   filler (not required) -> security_id_source(tag 22)
 TEST_F(AllFamiliesRoundtrip069, QuoteStatusRequest) {
@@ -1456,8 +1456,8 @@ TEST_F(AllFamiliesRoundtrip069, QuoteStatusRequest) {
     expect_wire_text(mv, 22, "a_security_id_source", "security_id_source");
 }
 
-// MassQuoteAcknowledgement (b) -- dictionaries/FIX44.xml:828-843
-//   required 'QuoteStatus' (FIX44.xml:831) -> quote_status(tag 297)
+// MassQuoteAcknowledgement (b) -- dictionaries/FIX44.xml message
+//   required 'QuoteStatus' (FIX44.xml field) -> quote_status(tag 297)
 //   filler (not required) -> account(tag 1)
 TEST_F(AllFamiliesRoundtrip069, MassQuoteAcknowledgement) {
     fixpp::v44::MassQuoteAcknowledgementArgs args{};
@@ -1472,9 +1472,9 @@ TEST_F(AllFamiliesRoundtrip069, MassQuoteAcknowledgement) {
     expect_wire_text(mv, 1, "b_account", "account");
 }
 
-// SecurityDefinitionRequest (c) -- dictionaries/FIX44.xml:844-859
-//   required 'SecurityReqID' (FIX44.xml:845) -> security_req_id(tag 320)
-//   required 'SecurityRequestType' (FIX44.xml:846) -> security_request_type(tag 321)
+// SecurityDefinitionRequest (c) -- dictionaries/FIX44.xml message
+//   required 'SecurityReqID' (FIX44.xml field) -> security_req_id(tag 320)
+//   required 'SecurityRequestType' (FIX44.xml field) -> security_request_type(tag 321)
 TEST_F(AllFamiliesRoundtrip069, SecurityDefinitionRequest) {
     fixpp::v44::SecurityDefinitionRequestArgs args{};
     args.security_req_id = "c_security_req_id";
@@ -1488,10 +1488,10 @@ TEST_F(AllFamiliesRoundtrip069, SecurityDefinitionRequest) {
     expect_wire_text(mv, 321, "321", "security_request_type");
 }
 
-// SecurityDefinition (d) -- dictionaries/FIX44.xml:860-877
-//   required 'SecurityReqID' (FIX44.xml:861) -> security_req_id(tag 320)
-//   required 'SecurityResponseID' (FIX44.xml:862) -> security_response_id(tag 322)
-//   required 'SecurityResponseType' (FIX44.xml:863) -> security_response_type(tag 323)
+// SecurityDefinition (d) -- dictionaries/FIX44.xml message
+//   required 'SecurityReqID' (FIX44.xml field) -> security_req_id(tag 320)
+//   required 'SecurityResponseID' (FIX44.xml field) -> security_response_id(tag 322)
+//   required 'SecurityResponseType' (FIX44.xml field) -> security_response_type(tag 323)
 TEST_F(AllFamiliesRoundtrip069, SecurityDefinition) {
     fixpp::v44::SecurityDefinitionArgs args{};
     args.security_req_id = "d_security_req_id";
@@ -1506,9 +1506,9 @@ TEST_F(AllFamiliesRoundtrip069, SecurityDefinition) {
     expect_wire_text(mv, 323, "323", "security_response_type");
 }
 
-// SecurityStatusRequest (e) -- dictionaries/FIX44.xml:878-888
-//   required 'SecurityStatusReqID' (FIX44.xml:879) -> security_status_req_id(tag 324)
-//   required 'SubscriptionRequestType' (FIX44.xml:885) -> subscription_request_type(tag 263)
+// SecurityStatusRequest (e) -- dictionaries/FIX44.xml message
+//   required 'SecurityStatusReqID' (FIX44.xml field) -> security_status_req_id(tag 324)
+//   required 'SubscriptionRequestType' (FIX44.xml field) -> subscription_request_type(tag 263)
 TEST_F(AllFamiliesRoundtrip069, SecurityStatusRequest) {
     fixpp::v44::SecurityStatusRequestArgs args{};
     args.security_status_req_id = "e_security_status_req_id";
@@ -1521,7 +1521,7 @@ TEST_F(AllFamiliesRoundtrip069, SecurityStatusRequest) {
     expect_wire_text(mv, 263, "1", "subscription_request_type");
 }
 
-// SecurityStatus (f) -- dictionaries/FIX44.xml:889-915
+// SecurityStatus (f) -- dictionaries/FIX44.xml message
 //   filler (not required) -> currency(tag 15)
 //   filler (not required) -> security_id_source(tag 22)
 TEST_F(AllFamiliesRoundtrip069, SecurityStatus) {
@@ -1536,9 +1536,9 @@ TEST_F(AllFamiliesRoundtrip069, SecurityStatus) {
     expect_wire_text(mv, 22, "f_security_id_source", "security_id_source");
 }
 
-// TradingSessionStatusRequest (g) -- dictionaries/FIX44.xml:916-923
-//   required 'TradSesReqID' (FIX44.xml:917) -> trad_ses_req_id(tag 335)
-//   required 'SubscriptionRequestType' (FIX44.xml:922) -> subscription_request_type(tag 263)
+// TradingSessionStatusRequest (g) -- dictionaries/FIX44.xml message
+//   required 'TradSesReqID' (FIX44.xml field) -> trad_ses_req_id(tag 335)
+//   required 'SubscriptionRequestType' (FIX44.xml field) -> subscription_request_type(tag 263)
 TEST_F(AllFamiliesRoundtrip069, TradingSessionStatusRequest) {
     fixpp::v44::TradingSessionStatusRequestArgs args{};
     args.trad_ses_req_id = "g_trad_ses_req_id";
@@ -1552,9 +1552,9 @@ TEST_F(AllFamiliesRoundtrip069, TradingSessionStatusRequest) {
     expect_wire_text(mv, 263, "1", "subscription_request_type");
 }
 
-// TradingSessionStatus (h) -- dictionaries/FIX44.xml:924-942
-//   required 'TradingSessionID' (FIX44.xml:926) -> trading_session_id(tag 336)
-//   required 'TradSesStatus' (FIX44.xml:931) -> trad_ses_status(tag 340)
+// TradingSessionStatus (h) -- dictionaries/FIX44.xml message
+//   required 'TradingSessionID' (FIX44.xml field) -> trading_session_id(tag 336)
+//   required 'TradSesStatus' (FIX44.xml field) -> trad_ses_status(tag 340)
 TEST_F(AllFamiliesRoundtrip069, TradingSessionStatus) {
     fixpp::v44::TradingSessionStatusArgs args{};
     args.trading_session_id = "h_trading_session_id";
@@ -1567,8 +1567,8 @@ TEST_F(AllFamiliesRoundtrip069, TradingSessionStatus) {
     expect_wire_text(mv, 340, "340", "trad_ses_status");
 }
 
-// MassQuote (i) -- dictionaries/FIX44.xml:943-955
-//   required 'QuoteID' (FIX44.xml:945) -> quote_id(tag 117)
+// MassQuote (i) -- dictionaries/FIX44.xml message
+//   required 'QuoteID' (FIX44.xml field) -> quote_id(tag 117)
 //   filler (not required) -> account(tag 1)
 TEST_F(AllFamiliesRoundtrip069, MassQuote) {
     fixpp::v44::MassQuoteArgs args{};
@@ -1582,9 +1582,9 @@ TEST_F(AllFamiliesRoundtrip069, MassQuote) {
     expect_wire_text(mv, 1, "i_account", "account");
 }
 
-// BusinessMessageReject (j) -- dictionaries/FIX44.xml:956-964
-//   required 'RefMsgType' (FIX44.xml:958) -> ref_msg_type(tag 372)
-//   required 'BusinessRejectReason' (FIX44.xml:960) -> business_reject_reason(tag 380)
+// BusinessMessageReject (j) -- dictionaries/FIX44.xml message
+//   required 'RefMsgType' (FIX44.xml field) -> ref_msg_type(tag 372)
+//   required 'BusinessRejectReason' (FIX44.xml field) -> business_reject_reason(tag 380)
 TEST_F(AllFamiliesRoundtrip069, BusinessMessageReject) {
     fixpp::v44::BusinessMessageRejectArgs args{};
     args.ref_msg_type = "j_ref_msg_type";
@@ -1597,13 +1597,13 @@ TEST_F(AllFamiliesRoundtrip069, BusinessMessageReject) {
     expect_wire_text(mv, 380, "380", "business_reject_reason");
 }
 
-// BidRequest (k) -- dictionaries/FIX44.xml:965-995
-//   required 'ClientBidID' (FIX44.xml:967) -> client_bid_id(tag 391)
-//   required 'BidRequestTransType' (FIX44.xml:968) -> bid_request_trans_type(tag 374)
-//   required 'TotNoRelatedSym' (FIX44.xml:970) -> tot_no_related_sym(tag 393)
-//   required 'BidType' (FIX44.xml:971) -> bid_type(tag 394)
-//   required 'BidTradeType' (FIX44.xml:989) -> bid_trade_type(tag 418)
-//   required 'BasisPxType' (FIX44.xml:990) -> basis_px_type(tag 419)
+// BidRequest (k) -- dictionaries/FIX44.xml message
+//   required 'ClientBidID' (FIX44.xml field) -> client_bid_id(tag 391)
+//   required 'BidRequestTransType' (FIX44.xml field) -> bid_request_trans_type(tag 374)
+//   required 'TotNoRelatedSym' (FIX44.xml field) -> tot_no_related_sym(tag 393)
+//   required 'BidType' (FIX44.xml field) -> bid_type(tag 394)
+//   required 'BidTradeType' (FIX44.xml field) -> bid_trade_type(tag 418)
+//   required 'BasisPxType' (FIX44.xml field) -> basis_px_type(tag 419)
 TEST_F(AllFamiliesRoundtrip069, BidRequest) {
     fixpp::v44::BidRequestArgs args{};
     args.client_bid_id = "k_client_bid_id";
@@ -1624,7 +1624,7 @@ TEST_F(AllFamiliesRoundtrip069, BidRequest) {
     expect_wire_text(mv, 419, "1", "basis_px_type");
 }
 
-// BidResponse (l) -- dictionaries/FIX44.xml:996-1000
+// BidResponse (l) -- dictionaries/FIX44.xml message
 //   filler (not required) -> bid_id(tag 390)
 //   filler (not required) -> client_bid_id(tag 391)
 TEST_F(AllFamiliesRoundtrip069, BidResponse) {
@@ -1639,9 +1639,9 @@ TEST_F(AllFamiliesRoundtrip069, BidResponse) {
     expect_wire_text(mv, 391, "l_client_bid_id", "client_bid_id");
 }
 
-// ListStrikePrice (m) -- dictionaries/FIX44.xml:1001-1007
-//   required 'ListID' (FIX44.xml:1002) -> list_id(tag 66)
-//   required 'TotNoStrikes' (FIX44.xml:1003) -> tot_no_strikes(tag 422)
+// ListStrikePrice (m) -- dictionaries/FIX44.xml message
+//   required 'ListID' (FIX44.xml field) -> list_id(tag 66)
+//   required 'TotNoStrikes' (FIX44.xml field) -> tot_no_strikes(tag 422)
 TEST_F(AllFamiliesRoundtrip069, ListStrikePrice) {
     fixpp::v44::ListStrikePriceArgs args{};
     args.list_id = "m_list_id";
@@ -1654,10 +1654,10 @@ TEST_F(AllFamiliesRoundtrip069, ListStrikePrice) {
     expect_wire_text(mv, 422, "422", "tot_no_strikes");
 }
 
-// RegistrationInstructions (o) -- dictionaries/FIX44.xml:1009-1022
-//   required 'RegistID' (FIX44.xml:1010) -> regist_id(tag 513)
-//   required 'RegistTransType' (FIX44.xml:1011) -> regist_trans_type(tag 514)
-//   required 'RegistRefID' (FIX44.xml:1012) -> regist_ref_id(tag 508)
+// RegistrationInstructions (o) -- dictionaries/FIX44.xml message
+//   required 'RegistID' (FIX44.xml field) -> regist_id(tag 513)
+//   required 'RegistTransType' (FIX44.xml field) -> regist_trans_type(tag 514)
+//   required 'RegistRefID' (FIX44.xml field) -> regist_ref_id(tag 508)
 TEST_F(AllFamiliesRoundtrip069, RegistrationInstructions) {
     fixpp::v44::RegistrationInstructionsArgs args{};
     args.regist_id = "o_regist_id";
@@ -1673,11 +1673,11 @@ TEST_F(AllFamiliesRoundtrip069, RegistrationInstructions) {
     expect_wire_text(mv, 508, "o_regist_ref_id", "regist_ref_id");
 }
 
-// RegistrationInstructionsResponse (p) -- dictionaries/FIX44.xml:1023-1034
-//   required 'RegistID' (FIX44.xml:1024) -> regist_id(tag 513)
-//   required 'RegistTransType' (FIX44.xml:1025) -> regist_trans_type(tag 514)
-//   required 'RegistRefID' (FIX44.xml:1026) -> regist_ref_id(tag 508)
-//   required 'RegistStatus' (FIX44.xml:1031) -> regist_status(tag 506)
+// RegistrationInstructionsResponse (p) -- dictionaries/FIX44.xml message
+//   required 'RegistID' (FIX44.xml field) -> regist_id(tag 513)
+//   required 'RegistTransType' (FIX44.xml field) -> regist_trans_type(tag 514)
+//   required 'RegistRefID' (FIX44.xml field) -> regist_ref_id(tag 508)
+//   required 'RegistStatus' (FIX44.xml field) -> regist_status(tag 506)
 TEST_F(AllFamiliesRoundtrip069, RegistrationInstructionsResponse) {
     fixpp::v44::RegistrationInstructionsResponseArgs args{};
     args.regist_id = "p_regist_id";
@@ -1695,10 +1695,10 @@ TEST_F(AllFamiliesRoundtrip069, RegistrationInstructionsResponse) {
     expect_wire_text(mv, 506, "1", "regist_status");
 }
 
-// OrderMassCancelRequest (q) -- dictionaries/FIX44.xml:1035-1048
-//   required 'ClOrdID' (FIX44.xml:1036) -> cl_ord_id(tag 11)
-//   required 'MassCancelRequestType' (FIX44.xml:1038) -> mass_cancel_request_type(tag 530)
-//   required 'TransactTime' (FIX44.xml:1044) -> transact_time(tag 60)
+// OrderMassCancelRequest (q) -- dictionaries/FIX44.xml message
+//   required 'ClOrdID' (FIX44.xml field) -> cl_ord_id(tag 11)
+//   required 'MassCancelRequestType' (FIX44.xml field) -> mass_cancel_request_type(tag 530)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, OrderMassCancelRequest) {
     fixpp::v44::OrderMassCancelRequestArgs args{};
     args.cl_ord_id = "q_cl_ord_id";
@@ -1713,10 +1713,10 @@ TEST_F(AllFamiliesRoundtrip069, OrderMassCancelRequest) {
     expect_wire_text(mv, 60, "q_transact_time", "transact_time");
 }
 
-// OrderMassCancelReport (r) -- dictionaries/FIX44.xml:1049-1068
-//   required 'OrderID' (FIX44.xml:1052) -> order_id(tag 37)
-//   required 'MassCancelRequestType' (FIX44.xml:1054) -> mass_cancel_request_type(tag 530)
-//   required 'MassCancelResponse' (FIX44.xml:1055) -> mass_cancel_response(tag 531)
+// OrderMassCancelReport (r) -- dictionaries/FIX44.xml message
+//   required 'OrderID' (FIX44.xml field) -> order_id(tag 37)
+//   required 'MassCancelRequestType' (FIX44.xml field) -> mass_cancel_request_type(tag 530)
+//   required 'MassCancelResponse' (FIX44.xml field) -> mass_cancel_response(tag 531)
 TEST_F(AllFamiliesRoundtrip069, OrderMassCancelReport) {
     fixpp::v44::OrderMassCancelReportArgs args{};
     args.order_id = "r_order_id";
@@ -1731,12 +1731,12 @@ TEST_F(AllFamiliesRoundtrip069, OrderMassCancelReport) {
     expect_wire_text(mv, 531, "1", "mass_cancel_response");
 }
 
-// NewOrderCross (s) -- dictionaries/FIX44.xml:1069-1115
-//   required 'CrossID' (FIX44.xml:1070) -> cross_id(tag 548)
-//   required 'CrossType' (FIX44.xml:1071) -> cross_type(tag 549)
-//   required 'CrossPrioritization' (FIX44.xml:1072) -> cross_prioritization(tag 550)
-//   required 'TransactTime' (FIX44.xml:1088) -> transact_time(tag 60)
-//   required 'OrdType' (FIX44.xml:1090) -> ord_type(tag 40)
+// NewOrderCross (s) -- dictionaries/FIX44.xml message
+//   required 'CrossID' (FIX44.xml field) -> cross_id(tag 548)
+//   required 'CrossType' (FIX44.xml field) -> cross_type(tag 549)
+//   required 'CrossPrioritization' (FIX44.xml field) -> cross_prioritization(tag 550)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
+//   required 'OrdType' (FIX44.xml field) -> ord_type(tag 40)
 TEST_F(AllFamiliesRoundtrip069, NewOrderCross) {
     fixpp::v44::NewOrderCrossArgs args{};
     args.cross_id = "s_cross_id";
@@ -1755,13 +1755,13 @@ TEST_F(AllFamiliesRoundtrip069, NewOrderCross) {
     expect_wire_text(mv, 40, "1", "ord_type");
 }
 
-// CrossOrderCancelReplaceRequest (t) -- dictionaries/FIX44.xml:1116-1164
-//   required 'CrossID' (FIX44.xml:1118) -> cross_id(tag 548)
-//   required 'OrigCrossID' (FIX44.xml:1119) -> orig_cross_id(tag 551)
-//   required 'CrossType' (FIX44.xml:1120) -> cross_type(tag 549)
-//   required 'CrossPrioritization' (FIX44.xml:1121) -> cross_prioritization(tag 550)
-//   required 'TransactTime' (FIX44.xml:1137) -> transact_time(tag 60)
-//   required 'OrdType' (FIX44.xml:1139) -> ord_type(tag 40)
+// CrossOrderCancelReplaceRequest (t) -- dictionaries/FIX44.xml message
+//   required 'CrossID' (FIX44.xml field) -> cross_id(tag 548)
+//   required 'OrigCrossID' (FIX44.xml field) -> orig_cross_id(tag 551)
+//   required 'CrossType' (FIX44.xml field) -> cross_type(tag 549)
+//   required 'CrossPrioritization' (FIX44.xml field) -> cross_prioritization(tag 550)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
+//   required 'OrdType' (FIX44.xml field) -> ord_type(tag 40)
 TEST_F(AllFamiliesRoundtrip069, CrossOrderCancelReplaceRequest) {
     fixpp::v44::CrossOrderCancelReplaceRequestArgs args{};
     args.cross_id = "t_cross_id";
@@ -1783,12 +1783,12 @@ TEST_F(AllFamiliesRoundtrip069, CrossOrderCancelReplaceRequest) {
     expect_wire_text(mv, 40, "1", "ord_type");
 }
 
-// CrossOrderCancelRequest (u) -- dictionaries/FIX44.xml:1165-1176
-//   required 'CrossID' (FIX44.xml:1167) -> cross_id(tag 548)
-//   required 'OrigCrossID' (FIX44.xml:1168) -> orig_cross_id(tag 551)
-//   required 'CrossType' (FIX44.xml:1169) -> cross_type(tag 549)
-//   required 'CrossPrioritization' (FIX44.xml:1170) -> cross_prioritization(tag 550)
-//   required 'TransactTime' (FIX44.xml:1175) -> transact_time(tag 60)
+// CrossOrderCancelRequest (u) -- dictionaries/FIX44.xml message
+//   required 'CrossID' (FIX44.xml field) -> cross_id(tag 548)
+//   required 'OrigCrossID' (FIX44.xml field) -> orig_cross_id(tag 551)
+//   required 'CrossType' (FIX44.xml field) -> cross_type(tag 549)
+//   required 'CrossPrioritization' (FIX44.xml field) -> cross_prioritization(tag 550)
+//   required 'TransactTime' (FIX44.xml field) -> transact_time(tag 60)
 TEST_F(AllFamiliesRoundtrip069, CrossOrderCancelRequest) {
     fixpp::v44::CrossOrderCancelRequestArgs args{};
     args.cross_id = "u_cross_id";
@@ -1807,8 +1807,8 @@ TEST_F(AllFamiliesRoundtrip069, CrossOrderCancelRequest) {
     expect_wire_text(mv, 60, "u_transact_time", "transact_time");
 }
 
-// SecurityTypeRequest (v) -- dictionaries/FIX44.xml:1177-1187
-//   required 'SecurityReqID' (FIX44.xml:1178) -> security_req_id(tag 320)
+// SecurityTypeRequest (v) -- dictionaries/FIX44.xml message
+//   required 'SecurityReqID' (FIX44.xml field) -> security_req_id(tag 320)
 //   filler (not required) -> text(tag 58)
 TEST_F(AllFamiliesRoundtrip069, SecurityTypeRequest) {
     fixpp::v44::SecurityTypeRequestArgs args{};
@@ -1822,10 +1822,10 @@ TEST_F(AllFamiliesRoundtrip069, SecurityTypeRequest) {
     expect_wire_text(mv, 58, "v_text", "text");
 }
 
-// SecurityTypes (w) -- dictionaries/FIX44.xml:1188-1201
-//   required 'SecurityReqID' (FIX44.xml:1189) -> security_req_id(tag 320)
-//   required 'SecurityResponseID' (FIX44.xml:1190) -> security_response_id(tag 322)
-//   required 'SecurityResponseType' (FIX44.xml:1191) -> security_response_type(tag 323)
+// SecurityTypes (w) -- dictionaries/FIX44.xml message
+//   required 'SecurityReqID' (FIX44.xml field) -> security_req_id(tag 320)
+//   required 'SecurityResponseID' (FIX44.xml field) -> security_response_id(tag 322)
+//   required 'SecurityResponseType' (FIX44.xml field) -> security_response_type(tag 323)
 TEST_F(AllFamiliesRoundtrip069, SecurityTypes) {
     fixpp::v44::SecurityTypesArgs args{};
     args.security_req_id = "w_security_req_id";
@@ -1840,9 +1840,9 @@ TEST_F(AllFamiliesRoundtrip069, SecurityTypes) {
     expect_wire_text(mv, 323, "323", "security_response_type");
 }
 
-// SecurityListRequest (x) -- dictionaries/FIX44.xml:1202-1217
-//   required 'SecurityReqID' (FIX44.xml:1203) -> security_req_id(tag 320)
-//   required 'SecurityListRequestType' (FIX44.xml:1204) -> security_list_request_type(tag 559)
+// SecurityListRequest (x) -- dictionaries/FIX44.xml message
+//   required 'SecurityReqID' (FIX44.xml field) -> security_req_id(tag 320)
+//   required 'SecurityListRequestType' (FIX44.xml field) -> security_list_request_type(tag 559)
 TEST_F(AllFamiliesRoundtrip069, SecurityListRequest) {
     fixpp::v44::SecurityListRequestArgs args{};
     args.security_req_id = "x_security_req_id";
@@ -1855,10 +1855,10 @@ TEST_F(AllFamiliesRoundtrip069, SecurityListRequest) {
     expect_wire_text(mv, 559, "559", "security_list_request_type");
 }
 
-// SecurityList (y) -- dictionaries/FIX44.xml:1218-1225
-//   required 'SecurityReqID' (FIX44.xml:1219) -> security_req_id(tag 320)
-//   required 'SecurityResponseID' (FIX44.xml:1220) -> security_response_id(tag 322)
-//   required 'SecurityRequestResult' (FIX44.xml:1221) -> security_request_result(tag 560)
+// SecurityList (y) -- dictionaries/FIX44.xml message
+//   required 'SecurityReqID' (FIX44.xml field) -> security_req_id(tag 320)
+//   required 'SecurityResponseID' (FIX44.xml field) -> security_response_id(tag 322)
+//   required 'SecurityRequestResult' (FIX44.xml field) -> security_request_result(tag 560)
 TEST_F(AllFamiliesRoundtrip069, SecurityList) {
     fixpp::v44::SecurityListArgs args{};
     args.security_req_id = "y_security_req_id";
@@ -1873,9 +1873,9 @@ TEST_F(AllFamiliesRoundtrip069, SecurityList) {
     expect_wire_text(mv, 560, "560", "security_request_result");
 }
 
-// DerivativeSecurityListRequest (z) -- dictionaries/FIX44.xml:1226-1238
-//   required 'SecurityReqID' (FIX44.xml:1227) -> security_req_id(tag 320)
-//   required 'SecurityListRequestType' (FIX44.xml:1228) -> security_list_request_type(tag 559)
+// DerivativeSecurityListRequest (z) -- dictionaries/FIX44.xml message
+//   required 'SecurityReqID' (FIX44.xml field) -> security_req_id(tag 320)
+//   required 'SecurityListRequestType' (FIX44.xml field) -> security_list_request_type(tag 559)
 TEST_F(AllFamiliesRoundtrip069, DerivativeSecurityListRequest) {
     fixpp::v44::DerivativeSecurityListRequestArgs args{};
     args.security_req_id = "z_security_req_id";
@@ -1890,7 +1890,7 @@ TEST_F(AllFamiliesRoundtrip069, DerivativeSecurityListRequest) {
 }
 
 // Coverage set-equality self-check (mandatory guard, mirrors
-// test_067_completeness.cpp's set_difference diagnostic, lines 138-155):
+// test_067_completeness.cpp's ExactSetEqualityOverBuilderRegistryKeys set_difference diagnostic):
 // this file's own hand-written MsgType table MUST equal, set-for-set, the
 // emitted fixpp::v44::builder_registry. Deleting/forgetting a row here is a
 // LOUD failure (both-direction set_difference), never a silent under-cover
@@ -1939,14 +1939,14 @@ TEST_F(AllFamiliesRoundtrip069, CoverageSetEqualityOverAllEmittedBuilders) {
 // ── T013 [US2] new-family required-field fail-closed witnesses ──────────
 // Disposition: fixpp::core::error::wire_required_field_missing (the SAME
 // enum test_067_builder_failclosed.cpp's RequiredGroupZero_ValidateRejects
-// asserts -- builder_validate.hpp:77 (missing scalar) and :86 (empty
+// asserts -- validate_required's required-scalar check (missing scalar) and its required-group-empty check (empty
 // required group) both return it). Each witness seeds every OTHER required
 // field and omits EXACTLY the one under test, so the reject is attributable
 // to that field (feedback_witness_asserts_named_postcondition_not_proxy (d)).
 
 // Nested: TradeCaptureReport(AE)'s TrdCapRptSideGrp/NoSides is REQUIRED
-// (dictionaries/FIX44.xml:1489/3536) with a required entry field Side(54)
-// (FIX44.xml:3537). Seed everything else (incl. OrderID(37), FIX44.xml:3538,
+// (dictionaries/FIX44.xml's TrdCapRptSideGrp component) with a required entry field Side(54)
+// (FIX44.xml's Side field). Seed everything else (incl. OrderID(37), FIX44.xml's OrderID field,
 // present) but omit Side on the one entry.
 TEST(AllFamiliesFailClosed069, TradeCaptureReport_NoSidesEntry_MissingSide) {
     std::pmr::monotonic_buffer_resource arena{4096};
@@ -1970,8 +1970,8 @@ TEST(AllFamiliesFailClosed069, TradeCaptureReport_NoSidesEntry_MissingSide) {
     EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
 }
 
-// Flat: BusinessMessageReject(j) requires RefMsgType(372) (FIX44.xml:958)
-// AND BusinessRejectReason(380) (FIX44.xml:960). Seed BusinessRejectReason,
+// Flat: BusinessMessageReject(j) requires RefMsgType(372) (FIX44.xml field)
+// AND BusinessRejectReason(380) (FIX44.xml field). Seed BusinessRejectReason,
 // omit RefMsgType alone.
 TEST(AllFamiliesFailClosed069, BusinessMessageReject_MissingRefMsgType) {
     fixpp::v44::BusinessMessageRejectArgs args{};

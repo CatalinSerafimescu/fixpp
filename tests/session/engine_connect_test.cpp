@@ -22,7 +22,7 @@
 //      TLS handshake → receive initiator's post-connect Logon → send Logon-ack
 //      + N heartbeats → set server_received_logon = true.
 //
-// RED today (STUB at engine.cpp ~line 550-566):
+// RED today (STUB in run_connect_loop, pre-T013):
 //   run_connect_loop does open() (which calls Session::open() for the initiator;
 //   open() transitions to LogonSent and emits the Logon into the no-op
 //   transport_send_) then co_returns.  It NEVER calls async_connect to the server.

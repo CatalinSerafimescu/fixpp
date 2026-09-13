@@ -76,7 +76,7 @@ TEST(BuildersHppRemovedUS4, CompileTimeGuardsPassed) {
     // If this TU compiled at all, every __has_include guard above already
     // passed -- SUCCEED() just gives the compile-time proof a runnable test
     // name/result in the ctest log (repo convention, e.g.
-    // tests/sync/test_consumer_contract_compile.cpp:135).
+    // SyncConsumerContract.ShippedSurfaceMatchesHandoffContract's SUCCEED() convention).
     SUCCEED() << "v44/v50sp2 Builders.hpp negative + all.hpp positive-control "
                  "__has_include guards enforced at compile time (see #if above).";
 }

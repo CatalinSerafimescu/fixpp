@@ -1,6 +1,6 @@
 # neg_duration_empty.toml
 # heartbeat_interval is an empty string — triggers parse_duration_to_ms
-# "empty duration string" error arm (line 112).
+# "empty duration string" error arm (loader_internal.cpp).
 
 [clock]
 kind = "system"

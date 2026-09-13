@@ -321,7 +321,7 @@ TEST_F(AdminDistinctNowTest, HB_DistinctNow_TwoHeartbeatsHaveDistinctSendingTime
 // ── T018 Test 2 (FR-007 admin builder): TestRequest (35=1) — per-message-distinct ──
 //
 // Trigger: liveness loop fires TestRequest after heartbt_int silence
-// (session.cpp:1437+). Advance mock_clock past two consecutive heartbt_int
+// (run_liveness_loop). Advance mock_clock past two consecutive heartbt_int
 // windows (with peer Heartbeat echo between to satisfy the liveness contract
 // and avoid the unanswered-TR Disconnected branch). Both emitted TestRequest
 // frames must carry distinct SendingTime(52) values.
@@ -440,7 +440,7 @@ TEST_F(AdminDistinctNowTest, TR_DistinctNow_TwoLivenessTestRequestsHaveDistinctS
 //
 // Note: session admin MsgTypes (A/0/1/2/3/4/5) bypass the Reject branch.
 // Only a non-admin MsgType ("D" = NewOrderSingle) reaches the
-// !is_session_admin → build_reject path (session.cpp:964+).
+// !is_admin_msgtype → build_reject path (on_inbound_frame's non-admin-MsgType Reject arm).
 // SendingTime must be within 120 s of mock_clock to pass the Q3 guard.
 TEST_F(AdminDistinctNowTest, Reject_DistinctNow_TwoRejectsHaveDistinctSendingTime) {
     // FR-007: Reject builder stamps SendingTime from effective_clock.now().

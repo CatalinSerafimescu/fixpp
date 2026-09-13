@@ -1,6 +1,6 @@
 # neg_security_profile_kind_empty.toml
 # security_profile.kind is an empty string — triggers empty_required at
-# session[0].security_profile.kind (lines 239-244 toml_config_loader.cpp
+# session[0].security_profile.kind (toml_config_loader.cpp
 # check_required_keys, and via scalar_mappers.cpp since kind is present/is_string).
 #
 # Note: scalar_mappers does not emit a diagnostic for empty kind (it just doesn't

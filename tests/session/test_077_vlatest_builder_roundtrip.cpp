@@ -29,7 +29,7 @@
 // dictionaries/orchestra/OrchestraFIXLatest.xml (074's native Orchestra
 // reader) -- table_view()/Parser<Index>{tv} downstream are identical
 // (dict::Dictionary is the same runtime type regardless of loader; see
-// tests/dictionary/orchestra_loader_test.cpp:143). The wire BeginString
+// tests/dictionary/orchestra_loader_test.cpp's OrchestraGroups.DeepAndReused). The wire BeginString
 // label ("FIXT.1.1", the real-world FIX Latest session transport string) is
 // inert to the dict-aware Parser<Index>{tv} ctor, which resolves solely from
 // the explicit table_view argument, not from BeginString (mirrors
@@ -76,7 +76,7 @@ using IndexView = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 // Load the real FIX Latest (EP303) dictionary via the native Orchestra
 // reader (074) -- the vlatest analog of app_message_read_scaffold.hpp's
 // load_fix44(). Consuming target defines FIXPP_ORCHESTRA_DATA_DIR (mirrors
-// tests/dictionary/CMakeLists.txt:96/129).
+// tests/dictionary/CMakeLists.txt's `set(FIXPP_ORCHESTRA_DATA_DIR ...)`).
 fixpp::dict::Dictionary load_vlatest(std::pmr::memory_resource* mr) {
     fixpp::dict::OrchestraLoader loader;
     return loader.load(std::string(FIXPP_ORCHESTRA_DATA_DIR) + "/OrchestraFIXLatest.xml", mr);

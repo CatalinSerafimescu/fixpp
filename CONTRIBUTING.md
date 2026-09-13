@@ -74,8 +74,52 @@ pre-commit run --all-files
 
 ## The line-number citation gate (issue #310)
 
-`check-line-citations` blocks a commit that ADDS a line-number citation —
-`file.cpp:1258`, `at line 2234`, or a bare `(:64)`. <!-- citation-ok: worked example, not a real citation -->
+`check-line-citations` blocks a commit that ADDS a line-number citation. There
+are **eight spellings** and the gate knows all of them: <!-- citation-ok: worked examples, not real citations -->
+
+| | shape | example |
+|---|---|---|
+| A | filename + line | `session.cpp:1258`, `reify_dispatch.hpp L15-24`, `session.cpp:~555` | <!-- citation-ok: worked example -->
+| A | non-C++ target | `dictionaries/FIX44.xml:2805`, `CMakeLists.txt:401`, `tier1.yml:392` | <!-- citation-ok: worked example -->
+| B | prose, no filename | `at line 2234`, `lines 138-140`, `~line 3232`, `line ~958` | <!-- citation-ok: worked example -->
+| C | bare, parenthesised | `(:64)`, `(:316-328)` | <!-- citation-ok: worked example -->
+| D | bracketed doc alias | `[2h §6.6]:1167-1204`, `` [2d §4.7]`:864 `` | <!-- citation-ok: worked example -->
+| F | bare or backticked | `at :2953`, `` `:616` ``, `` `constitution.md`:335 `` | <!-- citation-ok: worked example -->
+| F | tilde EITHER side | `` ~:1250 ``, `` :~1910 `` | <!-- citation-ok: worked example -->
+
+**Seven of those eight were added on 2026-09-12, and NOT ONE was found by running
+the detector.** Each surfaced because a person — or an agent reading like one —
+met it in prose. That is the durable lesson: an instrument keyed on the shapes
+you thought of reports clean about the shapes you did not.
+
+The blind spots were not small. Form D reached **shipped public headers** —
+`include/fixpp/core/error.hpp` carried 22, all pointing ~60 lines short of the
+table they named. Form B's tilde was accepted only on the OUTSIDE — the <!-- citation-ok: worked example -->
+spelling issue #310 quoted — so the inside form went unmatched for the life of
+the gate — including in a shipped header. **That same asymmetry then recurred
+in a different regex**: form F gated `` ~:1250 `` and not `` :~1910 ``, and the <!-- citation-ok: worked example -->
+second spelling survived the whole sweep. When a pattern admits an optional
+mark anywhere, write it on **both** sides and carry a self-test arm for each —
+the cost is one `?`, and the omission is invisible to every instrument,
+including the one you are editing. The extension list was C++ plus `md`,
+which silently declared that only C++ and markdown rot, while 435 citations
+pointed into the FIX dictionaries that dictionary features edit wholesale.
+
+**If you are adding a ninth, do not guess it.** Derive the blind set by
+complement: generate every line-number-ish token in the tree, subtract every line
+the current deciders match, and read the residue. The procedure is written out
+above `RE_A` in `tools/check_line_citations.py`. Guessing has failed eight times.
+
+**Two spellings are measured and deliberately NOT gated**, recorded here so the
+next person to notice one finds out it was seen rather than missed:
+`build_replay_frame:1220` and `NotConnected:1839` — a symbol name with a line <!-- citation-ok: worked example -->
+number and no extension. The tree's `identifier:NNN` hits are overwhelmingly
+`collector:4318`, `sha256:…`, `localhost:8080`, `iterations:89261714`; a gate
+that cries wolf gets narrowed by the next person, and **the narrowing is the
+thing that rots**. Restricting to a CamelCase head does separate the classes
+cleanly (7 live hits, zero false positives, measured 2026-09-12) — but seven
+sites are cheaper to fix by hand than a ninth decider is to defend forever, and
+a shape that is absent today is not absent tomorrow. They were fixed by hand.
 
 A line number is a claim about a file that keeps moving. Nobody has to touch the
 citing file for it to become false: the target drifts and the citation rots in
@@ -98,13 +142,23 @@ Citations into QuickFIX or vendored dependencies are exempt automatically — th
 do not rot when this tree moves. For a deliberate in-tree exception, put a
 `citation-ok` marker on the line; keep that rare.
 
-The gate covers ADDED LINES ONLY. The pre-existing population is large and is
-being retired opportunistically, not in one sweep. To survey it:
+The gate covers ADDED LINES ONLY. The pre-existing population on the LIVE
+surfaces was swept in 2026-09-12's #310 pass; what remains is concentrated in
+frozen `specs/<id>/` feature bundles, which are archival and are reported by the
+gate rather than charged by it. To survey either:
 
 ```bash
 python3 tools/check_line_citations.py --census          # candidates + out-of-range
 python3 tools/check_line_citations.py --self-test       # prove the detector fires
 ```
+
+⚠️ **Before believing any clean run, check that the instrument can report
+non-zero.** `--self-test` carries an arm per form on a throwaway repo — including
+a seeded out-of-range citation, a `:0`, a citation into an empty file, and both
+spellings of form D — so a zero from `--census` is a measured zero rather than a
+form the detector could not see. That distinction is the whole history of this
+issue: the census once reported `0 out of range` while scoped to seven directory
+trees that held almost none of this repo's line-cited documents.
 
 The gate above catches citations you ADD. It cannot catch an edit that
 INVALIDATES the ones already there — inserting a paragraph near the top of a

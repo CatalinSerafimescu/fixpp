@@ -6,15 +6,15 @@
 // frame through a real two-C-ABI-engine plaintext-TCP loopback pair
 // (capi_dict066_loopback_support.hpp) to a registered receive callback, and
 // queries a plain SCALAR tag — Symbol(55), `<field number='55'
-// name='Symbol' type='STRING' />` at dictionaries/FIX44.xml:4028, NOT a
+// name='Symbol' type='STRING' />` — dictionaries/FIX44.xml's Symbol field declaration, NOT a
 // NUMINGROUP count field — via `fixpp_msg_get_group`.
 //
-// Contract (C2 / SC-002; src/capi/message_read.cpp:336-380):
+// Contract (C2 / SC-002; fixpp_msg_get_group in src/capi/message_read.cpp):
 // `fixpp_msg_get_group(msg, 55, ...)` must return FIXPP_ERR_TYPE_MISMATCH
 // (present-but-not-a-group), never FIXPP_ERR_OK with a spurious instance.
 //
 // GREEN today (T006 already dict-backs the parse site). RED-first is
-// proven by TEMPORARY mutation of src/session/session.cpp:316 (not
+// proven by TEMPORARY mutation of Session::validate_inbound_'s dict-free Parser (not
 // committed) per the phase-implementer brief — this file is unconditionally
 // the same in both configurations.
 //

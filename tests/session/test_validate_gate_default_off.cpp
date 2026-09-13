@@ -238,7 +238,7 @@ TEST(ValidateGateDefaultOff, T016_ValidatorNotConstructed_SC005) {
     auto cfg = fix.make_cfg_default();
     Session sess{fix.engine, cfg};
 
-    // open() triggers the validator-construction guard (session.cpp:1103).
+    // open() triggers the `validate_inbound_messages` guard for validator construction.
     // With flag=false the guard is not entered → validator_ stays null.
     auto fut = asio::co_spawn(fix.ioc, sess.open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 200ms)) {
@@ -251,10 +251,10 @@ TEST(ValidateGateDefaultOff, T016_ValidatorNotConstructed_SC005) {
     ASSERT_TRUE(fut.get().has_value()) << "open() must succeed";
 
     // Direct structural assertion: no validator constructed.
-    // [SC-005; FR-002; 041 T016; session.cpp:1103; session.hpp FIXPP_TEST_HOOKS]
+    // [SC-005; FR-002; 041 T016; open()'s validate_inbound_messages guard; session.hpp FIXPP_TEST_HOOKS]
     EXPECT_FALSE(sess.has_validator_for_test())
         << "T016/SC-005: validator_ must be null when validate_inbound_messages==false "
-           "(flag gates construction at session.cpp:1103; dict IS set in this config, "
+           "(flag gates construction in open(); dict IS set in this config, "
            "so null is caused by the flag, not a missing dict)";
 }
 

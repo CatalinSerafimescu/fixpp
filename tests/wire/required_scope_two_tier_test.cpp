@@ -31,7 +31,7 @@
 //     the typed tier's actual required-set source, not the codegen IR) must
 //     be exactly set-equal.
 //   - FIX42 excluded entirely: no generated typed `validate_<Msg>`
-//     (tools/codegen/fixpp-codegen/main.cpp:132 `if (ir.ns != "v42")` —
+//     (tools/codegen/fixpp-codegen/main.cpp's now-deleted `if (ir.ns != "v42")` —
 //     L-077-1/#196).
 //     ⬆ **RETIRED by 082-structural-group-detection (2026-08-12, closes #196).**
 //     That `ir.ns != "v42"` condition was DELETED (082 T035), so `fixpp::v42`
@@ -52,7 +52,7 @@
 // needs NO link dependency on `fixpp::validators::{v44,v50sp2,vlatest}`.
 //
 // Anchors: specs/079-required-presence-scope/contracts/census-and-agreement.md
-// Contract 3; spec.md US3 (lines 62-75) / FR-007 / SC-004 / SC-008;
+// Contract 3; spec.md US3 / FR-007 / SC-004 / SC-008;
 // quickstart.md §5; tests/wire/validator_type_check_test.cpp (T006/T010/T011
 // real-frame corpus, reused here); tests/codegen/test_078_validator_mixing_us3.cpp
 // (header-only-inclusion precedent).
@@ -520,11 +520,11 @@ TEST(RequiredScopeTwoTier, V50sp2TradeCaptureReport_DerivationTierAgrees) {
         << "typed tier: Side(54) lives inside optional NoSides(552) — must not be "
            "message-level required";
     // Both sides are exactly EMPTY (not merely 54-excluding): AE's own
-    // top-level fields are all required='N' (dictionaries/FIX50SP2.xml:2063
-    // -2229; its sole message-level-required entity is the `Instrument`
+    // top-level fields are all required='N' (dictionaries/FIX50SP2.xml's
+    // `TradeCaptureReport` message declaration; its sole message-level-required entity is the `Instrument`
     // component, whose own direct fields are ALL required='N' too — see
-    // FIX50SP2.xml:4722-4735), and `<group name='NoSides' required='N'>`
-    // itself (FIX50SP2.xml:9047) is not required despite the enclosing
+    // FIX50SP2.xml's `Instrument` component declaration), and `<group name='NoSides' required='N'>`
+    // itself (FIX50SP2.xml's `TrdCapRptSideGrp` component) is not required despite the enclosing
     // `TrdCapRptSideGrp` component usage being required='Y' (so 552 is not
     // promoted the way vlatest's NoPartyIDs(453) is below). Asserted
     // directly so an accidental mis-load returning `{}` for an unrelated

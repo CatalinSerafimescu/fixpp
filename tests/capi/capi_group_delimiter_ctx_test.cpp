@@ -599,7 +599,7 @@ TEST(CapiGroupDelimiterCtx, DisclosedDelimiterMoveRejectsOldOrder) {
 //
 // This is D-10's total-regression pin. T028/T030 delete the one-level component
 // scan that used to populate the global `GroupDef.first_field_tag`, and the
-// same global is what `src/capi/message_write.cpp:157`, `:812` and `:923` use
+// same global is what `is_group_collision`, `fixpp_msg_group_begin` and `fixpp_entry_group_begin` use
 // as a bare predicate. If the repopulating projection ever leaves it 0, the C
 // ABI's group_begin rejects EVERY group through a GA-frozen ABI — and the whole
 // hazard is that this would otherwise be found by a client after release.

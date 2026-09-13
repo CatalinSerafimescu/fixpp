@@ -259,7 +259,7 @@ message(STATUS "T060 PASS leg: provenance matches the producing build "
 # "Require a clean tree for any artifact a witness accepts" is unrunnable as a
 # standing local gate — a working branch is dirty by definition, and this
 # bundle already rejected that exact shape in writing
-# (run_telemetry_provenance_witness.cmake:111-115 — "A gate that cannot pass
+# (run_telemetry_provenance_witness.cmake's own disposition comment — "A gate that cannot pass
 # in the environment it runs in is not a strict gate; it is a broken one.").
 # The operative discriminator against R2-F1 is the independent comparison
 # above, not a clean-tree precondition: clean-at-configure → dirty-at-pack-time

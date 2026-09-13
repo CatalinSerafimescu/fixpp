@@ -3,13 +3,13 @@
 # session[1] uses TLS with one_way_ca (profile differs from engine default)
 # but NO per-session cert_source (reuses engine cert) — hits the
 # "profile diverges but certs are the same: reuse engine default cert_source"
-# path (line 647-649 selector_resolver.cpp).
+# path (resolve_transport's cert-reuse arm, selector_resolver.cpp).
 #
 # This exercises:
-#   - Per-session divergence scan (lines 596-663)
-#   - profile_diverges && !cert_diverges path (line 649 — s_cert_source = engine default)
-#   - The overall divergence loop (lines 596-663)
-#   - continue at line 612 (session[0] matches engine default → s_transport_kind=="tls" matches,
+#   - Per-session divergence scan (resolve_transport's per-session minting loop)
+#   - profile_diverges && !cert_diverges path (resolve_transport's cert-reuse arm — s_cert_source = engine default)
+#   - The overall divergence loop (resolve_transport's per-session minting loop)
+#   - continue at resolve_transport's match-engine-default arm (session[0] matches engine default → s_transport_kind=="tls" matches,
 #     then profile and cert both match → !cert_diverges && !profile_diverges → continue at 635)
 #
 # Engine default: session[0] cert (ECDSA P256) + mtls_ca.

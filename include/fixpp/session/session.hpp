@@ -38,7 +38,7 @@
 // incomplete type like validator_), so table_view must be complete here.
 // [const §XV.9] guard confirmed clean — table_view.hpp has a deliberately
 // minimal include graph (no mutex, no heavy asio; see its own file header
-// and validator.hpp:23,41's identical confirmation) — the check_no_std_mutex
+// and validator.hpp's own identical §XV.9 confirmation) — the check_no_std_mutex
 // _corpus Tier-1 gate (tests/sync/CMakeLists.txt) covers this file.
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/session/message_store.hpp>  // 008-message-store — MessageStore complete type
@@ -155,7 +155,7 @@ public:
     // (FR-018); (5) reject a second open() → session_already_open (slot 51).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> open() noexcept;
 
-    // Two-phase close ([2d §4.7]:833-834 frozen shape). Idempotent
+    // Two-phase close ([2d §4.7] close() declaration frozen shape). Idempotent
     // THREE-STATE model (I-10): already-closing → SAME in-flight awaitable,
     // no error, no side effects; never-opened / already-closed(drained) →
     // error::session_already_closed; no side effects in any case. graceful
@@ -541,7 +541,7 @@ public:
     // attach_accepted_transport leave live_peer_id_ == nullopt on insecure_plain_tcp
     // (D-10 MUST — fail-closed-by-construction). A plain bool avoids any new include
     // edge ([const §XV.9]-safe; peer_identity is already transitively pulled in via
-    // the private member at line ~958). NOT for production use. [043 T008; D-10]
+    // the private member `live_peer_id_`). NOT for production use. [043 T008; D-10]
     [[nodiscard]] bool live_peer_id_has_value_for_test() const noexcept {
         return live_peer_id_.has_value();
     }
@@ -555,7 +555,7 @@ public:
     // re-enters LogonSent — initiator-only; Gate A Codex-2).
     // Declared public for accessibility from engine.cpp's run_accept_loop.
     // By convention only the engine's accept loop should call this method.
-    // §XV.9: handshake_result forward-declared on line 60; full def in session.cpp.
+    // §XV.9: handshake_result forward-declared above; full def in session.cpp.
     // [data-model §E-2; T011; contracts C1 step 5; FR-005/006; T-041]
     void attach_accepted_transport(std::unique_ptr<fixpp::transport::Transport> transport,
                                    fixpp::transport::handshake_result hr) noexcept;
@@ -593,7 +593,7 @@ private:
     //            so the caller can block reaching Active (C2.6; research D2).
     //   logged — teardown / 013-only received-141: store failure is swallowed
     //            and logged (I-07 logged-then-proceed) and the method co_returns
-    //            success (matching the existing :1589-1592 inline pattern; C2.6
+    //            success (matching session.cpp's existing store_->reset() logged-then-proceed pattern; C2.6
     //            zero-regression clause; data-model §"Durable reset helper").
     // Logic lives in session.cpp to keep this enum include-free ([const §XV.9]).
     // [024 data-model §"Durable reset helper"; C2.6; research D2]
@@ -601,7 +601,7 @@ private:
 
     // reset_seqnums_to_one_durable — shared durable-reset helper (T003).
     // Body: co_await seqnum_mgr_.reset_to_one() then co_await store_->reset().
-    // store_ null-checked (matching the existing :1589-1592 null-guard pattern).
+    // store_ null-checked (matching session.cpp's existing `if (store_)` null-guard pattern).
     // Disposition controls store-failure handling (see reset_disposition above).
     // NOT wired to any trigger in this slice (T002/T003 foundational only);
     // wired in T007 (initiator Logon), T008 (acceptor Logon), T014 (teardown).
@@ -613,8 +613,8 @@ private:
     // posture mismatch (or malformed 464). Emits a Logout(35=5) carrying reason_text
     // (fire toAdmin → assign_outbound → store_then_emit), then transitions to
     // Disconnected — the session never reaches Active. Mirrors the Logon-time
-    // Logout+disconnect disposition (session.cpp:2692-2714). Called from both the
-    // acceptor inbound-Logon and the initiator inbound-Logon-ack paths. [FR-002; D-F]
+    // Logout+disconnect disposition (session.cpp's 070-fix44-closeout S-029 posture-mismatch call site).
+    // Called from both the acceptor inbound-Logon and the initiator inbound-Logon-ack paths. [FR-002; D-F]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_logon_with_logout_(
         std::string_view reason_text) noexcept;
 
@@ -752,7 +752,7 @@ private:
 
     // 032-initiator-reset-outbound-advance: latched emit-time fact that fixpp
     // actually emitted 141=Y in its initiator Logon (= initr_reset_seqnum at
-    // session.cpp:721). Unconditionally assigned on every initiator-Logon emit
+    // session.cpp's initr_reset_seqnum). Unconditionally assigned on every initiator-Logon emit
     // (overwrites false when no 141=Y → stale-across-reconnect is structurally
     // impossible). Consumed one-shot on the peer_ack_sent_reset_flag arm.
     // Strand-confined; additive POD bool; no new include. [contract C4, data-model]
@@ -797,8 +797,8 @@ private:
     // ── 066-dict-backed-inbound-parse T002 — inbound dict-membership table ──
     //
     // Resolved ONCE in open(), immediately after the non-null-dictionary guard
-    // (session.cpp ~:929). Mirrors the validator's owned table_view (above /
-    // session.cpp ~:1171-1173).
+    // (session.cpp's inbound_tv_ assignment). Mirrors the validator's owned table_view (above /
+    // session.cpp's validator_ assignment).
     // Stable-address referent (data-model.md "Session inbound table_view"): the
     // dict-backed Parser ctor stores std::addressof of the POINTEE (parser.hpp),
     // so the pointee's address must not move for the session lifetime — a
@@ -892,7 +892,7 @@ private:
 
     // 041-validation-gate-wiring T010 — overload that carries a mapped
     // SessionRejectReason(373) and an optional RefTagID(371) through to
-    // build_reject (admin_messages.cpp:613, UNCHANGED). validate() returns a
+    // build_reject (admin_messages.cpp's `build_reject`, UNCHANGED). validate() returns a
     // wire_* error; the caller maps it via wire_error_to_session_reject_reason()
     // and passes the result here. ref_tag_id == 0 → 371 omitted.
     // [041 T010; data-model E-4; RC-C]
@@ -927,7 +927,7 @@ private:
     // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
     // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the
     // session_ back-pointer. ReconnectFsm is a value member of Session
-    // (reconnect_fsm_, session.hpp:517) so the call is always in-domain.
+    // (reconnect_fsm_, this file's member declaration) so the call is always in-domain.
     //
     // Responsibilities:
     //   - Take ownership of the live transport via reconnected_transport_.
@@ -936,8 +936,8 @@ private:
     //     live_peer_id_ as arm (1-live) ahead of the override seam.
     //   - Re-enter LogonSent so the session re-drives Logon to Active.
     //
-    // §XV.9 discipline: handshake_result is forward-declared in this header
-    // (line 60 — namespace fixpp::transport { struct handshake_result; }).
+    // §XV.9 discipline: handshake_result is forward-declared above in this header
+    // (namespace fixpp::transport { struct handshake_result; }).
     // A by-value parameter in a non-defining DECLARATION only needs the
     // forward declaration, so session.hpp stays free of tls_transport.hpp
     // (which pulls tls/pinset.hpp → std::shared_mutex into the awaitable
@@ -1030,7 +1030,7 @@ private:
     // 014 T015 — live peer identity from the most recent successful reconnect
     // handshake. Stored by install_reconnected_transport (step 8) and consumed
     // by arm (1-live) in the LogonSent→Active Logon-ack authorization
-    // guard (session.cpp:1864-1906), which reset()s it after authorizing. Nullopt
+    // guard (session.cpp's arm (1-live) authorize block), which reset()s it after authorizing. Nullopt
     // until the first successful reconnect; each successful reconnect overwrites
     // it and the guard reset()s it on consume, so a stale identity from a prior
     // session is never re-authorized. [data-model §E-2; contracts C2; FR-006]
@@ -1041,7 +1041,7 @@ private:
     // Outbound seqnum is managed exclusively by seqnum_mgr_ (RC#A gate-b/r1-green).
     // Use seqnum_mgr_.peek_outbound() to read; seqnum_mgr_.assign_outbound() to advance.
     // The bare next_outbound_seq_ field was removed to prevent split-brain divergence
-    // between admin paths and Session::send. [005 data-model.md:30 E3; 009 spec.md FR-001(a)]
+    // between admin paths and Session::send. [005 data-model.md E3; 009 spec.md FR-001(a)]
 
     // logout_confirmed_: set to true when an inbound Logout is received while
     // in LogoutSent state (the peer is confirming our Logout). The
@@ -1082,7 +1082,7 @@ private:
     // The SAME object used for BOTH the FR-008 kind()-check (US3/T023) AND the FSM
     // reconnect-mint (via set_transport_factory, E-5). Declared BEFORE reconnect_fsm_
     // so the owning shared_ptr outlives the FSM's non-owning factory_ raw pointer
-    // (destruction order = reverse of declaration; honours reconnect_fsm.hpp:239
+    // (destruction order = reverse of declaration; honours reconnect_fsm.hpp's
     // "factory outlives this FSM" contract). Null until open(). [data-model §E-6; D-6]
     std::shared_ptr<fixpp::transport::TransportFactory> effective_transport_factory_;
 
@@ -1103,12 +1103,12 @@ private:
     // FQ-A (gate-b/r2) — single serialized live-outbound write gate.
     // Held ACROSS each live async_write (acquire before write, release after
     // write completes). Ensures at most one async_write is ever in-flight on
-    // the live Transport, satisfying transport.hpp:47-50 ≤1-in-flight contract.
+    // the live Transport, satisfying transport.hpp's In-flight exclusivity contract.
     // Every live emit site (store_then_emit direct path, ResendRequest replay,
     // liveness HB/TR) acquires this gate before submitting to the transport.
     // Must be drained (cancel_and_drain()) in Session::close() AFTER root
     // cancellation fires, before seqnum_mgr_ drain, to satisfy the async_mutex
-    // destructor's not_locked precondition. [transport.hpp:47-50; FQ-A D-6]
+    // destructor's not_locked precondition. [transport.hpp In-flight exclusivity; FQ-A D-6]
     fixpp::sync::async_mutex write_gate_;
 
     // FQ-A (gate-b/r2) — liveness-loop lifetime counter.
@@ -1128,8 +1128,8 @@ private:
     // ── 034-credential-store-redaction T004 — masker buffer bound ────────────
     // Upper bound for the coroutine-frame copy used in the masked-Logon persist
     // path (store_then_emit, T006). Bound to the build_logon builder's actual
-    // maximum output capacity (session.cpp:755 logon_buf / session.cpp:2145
-    // reply_buf — both 256 bytes), so the over-bound branch in T006 is provably
+    // maximum output capacity (session.cpp's `logon_buf` / `reply_buf` arrays
+    // — both 256 bytes), so the over-bound branch in T006 is provably
     // dead for any frame that survives the MsgType=A gate (build_logon already
     // fails-closed with wire_frame_too_large above this size, and T007's
     // open()-time credential-length guard adds config-time defense for both roles).
@@ -1207,7 +1207,7 @@ private:
     //   - write_gate_ acquire cancelled (operation_aborted from cancel_and_drain)
     //   - async_write returns !has_value() (any transport error)
     // NEVER holds the gate across any read — guards write-submit→complete only.
-    // [transport.hpp:47-50; FQ-A D-6; feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
+    // [transport.hpp In-flight exclusivity; FQ-A D-6; feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> live_write_serialized_(
         std::span<const std::byte> frame) noexcept;
 
@@ -1217,7 +1217,7 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> run_logout_phase1() noexcept;
 
     // 027 T005 — replay_outbound_range_: extracted from the inline
-    // ResendRequest-reply walk (session.cpp:2485-2635). Replays stored outbound
+    // ResendRequest-reply walk (session.cpp's `replay_outbound_range_` body). Replays stored outbound
     // app messages in [begin, requested_end] (or through current when
     // end_is_through_current=true) with PossDupFlag(43)=Y+OrigSendingTime(122)
     // at their original MsgSeqNum; collapses admin/absent runs into

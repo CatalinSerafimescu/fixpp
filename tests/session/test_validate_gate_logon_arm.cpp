@@ -320,7 +320,7 @@ struct LogonArmFixture {
     // Acceptor config: open() stays in NotConnected, no outbound Logon emitted.
     // Used for tests that validate the NotConnected FSM arm (which in production is
     // ONLY reached by acceptors — the engine calls open() before routing the first
-    // inbound frame per engine.cpp:854/928).
+    // inbound frame per run_accept_loop).
     SessionConfig make_acceptor_cfg_with_validation() {
         SessionConfig cfg = make_cfg_with_validation();
         cfg.role = session_role::acceptor;

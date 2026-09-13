@@ -242,7 +242,7 @@ include_directories("${CMAKE_SOURCE_DIR}/include")
 # generates cleanly and exports targets carrying no include directory at all.
 # The package would then install correctly, find_package() would succeed, and
 # every consumer would fail to find a single header, with nothing in any CMake
-# file looking wrong. Keep this include above line 146.
+# file looking wrong. Keep this include above the 046-atomic-shared-ptr block.
 include(GNUInstallDirs)
 
 # ── Testing ──────────────────────────────────────────────────────────────────
@@ -453,8 +453,8 @@ install(
 # ── 086 (issue #218): the isolated include roots ─────────────────────────────
 #
 # ADDITIVE, and that word is doing real work. The rule above is UNCHANGED and
-# acquires NO new PATTERN ... EXCLUDE for these subtrees — the two exclusions it
-# already carries (:449-450) are unrelated and predate this. Both trees below
+# acquires NO new PATTERN ... EXCLUDE for these subtrees — the `core/test` and
+# `transport/test` exclusions above are unrelated and predate this. Both trees below
 # ship at their existing path as well as at the isolated one, from ONE source
 # directory each.
 #
@@ -472,7 +472,7 @@ install(
 # The isolated root is include/capi and the headers land under include/capi/fix/,
 # NOT at include/capi/ directly: the spelling <fix/c_api.h> must not change, and
 # the entry header includes its own sub-headers as "fix/c_api/export.h" etc.
-# (include/fix/c_api.h:40-48). architecture.md §7.4:503's literal
+# (include/fix/c_api.h's "Aggregate split headers" block). architecture.md §7.4's literal
 # `INTERFACE_INCLUDE_DIRECTORIES = include/fix/` is unsatisfiable for exactly
 # this reason — it would resolve <fix/c_api.h> to include/fix/fix/c_api.h.
 install(
@@ -585,7 +585,7 @@ endif()
 # THIS SAME root CMakeLists into _codegen_bootstrap/ with
 # FIXPP_CODEGEN_BOOTSTRAP_RUNNING=ON to build just the host codegen tool. That
 # sub-configure deliberately does not create the dictionary/codegen targets
-# (src/dictionary/CMakeLists.txt:73 guards fixpp_dict_dispatch_bridge on exactly
+# (src/dictionary/CMakeLists.txt's `if(NOT FIXPP_CODEGEN_BOOTSTRAP_RUNNING)` guards fixpp_dict_dispatch_bridge on exactly
 # this flag), so the fail-closed membership check below would fire and abort the
 # bootstrap. A build-tool-only configure must not define an install or export
 # surface at all.
@@ -644,7 +644,7 @@ set(FIXPP_EXPORT_TARGETS
 #     C-ABI consumer who deliberately does not want the C++ umbrella (Article IV
 #     §2 / architecture.md §7.4 -- linking both is rejected by CONVENTION and by
 #     review, NOT by tools/check_layers.py: that script is a source #include-edge
-#     lint over src/** and bindings/** (:2-7, :173-176) which reads no CMake link
+#     lint over src/** and bindings/** (its `Scan src/ and bindings/` loop) which reads no CMake link
 #     interface at all. Corrected by 086/FR-014),
 #     and fixpp::config_toml exactly as include/fixpp/config/toml_config_loader.hpp
 #     instructs.
@@ -685,7 +685,7 @@ endforeach()
 # T022 -- EXPORT_NAME on EVERY member, one convention, applied over the SAME list.
 # install(EXPORT ... NAMESPACE fixpp::) derives imported names from TARGET names;
 # add_library(fixpp::X ALIAS ...) does NOT carry into an export. Left alone the
-# package would publish fixpp::fixpp_capi while architecture.md:503 promises
+# package would publish fixpp::fixpp_capi while architecture.md §7.4 promises
 # fixpp::capi. Convention = target name minus the fixpp_ prefix, which is the
 # repository's existing de-facto one across 15 in-tree aliases.
 foreach(_fixpp_export_tgt IN LISTS FIXPP_EXPORT_TARGETS)

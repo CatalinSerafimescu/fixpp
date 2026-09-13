@@ -243,9 +243,9 @@ cp "$TMP/save.json" "$SUITE/alpha_bench.json"
 #
 # ⚠️ G8 PINS A SHAPE AN EARLIER DRAFT WOULD HAVE REJECTED ON A CORRECT TREE.
 # That draft required ONE time_unit per binary. But the allowlisted
-# `table_view_footprint_bench` deliberately mixes them: five benchmarks carry
-# `->Unit(benchmark::kMicrosecond)` (table_view_footprint_bench.cpp:118, :134,
-# :193, :218, :231) while `BM_TableView_Sizeof` uses the default ns. Under the
+# `table_view_footprint_bench` deliberately mixes them: five benchmarks (the
+# `BM_TableView_{Build,Copy}Fix{50SP2,44}` and `BM_TableView_BuildFix42` set) carry
+# `->Unit(benchmark::kMicrosecond)` while `BM_TableView_Sizeof` uses the default ns. Under the
 # old rule the CELL was the defect and AC-3 could never have gone green. Found
 # by Codex round 2, F3.
 cp "$SUITE/alpha_bench.json" "$TMP/save.json"

@@ -2,7 +2,7 @@
 # Gate B r2 Fix B discriminating counter-test fixture.
 #
 # TLS engine-default with NO root [cert_source] — fires session[0]'s cert-null
-# prerequisite return (:573) — PLUS session[1].transport.kind = "websocket"
+# prerequisite return (in resolve_transport) — PLUS session[1].transport.kind = "websocket"
 # (unknown enum).
 #
 # Before Fix B: the per-session validation was gated behind the cert-null return,
@@ -19,7 +19,7 @@ kind = "system"
 [store]
 kind = "memory"
 
-# NOTE: [cert_source] is intentionally ABSENT — this is what fires the :573
+# NOTE: [cert_source] is intentionally ABSENT — this is what fires the E-3 cert_source
 # prerequisite return in resolve_transport (before Fix B, it also suppressed
 # session[1] kind validation).
 

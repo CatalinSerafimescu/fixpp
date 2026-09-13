@@ -1,6 +1,6 @@
 # neg_no_sessions.toml
 # No [[session]] block at all — triggers missing_required at "session"
-# (lines 419-424 toml_config_loader.cpp).
+# (load_toml_config's missing-[[session]] check, toml_config_loader.cpp).
 
 [clock]
 kind = "system"

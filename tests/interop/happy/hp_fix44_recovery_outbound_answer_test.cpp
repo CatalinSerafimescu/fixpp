@@ -24,7 +24,7 @@
 //   (b) Inbound seqnum advances beyond Logon — fixpp RECEIVED+processed QFJ's
 //       ResendRequest. (The outbound counter is NOT a valid witness: resend
 //       replies are transmit-only and reuse the replayed seqnums —
-//       session.cpp:3406-3408 — so they never advance peek_outbound(). The
+//       src/session/session.cpp's `build_replay_frame` — so they never advance peek_outbound(). The
 //       emitted GapFill/replay is proven on the wire by the golden, not in-process.)
 //   (c) Session returns to Active (not Disconnected) after the outbound-answer window.
 //   Wire-frame assertions (golden-based only per R1 architecture):
@@ -285,7 +285,7 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
 
     // ── In-process witness (b) baseline: inbound seqnum after Logon ────────
     // 9.H app-replay: the OUTBOUND counter is NOT a valid witness for a resend
-    // reply (session.cpp:3406-3408 — replay frames reuse the original seqnum and
+    // reply (src/session/session.cpp's `build_replay_frame` — replay frames reuse the original seqnum and
     // are transmit-only, never advancing peek_outbound()). We witness that fixpp
     // RECEIVED+processed QFJ's ResendRequest (inbound advances); the REPLAY itself
     // (35=D carrying 43=Y) is proven ON THE WIRE by the golden below.
@@ -363,7 +363,7 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
     // admin frame; processing it advances the expected inbound seqnum). This proves
     // the resend-answer path was ENTERED; the REPLAYED app message itself is
     // asserted on the wire by the golden below (replay frames are transmit-only and
-    // do NOT advance the outbound counter — session.cpp:3406-3408 — so
+    // do NOT advance the outbound counter — src/session/session.cpp's `build_replay_frame` — so
     // peek_outbound() is structurally unobservable here).
     EXPECT_GT(s->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_after_logon)
         << "inbound seqnum did not advance; fixpp did not receive QFJ's ResendRequest "

@@ -58,7 +58,7 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 }
 
 // Context-aware lookup — the SAME group_member_fn_t shape the Parser
-// dict-lvalue ctor installs (parser.hpp:494-517) / defect_a_group_context_
+// dict-lvalue ctor installs (its `group_member_fn_` initializer lambda) / defect_a_group_context_
 // test.cpp's copy. Needed here to call nested_group_slices() directly
 // (opaque_dict_/group_member_fn_ are private on MessageView/Parser). Tries
 // the context store FIRST, falling back to the legacy bare-no_tag store on a
@@ -389,7 +389,7 @@ TEST(NestedGroupExtent, BenignSameMembershipReuseAcrossContexts) {
     ASSERT_TRUE(mv_d.has_value());
 
     // Seed the ROOT table's stored context (msg_type) — the same seeding
-    // MessageView::group<>() performs in production (parser.hpp:272-273)
+    // MessageView::group<>() performs in production (its own `set_group_context` call)
     // before group()'s membership predicate calls; this low-level test
     // drives OffsetTable::group_slices() directly, so it must seed context
     // itself.
@@ -512,8 +512,8 @@ TEST(NestedGroupExtent, DepthSixteenNoOverflow) {
     // EVERY level) is a deliberate scoping trick for the depth-K count only —
     // it is NOT representative of a real dictionary (where a nested group's
     // own delimiter differs from its enclosing group's). group_slices()'
-    // separate flat instance-boundary re-scan (offset_table.cpp:556-568/
-    // 604-624) is out of scope here (unaffected by T021/consume_group_extent,
+    // separate flat instance-boundary re-scan (its `is_boundary` count/fill
+    // passes) is out of scope here (unaffected by T021/consume_group_extent,
     // which only computes the EXTENT) and is deliberately not exercised by
     // this negative control — see MultiEntryNestedExtentGuard above for the
     // correctly-distinct-tag nested-instance-count assertion.

@@ -401,7 +401,7 @@ TEST_F(LogonHandshakeTest, BuildLogonProducesValidFrame) {
     EXPECT_EQ(target, "ISLD") << "TargetCompID(56) not ISLD";
 
     // S-021: EncryptMethod(98)=0 (None) — required by [FIX-SL §4.2]. Witness the
-    // emit (admin_messages.cpp:126) so a future builder refactor can't silently
+    // emit (build_logon's 98=0 append) so a future builder refactor can't silently
     // drop it; QuickFIX/Fix8 both reject a Logon without 98.
     auto encrypt = extract_field(*result, 98);
     EXPECT_EQ(encrypt, "0") << "EncryptMethod(98) not 0 (None)";
@@ -481,7 +481,7 @@ TEST_F(LogonHandshakeTest, AcceptorOpenStaysInNotConnected) {
 // Logon is emitted synchronously within the same coroutine invocation).
 //
 // Drift F1+F2 fix (Round-A): strict Active assertion + outbound Logon capture.
-// Anchors: spec.md FR-005 §US2 AC2; data-model.md:19 matrix row;
+// Anchors: spec.md FR-005 §US2 AC2; data-model.md's NotConnected matrix row;
 //          contracts/session_role.hpp; opus_pr81_1_triage.md RC#2.
 TEST_F(LogonHandshakeTest, AcceptorValidPeerLogonReachesActiveViaLogonReceived) {
     // Wire transport capture BEFORE constructing the session so the callback
@@ -509,11 +509,11 @@ TEST_F(LogonHandshakeTest, AcceptorValidPeerLogonReachesActiveViaLogonReceived) 
     // FR-005: after the reply Logon is emitted, state MUST be Active.
     // The LogonReceived→Active transition is internal and synchronous;
     // state() after feed_sync must read Active, not LogonReceived.
-    // [F1+F2 drift fix; spec.md FR-005; data-model.md:19 matrix row]
+    // [F1+F2 drift fix; spec.md FR-005; data-model.md's NotConnected matrix row]
     const auto final_state = sess.state();
     EXPECT_EQ(final_state, fsm_state::Active)
         << "Acceptor must reach Active after emitting reply Logon; "
-        << "got state=" << static_cast<int>(final_state) << " (FR-005 §US2 AC2; spec.md line 112)";
+        << "got state=" << static_cast<int>(final_state) << " (FR-005 §US2 AC2)";
 
     // FR-005: at least one outbound frame must have been emitted AND it must
     // carry MsgType 35=A (Logon reply). Transport was wired above.
@@ -531,7 +531,7 @@ TEST_F(LogonHandshakeTest, AcceptorValidPeerLogonReachesActiveViaLogonReceived) 
     EXPECT_TRUE(found_logon_reply)
         << "Acceptor must emit a Logon reply (35=A) on the LogonReceived→Active transition; "
         << "no such frame found in " << outbound_frames.size() << " captured outbound frames"
-        << " (FR-005; spec.md line 112)";
+        << " (FR-005)";
 }
 
 // US2-AC3 (FR-004): Initiator open() still transitions to LogonSent and emits outbound Logon.
@@ -560,7 +560,7 @@ TEST_F(LogonHandshakeTest, InitiatorOpenStillReachesLogonSentAndEmitsLogon) {
     ASSERT_GE(captured.size(), 1u) << "Initiator open() must emit at least one outbound frame";
     bool found_logon = false;
     for (const auto& frame : captured) {
-        // Use the file-local extract_field at line 133 (returns std::string; "" on miss).
+        // Use the file-local extract_field (returns std::string; "" on miss).
         const auto mt = extract_field(std::span<const std::byte>{frame}, 35);
         if (mt == "A") {
             found_logon = true;
@@ -576,7 +576,7 @@ TEST_F(LogonHandshakeTest, InitiatorOpenStillReachesLogonSentAndEmitsLogon) {
 // The 256-byte logon_buf overflows when sender_comp_id is large enough.
 // After F6 fix: open() returns unexpected when build_logon fails.
 // Before F6 fix: open() silently ignores build failure and returns ok.
-// [Drift F6; spec.md FR-001(e); open() code path session.cpp:263]
+// [Drift F6; spec.md FR-001(e); open()'s emit_initiator_logon_() path]
 TEST_F(LogonHandshakeTest, InitiatorOpen_BuildLogonOverflow_ReturnsError_NotSilentOk) {
     // A sender_comp_id of 220 characters overflows the 256-byte logon_buf.
     // The Logon frame minimum overhead is ~80 bytes (headers, fixed fields, etc.)
@@ -593,7 +593,7 @@ TEST_F(LogonHandshakeTest, InitiatorOpen_BuildLogonOverflow_ReturnsError_NotSile
     EXPECT_FALSE(open_result.has_value())
         << "open() must return error when build_logon fails (buffer overflow); "
         << "silently succeeding with a consumed seqnum is the F6 bug; "
-        << "[spec.md FR-001(e); session.cpp:263]";
+        << "[spec.md FR-001(e); emit_initiator_logon_()]";
 }
 
 // ── RC#B RED: Acceptor build-logon overflow must reach Disconnected (not Active).
@@ -603,7 +603,7 @@ TEST_F(LogonHandshakeTest, InitiatorOpen_BuildLogonOverflow_ReturnsError_NotSile
 // When build_logon fails (oversized sender_comp_id), the session still reaches Active.
 //
 // Fix: gate the LogonReceived→Active transition on successful emit.
-// Anchors: 009 spec.md FR-005; 005 data-model.md:19 matrix row.
+// Anchors: 009 spec.md FR-005; 005 data-model.md's NotConnected matrix row.
 // [gate-b/r1-red: F-02 acceptor build failure]
 TEST_F(LogonHandshakeTest, Acceptor_BuildLogonOverflow_DoesNotReachActive) {
     // Build an acceptor with an oversized sender_comp_id that makes build_logon fail.
@@ -638,8 +638,8 @@ TEST_F(LogonHandshakeTest, Acceptor_BuildLogonOverflow_DoesNotReachActive) {
     EXPECT_EQ(s, fsm_state::Disconnected)
         << "Acceptor must reach Disconnected (not Active) when reply build_logon fails; "
         << "got state=" << static_cast<int>(s) << ". "
-        << "Bug: fsm_state_==LogonReceived is set at line 650 then tested tautologically "
-        << "at line 692, so build failure still transitions to Active. "
+        << "Bug: fsm_state_==LogonReceived is set in the acceptor Logon-reply branch, "
+        << "then tested tautologically there, so build failure still transitioned to Active. "
         << "[gate-b/r1-red: F-02; 009 spec.md FR-005]";
     EXPECT_FALSE(inbound_result.has_value())
         << "on_inbound_frame must return an error when reply build fails "

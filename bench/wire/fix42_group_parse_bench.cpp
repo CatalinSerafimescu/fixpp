@@ -7,8 +7,8 @@
 // place.
 //
 // ── What changed on this path, and therefore what is measured ───────────────
-// `table_view::is_group_tag()` is the parse path's group pre-filter
-// (`table_view.hpp:737-741`): it words-indexes `group_bits_` and returns false
+// `table_view::group_bit()` is the parse path's group pre-filter — it
+// words-indexes `group_bits_` and returns false
 // when `w >= group_bits_.size()`. On FIX 4.0/4.1/4.2 that vector was **EMPTY**
 // before 082, because those dictionaries type every `<group>` count field as
 // legacy XML `INT` and detection keyed on the datatype — so every tag took the

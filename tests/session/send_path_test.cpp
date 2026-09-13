@@ -898,7 +898,7 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
 // of the Logon's seqnum.
 //
 // Fix: unify all outbound seqnum advance through SeqnumManager.
-// Anchors: 005 contracts/session.hpp:46-50; 005 data-model.md:30 E3; 009 spec.md FR-001(a).
+// Anchors: 005 contracts/session.hpp's send() decl (I-3); 005 data-model.md E3; 009 spec.md FR-001(a).
 // [gate-b/r1-red: F-01 absolute seqnum integrity post-logon]
 TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo) {
     std::vector<std::vector<std::byte>> outbound_frames;
@@ -1015,10 +1015,10 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree) {
 //   (b) leave session in Disconnected state.
 //
 // Bug: store_then_emit catches transport throw in catch(...) and returns
-// expected_t<void>{} unconditionally (session.cpp:1474). The transport error
+// expected_t<void>{} unconditionally (pre-live_write_serialized_ live-write path). The transport error
 // is silently swallowed. Callers see ok; state stays Active.
 //
-// Anchors: 009 spec.md US1 AC3; 005 data-model.md:80 I-3.
+// Anchors: 009 spec.md US1 AC3; 005 data-model.md I-3.
 // [gate-b/r1-red: F-02/F-03 transport failure surface]
 TEST_F(SendPathTest, Send_TransportThrowsAfterStore_ReturnsDefinedError_StateDisconnected) {
     std::vector<std::string> store_log;
@@ -1058,7 +1058,7 @@ TEST_F(SendPathTest, Send_TransportThrowsAfterStore_ReturnsDefinedError_StateDis
     // RC#B / F-03 bug: store_then_emit swallows transport throw and returns ok.
     EXPECT_FALSE(result.has_value())
         << "Session::send must return a defined error when transport throws; "
-        << "got ok (bug: store_then_emit swallows transport throw at session.cpp:1474). "
+        << "got ok (bug: store_then_emit swallows transport throw pre-live_write_serialized_). "
         << "[gate-b/r1-red: F-03; 009 spec.md US1 AC3]";
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "Session must be Disconnected after transport failure; "
@@ -1077,13 +1077,13 @@ TEST_F(SendPathTest, Send_TransportThrowsAfterStore_ReturnsDefinedError_StateDis
 // Test: seed the SeqnumManager outbound counter to seqnum_max (so the next
 // assign_outbound() call returns store_seqnum_overflow), then feed an inbound
 // TestRequest (35=1) which triggers the Heartbeat-reply admin emit at
-// session.cpp:901-904. Assert:
+// on_inbound_frame's TestRequest branch. Assert:
 //   (a) on_inbound_frame returns an error (not ok),
 //   (b) session state transitions to Disconnected (not Active),
 //   (c) no Heartbeat frame was emitted (transport did NOT see a second frame
 //       beyond the frames already captured before the inbound TestRequest).
 //
-// Anchors: 005 data-model.md:30 E3 ("session-fatal, no wrap, surfaced via
+// Anchors: 005 data-model.md E3 ("session-fatal, no wrap, surfaced via
 // store_seqnum_overflow"); 009 spec.md FR-001; [gate-b/r2-red: RC#G F-10].
 // Requires FIXPP_TEST_HOOKS for seqnum_mgr_test_access() and set_counters_for_test().
 TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_ReachesDisconnected) {
@@ -1157,14 +1157,14 @@ TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_Reaches
     //     must be surfaced, not silently discarded with (void)assign_r.
     EXPECT_FALSE(inbound_result.has_value())
         << "on_inbound_frame must return an error when assign_outbound() overflows; "
-        << "got ok (bug: (void)assign_r at session.cpp:901-904 discards overflow). "
-        << "[gate-b/r2-red: RC#G F-10; data-model.md:30 E3]";
+        << "got ok (bug: (void)assign_r in on_inbound_frame's TestRequest branch discards overflow). "
+        << "[gate-b/r2-red: RC#G F-10; data-model.md E3]";
 
     // (b) Session must be Disconnected after session-fatal overflow.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "Session must be Disconnected after assign_outbound() overflow; "
         << "got state=" << static_cast<int>(sess.state())
-        << ". [gate-b/r2-red: RC#G F-10; data-model.md:30 E3]";
+        << ". [gate-b/r2-red: RC#G F-10; data-model.md E3]";
 
     // (c) No Heartbeat frame must have been emitted (transport saw no new frame).
     EXPECT_EQ(transport_frames.size(), frames_before)
@@ -1177,9 +1177,9 @@ TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_Reaches
 //
 // Session::send's guard was broadened from the closed 3-code set to
 // is_persistent_retain_fatal ([56,65)). send_impl's assign_outbound() overflow
-// return (store_seqnum_overflow=60, session.cpp:4488) is NOT a store-retain
+// return (store_seqnum_overflow=60, in Session::send_impl) is NOT a store-retain
 // failure — it is a pure in-memory counter check that reuses a store-block
-// error code (data-model.md:30 E3) — but it now falls inside that range too,
+// error code (data-model.md E3) — but it now falls inside that range too,
 // so Session::send itself must newly Disconnect on outbound-seqnum overflow.
 // This brings Session::send in line with the session-fatal-on-overflow
 // disposition Cell7 (test_acceptor_logon_sending_time.cpp) and RC#G (above)

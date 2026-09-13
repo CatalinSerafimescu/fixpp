@@ -1,6 +1,6 @@
 # neg_dict_kind_absent_in_table.toml
 # [dictionary] table is present but has NO "kind" key — triggers missing_required at
-# "dictionary.kind" (lines 298-303 selector_resolver.cpp).
+# "dictionary.kind" (resolve_engine_dictionary's missing-kind arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

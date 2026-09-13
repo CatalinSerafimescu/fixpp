@@ -83,7 +83,7 @@ struct string_hash {
 // can share the identical parent path and differ only by msg_type).
 //
 // kMaxGroupContextDepth mirrors wire::group_context's K=16
-// (offset_table.hpp:239) NUMERICALLY only — this dict-layer header must not
+// (offset_table.hpp's `kMaxGroupDepth`) NUMERICALLY only — this dict-layer header must not
 // depend on the wire layer (dictionary.hpp -> table_view.hpp is the sole
 // allowed edge; [const layer direction], never wire -> dict reversed here).
 // A path deeper than K silently clamps (drops depth beyond 16) rather than
@@ -198,7 +198,7 @@ struct group_ctx_entry {
 // T017/T019 (data-model.md Entity B): enum-domain table entry. OWNS copies of
 // the code bytes — does NOT alias the source Dictionary's name_pool_.
 // as_table_view() may legally outlive the Dictionary it was built from
-// (dictionary.hpp:193-205); aliasing would silently turn that into a
+// (dictionary.hpp's `as_table_view()` accessor); aliasing would silently turn that into a
 // use-after-free no existing test would catch (Complexity row 2).
 struct enum_domain {
     std::vector<std::string> codes;  // sorted bytewise ascending, deduped

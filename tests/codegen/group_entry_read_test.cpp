@@ -11,7 +11,7 @@
 //
 // Frame assembly follows the established make_frame()/parse_frame() pattern
 // (tests/session/test_business_messages_read.cpp) — dict-free Parser<Index>,
-// same as production session.cpp:316/1869 (Parser<Index> pd_parser{}).
+// same as production `Session::parse_and_dispatch_`'s `pd_parser` construction in session.cpp.
 
 #include <gtest/gtest.h>
 
@@ -237,12 +237,12 @@ TEST(GroupEntryRead, AbsentVsPresentButEmptyField) {
 // this file. `73=0` is immediately followed only by the frame's trailing
 // checksum field (10=NNN — always present, an OffsetTable::build() invariant
 // for any whole-frame scan); under a dict-FREE Parser, OffsetTable::group()'s
-// fallback (`group_end = entries_.size()`, offset_table.cpp:440-443) cannot
+// fallback (`OffsetTable::consume_group_extent`'s dict-free branch) cannot
 // distinguish "genuinely empty group" from "count field followed by exactly
 // one more field", so it misclassifies the checksum tag itself as a single
 // phantom NoOrders member. The dict-aware path validates that the field
 // immediately after the count (the delimiter candidate) is an actual member
-// of group 73 (offset_table.cpp:401-411) — 10 (CheckSum) never is — so it
+// of group 73 (`OffsetTable::consume_group_extent`'s `group_member_fn_` check) — 10 (CheckSum) never is — so it
 // correctly reports an empty group. This is a pre-existing wire-layer
 // dict-free-group-boundary property, unrelated to and out of scope for 062
 // (062 does not touch OffsetTable::group()/group_slices()).
@@ -283,7 +283,7 @@ TEST(GroupEntryRead, EmptyGroupSizeZeroNoDeref) {
     EXPECT_EQ(dereferenced, 0) << "empty group must never dereference an entry";
 }
 
-// Edge (spec.md:71): single-entry group — the entry is simultaneously the
+// Edge (specs/062-grouped-typed-read-fix/spec.md's Edge Cases): single-entry group — the entry is simultaneously the
 // FIRST and the LAST occurrence, so its extent has no following delimiter to
 // bound it (relies on end-of-frame accounting). Assert every field, INCLUDING
 // the entry's LAST wire field (side, tag 54), reads its exact value: a

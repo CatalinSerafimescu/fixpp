@@ -5,18 +5,18 @@
 // FIFO fairness ACROSS drain cycles — the residual-vs-later-arrival straddle.
 //
 // test_fifo_fairness.cpp::DrainCycleReversesLIFO already proves FIFO WITHIN a
-// single drain cycle (unlock()'s LIFO->FIFO reversal, async_mutex.hpp:1387-
-// 1397). It does NOT prove the property T-7 names: that unlock()'s residual
+// single drain cycle (unlock()'s LIFO->FIFO reversal).
+// It does NOT prove the property T-7 names: that unlock()'s residual
 // list (`next_drain_head_`, spliced from the tail of a granting walk,
-// async_mutex.hpp:1339-1341/1409-1411) is drained to completion BEFORE any
+// at the sites where unlock() splices onto it) is drained to completion BEFORE any
 // waiter that first parks on the FRESH `state_` LIFO after the residual was
 // created — even though, wall-clock, the later arrival can park well before
 // the residual is exhausted.
 //
-// async_mutex.hpp:1310 (unlock()): every call checks `next_drain_head_`
-// FIRST (:1326) and returns immediately after granting exactly one waiter
+// unlock(): every call checks `next_drain_head_`
+// FIRST and returns immediately after granting exactly one waiter
 // from it; only once the residual is fully empty does it fall through to
-// drain the fresh `state_` LIFO (:1375-1436). A regression that checked
+// drain the fresh `state_` LIFO. A regression that checked
 // `state_` before (or interleaved with) the residual would let a
 // later-arriving waiter jump a still-pending residual — silently breaking
 // the "requests are served in arrival order" fairness contract, with no
@@ -52,7 +52,7 @@
 // (feedback_witness_asserts_named_postcondition_not_proxy shape (b)/(d)).
 //
 // Mutation-tested (transient, hand-reverted): temporarily swapping unlock()'s
-// residual-list check (:1326) to run AFTER the fresh state_ drain (:1375)
+// residual-list check to run AFTER the fresh state_ drain
 // turns this test's core assertion red (W4 gets granted in cycle 2, ahead of
 // W2/W3) while leaving test_fifo_fairness.cpp's within-cycle tests green —
 // confirming this witness is the one that actually covers the cross-cycle

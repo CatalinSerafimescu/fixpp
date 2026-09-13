@@ -1,6 +1,6 @@
 # neg_clock_kind_absent_in_table.toml
 # [clock] table is present but has NO "kind" key — triggers missing_required at
-# "clock.kind" (lines 64-69 selector_resolver.cpp: !clk_tbl->get("kind") branch).
+# "clock.kind" (resolve_engine_clock, selector_resolver.cpp: !clk_tbl->get("kind") branch).
 # Different from neg_missing_clock.toml (which has no [clock] table at all).
 
 [clock]

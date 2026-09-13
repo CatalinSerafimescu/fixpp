@@ -166,11 +166,11 @@ std::set<std::uint16_t> bare_registered_group_tags(table_view const& tv) {
 // precedent (a separate bounded scan alongside the shared oracle walker).
 //
 // Determines which `<group name="...">` declaration site the loader's OWN
-// global first-seen dedup guard (xml_loader.cpp:609,
+// global first-seen dedup guard (xml_loader.cpp,
 // "if (!group_index_by_no_tag_.contains(no_tag))") resolves to: a pre-order,
 // document-order depth-first search through `<field>`/`<group>`/`<component>`
 // children, recursing into named `<component>` refs -- mirroring
-// `expand_field_list`'s own traversal order (xml_loader.cpp:525+) -- and
+// `expand_field_list`'s own traversal order (xml_loader.cpp) -- and
 // returning the FIRST `<group name=group_name>` node encountered.
 std::optional<pugi::xml_node> dfs_find_group(
     pugi::xml_node const& node, std::string_view group_name,
@@ -531,7 +531,7 @@ TEST(RequiredScopeCensus, BareStoreIsAValidPerContextVariantExceptL0661GroupBlin
 // T018 below pins explicitly.
 //
 // EXPECTED RED until T023 lands: `Dictionary::as_table_view()`'s bare and
-// context population loops (dictionary.cpp:397-420, :439-470) gate on
+// context population loops (src/dictionary/dictionary.cpp, both `for` loops inside it) gate on
 // `fr.type == field_data_type::NumInGroup` BEFORE ever consulting the
 // structural `Dictionary::group_first_field()` predicate. FIX40/41/42 type
 // EVERY group-count tag `INT` (never `NUMINGROUP`), and FIX43's tag 576 is
@@ -630,7 +630,7 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
         // read it as history, not as a description of the code.
         // `as_table_view()` resolves each group's delimiter from the GLOBAL
         // first-seen `group_first_field(no_tag)`, and
-        // `table_view.hpp:641-646`'s `set_group_first_ctx` then UNCONDITIONALLY
+        // `table_view.hpp`'s `set_group_first_ctx` then UNCONDITIONALLY
         // calls `add_group_member_ctx(...)` — so the first-seen delimiter is
         // injected as a "member" of EVERY context of that no_tag, including
         // contexts whose XML never declares it. For FIX42 tag 146 the
@@ -657,7 +657,7 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
         // would be. Reverted 2026-08-12.
         //
         // Note the fix is on the CALLER side: `set_group_first_ctx`'s
-        // unconditional `add_group_member_ctx(..., first)` (table_view.hpp:645)
+        // unconditional `add_group_member_ctx(..., first)` (table_view.hpp's `set_group_first_ctx`)
         // is UNCHANGED and is meant to stay — what changed is that `first` is now
         // this context's OWN declared delimiter, so the injection is a no-op
         // (D-5 / C-3.3). Reading table_view.hpp alone concludes #210 is unfixed.
@@ -699,16 +699,16 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
     // a tag-set PROJECTION, which passes while every per-context member set is
     // wrong. Leg 1 above pins the context store per context; this leg pins the
     // bare store to the ONE variant the loader records (first-seen wins,
-    // `xml_loader.cpp:609`). Without leg 2 a half-restructure that populates the
+    // `LoaderState::expand_field_list`'s dedup guard). Without leg 2 a half-restructure that populates the
     // context store correctly and leaves the bare store wrong (or vice versa)
     // passes T017 — exactly what FR-004 exists to prevent. T015 does not close
     // this gap: it pins the bare store's registered *tag set*, not 146's *member
     // set*.
     //
     // The expected value is DERIVED via `dfs_find_group`, NOT transcribed:
-    // walk `<messages>/<message>` in document order (xml_loader.cpp:747) and,
+    // walk `<messages>/<message>` in document order (xml_loader.cpp's own message loop) and,
     // within each message, depth-first through field/group/component children
-    // — the same traversal `expand_field_list` follows (xml_loader.cpp:525+) —
+    // — the same traversal `expand_field_list` follows (xml_loader.cpp) —
     // to find the FIRST `<group name="NoRelatedSym">` declaration site
     // anywhere in the document. A doc reorder therefore cannot silently
     // invalidate this pin; the scan re-derives the answer instead of
@@ -724,7 +724,7 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
     std::string first_seen_msg_type;
     pugi::xml_node first_seen_node;
     // Header/trailer are expanded before EVERY message body by the real
-    // loader (xml_loader.cpp:927-931), so a header/trailer-declared group
+    // loader (xml_loader.cpp's "Header fields first, then message-specific, then trailer" block), so a header/trailer-declared group
     // would win first-seen ahead of any message body — NoRelatedSym is not
     // header/trailer-declared in FIX42 (kHeaderTrailerTags has no group
     // entries), so scanning <messages> directly is faithful for this tag; a
@@ -753,7 +753,7 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
     auto const& first_seen_variant = oit->second;
 
     // Sanity pin over the derivation (not a substitute for it): News (msgtype
-    // 'B', line 269) is declared before Email (msgtype 'C', line 309) in
+    // 'B', its own <message> element) is declared before Email (msgtype 'C', its own <message> element) in
     // FIX42.xml, so News's 19-member NoRelatedSym is first-seen.
     EXPECT_EQ(first_seen_msg_type, "B")
         << "scan-derived first-seen msg_type for tag 146 drifted from the pinned 'B' (News) -- "
@@ -776,7 +776,7 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
 // moves none of them.
 //
 // FIX50SP2's #208 special-case is RETIRED (2026-08-12). It read: the shipped
-// loader's one-level-deep <component> member scan (xml_loader.cpp:610-641)
+// loader's one-level-deep <component> member scan (`expand_field_list`'s "component" branch)
 // never resolves 1499/1669/1919's only-nested-group members, so those three
 // never register; pinned at 502 = oracle.group_tags minus those 3, "flips to a
 // plain oracle.group_tags comparison (505) once #208 lands".
@@ -1043,8 +1043,8 @@ TEST(RequiredScopeCensus, Fix43RegisteredSetDeltaIsExactlyPlusOneTag576) {
 // are NOT rejected; see #208). Both fixtures below place the member-less
 // `<group>` at a NON-first-seen occurrence of its no_tag/numInGroup id,
 // because both loaders record `GroupDef`/`OrchestraGroupDef` inside a
-// first-seen-wins dedup guard (`xml_loader.cpp:609`,
-// `orchestra_loader.cpp:626`) -- a check wrongly placed inside that guard
+// first-seen-wins dedup guard (`LoaderState::expand_field_list`'s guard,
+// `OrchestraLoaderState::expand_field_list`'s guard) -- a check wrongly placed inside that guard
 // would silently pass a fixture where the member-less occurrence isn't
 // first-seen.
 // ============================================================================

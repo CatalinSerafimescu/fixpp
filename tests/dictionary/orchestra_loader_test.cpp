@@ -283,7 +283,7 @@ namespace {
 // Minimal valid Orchestra skeleton: one field (String, tag 1), one message
 // (Heartbeat, msgType "0") referencing it. No fixr:datatypes / fixr:codeSets /
 // fixr:components / fixr:groups blocks — all optional per collect_*() (only
-// fixr:fields and fixr:messages are required, orchestra_loader.cpp:305-390).
+// fixr:fields and fixr:messages are required, orchestra_loader.cpp).
 constexpr std::string_view kMinimalValidRepository = R"xml(
 <fixr:repository version="FIX.Latest_EP303">
   <fixr:fields>
@@ -359,7 +359,7 @@ TEST(OrchestraFailClosed, UnusedUnknownDatatypeDeclarationDoesNotThrow) {
 // (c) unionDataType= present, but the PRIMARY type= is itself an unknown
 // datatype token (not a codeset name, not in kOrchestraTypeTable) — the
 // drop-second-arm rule (unionDataType is never even read, per
-// orchestra_loader.cpp:314-317) must NOT mask the unknown base type.
+// `collect_fields`'s `unionDataType=` handling) must NOT mask the unknown base type.
 TEST(OrchestraFailClosed, UnionDataTypeDoesNotMaskUnknownPrimaryType) {
     constexpr std::string_view kXml = R"xml(
 <fixr:repository version="FIX.Latest_EP303">
@@ -397,7 +397,7 @@ TEST(OrchestraFailClosed, QuickFixXmlFedToOrchestraLoaderThrows) {
     fixpp::dict::OrchestraLoader loader;
     auto const fix44 = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
     // FIX44.xml's root is <fix major="4" minor="4" ...>, not <fixr:repository>
-    // (verified: dictionaries/FIX44.xml:1), so this hits parse_root_and_version's
+    // (verified: dictionaries/FIX44.xml's root `<fix>` element), so this hits parse_root_and_version's
     // root check deterministically (not a downstream unknown-datatype/dangling-
     // ref path).
     EXPECT_THROW((void)loader.load(fix44, &mr), fixpp::dict::orchestra_parse_error);
@@ -439,12 +439,12 @@ TEST(OrchestraFailClosed, DanglingComponentRefThrows) {
 // (h) [reverse asymmetry regression pin] the vendored Orchestra file fed to
 // XmlLoader (QuickFIX-XML reader) — its root is <fixr:repository>, not <fix>,
 // so XmlLoader::parse_document's missing-<fix>-child check
-// (xml_loader.cpp:742-745) rejects it. Assert THROWS (any documented
+// (`LoaderState::parse_document`'s missing-`<fix>` check) rejects it. Assert THROWS (any documented
 // XmlLoader exception type).
 TEST(OrchestraFailClosed, VendoredOrchestraFileFedToXmlLoaderThrows) {
     std::pmr::monotonic_buffer_resource mr;
     fixpp::dict::XmlLoader loader;
-    // xml_loader.cpp:742-745's `doc.child("fix")`-missing check fires (the
+    // `LoaderState::parse_document`'s `doc.child("fix")`-missing check fires (the
     // Orchestra root is <fixr:repository>, so `doc.child("fix")` finds
     // nothing) — the base xml_parse_error, NOT orchestra_parse_error (that
     // type is OrchestraLoader-only).
@@ -686,7 +686,7 @@ TEST(OrchestraFailClosed, NumInGroupIdNotDeclaredThrows) {
 
 // (u) Gate B FQ-1 — a duplicate <fixr:field id="1"> declaration must throw
 // (fail-closed parity with XmlLoader's duplicate <field number> reject,
-// xml_loader.cpp:351-354). Otherwise-valid skeleton; the throw is
+// `LoaderState::parse_global_fields`'s duplicate check). Otherwise-valid skeleton; the throw is
 // attributable only to the duplicate id.
 TEST(OrchestraFailClosed, DuplicateFieldIdThrows) {
     constexpr std::string_view kXml = R"xml(
@@ -709,7 +709,7 @@ TEST(OrchestraFailClosed, DuplicateFieldIdThrows) {
 
 // (v) Gate B FQ-1 — a duplicate <fixr:component id="1000"> declaration must
 // throw (fail-closed parity with XmlLoader's duplicate <component name>
-// reject, xml_loader.cpp:372-375; also removes the phantom-top-level-
+// reject, `LoaderState::collect_components`'s duplicate check; also removes the phantom-top-level-
 // ComponentRef corruption an unconditional push_back would otherwise cause).
 TEST(OrchestraFailClosed, DuplicateComponentIdThrows) {
     constexpr std::string_view kXml = R"xml(

@@ -143,7 +143,7 @@ void collect_tags(pugi::xml_node const& node, ComponentIndex const& comps,
 // (<message>, NOT <header>/<trailer> — INV-2, the write-emitter exclusion),
 // but the READ-tier emitters (emit_messages.cpp/emit_reify.cpp) test
 // `is_group_tag()` against `m.fields`, which IS header/trailer-inclusive
-// (`dict.message_fields()`, xml_loader.cpp:926-933 header/trailer merge).
+// (`dict.message_fields()`, LoaderState::finalize()'s header/trailer merge).
 // Without this, a header/trailer-declared group (e.g. NoHops(627) in
 // FIX44's/FIXT11's own <header>) is silently demoted to a scalar accessor
 // on the read tier — confirmed empirically against the v44 read golden.
@@ -318,7 +318,7 @@ OrchestraGroupIndex build_orchestra_group_index(pugi::xml_node const& root) {
 // `collect_tags` above but over the fixr: schema's numeric-id refs. Used to
 // flatten the StandardHeader/StandardTrailer COMPONENTS (Orchestra has no
 // separate <header>/<trailer> elements — those are ordinary componentRefs
-// inside each message's own <fixr:structure>, orchestra_loader.cpp:730-732)
+// inside each message's own <fixr:structure>, per OrchestraLoaderState::finalize())
 // into their full tag set. Order is irrelevant here (membership only).
 // NOLINTNEXTLINE(misc-no-recursion)
 void collect_orchestra_tags(pugi::xml_node const& node, OrchestraComponentIndex const& comps,
@@ -412,7 +412,7 @@ void collect_orchestra_group_tags(pugi::xml_node const& node, OrchestraComponent
 // — a tag reused under two different group parents produces two entries
 // here, each with its own `group_path`). Walks the message's FULL
 // <fixr:structure> (header + body + trailer inline — Orchestra has no
-// separate header/trailer elements, orchestra_loader.cpp:730-732), matching
+// separate header/trailer elements, per OrchestraLoaderState::finalize()), matching
 // what `dict.message_fields()`/the shipped read classes actually carry
 // (data-model.md Entity 2: "header + body + repeating-group members at all
 // depths"); header/trailer EXCLUSION for the write-only builder surface is
@@ -535,7 +535,7 @@ void populate_orchestra_projection(std::filesystem::path const& xml_path,
 
     // header_trailer_tags (R2b output 2): resolve the named StandardHeader /
     // StandardTrailer components transitively — Orchestra has no separate
-    // <header>/<trailer> elements (orchestra_loader.cpp:730-732).
+    // <header>/<trailer> elements (per OrchestraLoaderState::finalize()).
     std::unordered_set<std::uint16_t> header_trailer;
     if (auto const it = comps.by_name.find("StandardHeader"); it != comps.by_name.end()) {
         collect_orchestra_tags(it->second, comps, groups, header_trailer);
@@ -715,7 +715,7 @@ VersionIR build_ir(std::filesystem::path const& xml_path, std::pmr::memory_resou
 
     // 067 T008/R9: codegen-tool-local declaration-order group plan (delimiter
     // + member order) — NOT derivable from the tag-sorted/deduped `fields`
-    // run above (xml_loader.cpp:695-702). Codegen-tool-local only: no
+    // run above (LoaderState::expand_field_list()'s delim_cap pop). Codegen-tool-local only: no
     // runtime Dictionary/GroupRef/C-ABI change (FR-009 intact).
     //
     // 076-fix-latest-typed-codegen T005 (research R1/R2b): dispatch on the

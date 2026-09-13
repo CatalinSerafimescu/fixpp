@@ -244,7 +244,7 @@ private:
 };
 
 // RecordingStoreFactory: mints a single OrderingStore bound to a shared
-// call-order vector. Session calls make() at open() per session.cpp:201-211.
+// call-order vector. Session calls make() at open() (its `store_factory->make()` call).
 class RecordingStoreFactory final : public MessageStoreFactory {
 public:
     explicit RecordingStoreFactory(std::vector<std::string>& order) noexcept : order_(order) {}

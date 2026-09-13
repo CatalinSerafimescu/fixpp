@@ -20,7 +20,7 @@
 //   [2i §5.2] (steady-state thunk: abort on exception escape)
 //
 // E-3/INV-5 RECONCILED (ratified): Session::session_arena() does not exist for the
-// C-ABI path (the plan's session.hpp:189 was an unreliable claim) and the engine's
+// C-ABI path (the plan's claim that it exists was unreliable) and the engine's
 // default_session_resource is new_delete_resource().  The outbound fixpp_msg shell
 // therefore owns a PER-MESSAGE std::pmr::monotonic_buffer_resource
 // (fixpp_msg::arena_resource_, seeded >= frame-cap at create_outbound,
@@ -102,7 +102,7 @@ static bool is_framing_tag(uint16_t tag) noexcept {
     return false;
 }
 
-// Frame-cap for commit serialization (~3800 B, per session.cpp:4021).
+// Frame-cap for commit serialization (~3800 B, per `Session::send()`'s threshold).
 static constexpr std::size_t kFrameCap = 3800;
 
 // ── Handle-validation helpers ─────────────────────────────────────────────────
@@ -422,8 +422,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
         // 4096 bytes: OffsetTable entries are proportional to the frame size; the
         // extra 4096 gives headroom for group_slices + cursor shells.  Upstream =
         // new_delete (graceful degrade if arena is exhausted, never null).
-        // Destruction order: fixpp_msg_destroy resets owned_view_ (line ~338) BEFORE
-        // arena_resource_ (line ~350), so MessageView destructs into a live arena.
+        // Destruction order: fixpp_msg_destroy resets owned_view_ BEFORE
+        // arena_resource_, so MessageView destructs into a live arena.
         std::unique_ptr<fixpp_msg> clone{new fixpp_msg{}};
         constexpr std::size_t kCursorHeadroom = 4096;
         std::size_t clone_arena_size = frame_len + kCursorHeadroom;
@@ -792,7 +792,7 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
         // .specify/decisions/215-simplify-followups-verify.md). FR-023's
         // completeness invariant guarantees a record for every context
         // `as_table_view()` itself registers, but `fixpp_msg_group_begin`
-        // (:895) and `fixpp_entry_group_begin` (:1006) gate only on the bare
+        // and `fixpp_entry_group_begin` gate only on the bare
         // no_tag store, and the entry setters run no `check_dict` — so a
         // caller can open a group on a message type, or nest it under a
         // parent path, this dictionary never registered that exact context

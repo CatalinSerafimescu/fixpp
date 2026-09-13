@@ -87,7 +87,7 @@ public:
     //   Under the per-session-strand discipline this is always the case.
     //   Used by admin builders (build_logon, build_logout, etc.) to obtain the seqnum
     //   BEFORE deciding whether to advance — "peek first, assign on success" (F6 pattern).
-    //   [gate-b/r1-green: RC#A; 005 data-model.md:30 E3 singular "next outbound seqnum_t"]
+    //   [gate-b/r1-green: RC#A; 005 data-model.md E3 singular "next outbound seqnum_t"]
     [[nodiscard]] seqnum_t peek_outbound() const noexcept { return next_outbound_; }
 
     // assign_outbound(): atomically read-then-advance the outbound counter.

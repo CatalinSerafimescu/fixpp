@@ -50,7 +50,7 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 }
 
 // Mirrors the group_member_fn_t that Parser's dict-lvalue ctor installs
-// (parser.hpp:462-472) — this test needs its OWN copy of the function
+// (its `group_member_fn_` initializer lambda) — this test needs its OWN copy of the function
 // pointer to hand explicitly to nested_group_slices (opaque_dict_/
 // group_member_fn_ are private on MessageView/Parser; the test drives
 // `dict` directly instead, which is exactly the pointer Parser would have

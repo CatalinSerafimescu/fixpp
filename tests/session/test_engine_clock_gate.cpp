@@ -28,8 +28,8 @@
 //     no-op transport_send so it can run without FIXPP_TLS_FIXTURE_DIR.
 //
 // Anchors: spec.md FR-007/FR-008/SC-004; contracts/validation-gate.md C-4;
-//          data-model.md E-5; tasks.md T017; engine_config.hpp:188
-//          (validate_engine_config → clock_not_set).
+//          data-model.md E-5; tasks.md T017; validate_engine_config
+//          (→ clock_not_set).
 //          [[feedback_witness_asserts_named_postcondition_not_proxy]]
 //          [[feedback_self_run_build_gate]]
 

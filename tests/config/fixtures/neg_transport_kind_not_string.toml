@@ -1,6 +1,6 @@
 # neg_transport_kind_not_string.toml
 # transport.kind is an integer (not a string) — triggers missing_required at
-# "session[0].transport.kind" (lines 527-533 selector_resolver.cpp).
+# "session[0].transport.kind" (resolve_transport's not-a-string arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

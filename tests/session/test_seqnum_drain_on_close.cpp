@@ -46,8 +46,8 @@
 // Anchors:
 //   spec.md FR-011, SC-004, §US4 AC1-3
 //   research.md D-2 (drain-failure logged-then-proceed)
-//   include/fixpp/core/sync/async_mutex.hpp:683-692 (terminate() precondition)
-//   include/fixpp/session/seqnum_manager.hpp:96-100 (drain() method)
+//   include/fixpp/core/sync/async_mutex.hpp (destructor's terminate() precondition)
+//   include/fixpp/session/seqnum_manager.hpp (drain() method)
 //   [const §XI.3] async_mutex teardown contract
 //
 // FIXPP_TEST_HOOKS: required for seqnum_mgr_test_access() on Session and

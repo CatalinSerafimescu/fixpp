@@ -5,7 +5,7 @@
 // fixpp::session::quickfix_compat::cfg_loader — QuickFIX .cfg → FileStoreFactory
 // config translation helper.
 //
-// Anchor: .specify/2e-msgstore.md v0.4 §4.8.A.2 (line 869). FR-030.
+// Anchor: .specify/2e-msgstore.md v0.4 §4.8.A.2. FR-030.
 // Entity E12.  Task T046.
 //
 // CONFIG TRANSLATION ONLY — NO runtime adapter.  Path A retired in v0.3 per
@@ -40,7 +40,7 @@ namespace fixpp::session::quickfix_compat {
 // it from EngineConfig::file_io_executor at FileStoreFactory::make() time
 // (see contracts/file_store_factory.hpp); this preserves the Config-only-CTOR
 // contract per design-doc §4.4 frozen surface AND the FileStore::Config::
-// file_io_executor required-at-construction contract per [2e §4.3.2]:665
+// file_io_executor required-at-construction contract per [2e §4.3.2]'s decision
 // (FileStore is constructed inside make()).
 //
 // Errors: file-not-found, parse-failure, malformed key, missing required key,

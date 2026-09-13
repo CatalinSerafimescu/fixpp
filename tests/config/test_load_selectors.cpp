@@ -81,7 +81,7 @@ bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
 // Assert: dynamic_cast<MemoryStoreFactory*> succeeds.
 // Also: yields_persistent_store()==false discriminates (base default=true; FileStoreFactory
 // does not override; only MemoryStoreFactory explicitly returns false).
-// PASS expected (existing impl: selector_resolver.cpp line 158).
+// PASS expected (existing impl: resolve_engine_store's kind="memory" branch).
 
 TEST(LoadSelectors, T026_StoreMemory) {
     auto result = load(fixture("happy_full.toml"));
@@ -108,7 +108,7 @@ TEST(LoadSelectors, T026_StoreMemory) {
 // Assert: dynamic_cast<FileStoreFactory*> succeeds.
 //
 // NOTE: The selector_resolver.cpp resolve_engine_store() ONLY handles kind=="memory";
-// kind="file" falls through to the unknown_enum branch (line 161-167). This test
+// kind="file" falls through to the unknown_enum branch (resolve_engine_store's else arm). This test
 // FAILS until T029 implements the file-store selector. A FAIL here is a real T029 gap.
 
 TEST(LoadSelectors, T026_StoreFile) {
@@ -216,7 +216,7 @@ TEST(LoadSelectors, T026_ClockSystem) {
 // Fixture: neg_step2_dict_version.toml (dictionary.kind="version").
 // Assert: load fails; diagnostic at "dictionary.kind" with
 // reason=recognized_not_yet_supported_step2. PASS expected (already handled in
-// selector_resolver.cpp line 307-313).
+// resolve_engine_dictionary's kind="version" branch).
 
 TEST(LoadSelectors, T028_DictionaryVersionDeferred) {
     auto result = load(fixture("neg_step2_dict_version.toml"));
@@ -254,7 +254,7 @@ TEST(LoadSelectors, T028_DialectOverlayDeferred) {
 //
 // Fixture: neg_step2_mtls_pinned.toml (security_profile.kind="mtls_pinned").
 // Assert: load fails; diagnostic at "session[0].security_profile.kind".
-// PASS expected (already handled in selector_resolver.cpp line 442-451).
+// PASS expected (already handled in parse_security_profile's mtls_pinned arm).
 
 TEST(LoadSelectors, T028_MtlsPinnedDeferred) {
     auto result = load(fixture("neg_step2_mtls_pinned.toml"));
@@ -273,7 +273,7 @@ TEST(LoadSelectors, T028_MtlsPinnedDeferred) {
 // Fixture: neg_direct_executor_no_attest.toml (mode="direct_executor", no attest).
 // Assert: load fails; diagnostic at "session[0].mode" with
 // reason=invalid_or_contradictory_selector. US3 AC-4 / FR-011. PASS expected (already in
-// scalar_mappers.cpp Rule 7a, line 373-382).
+// scalar_mappers.cpp Rule 7a).
 
 TEST(LoadSelectors, T028_DirectExecutorNoAttest) {
     auto result = load(fixture("neg_direct_executor_no_attest.toml"));
@@ -297,7 +297,7 @@ TEST(LoadSelectors, T028_DirectExecutorNoAttest) {
 //   session[1]: cert trio #2 (RSA 2048)    + security_profile=one_way_ca → DIVERGES from engine
 //   default.
 //
-// Assertions (all discriminating per D-6a / session_config.hpp:298-307):
+// Assertions (all discriminating per D-6a / SessionConfig::transport_factory_override):
 //   (1) Load succeeds; sessions.size()==2    (fixture schema is valid)
 //   (2) session[0].transport_factory_override is NULL   (uses shared engine default)
 //   (3) session[1].transport_factory_override is NON-NULL, use_count()==1 (freshly minted, single
@@ -305,7 +305,7 @@ TEST(LoadSelectors, T028_DirectExecutorNoAttest) {
 //   (distinct instance)
 //
 // EXPECTED RESULT: T027 FAILS at assertion (3) — the current selector_resolver.cpp
-// only builds the engine default from session[0] (line 387) and NEVER mints a
+// only builds the engine default from session[0] (resolve_transport) and NEVER mints a
 // per-session override for divergent sessions. This is a real T029 gap:
 //   "wire the divergent-cert transport_factory_override minting path
 //    (one-owner, use_count==1)" — tasks.md T029.
@@ -319,12 +319,12 @@ TEST(LoadSelectors, T028_DirectExecutorNoAttest) {
 // bundle — never copy the SessionConfig or bind to a local (that would bump
 // use_count and make the ==1 assertion spuriously fail).
 //
-// Anchor: research D-6a / session_config.hpp:298-307 / tasks.md T029.
+// Anchor: research D-6a / SessionConfig::transport_factory_override / tasks.md T029.
 
 // ── Mixed TLS + plaintext multi-session → plaintext session gets its own
 //    plaintext factory override (#1 Gate B r1 fix) ───────────────────────────
 //
-// Before fix: the divergence scan skipped any non-"tls" session (line 612
+// Before fix: the divergence scan skipped any non-"tls" session (the per-session minting loop's
 // continue), so session[1] declaring "plaintext" got no override and silently
 // fell back to the engine-default TLS factory (wrong transport — FR-007 drift).
 // pos_multisession_tls_and_plain.toml was a positive fixture that encoded this
@@ -470,10 +470,10 @@ TEST(LoadSelectors, GateBR1_Plaintext_MultisessionAllPlain) {
 }
 
 // ── Plaintext-default: session[1] has [transport] but NO kind key ─────────────
-// Hits lines 792-797 in the plaintext-default per-session loop:
+// Hits validate_per_session_transport_kinds's per-session loop:
 //   `else if (!kind_node)` → missing_required.
 // Distinct from GateBR1_Plaintext_Session1KindMissing which has NO [transport]
-// section at all (lines 778-784 = missing table arm).
+// section at all (validate_per_session_transport_kinds's missing-table arm).
 TEST(LoadSelectors, GateBR1_Plaintext_Session1NoKindKey) {
     auto result = load(fixture("neg_p1s1_transport_no_kind.toml"));
 
@@ -488,7 +488,7 @@ TEST(LoadSelectors, GateBR1_Plaintext_Session1NoKindKey) {
 }
 
 // ── Plaintext-default: session[1] has transport.kind = 42 (non-string) ────────
-// Hits lines 799-804 in the plaintext-default per-session loop:
+// Hits validate_per_session_transport_kinds's per-session loop:
 //   the `else` arm (kind_node present but not is_string()).
 TEST(LoadSelectors, GateBR1_Plaintext_Session1KindNonString) {
     auto result = load(fixture("neg_p1s1_transport_kind_nonstring.toml"));
@@ -504,7 +504,7 @@ TEST(LoadSelectors, GateBR1_Plaintext_Session1KindNonString) {
 }
 
 // ── Plaintext-default: session[1] has transport.kind = "" (empty) ─────────────
-// Hits lines 807-813 in the plaintext-default per-session loop.
+// Hits validate_per_session_transport_kinds's per-session loop.
 TEST(LoadSelectors, GateBR1_Plaintext_Session1KindEmpty) {
     auto result = load(fixture("neg_p1s1_transport_kind_empty.toml"));
 
@@ -518,7 +518,7 @@ TEST(LoadSelectors, GateBR1_Plaintext_Session1KindEmpty) {
 }
 
 // ── Plaintext-default: session[1] has transport.kind = "websocket" (unknown) ──
-// Hits lines 832-839 in the plaintext-default per-session loop.
+// Hits validate_per_session_transport_kinds's per-session loop.
 TEST(LoadSelectors, GateBR1_Plaintext_Session1KindUnknown) {
     auto result = load(fixture("neg_p1s1_transport_kind_unknown.toml"));
 
@@ -575,7 +575,7 @@ TEST(LoadSelectors, T027_DivergentCertMultiSession) {
     EXPECT_EQ(s1_override.use_count(), 1L)
         << "session[1].transport_factory_override must have use_count()==1 "
            "(freshly minted, single owner — cross-session sharing forbidden; "
-           "session_config.hpp:298-307 / D-6a)";
+           "SessionConfig::transport_factory_override / D-6a)";
 
     // (4) The override must be a distinct factory instance from the engine default.
     EXPECT_NE(s1_override, engine_default)
@@ -590,12 +590,12 @@ TEST(LoadSelectors, T027_DivergentCertMultiSession) {
 //
 // Before Fix B, per-session transport.kind validation was embedded in the
 // minting loops and was skipped whenever a prerequisite return fired (e.g. the
-// cert-null return at :573).  validate_per_session_transport_kinds now runs
+// cert-null return in `resolve_transport`).  validate_per_session_transport_kinds now runs
 // UNCONDITIONALLY for all sessions 1..n, independent of global acc state.
 //
 // Discriminating case (proves the fix vs a 554-only patch):
 //   TLS engine default + NO root [cert_source] → fires the cert-null return
-//   (:573) that previously suppressed all further per-session validation.
+//   (in resolve_transport) that previously suppressed all further per-session validation.
 //   session[1] has transport.kind="websocket" (unknown enum).
 //
 //   A 554-only patch: passes Codex's original root-unknown_key+websocket test

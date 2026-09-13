@@ -61,7 +61,7 @@ using FixtParam = std::tuple<Counterparty, Role, application_version>;
 //
 // fixpp's acceptor refuses an inbound FIXT Logon whose DefaultApplVerID(1137)
 // resolves to a version with NO application dictionary in the engine's
-// version_registry (Reject 373=5; session.cpp:2004). The registry is built from
+// version_registry (Reject 373=5; Session::on_inbound_frame's DefaultApplVerID check). The registry is built from
 // EngineConfig::dictionaries at Engine construction. A real FIXT-acceptor
 // deployment registers the app dictionaries it services; the interop fixture must
 // do the same or the acceptor cells reject a version they are configured to speak.

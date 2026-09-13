@@ -302,7 +302,7 @@ def test_msg_get_string_non_utf8_routes_through_fixpp_error():
 
     The thin binding wraps no raw-bytes field setter (msg_set_string validates
     UTF-8 on input), so the sender hand-builds the app payload in the msg_commit
-    wire format ("35=<type>\\x01<tag>=<value>\\x01..."; message_write.cpp:673) and
+    wire format ("35=<type>\\x01<tag>=<value>\\x01..."; fixpp_msg_commit in message_write.cpp) and
     injects the invalid bytes directly; Engine::send stamps the session envelope
     around this body. They round-trip through the wire and inbound parse intact
     (no SOH/'='), so the acceptor's callback reads them back and the decode fails

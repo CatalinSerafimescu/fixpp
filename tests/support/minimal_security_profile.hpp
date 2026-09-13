@@ -3,7 +3,7 @@
 //
 // Test-only helper: returns a minimal fixpp::session::SecurityProfile that
 // satisfies Session::open()'s no-implicit-default sentinel rejection
-// (FR-018 / N-P2-3 / [const §XII.5] / gate-b/r1 RC#1 / [arch §6 line 243]).
+// (FR-018 / N-P2-3 / [const §XII.5] / gate-b/r1 RC#1 / [arch §6, `SecurityProfile` enum bullet]).
 //
 // Usage: set cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
 // before calling Session::open() in any test that expects open() to succeed.

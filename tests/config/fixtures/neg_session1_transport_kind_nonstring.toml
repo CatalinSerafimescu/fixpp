@@ -1,7 +1,7 @@
 # neg_session1_transport_kind_nonstring.toml
 # Two sessions: session[0] uses TLS (engine default), session[1] has
 # transport.kind = 42 (integer, not a string).
-# Hits the "present but not a string" arm (lines 641-646) in the TLS-default
+# Hits the "present but not a string" arm (validate_per_session_transport_kinds) in the TLS-default
 # per-session validation loop.
 # Expected: missing_required at "session[1].transport.kind"
 

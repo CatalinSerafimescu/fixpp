@@ -6,9 +6,9 @@
 // Dictionary::as_table_view(), and assert that FIX44 tag 295 (NoQuoteEntries)
 // resolves — IN MASSQUOTE CONTEXT (msg_type "i", nested one level under
 // NoQuoteSets(296) via the QuotSetGrp/QuotEntryGrp component chain,
-// FIX44.xml:943-955/3350-3358/3219-3248) — to QuotEntryGrp's members
+// dictionaries/FIX44.xml's MassQuote message / QuotSetGrp / QuotEntryGrp components) — to QuotEntryGrp's members
 // {299 QuoteEntryID, 132 BidPx, 133 OfferPx}, NOT the globally-first-declared
-// QuotCxlEntriesGrp variant (FIX44.xml:3180-3187, which resolves 295's
+// QuotCxlEntriesGrp variant (dictionaries/FIX44.xml's QuotCxlEntriesGrp component, which resolves 295's
 // members via Instrument/FinancingDetails/UndInstrmtGrp/InstrmtLegGrp
 // components and carries NONE of QuoteEntryID/BidPx/OfferPx directly).
 //
@@ -20,7 +20,7 @@
 // fail.
 //
 // group_member_fn: a byte-identical local copy of the group_member_fn_t the
-// Parser dict-lvalue ctor installs (parser.hpp:494-517) — mirrors the
+// Parser dict-lvalue ctor installs — mirrors the
 // established pattern in tests/wire/nested_group_slices_cache_test.cpp's
 // `dict_group_member` — so this test drives the SAME logic the wire parser
 // uses, without pulling in a codegen dependency (tests/dictionary/ has none).

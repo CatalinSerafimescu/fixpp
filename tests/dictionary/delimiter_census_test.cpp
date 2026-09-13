@@ -133,9 +133,9 @@ std::set<std::uint16_t> to_set(std::span<std::uint16_t const> s) {
 
 // C-3.4a's checked set (contracts/group_ctx_delims.md), mirrored against the
 // loader's own gate — which post-082 is `find_context_without_delim_record`
-// (`src/dictionary/dictionary_internal.hpp`), NOT `dictionary.cpp:445-463` as
-// this banner used to cite. That anchor is stale twice over: the line range
-// moved, and `as_table_view()` no longer uses this datatype test at all
+// (`src/dictionary/dictionary_internal.hpp`), NOT `src/dictionary/dictionary.cpp`'s
+// old `as_table_view()` anchor as this banner used to cite. That anchor went stale:
+// `as_table_view()` no longer uses this datatype test at all
 // (082 re-pointed it onto `group_first_field(t) != 0`). What this mirrors is the
 // FR-023 load-time sweep, which still tests `NumInGroup` — see the divergence
 // warning at the head of that function.
@@ -149,7 +149,7 @@ std::set<std::uint16_t> to_set(std::span<std::uint16_t const> s) {
 // A context is checked iff, on `mt`'s deduped field run, the count tag's
 // FieldRef type is NumInGroup AND at least one FieldRef has group_no_tag == no_tag. Three
 // outcomes, not two — an INT-typed count tag (L-066-1/#196) and a
-// NumInGroup-typed tag with no members in THIS message (dictionary.cpp:463's
+// NumInGroup-typed tag with no members in THIS message (as_table_view()'s
 // separate "plain scalar reuse" skip) are different exclusion reasons and
 // must not be folded together, or the exact-55 tripwire below would silently
 // absorb a second population.
@@ -183,7 +183,7 @@ constexpr std::size_t kArenaBytes = 32UZ * 1024UZ * 1024UZ;
 // `unregistered_in_checked_set` (a real FR-023/C-3.4 completeness violation
 // — asserted 0) and `int_typed_out_of_checked_set` (L-066-1/#196).
 // `empty_members_out_of_checked_set` is a THIRD, distinct exclusion reason
-// (dictionary.cpp:463's "plain scalar reuse" skip) — reported, not folded
+// (as_table_view()'s "plain scalar reuse" skip) — reported, not folded
 // into either bucket above, so it can't silently distort the exact-count
 // tripwire.
 //
@@ -322,7 +322,7 @@ DictCensus census_one(DictCase const& dc) {
                     ++census.int_typed_out_of_checked_set;
                     break;
                 case CheckedSetStatus::kEmptyMembers:
-                    // dictionary.cpp:463's separate "plain scalar reuse"
+                    // as_table_view()'s separate "plain scalar reuse"
                     // skip — a distinct exclusion reason, reported only.
                     ++census.empty_members_out_of_checked_set;
                     break;
@@ -565,7 +565,7 @@ TEST(DelimiterCensus, RedCountsReconcileWithSpecBaseline) {
 
 // ============================================================================
 // T012: the `int_typed_out_of_checked_set` bucket (L-066-1/#196 — count
-// tags declared INT rather than NUMINGROUP, which dictionary.cpp:446 skips
+// tags declared INT rather than NUMINGROUP, which as_table_view() skips
 // entirely) is intentionally out of 083's scope and MUST NOT gate SC-015
 // above. But an un-asserted "just report it" bucket is a gate that observes
 // and never fails — the natural hiding place for a future silent drop, since

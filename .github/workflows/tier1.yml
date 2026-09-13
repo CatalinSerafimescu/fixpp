@@ -832,12 +832,12 @@ jobs:
       # matches NOTHING. fixpp::consumer::install-witness — which carries the
       # whole 087 system-include gate AND 086's reachability matrix — is
       # registered only inside `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in
-      # `if(FIXPP_BUILD_TESTS)` (CMakeLists.txt:401). If that option ever goes
+      # `if(FIXPP_BUILD_TESTS)`. If that option ever goes
       # OFF on a lane, the gate stops existing and the lane reports GREEN.
       #
       # UNCONDITIONAL — no `if:` guard, deliberately. The two test steps below
-      # are mutually exclusive by `if:` (`:513` runs on all but linux-gcc-release,
-      # `:544` only on it) and jointly cover every lane, so ONE unguarded step
+      # are mutually exclusive by `if:` (`minimal_tier_test` runs on all but linux-gcc-release,
+      # `full_tier_test` only on it) and jointly cover every lane, so ONE unguarded step
       # covers both without six conditional copies. Contract §6b.
       #
       # Placed after Build and before the first test step: `ctest -N` reads
@@ -1405,7 +1405,7 @@ jobs:
       # against a 10 GB decimal cap.
       # ⚠️ Re-derive by RE-LISTING (`gh cache list`); `gh api
       # repos/<owner>/<repo>/actions/cache/usage` lags deletes and must not be
-      # trusted alone (cache-cleanup.yml:207-209).
+      # trusted alone (cache-cleanup.yml's "Sweep unreachable PR cache scopes" step).
       - name: ccache (install + restore + save compiler cache)
         uses: hendrikmuhs/ccache-action@v1.2.23
         with:
@@ -1468,7 +1468,7 @@ jobs:
       # (ci/test-ccache-scripts.sh — 30 assertions, 10 killed mutants) rather
       # than an inline `run:` block. ⚠️ It does NOT gate on the rate:
       # ci/ccache-stats.sh asserts liveness only, imposes no hit-rate floor,
-      # and the restored-but-cold warning at its `:207` is gated on a restore
+      # and the "restore HIT with a near-zero rate" warning is gated on a restore
       # disposition this lane cannot supply (argument 2 is '', see below). A
       # warm run at 0% hits is therefore GREEN and silent — deliberately, so
       # the necessarily-cold PR run and first post-merge `main` run (§8 of the
@@ -2371,8 +2371,8 @@ jobs:
       # fixture that lost one site and gained a different one; exact-set
       # equality catches additions, removals, and substitutions alike, and
       # forces a legitimate migration PR to update the pin in the same change
-      # (see ci/expected-eligible-tests.txt:13-19 for why this repo already
-      # prefers exact equality to a floor). Buildless — no compiler, no
+      # (see ci/expected-eligible-tests.txt's exact-equality-vs-floor note for why
+      # this repo already prefers exact equality to a floor). Buildless — no compiler, no
       # ctest, python3 + coreutils only.
       - name: "Regression pin — run_for/get pump census (#289)"
         run: bash ci/test-pump-census.sh
@@ -2895,8 +2895,8 @@ jobs:
       # contended pool, bought with a 2-hour build.
       #
       # Nothing justified the separation: `FIXPP_BUILD_BENCH` appears ONLY as a
-      # gate on `add_subdirectory(bench)` (CMakeLists.txt:339, ProjectOptions
-      # .cmake:6). It changes no compile flag, so the library/test objects here
+      # gate on `add_subdirectory(bench)` (CMakeLists.txt's `if(FIXPP_BUILD_BENCH)`,
+      # ProjectOptions.cmake's option decl). It changes no compile flag, so the library/test objects here
       # are hash-identical to the matrix leg's and restore straight into them.
       #
       # `save: false`, not push-conditional — and that is the load-bearing half.

@@ -78,7 +78,7 @@ inline constexpr fixt_framing_entry kFixtFramingTable[] = {
     {.tag = 213, .type = field_type::Data},      // XmlData          DATA
     {.tag = 347, .type = field_type::String},    // MessageEncoding  STRING
     {.tag = 369, .type = field_type::Int},       // LastMsgSeqNumProcessed SEQNUM
-    // Flat-recursed nested <header> NoHops group (FIXT11.xml:32-35,
+    // Flat-recursed nested <header> NoHops group (dictionaries/FIXT11.xml's header NoHops group,
     // data-model.md E-1 disposition — accept-only, hop group not
     // structurally validated; SC-003 no-false-reject of routed FIXT traffic).
     {.tag = 627, .type = field_type::Int},       // NoHops           NUMINGROUP

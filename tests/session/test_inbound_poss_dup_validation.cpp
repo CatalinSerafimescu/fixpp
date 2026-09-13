@@ -419,7 +419,7 @@ TEST_F(PossDupValidationTest, StaleSendingTime_PossDup_KilledByMaxLatency) {
 
 // ── Test 10: FQ-2 — at-expected VALID 43=Y, 122==52 → processed once + advances ──
 //
-// spec.md:67 Edge Cases: "43=Y with MsgSeqNum == expected is processed once
+// 021 spec.md's Edge Cases: "43=Y with MsgSeqNum == expected is processed once
 // normally (it is not below expected; tolerance/ignore does not apply) and not
 // double-applied."
 // Stage-1 validation passes (122==52, not > 52 → not Arm C/D). Stage-2 tolerance

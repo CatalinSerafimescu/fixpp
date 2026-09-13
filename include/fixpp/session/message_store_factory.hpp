@@ -7,7 +7,7 @@
 //
 // History: 007 shipped the MINIMAL polymorphic-bind-target stub (deleted
 // move/copy + virtual destructor only) so SessionConfig's
-// shared_ptr<MessageStoreFactory> at session_config.hpp:127 could carry a
+// shared_ptr<MessageStoreFactory> member in session_config.hpp could carry a
 // complete type ([2d §4.5] Appendix D §D.1). 008 EXTENDS the class in place
 // (preserving the class identity, the deleted move/copy, the virtual
 // destructor) by adding the make() pure-virtual. 010 FR-001a amended
@@ -70,7 +70,7 @@ public:
     // threads in at call time for FileStore impls that need it (FR-024 /
     // I-13 / research D-7); the FileStoreFactory populates the minted
     // FileStore::Config::file_io_executor with this value (preserving
-    // [2e §4.3.2]:665 required-at-construction on FileStore itself, since
+    // [2e §4.3.2]'s required-at-construction decision on FileStore itself, since
     // FileStore is constructed inside make()) UNLESS the factory's Config
     // already carries a caller-supplied executor, in which case the
     // Config-supplied executor wins (caller override; Path-B user shape).

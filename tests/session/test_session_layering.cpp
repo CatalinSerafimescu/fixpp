@@ -91,7 +91,7 @@ static_assert(noexcept(std::declval<SeqnumManager&>().assign_outbound()),
               "SeqnumManager::assign_outbound must be noexcept (FR-015)");
 
 // NOTE — `Session::close()` is intentionally NOT noexcept per the gate-b/r1
-// RC#2/P2.1 carve-out documented at include/fixpp/session/session.hpp:115-121
+// RC#2/P2.1 carve-out documented on Session::close() itself
 // (first-close path allocates via std::make_shared on the cold path). It is
 // outside the inbound-process / timer-fire window so FR-015 does not bind it.
 

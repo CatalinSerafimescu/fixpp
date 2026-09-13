@@ -15,7 +15,7 @@
 //      inbound = SIZE_MAX/2-1, outbound = 2, frame = 8 → overflow →
 //      store_factory_failed.
 //   E. Default MemoryStore::Config against 1 GiB cap → store_factory_failed
-//      (AC #2a — design intent per [2e §1.2]:54).
+//      (AC #2a — design intent per [2e §1.2]'s Storage-DoS bound).
 //
 // TDD: linker-RED until T020 (MemoryStore) and T030 (DoS guard) ship.
 #include <gtest/gtest.h>
@@ -207,7 +207,7 @@ TEST(MemoryStoreCapacity, DefaultConfigExceedsDefaultCap) {
     MemoryStore::Config cfg;  // all defaults
     MemoryStoreFactory factory{cfg};
 
-    constexpr std::size_t kCap1GiB = 1ULL << 30;  // 1 GiB default per [2e §1.2]:54
+    constexpr std::size_t kCap1GiB = 1ULL << 30;  // 1 GiB default per [2e §1.2]'s Storage-DoS bound
     auto result = factory.make("SND", "TGT", nullptr, kCap1GiB, asio::any_io_executor{});
     EXPECT_FALSE(result.has_value())
         << "default MemoryStore::Config should fail the 1-GiB DoS guard (AC #2a)";
@@ -279,7 +279,7 @@ TEST(MemoryStoreCapacity, DoSGuardDetectsActualAdditionOverflow) {
 // ── H. Coverage uplift: engine-provided mr applied when Config.store_resource is nullptr
 //
 // make() with mr != nullptr and cfg.store_resource == nullptr → resolved_cfg uses mr.
-// Exercises the branch at line 110 (resolved_cfg.store_resource = mr).
+// Exercises MemoryStoreFactory::make's resolved_cfg.store_resource fallback branch.
 TEST(MemoryStoreCapacity, EngineMrAppliedWhenConfigResourceIsNull) {
     // Use a small bounded config that passes the DoS guard.
     MemoryStore::Config cfg;

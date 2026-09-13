@@ -145,14 +145,14 @@ struct EngineConfig {
     //    session-open per [2e §D.6] / FR-005 (4th + 5th parameters). Non-
     //    breaking append; do NOT renumber or relocate the fields above.
     //
-    //    max_store_memory_per_session = 1 GiB default per [2e §1.2]:54;
+    //    max_store_memory_per_session = 1 GiB default per [2e §1.2]'s storage-DoS-bound bullet;
     //      a default MemoryStore::Config (10_000-per-direction × default
     //      max_frame_bytes) intentionally exceeds this so the storage-DoS
     //      guard fires under AC US2 #2a — operators set capacities AND raise
     //      the cap deliberately, no implicit silent oversize ([const §XV.15]
     //      sibling rule).
     //
-    //    file_io_executor = default-constructed empty per [2e §4.3.2]:669;
+    //    file_io_executor = default-constructed empty per [2e §4.3.2]'s decision;
     //      MemoryStore impls silently discard it. FileStoreFactory rejects
     //      with store_factory_failed when both the Config-supplied executor
     //      AND this threaded-in value are empty (FR-024 / I-13).

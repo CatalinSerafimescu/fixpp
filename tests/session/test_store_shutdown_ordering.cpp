@@ -377,7 +377,7 @@ TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
 // No UAF, no use-of-joined-pool under ASan/TSan.  The witness is at the
 // pool-level (standalone FileStore + app-owned asio::thread_pool) because:
 //   - Engine::stop() drives close(terminal), which does NOT invoke
-//     flush_for_session_close() per file_store.hpp:152 / Appendix D §D.2.
+//     flush_for_session_close() per file_store.hpp / Appendix D §D.2.
 //   - The pool-level witness is the faithful, tractable path for the
 //     graceful-close flush property (brief §T014 explicit approval).
 //

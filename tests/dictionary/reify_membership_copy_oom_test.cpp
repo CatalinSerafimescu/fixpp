@@ -4,7 +4,7 @@
 // gate-b/r1 FQ-1 (PR #181 round 1, Finding 1) — OOM hardening witness for
 // MessageView::membership_copy() (include/fixpp/wire/parser.hpp), now NOT
 // noexcept: `dict::reify()`'s production caller
-// (src/dictionary/reify.cpp:188, inside `owning_message_handle_from_frame`'s
+// (inside `owning_message_handle_from_frame`'s
 // `catch (std::bad_alloc const&)`) must translate a bad_alloc thrown during
 // the table_view deep-copy into dict_reify_oom, NOT std::terminate.
 //
@@ -23,7 +23,7 @@
 // against libstdc++/libc++ container-internals differences): a single
 // unarmed dict-backed reify() call establishes `dict_total` (the total
 // global-new call count for that invocation). Source-verified
-// (src/dictionary/reify.cpp:174-194): after `handle.pimpl_->owned_tv_ =
+// (`owning_message_handle_from_frame`): after `handle.pimpl_->owned_tv_ =
 // view.membership_copy();` the function does ONLY `return handle;` (a
 // noexcept move, zero allocation) before the try block ends -- so
 // membership_copy()'s own K allocations are the LAST K allocations in the
@@ -32,8 +32,8 @@
 // (as long as K>=1, confirmed by the T_dict>T_free sanity check below).
 // Arming `fail_at = dict_total` injects the OOM precisely into the copy.
 //
-// Anchors: opus_pr181_1_triage.md Finding 1 / FQ-1; parser.hpp:511-528
-// membership_copy() out-of-line definition; table_view.hpp:185-192 "copy may
+// Anchors: opus_pr181_1_triage.md Finding 1 / FQ-1; parser.hpp's
+// membership_copy() out-of-line definition; table_view.hpp's "copy may
 // throw on allocation failure".
 #include <gtest/gtest.h>
 

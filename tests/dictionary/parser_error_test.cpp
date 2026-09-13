@@ -112,7 +112,7 @@ TEST(ParserError, NonXmlGarbage) {
 
 // ---------------------------------------------------------------------------
 // TC-PE-06..09 — defensive structural checks in `<fix>` header parsing
-// (xml_loader.cpp:269/276/285/293; complements AC-L4 which exercises the
+// (LoaderState::parse_version()'s defensive structural checks; complements AC-L4 which exercises the
 // resolve_version→Unknown path, not the from_chars-failure path).
 // ---------------------------------------------------------------------------
 

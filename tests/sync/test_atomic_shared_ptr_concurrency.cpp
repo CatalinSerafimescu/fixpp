@@ -120,7 +120,7 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
   //     2 is unbounded allocation over the deadline. (The atomic itself does
   //     NOT defer destruction of displaced pointees — `store()` releases the
   //     previous payload at the end of the same call, see
-  //     atomic_shared_ptr.hpp:100-113 (and in this build the active path is the
+  //     store() (and in this build the active path is the
   //     native `std::atomic<std::shared_ptr>` alias, which has the same
   //     property) — so the bound here is scheduling fairness plus total
   //     allocation, not a retire list.) Note the throttle, NOT an iteration

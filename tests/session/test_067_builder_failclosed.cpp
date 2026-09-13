@@ -242,7 +242,7 @@ TEST(BuilderFailClosed067, RequiredGroupZero_ValidateRejects) {
     args.bid_type = seed.bid_type;
     args.tot_no_orders = seed.tot_no_orders;
     // orders left as a zero-length span: E's NoOrders(73) group is REQUIRED
-    // (dictionaries/FIX44.xml:2944 `<group name='NoOrders' required='Y'>`).
+    // (dictionaries/FIX44.xml's ListOrdGrp `<group name='NoOrders' required='Y'>`).
     args.orders = std::span<const fixpp::v44::groups::G_73_2Args>{};
 
     auto r = fixpp::v44::validate_NewOrderList(args);

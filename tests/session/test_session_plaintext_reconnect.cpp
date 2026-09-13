@@ -3,11 +3,11 @@
 // tests/session/test_session_plaintext_reconnect.cpp — 043 /speckit-verify coverage witness
 //
 // Witnesses the plaintext RECONNECT branch:
-//   * reconnect_fsm.cpp:265-271 — when is_plaintext_, drive_reconnect_attempt()
+//   * drive_reconnect_attempt() — when is_plaintext_,
 //     skips Step 6 (dynamic_cast<TlsTransport*> + async_handshake) entirely and
 //     hands the freshly-connected transport to Session::install_reconnected_transport
 //     with an EMPTY handshake_result{} (connect → Logon, no handshake / no authz).
-//   * session.cpp:419 — install_reconnected_transport's live_peer_id_ guard: for
+//   * install_reconnected_transport's live_peer_id_ guard: for
 //     insecure_plain_tcp the empty handshake_result must NOT populate live_peer_id_,
 //     which therefore stays nullopt (D-10 #2 MUST — no fake peer identity).
 //
@@ -26,10 +26,10 @@
 // WITHOUT casting/handshaking, regardless of the concrete transport type.
 //
 // Mutation-discrimination:
-//   * drop the is_plaintext_ guard (reconnect_fsm.cpp:265) → the FSM takes the TLS
+//   * drop the is_plaintext_ guard (drive_reconnect_attempt) → the FSM takes the TLS
 //     path, dynamic_cast<TlsTransport*> succeeds on the mock, then async_handshake
 //     runs and (with no real TLS peer) the attempt fails → r.has_value() FALSE.
-//   * drop the is_insecure_plain_tcp guard (session.cpp:419) → live_peer_id_ is
+//   * drop the is_insecure_plain_tcp guard (install_reconnected_transport) → live_peer_id_ is
 //     assigned the empty handshake_result{}.peer_id → has_value() TRUE.
 //   Either mutation flips an assertion below.
 
@@ -194,7 +194,7 @@ TEST(PlaintextReconnectTest, PlaintextReconnectSkipsHandshakeAndLeavesPeerIdNull
     //     so live_peer_id_ stays nullopt — no fake peer identity.
     EXPECT_FALSE(sess.live_peer_id_has_value_for_test())
         << "insecure_plain_tcp reconnect must leave live_peer_id_ == nullopt "
-           "(D-10 #2; session.cpp:419 guard)";
+           "(D-10 #2; install_reconnected_transport's guard)";
 }
 
 #pragma clang diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp)

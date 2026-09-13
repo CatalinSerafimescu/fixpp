@@ -107,7 +107,7 @@ static int fixpp_py_is_main_interpreter(void);
  * is cp312 and 3.10/3.11 are no longer built or install-tested. The detection is
  * kept regardless: it is the in-tree build's guard too, and it is what makes the
  * rejection independent of the import barrier rather than reliant on it.
- * Preserves the code-1201 rejection (fixpp_oo.py:152 / test_subinterpreter.py);
+ * Preserves the code-1201 rejection (fixpp_oo.py's _is_main_interpreter() check / test_subinterpreter.py);
  * on 3.12+ the single-phase import barrier rejects the sub-interp first. */
 
 /* Raise the root fixpp.FixppError from an `in`-typemap conversion failure
@@ -608,8 +608,8 @@ static fixpp_error_t fixpp_py_register_callback(
         session, fixpp_py_recv_trampoline, (void*)py_callable);
     if (err != FIXPP_ERR_OK) {
         /* Native refused (e.g. post-start registration).  Release the ref we
-         * just acquired — the C-ABI never stored it (session.cpp:311-313
-         * returns before slot->userdata = userdata at 314-317). */
+         * just acquired — the C-ABI never stored it (fixpp_session_register_callback
+         * returns early, in src/capi/session.cpp, before its slot->userdata store). */
         Py_DECREF(py_callable);
     }
     return err;
@@ -646,7 +646,7 @@ static int fixpp_py_is_main_interpreter(void) {
 
 /* ── T008: engine_create(cfg) hand-wrapper (injects the version macros) ──────
  * The real symbol is the 4-arg fixpp_engine_create(cfg, major, minor, &out)
- * (engine.h:81) — it records the consumer's ABI minor for the forward-compat
+ * (declared in engine.h) — it records the consumer's ABI minor for the forward-compat
  * downgrade. Python callers pass only cfg; this thin wrapper supplies the
  * compile-time FIXPP_C_ABI_VERSION_{MAJOR,MINOR}. The fixpp_engine_t** out
  * uses the T007 HANDLE_OUT typemap; %rename forces the short Python name
@@ -673,7 +673,7 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
  *   --------------------------------|---------|------------------------------------
  *   session_close                   | release | co_spawn(close_exec,…,use_future)+fut.get() — strand drain
  *   session_send                    | release | co_spawn(ioc_,…,use_future)+fut.get() — worker run
- *                                   |         |   (mechanism src/capi/session.cpp:284-286; rule session.h:255-258)
+ *                                   |         |   (mechanism: fixpp_session_send's co_spawn+fut.get() in src/capi/session.cpp; rule: session.h's Reentrancy note on fixpp_session_send)
  *   engine_destroy                  | release | stop_fut.get() + worker joins
  *   engine_create                   | hold    | construct + worker spawn; no round-trip
  *   engine_start                    | hold    | starts workers; returns immediately
@@ -834,7 +834,7 @@ except ImportError:
  * SWIG emits %pythoncode blocks in SOURCE ORDER, and the `import typing` being
  * undone lives in the generated PREAMBLE, which precedes every %pythoncode
  * block. So any block in this file runs after it. Verified on 4.5.0: the
- * import is line 22, this pop is line 349 of 351.
+ * import precedes this pop, consistent with SOURCE ORDER.
  *
  * Deliberately NOT stated as "the last block in the file". The comment 60-odd
  * lines above made exactly that claim and went stale the moment another block

@@ -4,7 +4,7 @@
 //
 // 058-async-mutex-hardening Gate-B MAJOR-2 — deterministic seam witness for
 // the pre-existing acquisition livelock at async_mutex.hpp's contended
-// acquire loop (~:1290): the `if (old_state == not_locked)` branch CASed
+// acquire loop: the `if (old_state == not_locked)` branch CASed
 // with a FRESH `uintptr_t exp2 = not_locked;` (NOT `old_state`), and on CAS
 // failure did `continue;` WITHOUT refreshing `old_state`. A waiter that
 // observed `not_locked` and lost the CAS to another acquirer kept

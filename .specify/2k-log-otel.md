@@ -1466,7 +1466,7 @@ None — this doc does not cite FIX wire-format specifications directly. The log
 | Codex P2-1 / Opus confirm: MPSC overflow deadlock | Fixed in §4.3: load-check-CAS-claim pattern prevents slot claim before overflow detection |
 | Opus N-P2-1: `static_assert(sizeof(ArgValue) <= 24)` | Fixed: changed to `== 24` |
 | Codex P3-1: stale `emit(record, deadline)` | Fixed: `emit(Record const& record)` |
-| Codex P3-3: §D.1 line range label | Fixed: corrected to actual line range from live 2d-threading.md (lines 593–603) |
+| Codex P3-3: §D.1 line range label | Fixed: corrected to point at live 2d-threading.md's `SessionConfig` observability-hooks comment block |
 
 **Disagreements recorded:** None from round 3.
 
@@ -1503,7 +1503,7 @@ Following the `[2j App D]` byte-faithful Before/After pattern. Each entry is app
 
 Per `[2d §4.4]`, `EngineConfig` already has three observability stubs. 2k confirms their types are correct as declared. No structural change to `2d-threading.md` is needed — the field names and types in the existing stub match 2k's defined API.
 
-**No Before/After needed.** The existing `[2d §4.4]` lines (at `2d-threading.md` lines 441–443) already read:
+**No Before/After needed.** The existing `[2d §4.4]` lines (at `2d-threading.md`'s `EngineConfig` observability stub fields) already read:
 
 ```cpp
 std::shared_ptr<fixpp::core::Logger>           logger;        // null → no-op.
@@ -1515,7 +1515,7 @@ The type `fixpp::core::Logger` is the forward-declared name in the `core` module
 
 Additionally, 2k adds the `logger_override` and `tracer_override` fields to `SessionConfig`. These are **new fields** requiring an amendment to `[2d §4.5]`.
 
-**Before** (lines 593–603 of `library/.specify/2d-threading.md` — verbatim, byte-faithful; the observability-hooks comment block and the two fields it introduces):
+**Before** (`library/.specify/2d-threading.md`'s `SessionConfig` observability-hooks comment block — verbatim, byte-faithful; the two fields it introduces):
 
 ```
     // ── Observability hooks (interface-level only; locked by 2k) ────────
@@ -1549,7 +1549,7 @@ Additionally, 2k adds the `logger_override` and `tracer_override` fields to `Ses
 
 **§D.1 amendment (v0.4) — Add `Session::get_trace_context() const noexcept` to `Session`'s public surface.**
 
-**Before** (lines 789–835 of `library/.specify/2d-threading.md` — verbatim, byte-faithful; the `Session` class definition):
+**Before** (`library/.specify/2d-threading.md` — verbatim, byte-faithful; the `Session` class definition):
 
 ```
 class Session {
@@ -1673,7 +1673,7 @@ public:
 
 Per `[arch §11]`, row 4 currently reads:
 
-**Before** (lines 597–598 of `library/.specify/architecture.md` — verbatim, byte-faithful):
+**Before** (`library/.specify/architecture.md`'s §11 tracking table, row 4 "`quill` vs own async logger" — verbatim, byte-faithful):
 
 ```
 | 4 | `quill` vs own async logger — adopt or build | **2k** | Bench-driven `[SYN §3.8]` |
@@ -1689,7 +1689,7 @@ Per `[arch §11]`, row 4 currently reads:
 
 ### §D.3 NEW catalogue rows LOG-001..004 + OBS-001..003 in `library/spec/feature-catalogue.md`
 
-**Before** (lines 209–210 of `library/spec/feature-catalogue.md` — verbatim, byte-faithful; the last SVC row and the blank line before the NFR section):
+**Before** (`library/spec/feature-catalogue.md`'s last SVC row (SVC-005) and the blank line before the NFR section — verbatim, byte-faithful):
 
 ```
 | SVC-005 | OFFICIAL | service | Pluggable control plane interface — `fixpp::service::ControlPlane` (3 pure-virtual: `start`, `stop`, `health`; ≤5 cap with 2 slots of headroom for v1.x auth-token rotation + RPC re-mapping per [2j §10] Q5); default impl gRPC over Unix socket (Linux) / named pipe (Windows); alternative impls (JSON-over-Unix-socket sample, ...) link without rebuilding the engine via the AGPL-boundary structural rule per `[const §V.1]` / `[arch §8]`; `EngineConfig::control_plane_factory` engine-anchor per `[2j Appendix D §D.2]`; handlers run on the engine executor per `[2d §7.8]`; `CloseSession` RPC consumes `[2h §7.6]` graceful-drain shape; rotation RPCs (`RotatePinset` / `ReloadCertSource`) deferred to v1.x per `[2j §10]` Q1 + Q9 | all | [2j §4.1] / [arch §4.11] | backlog | `.specify/2j-controlplane.md` v0.3 | — | — | — |

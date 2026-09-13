@@ -4,7 +4,7 @@
 //
 // fixpp::session::FileStoreFactory — factory producing FileStore instances.
 //
-// Anchor: .specify/2e-msgstore.md v0.5 §4.4 (lines 727–732). Entity E7.
+// Anchor: .specify/2e-msgstore.md v0.5 §4.4's `FileStoreFactory` block. Entity E7.
 // FR-008 (log path) / FR-013 (advisory lock) / FR-014 (factory contract) /
 // FR-024 (file_io_executor injection) / I-11 (storage-DoS) / I-13 /
 // I-16 (advisory lock) / [2e §D.4] (CompID validation — Gap 1 close) /

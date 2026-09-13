@@ -8,9 +8,9 @@
 // The driver's quoted include "support/minimal_dictionary.hpp" used to be
 // satisfied by COPYING the real tests/support/minimal_dictionary.hpp into the
 // scratch project (see run_real_client_witness.cmake history). That smuggled a
-// private test-support header into the consumer project, violating spec.md:78
-// (US1 acceptance scenario 7 — "does not reach into ... its test-support
-// headers") and spec.md:90 (FR-018a MUST — the packaged variant replaces the
+// private test-support header into the consumer project, violating
+// specs/084-packaging-cpack-export/spec.md's acceptance scenario 7 ("does not reach into ... its test-support
+// headers") and its FR-018a bullet (MUST — the packaged variant replaces the
 // dictionary helper with a runtime load through the PUBLIC API of a dictionary
 // SHIPPED in the package).
 //
@@ -25,7 +25,7 @@
 // string via XmlLoader::load_from_string. This shim instead loads the REAL,
 // SHIPPED dictionaries/FIX42.xml through the PUBLIC XmlLoader::load(path, mr)
 // API, from the staged install prefix's share/fixpp/dictionaries/ directory
-// (CMakeLists.txt:774-777 installs the whole dictionaries/ directory). FIX 4.2
+// (the root CMakeLists.txt's T033 dictionaries/ install rule). FIX 4.2
 // is kept — not substituted for FIX 4.4 — because the driver's SessionConfig
 // for BOTH sides of the loopback pair is version-agnostic w.r.t. this helper
 // (it only needs A valid, non-null dictionary satisfying the null-dictionary

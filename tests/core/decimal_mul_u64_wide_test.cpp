@@ -9,7 +9,7 @@
 // linkable from a test binary, and the surface must stay invariant (T019:
 // no new public/C-ABI symbol). So this file carries a FLAG-IDENTICAL COPY of
 // the function (identical #if ladder, identical bare-macro guards, #else
-// body copied VERBATIM from src/core/decimal.cpp:264-286) compiled under the
+// body copied VERBATIM from src/core/decimal.cpp's mul_u64_wide) compiled under the
 // same compile-time flags as the shipped TU. Because mul_u64_wide is pure,
 // stateless, compile-time-selected arithmetic with no external dependency,
 // a copy built under the same flags is bit-identical machine code to the
@@ -47,7 +47,7 @@ namespace {
 // Flag-identical copy of src/core/decimal.cpp mul_u64_wide (see file header
 // comment). Selection order and bare-macro guards match the shipped copy
 // exactly. The #else body below is copied VERBATIM from
-// src/core/decimal.cpp:264-286.
+// src/core/decimal.cpp's mul_u64_wide.
 static inline std::uint64_t mul_u64_wide(std::uint64_t a, std::uint64_t b,
                                          std::uint64_t* hi) noexcept {
 #if defined(__SIZEOF_INT128__) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)

@@ -80,9 +80,9 @@ if(TARGET opentelemetry-cpp::api)
   add_executable(test_session_spans test_session_spans.cpp)
   target_link_libraries(test_session_spans PRIVATE
     fixpp_otel
-    # fixpp_session supplies session_trace_context_of (src/session/
-    # session_executor.cpp:81). It is referenced from include/fixpp/core/
-    # trace_context.hpp:162 — a CORE header — and fixpp_otel links only
+    # fixpp_session supplies session_trace_context_of (its definition in src/session/
+    # session_executor.cpp). It is referenced from include/fixpp/core/
+    # trace_context.hpp — a CORE header — and fixpp_otel links only
     # core/log/asio, so it is NOT reachable transitively. Both this TU and
     # libfixpp_otel.a(session_spans.cpp.o) carry the undefined reference.
     #

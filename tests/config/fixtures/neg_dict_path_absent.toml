@@ -1,6 +1,6 @@
 # neg_dict_path_absent.toml
 # [dictionary] kind="path" but the "path" key is absent — triggers missing_required at
-# "dictionary.path" (lines 340-345 selector_resolver.cpp).
+# "dictionary.path" (resolve_engine_dictionary's missing-path arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

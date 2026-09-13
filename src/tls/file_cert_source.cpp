@@ -18,7 +18,7 @@
 // - Chain dedupe by SHA-256-of-DER on load.
 //
 // load_credentials: implements the [2g §6.4] cached-state fast path
-// (lines 926-929: "for already-cached state, just return the prepared
+// ("for already-cached state, just return the prepared
 // local_credentials directly"). Performs the §6.4 step-2 (read
 // cancellation_state) and step-3 (pre-I/O reap) checks; the step-4
 // cancellable_dispatch hop is omitted because all parsing happens at
@@ -231,7 +231,7 @@ struct file_cert_source::Impl {
         // leaf_path and private_key_path are MANDATORY for a file_cert_source
         // that supplies local credentials. Accepting empty paths silently and
         // returning a null-handle signer violates data-model E-2 ("default-
-        // construction is NOT permitted") and [2g §4.2] line 376 (signer must
+        // construction is NOT permitted") and [2g §4.2]'s "Signer (software-key path)" note (signer must
         // be software_key_ref{handle = key_, ...} unconditionally on the
         // success path). F-3 Gate-B/r1 fix.
         if (c.leaf_path.empty()) {
@@ -500,11 +500,11 @@ file_cert_source::make_file_cert_source(Config cfg, std::pmr::memory_resource* m
 }
 
 // ── load_credentials — [2g §6.4] cached-state fast path ──────────────────────
-// Implements [2g §6.4] lines 926-929: "for already-cached state, just return
+// Implements [2g §6.4]: "for already-cached state, just return
 // the prepared local_credentials directly." Since file_cert_source loads and
 // parses every file ONCE at construction time, no blocking I/O is needed here.
 //
-// Steps executed per [2g §6.4] contracts/cert_source.hpp lines 206-243:
+// Steps executed per [2g §6.4] contracts/cert_source.hpp's `load_credentials` Recipe block:
 // Executed in this order (recipe step numbers in parentheses):
 //   read the INHERITED cancellation_state   (step 2) — before any reset, #349
 //   reap pre-I/O cancellation               (step 3) — load-bearing for §6.4

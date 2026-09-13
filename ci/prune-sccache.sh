@@ -8,7 +8,7 @@
 #
 # The wrapper exists so this documented standalone command keeps working, and so
 # the TAG GRAMMAR stays next to the key script that mints it
-# (ci/sccache-cache-key.sh:75 — `sccache-<preset>-<toolset>`).
+# (ci/sccache-cache-key.sh's `SCCACHE_CACHE_TAG` — `sccache-<preset>-<toolset>`).
 #
 # ⚠️ ANCHORED AT BOTH ENDS. It used to be start-only, which was safe only BY
 # ACCIDENT of naming — no Tier 2 preset is a prefix of another today
@@ -18,7 +18,7 @@
 #
 # `[0-9.]+$` is this package's toolset grammar — `sccache-<preset>-<VCToolsVersion
 # |VSCMD_VER>`, e.g. `sccache-windows-msvc-debug-14.44.35207`
-# (ci/sccache-cache-key.sh:75). Stating the end here rather than in the generic
+# (ci/sccache-cache-key.sh's `SCCACHE_CACHE_TAG`). Stating the end here rather than in the generic
 # pruner is the point: each caller knows its own grammar.
 #
 # MEASURED before changing it, not reasoned: all three live fixpp-sccache tags

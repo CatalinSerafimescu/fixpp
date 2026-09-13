@@ -11,7 +11,7 @@
 // (a) FUNCTIONAL CORROBORATION (non-discriminating alone): an admin message
 //     (inbound Heartbeat) and a no-group app message (inbound NewOrderSingle,
 //     no repeating groups referenced) dispatch correctly through the SAME
-//     dict-backed `parse_and_dispatch_` site (session.cpp:316-330, T006) and
+//     dict-backed `parse_and_dispatch_` site (T006) and
 //     read their scalar fields correctly — proving 066 did not regress
 //     admin/no-group behavior. "Dispatches fine" alone does NOT discriminate
 //     lazy-vs-eager membership consultation (it would pass either way) — see
@@ -19,17 +19,17 @@
 //
 // (b) STRUCTURAL LAZINESS PROOF (the actual discriminator, code-cited, not a
 //     test): `group_member_fn_` (the membership predicate the dict-backed
-//     `Parser` ctor installs, parser.hpp:566-585) is invoked ONLY from three
+//     `Parser` ctor installs) is invoked ONLY from three
 //     call sites, all inside `OffsetTable::consume_group_extent` /
 //     `OffsetTable::group` (src/wire/offset_table.cpp — confirmed by census,
 //     grep `group_member_fn_(` across src/wire/offset_table.cpp):
-//       - offset_table.cpp:448  (consume_group_extent: confirm count field
+//       - offset_table.cpp (consume_group_extent: confirm count field
 //         heads a group in-context)
-//       - offset_table.cpp:469  (consume_group_extent: is a scanned entry a
+//       - offset_table.cpp (consume_group_extent: is a scanned entry a
 //         member of the CURRENT group)
-//       - offset_table.cpp:477  (consume_group_extent: nested-descent trigger
+//       - offset_table.cpp (consume_group_extent: nested-descent trigger
 //         check)
-//       - offset_table.cpp:532  (group(): confirm `no_tag` is a real group
+//       - offset_table.cpp (group(): confirm `no_tag` is a real group
 //         count field before consuming its extent)
 //     `OffsetTable::group()`/`group_slices()` are themselves invoked ONLY from
 //     a caller doing an EXPLICIT group read (`MessageView::offsets().group_

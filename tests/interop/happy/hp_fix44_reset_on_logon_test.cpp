@@ -19,7 +19,7 @@
 //   live outbound path). The byte-level assertion that the Logon carried 141=Y
 //   and 34=1 verbatim is provided by two authoritative sources:
 //     - Unit witness ResetOnLogon_Initiator_ResetsAndEmits141
-//       (tests/session/test_reset_on_lifecycle.cpp:357/366): directly asserts
+//       (tests/session/test_reset_on_lifecycle.cpp): directly asserts
 //       34=1 and 141=Y on captured Logon frame bytes via extract_field/frame_has_tag.
 //     - Parent golden (diff_golden_or_skip below): asserts 141=Y + 34=1 verbatim
 //       under the {52,10} admin profile against the live proxy capture.

@@ -4,8 +4,8 @@
 //
 // 058-async-mutex-hardening Gate-B MAJOR-1 — deterministic seam witnesses
 // for unlock()'s two chain-walk `queued -> granted` CAS-loss arms (the
-// `ph = expected_ph;` fallthrough after a failed CAS at ~:1357 [residual
-// walk] and ~:1438 [fresh LIFO->FIFO walk]): a waiter's `on_cancel()` can
+// `ph = expected_ph;` fallthrough after a failed CAS (unlock_pre_grant_cas_residual [residual
+// walk] and unlock_pre_grant_cas_fifo [fresh LIFO->FIFO walk]): a waiter's `on_cancel()` can
 // win the `queued -> cancelled` race concurrently with unlock()'s walk
 // observing that waiter as `queued` and attempting to grant it. The
 // coverage-design doc (.specify/decisions/058-async-mutex-hardening-
@@ -121,7 +121,7 @@ void chain_walk_hook(async_mutex_seam_phase phase) noexcept {
 }  // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FIFO walk (:1438-area) — a single fresh waiter is cancelled while
+// FIFO walk — a single fresh waiter is cancelled while
 // unlock()'s LIFO->FIFO walk holds it as `queued`.
 //
 // Pool-slot index: this is the FIRST slow-path waiter_record allocated on a
@@ -210,7 +210,7 @@ TEST(AsyncMutexChainWalkCasLoss, FifoWalkCancelWinsGrantCasLoss) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Residual walk (:1357-area) — a waiter spliced onto next_drain_head_ by a
+// Residual walk — a waiter spliced onto next_drain_head_ by a
 // PRIOR unlock() call is cancelled while a SUBSEQUENT unlock()'s residual
 // walk holds it as `queued`.
 //

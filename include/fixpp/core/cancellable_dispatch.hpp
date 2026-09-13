@@ -45,7 +45,7 @@
 //   exception crosses the parse→fromApp window ([arch §5.3]). This mirrors
 //   the `fixpp::core::detail::trap_throw` pattern from 001/004 (D-6).
 //
-// ARENA DERIVATION (pinned — [2d §6.5]:1153-1154): the dispatch node is
+// ARENA DERIVATION (pinned — [2d §6.5]'s cancellable_dispatch template): the dispatch node is
 // allocated from the session PMR arena recovered THROUGH `exec`
 // (`exec.session_ptr()->session_arena()` — the [2d §4.5] never-null chain).
 // The resource never falls back to the global heap, so arena exhaustion

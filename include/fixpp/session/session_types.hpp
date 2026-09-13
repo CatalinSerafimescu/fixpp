@@ -21,7 +21,7 @@ namespace fixpp::session {
 enum class session_posture { production, test };
 
 // data-model E3 — NoMsgTypes(384) member direction. Renders send→'S', receive→'R'
-// on the wire (FIX44 CHAR domain, FIX44.xml:4997-5000). NOTE: a C++ `enum class`
+// on the wire (FIX44 CHAR domain, dictionaries/FIX44.xml's MsgDirection(385) field). NOTE: a C++ `enum class`
 // can still hold an off-enum value via `static_cast`, so the wire rendering in
 // build_logon uses an exhaustive switch that FAILS CLOSED (returns an error) on
 // any other value (gate-b/r1, PR #189) — it is NOT unrepresentable by construction.

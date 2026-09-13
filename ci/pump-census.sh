@@ -107,8 +107,8 @@
 # BOTH directions. A count alone is satisfied by one site removed plus one
 # added, by a site moving between files, or by classifier drift that swaps a
 # real site for a false positive — none of which a bare cardinality check can
-# see. See ci/expected-eligible-tests.txt:13-19 for why this repo already
-# treats a floor/count as weaker than exact equality.
+# see. See ci/expected-eligible-tests.txt's exact-equality-vs-floor note for why
+# this repo already treats a floor/count as weaker than exact equality.
 #
 # Usage:
 #   bash ci/pump-census.sh [--root DIR] [--expected FILE]

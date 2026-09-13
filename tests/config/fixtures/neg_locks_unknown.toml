@@ -1,6 +1,6 @@
 # neg_locks_unknown.toml
 # locks has an unrecognised token — triggers unknown_enum at session[0].locks
-# (lines 307-314 scalar_mappers.cpp).
+# (map_scalars's locks unknown-token arm, scalar_mappers.cpp).
 
 [clock]
 kind = "system"

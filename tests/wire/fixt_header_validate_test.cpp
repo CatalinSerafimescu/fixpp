@@ -176,8 +176,8 @@ struct FixtHeaderValidateTest : ::testing::TestWithParam<char const*> {};
 // enable strict validation (dictionary_driven_validator IS the strict path),
 // feed a well-formed NewOrderSingle carrying standard header+trailer.
 // GREEN: accepted. (RED, pre-fix: rejected wire_unexpected_tag, ref_tag==8 —
-// see the mechanism pin tests/wire/validator_production_table_view_test.cpp
-// :270 for the identical "empty valid-tag view -> first field is 8" proof.)
+// see the mechanism pin tests/wire/validator_production_table_view_test.cpp's
+// `UnknownMsgTypeRejectsLikePreHoistFieldValidFor` for the identical "empty valid-tag view -> first field is 8" proof.)
 TEST_P(FixtHeaderValidateTest, WellFormedApplicationFrameAccepted) {
     std::pmr::monotonic_buffer_resource mr;
     auto dict = load_real_dict(GetParam(), &mr);

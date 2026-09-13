@@ -42,7 +42,7 @@
 // forward-declared in reconnect_fsm.hpp per [const §XV.9].
 // [data-model §E-3; FR-010]
 // TlsTransport — needed for the dynamic_cast<TlsTransport*> in E-1 step 6.
-// [data-model §E-1; tls_transport.hpp:61-67]
+// [data-model §E-1; TlsTransport's dynamic_cast requirement]
 #include "fixpp/transport/tls_transport.hpp"
 // Session — full definition needed to call Session::install_reconnected_transport.
 // [data-model §E-1 step 8; const §XV.9: kept out of reconnect_fsm.hpp]
@@ -227,7 +227,7 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
         // needed — the first-ever load (baseline) or a detected rotation. A
         // no-rotation reconnect (snap == last_active_source_) must NOT load,
         // else load_credentials() would run twice per handshake (this
-        // rotation-detect + the handshake itself at transport_factory.cpp:378),
+        // rotation-detect + the handshake itself in transport_factory.cpp's `prepare_ssl_ctx_`),
         // breaking the FR-013a "load_credentials() == 1 per handshake" witness.
         const bool first_load = (last_active_source_ == nullptr);
         const bool rotated = !first_load && (snap != last_active_source_);
@@ -257,7 +257,7 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
                 // injection seam so a throwing test callback does not propagate
                 // out of the noexcept coroutine body.
                 // Mirror: CompIdAuthorizationPolicy::authorize_logon try/catch
-                // shape (compid_authorization_policy.cpp:355-361).
+                // shape (`CompIdAuthorizationPolicy::authorize_logon`'s try/catch).
                 // The catch MUST fall through: baseline update and make() still
                 // run (the attempt proceeds to its policy outcome; INV-7).
                 // [038 G2; FR-006/FR-007; INV-7/8/9; 038 contracts C-2]
@@ -324,7 +324,7 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
 
         // ── Step 6: dynamic_cast to TlsTransport + async_handshake ────────────
         // TlsTransport inherits virtually from Transport — static_cast down that
-        // edge is ill-formed; dynamic_cast is required (E-1 / C1 / tls_transport.hpp:61-67).
+        // edge is ill-formed; dynamic_cast is required (E-1 / C1 / TlsTransport's exactly-one-dynamic_cast contract).
         auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(t.get());
         if (tls == nullptr) {
             // Non-TLS transport (or cast fail): release t, count, continue.
@@ -350,7 +350,7 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
         //   - Auth failure counts as exactly ONE attempt and is retried per the
         //     backoff schedule to the cap (reason-agnostic per Clarifications Q1).
         //   - This is NOT a terminal Disconnected (unlike 013's open-Logon path
-        //     at session.cpp:1004-1005 / :1799-1800); only loop-exhaustion is.
+        //     at emit_initiator_logon_'s fail-closed Disconnected dispositions); only loop-exhaustion is.
         //   - Only when session_ != nullptr (session-bound FSM path).
         //
         // [data-model §E-1 step 7; E-2; contracts C2; FR-006; FR-007; Q1]
@@ -367,10 +367,10 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
                 if (!auth_r) {
                     // Authorization failed: emit event, release t, count attempt.
                     // cn is left EMPTY: emit_event PERSISTS the event into the
-                    // session-lifetime recent_events_ ring (session.cpp:142), so a
+                    // session-lifetime recent_events_ ring (Session::emit_event's ring write), so a
                     // view into hr.peer_id (a coroutine-stack temporary destroyed at
                     // the `continue` below) would dangle for later recent_events()
-                    // readers. Mirrors the mTLS-no-identity arm (session.cpp:1939).
+                    // readers. Mirrors on_inbound_frame's mTLS-no-identity fail-closed arm (RC#A).
                     session_->emit_event(fixpp::session::session_event_compid_authorization_failed{
                         .cn = {},
                         .asserted_compid = asserted_compid,

@@ -12,14 +12,14 @@
 // so a mock-driven cell is green EXACTLY where a real asio::ssl::stream
 // hangs. asio_tls_transport::async_read_some's SSL composed op is built with
 // a one-argument reset_cancellation_state(enable_total_cancellation()) at
-// src/transport/asio_tls_transport.cpp:1134 — the terminal-only IN filter is
+// src/transport/asio_tls_transport.cpp's async_read_some reset_cancellation_state call — the terminal-only IN filter is
 // honoured by the SSL composed op's internal state, but there is no OUT
 // filter mapping `total` back to `terminal`, so an emitted `total` is
 // silently dropped and the read never aborts. FR-018 (task T029, NOT landed
 // by this file) replaces the one-argument reset with a two-argument OUT-
 // mapping form. This file's RED basis is the CURRENT (un-mapped) tree — see
 // research.md D-6.13(b) and tasks.md T025: no revert is needed, because
-// asio_tls_transport.cpp:1134 is already at the one-argument form.
+// asio_tls_transport.cpp's async_read_some reset_cancellation_state call is already at the one-argument form.
 //
 // Two legs (research.md D-6.10a — a single joined leg cannot assert an exact
 // error value, because BOTH the read arm and the deadline arm inside
@@ -286,7 +286,7 @@ TEST(FirstFrameTotalCancelTls, LegA_JoinedHelper_CancellationAttributable) {
     // the watchdog's close() eventually unblocks it.
     EXPECT_FALSE(watchdog_fired)
         << "T6 leg A (SC-018/FR-018): watchdog fired — Engine::stop()'s cancellation_type::total "
-        << "did not abort the in-flight TLS read within 1000ms. asio_tls_transport.cpp:1134 is "
+        << "did not abort the in-flight TLS read within 1000ms. asio_tls_transport.cpp's async_read_some reset_cancellation_state call is "
         << "still the one-argument reset_cancellation_state(enable_total_cancellation()); the "
         << "SSL composed op's internal state is terminal-only, so an emitted `total` is silently "
         << "dropped and the read hangs until this test's watchdog force-closes the socket. "
@@ -370,7 +370,7 @@ TEST(FirstFrameTotalCancelTls, LegB_DirectRead_ExactCancelled) {
     EXPECT_FALSE(watchdog_fired)
         << "T6 leg B (SC-018/FR-018): watchdog fired — a single, un-joined "
         << "transport.async_read_some(...) was not aborted by cancellation_type::total within "
-        << "1000ms. See leg A's message for the mechanism (asio_tls_transport.cpp:1134).";
+        << "1000ms. See leg A's message for the mechanism (asio_tls_transport.cpp's async_read_some reset_cancellation_state call).";
     if (watchdog_fired) return;
 
     // A3-B — no join, no order[0] premise: the EXACT value is assertable.

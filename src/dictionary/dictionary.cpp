@@ -516,7 +516,7 @@ table_view Dictionary::as_table_view() const {
         // whichever variant the loader saw FIRST across the whole dictionary
         // (Defect A). Instead, derive membership from THIS message's own
         // per-message expansion (`all_fields = message_fields(mt)`, already
-        // fetched above): `FieldRef.group_no_tag` (field_ref.hpp:88) persists
+        // fetched above): `FieldRef::group_no_tag` persists
         // each field's IMMEDIATE enclosing group's no_tag within this
         // specific message's expansion — a pre-dedup context that survives
         // finalize() (data-model.md "GroupMembership", Option A).
@@ -632,7 +632,7 @@ table_view Dictionary::as_table_view() const {
             //    survived inspection. The member set does NOT stay exact: it is
             //    `set_group_first_ctx`'s own unconditional
             //    `add_group_member_ctx(msg_type, parent_path, no_tag, first)`
-            //    (include/fixpp/dict/table_view.hpp:645) that INJECTS the wrong
+            //    (table_view.hpp's `set_group_first_ctx`) that INJECTS the wrong
             //    global delimiter into this context's member set — measured on
             //    48 contexts. A wrong delimiter therefore corrupts the member
             //    set too, which is fixpp#210 Consequence 1/2. With the source
@@ -696,7 +696,7 @@ table_view Dictionary::as_table_view() const {
     // across FIX50/SP1/SP2, the FIXT split). A message_fields()-only
     // projection would leave those 35 with NO domain, and
     // `table_view::validate_field()`'s first statement is `enum_valid()`
-    // with NO `field_valid_for` precheck (validator.hpp:323-330) — silently
+    // with NO `field_valid_for` precheck — silently
     // ACCEPTING out-of-domain values through a frozen public API, an FR-003
     // (normative MUST) violation. This is the C3-1 fix.
     //

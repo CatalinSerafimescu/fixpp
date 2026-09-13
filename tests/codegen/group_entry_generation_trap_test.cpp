@@ -184,7 +184,7 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
         << "nested entry scalar read must trap after pool recycle (INV-G6)";
 
     // A WARM re-descent (exact nested_cache_ hit on (slice_data, no_tag),
-    // OffsetTable::nested_group_slices ~:579-581) must ALSO trap after pool
+    // OffsetTable::nested_group_slices) must ALSO trap after pool
     // recycle. quote_set0.quote_entries() was already called above (line
     // ~151), so this second call is a cache hit that historically returned
     // the cached sub-table's group_slices() with NO liveness check against
@@ -195,7 +195,7 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
         << "warm nested-cache-hit descent must trap after pool recycle (INV-G6)";
 
     // Discriminating witness for issue #169 guard B: `sets` (minted while the
-    // token was live, at line ~144) is a HELD group_view. Exercising its own
+    // token was live, via `mq.quote_sets()`) is a HELD group_view. Exercising its own
     // size()/operator[]/end() directly must trap via View::check_alive() on
     // the held view itself — none of these re-enter OffsetTable::group_slices()
     // (that would only prove guard A again).

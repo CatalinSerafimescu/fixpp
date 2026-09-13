@@ -75,7 +75,7 @@ target_compile_definitions(wire_pure_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 # 085 T002 (FR-001b single-traversal source-inspection pin): repo src root so
 # the pin can read src/wire/offset_table.cpp verbatim. Mirrors
-# tests/dictionary/CMakeLists.txt:178-183 (080 T015).
+# tests/dictionary/CMakeLists.txt's `dictionary_load_any_tests` FIXPP_SRC_DIR pin (080 T015).
 target_compile_definitions(wire_pure_tests PRIVATE
   "FIXPP_SRC_DIR=\"${CMAKE_SOURCE_DIR}/src\"")
 # 079 T024: label the bucket `wire` so `ctest -L wire` selects the US1/US2

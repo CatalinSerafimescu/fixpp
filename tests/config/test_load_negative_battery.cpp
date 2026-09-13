@@ -698,7 +698,7 @@ TEST(LoadNegativeBattery, T020_MissingRequired_StoreKind) {
 //
 // Fixture: neg_missing_dictionary.toml (entire [dictionary] section absent).
 // Phase 3b's resolve_dict returns early (silently) when the table is absent
-// (selector_resolver.cpp:278-282). Phase 4b will add the missing_required check.
+// (resolve_engine_dictionary's early-return-on-absence). Phase 4b will add the missing_required check.
 
 TEST(LoadNegativeBattery, T020_MissingRequired_Dictionary) {
     auto result = load(neg_fixture("neg_missing_dictionary.toml"));
@@ -717,7 +717,7 @@ TEST(LoadNegativeBattery, T020_MissingRequired_Dictionary) {
 
 // ── #2 (Gate B r1): collect-ALL not truncated by missing [dictionary] ─────────
 //
-// Before fix: the early-return at toml_config_loader.cpp:444 fired for ANY
+// Before fix: load_toml_config's structural guard fired for ANY
 // non-empty accumulator, which truncated all root/default/per-session diagnostics
 // when only the dictionary diagnostic had fired.  After fix: the return fires
 // ONLY on !sessions_arr||sessions_arr->empty().
@@ -828,7 +828,7 @@ TEST(LoadNegativeBattery, T020_FIXTMissingApplVerId) {
 // ── cert_source missing under TLS profile → missing_required (ALREADY-GREEN)
 //
 // Reuses neg_contradictory_tls_no_certs.toml from T018.
-// selector_resolver.cpp:467-474: bundle.engine.default_cert_source == nullptr
+// resolve_transport's cert_source-required check: bundle.engine.default_cert_source == nullptr
 // when [cert_source] is absent → emits missing_required at "cert_source".
 // This is ALREADY-GREEN (Phase 3b), documented here as a T020 Bucket-B cell.
 
@@ -964,7 +964,7 @@ TEST(LoadNegativeBattery, GateBR2A_SecurityProfileKindUnset) {
 
 // ── Duration: empty string ────────────────────────────────────────────────────
 // heartbeat_interval = "" → malformed_value (parse_duration_to_ms empty arm,
-// line 112 scalar_mappers.cpp).
+// loader_internal.cpp).
 
 TEST(LoadNegativeBattery, Cov_DurationEmpty) {
     auto result = load(neg_fixture("neg_duration_empty.toml"));
@@ -975,7 +975,7 @@ TEST(LoadNegativeBattery, Cov_DurationEmpty) {
 }
 
 // ── Duration: no numeric prefix ───────────────────────────────────────────────
-// heartbeat_interval = "xs" → malformed_value (line 127 scalar_mappers.cpp).
+// heartbeat_interval = "xs" → malformed_value (parse_duration_to_ms's numeric-prefix arm).
 
 TEST(LoadNegativeBattery, Cov_DurationNoNumeric) {
     auto result = load(neg_fixture("neg_duration_no_numeric.toml"));
@@ -986,7 +986,7 @@ TEST(LoadNegativeBattery, Cov_DurationNoNumeric) {
 }
 
 // ── Duration: unknown unit ────────────────────────────────────────────────────
-// heartbeat_interval = "30d" → malformed_value (unknown unit arm, line 171).
+// heartbeat_interval = "30d" → malformed_value (unknown unit arm).
 
 TEST(LoadNegativeBattery, Cov_DurationUnknownUnit) {
     auto result = load(neg_fixture("neg_duration_unknown_unit.toml"));
@@ -997,7 +997,7 @@ TEST(LoadNegativeBattery, Cov_DurationUnknownUnit) {
 }
 
 // ── mode: unknown token ───────────────────────────────────────────────────────
-// mode = "event_loop" → unknown_enum at session[0].mode (line 286).
+// mode = "event_loop" → unknown_enum at session[0].mode (mode enum's unknown-token arm).
 
 TEST(LoadNegativeBattery, Cov_ModeUnknownToken) {
     auto result = load(neg_fixture("neg_mode_unknown.toml"));
@@ -1008,7 +1008,7 @@ TEST(LoadNegativeBattery, Cov_ModeUnknownToken) {
 }
 
 // ── locks: unknown token ──────────────────────────────────────────────────────
-// locks = "rwlock" → unknown_enum at session[0].locks (line 307).
+// locks = "rwlock" → unknown_enum at session[0].locks (locks enum's unknown-token arm).
 
 TEST(LoadNegativeBattery, Cov_LocksUnknownToken) {
     auto result = load(neg_fixture("neg_locks_unknown.toml"));
@@ -1019,7 +1019,7 @@ TEST(LoadNegativeBattery, Cov_LocksUnknownToken) {
 }
 
 // ── reset_seqnum_policy: unknown token ───────────────────────────────────────
-// reset_seqnum_policy = "never" → unknown_enum (line 461).
+// reset_seqnum_policy = "never" → unknown_enum (reset_seqnum_policy enum's unknown-token arm).
 
 TEST(LoadNegativeBattery, Cov_ResetSeqnumUnknownToken) {
     auto result = load(neg_fixture("neg_reset_seqnum_unknown.toml"));
@@ -1030,8 +1030,8 @@ TEST(LoadNegativeBattery, Cov_ResetSeqnumUnknownToken) {
 }
 
 // ── security_profile.kind: unknown token ─────────────────────────────────────
-// Exercises scalar_mappers.cpp lines 609-618 (unknown_enum for unknown kind)
-// AND loc_for_subkey (line 80-88) which is called for the sub-table location.
+// Exercises map_structured_members's security_profile.kind unknown_enum arm
+// AND loc_for_subkey, which is called for the sub-table location.
 
 TEST(LoadNegativeBattery, Cov_SecurityProfileKindUnknown) {
     auto result = load(neg_fixture("neg_security_profile_kind_unknown.toml"));
@@ -1042,7 +1042,7 @@ TEST(LoadNegativeBattery, Cov_SecurityProfileKindUnknown) {
 }
 
 // ── username: wrong type (integer) ───────────────────────────────────────────
-// username = 42 → malformed_value at session[0].username (lines 227-235).
+// username = 42 → malformed_value at session[0].username (map_scalars's username wrong-type arm).
 
 TEST(LoadNegativeBattery, Cov_UsernameWrongType) {
     auto result = load(neg_fixture("neg_username_wrong_type.toml"));
@@ -1053,7 +1053,7 @@ TEST(LoadNegativeBattery, Cov_UsernameWrongType) {
 }
 
 // ── transport.port: out of range ──────────────────────────────────────────────
-// transport.port = 99999 → out_of_range at session[0].transport.port (line 676).
+// transport.port = 99999 → out_of_range at session[0].transport.port (map_structured_members's port range arm).
 
 TEST(LoadNegativeBattery, Cov_TransportPortOutOfRange) {
     auto result = load(neg_fixture("neg_transport_port_out_of_range.toml"));
@@ -1064,7 +1064,7 @@ TEST(LoadNegativeBattery, Cov_TransportPortOutOfRange) {
 }
 
 // ── compid_authorization_policy: value not an array ──────────────────────────
-// Exercises scalar_mappers.cpp lines 631-641.
+// Exercises map_structured_members's compid_authorization_policy array-check arm.
 
 TEST(LoadNegativeBattery, Cov_CompidAuthNotArray) {
     auto result = load(neg_fixture("neg_compid_auth_not_array.toml"));
@@ -1081,7 +1081,7 @@ TEST(LoadNegativeBattery, Cov_CompidAuthNotArray) {
 }
 
 // ── reconnect_policy.schedule: non-string entry ───────────────────────────────
-// Exercises scalar_mappers.cpp lines 701-709.
+// Exercises map_structured_members's reconnect_policy.schedule entry-type-check arm.
 
 TEST(LoadNegativeBattery, Cov_ReconnectScheduleNotString) {
     auto result = load(neg_fixture("neg_reconnect_schedule_not_string.toml"));
@@ -1093,7 +1093,7 @@ TEST(LoadNegativeBattery, Cov_ReconnectScheduleNotString) {
 }
 
 // ── clock.kind: not a string ──────────────────────────────────────────────────
-// clock.kind = 42 → malformed_value at "clock.kind" (lines 71-76 selector_resolver).
+// clock.kind = 42 → malformed_value at "clock.kind" (resolve_engine_clock's not-a-string arm).
 
 TEST(LoadNegativeBattery, Cov_ClockKindNotString) {
     auto result = load(neg_fixture("neg_clock_kind_not_string.toml"));
@@ -1104,7 +1104,7 @@ TEST(LoadNegativeBattery, Cov_ClockKindNotString) {
 }
 
 // ── clock.kind: empty string ──────────────────────────────────────────────────
-// clock.kind = "" → empty_required at "clock.kind" (lines 79-85).
+// clock.kind = "" → empty_required at "clock.kind" (resolve_engine_clock's empty-kind arm).
 
 TEST(LoadNegativeBattery, Cov_ClockKindEmpty) {
     auto result = load(neg_fixture("neg_clock_kind_empty.toml"));
@@ -1115,7 +1115,7 @@ TEST(LoadNegativeBattery, Cov_ClockKindEmpty) {
 }
 
 // ── clock.kind: unknown value ─────────────────────────────────────────────────
-// clock.kind = "ntp" → unknown_enum at "clock.kind" (lines 88-95).
+// clock.kind = "ntp" → unknown_enum at "clock.kind" (resolve_engine_clock's unknown-kind arm).
 
 TEST(LoadNegativeBattery, Cov_ClockKindUnknown) {
     auto result = load(neg_fixture("neg_clock_kind_unknown.toml"));
@@ -1126,7 +1126,7 @@ TEST(LoadNegativeBattery, Cov_ClockKindUnknown) {
 }
 
 // ── store.kind: not a string ──────────────────────────────────────────────────
-// store.kind = 42 → missing_required at "store.kind" (lines 133-138).
+// store.kind = 42 → missing_required at "store.kind" (resolve_engine_store's not-a-string arm).
 
 TEST(LoadNegativeBattery, Cov_StoreKindNotString) {
     auto result = load(neg_fixture("neg_store_kind_not_string.toml"));
@@ -1137,7 +1137,7 @@ TEST(LoadNegativeBattery, Cov_StoreKindNotString) {
 }
 
 // ── store.kind: empty string ──────────────────────────────────────────────────
-// store.kind = "" → empty_required at "store.kind" (lines 141-147).
+// store.kind = "" → empty_required at "store.kind" (resolve_engine_store's empty-kind arm).
 
 TEST(LoadNegativeBattery, Cov_StoreKindEmpty) {
     auto result = load(neg_fixture("neg_store_kind_empty.toml"));
@@ -1148,7 +1148,7 @@ TEST(LoadNegativeBattery, Cov_StoreKindEmpty) {
 }
 
 // ── store.kind: unknown value ─────────────────────────────────────────────────
-// store.kind = "redis" → unknown_enum at "store.kind" (lines 175-180).
+// store.kind = "redis" → unknown_enum at "store.kind" (resolve_engine_store's unknown-kind arm).
 
 TEST(LoadNegativeBattery, Cov_StoreKindUnknown) {
     auto result = load(neg_fixture("neg_store_kind_unknown.toml"));
@@ -1170,7 +1170,7 @@ TEST(LoadNegativeBattery, Cov_StoreFileNoDirectory) {
 }
 
 // ── transport.kind: not a string ─────────────────────────────────────────────
-// transport.kind = 42 → missing_required at "session[0].transport.kind" (line 529).
+// transport.kind = 42 → missing_required at "session[0].transport.kind" (resolve_transport's not-a-string arm).
 
 TEST(LoadNegativeBattery, Cov_TransportKindNotString) {
     auto result = load(neg_fixture("neg_transport_kind_not_string.toml"));
@@ -1181,7 +1181,7 @@ TEST(LoadNegativeBattery, Cov_TransportKindNotString) {
 }
 
 // ── transport.kind: empty string ─────────────────────────────────────────────
-// transport.kind = "" → empty_required at "session[0].transport.kind" (line 537).
+// transport.kind = "" → empty_required at "session[0].transport.kind" (resolve_transport's empty-kind arm).
 
 TEST(LoadNegativeBattery, Cov_TransportKindEmpty) {
     auto result = load(neg_fixture("neg_transport_kind_empty.toml"));
@@ -1192,7 +1192,7 @@ TEST(LoadNegativeBattery, Cov_TransportKindEmpty) {
 }
 
 // ── transport.kind: unknown value ────────────────────────────────────────────
-// transport.kind = "websocket" → unknown_enum at "session[0].transport.kind" (line 697).
+// transport.kind = "websocket" → unknown_enum at "session[0].transport.kind" (resolve_transport's unknown-kind arm).
 
 TEST(LoadNegativeBattery, Cov_TransportKindUnknown) {
     auto result = load(neg_fixture("neg_transport_kind_unknown.toml"));
@@ -1205,7 +1205,7 @@ TEST(LoadNegativeBattery, Cov_TransportKindUnknown) {
 // ── #1 (Gate B r1): per-session transport.kind validated for non-first sessions
 //
 // Before fix: the divergence scan skipped non-"tls" sessions (continue at
-// line 612), so session[1] with a missing/empty/unknown kind escaped validation
+// the per-session minting loop's tls-only skip), so session[1] with a missing/empty/unknown kind escaped validation
 // and silently ran on the engine-default (wrong) transport.
 // After fix: each session[i>=1] has transport.kind validated; diagnostics are
 // attributed to "session[1].transport.kind" (not "session[0].transport.kind").
@@ -1247,10 +1247,10 @@ TEST(LoadNegativeBattery, GateBR1_Session1TransportKindUnknown) {
 }
 
 // ── TLS-default: session[1] has [session.transport] but NO kind key ───────────
-// Hits lines 633-638 in the TLS-default per-session loop:
+// Hits validate_per_session_transport_kinds's per-session loop:
 //   `else if (!kind_node)` → missing_required.
 // Distinct from GateBR1_Session1TransportKindMissing which has NO [transport]
-// section at all (lines 619-625 = missing table arm).
+// section at all (validate_per_session_transport_kinds's missing-table arm).
 
 TEST(LoadNegativeBattery, GateBR1_Session1TransportNoKindKey) {
     auto result = load(neg_fixture("neg_session1_transport_no_kind.toml"));
@@ -1264,7 +1264,7 @@ TEST(LoadNegativeBattery, GateBR1_Session1TransportNoKindKey) {
 }
 
 // ── TLS-default: session[1] has transport.kind = 42 (non-string) ─────────────
-// Hits lines 641-646 in the TLS-default per-session loop:
+// Hits validate_per_session_transport_kinds's per-session loop:
 //   the `else` arm (kind_node present but not is_string()).
 
 TEST(LoadNegativeBattery, GateBR1_Session1TransportKindNonString) {
@@ -1278,7 +1278,7 @@ TEST(LoadNegativeBattery, GateBR1_Session1TransportKindNonString) {
 }
 
 // ── No [[session]] at all → missing_required at "session" ────────────────────
-// (toml_config_loader.cpp lines 419-424)
+// (load_toml_config's missing-[[session]] check)
 
 TEST(LoadNegativeBattery, Cov_NoSessions) {
     auto result = load(neg_fixture("neg_no_sessions.toml"));
@@ -1290,7 +1290,7 @@ TEST(LoadNegativeBattery, Cov_NoSessions) {
 
 // ── session array contains non-table element → parse_error ───────────────────
 // session = [1, 2] is an inline integer array, not array-of-tables.
-// (toml_config_loader.cpp lines 483-490)
+// (load_toml_config's non-table-session-element arm)
 
 TEST(LoadNegativeBattery, Cov_SessionNonTableElement) {
     auto result = load(neg_fixture("neg_session_non_table_element.toml"));
@@ -1302,7 +1302,7 @@ TEST(LoadNegativeBattery, Cov_SessionNonTableElement) {
 }
 
 // ── FIXT.1.1 with empty default_appl_ver_id → empty_required ─────────────────
-// (toml_config_loader.cpp check_required_keys lines 210-216)
+// (toml_config_loader.cpp check_required_keys's FIXT.1.1 empty-appl-ver-id arm)
 
 TEST(LoadNegativeBattery, Cov_FixtEmptyApplVerId) {
     auto result = load(neg_fixture("neg_fixt_empty_appl_ver_id.toml"));
@@ -1313,7 +1313,7 @@ TEST(LoadNegativeBattery, Cov_FixtEmptyApplVerId) {
 }
 
 // ── security_profile.kind = "" → empty_required ──────────────────────────────
-// (toml_config_loader.cpp check_required_keys lines 239-244)
+// (toml_config_loader.cpp check_required_keys's security_profile.kind empty arm)
 
 TEST(LoadNegativeBattery, Cov_SecurityProfileKindEmpty) {
     auto result = load(neg_fixture("neg_security_profile_kind_empty.toml"));
@@ -1325,7 +1325,7 @@ TEST(LoadNegativeBattery, Cov_SecurityProfileKindEmpty) {
 
 // ── clock.kind absent inside [clock] table → missing_required ────────────────
 // [clock] present but no "kind" key → missing_required at "clock.kind"
-// (lines 64-69 selector_resolver.cpp: !clk_tbl->get("kind") branch).
+// (resolve_engine_clock, selector_resolver.cpp: !clk_tbl->get("kind") branch).
 
 TEST(LoadNegativeBattery, Cov_ClockKindAbsentInTable) {
     auto result = load(neg_fixture("neg_clock_kind_absent_in_table.toml"));
@@ -1336,7 +1336,7 @@ TEST(LoadNegativeBattery, Cov_ClockKindAbsentInTable) {
 }
 
 // ── cert_source.kind: not a string → missing_required ────────────────────────
-// cert_source.kind = 42 → missing_required at "cert_source.kind" (lines 212-217).
+// cert_source.kind = 42 → missing_required at "cert_source.kind" (resolve_engine_cert_source's not-a-string arm).
 
 TEST(LoadNegativeBattery, Cov_CertSourceKindNotString) {
     auto result = load(neg_fixture("neg_cert_source_kind_not_string.toml"));
@@ -1347,7 +1347,7 @@ TEST(LoadNegativeBattery, Cov_CertSourceKindNotString) {
 }
 
 // ── cert_source.kind: empty string → empty_required ──────────────────────────
-// cert_source.kind = "" → empty_required at "cert_source.kind" (lines 221-226).
+// cert_source.kind = "" → empty_required at "cert_source.kind" (resolve_engine_cert_source's empty-kind arm).
 
 TEST(LoadNegativeBattery, Cov_CertSourceKindEmpty) {
     auto result = load(neg_fixture("neg_cert_source_kind_empty.toml"));
@@ -1358,7 +1358,7 @@ TEST(LoadNegativeBattery, Cov_CertSourceKindEmpty) {
 }
 
 // ── cert_source.kind: unknown → unknown_enum ─────────────────────────────────
-// cert_source.kind = "pkcs11" → unknown_enum at "cert_source.kind" (lines 230-236).
+// cert_source.kind = "pkcs11" → unknown_enum at "cert_source.kind" (resolve_engine_cert_source's unknown-kind arm).
 
 TEST(LoadNegativeBattery, Cov_CertSourceKindUnknown) {
     auto result = load(neg_fixture("neg_cert_source_kind_unknown.toml"));
@@ -1370,7 +1370,7 @@ TEST(LoadNegativeBattery, Cov_CertSourceKindUnknown) {
 
 // ── dictionary.kind absent in [dictionary] table → missing_required ───────────
 // [dictionary] present but no "kind" key → missing_required at "dictionary.kind"
-// (lines 298-303 selector_resolver.cpp).
+// (resolve_engine_dictionary's missing-kind arm, selector_resolver.cpp).
 
 TEST(LoadNegativeBattery, Cov_DictKindAbsentInTable) {
     auto result = load(neg_fixture("neg_dict_kind_absent_in_table.toml"));
@@ -1381,7 +1381,7 @@ TEST(LoadNegativeBattery, Cov_DictKindAbsentInTable) {
 }
 
 // ── dictionary.kind: empty string → empty_required ───────────────────────────
-// dictionary.kind = "" → empty_required at "dictionary.kind" (lines 307-312).
+// dictionary.kind = "" → empty_required at "dictionary.kind" (resolve_engine_dictionary's empty-kind arm).
 
 TEST(LoadNegativeBattery, Cov_DictKindEmpty) {
     auto result = load(neg_fixture("neg_dict_kind_empty.toml"));
@@ -1392,7 +1392,7 @@ TEST(LoadNegativeBattery, Cov_DictKindEmpty) {
 }
 
 // ── dictionary.kind: unknown value → unknown_enum ────────────────────────────
-// dictionary.kind = "database" → unknown_enum at "dictionary.kind" (lines 325-330).
+// dictionary.kind = "database" → unknown_enum at "dictionary.kind" (resolve_engine_dictionary's unknown-kind arm).
 
 TEST(LoadNegativeBattery, Cov_DictKindUnknown) {
     auto result = load(neg_fixture("neg_dict_kind_unknown.toml"));
@@ -1403,7 +1403,7 @@ TEST(LoadNegativeBattery, Cov_DictKindUnknown) {
 }
 
 // ── dictionary.path absent → missing_required ─────────────────────────────────
-// dictionary.kind="path" but path key absent → missing_required (lines 340-345).
+// dictionary.kind="path" but path key absent → missing_required (resolve_engine_dictionary's missing-path arm).
 
 TEST(LoadNegativeBattery, Cov_DictPathAbsent) {
     auto result = load(neg_fixture("neg_dict_path_absent.toml"));
@@ -1414,7 +1414,7 @@ TEST(LoadNegativeBattery, Cov_DictPathAbsent) {
 }
 
 // ── dictionary.path empty → empty_required ────────────────────────────────────
-// dictionary.kind="path" with path = "" → empty_required (lines 349-354).
+// dictionary.kind="path" with path = "" → empty_required (resolve_engine_dictionary's empty-path arm).
 
 TEST(LoadNegativeBattery, Cov_DictPathEmpty) {
     auto result = load(neg_fixture("neg_dict_path_empty.toml"));
@@ -1425,7 +1425,7 @@ TEST(LoadNegativeBattery, Cov_DictPathEmpty) {
 }
 
 // ── duration numeric overflow (from_chars fails) → malformed_value ────────────
-// (lines 140-147 scalar_mappers.cpp: ec != std::errc{} after from_chars)
+// (parse_duration_to_ms's numeric-parse-failure arm, loader_internal.cpp: ec != std::errc{} after from_chars)
 
 TEST(LoadNegativeBattery, Cov_DurationOverflow) {
     auto result = load(neg_fixture("neg_duration_overflow.toml"));
@@ -1500,7 +1500,7 @@ TEST(LoadNegativeBattery, GateBR1_DurationUsRejected) {
 }
 
 // ── sending_time_precision: unknown token → unknown_enum ─────────────────────
-// (lines 487-495 scalar_mappers.cpp)
+// (map_scalars's sending_time_precision unknown-token arm, scalar_mappers.cpp)
 
 TEST(LoadNegativeBattery, Cov_SendingTimePrecisionUnknown) {
     auto result = load(neg_fixture("neg_sending_time_precision_unknown.toml"));
@@ -1511,7 +1511,7 @@ TEST(LoadNegativeBattery, Cov_SendingTimePrecisionUnknown) {
 }
 
 // ── app_backpressure: unknown token → unknown_enum ────────────────────────────
-// (lines 510-517 scalar_mappers.cpp)
+// (map_scalars's app_backpressure unknown-token arm, scalar_mappers.cpp)
 
 TEST(LoadNegativeBattery, Cov_AppBackpressureUnknown) {
     auto result = load(neg_fixture("neg_app_backpressure_unknown.toml"));
@@ -1522,7 +1522,7 @@ TEST(LoadNegativeBattery, Cov_AppBackpressureUnknown) {
 }
 
 // ── compid_authorization_policy: non-string element in array → malformed_value ─
-// (lines 646-654 scalar_mappers.cpp: each CompID must be a string)
+// (map_structured_members's CompID-must-be-string arm, scalar_mappers.cpp)
 
 TEST(LoadNegativeBattery, Cov_CompidAuthNonStringElement) {
     auto result = load(neg_fixture("neg_compid_auth_non_string_element.toml"));
@@ -1535,8 +1535,8 @@ TEST(LoadNegativeBattery, Cov_CompidAuthNonStringElement) {
 
 // ── cert_source file with missing cert_file (leaf) → make_file_cert_source fails ─
 // [cert_source] kind="file" but cert_file absent → get_path lambda returns {}
-// (line 246 selector_resolver.cpp), make_file_cert_source fails for empty leaf_path
-// → invalid_or_contradictory_selector (lines 261-268 selector_resolver.cpp).
+// (resolve_engine_cert_source's get_path lambda, selector_resolver.cpp), make_file_cert_source fails for empty leaf_path
+// → invalid_or_contradictory_selector (resolve_engine_cert_source's cs_result-failure arm, selector_resolver.cpp).
 
 TEST(LoadNegativeBattery, Cov_CertSourceFileMissingLeaf) {
     auto result = load(neg_fixture("neg_cert_source_file_missing_leaf.toml"));
@@ -1548,8 +1548,8 @@ TEST(LoadNegativeBattery, Cov_CertSourceFileMissingLeaf) {
 
 // ── per-session cert_source missing cert_file → build_file_cert_source fails ──
 // Two TLS sessions; session[1] has per-session [cert_source] with NO cert_file.
-// Divergence scan calls build_file_cert_source → line 433 (absent key) →
-// make_file_cert_source fails (empty leaf) → lines 443-449.
+// Divergence scan calls build_file_cert_source → its get_path_str lambda (absent key) →
+// make_file_cert_source fails (empty leaf) → build_file_cert_source's cs_result-failure arm.
 
 TEST(LoadNegativeBattery, Cov_PerSessionCertMissingLeaf) {
     auto result = load(neg_fixture("neg_per_session_cert_missing_leaf.toml"));

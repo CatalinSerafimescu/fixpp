@@ -690,7 +690,7 @@ TEST(Conversation, Cell)
     // ResendRequest, rather than collapse every range to a SequenceReset-
     // GapFill (a storeless session cannot replay app bodies -- Session::
     // replay_outbound_range_'s `if (!store_ || our_last == 0 ...)` early
-    // branch, session.cpp ~5387). Same precedent as
+    // branch). Same precedent as
     // hp_fix44_recovery_outbound_answer_test.cpp's FixppAnswersResendRequestAndPeerResyncs: unbounded
     // policy, exempt from the bounded-store DoS construction guard that
     // would otherwise abort session open under the engine's default

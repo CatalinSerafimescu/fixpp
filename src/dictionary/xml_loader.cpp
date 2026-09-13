@@ -626,7 +626,7 @@ void LoaderState::expand_field_list(
                 group_required_pairs_out.emplace_back(enclosing_group_no_tag, no_tag);
             }
             // FR-023 (082) is NOT implemented here. It is satisfied by 083's
-            // T036 `captured == 0` disposition below (:704-737), which rejects
+            // T036 `captured == 0` disposition below, which rejects
             // the same input class — a member-less <group> emits no first
             // member — and does so with the policy layering FR-023 owes:
             // fail-closed by default, skipped under the explicit
@@ -1041,7 +1041,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     // anywhere later in finalize().
     //
     // "First-seen" is the pool's own order, which is `messages_` order — sorted
-    // bytewise by msg_type at :819 — so the projection is deterministic across
+    // bytewise by msg_type (the research.md D-6 std::sort above) — so the projection is deterministic across
     // runs and platforms. Which message wins no longer matters for CORRECTNESS
     // (per-context resolution reads Entity 2 directly); the global survives
     // only as an is-this-tag-a-group predicate and as this guard's input.
@@ -1077,7 +1077,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     // `as_table_view()` (`group_first_field(t) != 0`) rather than
     // `fr.type == NumInGroup` — this loader-side `groups_` table IS final at
     // this point (the first-seen projection above just completed), unlike the
-    // handle-side `h.groups_`, which is not filled until :1157-1207. See the
+    // handle-side `h.groups_`, which is not filled until its own reserve/push_back loop further down. See the
     // doc comment on `find_context_without_delim_record`
     // (dictionary_internal.hpp) for the exact set definition.
     std::vector<std::uint16_t> structural_group_tags;
@@ -1136,7 +1136,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         // Derive parent_component_id: look up the pre-built reverse map from
         // collect_components(). 0 = top-level (no enclosing component); otherwise
         // the enclosing component's 1-based id per [2c §4.2] / data-model.md
-        // Entity 2 / contracts/component_ref.hpp:27–29.
+        // Entity 2 / contracts/component_ref.hpp's `component_id` field.
         std::uint16_t parent_comp_id = 0;
         if (auto const pit = parent_of_.find(def.name); pit != parent_of_.end()) {
             parent_comp_id = pit->second;

@@ -1224,7 +1224,7 @@ No Codex or Opus findings were marked "Disagree" in the adversarial review. All 
 |---|---|---|---|
 | RC#1 | Phantom `bytes` field references (residual from v0.2 RC#1 fix) | Codex P1-1 (round 2) | **Done.** All references to `header.bytes`, `TapRecord::bytes`, and "bytes field in header" removed from §4.5 `TapShmRecord` comment block and §6.4 publisher/subscriber prose. `TapRecord` has no `bytes` field. §4.5 comment now reads "sets `slot.header.bytes_len` to the actual byte count"; §6.4 subscriber side now reads "reads `sample.header.bytes_len` bytes from `sample.payload[0..bytes_len-1]`". Appendix C RC#1 "Done" text updated to reflect that phantom references were also purged in v0.3. |
 | RC#2 | Overflow counter ownership incoherence + `NoTap` sentinel defect | Codex P1-2, Codex P2-5 (escalated P1), N-P1-1, N-P2-1 | **Done.** Three-part fix: (a) `overflow_counter_ptr` removed from `TapConfig`; replaced with `mutable std::atomic<uint64_t> overflow_count = 0` directly on `TapConfig`. No dangling pointer, no post-construction mutation of a value type. (b) `NoTap {}` added as first variant arm of `TapConsumer`: `std::variant<NoTap, RingBufferTap, Iox2Tap, SyncCallbackTap>`. Default-constructed `TapConsumer` = `NoTap{}`. Dispatch loop guard updated to `!std::holds_alternative<tap::NoTap>(tap_consumer)`. (c) All counter references unified: `TapConfig::overflow_count` (the `mutable std::atomic<uint64_t>`) read via `tap_config.overflow_count.load(std::memory_order_relaxed)`. §3.2, §4.3, §4.7, §6.3, §6.4, §7.1, §7.3, TS-3, TS-4, TS-6, TS-7, Appendix D all updated. |
-| RC#3 | Appendix D fidelity failure | Codex P1-3 (round 2) | **Done.** Appendix D §D.1 regenerated from scratch after RC#1 and RC#2 fixes. Uses exact field names from §4.3: `capacity`, `drop_policy`, `max_message_bytes`, `tap_ring_arena`, `on_overflow_block`, `overflow_count`. `ring_capacity` erased. `overflow_counter_ptr` and `iox2_service_name` removed (former eliminated by RC#2; latter moved to `Iox2TapConfig::service_name` per Codex P3-9 fix). Before/After blocks use the exact `[2d §4.5]` line 605–606 content as the baseline. Default values match the §4.3 summary exactly. `NoTap{}` default annotated on the `tap_consumer` line. |
+| RC#3 | Appendix D fidelity failure | Codex P1-3 (round 2) | **Done.** Appendix D §D.1 regenerated from scratch after RC#1 and RC#2 fixes. Uses exact field names from §4.3: `capacity`, `drop_policy`, `max_message_bytes`, `tap_ring_arena`, `on_overflow_block`, `overflow_count`. `ring_capacity` erased. `overflow_counter_ptr` and `iox2_service_name` removed (former eliminated by RC#2; latter moved to `Iox2TapConfig::service_name` per Codex P3-9 fix). Before/After blocks use the exact `[2d §4.5]` `tap_consumer` field declaration as the baseline. Default values match the §4.3 summary exactly. `NoTap{}` default annotated on the `tap_consumer` line. |
 
 ### Per-finding resolution table (v0.2 → v0.3)
 
@@ -1322,7 +1322,7 @@ None. All Codex P3 and Opus findings accepted.
 
 **Target section:** `[2d §4.5] fixpp::session::SessionConfig — session-level frozen-at-open knobs`
 
-**Context (current state of `[2d §4.5]` — lines 605–606):**
+**Context (current state of `[2d §4.5]`'s `tap_consumer` field declaration):**
 
 ```cpp
 // ── Tap (locked by 2l) ──────────────────────────────────────────────

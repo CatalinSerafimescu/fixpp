@@ -730,7 +730,7 @@ TEST(ApplicationThrow, ToAdminGracefulCloseLogoutThrowTerminatesSession) {
 // a Heartbeat reply echoing the TestReqID → toAdmin fires. With ThrowingToAdminAtN(2)
 // and the acceptor path (call #1 = Logon reply), the reply fires toAdmin call #2 →
 // throw. FIX-3: terminal-close + app_callback_threw. Pre-fix: continued with discard.
-// (An inbound Heartbeat is NOT answered — data-model.md:22 — so the TestRequest is
+// (An inbound Heartbeat is NOT answered — data-model.md's Active-row Heartbeat cell — so the TestRequest is
 // the emit trigger here.)
 
 TEST(ApplicationThrow, ToAdminTestRequestReplyThrowTerminatesSession) {

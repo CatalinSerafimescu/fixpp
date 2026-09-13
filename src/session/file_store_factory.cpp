@@ -246,7 +246,7 @@ fixpp::core::expected_t<std::unique_ptr<MessageStore>> FileStoreFactory::make(
     }
 
     // ── (3) Construct FileStore — the ctor is where we open + lock + scan ─────
-    // [2e §4.3.2]:665 required-at-construction: FileStore is constructed here
+    // [2e §4.3.2] "Threading: file-I/O executor" required-at-construction: FileStore is constructed here
     // inside make() once the executor is resolved, preserving the contract.
     auto store = std::make_unique<FileStore>(std::move(resolved_cfg));
 

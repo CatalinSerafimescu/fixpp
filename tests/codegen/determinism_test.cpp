@@ -327,7 +327,7 @@ static int run_codegen_v42_official(const fs::path& out_dir) {
 
 // 076-fix-latest-typed-codegen T017/T018: invoke the tool over ONLY the FIX
 // Latest Orchestra XML. It lives under dictionaries/orchestra/ (Codegen.cmake
-// :269), not directly under kDictDir like the 4 legacy XMLs in kXmls. Each
+// 's `_orchestra_xml` path variable), not directly under kDictDir like the 4 legacy XMLs in kXmls. Each
 // --xml/--out pair is an independent job (main.cpp's job loop), so a
 // single-job invocation still emits the full vlatest tier.
 static int run_codegen_vlatest_only(const fs::path& out_dir) {
@@ -340,7 +340,7 @@ static int run_codegen_vlatest_only(const fs::path& out_dir) {
 
 // T018: invoke the tool over all 5 XMLs (4 legacy + orchestra) — mirrors the
 // real Codegen.cmake ON configuration (FIXPP_CODEGEN_FIX_LATEST=ON, the
-// default; Codegen.cmake:373-380).
+// default; cmake/Codegen.cmake's `option(FIXPP_CODEGEN_FIX_LATEST ...)` declaration).
 static int run_codegen_with_vlatest(const fs::path& out_dir) {
     std::string cmd = quote(kBin);
     for (auto const* xml : kXmls) {
@@ -869,7 +869,7 @@ TEST_F(DeterminismTest, BuildersOffPathNoStaleVlatestOthersUnaffected) {
     ASSERT_EQ(rc, 0) << "OFF-path codegen run failed (exit " << rc << ")";
 
     // FR-012: no vlatest/ dir at all when the option is OFF -- the
-    // conditional OFF-clean (cmake/Codegen.cmake:347-349) mirrored at the
+    // conditional OFF-clean (cmake/Codegen.cmake's `if(NOT FIXPP_CODEGEN_FIX_LATEST)` REMOVE_RECURSE block) mirrored at the
     // tool-invocation level: an OFF configure simply never adds the
     // orchestra --xml job, so no vlatest/all.hpp (or any other vlatest/*
     // builder-tier artifact) is ever written to begin with. `all.hpp` is the

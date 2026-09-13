@@ -203,7 +203,7 @@ struct ParsedKeys {
         // ── (4) Build FileStore::Config ───────────────────────────────────────
         // file_io_executor is left default-constructed (empty).
         // The engine populates it from EngineConfig::file_io_executor at
-        // FileStoreFactory::make() time per [2e §4.3.2]:665.
+        // FileStoreFactory::make() time per [2e §4.3.2] "Threading: file-I/O executor".
         FileStore::Config cfg;
         cfg.directory = std::filesystem::path(keys.file_store_path);
         cfg.sender_comp_id = keys.sender_comp_id;

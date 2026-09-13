@@ -1,6 +1,6 @@
 # neg_store_file_no_directory.toml
 # store.kind="file" but store.directory is absent — triggers missing_required
-# at "store.directory" (lines 158-163 selector_resolver.cpp).
+# at "store.directory" (resolve_engine_store's store.directory branch, selector_resolver.cpp).
 
 [clock]
 kind = "system"

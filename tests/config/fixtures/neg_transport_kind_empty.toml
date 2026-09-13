@@ -1,6 +1,6 @@
 # neg_transport_kind_empty.toml
 # transport.kind is an empty string — triggers empty_required at
-# "session[0].transport.kind" (lines 536-542 selector_resolver.cpp).
+# "session[0].transport.kind" (resolve_transport's empty-kind arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

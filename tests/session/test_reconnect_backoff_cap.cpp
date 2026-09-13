@@ -20,7 +20,7 @@
 //          T013: FR-003/FR-007; Q1; R4; data-model E-2; contracts C2.
 //
 // TDD RED witness (T007):
-//   The current drive_reconnect_attempt() stub (reconnect_fsm.cpp:53-61) makes
+//   The current drive_reconnect_attempt() stub makes
 //   exactly ONE make() call and returns success WITHOUT calling async_connect or
 //   async_handshake. The attempt counter stays at 1, never reaches max_attempts,
 //   and the loop never terminates → EXPECT_EQ(make_count, max_attempts) FAILS.

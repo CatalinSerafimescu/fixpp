@@ -227,7 +227,7 @@ protected:
 //
 // Behavioral assertion: we feed N inbound Heartbeats in a loop and check that
 //   the session emits NO outbound frame — a Heartbeat is never answered
-//   (data-model.md:22 Active×inbound-Heartbeat = "advance counter", no emit).
+//   (specs/005-session-establishment-fsm/data-model.md's FSM table, Active×inbound-Heartbeat = "advance counter", no emit).
 //   The alloc gates measure the steady-state inbound-Heartbeat processing path.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
@@ -268,7 +268,7 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
         << "must be zero. [const §VIII.5].";
 
     // Behavioral gate: inbound Heartbeats must produce NO outbound frame
-    // (a Heartbeat is never answered; data-model.md:22).
+    // (a Heartbeat is never answered; specs/005-session-establishment-fsm/data-model.md's FSM table).
     EXPECT_EQ(outbound_frames.size(), 0U)
         << "Behavioral gate: " << kIter << " inbound Heartbeats must produce ZERO "
         << "outbound frames (a Heartbeat is never answered); got "

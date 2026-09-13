@@ -142,7 +142,7 @@ TEST(XmlLoaderLoad, LoadFromStringEquivalent) {
     //    (msg_type, tag) pair in the file-loaded Dictionary, assert that both
     //    paths agree on rule, type, group_no_tag, component_index, and
     //    length_pair_data_tag. Uses the same probe-walk shape as
-    //    round_trip_test.cpp:316-329.
+    //    `RoundTrip.ExhaustiveWalkVisitsEveryMessage`'s probe-walk.
     for (auto const& m_file : msgs_file) {
         for (std::uint32_t t = 0; t < 65536u; ++t) {
             auto const tag = static_cast<std::uint16_t>(t);

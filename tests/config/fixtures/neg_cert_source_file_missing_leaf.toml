@@ -1,8 +1,8 @@
 # neg_cert_source_file_missing_leaf.toml
 # [cert_source] kind="file" but cert_file (leaf_path) is absent — the get_path
-# lambda returns {} for missing keys (line 246 selector_resolver.cpp).
-# make_file_cert_source then fails because leaf_path is empty (line 261-268).
-# This covers both lines 246 and 261-268.
+# lambda returns {} for missing keys (resolve_engine_cert_source's get_path lambda, selector_resolver.cpp).
+# make_file_cert_source then fails because leaf_path is empty (resolve_engine_cert_source's cs_result-failure arm).
+# This covers both the get_path lambda and the cs_result-failure arm.
 
 [clock]
 kind = "system"

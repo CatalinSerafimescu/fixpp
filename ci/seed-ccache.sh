@@ -89,7 +89,7 @@ fi
 # because the old `~460 MB each` comment in tier3-libcxx.yml measured what the
 # 500M cap ALLOWED, then cited it as evidence the cap was big enough.
 #
-# Reported before the push for the same reason seed-sccache.sh:140-144 does: the
+# Reported before the push for the same reason seed-sccache.sh's pre-push sizing report does: the
 # run most likely to FAIL its push is the first one, before the GHCR package
 # exists — exactly the run whose sizing datum would otherwise be lost.
 #
@@ -150,7 +150,7 @@ note "ccache-cache SEEDED \`$TAG\`"
 # Deliberately a POINTER rather than a copy. Duplicating ~35 lines of evidence
 # comments is precisely how a correction lands on one side only, and this repo
 # has already paid that bill once in this very directory:
-# ci/prune-conan-cache.sh:45 — "prune-sccache.sh was fixed for this on
+# ci/prune-conan-cache.sh's "FAIL CLOSED ON A FAILED READ" section — "prune-sccache.sh was fixed for this on
 # 2026-08-06; the backport never happened." Read the two blocks together before
 # changing either.
 #

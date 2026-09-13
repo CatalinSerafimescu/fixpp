@@ -7,7 +7,7 @@
 // + §6.5 (FIXS rotation invariants)
 // + §6.5.2 (CONSOLIDATED mutex-choice rationale — cite-and-stop per NEW-P2-6)
 //
-// API re-emitted verbatim from [2g §4.3] lines 437-518 (contracts/pinset.hpp).
+// API re-emitted verbatim from [2g §4.3]'s `class Pinset` block (contracts/pinset.hpp).
 // Spec anchors: FR-006 (add/remove separate), FR-007 (zero-alloc hot path),
 // FR-008 (pin_view lifetime-bound), FR-009 (mid-session-mutable),
 // FR-009a (per-counterparty granularity), FR-010 (max_pins=16).
@@ -35,7 +35,7 @@ using pin_fingerprint = std::array<std::byte, 32>;
 
 // ── pin ───────────────────────────────────────────────────────────────────────
 // Owned diagnostic record + 32-byte fingerprint.
-// Re-emitted from [2g §4.3] lines 411-416. PMR-allocated copies of
+// Re-emitted from [2g §4.3]'s `struct pin` block. PMR-allocated copies of
 // subject/SAN strings so a long-lived shared_ptr<const pin_snapshot>
 // can outlive the Certificate the caller passed to add().
 //
@@ -54,13 +54,13 @@ struct pin {
 };
 
 // ── pin_snapshot ──────────────────────────────────────────────────────────────
-// Immutable snapshot container. Re-emitted from [2g §4.3] line 421.
+// Immutable snapshot container. Re-emitted from [2g §4.3]'s `pin_snapshot` alias.
 // Lifetime is the holding shared_ptr's.
 // The PMR backing resource is Pinset::Config::mr; see §4.6 ownership rules.
 using pin_snapshot = std::pmr::vector<pin>;
 
 // ── pin_view ─────────────────────────────────────────────────────────────────
-// Value-typed lookup result for find(). Re-emitted from [2g §4.3] lines 427-433.
+// Value-typed lookup result for find(). Re-emitted from [2g §4.3]'s `struct pin_view` block.
 // NOTE: the contract oracle places [[clang::lifetimebound]] on `value` as a field
 // annotation (N-P3-1). Clang only supports this attribute on function
 // parameters, not data members. The attribute is therefore omitted from the
@@ -77,7 +77,7 @@ struct pin_view {
 
 // ── Pinset ────────────────────────────────────────────────────────────────────
 // Mutable container with mid-session-mutable rotation.
-// Re-emitted from [2g §4.3] lines 435-528.
+// Re-emitted from [2g §4.3]'s `class Pinset` block.
 class Pinset {
 public:
     struct Config {

@@ -353,7 +353,7 @@ int verify_peer_trampoline(int /*preverify_ok*/, X509_STORE_CTX* store_ctx) noex
     // std::terminate rather than surface transport_handshake_failed).
     //
     // On OOM: reject the peer (return 0) and mark hctx->accepted = false so
-    // async_handshake maps to transport_handshake_failed at line 952-955.
+    // async_handshake maps to transport_handshake_failed (its handshake-error returns below).
     //
     // The noexcept declaration is load-bearing for the OpenSSL C-ABI: OpenSSL
     // calls this as a C function pointer; a throw across the extern "C"
@@ -1295,7 +1295,7 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // default TLS accept path (research.md D-2a). The two-argument OUT filter
     // below maps any accepted (non-none) cancellation to `terminal` for the
     // forwarded child op, so the io_op's inner state records and forwards it.
-    // Mirrors async_connect's precedent at :918-933, including its commenting
+    // Mirrors async_connect's own `reset_cancellation_state` precedent, including its commenting
     // discipline. NOT expressible at the call site (read_first_frame_bounded):
     // reset_cancellation_state REPLACES the single bottom-frame state — last
     // reset wins — so an engine-side wrapper reset is clobbered by this one.

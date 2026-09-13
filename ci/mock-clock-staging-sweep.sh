@@ -115,8 +115,8 @@ CONDITION = re.compile(r"pump_until\s*\(|pump_until_ready\s*\(|"
                        r"yield_window_then_ready\s*\(")
 # ⚠️ A FIXED WINDOW INSIDE A `while`/`for` IS NOT A FIXED WINDOW -- it is a
 # HAND-ROLLED `pump_until`, and calling it a candidate is a false positive. This
-# rule was added because the sweep's first run reported
-# `logout_exchange_test.cpp:888`, whose window sits inside
+# rule was added because the sweep's first run reported a false positive in
+# `logout_exchange_test.cpp`, whose window sat inside
 # `while (sess.state() != LogoutSent && now < deadline) ioc.run_for(20ms);` --
 # already an observable staging condition, just not spelled with the primitive.
 # It is reported as its own class rather than folded into CONDITION: it is correct
@@ -418,7 +418,7 @@ void f() {
 }
 """, ["FIXED-WINDOW"]),
     # ⚠️ THE CONTROL THAT WOULD HAVE CAUGHT THE INSTRUMENT'S OWN BUG. Every case
-    # above passed while the sweep still misread `logout_exchange_test.cpp:888`,
+    # above passed while the sweep still misread `logout_exchange_test.cpp`'s loop,
     # because the real loop's condition WRAPS and the body-opening line is the tail
     # of that condition rather than the `while`. Synthetic fixtures written by the
     # same hand as the rule share the rule's blind spot -- this one is copied from

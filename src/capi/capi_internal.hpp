@@ -343,7 +343,7 @@ struct fixpp_group {
 //
 // IMPLEMENTATION NOTE (E-3 reconciliation): data-model E-3/INV-5 said "all bytes
 // in the session arena; no global-heap".  Session::session_arena() does not exist
-// for the C-ABI path (the plan's session.hpp:189 was an unreliable claim) and the
+// for the C-ABI path (the plan's claim that it exists was unreliable) and the
 // engine's default_session_resource is new_delete_resource().  Resolution: the
 // fixpp_msg shell owns a PER-MESSAGE monotonic_buffer_resource (fixpp_msg::arena_
 // resource_, seeded >= frame-cap at create_outbound), and OutboundAccumulator::arena_
@@ -527,7 +527,7 @@ long live_state_count() noexcept;
 }  // namespace fixpp_capi::detail
 
 // Engine handle (E-1): owns the internal io_context + worker thread(s) + the C++
-// Engine + the trampoline. The C++ Engine owns NO worker threads (engine.hpp:222
+// Engine + the trampoline. The C++ Engine owns NO worker threads (engine.hpp
 // — "the engine owns NO worker threads"); a C consumer has no executor to
 // supply, so the C-ABI boundary owns one (research D-2).
 //
@@ -541,7 +541,7 @@ long live_state_count() noexcept;
 //
 // EngineState DESTRUCTION ORDER (reverse of member declaration order):
 //   engine_    — declared LAST → destroyed FIRST; MUST be stopped()
-//               (~Engine asserts stopped(), engine.hpp:233); borrowed ioc_ must
+//               (~Engine asserts stopped(), engine.hpp's `~Engine()`); borrowed ioc_ must
 //               still be alive (engine_ borrows the io_context executor).
 //   work_guard_ — declared 3rd → destroyed 2nd; ioc_ still alive.
 //   ioc_        — declared 2nd → destroyed 3rd.

@@ -14,7 +14,7 @@
 //
 // NO close_timeout field (D-9): the close-timeout VALUE lives in the
 // session-module Phase-4 spec (005), not 2d's frozen config shape; 2d wires
-// only the timeout mechanism ([2d §4.7]:864 / [2d §6.7]:1207).
+// only the timeout mechanism ([2d §4.7] / [2d §6.7]'s cancellation_propagation_timeout notes).
 #pragma once
 
 #include <asio/any_io_executor.hpp>
@@ -183,7 +183,7 @@ struct SessionConfig {
     std::shared_ptr<fixpp::tls::cert_source> cert_source;
     fixpp::session::SecurityProfile
         security_profile;  // no-implicit-default (N-P2-3); kind::unset → Session::open() rejects
-                           // (FR-018; lives in `session` per [arch §6 line 243])
+                           // (FR-018; lives in `session` per architecture.md's SecurityProfile enum row)
 
     std::shared_ptr<const fixpp::dict::Dictionary> dictionary;           // required
     std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;  // optional
@@ -332,8 +332,8 @@ struct SessionConfig {
     //                          EngineConfig::default_transport_factory).
     // OWNERSHIP TYPE: std::shared_ptr<TransportFactory> (NOT unique_ptr) per
     // 010 FR-001a precedent — unique_ptr would break the
-    // static_assert(std::is_copy_constructible_v<SessionConfig>) invariant at
-    // line 176. The "no factory shared across Sessions" invariant is preserved
+    // static_assert(std::is_copy_constructible_v<SessionConfig>) invariant
+    // below. The "no factory shared across Sessions" invariant is preserved
     // via a Session::open-time hygiene assertion (Phase 3 T030) checking
     // use_count()==1. The shared_ptr type is for SessionConfig COPY SEMANTICS
     // ONLY; cross-Session sharing is FORBIDDEN. [2h Appendix D §D.1+§D.2]
@@ -482,7 +482,7 @@ struct SessionConfig {
     //   DefaultApplVerID(1137) on every outbound FIXT.1.1 Logon (initiator + acceptor
     //   reply). REQUIRED when begin_string=="FIXT.1.1"; unset => FIX.4.x path (byte-
     //   identical, INV-FIXT-1 / SC-002). Type: dict::application_version enum (NOT a
-    //   raw wire string) — prevents "1137" index-reuse bugs (version_profile.hpp:117-132).
+    //   raw wire string) — prevents "1137" index-reuse bugs (version_profile.hpp's wire↔C++ mapping table).
     //   An Unknown or missing value with begin_string=="FIXT.1.1" fails before Logon.
     //   [033 data-model.md E3; research R2/R3; FR-001/FR-003]
     std::optional<fixpp::dict::application_version> default_appl_ver_id;

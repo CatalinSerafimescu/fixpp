@@ -768,7 +768,7 @@ TEST(FixtCredentials, W7_GoldenFixture_RedactedLogon) {
 // Pre-fix: the thrown exception crosses the noexcept boundary → std::terminate.
 // Post-fix: the session reaches Disconnected (not Active), no crash.
 //
-// [compid_authorization_policy.cpp:345; FR-008a; [const §X.5]; FQ-2]
+// [compid_authorization_policy.cpp's authorize_logon; FR-008a; [const §X.5]; FQ-2]
 
 TEST(FixtCredentials, FQ2_ThrowingLogonValidator_SessionDisconnectsNoTerminate) {
     auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);

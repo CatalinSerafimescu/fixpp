@@ -5,7 +5,7 @@
 // (research.md census methodology; tasks.md T016 / [pin#3-report]).
 //
 // MEMBERSHIP DERIVATION mirrors `Dictionary::as_table_view()`
-// (src/dictionary/dictionary.cpp:355-422) EXACTLY: walks the real,
+// (src/dictionary/dictionary.cpp) EXACTLY: walks the real,
 // loader-produced `Dictionary::messages()` / `Dictionary::message_fields()`
 // (NOT a hand-rolled XML parser), builds each message's immediate-parent
 // chain from `FieldRef.group_no_tag`, and derives the full outermost-first
@@ -37,7 +37,7 @@
 //
 // This is informational (C-6, NOT a soundness gate — B-004-1): the read
 // path (`OffsetTable::group()`) slices on the FRAME's own delimiter
-// (offset_table.cpp:440), never on the dict's stored `group_first`, so a
+// (`OffsetTable::group()` itself), never on the dict's stored `group_first`, so a
 // delimiter-variance finding here does not indicate a live parsing defect
 // — see the printed report for the full reasoning.
 
@@ -175,7 +175,7 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
         //
         // The underlying PRODUCTION gap this originally reported is NOT yet
         // fixed by this test-file-only re-point: `Dictionary::as_table_view()`
-        // itself (`dictionary.cpp:398,441,446`) and codegen's
+        // itself (src/dictionary/dictionary.cpp) and codegen's
         // `emit_messages.cpp` (`f->ref.type == NumInGroup`) both still gate on
         // the same datatype test, so `wire::Validator`/`OffsetTable::group()`
         // and the generated `v42` flyweight remain INERT for FIX40/41/42's
@@ -311,7 +311,7 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
                  "file header) — the above delimiter-scan compares raw <group> declaration "
                  "SITES, a coarser but source-grounded proxy. This is moot for read-path "
                  "correctness: OffsetTable::group() slices on the FRAME's own delimiter "
-                 "(offset_table.cpp:440), never on the dict's stored group_first. ===\n";
+                 "(OffsetTable::group() itself), never on the dict's stored group_first. ===\n";
 
     // Hard discriminating invariant (not assertion-free coverage): the
     // FIX44 295 MassQuote-vs-QuotCxlEntriesGrp collision this feature's own

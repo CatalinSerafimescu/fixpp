@@ -51,16 +51,16 @@
 #   placeholder_bench               measures nothing; its baseline is the
 #                                   null-cpu_time shape tier 1 rejects
 #   heartbeat_bench                 an explicit SCOPE PLACEHOLDER
-#                                   (heartbeat_bench.cpp:31-38), not a measurement
+#                                   (heartbeat_bench.cpp's own SCOPE PLACEHOLDER banner), not a measurement
 #   check_alive_bench               its measured operation compiles to a no-op in
-#                                   release (check_alive_bench.cpp:7-26), so a
+#                                   release (check_alive_bench.cpp's own NDEBUG no-op note), so a
 #                                   release timing lane measures nothing
 #
 # ⚠️ Every exclusion above cites a SOURCE property of that binary. An earlier
 # draft excluded whole directories because one member was noisy, which dropped
 # deterministic hot paths for their siblings' sins; `log_enqueue_bench` in
 # particular was excluded for having a debug baseline when the real reason is
-# that it runs a drain thread (log_enqueue.cpp:11-23,62-80).
+# that it runs a drain thread (log_enqueue.cpp's Fill-rate-strategy / NullSink drain).
 
 # ── core ─────────────────────────────────────────────────────────────────────
 bench/core/decimal_bench                    gb-json:decimal_baseline.json                    no
@@ -111,9 +111,9 @@ bin/fix_time_bench                          gb-json:session/fix_time_baseline.js
 bin/bench_memory_store                      gb-json:session/bench_memory_store_WSLUBUNTU24.04.json  no
 # Added on a SOURCE reading, overriding an earlier directory-level exclusion that
 # had lumped these in with the FSM's mock-clock benches (Codex round 2, F7):
-# fsm_bench is a pure build_heartbeat() CPU loop (fsm_bench.cpp:31-64),
-# seqnum_bench uses one local io_context with no contender (seqnum_bench.cpp:34-59),
-# and bench_compid_authorize is a pure hash/string lookup (:54-105).
+# fsm_bench is a pure build_heartbeat() CPU loop (fsm_bench.cpp's BM_Session_OutboundAdminEmit),
+# seqnum_bench uses one local io_context with no contender (seqnum_bench.cpp's BM_Session_SeqnumNextWithIncrement),
+# and bench_compid_authorize is a pure hash/string lookup (bench_compid_authorize.cpp's authorize() hash lookup).
 bin/fsm_bench                               gb-json:session/fsm_baseline.json                no
 bin/seqnum_bench                            gb-json:session/seqnum_baseline.json             no
 bin/bench_compid_authorize                  none:no-gb-baseline-recorded                     no

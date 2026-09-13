@@ -4,7 +4,7 @@
 //
 // Session-INTERNAL helper: admin-vs-application MsgType(35) classifier.
 //
-// Extracted from the inline `is_session_admin` bool in session.cpp ~:1924
+// Extracted from the inline `is_session_admin` bool in session.cpp
 // (019-app-callbacks T006 / research D8). This is the single source of truth
 // for the admin MsgType allow-list; both inbound routing and the outbound
 // emit split call this helper.
@@ -23,7 +23,7 @@ namespace fixpp::session::detail {
 // is_admin_msgtype — returns true for the 6 session-admin MsgTypes that the
 // FIX session layer handles internally (after FSM processing).
 //
-// Admin allow-list (source: research.md D8 + session.cpp:1920–1930 comments):
+// Admin allow-list (source: research.md D8 + on_inbound_frame's admin-dispatch comments):
 //   "0" Heartbeat        — handled in Active; forwarded to fromAdmin
 //   "1" TestRequest      — handled in Active; forwarded to fromAdmin
 //   "2" ResendRequest    — handled ABOVE the Reject branch (recovery); in allow-

@@ -40,7 +40,7 @@ std::span<const std::byte> as_bytes(std::string_view s) {
 }
 
 // See validator_enum_domain_test.cpp for the outliving-Dictionary rationale
-// (dictionary.hpp:193-205 -- as_table_view() owns copies of the code bytes).
+// (as_table_view() owns copies of the code bytes).
 table_view load_shipped_table_view(char const* filename) {
     std::vector<std::byte> buf(8u * 1024u * 1024u);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};

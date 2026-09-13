@@ -37,7 +37,7 @@
 // build_nested_subview()/nested_group_slices(), never touched group()).
 // group()'s per-top-level-occurrence boundary walk uses a "has this tag
 // already appeared since the last delimiter" heuristic
-// (offset_table.cpp:~420-435, `seen_in_instance`) that has no notion of
+// (offset_table.cpp's `seen_in_instance` heuristic) that has no notion of
 // nesting depth: once a nested group's own descendant tags (299/132/133,
 // necessarily registered as transitive members of the OUTER group 296 so
 // the outer occurrence's byte-span extends far enough to cover them) repeat
@@ -107,15 +107,15 @@ decimal_t parse_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
 }
 
 // The group-membership predicate `Parser`'s dict-lvalue ctor installs
-// (parser.hpp:462-472) — mirrors tests/wire/group_slice_trailing_soh_test.cpp
+// (`Parser`'s dict-lvalue ctor, its `group_member_fn_` initializer) — mirrors tests/wire/group_slice_trailing_soh_test.cpp
 // T008's own copy, needed here only to construct the Parser via the
 // dict-lvalue ctor (which builds this same predicate internally); no direct
 // call is required by this file, but the pattern is documented here for
 // readers cross-referencing T008.
 
 // Hand-built CORRECT MassQuote group membership (FIX44.xml component defs:
-// QuotSetGrp:3350-3358 for NoQuoteSets(296); QuotEntryGrp:3219-3247 for
-// NoQuoteEntries(295); InstrumentLeg:2436+ for NoLegs(555)'s InstrumentLeg
+// the QuotSetGrp component for NoQuoteSets(296); QuotEntryGrp for
+// NoQuoteEntries(295); InstrumentLeg for NoLegs(555)'s InstrumentLeg
 // fields). `OffsetTable::group()`'s per-top-level-occurrence boundary walk
 // (src/wire/offset_table.cpp) needs the OUTER group(296)'s member set to
 // include every tag transitively nested under a QuoteSet occurrence (302
@@ -123,8 +123,8 @@ decimal_t parse_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
 // 367 QuoteSetValidUntilTime when present) so the outer occurrence's byte
 // span extends far enough to cover the nested content — this mirrors
 // exactly what `Dictionary::as_table_view()`'s recursive `expand_field_list`
-// would produce for a non-collided dictionary (dictionary.cpp:295-339 /
-// xml_loader.cpp:416-524).
+// would produce for a non-collided dictionary (src/dictionary/dictionary.cpp /
+// xml_loader.cpp).
 fixpp::dict::table_view make_correct_massquote_dict() {
     fixpp::dict::table_view dict;
     dict.add_group_member(296, 302)   // QuoteSetID — NoQuoteSets' own delimiter
@@ -360,7 +360,7 @@ TEST(NestedGroupRead, Depth3MultiEntryAtMultipleLevelsNoCrossLevelTruncation) {
 // QuoteEntry, and a QuoteSet-level scalar field QuoteSetValidUntilTime(367)
 // placed AFTER the nested NoQuoteEntries(295) group in WIRE order (367 is
 // declared BEFORE QuotEntryGrp in the FIX44 QuotSetGrp component
-// (dictionaries/FIX44.xml:3350-3358), so this wire layout deliberately
+// (dictionaries/FIX44.xml's QuotSetGrp component), so this wire layout deliberately
 // diverges from dictionary declaration order — the point being that
 // correctness must not depend on wire position, only on dictionary
 // membership).
@@ -535,7 +535,7 @@ TEST(NestedGroupRead, NestedQuoteEntriesPerInstancePrices) {
 //
 // Run under both the debug preset and ASan (per the phase-5 brief): the
 // `group_context::msg_type` is a `string_view` aliasing the parsed message's
-// wire buffer (data-model.md:28) and must outlive every nested entry read
+// wire buffer (specs/004-wire-codec/data-model.md's E4 Invariants note) and must outlive every nested entry read
 // below — a dangling-view lifetime bug here would be invisible in a plain
 // debug build but would fault under ASan.
 TEST(NestedGroupRead, RealDictionaryMassQuoteTwoQuoteEntriesPerInstancePrices) {
@@ -608,8 +608,8 @@ TEST(NestedGroupRead, RealDictionaryMassQuoteTwoQuoteEntriesPerInstancePrices) {
 // Gate B PR#176 r1, fix queue item 1(i): cache-poison counter-test. Real
 // FIX44.xml top-level tag 296 (NoQuoteSets) collides between MassQuote's
 // QuotSetGrp (members incl. QuoteSetValidUntilTime(367), declared SECOND in
-// FIX44.xml:3350) and MassQuoteAcknowledgement's QuotSetAckGrp (no 367,
-// declared FIRST, FIX44.xml:3341) — so the legacy bare/global-first-seen
+// dictionaries/FIX44.xml's QuotSetGrp) and MassQuoteAcknowledgement's QuotSetAckGrp (no 367,
+// declared FIRST, dictionaries/FIX44.xml's QuotSetAckGrp) — so the legacy bare/global-first-seen
 // store resolves 296 to the Ack member set. Before the root-context ctor
 // seed (parser.hpp dict-aware MessageView ctors), a RAW
 // `offsets().group_slices(296)` call — issued before any typed group<>()
@@ -688,7 +688,7 @@ TEST(NestedGroupRead, RealDictionaryMassQuote296RootContextSeededAtCtorNoCachePo
 // pushed-context DISCRIMINATION witness.
 //
 // The generated typed nested accessor re-wraps the parent membership context
-// UNPUSHED at the emitter view-mint (emit_messages.cpp:270-271), so a depth-3
+// UNPUSHED at the emitter view-mint (`emit_group_class`'s `child_ctx.group_ctx` construction), so a depth-3
 // grandchild-group (555) slice queries membership one level too short. This
 // witness makes that observable with a HAND-BUILT table_view whose grandchild
 // group 555 is registered DIVERGENTLY:

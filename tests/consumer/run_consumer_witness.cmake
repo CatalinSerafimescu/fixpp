@@ -94,7 +94,7 @@ execute_process(
     "-DCMAKE_CXX_COMPILER=${FIXPP_CXX_COMPILER}"
     "-DCMAKE_C_COMPILER=${FIXPP_C_COMPILER}"
     # 086 T053: the sub-build does not go through CMakePresets.json, so it never
-    # picks up the _base preset's CMAKE_EXPORT_COMPILE_COMMANDS (:12). Without a
+    # picks up the _base preset's CMAKE_EXPORT_COMPILE_COMMANDS. Without a
     # compile DB here, clang-tidy cannot be pointed at the new probe TUs at all.
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
     "-DFIXPP_STAGE_PREFIX=${_stage}"
@@ -251,7 +251,7 @@ endif()
 # named below, for exactly the reason given. Asserting empty — rather than "does not contain FIXPP_LOG_MIN_LEVEL"
 # — is deliberate: it is a closed assertion, so a definition nobody predicted
 # fails it too. (The withheld set today is at least FIXPP_LOG_MIN_LEVEL, from
-# src/log/CMakeLists.txt:27, and ASIO_STANDALONE, carried by asio::asio linked
+# src/log/CMakeLists.txt's fixpp_log FIXPP_LOG_MIN_LEVEL definition, and ASIO_STANDALONE, carried by asio::asio linked
 # unwrapped inside the closure. Membership is decided by this predicate, not by
 # that list.) Instrument measured in research.md R10.
 set(_usage_file "${_sub_build}/usage-requirements.txt")

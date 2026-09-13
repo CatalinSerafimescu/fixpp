@@ -15,7 +15,7 @@
 // Anchors:
 //   data-model.md E-3/E-4 (scalars + sink param maps)
 //   research.md D-3/D-7 (sink resolver, deferred-construction protocol)
-//   contracts/observability_config.hpp lines 77-116
+//   contracts/observability_config.hpp's resolver contracts block
 //   tasks.md T010–T012
 
 #include "logger_resolver.hpp"  // PendingLogger, PendingLoggerSet
@@ -34,7 +34,7 @@
 // Unconditional include: syslog_sink.hpp self-#defines FIXPP_HAS_SYSLOG on a
 // POSIX platform that has <syslog.h> (there is no CMake define). It MUST be
 // included before any #ifdef FIXPP_HAS_SYSLOG test, or the macro is never seen
-// and the syslog branch is dead on every build (matches scalar_mappers.cpp:27).
+// and the syslog branch is dead on every build (matches scalar_mappers.cpp's `syslog_sink.hpp` include).
 #include <fixpp/log/syslog_sink.hpp>
 
 #ifdef FIXPP_CONFIG_HAS_OTLP

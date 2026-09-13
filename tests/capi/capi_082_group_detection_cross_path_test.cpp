@@ -8,7 +8,7 @@
 // `Dictionary::as_table_view()`'s bare-store registration loop must be the
 // SAME accessor the C-ABI outbound WRITE path uses
 // (`Dictionary::group_first_field(t)`, unconditional/structural since
-// XML-load time -- src/capi/message_write.cpp:812:
+// XML-load time -- fixpp_msg_group_begin / fixpp_entry_group_begin's guard:
 // `h->dict_->group_first_field(group_tag) == 0 => FIXPP_ERR_TYPE_MISMATCH`).
 //
 // Per contracts/group-detection.md C4.4: the WRITE family (this test)
@@ -166,7 +166,7 @@ TEST(GroupDetectionCrossPath, WriteGroupBeginMatchesBareStoreRegisteredSetBothDi
 
     // Full uint16_t sweep, mirroring the READ-side bare-store sweep exactly
     // (T015's bare_registered_group_tags) -- only successful opens allocate
-    // (message_write.cpp:812 returns FIXPP_ERR_TYPE_MISMATCH BEFORE any
+    // (that group_first_field(group_tag) == 0 guard returns FIXPP_ERR_TYPE_MISMATCH BEFORE any
     // arena allocation on failure), so this is cheap: only the real 18 FIX42
     // group tags ever reach the allocating path.
     std::set<std::uint16_t> write_succeeds;

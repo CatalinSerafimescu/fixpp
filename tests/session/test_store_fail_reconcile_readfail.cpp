@@ -8,7 +8,7 @@
 //
 // W1/W3/breadth all drive a store() failure where the subsequent reconcile
 // read next_seqnum(outbound,false) SUCCEEDS — so two branches in
-// store_then_emit's fatal disposition (src/session/session.cpp ~:4804-4823)
+// store_then_emit's fatal disposition (src/session/session.cpp's is_persistent_retain_fatal)
 // stay uncovered by those witnesses:
 //
 //   Arm (b) else-arm  — the reconcile read FAILS (dk.has_value()==false):
@@ -22,7 +22,7 @@
 //     (which remains the ORIGINAL store() error captured before reconcile,
 //     D2/NEW-P3).
 //
-//   Arm (a) store_cancelled false-leg — the `!= store_cancelled` guard (:4805)
+//   Arm (a) store_cancelled false-leg — store_then_emit's `!= store_cancelled` guard
 //     evaluates FALSE: a persistent store returning store_cancelled is
 //     cancellation-class (D7), excluded from the fatal branch → logged-then-
 //     proceed, unchanged (send SUCCEEDS, session stays Active, frame IS
@@ -31,20 +31,20 @@
 //     ex-ante Arm (a) risk-assessment into a real witness now that the double
 //     exists.)
 //
-// The reconcile `catch (...)` arm (:4819) is NOT witnessed here and is waived
+// The reconcile `catch (...)` arm is NOT witnessed here and is waived
 // in the verify record as a cancellation-race branch (Article IX §1, no stable
 // stimulus). It IS production-reachable: a real store (FileStore) serves
 // next_seqnum by acquiring the async_mutex → suspends → is cancellable, and a
 // co_await of a cancelled store method throws asio::system_error{
 // operation_aborted} in the AWAITER's frame even though the store method is
-// `noexcept` — the exact mechanism the OUTER catch at session.cpp:4827 absorbs
-// from `co_await store_->store()` (see its comment at :4790-4793). This
-// store-double cannot reach :4819 because ReconcileFaultStore::next_seqnum is
+// `noexcept` — the exact mechanism store_then_emit's OUTER catch(...) absorbs
+// from `co_await store_->store()` (see store_then_emit's Step-1 store comment). This
+// store-double cannot reach the reconcile catch(...) arm because ReconcileFaultStore::next_seqnum is
 // synchronous (co_return cur; — no suspension, nothing to cancel), and driving
 // the cancellation race deterministically is inherently flaky — the same
 // no-stable-stimulus rationale the coverage-design record used for Arm (a)'s
 // store_cancelled-on-shutdown-drain. (An earlier draft wrongly waived this as
-// "noexcept → std::terminate → unreachable"; that is disproved by :4827.)
+// "noexcept → std::terminate → unreachable"; that is disproved by store_then_emit's F5 (Round-A drift) try/catch.)
 //
 // Harness mirrors test_store_fail_reconcile_breadth.cpp (single-threaded
 // io_context): the reconcile-read fault is deterministic (no strand race to
@@ -159,9 +159,9 @@ using fixpp::test_support::extract_tag;
 // fail_at_outbound_seq_ with store_err_, AND next_seqnum(outbound,false) fails
 // once — but ONLY after store() has already fired (store_fired_) and ONLY on
 // the reconcile signature (increment==false). That gating is precise:
-//   * persist_outbound_advance_ (session.cpp:720) reads next_seqnum(outbound,
+//   * persist_outbound_advance_ reads next_seqnum(outbound,
 //     increment=TRUE) — never faulted (wrong increment flag).
-//   * the reconcile read (session.cpp:4815) is next_seqnum(outbound,
+//   * the reconcile read (store_then_emit's reconcile block) is next_seqnum(outbound,
 //     increment=FALSE), the first such read after store_fired_ → faulted once.
 // yields_persistent_store() defaults to true (no factory override), so this
 // store is classified persistent (research.md D6 fallback), same as the

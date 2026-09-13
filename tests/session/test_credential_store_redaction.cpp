@@ -307,7 +307,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
 // Logon; the 3-arg Session(engine, cfg, &registry) ctor is required by the
 // FQ-1 open()-time FIXT validation gate.
 //
-// Anchors: contracts/store-redaction.md C2; session.cpp:4446 (store_then_emit gate);
+// Anchors: contracts/store-redaction.md C2; store_then_emit's `msg_type == "A"` gate;
 //          data-model.md E1/INV-034-1..5; test_fixt_credentials.cpp (FIXT harness
 //          pattern); test_file_store_flush_for_session_close.cpp (FileStore pattern).
 
@@ -585,7 +585,7 @@ struct CapturingMemStoreFactory final : public MessageStoreFactory {
 //   (a) Sentinel byte-sequence appears ZERO times in any disk file.
 //   (b) "554=" followed by a run of '*' of the same length is present on disk.
 //
-// Anchor: contracts/store-redaction.md C2 / INV-034-1; session.cpp:4446.
+// Anchor: contracts/store-redaction.md C2 / INV-034-1; store_then_emit's `msg_type == "A"` gate.
 
 TEST(CredentialStoreRedaction, T005_Persisted_LogonPassword_AbsentFromStoreFile_MaskPresent) {
     constexpr std::string_view kSentinel = "s3cr3t-T005-sentinel";
@@ -594,7 +594,7 @@ TEST(CredentialStoreRedaction, T005_Persisted_LogonPassword_AbsentFromStoreFile_
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
     // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
-    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp
     // "close() is called from within the session's serialisation domain"). Mirrors
     // production's per-session-strand-over-engine-pool; preserves real multi-thread
     // coverage (handlers still hop across both pool threads, serialised by the strand).
@@ -666,7 +666,7 @@ TEST(CredentialStoreRedaction, T005_Persisted_LogonPassword_AbsentFromStoreFile_
 // Setup: open acceptor, feed a valid inbound FIXT Logon (no creds from peer),
 // acceptor transitions Active and emits a reply Logon carrying its own 554.
 //
-// Anchors: session.cpp:2252-2274 (acceptor reply Logon emit path);
+// Anchors: Session::on_inbound_frame's acceptor-reply-Logon branch;
 //          contracts/store-redaction.md C2.
 
 TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
@@ -676,7 +676,7 @@ TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
     // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
-    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp
     // "close() is called from within the session's serialisation domain"). Mirrors
     // production's per-session-strand-over-engine-pool; preserves real multi-thread
     // coverage (handlers still hop across both pool threads, serialised by the strand).
@@ -772,7 +772,7 @@ TEST(CredentialStoreRedaction, T005_InMemoryStore_CredentialedLogon_AlsoMasked) 
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
     // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
-    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp
     // "close() is called from within the session's serialisation domain"). Mirrors
     // production's per-session-strand-over-engine-pool; preserves real multi-thread
     // coverage (handlers still hop across both pool threads, serialised by the strand).
@@ -845,7 +845,7 @@ TEST(CredentialStoreRedaction, T005_InMemoryStore_CredentialedLogon_AlsoMasked) 
 // Port of W6a from test_fixt_credentials.cpp (proves the same property but
 // from the 034 angle: the wire is NOT masked).
 //
-// Anchors: session.cpp:4443-4467 (step 2 transmit original); INV-034-5.
+// Anchors: store_then_emit's Step 2 (wire path transmits the original frame); INV-034-5.
 
 TEST(CredentialStoreRedaction, T008_Wire_LogonPassword_UnmaskedOnTransmit) {
     constexpr std::string_view kSentinel = "wire-T008-sentinel";
@@ -856,7 +856,7 @@ TEST(CredentialStoreRedaction, T008_Wire_LogonPassword_UnmaskedOnTransmit) {
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
     // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
-    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp
     // "close() is called from within the session's serialisation domain"). Mirrors
     // production's per-session-strand-over-engine-pool; preserves real multi-thread
     // coverage (handlers still hop across both pool threads, serialised by the strand).
@@ -912,13 +912,13 @@ TEST(CredentialStoreRedaction, T008_Wire_LogonPassword_UnmaskedOnTransmit) {
 // The wire bytes are known to NOT contain "554=" (no creds configured). The retrieved
 // bytes must exactly match the wire bytes.
 //
-// Anchor: session.cpp:4443-4444 (span_to_store = frame; default path).
+// Anchor: store_then_emit's `span_to_store = frame` default path.
 
 TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWire) {
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
     // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
-    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp
     // "close() is called from within the session's serialisation domain"). Mirrors
     // production's per-session-strand-over-engine-pool; preserves real multi-thread
     // coverage (handlers still hop across both pool threads, serialised by the strand).
@@ -980,7 +980,7 @@ TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWir
 // NonLogon_WithGenuine554_StoredUnchanged
 //
 // A frame with genuine "554=" but msg_type != "A" must be stored UNCHANGED.
-// The msg_type == "A" gate in store_then_emit (session.cpp:4446) means only
+// The msg_type == "A" gate in store_then_emit means only
 // Logon frames are subject to masking; business messages are stored verbatim.
 //
 // Harness: FIXT.1.1 initiator + manually-crafted acceptor reply Logon (no second
@@ -992,13 +992,13 @@ TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWir
 // (not just "cleartext absent" — we assert the actual cleartext is PRESENT in
 // the store, proving masking was skipped for non-Logon frames).
 //
-// Anchor: session.cpp:4446 (`msg_type == "A"` gate); INV-034-2.
+// Anchor: store_then_emit's `msg_type == "A"` gate; INV-034-2.
 
 TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
     // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
-    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp
     // "close() is called from within the session's serialisation domain"). Mirrors
     // production's per-session-strand-over-engine-pool; preserves real multi-thread
     // coverage (handlers still hop across both pool threads, serialised by the strand).
@@ -1128,7 +1128,7 @@ TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Initiator) {
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
     // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
-    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp
     // "close() is called from within the session's serialisation domain"). Mirrors
     // production's per-session-strand-over-engine-pool; preserves real multi-thread
     // coverage (handlers still hop across both pool threads, serialised by the strand).
@@ -1159,7 +1159,7 @@ TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Acceptor) {
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
     // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
-    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp
     // "close() is called from within the session's serialisation domain"). Mirrors
     // production's per-session-strand-over-engine-pool; preserves real multi-thread
     // coverage (handlers still hop across both pool threads, serialised by the strand).
@@ -1207,7 +1207,7 @@ TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Acceptor) {
 // Postcondition (c) — a resend over the skipped seq yields a SequenceReset-GapFill,
 // not a masked verbatim replay — is NOT new behavior 034 introduces: in the resend
 // store-walk a stored `35=A` (admin) or absent slot is classified non-app at
-// session.cpp:4815-4818 and folded into a GapFill run at :4835-4841. Not re-proven
+// replay_outbound_range_'s classification, folded into a GapFill run. Not re-proven
 // here to avoid over-investing in dead-branch coverage. T010 proves (a)+(b) only.
 //
 // Anchors: contracts/store-redaction.md C2 step-2 / I-07; research R3; session.hpp
@@ -1219,7 +1219,7 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
     // (executor_override, clock, open/inbound/send/close co_spawns) is confined to
-    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp:140
+    // ONE serialisation domain — honors close()'s v1.0 precondition (session.hpp
     // "close() is called from within the session's serialisation domain"). Mirrors
     // production's per-session-strand-over-engine-pool; preserves real multi-thread
     // coverage (handlers still hop across both pool threads, serialised by the strand).

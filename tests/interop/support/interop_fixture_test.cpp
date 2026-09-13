@@ -54,7 +54,7 @@ TEST(InteropEngineFixtureRunUntil, RevivesContextStoppedAtEntry) {
 //
 // ~InteropEngineFixture used to call stop_within(30s) and DISCARD the result, so
 // a stop() that never completed was invisible; ~Engine's `assert(stopped_)`
-// (src/session/engine.cpp:145) then turned a teardown regression into a SIGABRT
+// (src/session/engine.cpp's `~Engine`'s assert) then turned a teardown regression into a SIGABRT
 // instead of a named failure. This is the direct witness for the repaired
 // branch: the miss is taken deterministically (teardown bound 0 ms, so
 // stop_within's pump loop body never runs and stop() cannot have completed) and
@@ -175,8 +175,8 @@ TEST(InteropEngineFixtureTeardown, CleanStopReportsNothing) {
 // ── #292 — the case the FIRST fix attempt got wrong ──────────────────────────
 //
 // Engine::stop() stores stopped_=true at STEP 1 of its teardown
-// (src/session/engine.cpp:1196) and only then cancels loops, joins them, closes
-// sessions and clears the registry (through engine.cpp:1343). So there is a real
+// (`Engine::stop()`'s inner Step-1 store) and only then cancels loops, joins them, closes
+// sessions and clears the registry (through `Engine::stop()`'s Step 5 `registry_.clear()`). So there is a real
 // window in which Engine::stopped() reports true while teardown frames are still
 // suspended in the io_context.
 //
@@ -290,9 +290,9 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
 //
 // Withdraws two round-1 waivers that both rested on "no test seam exists to make
 // Engine::stop() throw". One does: every interop target compiles with
-// FIXPP_TEST_HOOKS (tests/interop/CMakeLists.txt:93), Engine exposes
-// set_post_send_drain_hook() (engine.hpp:340), and stop() co_awaits it
-// (engine.cpp:1304) BEFORE step 4 (session close) and step 5 (registry clear).
+// FIXPP_TEST_HOOKS (tests/interop/CMakeLists.txt's per-target compile-definitions call), Engine exposes
+// set_post_send_drain_hook() (its definition in engine.hpp), and stop() co_awaits it
+// (`Engine::stop()`'s `test_hook_post_send_drain_` await) BEFORE step 4 (session close) and step 5 (registry clear).
 // A throwing hook therefore aborts teardown midway — exactly the state to test.
 //
 // The defect this pins was introduced by the round-1 fix for P1-3. Wrapping the
@@ -372,10 +372,10 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
 //
 // The reason is an ORDERING, not a guarantee, and the distinction matters enough
 // to write down. Engine::stop() opens with an idempotency guard,
-// `if (stopped_.load(acquire)) co_return;` (engine.cpp:1163), so a second
+// `if (stopped_.load(acquire)) co_return;` (`Engine::stop()`'s outer idempotency guard), so a second
 // operation that starts AFTER the first has set the flag returns immediately.
 // But the authoritative store happens in the INNER control-strand body
-// (engine.cpp:1197), which does NOT re-check the flag before storing. Two
+// (`Engine::stop()`'s inner Step-1 store), which does NOT re-check the flag before storing. Two
 // operations that both clear the outer check before either inner body runs would
 // therefore BOTH execute a full teardown. The measured single entry reflects the
 // pump order actually taken, not an invariant — so "an extra spawn is harmless"

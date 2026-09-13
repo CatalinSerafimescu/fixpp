@@ -4,7 +4,7 @@
 // session_executor round-trip across BOTH threading modes via
 // make_session_executor(...), INCLUDING:
 //   • the SINGLE error::executor_not_serialised enforcement point
-//     ([2d §4.8]:996 / FR-009 / I-06);
+//     ([2d §4.8]'s `make_session_executor` bullet / FR-009 / I-06);
 //   • the N5 open-path arm (data-model.md N5): a second Session::open() on
 //     the same handle → error::session_already_open (slot 51 / FR-018).
 //

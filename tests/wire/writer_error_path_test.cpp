@@ -5,24 +5,24 @@
 //   - digit_count for values ≥ 100000 (5..10 digits)
 //   - write_byte overflow (pos_ >= dst_.size())
 //   - write_span overflow
-//   - write_tag_eq overflow (member: lines 138-140; free fn: lines 94-96)
+//   - write_tag_eq overflow (member: Writer::write_tag_eq's npos check; free fn: its own bound check)
 //   - append_raw with prior overflow set
-//   - append_raw error when tag write fails (lines 166-167)
-//   - append_raw error when 9= '9' byte overflows (lines 181-182)
-//   - append_raw error when 9= '=' byte overflows (lines 184-186)
-//   - append_raw error when 9= placeholder SOH overflows (lines 200-201)
+//   - append_raw error when tag write fails (its write_tag_eq call)
+//   - append_raw error when 9= '9' byte overflows (its '9' write_byte call)
+//   - append_raw error when 9= '=' byte overflows (its EQ_BYTE write_byte call)
+//   - append_raw error when 9= placeholder SOH overflows (its trailing write_byte)
 //   - commit() with overflow_ set
 //   - commit() body_start_ == npos (no fields written)
-//   - commit() body_length exceeds placeholder width → err_frame_too_large (lines 251-252)
+//   - commit() body_length exceeds placeholder width → err_frame_too_large (its actual_digits check)
 //   - commit() no room for 10= field
 //   - open_group() error path (append_raw fails)
-//   - group_writer::append_field null owner (lines 331-333)
+//   - group_writer::append_field null owner (its owner_==nullptr guard)
 //   - bytes_written() accessor coverage
 //   - large body_length requiring 5+ digit BodyLength field
-//   - large body_length requiring 7-digit BodyLength (lines 53-54)
-//   - large body_length requiring 8-digit BodyLength (lines 56-57)
+//   - large body_length requiring 7-digit BodyLength (digit_count's 7-digit arm)
+//   - large body_length requiring 8-digit BodyLength (digit_count's 8-digit arm)
 //   Round-2 additions:
-//   - Writer::append<T> trap_throw fence (writer.hpp ~182-187): custom type
+//   - Writer::append<T> trap_throw fence (around its v.format() call): custom type
 //     whose format() throws → trapped, returns wire error, no propagation
 
 #include <gtest/gtest.h>
@@ -121,7 +121,7 @@ TEST(WriterErrorPath, CommitWithNoFieldsReturnsError) {
 
 // An empty FIELD VALUE (e.g. "58=\x01" empty Text) yields a zero-length value
 // span whose data() is null. write_span then did memcpy(dst, nullptr, 0), which
-// is UB (memcpy's src is declared nonnull) and trips UBSan at writer.cpp:129 —
+// is UB (memcpy's src is declared nonnull) and trips UBSan in write_span's memcpy —
 // the latent flake behind business_messages_roundtrip. write_span must early-out
 // on an empty span. A valid FIX field may legitimately carry an empty value.
 TEST(WriterErrorPath, EmptyValueFieldIsWellFormedNoUB) {
@@ -345,14 +345,14 @@ TEST(WriterErrorPath, AppendRawOverflowOnTrailingSOH) {
     EXPECT_EQ(rc.error(), error::wire_field_value_truncated);
 }
 
-// ── write_tag_eq member overflow (lines 138-140) ─────────────────────────────
+// ── write_tag_eq member overflow (Writer::write_tag_eq's npos check) ────────
 // Writer::write_tag_eq() calls the free write_tag_eq which returns npos when
 // pos + dc + 1 > buf_size. Drive this by using a 5-digit tag (65535, dc=5)
 // after writing the standard header so only 5 bytes remain — "65535=" needs 6.
 // Layout: "8=FIX.4.4\x01" (10) + "9=000000\x01" (9) = 19 bytes header.
 // buf=24 leaves 5 bytes; "65535=" needs 6 → write_tag_eq(65535) returns npos.
-// Covers: src/wire/writer.cpp lines 94-96 (free fn npos), 138-140 (member),
-//         166-167 (append_raw tag-write branch).
+// Covers: writer.cpp's write_tag_eq (free fn npos and member), and
+//         append_raw's tag-write branch.
 
 TEST(WriterErrorPath, WriteTagEqMemberOverflowCoversLines138to140) {
     std::array<std::byte, 24> buf24{};
@@ -371,10 +371,10 @@ TEST(WriterErrorPath, WriteTagEqMemberOverflowCoversLines138to140) {
     EXPECT_EQ(rc.error(), error::wire_field_value_truncated);
 }
 
-// ── append_raw: '9' write_byte fails in placeholder injection (lines 181-182) ─
+// ── append_raw: '9' write_byte fails in placeholder injection ────────────────
 // Buffer exactly 10 bytes: "8=FIX.4.4\x01" (10) fills it, so the '9' byte
 // for the 9= injection hits pos_=10 ≥ 10 → write_byte returns false.
-// Covers: src/wire/writer.cpp lines 181-182.
+// Covers: writer.cpp append_raw's '9' write_byte call.
 
 TEST(WriterErrorPath, AppendRaw9ByteWriteFailsCoversLines181to182) {
     std::array<std::byte, 10> buf10{};
@@ -389,10 +389,10 @@ TEST(WriterErrorPath, AppendRaw9ByteWriteFailsCoversLines181to182) {
     EXPECT_EQ(rc.error(), error::wire_field_value_truncated);
 }
 
-// ── append_raw: '=' write_byte fails in placeholder injection (lines 184-186) ─
+// ── append_raw: '=' write_byte fails in placeholder injection ────────────────
 // Buffer exactly 11 bytes: "8=FIX.4.4\x01" (10) + '9' (1) = 11 total.
 // After the body write, '9' at pos=10 fits, '=' at pos=11 ≥ 11 → fails.
-// Covers: src/wire/writer.cpp lines 184-186.
+// Covers: writer.cpp append_raw's EQ_BYTE write_byte call.
 
 TEST(WriterErrorPath, AppendRawEqByteWriteFailsCoversLines184to186) {
     std::array<std::byte, 11> buf11{};
@@ -407,10 +407,10 @@ TEST(WriterErrorPath, AppendRawEqByteWriteFailsCoversLines184to186) {
     EXPECT_EQ(rc.error(), error::wire_field_value_truncated);
 }
 
-// ── append_raw: SOH at end of 9= placeholder fails (lines 200-201) ───────────
+// ── append_raw: SOH at end of 9= placeholder fails ────────────────────────────
 // Buffer exactly 18 bytes: "8=FIX.4.4\x01" (10) + "9=" (2) + "000000" (6) = 18.
 // The trailing SOH of the 9= field is at pos=18 ≥ 18 → overflow.
-// Covers: src/wire/writer.cpp lines 199-201.
+// Covers: writer.cpp append_raw's placeholder-terminating write_byte.
 
 TEST(WriterErrorPath, AppendRawPlaceholderSOHFailsCoversLines200to201) {
     std::array<std::byte, 18> buf18{};
@@ -426,12 +426,12 @@ TEST(WriterErrorPath, AppendRawPlaceholderSOHFailsCoversLines200to201) {
     EXPECT_EQ(rc.error(), error::wire_field_value_truncated);
 }
 
-// ── commit(): body_length > max placeholder → err_frame_too_large (lines 251-252)
+// ── commit(): body_length > max placeholder → err_frame_too_large ────────────
 // The 9= placeholder reserves 6 digits (max body length 999 999). If the body
 // exceeds 999 999 bytes, digit_count(body_length) = 7 > bl_digit_count_=6 and
-// commit() returns err_frame_too_large. The 7-digit branch of digit_count
-// (lines 53-54 of writer.cpp) is also exercised here.
-// Covers: src/wire/writer.cpp lines 53-54, 251-252.
+// commit() returns err_frame_too_large. digit_count's 7-digit arm
+// is also exercised here.
+// Covers: writer.cpp's digit_count 7-digit arm and commit()'s actual_digits check.
 
 TEST(WriterErrorPath, CommitBodyLengthExceedsPlaceholderWidthFrameTooLarge7Digits) {
     // Body of 1 000 001 bytes → digit_count(1000001) = 7 > 6 → err_frame_too_large.
@@ -457,11 +457,11 @@ TEST(WriterErrorPath, CommitBodyLengthExceedsPlaceholderWidthFrameTooLarge7Digit
     EXPECT_EQ(result.error(), error::wire_frame_too_large);
 }
 
-// ── digit_count 8-digit branch (lines 56-57) ─────────────────────────────────
+// ── digit_count 8-digit branch ────────────────────────────────────────────────
 // Body of 10 000 001 bytes → digit_count(10000001) = 8 > 6 → err_frame_too_large.
-// Exercises the `if (v < 100000000U)` branch in digit_count (lines 56-57).
+// Exercises the `if (v < 100000000U)` branch in digit_count.
 // NOTE: Requires ~10 MB scratch buffer; this is deliberate (no alternative path).
-// Covers: src/wire/writer.cpp lines 56-57.
+// Covers: writer.cpp's digit_count 8-digit arm.
 
 TEST(WriterErrorPath, CommitBodyLengthExceedsPlaceholderWidthFrameTooLarge8Digits) {
     constexpr std::size_t kBodySize = 10'000'001;
@@ -484,7 +484,7 @@ TEST(WriterErrorPath, CommitBodyLengthExceedsPlaceholderWidthFrameTooLarge8Digit
     EXPECT_EQ(result.error(), error::wire_frame_too_large);
 }
 
-// ── Round-2: Writer::append<T> trap_throw fence (writer.hpp ~182-187) ────────
+// ── Round-2: Writer::append<T> trap_throw fence (around its v.format() call) ─
 // The trap_throw fence in Writer::append<T> wraps the lambda
 //   [&]() noexcept(false) -> expected_t<size_t> { return v.format(scratch_span); }
 // The lambda is explicitly noexcept(false), so if v.format() throws,
@@ -519,7 +519,7 @@ TEST(WriterErrorPath, AppendTypedTrapThrowFenceCatchesExceptionReturnsError) {
         << "header write must succeed";
 
     // Now call append<throwing_field_t>; its format() throws.
-    // The trap_throw fence (writer.hpp ~182-187) must catch the exception and
+    // The trap_throw fence around Writer::append<T>'s v.format() call must catch it and
     // return a wire error without propagating.
     throwing_field_t thrower{};
     bool escaped = false;
@@ -537,7 +537,7 @@ TEST(WriterErrorPath, AppendTypedTrapThrowFenceCatchesExceptionReturnsError) {
         << "trapped exception must map to decimal_invalid_input (catch-all branch)";
 }
 
-// ── group_writer::append_field with owner_ == nullptr (lines 331-333) ─────────
+// ── group_writer::append_field with owner_ == nullptr ─────────────────────────
 // The non-template append_field returns {} immediately when owner_ == nullptr.
 // A default-constructed group_writer has owner_=nullptr. Since group_writer has
 // no public default ctor (passkey protected), we use move-then-reset semantics:
@@ -546,17 +546,17 @@ TEST(WriterErrorPath, AppendTypedTrapThrowFenceCatchesExceptionReturnsError) {
 // token. Because group_writer(group_writer&&)=default copies raw pointer without
 // zeroing the source, we instead rely on the close_impl null-guard path inside
 // move-only RAII and explicitly exercise the template overload in writer.hpp
-// (lines 153-155 there) — the only reachable null-owner path from external tests.
+// (append_field<T>'s owner_ guard) — the only reachable null-owner path from external tests.
 //
 // Concretely: after move-constructing gw2 from *gw_result, both share owner_.
 // We call append_field through gw2 (live owner → succeeds). The *gw_result
-// source still has non-null owner, so the raw bytes overload line 331 is NOT
+// source still has non-null owner, so the raw bytes overload's guard is NOT
 // reachable without internal access. We document and accept this limitation;
-// the template overload in the header IS reachable (line 153: `if (!owner_)`).
+// the template overload in the header IS reachable (`if (!owner_)`).
 //
 // This test supersedes GroupWriterNullOwnerAppendIsNoOp (which incorrectly
 // assumed default-move zeros the pointer) — it explicitly verifies the live-owner
-// path via gw2 and documents the non-reachability of line 331-332 from external
+// path via gw2 and documents the non-reachability of the raw overload from external
 // test code.
 
 TEST(WriterErrorPath, GroupWriterNullOwnerRawAppendFieldDocumentedNotReachable) {

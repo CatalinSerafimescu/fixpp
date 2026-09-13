@@ -47,11 +47,11 @@ std::string bytes_to_string(std::span<const std::byte> b) {
     return std::string{reinterpret_cast<const char*>(b.data()), b.size()};
 }
 
-// TradeCaptureReport (35=AE) required fields (dictionaries/FIX44.xml:1435-
-// 1493): TradeReportID(571), PreviouslyReported(570), LastQty(32),
+// TradeCaptureReport (35=AE) required fields (dictionaries/FIX44.xml's TradeCaptureReport message declaration):
+// TradeReportID(571), PreviouslyReported(570), LastQty(32),
 // LastPx(31), TradeDate(75), TransactTime(60), and the TrdCapRptSideGrp
 // NoSides(552) group (required, >=1 entry; entry-level Side(54)/OrderID(37)
-// required, dictionaries/FIX44.xml:3536-3538).
+// required, dictionaries/FIX44.xml's TrdCapRptSideGrp NoSides group).
 fixpp::v44::TradeCaptureReportArgs make_valid_args(
     std::pmr::memory_resource* mr, std::span<const fixpp::v44::groups::G_552_1Args> sides) {
     fixpp::v44::TradeCaptureReportArgs args{};

@@ -7,7 +7,7 @@
 // serialized-lifetime-safe-error-returning write channel invariants:
 //
 //   (A) Write serialization: at most one async_write is in-flight per
-//       Transport at a time (transport.hpp:47-50 ≤1-in-flight contract).
+//       Transport at a time (transport.hpp's ≤1-in-flight contract).
 //       A GENUINE second emit while the first write is pending must NOT
 //       enter async_write until the first completes (total_write_starts >= 2
 //       is the meaningful bar; if only 1 write ever started, the test is void).
@@ -25,7 +25,7 @@
 //       complete) before returning. This guarantees no detached session work
 //       can touch freed Session/transport after registry_.clear().
 //
-// Anchors: transport.hpp:47-50 ≤1-in-flight contract; realized-behavior.md
+// Anchors: transport.hpp's ≤1-in-flight contract; realized-behavior.md
 //          C1/C2 emit-over-live-sink; gate-b/r2 FQ-A; [const §VIII.5];
 //          [feedback_detached_cospawn_write_not_in_join_counter];
 //          [feedback_engine_stop_must_close_transports_total_cancel_insufficient].
@@ -381,7 +381,7 @@ static std::vector<std::byte> make_peer_heartbeat(std::string_view begin_string,
 
 // Inbound TestRequest(35=1) with a TestReqID(112). The session replies with a
 // Heartbeat echoing the 112 — the correct outbound-emit trigger (an inbound
-// Heartbeat is never answered; data-model.md:22). Used to drive the live-write
+// Heartbeat is never answered; data-model.md's Active-row Heartbeat cell). Used to drive the live-write
 // path that the retired Heartbeat-echo used to drive.
 static std::vector<std::byte> make_peer_test_request(std::string_view begin_string,
                                                      std::uint32_t seq, std::string_view sender,
@@ -547,7 +547,7 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
 //     (both Heartbeat replies must have started a write — the second proves it
 //     was genuinely queued behind the first and not dropped).
 //
-// [FQ-A D-6 F1; transport.hpp:47-50; gate-b/r2; gate-b/r1]
+// [FQ-A D-6 F1; transport.hpp's ≤1-in-flight contract; gate-b/r2; gate-b/r1]
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) {
     asio::io_context ioc;

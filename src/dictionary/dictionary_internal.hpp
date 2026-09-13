@@ -119,7 +119,7 @@ struct GroupCtxDelim {
 // (xml_loader) and the lookup side (`group_ctx_delimiter_impl`) go through it,
 // so the depth clamp cannot drift between them. The clamp mirrors
 // `make_group_ctx_key`'s `std::min(parent_path.size(), kMaxGroupContextDepth)`
-// (include/fixpp/dict/table_view.hpp:229-233) — a path deeper than K=16 clamps
+// (include/fixpp/dict/table_view.hpp's `make_group_ctx_key`) — a path deeper than K=16 clamps
 // rather than growing unbounded.
 [[nodiscard]] inline GroupCtxDelim make_group_ctx_delim(std::span<std::uint16_t const> parent_path,
                                                         std::uint16_t no_tag,
@@ -289,7 +289,7 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
 // Gate B r1 F1 (fixpp#261 PR review, 2026-08-13) — the predicate below is
 // STRUCTURAL, matching `as_table_view()` exactly. History: 082 made
 // `as_table_view()` decide group-ness structurally (`group_first_field(t) !=
-// 0`, `dictionary.cpp:489/528/533`) while this sweep still tested
+// 0`, in `Dictionary::as_table_view()`) while this sweep still tested
 // `fr.type == NumInGroup`, so on FIX 4.0/4.1/4.2 — whose `<group>` count
 // fields are legacy `INT`-typed — `as_table_view()` registered 4/7/18
 // contexts this sweep never examined. Closed by widening both
@@ -301,15 +301,15 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
 // groups_[idx].first_field_tag != 0}`, built by each loader from its OWN
 // build-time `groups_` / `group_index_by_no_tag_` — NOT from
 // `dict_metadata_handle::groups_` / `group_first_field_impl()` (the
-// handle-side table), which is not filled until `xml_loader.cpp:1157-1207` /
-// `orchestra_loader.cpp:980-1019`. That re-point was tried and reverted: at
+// handle-side table), which is not filled until `LoaderState::finalize()`'s /
+// `OrchestraLoaderState::finalize()`'s "Emit groups" block. That re-point was tried and reverted: at
 // sweep time the handle-side table is EMPTY, so every tag reads "not a
 // group", the sweep reports no violation, and FR-023 silently stops
 // enforcing — three `LoaderDisposition` tests went RED on that change. The
 // loader-side `groups_` table, by contrast, IS final at sweep time: both
 // loaders finish their first-seen `first_field_tag` projection immediately
-// before calling this sweep (`xml_loader.cpp:1038-1047`,
-// `orchestra_loader.cpp:881-890`), so there was never an ordering problem to
+// before calling this sweep (xml_loader.cpp's 083 T028/T029 projection loop,
+// orchestra_loader.cpp's 083 T030 projection loop), so there was never an ordering problem to
 // solve — only the wrong table being read.
 //
 // The `first_field_tag != 0` filter is load-bearing: dropping it would widen
@@ -597,7 +597,7 @@ public:
 //
 // Declared in this INTERNAL header, deliberately — not in the public
 // `include/fixpp/dict/dictionary.hpp` — mirroring the `fixpp_capi::detail`
-// live-state-counter precedent (`src/capi/capi_internal.hpp:496-503`). No
+// live-state-counter precedent (capi_internal.hpp's `liveness_` member). No
 // installed public surface is touched. `tests/capi/` already includes internal
 // headers directly.
 void bump_as_table_view_call_count() noexcept;
@@ -618,8 +618,8 @@ void reset_as_table_view_call_count() noexcept;
 // reason it exists to catch. RAII-reset by the test.
 //
 #ifdef FIXPP_TEST_HOOKS
-// Gate B r2: declaration gated to the repo's house pattern (src/capi/capi_internal.hpp:45-59,
-// src/session/file_store.cpp:123-125). The DEFINITION stays unconditional in dictionary.cpp —
+// Gate B r2: declaration gated to the repo's house pattern (capi_internal.hpp's
+// FIXPP_TEST_HOOKS-gated seams, file_store.cpp's flush-ran witness counter). The DEFINITION stays unconditional in dictionary.cpp —
 // that is what lets a test TU defining this macro link against the library, which is compiled
 // WITHOUT it. Gating the declaration is what makes a production caller unable to NAME it.
 void set_force_incomplete_group_context_for_testing(bool enable) noexcept;
@@ -627,7 +627,7 @@ void set_force_incomplete_group_context_for_testing(bool enable) noexcept;
 
 // Consulted unconditionally by BOTH loaders' finalize() and therefore NOT gated — it is inert
 // (one relaxed atomic load) unless the gated setter above has been called. Same shape as
-// src/session/engine.cpp:919's unconditional consult of a hook production can never set.
+// engine.cpp's unconditional `test_hook_pre_publish_` consult, which production can never set.
 void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) noexcept;
 
 // ── 083 /simplify (C-1.5): the last two loader-symmetric blocks, shared ──────

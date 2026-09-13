@@ -2,7 +2,7 @@
 // tests/codegen/test_078_builder_inline_all_tus_us3.cpp
 //
 // 078-precompiled-builder-libs Gate B RC#3 [US3]: SAFE-path counter-test for
-// the inline-XOR-link contract (spec.md Edge Case ~line 128; FR-006/FR-007;
+// the inline-XOR-link contract (spec.md's "One-definition-rule at the link/inline boundary" Edge Case; FR-006/FR-007;
 // quickstart.md Scenario 4d). test_078_builder_mixing_us3.cpp force-inlines
 // ONE message (NewOrderSingle) and links a DIFFERENT one (ExecutionReport)
 // -- it never puts the SAME message in both an inline form and a linked form
@@ -34,7 +34,7 @@
 // tools/codegen/fixpp-codegen/emit_builders.cpp and quickstart.md Scenario
 // 4d for the documented inline-XOR-link discipline.
 //
-// Anchors: specs/078-precompiled-builder-libs/spec.md Edge Case (~line 128),
+// Anchors: specs/078-precompiled-builder-libs/spec.md's "One-definition-rule at the link/inline boundary" Edge Case,
 // FR-006/FR-007; quickstart.md Scenario 4d;
 // tests/codegen/test_078_builder_mixing_us3.cpp (mixed-message precedent,
 // does not cover same-message mixing);

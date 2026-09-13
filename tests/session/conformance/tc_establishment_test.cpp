@@ -225,7 +225,7 @@ struct Harness {
 //
 // F8 (Round-A drift): wire transport_send capture; assert Active + outbound 35=A
 // frame with correct 8=cfg.begin_string and 52=mock_clock_now.
-// Anchors: spec.md FR-005 §US2 AC2; data-model.md:19 matrix row; FR-013;
+// Anchors: spec.md FR-005 §US2 AC2; 005's data-model.md matrix header row; FR-013;
 //          opus_pr81_1_triage.md RC#2; contracts/session_role.hpp.
 // ══════════════════════════════════════════════════════════════════════════════
 

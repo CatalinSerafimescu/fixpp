@@ -59,7 +59,7 @@ using namespace fixpp::transport;
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Cell 1 (per_session_strand): async_connect cancelled → transport_connect_cancelled
-// [2h §6.6]:1194; D-17 total cancellation reset; [2h §9 seam #5]
+// [2h §6.6]'s `transport_connect_cancelled` row; D-17 total cancellation reset; [2h §9 seam #5]
 TEST(DISABLED_CancellationPropagation, ConnectCancelledStrand) {
     // REQUIRES: make_asio_tls_transport (T026) + real SslCtxConfig (T027).
     // The test structure:

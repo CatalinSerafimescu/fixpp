@@ -2,7 +2,7 @@
 // include/fixpp/tls/cipher_policy.hpp
 // fixpp::tls::CipherPolicy — compile-time allow-list + runtime predicate.
 //
-// Design anchor: .specify/2g-tls.md v0.4 §4.4 lines 553-604 (verbatim).
+// Design anchor: .specify/2g-tls.md v0.4 §4.4's `CipherPolicy` section (verbatim).
 // Spec anchors: FR-011 (compile-time allow-list, static_assert refusal),
 //               FR-012 (runtime is_allowed constexpr noexcept predicate).
 // Constitution: [const §XII.3] (allowed cipher suites),

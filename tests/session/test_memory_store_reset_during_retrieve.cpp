@@ -12,7 +12,7 @@
 // 0. So a reset()+store() during a visitor suspension overwrote the slab slot
 // a not-yet-visited Entry descriptor points at → the visitor copied the NEW
 // frame's bytes under the OLD seqnum, silently. This violates the
-// message_store.hpp:113-116 contract ("mid-traversal mutation is detected …
+// MessageStore::retrieve's contract ("mid-traversal mutation is detected …
 // without UB"). Bounds-safe (fixed slab) — a data-integrity hole, not a UAF.
 //
 // Fix (mirrors FileStore T015): a per-instance generation_ epoch, bumped under

@@ -1,6 +1,6 @@
 # neg_cert_source_kind_not_string.toml
 # [cert_source] table is present but kind is not a string (integer) — triggers
-# missing_required at "cert_source.kind" (lines 212-217 selector_resolver.cpp).
+# missing_required at "cert_source.kind" (resolve_engine_cert_source's not-a-string arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

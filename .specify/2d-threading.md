@@ -340,7 +340,7 @@ Notes:
 // helpers. Per [const §VII] every plugin interface ships a mock + test seam.
 //
 // CONSTITUTIONAL CONSTRAINT: This header includes <asio/awaitable.hpp> via
-// the Clock base. Per [const §XI.3] line 146, plain std::mutex is BANNED in
+// the Clock base. Per [const §XI.3], plain std::mutex is BANNED in
 // any header that includes asio::awaitable<...>. Therefore mock_clock's
 // mutable state lives behind a pimpl in src/core/test/mock_clock.cpp; the
 // header declares only the public surface and an opaque impl pointer.
@@ -1516,7 +1516,7 @@ Engineering-judgment decisions whose primary driver is engineering judgment rath
 **Sibling-doc tensions surfaced by the convergence pass (input to round 2 if it happens):**
 
 1. **`[arch §5.4]` Trace context wording** says: "**Storage:** `SessionConfig.trace_context_provider`, called once at session open, returns a `fixpp::otel::trace_context` stored on the session strand." Per C-P2-4 / Opus confirm, 2d v0.2 replaces the callable with a value-typed `initial_trace_context` field. The arch §5.4 wording is now stale; the orchestrator surfaces this to the user as a one-line architecture amendment (see Appendix D below). This is the only sibling-doc text that the v0.2 convergence directly touched.
-2. **`[arch §4.4]` Configuration shape claim** at line 240: "`fixpp::session::SessionConfig` — frozen config struct: `SecurityProfile`, dictionary, `MessageStore` factory, executor opt-out, lock policy, recovery thresholds, dialect overlay, tap consumer, log/otel hooks." The 2d v0.2 surface adds `executor_override`, `already_serialized_executor`, `clock_override`, `initial_trace_context` to that enumeration; all are additive, none remove a v0.2-arch field. Editorial only — orchestrator may fold into the Appendix D amendment if convenient.
+2. **`[arch §4.4]` Configuration shape claim** (the `SessionConfig` bullet): "`fixpp::session::SessionConfig` — frozen config struct: `SecurityProfile`, dictionary, `MessageStore` factory, executor opt-out, lock policy, recovery thresholds, dialect overlay, tap consumer, log/otel hooks." The 2d v0.2 surface adds `executor_override`, `already_serialized_executor`, `clock_override`, `initial_trace_context` to that enumeration; all are additive, none remove a v0.2-arch field. Editorial only — orchestrator may fold into the Appendix D amendment if convenient.
 
 ### Round 2: v0.2 → v0.3 (2026-05-08)
 

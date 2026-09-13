@@ -21,7 +21,7 @@
 //     T008_EquivalenceFileSink   — static fixture (logger_happy.toml, file sink)
 //     T008_DuplicateFileSinkFanout — runtime TOML, two file sinks to distinct
 //                                    directories (positive duplicate-sink-kind
-//                                    cell, spec Edge Cases line 102)
+//                                    cell, spec Edge Cases: "same sink kind twice")
 //   OTLP sub-cells (guarded under #ifdef FIXPP_CONFIG_HAS_OTLP):
 //     T008_EquivalenceOtlpSink   — runtime TOML, file + OTLP sink with a
 //                                  test_exporter seam to count Export() calls
@@ -210,7 +210,7 @@ TEST(LoadLogger, T008_EquivalenceFileSink) {
 
 // ── T008_DuplicateFileSinkFanout ─────────────────────────────────────────────
 //
-// Positive duplicate-sink-kind cell (spec Edge Cases line 102):
+// Positive duplicate-sink-kind cell (spec Edge Cases: "same sink kind twice"):
 // Two file sinks to DISTINCT directories are a valid fan-out (not an error).
 // Both sinks receive the same log record after emit+shutdown.
 //
@@ -283,7 +283,7 @@ TEST(LoadLogger, T008_DuplicateFileSinkFanout) {
 
     ASSERT_TRUE(result.has_value())
         << "Two file sinks to distinct directories must load successfully "
-           "(positive duplicate-sink-kind cell, spec Edge Cases line 102); "
+           "(positive duplicate-sink-kind cell, spec Edge Cases: 'same sink kind twice'); "
            "diagnostics:\n"
         << (result.has_value() ? "" : diag_string(result.error()));
 
@@ -333,7 +333,7 @@ TEST(LoadLogger, T008_DuplicateFileSinkFanout) {
 // defined), test a [logger] with a file sink + an OTLP sink (ordered).
 //
 // Observable OTLP equivalence:
-//   OtlpLogSinkConfig has a test_exporter seam (otlp_log_sink.hpp:64).
+//   OtlpLogSinkConfig has a test_exporter seam (OtlpLogSinkConfig::test_exporter).
 //   However, the test_exporter is injected via C++ code — it cannot be set
 //   from TOML.  The TOML-resolved OTLP sink uses the REAL HTTP exporter.
 //   Therefore OTLP behavioural equivalence is verified at the FILE sink level
@@ -940,7 +940,7 @@ TEST(LoadLogger, T026_SyslogFacilitySuccessWhiteBox) {
 //   • max_keep_count — pruning settles archived count at EXACTLY max_keep_count
 //                       once rotations exceed it; the default (8) would leave ~8,
 //                       not 2.  Same-second archive collisions are counter-
-//                       disambiguated (file_sink.cpp:296), so the count is exact.
+//                       disambiguated (FileSink::rotate's collision counter), so the count is exact.
 //
 // This complements the white-box scalar cells (T026_LoggerLevelScalars,
 // T026_SyslogFacility) which witness the logger-level cfg fields directly; the

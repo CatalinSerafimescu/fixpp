@@ -41,7 +41,7 @@
 //   (a) EXPECT_FALSE(r.has_value()) — typed fail-closed error, and
 //   (b) `out` is byte-for-byte unchanged from a 0xAB sentinel prefill
 //       (INV-4 atomicity: wire::body_builder::commit() copies into `out`
-//       only on full success — src/wire/body_builder.cpp:391-403 — so ANY
+//       only on full success — so ANY
 //       failure, at any exemplar validation site or inside body_builder
 //       itself, must leave `out` untouched).
 //
@@ -51,14 +51,14 @@
 // (cited per TEST below):
 //   - is_valid_side (business_messages.cpp is_valid_side) is called by
 //     build_new_order_single (D) and build_execution_report (8), AND by
-//     build_new_order_list (E, business_messages.cpp:279) and
-//     build_allocation_report (AS, business_messages.cpp:335) — 9 has no
+//     build_new_order_list (E, its per-order side check) and
+//     build_allocation_report (AS, its side check) — 9 has no
 //     side field at all, so it is not exercised. All four side-bearing
 //     exemplars (D/8/E/AS) hand-validate the '1'/'2' domain before the
 //     value ever reaches body_builder's printable/non-control guard; an
 //     out-of-range-but-printable side char (e.g. '9') is rejected on every
 //     one of them — see FailClosed_OutOfRangeSide below.
-//   - is_valid_utc_timestamp (business_messages.cpp, called at line 139) is
+//   - is_valid_utc_timestamp (business_messages.cpp) is
 //     used ONLY by build_new_order_single — no other exemplar has a
 //     UTCTimestamp-typed field. FailClosed_MalformedTimestamp therefore
 //     exercises D only.
@@ -103,7 +103,7 @@ decimal_t make_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
 
 // The invalid-mantissa sentinel (fixpp::core::pod_decimal_invalid): the only
 // value that trips decimal_traits<pod_decimal>::to_chars's AC-S1 sentinel
-// check (src/core/decimal.cpp:143-145), returning decimal_invalid_input.
+// check, returning decimal_invalid_input.
 decimal_t make_invalid_decimal() { return decimal_t{fixpp::core::pod_decimal_invalid}; }
 
 // INV-4 atomicity: assert every byte of `buf` is still the 0xAB sentinel.
@@ -150,7 +150,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString) {
         << "8: empty order_id must fail-closed";
     assert_unchanged(buf, "8 empty order_id");
 
-    // 9: empty order_id (the FIRST required-string check, business_messages.cpp:297).
+    // 9: empty order_id (build_order_cancel_reject's first required-string check).
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_order_cancel_reject(std::span<std::byte>{buf}, "", "CLORD1",
                                                              "CLORD0", '8', '1', 0)
@@ -159,7 +159,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString) {
     assert_unchanged(buf, "9 empty order_id");
 
     // E: empty list_id. orders left empty too (list_id is checked first, so
-    // this alone determines the outcome — business_messages.cpp:225).
+    // this alone determines the outcome — build_new_order_list's list_id.empty() guard).
     buf.fill(kSentinel);
     NewOrderListParams e_params{"", 0, 0, std::span<const NewOrderListOrder>{}};
     EXPECT_FALSE(fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_params).has_value())
@@ -167,7 +167,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString) {
     assert_unchanged(buf, "E empty list_id");
 
     // AS: empty alloc_report_id (the FIRST required-string check,
-    // business_messages.cpp:320). trade_date/symbol left non-empty so this
+    // build_allocation_report's alloc_report_id.empty() guard). trade_date/symbol left non-empty so this
     // check alone determines the outcome.
     buf.fill(kSentinel);
     AllocationReportParams as_params{
@@ -182,8 +182,8 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString) {
 // FailClosed_EmptyRequiredString above exercises each message's FIRST required
 // check (which short-circuits). This pins the SUBSEQUENT guards, each reached
 // only when every earlier required field is valid: E `orders.empty()`
-// (business_messages.cpp:227-228), 9 `orig_cl_ord_id` (:302-303), AS
-// `trade_date` (:325-326) and AS `symbol` (:327-328).
+// (build_new_order_list's orders.empty() guard), 9 `orig_cl_ord_id` (its guard), AS
+// `trade_date` (its guard) and AS `symbol` (its guard).
 TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_LaterFields) {
     std::pmr::monotonic_buffer_resource arena{4096};
     auto qty = make_decimal("10", &arena);
@@ -337,11 +337,11 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_PerEntry) {
 
 // ── AC-2 case 2: control byte / SOH in a value ────────────────────────────────
 // The shared guard (is_clean_field_value) lives in wire::body_builder::
-// append_string_field (src/wire/body_builder.cpp:72-74, invoked from field()/
-// set_string() — src/wire/body_builder.cpp:172-178,295-297), so EVERY exemplar
+// append_string_field (in body_builder.cpp, invoked from field()/
+// set_string() — both routed through the same guard), so EVERY exemplar
 // that emits the tainted field through body_builder rejects it, regardless of
 // whether the exemplar ALSO hand-validates it (D/8 hand-validate too —
-// business_messages.cpp:129-132,178-183 — already witnessed extensively in
+// business_messages.cpp's is_clean_field_value hand-validation — already witnessed extensively in
 // test_business_messages_build.cpp; 9/E/AS have no hand-validation of their
 // own and rely entirely on this shared body_builder guard, which is the new
 // coverage this file adds).
@@ -397,10 +397,10 @@ TEST(ExemplarBuildFailClosed, FailClosed_SohInValue) {
 }
 
 // ── AC-2 case 3: out-of-range char / side ─────────────────────────────────────
-// is_valid_side (business_messages.cpp:73) is called by build_new_order_single
+// is_valid_side (business_messages.cpp) is called by build_new_order_single
 // (D), build_execution_report (8), build_new_order_list (E,
-// business_messages.cpp:279), and build_allocation_report (AS,
-// business_messages.cpp:335) — 9 has no side field, so it is not exercised.
+// its order.side check), and build_allocation_report (AS,
+// its side check) — 9 has no side field, so it is not exercised.
 // A printable-but-out-of-range side (e.g. '9') is rejected on all four
 // side-bearing exemplars: is_valid_side runs before the value ever reaches
 // body_builder's printable/non-control guard.
@@ -452,8 +452,8 @@ TEST(ExemplarBuildFailClosed, FailClosed_OutOfRangeSide) {
 
 // ── AC-2 case 4: unformattable / invalid decimal ──────────────────────────────
 // decimal_traits<pod_decimal>::to_chars's AC-S1 sentinel check
-// (src/core/decimal.cpp:143-145) is reached from body_builder::
-// append_decimal_field (src/wire/body_builder.cpp:150-168), invoked by every
+// is reached from body_builder::
+// append_decimal_field (body_builder.cpp), invoked by every
 // exemplar's field(tag, decimal_t)/set_decimal() calls: D (order_qty/price),
 // 8 (leaves_qty/cum_qty/avg_px), E (order.order_qty), AS (quantity/avg_px).
 // 9 has no decimal-typed field — not exercised.
@@ -474,7 +474,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_UnformattableDecimal) {
     assert_unchanged(buf, "D invalid order_qty");
 
     // 8: avg_px = invalid sentinel (the first field() call in build_execution_
-    // report is field(6, avg_px) — business_messages.cpp:198).
+    // report is field(6, avg_px)).
     buf.fill(kSentinel);
     auto er = fixpp::session::build_execution_report(std::span<std::byte>{buf}, "ORD1", "EXEC1", 'F',
                                                        '2', "MSFT", '1', qty, qty, invalid);
@@ -491,7 +491,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_UnformattableDecimal) {
     assert_unchanged(buf, "E invalid order_qty");
 
     // AS: avg_px = invalid sentinel (the first field() call in
-    // build_allocation_report is field(6, avg_px) — business_messages.cpp:329).
+    // build_allocation_report is field(6, avg_px)).
     buf.fill(kSentinel);
     AllocationReportParams as_params{"ALLOCRPT1",         '0', 9,     0,   0,   '1',
                                       qty,                 invalid, "20240101", "MSFT",
@@ -503,8 +503,8 @@ TEST(ExemplarBuildFailClosed, FailClosed_UnformattableDecimal) {
 }
 
 // ── AC-2 case 5: malformed UTCTimestamp (FR-008) ──────────────────────────────
-// is_valid_utc_timestamp (business_messages.cpp:78) is called ONLY from
-// build_new_order_single (line 139) — the sole exemplar with a
+// is_valid_utc_timestamp (business_messages.cpp) is called ONLY from
+// build_new_order_single's transact_time check — the sole exemplar with a
 // UTCTimestamp-typed field. Not reachable via 8/9/E/AS.
 TEST(ExemplarBuildFailClosed, FailClosed_MalformedTimestamp) {
     std::pmr::monotonic_buffer_resource arena{4096};
@@ -532,7 +532,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_MalformedTimestamp) {
 
 // ── AC-2 case 6: undersized output buffer (INV-4) ─────────────────────────────
 // out.size() < total is the LAST check in wire::body_builder::commit()
-// (src/wire/body_builder.cpp:389) — reached identically by all 5 exemplars,
+// (body_builder::commit()'s out.size() check) — reached identically by all 5 exemplars,
 // each of which routes its final assembly through bb.commit(out).
 TEST(ExemplarBuildFailClosed, FailClosed_UndersizedBuffer_Untouched) {
     std::pmr::monotonic_buffer_resource arena{4096};

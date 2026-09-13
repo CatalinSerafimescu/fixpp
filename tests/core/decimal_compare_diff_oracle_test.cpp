@@ -201,7 +201,7 @@ void expect_order(pod_decimal const& a, pod_decimal const& b, std::strong_orderi
 // after every mutant; final restored state re-verified byte-identical and
 // GREEN before this comment was written — see the T009 implementer report).
 // Each row records whether >=1 witness in this file FAILED (killed) and, for
-// mutants that read src/core/decimal.cpp:293 kPow10[19] (size 19, valid
+// mutants that read src/core/decimal.cpp's kPow10[19] (size 19, valid
 // indices [0,18]) out of bounds, whether the OOB was ALSO confirmed via
 // build/linux-clang-asan (global-buffer-overflow) in addition to (or instead
 // of) a clean GoogleTest assertion failure under build/linux-clang-debug.
@@ -209,12 +209,12 @@ void expect_order(pod_decimal const& a, pod_decimal const& b, std::strong_orderi
 // | # | Mutant (edit)                                              | Outcome | Detection mode (debug / asan)                                    |
 // |---|--------------------------------------------------------------|---------|-------------------------------------------------------------------|
 // | 1 | drop `hi != 0`: `(hi != 0 || lo > other)` -> `(lo > other)`   | KILLED  | clean assert-fail: CorpusMatchesReference, WitnessHiLimbCrosses2Pow64, PropertyTransitivity. No OOB (in-bounds edit). |
-// | 2 | guard `k >= 19` -> `k >= 21`                                  | KILLED  | debug: clean assert-fail (CorpusMatchesReference, PropertyTransitivity) — WitnessKBoundary itself did NOT fail (its k=20 cell's `mag_scaled=1` happened to still compare `greater` against the OOB-read `kPow10[20]` garbage value — a "lucky" non-discriminating cell for THIS guard value). asan: CONFIRMED global-buffer-overflow at decimal.cpp:416 (kPow10[19]/[20] OOB read, k in [19,20] now falls to the multiply arm). |
-// | 3 | guard `k >= 19` -> `k >= 40`                                  | KILLED  | debug: clean assert-fail (CorpusMatchesReference, PropertyTransitivity). asan: CONFIRMED global-buffer-overflow at decimal.cpp:416 (k in [19,39] falls to the multiply arm, kPow10[k] OOB for k>18). |
-// | 4 | `a_scales = ae > be` -> `ae < be`                             | KILLED  | debug: clean assert-fail (CorpusMatchesReference, WitnessCanonicalizationEquality, WitnessHiLimbCrosses2Pow64, WitnessKBoundary, WitnessExtremes, WitnessOutOfDomainExponents, PropertyTransitivity — 7/9 witnesses). asan: CONFIRMED global-buffer-overflow at decimal.cpp:416 (k becomes negative for every diff-exponent pair -> kPow10[negative index], OOB before the array start). |
+// | 2 | guard `k >= 19` -> `k >= 21`                                  | KILLED  | debug: clean assert-fail (CorpusMatchesReference, PropertyTransitivity) — WitnessKBoundary itself did NOT fail (its k=20 cell's `mag_scaled=1` happened to still compare `greater` against the OOB-read `kPow10[20]` garbage value — a "lucky" non-discriminating cell for THIS guard value). asan: CONFIRMED global-buffer-overflow at decimal.cpp's compare() kPow10[k] read (kPow10[19]/[20] OOB read, k in [19,20] now falls to the multiply arm). |
+// | 3 | guard `k >= 19` -> `k >= 40`                                  | KILLED  | debug: clean assert-fail (CorpusMatchesReference, PropertyTransitivity). asan: CONFIRMED global-buffer-overflow at decimal.cpp's compare() kPow10[k] read (k in [19,39] falls to the multiply arm, kPow10[k] OOB for k>18). |
+// | 4 | `a_scales = ae > be` -> `ae < be`                             | KILLED  | debug: clean assert-fail (CorpusMatchesReference, WitnessCanonicalizationEquality, WitnessHiLimbCrosses2Pow64, WitnessKBoundary, WitnessExtremes, WitnessOutOfDomainExponents, PropertyTransitivity — 7/9 witnesses). asan: CONFIRMED global-buffer-overflow at decimal.cpp's compare() kPow10[k] read (k becomes negative for every diff-exponent pair -> kPow10[negative index], OOB before the array start). |
 // | 5 | `kPow10[k]` -> `kPow10[k - 1]` (stays in [0,17], no OOB since k>=1 in the else branch) | KILLED | clean assert-fail: CorpusMatchesReference, WitnessCanonicalizationEquality. No OOB (in-bounds edit). |
 // | 6 | end sign-flip: `return a_neg ? invert(mag_cmp) : mag_cmp;` -> `return mag_cmp;` | KILLED | clean assert-fail: CorpusMatchesReference, WitnessHiLimbCrosses2Pow64, WitnessKBoundary, WitnessExtremes (the named target witness), WitnessOutOfDomainExponents, PropertyTransitivity. No OOB (in-bounds edit). |
-// | 7 | guard `k >= 19` -> `k >= 20` (tasks.md/R1's "accepted no-kill")| **KILLED — result-equivalent but OOB read at kPow10[19] (memory-safety)** | debug: clean assert-fail (CorpusMatchesReference, PropertyTransitivity) — WitnessKBoundary's new k=19 cell is NOT a killer here (its comparison reads uninitialized/garbage past `kPow10`'s end under mutant 7, a UB coin-flip; see note below). asan: CONFIRMED `global-buffer-overflow` at decimal.cpp:416 (`kPow10[19]`, one past the last valid index 18) — see re-measurement note below. |
+// | 7 | guard `k >= 19` -> `k >= 20` (tasks.md/R1's "accepted no-kill")| **KILLED — result-equivalent but OOB read at kPow10[19] (memory-safety)** | debug: clean assert-fail (CorpusMatchesReference, PropertyTransitivity) — WitnessKBoundary's new k=19 cell is NOT a killer here (its comparison reads uninitialized/garbage past `kPow10`'s end under mutant 7, a UB coin-flip; see note below). asan: CONFIRMED `global-buffer-overflow` at decimal.cpp's compare() kPow10[k] read (`kPow10[19]`, one past the last valid index 18) — see re-measurement note below. |
 //
 // **Mutant 7 finding, corrected (follow-up to the original T009 pass — the
 // prior version of this note mis-stated the mechanism as "wrong answers";
@@ -235,7 +235,7 @@ void expect_order(pod_decimal const& a, pod_decimal const& b, std::strong_orderi
 // not by a wrong-answer assertion — it is killed by the ASan lane detecting
 // the OOB read. (The original T009 pass additionally flagged that the
 // directed WitnessKBoundary matrix had no k=19 cell, relying instead on the
-// seed=42 corpus/property tests, whose fixed exponent pool at line ~216
+// seed=42 corpus/property tests, whose fixed exponent pool (make_value_pool)
 // happens to include both `-19` and `0`, to kill this mutant on the debug
 // lane. That gap in DIRECTED coverage is now closed: WitnessKBoundary has a
 // dedicated k=19 cell above, asserting the CORRECT ordering at the boundary
@@ -257,13 +257,13 @@ void expect_order(pod_decimal const& a, pod_decimal const& b, std::strong_orderi
 //   0x5e457686e018 at pc 0x5e457676fae8 bp 0x7fff06ab6c90 sp 0x7fff06ab6c88
 //   READ of size 8 at 0x5e457686e018 thread T0
 //     #0 ... fixpp::core::decimal_traits<pod_decimal>::compare(pod_decimal
-//        const&, pod_decimal const&) src/core/decimal.cpp:416:59
+//        const&, pod_decimal const&) src/core/decimal.cpp
 //   ...
 //   0x5e457686e018 is located 0 bytes after global variable
 //   'fixpp::core::kPow10' defined in
-//   '.../src/core/decimal.cpp:293' (0x5e457686df80) of size 152
+//   '.../src/core/decimal.cpp' (0x5e457686df80) of size 152
 //   SUMMARY: AddressSanitizer: global-buffer-overflow
-//   src/core/decimal.cpp:416:59 in
+//   src/core/decimal.cpp in
 //   fixpp::core::decimal_traits<pod_decimal>::compare(...)
 //
 // 152 bytes = 19 entries * 8 bytes/uint64_t — i.e. the OOB read lands

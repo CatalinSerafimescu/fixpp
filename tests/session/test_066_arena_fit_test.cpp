@@ -5,7 +5,7 @@
 //
 // FR-009: dict-backed nested reads build sub-`OffsetTable`s from the stack
 // arena — a NEW cost on both `parse_and_dispatch_` arenas
-// (src/session/session.cpp:293-294). This file witnesses:
+// (its kAdminParseArena/kInboundParseArena constants). This file witnesses:
 //
 //   1. AppMessageFitsInboundParseArena  — a representative group-bearing APP
 //      message parses+reads within `kInboundParseArena=16384`, via REAL
@@ -15,11 +15,11 @@
 //      spill; dispatch SUCCEEDING is itself the "fits, no heap fallback"
 //      witness).
 //   2. AdminGroupMessageFitsAdminArena  — a group-bearing ADMIN message
-//      (Logon `NoMsgTypes(384)`, dictionaries/FIX44.xml:286-289 — a REAL
+//      (Logon `NoMsgTypes(384)`, dictionaries/FIX44.xml's NoMsgTypes group — a REAL
 //      dict-registered admin group) parses+reads within the tighter
 //      `kAdminParseArena=8192`. `kAdminParseArena` is exercised in production
 //      ONLY by the private `fire_to_admin_` (outbound-emit toAdmin) call
-//      site (session.cpp:344-354), so this probe mirrors that exact
+//      site (fire_to_admin_'s parse_and_dispatch_ call), so this probe mirrors that exact
 //      construction directly (stack array + `monotonic_buffer_resource` +
 //      `Parser<Index>{tv}`) rather than going through `Session`.
 //   3. NearCapHeadroomProbe             — a large-but-realistic group-bearing
@@ -28,9 +28,9 @@
 //      boundary search — see the test body comment).
 //   4. PathologicalDeepNestingFailsClosed — a 17-level nested repeating-group
 //      chain (one level beyond `kMaxGroupDepth=16`,
-//      include/fixpp/wire/offset_table.hpp:259) fails CLOSED:
+//      offset_table.hpp's kMaxGroupDepth constant) fails CLOSED:
 //      `OffsetTable::group()` returns `wire_group_too_large`
-//      (src/wire/offset_table.cpp:433-434/478-482/541-543), never an
+//      (consume_group_extent's depth guard and its wire_group_too_large returns), never an
 //      over-read/corrupt/partial result. Bracketed (per FR-009's "never
 //      over-read" concern, a shared post-state like "empty span" would be a
 //      non-discriminating witness — 16-deep succeeds with a real
@@ -40,7 +40,7 @@
 //      produce).
 //
 // Anchors: tasks.md T014; spec.md FR-009/SC-004; contracts/inbound-parse.md
-// C5/C6; src/session/session.cpp:271-330 (parse_and_dispatch_, the
+// C5/C6; parse_and_dispatch_ (the
 // construction mirrored by probes 2-4); src/wire/offset_table.cpp
 // (consume_group_extent, group()).
 
@@ -79,7 +79,7 @@ using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 using fixpp::wire::pmr_carry_buffer;
 
-// Mirrors src/session/session.cpp:293-294 exactly.
+// Mirrors parse_and_dispatch_'s kAdminParseArena/kInboundParseArena constants exactly.
 constexpr std::size_t kAdminParseArena = 8192;
 constexpr std::size_t kInboundParseArena = 16384;
 
@@ -95,7 +95,7 @@ bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
 }
 
 // Mirrors Session::parse_and_dispatch_'s stack-arena construction
-// (session.cpp:298-322) so probes 2-4 measure the exact production shape
+// (mirrored in MirroredParse below) so probes 2-4 measure the exact production shape
 // without needing access to the private method / a full Session.
 struct MirroredParse {
     std::array<std::byte, kInboundParseArena> pa_buf{};
@@ -148,7 +148,7 @@ TEST(ArenaFit, AppMessageFitsInboundParseArena) {
 
 // ── 2. Admin-path fit: mirrored construction, kAdminParseArena=8192 ─────────
 // A group-bearing Logon(35=A) carrying NoMsgTypes(384) x2 (RefMsgType(372) +
-// MsgDirection(385) members, dictionaries/FIX44.xml:286-289).
+// MsgDirection(385) members, dictionaries/FIX44.xml's NoMsgTypes group).
 TEST(ArenaFit, AdminGroupMessageFitsAdminArena) {
     auto dict = fixpp::test_support::make_fix44_dictionary();
     auto tv = dict->as_table_view();
@@ -248,9 +248,9 @@ TEST(ArenaFit, NearCapHeadroomProbe) {
 // after its delimiter to trigger the nested-descent check one level deeper.
 //
 // Recursion depth: T_0's own consume_group_extent runs at depth 0; recursing
-// into T_k runs at depth k. `kMaxGroupDepth=16` (offset_table.hpp:259) is
+// into T_k runs at depth k. `kMaxGroupDepth=16` (offset_table.hpp's constant) is
 // checked as the FIRST line of consume_group_extent
-// (offset_table.cpp:433-434), so building a chain of n=17 groups (T_0..T_16)
+// (consume_group_extent's depth guard), so building a chain of n=17 groups (T_0..T_16)
 // makes the recursion into T_16 run at depth=16 -> immediate overflow.
 // n=16 (T_0..T_15) never reaches depth 16 -> succeeds. This n/n-1 bracket is
 // the discriminating check (a shared post-state like "empty result" would

@@ -581,7 +581,7 @@ TEST(MessageWrite, TombstoneAfterEngineDestroyWithoutClose) {
     EXPECT_EQ(fixpp_msg_set_string(msg, 112, "before", 6), FIXPP_ERR_OK);
 
     // Destroy the engine WITHOUT prior session_close.
-    // engine.cpp:290-294 loops sessions_ and resets each liveness_ BEFORE state_.reset().
+    // fixpp_engine_destroy's sessions_ loop resets each liveness_ BEFORE state_.reset().
     // So the token expires BEFORE the session_arena_ is freed.
     fixpp_engine_destroy(eng);
     eng = nullptr;  // engine is gone; session handle is now a retained dead shell
@@ -891,8 +891,8 @@ TEST(MessageWrite, CreateOutboundAbsentMsgTypeReturnsDictConfig) {
 }
 
 // SC-001 live peer-receive: create_outbound("D") → set_string → commit → send →
-// peer recv callback fires → confirmed (spec.md:51 "confirms the peer receives a
-// well-formed message").
+// peer recv callback fires → confirmed (051-c-abi-message-accessors spec.md,
+// US2 Independent Test: "confirms the peer receives a well-formed message").
 //
 // Uses a richer session dict (kFix42WithNewOrderSingleXml) that includes "D"
 // (NewOrderSingle, msgcat=app) so:
@@ -1645,8 +1645,8 @@ TEST(MessageWrite, GroupEndNullGuards) {
 
 // ── Clone success path ────────────────────────────────────────────────────────
 //
-// fixpp_msg_clone on a real inbound handle: exercises lines 368–435 of
-// message_write.cpp (the entire try{} block that deep-copies the frame,
+// fixpp_msg_clone on a real inbound handle: exercises the entire
+// try{} block in message_write.cpp (deep-copies the frame,
 // builds a MessageView over it, and wraps it in a new fixpp_msg shell).
 //
 // Discriminating independence test (per advisor): after clone, we scribble
@@ -1757,7 +1757,7 @@ TEST(MessageWrite, EntryGroupBeginNullBuilderOut) {
 // ── Branch coverage gaps ──────────────────────────────────────────────────────
 
 // set_string / set_bytes / set_int / set_double / set_decimal / remove_tag with
-// msg == nullptr: covers lines 440/460/477/499/520/614 TRUE arms.
+// msg == nullptr: covers each setter's leading null-msg guard TRUE arms.
 // (These differ from SetOnInboundHandleIsInvalidHandle which tests a LIVE inbound
 // handle — not null msg.)
 TEST(MessageWrite, SetAllNullMsgReturnsNullHandle) {
@@ -1769,7 +1769,7 @@ TEST(MessageWrite, SetAllNullMsgReturnsNullHandle) {
     EXPECT_EQ(fixpp_msg_set_decimal(nullptr, 112, dec), FIXPP_ERR_NULL_HANDLE);
     EXPECT_EQ(fixpp_msg_remove_tag(nullptr, 112), FIXPP_ERR_NULL_HANDLE);
 
-    // set_string with valid msg but null value: covers line 441 TRUE arm.
+    // set_string with valid msg but null value: covers its value==nullptr guard.
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(make_engine(&eng), FIXPP_ERR_OK);
     fixpp_session_config_t* sc = make_session_cfg("FIXSRV", "FIXCLI", FIXPP_ROLE_ACCEPTOR);
@@ -1783,7 +1783,7 @@ TEST(MessageWrite, SetAllNullMsgReturnsNullHandle) {
     fixpp_engine_destroy(eng);
 }
 
-// check_outbound_msg: dead-handle path (tag_ == DEAD) → covers line 116 TRUE arm.
+// check_outbound_msg: dead-handle path → covers its tag_ == DEAD TRUE arm.
 // The SetOnInboundHandleIsInvalidHandle test exercises the INBOUND flavour arm but
 // not the DEAD tag arm.
 TEST(MessageWrite, DeadHandleSetStringReturnsInvalidHandle) {
@@ -1793,30 +1793,30 @@ TEST(MessageWrite, DeadHandleSetStringReturnsInvalidHandle) {
     EXPECT_EQ(fixpp_msg_set_string(h, 112, "v", 1), FIXPP_ERR_INVALID_HANDLE);
 }
 
-// fixpp_msg_clone null src / null clone_out / dead handle: covers lines 355-359.
+// fixpp_msg_clone null src / null clone_out / dead handle: covers all three guards.
 TEST(MessageWrite, CloneNullAndDeadHandleErrors) {
-    // Null clone_out: covers line 356 second '||' operand (clone_out == nullptr)
+    // Null clone_out: covers the clone_out == nullptr '||' operand
     const fixpp_msg_t* valid_src = nullptr;
     {
         // We need a valid inbound-flavoured handle for valid_src; use a stack msg.
         fixpp_msg shell{};
         shell.tag_ = FIXPP_HANDLE_TAG_MSG;
         shell.flavour = FixppMsgFlavour::inbound;
-        shell.view = nullptr;  // view is null — but we only reach line 356 checks
+        shell.view = nullptr;  // view is null — but we only reach the null-arg checks
         valid_src = reinterpret_cast<const fixpp_msg_t*>(&shell);
 
-        // clone_out == nullptr: triggers line 356 branch (clone_out nullptr)
+        // clone_out == nullptr: triggers the clone_out nullptr branch
         EXPECT_EQ(fixpp_msg_clone(valid_src, nullptr), FIXPP_ERR_NULL_HANDLE);
     }
 
-    // Null src: covers line 356 first '||' operand (src == nullptr)
+    // Null src: covers the src == nullptr '||' operand
     {
         fixpp_msg_t* co = nullptr;
         EXPECT_EQ(fixpp_msg_clone(nullptr, &co), FIXPP_ERR_NULL_HANDLE);
         EXPECT_EQ(co, nullptr);
     }
 
-    // Dead handle: covers line 359 (tag_ == DEAD)
+    // Dead handle: covers the tag_ == DEAD branch
     {
         fixpp_msg dead{};
         dead.tag_ = FIXPP_HANDLE_TAG_DEAD;
@@ -1828,7 +1828,7 @@ TEST(MessageWrite, CloneNullAndDeadHandleErrors) {
 }
 
 // create_outbound on a CLOSED session → INVALID_HANDLE.
-// Covers line 239 branch 0 (sess->valid.load() == false after close).
+// Covers fixpp_msg_create_outbound's sess->valid.load() == false branch.
 TEST(MessageWrite, CreateOutboundClosedSessionReturnsInvalid) {
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(make_engine(&eng), FIXPP_ERR_OK);
@@ -1849,7 +1849,7 @@ TEST(MessageWrite, CreateOutboundClosedSessionReturnsInvalid) {
     fixpp_engine_destroy(eng);
 }
 
-// group_end: check_outbound_msg fails → covers line 817 TRUE arm.
+// group_end: check_outbound_msg fails → covers fixpp_msg_group_end's leading guard.
 // (Exercises the path where the msg becomes invalid while the builder is open.)
 TEST(MessageWrite, GroupEndOnDeadMsgInvalid) {
     GroupFixture f;
@@ -1867,7 +1867,7 @@ TEST(MessageWrite, GroupEndOnDeadMsgInvalid) {
     EXPECT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
 }
 
-// group_end: b->msg != h (builder belongs to another msg) → covers line 820 TRUE arm.
+// group_end: b->msg != h (builder belongs to another msg) → covers that guard's TRUE arm.
 TEST(MessageWrite, GroupEndBuilderWrongMsg) {
     GroupFixture f1;
     GroupFixture f2;
@@ -1886,7 +1886,7 @@ TEST(MessageWrite, GroupEndBuilderWrongMsg) {
 }
 
 // entry_group_begin: framing tag → FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN.
-// Covers line 794 TRUE arm (distinct from GroupBeginFramingTagForbidden which
+// Covers its is_framing_tag(group_tag) TRUE arm (distinct from GroupBeginFramingTagForbidden which
 // tests fixpp_msg_group_begin, not fixpp_entry_group_begin).
 TEST(MessageWriteGroup, EntryGroupBeginFramingTagForbidden) {
     GroupFixture f;
@@ -1905,7 +1905,7 @@ TEST(MessageWriteGroup, EntryGroupBeginFramingTagForbidden) {
 }
 
 // entry_group_begin: non-group tag (scalar) → TYPE_MISMATCH.
-// Covers line 795 branches (h->dict_ != nullptr AND group_first_field == 0).
+// Covers entry_group_begin's dict_ != nullptr AND group_first_field == 0 branches.
 TEST(MessageWriteGroup, EntryGroupBeginNonGroupTagTypeMismatch) {
     GroupFixture f;
     ASSERT_NE(f.msg, nullptr);

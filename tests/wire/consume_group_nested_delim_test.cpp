@@ -9,8 +9,8 @@
 //
 // Outer group 100 (NoOuter) is delimited by 200 — which is ITSELF a nested
 // group's (NoInner's) own count tag. `consume_group` (include/fixpp/wire/
-// validator.hpp:357-406) consumes the instance-opening delimiter with a
-// bare `++i` (:362) instead of descending into the nested group, so the
+// validator.hpp) consumes the instance-opening delimiter with a
+// bare `++i` (consume_group's position-1 `else` branch) instead of descending into the nested group, so the
 // second instance's opening tag (the second `200=1`) is never reached: the
 // scanner treats the whole two-instance message as containing only one
 // instance, `actual_count(1) != declared_count(2)`, and the message is
@@ -23,14 +23,14 @@
 // (contracts/consume_group.md "Gate between the two"):
 //
 //   W-1  — the repro on a HAND-BUILT table_view. Hand-built fixtures never
-//          populate `group_ctx_` (table_view.hpp:346-349), so this exercises
-//          ONLY the bare/legacy fallback at table_view.hpp:364.
+//          populate `group_ctx_` (table_view.hpp), so this exercises
+//          ONLY the bare/legacy fallback (group_first_field's 1-arg overload).
 //   W-1a — `ConsumeGroupNestedDelim.NestedDelimiterDescendsOnPopulatedContextStore`.
 //          The IDENTICAL shape, but with the outer group (NoOuter/100)
 //          registered under a NON-EMPTY parent path ([900], via a real
 //          `XmlLoader::load_from_string` + `as_table_view()`), so the
 //          descend-at-delimiter probe resolves through `group_ctx_`
-//          (table_view.hpp:360-364) rather than through the bare fallback.
+//          (group_first_field's context-scoped overload) rather than through the bare fallback.
 //          W-1 alone is insufficient: an implementation that descends
 //          correctly on the bare path and is broken on the context-keyed
 //          one would pass W-1 and only fail once Phase 3 registers real
@@ -230,7 +230,7 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterTwoInstanceRejectedTodayOneInstance
     // Two instances: outer group 100 declares count=2, each instance opened
     // by its delimiter 200 (itself NoInner's count tag, with one nested
     // InnerField(201) member). POST-FIX TARGET: accepted with 2 instances.
-    // TODAY: the un-descended `++i` at validator.hpp:362 consumes only the
+    // TODAY: the un-descended `++i` in consume_group's position-1 `else` branch consumes only the
     // FIRST instance's delimiter without entering NoInner, so the scan sees
     // one non-member tag (201) immediately after, counts actual_count=1
     // against declared_count=2, and rejects.
@@ -251,7 +251,7 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterTwoInstanceRejectedTodayOneInstance
             << "POST-FIX TARGET (W-1, C-4.1): the two-instance #208 B-2 shape — outer group "
                "100's delimiter (200) is itself nested group 200's own count tag — must be "
                "ACCEPTED with an instance count of 2. TODAY this is expected REJECTED because "
-               "consume_group's instance-opening `++i` (validator.hpp:362) does not descend "
+               "consume_group's instance-opening `++i` (its position-1 `else` branch) does not descend "
                "into the nested group, so the second instance is never reached. error="
             << (result.has_value() ? 0 : static_cast<int>(result.error()));
     }
@@ -283,12 +283,12 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterTwoInstanceRejectedTodayOneInstance
 }
 
 // ============================================================================
-// FAIL-CLOSED propagation at the DELIMITER position (validator.hpp:390-391).
+// FAIL-CLOSED propagation at the DELIMITER position (consume_group's position-1 descent).
 //
 // Added at /speckit-verify Step 4, which found this leg uncovered. C-4.1's
 // descent is a symmetry repair: the post-delimiter MEMBER loop already had a
 // nested descent with a `if (!nested) return nested;` failure propagation
-// (validator.hpp:415-416), and T017 added the twin at the instance-opening
+// (the member loop's nested-descent propagation), and T017 added the twin at the instance-opening
 // DELIMITER position. Coverage showed the member-position propagation firing
 // (`[True: 1, False: 14]`) while the new delimiter-position one read
 // `[True: 0, False: 74]` — the fix was made at both sites, but only one site
@@ -301,7 +301,7 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterTwoInstanceRejectedTodayOneInstance
 // 200, which IS NoInner's own count tag (FR-021 class (c) — the whole point of
 // 083). NoInner declares one instance, but the frame ends before its delimiter
 // 201 ever appears, so the NESTED consume_group hits its "first instance must
-// open with the delimiter" guard (validator.hpp:287-290) and returns
+// open with the delimiter" guard (consume_group's `ents[i].tag != delim_tag` check) and returns
 // unexpected. The outer call must PROPAGATE that failure rather than swallow
 // it and continue scanning — a swallow here would silently accept a malformed
 // nested group sitting at the delimiter position.
@@ -319,7 +319,7 @@ TEST(ConsumeGroupNestedDelim, NestedFailureAtDelimiterPositionPropagatesFailClos
     std::uint16_t ref_tag = 0;
     auto result = v.validate(mv, &scratch_mr, &ref_tag);
     ASSERT_FALSE(result.has_value())
-        << "FAIL-CLOSED (validator.hpp:390-391): NoInner(200) declares one instance but the "
+        << "FAIL-CLOSED (consume_group's position-1 descent): NoInner(200) declares one instance but the "
            "frame ends before its delimiter 201, so the nested consume_group invoked from the "
            "DELIMITER position fails. The outer consume_group must propagate that failure. "
            "Accepting here would mean a malformed nested group at the instance-opening "
@@ -353,8 +353,8 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterDescendsOnPopulatedContextStore) {
     // check, contracts/group_ctx_delims.md): the context-keyed
     // `group_member_tags("Y", [900], 100)` MUST return a DIFFERENT span than
     // the bare `group_member_tags(100)` — i.e. it must genuinely hit
-    // `group_ctx_` (table_view.hpp:373-377), not silently fall through to
-    // the SAME bare storage the 1-arg overload returns (table_view.hpp:377).
+    // `group_ctx_` (group_member_tags' context-hit branch), not silently fall through to
+    // the SAME bare storage the 1-arg overload returns (its legacy bare fallback).
     // Equal pointers here would mean this witness exercises only the same
     // bare path as W-1, defeating the entire point of W-1a.
     ASSERT_NE(tv.group_member_tags("Y", path900, kNoOuter).data(),
@@ -401,9 +401,9 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterDescendsOnPopulatedContextStore) {
 //
 // C-4.3: the delimiter-descend T017 will add reuses the EXISTING
 // `can_descend`/K=16 guard — `group_context::parent_path`, a fixed
-// `std::array<std::uint16_t, 16>` (group_view.hpp:45); `pushed()` clamps at
-// depth 16 rather than overflow the array (group_view.hpp:56-63) — already
-// used for post-delimiter member descent (validator.hpp:302-306). "No new
+// `std::array<std::uint16_t, 16>` (`group_context::parent_path`); `pushed()` clamps at
+// depth 16 rather than overflow the array (`group_context::pushed()`) — already
+// used for post-delimiter member descent (consume_group's member loop). "No new
 // branch is introduced by W-3" (contract footnote): this case therefore
 // CANNOT discriminate "rejected by the depth cap" from "rejected because
 // descent never happens" by error code — both dispositions return the SAME
@@ -418,7 +418,7 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterDescendsOnPopulatedContextStore) {
 //
 // Depth accounting — group_view.hpp's `group_context` is the validator's OWN
 // depth authority (C-4.2 "reuses the existing depth guard"), numerically
-// identical to but a DISTINCT mechanism from offset_table.hpp:340's
+// identical to but a DISTINCT mechanism from offset_table.hpp's
 // `kMaxGroupDepth` (which bounds the UNRELATED typed-read extent walk,
 // pinned separately by W-10a per this file's contract footnote — "Its
 // offset-table twin ... is a distinct hazard"). K=16 either way. Processing

@@ -1,6 +1,6 @@
 # neg_dict_kind_empty.toml
 # [dictionary] kind is an empty string — triggers empty_required at "dictionary.kind"
-# (lines 307-312 selector_resolver.cpp).
+# (resolve_engine_dictionary's empty-kind arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

@@ -23,7 +23,7 @@
 //        accepted on the received-141 path (no too-low disconnect / Logout).
 //   (b') session_event_sequence_numbers_reset{by_peer_request=true} in the in-process
 //        event ring — THE discriminating witness: it is emitted ONLY when the peer sent
-//        141=Y (session.cpp:1969, reset_on_logon=false here), so it proves fixpp took
+//        141=Y (FR-018's reset-event emission, reset_on_logon=false here), so it proves fixpp took
 //        the received-141 reset path. A plain non-reset Logon emits no such event.
 //   (b)  inbound seqnum == 2 after the Logon exchange — the 030 correction (the consumed
 //        seq-1 reset Logon advanced next-expected-inbound to 2). NOT a path discriminator
@@ -135,12 +135,12 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     // ── In-process witness (b'): received-141 reset path actually ran ─────────────
     // recent_events() exposes the in-process SessionEvent ring directly — NO
     // Application / event sink needed (emit_event writes the ring unconditionally,
-    // session.cpp:204). The received-141 acceptor arm emits
+    // Session::emit_event). The received-141 acceptor arm emits
     // session_event_sequence_numbers_reset{by_peer_request=true} ONLY when the peer
-    // sent 141=Y (session.cpp:1969, reset_on_logon=false here). A plain non-reset
+    // sent 141=Y (FR-018's reset-event emission, reset_on_logon=false here). A plain non-reset
     // Logon emits NO such event. This discriminates received-141 from a plain Logon
     // (which would also reach Active with next_inbound==2..3 under a harness
-    // misconfiguration). Idiom mirrors test_reset_seqnum_policy_matrix.cpp:653-662.
+    // misconfiguration). Idiom mirrors BilateralStrict_Initiator_CountersResetToOne's recent_events() check.
     {
         bool reset_event_seen = false;
         for (const auto& ev : s->recent_events()) {

@@ -386,7 +386,7 @@ tier1_required_needs = jobs["tier1-required"]["needs"]
 ci_pin_runs = "\n".join(str(s.get("run", "")) for s in jobs["ci-script-pins"]["steps"])
 
 # #270 Gate B r1, F1. `python-wheel-build`'s CONTAINER compile does not inherit
-# the runner's environment (tier1.yml:1587-1590), so CONAN_HOME and the four
+# the runner's environment, so CONAN_HOME and the four
 # CCACHE_* vars only reach it through the ONE `CIBW_ENVIRONMENT` string on the
 # `wheel_build` step — and the host-side restore/build/chown/stats/seed order
 # is what makes that step's ccache mount and the host's liveness read agree.
@@ -929,7 +929,7 @@ $got"
 # the container's `CIBW_ENVIRONMENT` and every ccache-side assertion still
 # passes; only the dependency closure quietly rebuilds from source every run).
 #
-# The container does not inherit the runner's environment (tier1.yml:1587-1590),
+# The container does not inherit the runner's environment,
 # so CONAN_HOME and the four CCACHE_* vars reach the compile ONLY through this
 # one string. YAML keeps only the LAST of two same-named mapping keys rather
 # than erroring, so a second `CIBW_ENVIRONMENT:` is the same silent-drop shape
@@ -941,13 +941,13 @@ $got"
 # `XCONAN_HOME=/tmp` (Codex's flagship escape — a typo'd name that still
 # contains every pinned substring), and neither check compares a VALUE against
 # anything, so a wrong path (`CONAN_HOME=/tmp`), a swap of the two paths, or a
-# rename of the mount TARGET in the sibling `CIBW_CONTAINER_ENGINE` (same step,
-# :1594) all leave this pin green while the container silently loses its
+# rename of the mount TARGET in the sibling `CIBW_CONTAINER_ENGINE` (same step)
+# all leave this pin green while the container silently loses its
 # Conan/ccache wiring.
 #
 # Exact whole-map equality subsumes the key-set check (so that check is DELETED
 # here, not kept alongside — two assertions for one property is how the weaker
-# one survives a later simplification, :794-797 above) and is strictly
+# one survives a later simplification, per the if:-emptiness check removed above) and is strictly
 # stronger than a parsed-assignment map compared as a mount-target SET: a set
 # comparison is blind to a swap (`CONAN_HOME=/host-ccache
 # CCACHE_DIR=/host-conan2` produces the identical target set), because the
@@ -1160,7 +1160,7 @@ commit — do not relax this to a substring or regex."
 }
 
 # The host restore/stats/seed steps and the container's bind mount all read the
-# SAME $CCACHE_DIR (job-level env, tier1.yml:1459) — the mechanism that makes a
+# SAME $CCACHE_DIR (the `python-wheel-build` job's env) — the mechanism that makes a
 # drifted mount fail LOUD via ccache-stats.sh's zero-cacheable-calls assert
 # (opus_pr270_1_triage.md F1's correction to fc7a4ae3's commit message). That
 # mechanism depends on running in the right ORDER: restore before the compile
@@ -2285,8 +2285,8 @@ assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
 
-  # M49: a SECOND `CIBW_ENVIRONMENT:` key on the same step. The comment at
-  # tier1.yml:1582-1590 warns this silently drops the first one's content
+  # M49: a SECOND `CIBW_ENVIRONMENT:` key on the same step. The "ONE KEY,
+  # SPACE-SEPARATED" comment there warns this silently drops the first one's content
   # (YAML keeps only the last of two same-named mapping keys) — this mutant is
   # the first instrument behind that warning.
   mutate_workflow M49 "a second CIBW_ENVIRONMENT key shadows the first" 'got:.*"CIBW_ENVIRONMENT":"FOO=bar"' '
@@ -2369,7 +2369,7 @@ open(dst, "w").write(t.replace(old, new))
 '
 
   # M54: the mount TARGET renamed on ONE side only — inside
-  # CIBW_CONTAINER_ENGINE (:1594), leaving CIBW_ENVIRONMENT (:1604) still
+  # CIBW_CONTAINER_ENGINE, leaving CIBW_ENVIRONMENT still
   # pointing CONAN_HOME at the now-nonexistent `/host-conan2`. This is the
   # genuinely silent production drift the triage names: a two-character edit
   # inside the two lines this PR adds, invisible to every prior assertion

@@ -1,7 +1,7 @@
 # neg_security_profile_kind_unknown.toml
 # security_profile.kind has an unrecognised token — triggers:
-#   - unknown_enum at session[0].security_profile.kind    (scalar_mappers.cpp lines 609-618)
-#     This also exercises loc_for_subkey() (line 80-88) since kind is in a sub-table.
+#   - unknown_enum at session[0].security_profile.kind    (map_structured_members's security_profile.kind unknown_enum arm, scalar_mappers.cpp)
+#     This also exercises loc_for_subkey() since kind is in a sub-table.
 #   - Additionally: missing_required at session[0].security_profile.kind
 #     from toml_config_loader.cpp check_required_keys (which checks the kind string).
 #
@@ -18,8 +18,8 @@
 # which returns unset for unknown tokens, causing build_tls_factory to fail.
 #
 # The key coverage targets are:
-#   - scalar_mappers.cpp lines 609-618 (unknown security_profile.kind unknown_enum)
-#   - scalar_mappers.cpp lines 80-88 (loc_for_subkey called for the sub-table key)
+#   - scalar_mappers.cpp, map_structured_members (unknown security_profile.kind unknown_enum)
+#   - scalar_mappers.cpp, loc_for_subkey (called for the sub-table key)
 
 [clock]
 kind = "system"

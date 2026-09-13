@@ -21,7 +21,7 @@
 // `timer.cancel()`. The sibling "guard omitted" mutant has no killer and is
 // discharged structurally (D-9); no cell here claims to kill it.
 //
-// Resolves plan.md:240's "(TLS transport test target)" placeholder — no
+// Resolves plan.md's tests/transport/ file-tree "(TLS transport test target)" placeholder — no
 // existing file fits: test_asio_tls_transport_error_paths.cpp is scoped to
 // error paths, and the other TLS files (pinset rotation, CompID identity
 // binding, validation taxonomy) are unrelated.

@@ -5,8 +5,8 @@
  * probe_capi_positive.cpp, compiled as C.
  *
  * This is the only place the INSTALLED C-ABI interface is exercised from a C
- * compiler. In-tree C-cleanliness is already pinned (tests/capi/CMakeLists.txt:13,
- * :23), but that says nothing about what the installed package delivers, which is
+ * compiler. In-tree C-cleanliness is already pinned (tests/capi/CMakeLists.txt's
+ * capi_version_smoke_c, capi_handles_compile_test targets), but that says nothing about what the installed package delivers, which is
  * what US1 promises a "C or C++ integrator". Requiring it is why
  * tests/consumer/ moved from project(... CXX) to project(... C CXX) (contracts §2a).
  *

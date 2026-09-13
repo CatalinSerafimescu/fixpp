@@ -6,7 +6,7 @@
 // fixpp::core::Logger = fixpp::log::Logger.
 //
 // This header provides the type name resolution needed by EngineConfig::logger
-// (engine_config.hpp:127) and any other header that holds a
+// (engine_config.hpp's `logger` member) and any other header that holds a
 // std::shared_ptr<fixpp::core::Logger> field WITHOUT needing the full Logger
 // definition (which is pimpl'd and lives in include/fixpp/log/logger.hpp).
 //

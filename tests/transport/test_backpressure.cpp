@@ -84,7 +84,7 @@ TEST(Backpressure, SequentialWritesDrainAtStrandDepth1) {
 // Cell D — FR-037 partial-write-then-cancel. Configure the mock to ack only
 // the first N/2 bytes of a 64-byte write and return transport_write_short.
 // The mock must surface this variant IDENTICAL to the production
-// asio_tls_transport per [2h §6.6]:1182.
+// asio_tls_transport per [2h §6.6] `transport_write_short` row.
 // ════════════════════════════════════════════════════════════════════════════
 TEST(Backpressure, PartialWriteReturnsWriteShort) {
     asio::io_context ioc;

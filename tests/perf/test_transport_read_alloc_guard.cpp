@@ -2,7 +2,7 @@
 // Copyright (c) 2026 fixpp contributors
 //
 // tests/perf/test_transport_read_alloc_guard.cpp
-// T018 — [2h §9 seam #4]:1345 — read-path alloc guard.
+// T018 — [2h §9 seam #4] — read-path alloc guard.
 //
 // Validates zero global heap allocation between async_read_some completion-
 // handler dispatch and Framer::feed exit per [const §VIII.5] + SC-003.

@@ -240,7 +240,7 @@ TEST(LoadDeferredSurface, T020_DeferredTap) {
 //
 // This cell pins the WHOLE deferred surface: the fixture carries all 13 kDeferred
 // keys, and we assert each one yields the deferred reason AND never unknown_key.
-// Dropping any key from kDeferred (toml_config_loader.cpp:268-283) demotes it to
+// Dropping any key from kDeferred (recognize_keys's kDeferred set, toml_config_loader.cpp) demotes it to
 // unknown_key → both assertions fail RED here.  This is the exact-coverage
 // discipline of [[feedback_completeness_gate_exact_set_not_subset]] applied at
 // the public-API level (the kDeferred set itself is file-scoped in the .cpp; this

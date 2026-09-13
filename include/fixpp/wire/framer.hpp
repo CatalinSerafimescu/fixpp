@@ -121,7 +121,7 @@ private:
 
 // Friend seam (062 T003): mint a frame_view over a raw {data,len} byte
 // slice + a caller-supplied generation token — mirrors the frame_view_access
-// production precedent (src/capi/message_write.cpp:63-74) in shape only.
+// production precedent (message_write.cpp's `frame_view_access` seam) in shape only.
 // body_off/body_len are irrelevant to the consumer (OffsetTable::build scans
 // frame.bytes(), never body()) so the whole slice is exposed as the "body"
 // too. Does NOT build a sub-view/OffsetTable — mint capability only (T005).

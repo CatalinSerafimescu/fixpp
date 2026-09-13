@@ -210,7 +210,7 @@
 // the ignore removed the leak APPEARS, from tests that still report [ OK ].
 //
 // Shape follows the repo's established sanitizer-detection idiom (two separate
-// #if blocks, not an #elif chain) — see tests/interop/support/interop_fixture.cpp:49-62.
+// #if blocks, not an #elif chain) — see the LSan-detection idiom in tests/interop/support/interop_fixture.cpp.
 // An #elif chain would skip the __SANITIZE_ADDRESS__ arm on any compiler that
 // defines __has_feature without reporting address_sanitizer through it.
 //
@@ -315,8 +315,8 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
 // (Gate: Codex review of this branch, P3. The first version of this comment cited
 // the acceptor-Logon site; the isolation above falsifies that.)
 // ⚠️ FIFTH copy of this format-a-SendingTime shape in tests/: the same body is
-// hand-rolled at engine_acceptor_test.cpp:75, engine_acceptor_failclosed_test.cpp:77,
-// engine_connect_test.cpp:89 and engine_readpump_test.cpp:89. Those four format
+// hand-rolled in engine_acceptor_test.cpp, engine_acceptor_failclosed_test.cpp,
+// engine_connect_test.cpp and engine_readpump_test.cpp. Those four format
 // `system_clock::now()`; this one takes the time point, because a mock-clock test
 // must stamp the clock the SESSION reads, not the wall clock. Not hoisted here —
 // that is #315's class of work and would inflate this review target — but recorded
@@ -604,7 +604,7 @@ struct SessionFixture {
     // a mutant that drops the release() while copying the clock somewhere else
     // keeps the weak_ptr live and passes. #292 hit exactly this and had to record
     // it as an accepted gap, because closing it there needed a src/ seam
-    // (tests/interop/support/interop_fixture_test.cpp:191-203).
+    // (interop_fixture_test.cpp's "#292 — miss path retains the Engine-owned clock" witness).
     //
     // Here it costs nothing: SessionFixture is file-local, so it can count its own
     // destructions and no spelling of the failure message or of the clock graph can
@@ -733,7 +733,7 @@ struct counting_io_context : asio::io_context {
 //
 // THE WHOLE FIXTURE, NOT JUST THE SESSION: `Session` holds
 // `const fixpp::core::EngineConfig& engine_` — a REFERENCE into
-// `SessionFixture::engine` (include/fixpp/session/session.hpp:621) — and its
+// `SessionFixture::engine` (session.hpp's `engine_` reference member) — and its
 // by-value `cfg_` copy carries a `transport_send` lambda capturing
 // `SessionFixture*`. Releasing only the Session would leave both dangling.
 //
@@ -807,7 +807,7 @@ struct counting_io_context : asio::io_context {
 // read as proof of the second, which it is not.
 //
 // PRIOR ART, named so nobody has to rediscover it: release-on-residual is not
-// invented here. `tests/interop/support/interop_fixture.cpp:95-160`
+// invented here. `tests/interop/support/interop_fixture.cpp`
 // (`~InteropEngineFixture`) already does drive-to-completion, then `release()` +
 // `__lsan_ignore_object` + a named `ADD_FAILURE`, for a single `Engine`. This is the
 // mechanism's SECOND occurrence, not its first.
@@ -1257,7 +1257,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     //
     // `frames` is pure storage — it holds no executor and no strand — so it is
     // safe for it to outlive `ioc`. That is NOT true of `sA`/`sB` below, which
-    // own Sessions whose executors wrap `asio::make_strand` (session.hpp:360):
+    // own Sessions whose executors wrap `asio::make_strand` (session.hpp's `exec_` member):
     // a strand handle destroyed after its io_context dereferences an already-
     // destroyed service (asio strand_executor_service.ipp:83-94 unlinks through
     // `service_`, which ~execution_context has already destroyed —
@@ -1821,7 +1821,7 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         // (e.g. +2 this iteration, +0 the next) while the cumulative equality
         // after the loop only reports a confusing final count. Safe to assert as
         // an equality here: after the wait returns, each emitter is parked on its
-        // grace sleep (session.cpp:4924-4926) and the only clock advancer is this
+        // grace sleep (run_liveness_loop's post-TestRequest wait) and the only clock advancer is this
         // blocked test thread, so the size is stable at exactly `want`.
         ASSERT_EQ(sA.transport.test_req_id_count(), want)
             << "session A emitted more than one TestRequest at iteration " << i;

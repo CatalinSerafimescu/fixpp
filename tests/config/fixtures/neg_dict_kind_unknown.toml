@@ -1,6 +1,6 @@
 # neg_dict_kind_unknown.toml
 # [dictionary] kind is an unknown value (not "path" or "version") — triggers
-# unknown_enum at "dictionary.kind" (lines 325-330 selector_resolver.cpp).
+# unknown_enum at "dictionary.kind" (resolve_engine_dictionary's unknown-kind arm, selector_resolver.cpp).
 
 [clock]
 kind = "system"

@@ -1,6 +1,6 @@
 # neg_duration_unknown_unit.toml
 # heartbeat_interval has an unrecognised unit suffix "d" (days) — triggers
-# "unrecognised duration unit" error arm (lines 171-178 scalar_mappers.cpp).
+# "unrecognised duration unit" error arm (parse_duration_to_ms, loader_internal.cpp).
 
 [clock]
 kind = "system"

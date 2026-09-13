@@ -1,6 +1,6 @@
 # neg_duration_no_numeric.toml
 # heartbeat_interval starts with a non-digit — triggers "duration must start
-# with a numeric value" error arm (lines 127-135).
+# with a numeric value" error arm (parse_duration_to_ms, loader_internal.cpp).
 
 [clock]
 kind = "system"

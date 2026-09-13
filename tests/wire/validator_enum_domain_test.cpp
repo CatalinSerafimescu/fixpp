@@ -104,7 +104,7 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 }
 
 // Loads a real shipped dictionary and returns its table_view. Per
-// dictionary.hpp:193-205, as_table_view() legally outlives the Dictionary it
+// `Dictionary::as_table_view()`'s own contract, it legally outlives the Dictionary it
 // was built from (the enum-domain table OWNS copies of the code bytes), so
 // the Dictionary going out of scope at the end of this function is safe —
 // only the pmr arena backing `buf` must outlive the *loader call*, which it
@@ -229,7 +229,7 @@ TEST(ValidatorEnumDomain, Fixt11MsgTypeAllEightAcceptViaEmptySetFloor) {
 
 // ── T022 (FR-015): header field PossDupFlag(43)=X -> reject/5, RefTagID=43 ─
 // PossDupFlag is BOOLEAN, whose type arm imposes NO constraint
-// (validator.hpp:419-425) -- so ONLY the enum arm can catch "X". A
+// (validate_field's `case ft::Boolean` arm) -- so ONLY the enum arm can catch "X". A
 // body-only Step-1 walk would silently accept this (mutation c below).
 TEST(ValidatorEnumDomain, PossDupFlag43HeaderFieldOutOfDomainRejectsReason5) {
     auto tv = load_shipped_table_view("FIX44.xml");
@@ -269,7 +269,7 @@ TEST(ValidatorEnumDomain, PossDupFlag43HeaderFieldOutOfDomainRejectsReason5) {
 // ═══ T022a: the empty-value witness (FR-008, DV-1/DV-2) ════════════════════
 // Nothing in the tree pins the empty x String accept case today; a missing
 // Floor-2 bypass would leave the pre-existing empty x Char pin
-// (validator_type_check_test.cpp:387-396) green while silently regressing
+// (validator_type_check_test.cpp's own witness) green while silently regressing
 // ExecInst(18)=.
 
 // DV-1: Side(54)="" (empty x Char) -> reject, but via the TYPE arm

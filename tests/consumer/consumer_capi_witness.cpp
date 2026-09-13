@@ -21,7 +21,7 @@
 //
 // NOTHING MECHANICALLY ENFORCES THAT (corrected by 086/FR-014 — this comment used
 // to say tools/check_layers.py did). That script is a source #include-edge lint
-// over src/** and bindings/** (:2-7, :173-176); it parses no CMake and reads no
+// over src/** and bindings/** (its own docstring + glob scan); it parses no CMake and reads no
 // link interface, and an installed package cannot observe which targets a
 // consumer links together anyway. Keeping this a separate executable IS the
 // convention being upheld.

@@ -3,8 +3,8 @@
 // arena-exhaustion witness, L-065-2 / #184).
 //
 // Proves the TYPED nested-group descent chain (the codegen-emitted
-// `group_view<G>::…` accessor, tools/codegen/fixpp-codegen/emit_messages.cpp
-// ~:256-290) surfaces a nested sub-table arena-exhaustion failure via
+// `group_view<G>::…` accessor, tools/codegen/fixpp-codegen/emit_messages.cpp's
+// `group_view<>` accessor emission) surfaces a nested sub-table arena-exhaustion failure via
 // `group_view::alloc_failed() == true` (SC-002, FR-004) rather than a silent
 // `size()==0` — as a VALUE, not a throw across the `noexcept` boundary, and
 // the process does NOT terminate.
@@ -53,7 +53,7 @@
 //
 // The notch is NOT a product defect and NOT new: it is the pre-existing
 // MSVC-debug-STL characteristic already documented in
-// nested_group_slices_failloud_test.cpp:43-52 (PR #191 round 3) — a cap where
+// nested_group_slices_failloud_test.cpp's PR #191 round 3 note — a cap where
 // the nested sub-table's SHELL allocation fits but its `noexcept` ctor's
 // MSVC-debug pmr-member proxies do not, so `bad_alloc` escapes the `noexcept`
 // ctor and terminates before any assertion runs

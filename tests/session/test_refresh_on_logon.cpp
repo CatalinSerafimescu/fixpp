@@ -891,7 +891,7 @@ TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
 // refresh_on_logon=true on a NON-persistent store (yields_persistent_store()==false),
 // bilateral_lenient.
 //
-// The !store_is_persistent_ skip at session.cpp:576 fires even when force=true:
+// The !store_is_persistent_ skip in ensure_hydrated_ fires even when force=true:
 //   ensure_hydrated_: if (hydrated_ && !force) → NOT taken (force=true).
 //   if (hydrating_)  → NOT taken (not re-entrant).
 //   hydrating_ = true.
@@ -968,7 +968,7 @@ TEST(RefreshOnLogon, W4_NonPersistentStore_NoReread) {
            "ZERO store reads even when refresh_on_logon=true (force=true). "
            "call_count before=" << call_count_before
         << " got=" << store->call_count
-        << ". A non-zero delta means the !store_is_persistent_ skip (session.cpp:576) "
+        << ". A non-zero delta means the !store_is_persistent_ skip (in ensure_hydrated_) "
            "is not firing under force (INV-RoL-2 violated).";
 
     // (b) The manager was never seeded from the store; counters reflect only the

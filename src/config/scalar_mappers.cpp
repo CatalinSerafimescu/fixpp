@@ -156,7 +156,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
 
     // ── role enum ─────────────────────────────────────────────────────────────
     // Canonical spellings: "initiator", "acceptor"
-    // (session_config.hpp session_role enum, lines 112-115)
+    // (session_config.hpp `session_role` enum)
 
     if (const auto* n = merged.get("role"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
@@ -177,7 +177,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
 
     // ── mode enum ─────────────────────────────────────────────────────────────
     // Canonical spellings: "per_session_strand", "direct_executor"
-    // (session_config.hpp threading_mode enum, lines 98-101)
+    // (session_config.hpp `threading_mode` enum)
 
     if (const auto* n = merged.get("mode"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
@@ -198,7 +198,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
 
     // ── locks enum ────────────────────────────────────────────────────────────
     // Canonical spellings: "mutex", "spin"
-    // (session_config.hpp lock_policy enum, lines 103-106)
+    // (session_config.hpp `lock_policy` enum)
 
     if (const auto* n = merged.get("locks"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
@@ -230,7 +230,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     //
     // Rule 7:  mode=direct_executor + locks=spin is contradictory: direct_executor
     //          implies the caller owns serialisation; spin is meaningless and
-    //          mirrors the runtime reject in Session::open() (session.cpp:904).
+    //          mirrors the runtime reject in `Session::open()`.
     //
     // Rule 7a: mode=direct_executor WITHOUT already_serialized_executor=true is
     //          an invalid configuration (fail-closed per FR-011; only one arm fires
@@ -350,7 +350,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // ── reset_seqnum_policy enum ──────────────────────────────────────────────
     // TOML key: "reset_seqnum_policy"; struct field: reset_seqnum_policy_field
     // Canonical spellings: "bilateral_strict", "bilateral_lenient", "unilateral"
-    // (session_config.hpp reset_seqnum_policy enum, lines 92-96)
+    // (session_config.hpp `reset_seqnum_policy` enum)
 
     if (const auto* n = merged.get("reset_seqnum_policy"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
@@ -374,7 +374,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
 
     // ── sending_time_precision enum ───────────────────────────────────────────
     // Canonical spellings: "seconds", "millis", "micros", "nanos"
-    // (fix_time.hpp fix_time_precision enum, lines 43-48)
+    // (fix_time.hpp `fix_time_precision` enum)
 
     if (const auto* n = merged.get("sending_time_precision"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
@@ -400,7 +400,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
 
     // ── app_backpressure enum ─────────────────────────────────────────────────
     // Canonical spellings: "block", "disconnect_and_recover"
-    // (session_config.hpp SessionConfig::backpressure_mode nested enum, lines 154-157)
+    // (session_config.hpp `SessionConfig::backpressure_mode` nested enum)
 
     if (const auto* n = merged.get("app_backpressure"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
