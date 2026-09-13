@@ -6,6 +6,16 @@ status: stable
 
 # Log
 
+- **2026-09-14 — #413 / #416 / #417, the lint sweep and a `-Werror` that did nothing.**
+  `components/nfr-and-tooling.md` gains *warnings as errors and the lint/format sweep*: why
+  `FIXPP_WERROR` is applied by walking the buildsystem instead of by a call list (a call list is how it
+  went inert), the per-target WILL_FAIL-probe exemption, the lead that it only promotes the compiler's
+  default warnings, and why the format/lint exclusions are policy. `components/test.md` gains the
+  discarded-`[[nodiscard]]` rule for tests — MSVC's STL marks `std::expected`/`std::future` nodiscard and
+  libstdc++ does not, so Linux green is not MSVC green — and why the Windows alloc-guard markers are null
+  function pointers. ⚠️ **Rejected on the record:** `/wd4834` on MSVC test targets and a mechanical
+  `(void)` everywhere; the sweep decided each site. Residuals: fixpp#436.
+
 - **2026-09-09 — #408, the harnesses CI compiled and never ran.**
   `components/test.md` gains the fuzz replay set: `tests/fuzz/CMakeLists.txt` registers one
   `fuzz_replay_<name>` ctest **per corpus DIRECTORY**, so eight harnesses with no corpus registered
