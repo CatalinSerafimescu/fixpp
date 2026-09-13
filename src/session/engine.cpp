@@ -611,14 +611,16 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
     fixpp::tls::SslCtxConfig ssl_cfg;
     if (!is_plaintext) {
         auto k = entry.config.security_profile.k;
+        // The engine must still map the deprecated-but-supported legacy profile.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
         if (k == sk::mtls_pinned)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_pinned;
         else if (k == sk::one_way_ca)
-            // The engine must still map the deprecated-but-supported legacy profile.
-            // NOLINTNEXTLINE(clang-diagnostic-deprecated-declarations)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::one_way_ca;
         else  // mtls_ca (default for TLS acceptors)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
+#pragma clang diagnostic pop
 
         if (entry.config.transport_factory_override)
             ssl_cfg.cs = entry.config.transport_factory_override->cert_source_snapshot();
@@ -772,14 +774,16 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // dynamic_cast to TlsTransport to call async_handshake.
             auto* tls_transport = dynamic_cast<fixpp::transport::TlsTransport*>(transport.get());
             if (!tls_transport) {
-                transport->close();
+                // Rejecting a pre-session connection: nothing consumes a close error.
+                (void)transport->close();
                 continue;  // not a TLS transport — config error; re-accept
             }
 
             {
                 auto hs_r = co_await tls_transport->async_handshake(ssl_cfg);
                 if (!hs_r.has_value()) {
-                    transport->close();
+                    // Rejecting a pre-session connection: nothing consumes a close error.
+                    (void)transport->close();
                     continue;  // handshake failure → reclaim slot, re-accept
                 }
                 hr = std::move(*hs_r);
@@ -823,7 +827,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             auto read_r = co_await read_first_frame_bounded(
                 *transport, frame_buf, *engine_cfg.clock, kFirstFrameDeadline, kFirstFrameMaxBytes);
             if (!read_r.has_value()) {
-                transport->close();
+                // Rejecting a pre-session connection: nothing consumes a close error.
+                (void)transport->close();
                 continue;  // timeout / over-budget / read-error → reclaim
             }
             first_frame_len = *read_r;
@@ -838,7 +843,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // Step 4: parse CompIDs for reversed-CompID registry resolution.
         auto ids = scan_first_frame_ids(first_frame);
         if (ids.begin_string.empty() || ids.sender_comp_id.empty() || ids.target_comp_id.empty()) {
-            transport->close();
+            // Rejecting a pre-session connection: nothing consumes a close error.
+            (void)transport->close();
             continue;  // malformed first frame → reclaim
         }
 
@@ -851,7 +857,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // No registry match — unknown acceptor session (slot 121).
             // Per data-model C1 step 6 and engine.hpp lookup() contract:
             // close the transport and construct NO session. [FQ-2 / gate-b/r1]
-            transport->close();
+            // Rejecting a pre-session connection: nothing consumes a close error.
+            (void)transport->close();
             continue;
         }
 
@@ -868,7 +875,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         {
             auto res = co_await local_session->open();
             if (!res.has_value()) {
-                transport->close();
+                // Rejecting a pre-session connection: nothing consumes a close error.
+                (void)transport->close();
                 co_return;
             }
         }
