@@ -467,15 +467,15 @@ template <class Pump>
 // What it DOES take from `pump_until_ready` is the load-bearing property in
 // its own doc comment — the caller must consult the bool BEFORE `fut.get()`. `[[nodiscard]]`
 // puts a compiler DIAGNOSTIC on ignoring it, rather than leaving it to a
-// reviewer or a lexical checker. Note that is a WARNING, not an error: this
-// repo does not build tests under a blanket `-Werror`, so do not describe it as
-// compiler-ENFORCED. ⚠️ Re-derive that rather than trusting it -- this sentence used
-// to name a LINE NUMBER for its one supporting example, which had moved, and to say
-// "the one targeted use" when there are two (`-Werror=deprecated-declarations`, on
-// WILL_FAIL probe targets in tests/session/ and tests/tls/). `grep -rn Werror` over
-// the build files is the derivation; note also that `FIXPP_WERROR` and
-// `fixpp_maybe_werror` in cmake/Helpers.cmake have ZERO call sites, so the blanket
-// form is absent because the plumbing is dead, not because it was decided against.
+// reviewer or a lexical checker. Whether that diagnostic is an ERROR depends on the
+// build, so do not describe it as compiler-ENFORCED unconditionally: with
+// `FIXPP_WERROR=ON`, `fixpp_apply_werror_to_all_targets` (cmake/Helpers.cmake) adds
+// `-Werror` to every compiled target, tests included; with it OFF it stays a warning.
+// ⚠️ Re-derive which presets set the option from CMakePresets.json rather than trusting
+// a list here -- this paragraph has been wrong twice, once naming a moved LINE NUMBER
+// and once calling the blanket plumbing dead after it was wired (#417). The targeted
+// `-Werror=deprecated-declarations` WILL_FAIL probes are exempt from the blanket flag;
+// `grep -rn Werror` over the build files is the derivation.
 //
 // The grace slice is not a "CI tolerance" and must not be grown into one.
 // `run_one_until` tests `now < abs_time` BEFORE dispatching (see `pump_until`'s
