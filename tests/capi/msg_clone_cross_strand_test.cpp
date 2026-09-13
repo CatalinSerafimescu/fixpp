@@ -36,12 +36,11 @@
 #include <thread>
 #include <vector>
 
+#include "capi_internal.hpp"
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
-
-#include "capi_internal.hpp"
-#include "capi_loopback_support.hpp"
 
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
@@ -220,15 +219,13 @@ TEST(MsgCloneCrossStrand, CloneNullAndDeadHandleGuards) {
     inbound_shell.tag_ = FIXPP_HANDLE_TAG_MSG;
     inbound_shell.flavour = FixppMsgFlavour::inbound;
     inbound_shell.view = nullptr;
-    EXPECT_EQ(
-        fixpp_msg_clone(reinterpret_cast<const fixpp_msg_t*>(&inbound_shell), nullptr),
-        FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_msg_clone(reinterpret_cast<const fixpp_msg_t*>(&inbound_shell), nullptr),
+              FIXPP_ERR_NULL_HANDLE);
 
     // Dead handle (tag_ = FIXPP_HANDLE_TAG_DEAD) → INVALID_HANDLE
     fixpp_msg dead_shell{};
     dead_shell.tag_ = FIXPP_HANDLE_TAG_DEAD;
-    EXPECT_EQ(
-        fixpp_msg_clone(reinterpret_cast<const fixpp_msg_t*>(&dead_shell), &clone),
-        FIXPP_ERR_INVALID_HANDLE);
+    EXPECT_EQ(fixpp_msg_clone(reinterpret_cast<const fixpp_msg_t*>(&dead_shell), &clone),
+              FIXPP_ERR_INVALID_HANDLE);
     EXPECT_EQ(clone, nullptr);
 }

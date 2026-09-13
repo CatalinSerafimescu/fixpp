@@ -153,7 +153,8 @@ TEST(SessionOpenValidationArms, DirectExecutorWithSpinLockRejected) {
 }
 
 // Out-of-range backpressure_mode (FFI/SWIG bypass) → invalid_session_config
-// (open()'s T048 backpressure_mode range guard — the I-14 defence-in-depth backstop on the closed enum).
+// (open()'s T048 backpressure_mode range guard — the I-14 defence-in-depth backstop on the closed
+// enum).
 TEST(SessionOpenValidationArms, OutOfRangeBackpressureModeRejected) {
     asio::io_context ioc;
     EngineConfig engine;

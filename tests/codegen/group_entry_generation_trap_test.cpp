@@ -56,9 +56,8 @@ namespace {
 
 // Build a well-formed FIX frame: "8=FIX.4.4<SOH> 9=<len><SOH> <body> 10=<chk><SOH>"
 std::vector<std::byte> make_frame(std::string_view body) {
-    std::string pre =
-        "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
-        std::string(body);
+    std::string pre = "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
+                      std::string(body);
     unsigned sum = 0;
     for (unsigned char c : pre) {
         sum += c;
@@ -121,9 +120,8 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
                                               std::pmr::null_memory_resource()};
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     std::array<fixpp::wire::frame_view, 1> fvs{};
-    auto framed = framer.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs});
+    auto framed = framer.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                              std::span<fixpp::wire::frame_view>{fvs});
     ASSERT_TRUE(framed.has_value());
     ASSERT_GE(framed->size(), 1U);
 
@@ -199,12 +197,9 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
     // size()/operator[]/end() directly must trap via View::check_alive() on
     // the held view itself — none of these re-enter OffsetTable::group_slices()
     // (that would only prove guard A again).
-    EXPECT_DEATH((void)sets.size(), "")
-        << "held group_view::size() must trap (guard B)";
-    EXPECT_DEATH((void)sets[0], "")
-        << "held group_view::operator[] must trap (guard B)";
-    EXPECT_DEATH((void)sets.end(), "")
-        << "held group_view::end() must trap (guard B)";
+    EXPECT_DEATH((void)sets.size(), "") << "held group_view::size() must trap (guard B)";
+    EXPECT_DEATH((void)sets[0], "") << "held group_view::operator[] must trap (guard B)";
+    EXPECT_DEATH((void)sets.end(), "") << "held group_view::end() must trap (guard B)";
 }
 
 #else

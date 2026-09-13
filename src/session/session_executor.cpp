@@ -3,8 +3,8 @@
 // src/session/session_executor.cpp
 //
 // fixpp::core::make_session_executor — THE SINGLE ENFORCEMENT POINT for
-// error::executor_not_serialised (slot 48 / FR-009 / I-06 / [2d §4.8]'s "Round 2 + round 3 unification" note).
-// Defined in a session/ TU (NOT the core header) so the complete
+// error::executor_not_serialised (slot 48 / FR-009 / I-06 / [2d §4.8]'s "Round 2 + round 3
+// unification" note). Defined in a session/ TU (NOT the core header) so the complete
 // fixpp::session::threading_mode enum is visible without core/ back-edging
 // into session/ ([arch §2.3] leaf rule — the core header only declares it).
 // Linked into fixpp_session; its sole call site is Session::open() (T020).

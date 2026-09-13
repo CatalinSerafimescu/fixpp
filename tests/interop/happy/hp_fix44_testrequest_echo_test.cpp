@@ -33,12 +33,11 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <string>
-#include <tuple>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <string>
+#include <tuple>
 
 #include "hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
@@ -59,8 +58,7 @@ namespace {
 // canonicalized away and would yield a false non-biting "pass" (SC-004 rule).
 // [feedback_fail_placeholder_red_test]: real DiffResult assertion, not SUCCEED().
 
-TEST(TestRequestEchoGateBite, MutatedTag112CausesGateBite)
-{
+TEST(TestRequestEchoGateBite, MutatedTag112CausesGateBite) {
     // Minimal synthetic FIX 4.4 TestRequest (35=1) with 112=TESTREQ_ID_A
     // SOH rendered as \x01 (the checked-in golden escape, decoded by parse_golden).
     const char* expected_text =
@@ -89,8 +87,7 @@ TEST(TestRequestEchoGateBite, MutatedTag112CausesGateBite)
 // previously duplicated this assertion; they are collapsed here (SC-004 rule).
 // [feedback_fail_placeholder_red_test]: real DiffResult assertion, not SUCCEED().
 
-TEST(AdminProfileGateBite, CanonicalizedTags5210DoNotBite)
-{
+TEST(AdminProfileGateBite, CanonicalizedTags5210DoNotBite) {
     // Synthetic FIX 4.4 TestRequest (35=1): payload tag 112 is identical in both
     // frames; only SendingTime(52) and CheckSum(10) differ between expected and actual.
     const char* expected_text =
@@ -99,7 +96,7 @@ TEST(AdminProfileGateBite, CanonicalizedTags5210DoNotBite)
         "> 8=FIX.4.4\\x0135=1\\x01112=TESTREQ_ID_X\\x0152=20260604-11:11:11\\x0110=999\\x01\n";
 
     auto expected_frames = fixpp::interop::parse_golden(expected_text);
-    auto actual_frames   = fixpp::interop::parse_golden(actual_text);
+    auto actual_frames = fixpp::interop::parse_golden(actual_text);
 
     const fixpp::interop::DiffResult result = fixpp::interop::diff_transcripts(
         expected_frames, actual_frames, fixpp::interop::admin_profile_excluded_tags());
@@ -129,8 +126,7 @@ TEST(AdminProfileGateBite, CanonicalizedTags5210DoNotBite)
 //
 // AdminScenarioDescriptor (rule 7+8): declared inline and validated at entry.
 
-class HappyTestRequestEcho
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class HappyTestRequestEcho : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
 TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
     const auto [counterparty, role] = GetParam();
@@ -168,7 +164,8 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
     // harness (T008 [PARENT]). Skip for non-QFj counterparties.
     if (counterparty != Counterparty::quickfix_j) {
         GTEST_SKIP() << "skip:not-applicable (testrequest_echo admin round-trip is QFj-only at G1; "
-                        "not configured for " << hp::counterparty_token(counterparty) << ")";
+                        "not configured for "
+                     << hp::counterparty_token(counterparty) << ")";
     }
 
     const char* dir = hp::tls_fixture_dir();
@@ -185,8 +182,8 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
     fixpp::interop::InteropEngineFixture fx;
     // Use a 3 s heartbeat_interval so the liveness loop emits TestRequest
     // within the 10 s self-deadline when held inbound-silent (US1-1 induction).
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     cfg.heartbeat_interval = std::chrono::seconds{3};  // inbound-silence induction (US1-1)
     const auto id = fixpp::session::SessionId::from_config(cfg);
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
@@ -198,8 +195,7 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
     // Drive to Active within 5 s (same as other cells).
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active (logon) against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active (logon) against " << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
     auto s = fx.engine().lookup(id);

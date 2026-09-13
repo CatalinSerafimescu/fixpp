@@ -39,8 +39,6 @@
 // nine — T016's own task text names "35 such tags across FIX50/SP1/SP2, the
 // FIXT split", never Orchestra.
 
-#include "reused_tag_census.hpp"  // fixpp_test_support::kRuntimeDicts (the nine)
-
 #include <gtest/gtest.h>
 
 #include <array>
@@ -61,6 +59,8 @@
 #include <string_view>
 #include <tuple>
 #include <vector>
+
+#include "reused_tag_census.hpp"  // fixpp_test_support::kRuntimeDicts (the nine)
 
 namespace {
 
@@ -84,7 +84,7 @@ constexpr std::size_t kArenaBytes = 32UZ * 1024UZ * 1024UZ;
 // can say.
 // ---------------------------------------------------------------------------
 struct RawValue {
-    std::string code;      // the `enum=` attribute value (wire literal)
+    std::string code;  // the `enum=` attribute value (wire literal)
     bool has_enum_attr = false;
     bool has_desc_attr = false;
 };
@@ -101,7 +101,7 @@ std::vector<RawField> scan_quickfix_fields(std::filesystem::path const& xml_path
     auto const result = doc.load_file(xml_path.c_str());
     if (!result) {
         return out;  // reported empty; the primary Dictionary::load below
-                      // already exercises the same file and would fail loudly.
+                     // already exercises the same file and would fail loudly.
     }
     auto const fields_node = doc.child("fix").child("fields");
     for (auto const& f : fields_node.children("field")) {
@@ -145,7 +145,7 @@ std::ostream& operator<<(std::ostream& os, SpaceCode const& sc) {
 // Raw scan of Orchestra's `fixr:codeSets/fixr:codeSet/fixr:code value=...`
 // tree for space-bearing `value` attributes (SC-011's tenth-dictionary leg).
 void scan_orchestra_space_codes(std::filesystem::path const& xml_path, std::string const& label,
-                                 std::set<SpaceCode>& out) {
+                                std::set<SpaceCode>& out) {
     pugi::xml_document doc;
     auto const result = doc.load_file(xml_path.c_str());
     ASSERT_TRUE(result) << "failed to load " << xml_path;
@@ -216,12 +216,14 @@ TEST(DictEnumCensus, SC010_EveryMessageTypeCoveredByMsgTypeCodesetOrCodesetEmpty
         }
 
         std::cout << "  " << label << ": " << checked << " declared message type(s), MsgType(35) "
-                  << (codeset_empty ? "codeset EMPTY (Floor-1 accept-floor arm)"
-                                    : "codeset has " + std::to_string(msgtype_codes.size()) + " code(s)")
+                  << (codeset_empty
+                          ? "codeset EMPTY (Floor-1 accept-floor arm)"
+                          : "codeset has " + std::to_string(msgtype_codes.size()) + " code(s)")
                   << "\n";
 
         EXPECT_EQ(missing, 0u)
-            << label << ": " << missing << " declared message type(s) NOT present in the MsgType(35) "
+            << label << ": " << missing
+            << " declared message type(s) NOT present in the MsgType(35) "
             << "codeset while that codeset is non-empty — those message types would be REJECTED "
             << "OUTRIGHT by enum_valid(35, msgtype). First offender: "
             << (missing_types.empty() ? std::string{} : std::string{missing_types.front()});
@@ -239,7 +241,8 @@ TEST(DictEnumCensus, SC010_EveryMessageTypeCoveredByMsgTypeCodesetOrCodesetEmpty
     }
 
     {
-        auto const path = std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / "OrchestraFIXLatest.xml";
+        auto const path =
+            std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / "OrchestraFIXLatest.xml";
         auto dict = fixpp::dict::OrchestraLoader{}.load(path, &mr);
         ASSERT_FALSE(dict.messages().empty()) << "Orchestra failed to load or has no messages";
         check(dict, std::string{"OrchestraFIXLatest.xml"});
@@ -269,7 +272,8 @@ TEST(DictEnumCensus, SC010_EveryMessageTypeCoveredByMsgTypeCodesetOrCodesetEmpty
 // the three fails the BUILD.
 // ============================================================================
 TEST(DictEnumCensus, SC011_ZeroDuplicateZeroMissingEnumZeroMissingDescription) {
-    std::cout << "\n=== 075 T021 SC-011 leg 1: duplicate/missing-attr census (nine QuickFIX dicts) ===\n";
+    std::cout
+        << "\n=== 075 T021 SC-011 leg 1: duplicate/missing-attr census (nine QuickFIX dicts) ===\n";
 
     std::size_t total_duplicate_codes = 0;
     std::size_t total_missing_enum = 0;
@@ -300,8 +304,8 @@ TEST(DictEnumCensus, SC011_ZeroDuplicateZeroMissingEnumZeroMissingDescription) {
         }
 
         std::cout << "  " << fname << ": " << raw_fields.size() << " field(s), " << dup_here
-                  << " duplicate code(s), " << missing_enum_here << " missing-enum, " << missing_desc_here
-                  << " missing-description\n";
+                  << " duplicate code(s), " << missing_enum_here << " missing-enum, "
+                  << missing_desc_here << " missing-description\n";
 
         total_duplicate_codes += dup_here;
         total_missing_enum += missing_enum_here;
@@ -355,7 +359,8 @@ TEST(DictEnumCensus, SC011_SpaceBearingCodesAreExactlyTheTwoSettlLocationPlaceho
     }
 
     {
-        auto const path = std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / "OrchestraFIXLatest.xml";
+        auto const path =
+            std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / "OrchestraFIXLatest.xml";
         scan_orchestra_space_codes(path, "OrchestraFIXLatest.xml", found);
     }
 
@@ -364,17 +369,21 @@ TEST(DictEnumCensus, SC011_SpaceBearingCodesAreExactlyTheTwoSettlLocationPlaceho
         SpaceCode{"FIX42.xml", "SettlLocation", "ISO Country Code"},
     };
 
-    std::cout << "\n=== 075 T021 SC-011 leg 2: space-bearing declared codes across all TEN dictionaries "
-                 "===\n";
+    std::cout
+        << "\n=== 075 T021 SC-011 leg 2: space-bearing declared codes across all TEN dictionaries "
+           "===\n";
     for (auto const& sc : found) {
         std::cout << "  " << sc << "\n";
     }
 
     EXPECT_EQ(found, expected)
-        << "the set of declared codes containing a space, across all ten shipped dictionaries, must "
+        << "the set of declared codes containing a space, across all ten shipped dictionaries, "
+           "must "
            "be EXACTLY the two SettlLocation(166) 'ISO Country Code' placeholders on FIX41/FIX42 "
-           "(spec.md DV-4 / FR-022) — any addition, removal, or edited literal converts a placeholder "
-           "codeset into a silent reject-everything trap and must be re-argued, not silently absorbed.";
+           "(spec.md DV-4 / FR-022) — any addition, removal, or edited literal converts a "
+           "placeholder "
+           "codeset into a silent reject-everything trap and must be re-argued, not silently "
+           "absorbed.";
 }
 
 // ============================================================================
@@ -438,15 +447,18 @@ TEST(DictEnumCensus, SC011_StoreOnlyEnumBackedTagsAreNeverMultiValueTyped) {
             }
             ++store_only_here;
 
-            bool const is_multi = (rf.type == "MULTIPLECHARVALUE" || rf.type == "MULTIPLEVALUESTRING" ||
-                                    rf.type == "MULTIPLESTRINGVALUE");
+            bool const is_multi =
+                (rf.type == "MULTIPLECHARVALUE" || rf.type == "MULTIPLEVALUESTRING" ||
+                 rf.type == "MULTIPLESTRINGVALUE");
             EXPECT_FALSE(is_multi)
                 << fname << ": store-only enum-backed tag " << rf.tag << " (" << rf.name
                 << ") is declared " << rf.type
-                << " — a MULTIPLE* type. T016's `multi_value = false` default for store-only tags is "
+                << " — a MULTIPLE* type. T016's `multi_value = false` default for store-only tags "
+                   "is "
                    "an ASSUMPTION that this tag now VIOLATES: it would be checked as a single "
                    "whole-string token instead of being tokenized, silently false-rejecting every "
-                   "conformant multi-token value. table_view::set_multi_value() must be extended to "
+                   "conformant multi-token value. table_view::set_multi_value() must be extended "
+                   "to "
                    "cover this tag before the assumption is safe again.";
         }
 
@@ -457,11 +469,14 @@ TEST(DictEnumCensus, SC011_StoreOnlyEnumBackedTagsAreNeverMultiValueTyped) {
         total_store_only += store_only_here;
     }
 
-    std::cout << "  total store-only enum-backed tags across the nine: " << total_store_only << "\n";
+    std::cout << "  total store-only enum-backed tags across the nine: " << total_store_only
+              << "\n";
     EXPECT_GT(total_store_only, 0u)
-        << "expected at least one store-only enum-backed tag (e.g. MsgType(35), EncryptMethod(98)) — "
+        << "expected at least one store-only enum-backed tag (e.g. MsgType(35), EncryptMethod(98)) "
+           "— "
            "if this is zero, either the dictionary set changed or the reachability walk above no "
-           "longer mirrors production; either way this test's own precondition needs re-examination.";
+           "longer mirrors production; either way this test's own precondition needs "
+           "re-examination.";
 }
 
 // ============================================================================

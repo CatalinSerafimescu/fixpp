@@ -83,11 +83,10 @@ namespace {
 // Build a FIX frame with deliberately WRONG BodyLength(9) and CheckSum(10).
 // The body itself is correct; only 9= and 10= are poisoned.
 static std::vector<std::byte> make_frame_with_wrong_9_10(std::string_view begin_string,
-                                                          std::string_view msg_type,
-                                                          std::uint32_t seq,
-                                                          std::string_view sender,
-                                                          std::string_view target,
-                                                          std::string_view extra = {}) {
+                                                         std::string_view msg_type,
+                                                         std::uint32_t seq, std::string_view sender,
+                                                         std::string_view target,
+                                                         std::string_view extra = {}) {
     using namespace fixpp::interop::parity;
     std::string body;
     body += field(35, msg_type);
@@ -270,8 +269,7 @@ protected:
         return fut.get();
     }
 
-    fixpp::core::expected_t<void> feed(fixpp::session::Session& s,
-                                       std::span<const std::byte> frm) {
+    fixpp::core::expected_t<void> feed(fixpp::session::Session& s, std::span<const std::byte> frm) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frm), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms, "Qfj626Fixture::feed")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Qfj626Fixture::feed");
@@ -310,7 +308,8 @@ TEST_F(Qfj626Fixture, ResendReplay_RecomputesBodyLengthAndChecksum) {
         found_replay = true;
 
         // Assert PossDupFlag(43)=Y present (precondition check).
-        EXPECT_NE(wire.find("43=Y\x01"), std::string::npos) << "replay must carry PossDupFlag(43)=Y";
+        EXPECT_NE(wire.find("43=Y\x01"), std::string::npos)
+            << "replay must carry PossDupFlag(43)=Y";
         // Assert OrigSendingTime(122) present.
         EXPECT_NE(wire.find("122="), std::string::npos) << "replay must carry OrigSendingTime(122)";
 

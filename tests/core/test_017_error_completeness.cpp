@@ -10,9 +10,8 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/core/error.hpp>
-
 #include <cstdint>
+#include <fixpp/core/error.hpp>
 #include <set>
 #include <string>
 #include <string_view>
@@ -21,12 +20,8 @@ using fixpp::core::error;
 
 // The 7 enumerators introduced by 017-log-otel at slots 122–128.
 static const std::set<error> k017_expected_set = {
-    error::log_queue_overflow,
-    error::log_sink_open_failed,
-    error::log_sink_write_failed,
-    error::log_sink_flush_failed,
-    error::log_drain_timeout,
-    error::otel_export_failed,
+    error::log_queue_overflow,        error::log_sink_open_failed, error::log_sink_write_failed,
+    error::log_sink_flush_failed,     error::log_drain_timeout,    error::otel_export_failed,
     error::otel_provider_init_failed,
 };
 
@@ -41,12 +36,12 @@ struct SlotCase {
 };
 
 static const SlotCase k017_slots[] = {
-    {error::log_queue_overflow,     122, "log_queue_overflow"},
-    {error::log_sink_open_failed,   123, "log_sink_open_failed"},
-    {error::log_sink_write_failed,  124, "log_sink_write_failed"},
-    {error::log_sink_flush_failed,  125, "log_sink_flush_failed"},
-    {error::log_drain_timeout,      126, "log_drain_timeout"},
-    {error::otel_export_failed,     127, "otel_export_failed"},
+    {error::log_queue_overflow, 122, "log_queue_overflow"},
+    {error::log_sink_open_failed, 123, "log_sink_open_failed"},
+    {error::log_sink_write_failed, 124, "log_sink_write_failed"},
+    {error::log_sink_flush_failed, 125, "log_sink_flush_failed"},
+    {error::log_drain_timeout, 126, "log_drain_timeout"},
+    {error::otel_export_failed, 127, "otel_export_failed"},
     {error::otel_provider_init_failed, 128, "otel_provider_init_failed"},
 };
 
@@ -63,8 +58,7 @@ TEST(Error017Completeness, ExactSetEquality) {
     for (error e : k017_expected_set) {
         named_slots.insert(static_cast<std::uint8_t>(e));
     }
-    const std::set<std::uint8_t> expected_slots = {122u, 123u, 124u, 125u,
-                                                   126u, 127u, 128u};
+    const std::set<std::uint8_t> expected_slots = {122u, 123u, 124u, 125u, 126u, 127u, 128u};
     EXPECT_EQ(named_slots, expected_slots)
         << "the 7 named 017 enumerators must occupy exactly slots 122-128 "
            "(no alias, none outside the block)";
@@ -110,8 +104,7 @@ TEST(Error017Completeness, SlotValues) {
 TEST(Error017Completeness, ErrorMessageNonEmpty) {
     for (const auto& c : k017_slots) {
         std::string_view msg = fixpp::core::error_message(c.e);
-        EXPECT_FALSE(msg.empty())
-            << "error_message(" << c.name << ") must not be empty";
+        EXPECT_FALSE(msg.empty()) << "error_message(" << c.name << ") must not be empty";
         EXPECT_NE(msg, "unknown error")
             << "error_message(" << c.name << ") returned 'unknown error'";
     }
@@ -122,10 +115,8 @@ TEST(Error017Completeness, ErrorMessageNonEmpty) {
 TEST(Error017Completeness, ToStringNonEmpty) {
     for (const auto& c : k017_slots) {
         std::string_view s = fixpp::core::to_string(c.e);
-        EXPECT_FALSE(s.empty())
-            << "to_string(" << c.name << ") must not be empty";
-        EXPECT_NE(s, "unknown error")
-            << "to_string(" << c.name << ") returned 'unknown error'";
+        EXPECT_FALSE(s.empty()) << "to_string(" << c.name << ") must not be empty";
+        EXPECT_NE(s, "unknown error") << "to_string(" << c.name << ") returned 'unknown error'";
     }
 }
 

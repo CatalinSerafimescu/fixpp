@@ -22,7 +22,6 @@
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/steady_timer.hpp>
-
 #include <chrono>
 #include <cstddef>
 #include <future>
@@ -46,7 +45,8 @@ using fixpp::test_support::run_for_residual_measurement;
 run_for_residual_measurement measure_via_fixture_helper(
     asio::io_context& ioc, std::future<void>& fut, std::chrono::steady_clock::duration window,
     std::source_location location = std::source_location::current()) {
-    return measure_run_for_residual_ready(ioc, fut, window, /*exclusive_driver=*/true, {}, location);
+    return measure_run_for_residual_ready(ioc, fut, window, /*exclusive_driver=*/true, {},
+                                          location);
 }
 
 // Positive/RED cell: one handler makes a promise ready and posts exactly N

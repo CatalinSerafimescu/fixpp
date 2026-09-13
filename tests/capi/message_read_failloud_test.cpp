@@ -203,9 +203,9 @@ TEST(MessageReadFailloud, PresentNestedGroup_ArenaExhausted_ReturnsWireLimitExce
 //
 // A repeated read of the SAME exhausted nested group must signal failure on
 // BOTH reads — the second read is served from `nested_cache_`'s cached
-// (possibly null) row (`OffsetTable::nested_group_slices`'s cache-hit branch) and must not silently serve
-// a stale "empty" result that hides the earlier failure (spec.md Edge Case
-// "Repeated read after a failed build").
+// (possibly null) row (`OffsetTable::nested_group_slices`'s cache-hit branch) and must not silently
+// serve a stale "empty" result that hides the earlier failure (spec.md Edge Case "Repeated read
+// after a failed build").
 TEST(MessageReadFailloud, RepeatedReadAfterArenaExhaustion_SignalsFailureBothTimes) {
     std::vector<std::byte> arena_buf(kTinyCap);
     std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),

@@ -659,7 +659,8 @@ void OrchestraLoaderState::expand_field_list(
                 // under a non-null sink, i.e. only in the message-scoped walk.
                 // 082 FR-023: the diagnostic MUST name the group's `name`
                 // attribute as well as its `no_tag` — "the facts an operator
-                // needs to fix the offending dialect" (`group_delimiter_collision_error::make`'s doc comment). The
+                // needs to fix the offending dialect" (`group_delimiter_collision_error::make`'s
+                // doc comment). The
                 // `<fix>` twin already names it (`xml_loader.cpp`'s
                 // `<group name="...">`); this one did not, which is the ONE
                 // gap found when FR-023's own pins were re-pointed onto this

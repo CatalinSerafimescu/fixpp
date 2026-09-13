@@ -14,24 +14,23 @@
 //   [const §XIII.4] — single write path (exactly-once Export per record)
 //   contracts/log-sinks.md §OtlpLogSink
 
+#include <fixpp/core/fix_time.hpp>
+#include <fixpp/log/level.hpp>
+#include <fixpp/log/logger.hpp>  // FIXPP_FORMAT_ID, detail::crc32_str
 #include <fixpp/log/otlp_log_sink.hpp>
 #include <fixpp/log/record.hpp>
-#include <fixpp/log/level.hpp>
-#include <fixpp/core/fix_time.hpp>
-#include <fixpp/log/logger.hpp>  // FIXPP_FORMAT_ID, detail::crc32_str
 
 // OTel SDK headers for the mock exporter
+#include <gtest/gtest.h>
+#include <opentelemetry/logs/severity.h>
+#include <opentelemetry/nostd/variant.h>
+#include <opentelemetry/sdk/common/attribute_utils.h>
+#include <opentelemetry/sdk/common/exporter_utils.h>
 #include <opentelemetry/sdk/logs/exporter.h>
 #include <opentelemetry/sdk/logs/read_write_log_record.h>
 #include <opentelemetry/sdk/logs/recordable.h>
-#include <opentelemetry/sdk/common/attribute_utils.h>
-#include <opentelemetry/sdk/common/exporter_utils.h>
-#include <opentelemetry/logs/severity.h>
-#include <opentelemetry/trace/trace_id.h>
 #include <opentelemetry/trace/span_id.h>
-#include <opentelemetry/nostd/variant.h>
-
-#include <gtest/gtest.h>
+#include <opentelemetry/trace/trace_id.h>
 
 #include <atomic>
 #include <chrono>
@@ -47,26 +46,24 @@ class CapturingExporter final : public opentelemetry::sdk::logs::LogRecordExport
 public:
     struct CapturedRecord {
         opentelemetry::logs::Severity severity;
-        std::chrono::nanoseconds      timestamp_ns{0};
+        std::chrono::nanoseconds timestamp_ns{0};
         // TraceId bytes (16)
         std::array<uint8_t, 16> trace_id_bytes{};
         // SpanId bytes (8)
-        std::array<uint8_t, 8>  span_id_bytes{};
+        std::array<uint8_t, 8> span_id_bytes{};
         // Body: resolved formatted string (RC#1 — [2k §4.6] "formatted body→Body")
         std::string body_str;
         // Category attribute
         int64_t category{0};
     };
 
-    std::unique_ptr<opentelemetry::sdk::logs::Recordable>
-    MakeRecordable() noexcept override {
+    std::unique_ptr<opentelemetry::sdk::logs::Recordable> MakeRecordable() noexcept override {
         return std::make_unique<opentelemetry::sdk::logs::ReadWriteLogRecord>();
     }
 
     opentelemetry::sdk::common::ExportResult Export(
-        const opentelemetry::nostd::span<
-            std::unique_ptr<opentelemetry::sdk::logs::Recordable>>& batch) noexcept override
-    {
+        const opentelemetry::nostd::span<std::unique_ptr<opentelemetry::sdk::logs::Recordable>>&
+            batch) noexcept override {
         export_call_count_.fetch_add(1, std::memory_order_relaxed);
         for (auto& r : batch) {
             auto* lr = dynamic_cast<opentelemetry::sdk::logs::ReadWriteLogRecord*>(r.get());
@@ -77,8 +74,8 @@ public:
 
             // Timestamp
             auto ts_sys = lr->GetTimestamp();
-            cap.timestamp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                ts_sys.time_since_epoch());
+            cap.timestamp_ns =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(ts_sys.time_since_epoch());
 
             // TraceId
             const auto& tid = lr->GetTraceId();
@@ -112,7 +109,7 @@ public:
     }
 
     bool ForceFlush(std::chrono::microseconds) noexcept override { return true; }
-    bool Shutdown(std::chrono::microseconds)   noexcept override { return true; }
+    bool Shutdown(std::chrono::microseconds) noexcept override { return true; }
 
     [[nodiscard]] int export_call_count() const noexcept {
         return export_call_count_.load(std::memory_order_relaxed);
@@ -132,21 +129,19 @@ private:
 // ── FailingExporter — always returns kFailure for E10 test ───────────────────
 class FailingExporter final : public opentelemetry::sdk::logs::LogRecordExporter {
 public:
-    std::unique_ptr<opentelemetry::sdk::logs::Recordable>
-    MakeRecordable() noexcept override {
+    std::unique_ptr<opentelemetry::sdk::logs::Recordable> MakeRecordable() noexcept override {
         return std::make_unique<opentelemetry::sdk::logs::ReadWriteLogRecord>();
     }
 
     opentelemetry::sdk::common::ExportResult Export(
         const opentelemetry::nostd::span<
-            std::unique_ptr<opentelemetry::sdk::logs::Recordable>>&) noexcept override
-    {
+            std::unique_ptr<opentelemetry::sdk::logs::Recordable>>&) noexcept override {
         export_call_count_.fetch_add(1, std::memory_order_relaxed);
         return opentelemetry::sdk::common::ExportResult::kFailure;
     }
 
     bool ForceFlush(std::chrono::microseconds) noexcept override { return false; }
-    bool Shutdown(std::chrono::microseconds)   noexcept override { return true; }
+    bool Shutdown(std::chrono::microseconds) noexcept override { return true; }
 
     [[nodiscard]] int export_call_count() const noexcept {
         return export_call_count_.load(std::memory_order_relaxed);
@@ -164,10 +159,10 @@ private:
 
 fixpp::log::Record make_record_42() {
     fixpp::log::Record rec{};
-    rec.level     = fixpp::log::Level::info;
+    rec.level = fixpp::log::Level::info;
     // CRC32 of "msg {}" — registered in format_registry.cpp
     rec.format_id = static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("msg {}"));
-    rec.category  = fixpp::log::cat::session;
+    rec.category = fixpp::log::cat::session;
 
     // Known trace_id (all 0xAA)
     rec.trace_id.fill(0xAA);
@@ -180,7 +175,7 @@ fixpp::log::Record make_record_42() {
 
     // Arg: u64(42) — fills the {} placeholder → body resolves to "msg 42"
     rec.arg_count = 1;
-    rec.args[0]   = fixpp::log::ArgValue::from_u64(42u);
+    rec.args[0] = fixpp::log::ArgValue::from_u64(42u);
 
     return rec;
 }
@@ -191,10 +186,11 @@ template <typename Exporter>
 fixpp::log::OtlpLogSinkConfig make_config(std::shared_ptr<Exporter> exporter_owner) {
     fixpp::log::OtlpLogSinkConfig cfg;
     cfg.max_export_retries = 3;
-    cfg.max_export_batch   = 512;
-    cfg.export_timeout     = std::chrono::seconds{1};
+    cfg.max_export_batch = 512;
+    cfg.export_timeout = std::chrono::seconds{1};
     // Store the exporter as a shared_ptr<void> — the sink borrows the raw ptr.
-    cfg.test_exporter = std::shared_ptr<void>(exporter_owner,
+    cfg.test_exporter = std::shared_ptr<void>(
+        exporter_owner,
         static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(exporter_owner.get()));
     return cfg;
 }
@@ -209,11 +205,10 @@ TEST(OtlpLogSink, TS10_RecordFieldMapping) {
 
     fixpp::log::OtlpLogSinkConfig cfg;
     cfg.max_export_retries = 3;
-    cfg.max_export_batch   = 512;
-    cfg.export_timeout     = std::chrono::seconds{2};
+    cfg.max_export_batch = 512;
+    cfg.export_timeout = std::chrono::seconds{2};
     cfg.test_exporter = std::shared_ptr<void>(
-        capturing,
-        static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(capturing.get()));
+        capturing, static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(capturing.get()));
 
     fixpp::log::OtlpLogSink sink{cfg};
 
@@ -241,8 +236,7 @@ TEST(OtlpLogSink, TS10_RecordFieldMapping) {
     // Timestamp must match 1s since epoch (within 1 ms tolerance).
     auto expected_ns = std::chrono::nanoseconds{1'000'000'000LL};
     auto diff = std::chrono::abs(cap.timestamp_ns - expected_ns);
-    EXPECT_LT(diff.count(), 1'000'000LL)
-        << "Timestamp differs by " << diff.count() << " ns";
+    EXPECT_LT(diff.count(), 1'000'000LL) << "Timestamp differs by " << diff.count() << " ns";
 
     // TraceId must be all 0xAA.
     for (auto b : cap.trace_id_bytes) {
@@ -250,8 +244,7 @@ TEST(OtlpLogSink, TS10_RecordFieldMapping) {
     }
 
     // SpanId must be 0xBBBBBBBBBBBBBBBB big-endian.
-    const std::array<uint8_t, 8> expected_span{
-        0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB};
+    const std::array<uint8_t, 8> expected_span{0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB};
     EXPECT_EQ(cap.span_id_bytes, expected_span);
 
     // Body must be the resolved formatted string: "msg {}" + u64(42) → "msg 42".
@@ -272,11 +265,10 @@ TEST(OtlpLogSink, TS10_ExactlyOnceExport) {
 
     fixpp::log::OtlpLogSinkConfig cfg;
     cfg.max_export_retries = 3;
-    cfg.max_export_batch   = 512;
-    cfg.export_timeout     = std::chrono::seconds{2};
+    cfg.max_export_batch = 512;
+    cfg.export_timeout = std::chrono::seconds{2};
     cfg.test_exporter = std::shared_ptr<void>(
-        capturing,
-        static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(capturing.get()));
+        capturing, static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(capturing.get()));
 
     fixpp::log::OtlpLogSink sink{cfg};
     ASSERT_TRUE(sink.open().has_value());
@@ -292,8 +284,7 @@ TEST(OtlpLogSink, TS10_ExactlyOnceExport) {
     sink.flush(std::chrono::milliseconds{2000});
 
     auto records = capturing->records();
-    EXPECT_EQ(records.size(), 3u)
-        << "Expected all 3 records to be exported after flush";
+    EXPECT_EQ(records.size(), 3u) << "Expected all 3 records to be exported after flush";
 
     // No double-write: each record appears exactly once.
     // (records.size() == 3, already asserted above).
@@ -308,11 +299,10 @@ TEST(OtlpLogSink, E10_FailingExporter_BoundedRetries) {
 
     fixpp::log::OtlpLogSinkConfig cfg;
     cfg.max_export_retries = kMaxRetries;
-    cfg.max_export_batch   = 512;
-    cfg.export_timeout     = std::chrono::seconds{1};
+    cfg.max_export_batch = 512;
+    cfg.export_timeout = std::chrono::seconds{1};
     cfg.test_exporter = std::shared_ptr<void>(
-        failing,
-        static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(failing.get()));
+        failing, static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(failing.get()));
 
     fixpp::log::OtlpLogSink sink{cfg};
     ASSERT_TRUE(sink.open().has_value());
@@ -341,11 +331,10 @@ TEST(OtlpLogSink, E10_ZeroRetries_ImmediateFail) {
 
     fixpp::log::OtlpLogSinkConfig cfg;
     cfg.max_export_retries = 0;  // zero retries: first failure → otel_export_failed
-    cfg.max_export_batch   = 512;
-    cfg.export_timeout     = std::chrono::seconds{1};
+    cfg.max_export_batch = 512;
+    cfg.export_timeout = std::chrono::seconds{1};
     cfg.test_exporter = std::shared_ptr<void>(
-        failing,
-        static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(failing.get()));
+        failing, static_cast<opentelemetry::sdk::logs::LogRecordExporter*>(failing.get()));
 
     fixpp::log::OtlpLogSink sink{cfg};
     ASSERT_TRUE(sink.open().has_value());

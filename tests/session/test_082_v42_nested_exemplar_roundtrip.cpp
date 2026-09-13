@@ -36,17 +36,16 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory_resource>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/v42/Messages.hpp>  // GENERATED read tier
 #include <fixpp/v42/all.hpp>       // GENERATED builder tier (082 US2)
+#include <memory_resource>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/app_message_read_scaffold.hpp"
 #include "support/golden_diff.hpp"
@@ -120,13 +119,14 @@ TEST(V42NestedExemplar082, BuildMatchesQuickFixGoldenAndRoundTripsBothGroupLevel
 
     std::array<std::byte, 4096> out{};
     auto const built = fixpp::v42::build_MassQuote(std::span<std::byte>{out}, args);
-    ASSERT_TRUE(built.has_value()) << "fixpp::v42::build_MassQuote failed -- the v42 builder tier is "
-                                     "the thing US2 delivered; a failure here is not a test bug";
+    ASSERT_TRUE(built.has_value())
+        << "fixpp::v42::build_MassQuote failed -- the v42 builder tier is "
+           "the thing US2 delivered; a failure here is not a test bug";
     std::span<const std::byte> const body = *built;
 
     // ── LEG 1: byte-diff against the QuickFIX-authored golden ────────────────
-    std::string const golden_text = read_file(std::string(FIXPP_REPO_ROOT) + "/" +
-                                              std::string(kGoldenPath));
+    std::string const golden_text =
+        read_file(std::string(FIXPP_REPO_ROOT) + "/" + std::string(kGoldenPath));
     ASSERT_FALSE(golden_text.empty()) << "golden is empty -- an empty golden would make the diff "
                                          "below vacuous rather than failing";
     std::vector<GoldenFrame> const expected = parse_golden(golden_text);
@@ -205,7 +205,8 @@ TEST(V42NestedExemplar082, BuildMatchesQuickFixGoldenAndRoundTripsBothGroupLevel
     EXPECT_EQ(sets_seen, 1U) << "NoQuoteSets(296) must enumerate exactly one entry -- zero means "
                                 "the outer group did not round-trip and the assertions above never "
                                 "executed";
-    EXPECT_EQ(entries_seen, 1U) << "NoQuoteEntries(295) must enumerate exactly one entry INSIDE the "
-                                   "296 entry -- zero means the NESTED level did not round-trip, "
-                                   "which is precisely the L-061-1 capability under test";
+    EXPECT_EQ(entries_seen, 1U)
+        << "NoQuoteEntries(295) must enumerate exactly one entry INSIDE the "
+           "296 entry -- zero means the NESTED level did not round-trip, "
+           "which is precisely the L-061-1 capability under test";
 }

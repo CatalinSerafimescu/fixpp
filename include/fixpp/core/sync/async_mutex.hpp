@@ -810,9 +810,9 @@ bool waiter_record::store_executor(Executor&& ex) noexcept {
             // destructor guard, the T023/T024 traps above). This is NOT
             // closed the way the pre-grant slot-assign allocation is
             // (`store_executor`/`inherited_slot.assign` failures above fail
-            // CLOSED with `sync_lock_alloc_failed` (the pool-exhaustion / store_executor / inherited_slot.assign failure arms): the
-            // difference is grant ORDERING, not an oversight. Slot-assign
-            // runs pre-commitment — no waiter has been granted yet, so
+            // CLOSED with `sync_lock_alloc_failed` (the pool-exhaustion / store_executor /
+            // inherited_slot.assign failure arms): the difference is grant ORDERING, not an
+            // oversight. Slot-assign runs pre-commitment — no waiter has been granted yet, so
             // returning an error is a legitimate outcome. This post runs
             // POST-GRANT: the waiter already owns the lock (or has been
             // definitively cancelled) and MUST be resumed — there is no
@@ -879,7 +879,8 @@ enum class async_mutex_seam_phase : std::uint8_t {
     // reliably organic on the seam-OFF coverage lane (F4 flaky ~0.3-1.5%;
     // F6 0/all-trials) — see test_async_mutex_terminal_cas_recursive_unlock.cpp.
     unlock_pre_terminal_cas_fast,  // F4: no-waiters fast path (unlock()'s terminal CAS)
-    unlock_pre_terminal_cas_fifo,  // F6: FIFO walk exhausted, all cancelled (unlock()'s terminal CAS)
+    unlock_pre_terminal_cas_fifo,  // F6: FIFO walk exhausted, all cancelled (unlock()'s terminal
+                                   // CAS)
 
     // 058 Gate-B MAJOR-2 (async_mutex.hpp's async_lock contended-acquire loop):
     // deterministic reproduction of the pre-fix `old_state` staleness
@@ -1656,7 +1657,7 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
                 chain->result_ = expected_t<async_lock_guard>{
                     std::unexpected(fixpp::core::error::sync_lock_aborted)};
                 detail::waiter_record::release_ref(chain);  // list membership
-                schedule_record_resume(chain);  // ++in_flight_resumers_ inside
+                schedule_record_resume(chain);              // ++in_flight_resumers_ inside
             } else {
                 // CAS lost: granted (holder will quiesce) or the waiter's
                 // own on_cancel beat the reaper. Drop list membership only.
@@ -1715,9 +1716,8 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     // no co_await between them) — a reentrant caller observing draining_complete_
     // also observes state_==not_locked (research.md D-2 step 5).
     uintptr_t expected_state = locked_no_waiters;
-    bool finalized = state_.compare_exchange_strong(expected_state, not_locked,
-                                                    std::memory_order_acq_rel,
-                                                    std::memory_order_acquire);
+    bool finalized = state_.compare_exchange_strong(
+        expected_state, not_locked, std::memory_order_acq_rel, std::memory_order_acquire);
     // P3-2 (Gate B): the loop only breaks once both lists are empty in a pass, so the
     // drain holds the lock (locked_no_waiters) at this point and the CAS is invariant.
     // Assert it — an internal regression must NOT publish draining_complete_ while

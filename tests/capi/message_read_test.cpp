@@ -30,8 +30,8 @@
 #include <vector>
 
 // C-ABI under test
-#include "fix/c_api/message.h"
 #include "fix/c_api/error.h"
+#include "fix/c_api/message.h"
 
 // Engine-internal concrete fixpp_msg definition (test-only access)
 #include "capi_internal.hpp"
@@ -40,15 +40,16 @@
 #include <fixpp/wire/parser.hpp>
 
 // Test support
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/xml_loader.hpp>
+
 #include "support/alloc_guard_markers.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"  // has group_member_tags interface
-#include <fixpp/dict/table_view.hpp>
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/xml_loader.hpp>
 
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 
 namespace {
@@ -83,9 +84,7 @@ std::vector<std::byte> make_checked_frame(std::string_view body) {
 // token is default-constructed (expired) — reads are allowed, writes → INVALID_HANDLE.
 struct InboundHandle {
     fixpp_msg msg{};
-    const fixpp_msg_t* ptr() const noexcept {
-        return reinterpret_cast<const fixpp_msg_t*>(&msg);
-    }
+    const fixpp_msg_t* ptr() const noexcept { return reinterpret_cast<const fixpp_msg_t*>(&msg); }
 };
 
 // ── US1 (T005) ─────────────────────────────────────────────────────────────
@@ -117,7 +116,10 @@ TEST(MessageRead, NullHandleReturnsNullHandle) {
 }
 
 TEST(MessageRead, NullOutPointerReturnsNullHandle) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -167,7 +169,9 @@ TEST(MessageRead, OutboundFlavorGetStringReturnsInvalidHandle) {
 // the view pointer → fixpp_msg_get_string looks up tag 35 in the real view → OK.
 // Post-fix (positive tag): ENGINE != MSG → INVALID_HANDLE.
 TEST(MessageRead, TypeMismatchedHandleReturnsInvalidHandle) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -175,7 +179,7 @@ TEST(MessageRead, TypeMismatchedHandleReturnsInvalidHandle) {
 
     fixpp_msg bad{};
     bad.tag_ = FIXPP_HANDLE_TAG_ENGINE;  // wrong type, non-DEAD
-    bad.view = &mv;                       // non-null: DEAD-only guard would sail past
+    bad.view = &mv;                      // non-null: DEAD-only guard would sail past
     const auto* p = reinterpret_cast<const fixpp_msg_t*>(&bad);
 
     const char* out = nullptr;
@@ -185,7 +189,10 @@ TEST(MessageRead, TypeMismatchedHandleReturnsInvalidHandle) {
 }
 
 TEST(MessageRead, GetMsgType) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -202,7 +209,10 @@ TEST(MessageRead, GetMsgType) {
 }
 
 TEST(MessageRead, GetStringPresent) {
-    auto buf = make_raw_frame("35=D\x01" "49=MYSENDER\x01" "56=TARGET\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=MYSENDER\x01"
+        "56=TARGET\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -219,13 +229,15 @@ TEST(MessageRead, GetStringPresent) {
 
     // Alias check: the returned pointer must lie within the wire buffer
     const auto* buf_start = reinterpret_cast<const char*>(buf.data());
-    const auto* buf_end   = buf_start + buf.size();
+    const auto* buf_end = buf_start + buf.size();
     EXPECT_GE(out, buf_start) << "string must alias wire buffer (not a copy)";
-    EXPECT_LT(out, buf_end)   << "string must alias wire buffer (not a copy)";
+    EXPECT_LT(out, buf_end) << "string must alias wire buffer (not a copy)";
 }
 
 TEST(MessageRead, GetBytesPresent) {
-    auto buf = make_raw_frame("35=D\x01" "49=MYSENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=MYSENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -243,13 +255,15 @@ TEST(MessageRead, GetBytesPresent) {
 
     // Alias check
     const auto* buf_start = reinterpret_cast<const uint8_t*>(buf.data());
-    const auto* buf_end   = buf_start + buf.size();
+    const auto* buf_end = buf_start + buf.size();
     EXPECT_GE(bp, buf_start);
     EXPECT_LT(bp, buf_end);
 }
 
 TEST(MessageRead, GetStringAbsentTagNotFound) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -265,7 +279,9 @@ TEST(MessageRead, GetStringAbsentTagNotFound) {
 
 TEST(MessageRead, GetIntPresent) {
     // tag 34 = MsgSeqNum (integer)
-    auto buf = make_raw_frame("35=D\x01" "34=42\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=42\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -280,7 +296,9 @@ TEST(MessageRead, GetIntPresent) {
 }
 
 TEST(MessageRead, GetIntNegative) {
-    auto buf = make_raw_frame("35=D\x01" "38=-7\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "38=-7\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -310,7 +328,9 @@ TEST(MessageRead, GetIntAbsent) {
 
 TEST(MessageRead, GetIntNonNumericWireInvalidFrame) {
     // tag 34 contains non-numeric bytes
-    auto buf = make_raw_frame("35=D\x01" "34=NOTNUM\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=NOTNUM\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -325,7 +345,9 @@ TEST(MessageRead, GetIntNonNumericWireInvalidFrame) {
 
 TEST(MessageRead, GetDoublePresent) {
     // tag 44 = Price (float/double)
-    auto buf = make_raw_frame("35=D\x01" "44=12.50\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "44=12.50\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -340,7 +362,9 @@ TEST(MessageRead, GetDoublePresent) {
 }
 
 TEST(MessageRead, GetDoubleNonNumericWireInvalidFrame) {
-    auto buf = make_raw_frame("35=D\x01" "44=NOTNUM\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "44=NOTNUM\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -355,7 +379,9 @@ TEST(MessageRead, GetDoubleNonNumericWireInvalidFrame) {
 
 TEST(MessageRead, GetDecimalPresent) {
     // tag 44 = Price; use a simple decimal value
-    auto buf = make_raw_frame("35=D\x01" "44=1.23\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "44=1.23\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -389,7 +415,9 @@ TEST(MessageRead, GetDecimalAbsent) {
 }
 
 TEST(MessageRead, HasTagPresentAndAbsent) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -409,7 +437,9 @@ TEST(MessageRead, HasTagPresentAndAbsent) {
 
 TEST(MessageRead, Version) {
     // tag 8 = BeginString; parse a frame with it in the wire buffer
-    auto buf = make_raw_frame("35=D\x01" "49=S\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=S\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -446,7 +476,11 @@ TEST(MessageRead, Version) {
 //   The group cursor path (present tag) is guarded separately in
 //   ZeroGlobalHeapGroupCursorGuard below.
 TEST(MessageRead, ZeroGlobalHeapAllocGuard) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=42\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01"
+        "34=42\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -460,9 +494,11 @@ TEST(MessageRead, ZeroGlobalHeapAllocGuard) {
     // get_double, get_decimal, has_tag, get_msg_type, version) and
     // get_group (absent tag 453 — frame has no group field; early return).
     for (int i = 0; i < 8; ++i) {
-        const char* out = nullptr; size_t len = 0;
+        const char* out = nullptr;
+        size_t len = 0;
         (void)fixpp_msg_get_string(h.ptr(), 49, &out, &len);
-        const uint8_t* bout = nullptr; size_t blen = 0;
+        const uint8_t* bout = nullptr;
+        size_t blen = 0;
         (void)fixpp_msg_get_bytes(h.ptr(), 49, &bout, &blen);
         int64_t iv = 0;
         (void)fixpp_msg_get_int(h.ptr(), 34, &iv);
@@ -472,7 +508,8 @@ TEST(MessageRead, ZeroGlobalHeapAllocGuard) {
         (void)fixpp_msg_get_decimal(h.ptr(), 34, &decv);
         fixpp_resolved_msg_version_t verv{};
         (void)fixpp_msg_version(h.ptr(), &verv);
-        const fixpp_group_t* grp_wu = nullptr; size_t cnt_wu = 0;
+        const fixpp_group_t* grp_wu = nullptr;
+        size_t cnt_wu = 0;
         (void)fixpp_msg_get_group(h.ptr(), 453, &grp_wu, &cnt_wu);  // absent → TAG_NOT_FOUND
     }
 
@@ -482,10 +519,12 @@ TEST(MessageRead, ZeroGlobalHeapAllocGuard) {
     // ZeroGlobalHeapGroupCursorGuard.
     if (alloc_guard_start) alloc_guard_start();
     for (int i = 0; i < 1000; ++i) {
-        const char* out = nullptr; size_t len = 0;
+        const char* out = nullptr;
+        size_t len = 0;
         ASSERT_EQ(fixpp_msg_get_string(h.ptr(), 49, &out, &len), FIXPP_ERR_OK);
 
-        const uint8_t* bout = nullptr; size_t blen = 0;
+        const uint8_t* bout = nullptr;
+        size_t blen = 0;
         ASSERT_EQ(fixpp_msg_get_bytes(h.ptr(), 49, &bout, &blen), FIXPP_ERR_OK);
 
         int64_t iv = 0;
@@ -500,14 +539,16 @@ TEST(MessageRead, ZeroGlobalHeapAllocGuard) {
         bool present = false;
         ASSERT_EQ(fixpp_msg_has_tag(h.ptr(), 56, &present), FIXPP_ERR_OK);
 
-        const char* mt = nullptr; size_t mtl = 0;
+        const char* mt = nullptr;
+        size_t mtl = 0;
         ASSERT_EQ(fixpp_msg_get_msg_type(h.ptr(), &mt, &mtl), FIXPP_ERR_OK);
 
         fixpp_resolved_msg_version_t ver{};
         ASSERT_EQ(fixpp_msg_version(h.ptr(), &ver), FIXPP_ERR_OK);
 
         // get_group on an absent tag: early return before cursor allocation → zero alloc.
-        const fixpp_group_t* grp_out = nullptr; size_t grp_count = 0;
+        const fixpp_group_t* grp_out = nullptr;
+        size_t grp_count = 0;
         ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp_out, &grp_count), FIXPP_ERR_TAG_NOT_FOUND);
     }
     if (alloc_guard_end) alloc_guard_end();
@@ -613,7 +654,8 @@ TEST(MessageRead, ZeroGlobalHeapGroupCursorGuard) {
         ASSERT_EQ(grp_count, 1U);
         ASSERT_NE(grp_out, nullptr);
         // Verify field access through the cursor also stays zero-alloc.
-        const char* pv = nullptr; size_t pl = 0;
+        const char* pv = nullptr;
+        size_t pl = 0;
         ASSERT_EQ(fixpp_group_get_field_string(grp_out, 0, 448, &pv, &pl), FIXPP_ERR_OK);
         EXPECT_EQ(std::string_view(pv, pl), "PA");
     }
@@ -671,7 +713,8 @@ TEST(MessageReadGroupDeath, StaleTopLevelGroupCursorMetadataTrapsAfterRecycle) {
         {
             const fixpp_group_t* grp = nullptr;
             size_t count = 0;
-            (void)fixpp_msg_get_group(h.ptr(), 9999, &grp, &count);  // absent tag → stale find() must trap
+            (void)fixpp_msg_get_group(h.ptr(), 9999, &grp,
+                                      &count);  // absent tag → stale find() must trap
         },
         "");
 }
@@ -733,7 +776,8 @@ TEST(MessageReadGroup, GetGroupEntryFirstAndLast) {
     ASSERT_EQ(count, 2U);
 
     // entry [0]: tag 448 == "PA", tag 447 == "D"
-    const char* val = nullptr; size_t vlen = 0;
+    const char* val = nullptr;
+    size_t vlen = 0;
     ASSERT_EQ(fixpp_group_get_field_string(grp, 0, 448, &val, &vlen), FIXPP_ERR_OK);
     EXPECT_EQ(std::string_view(val, vlen), "PA");
 
@@ -771,10 +815,10 @@ TEST(MessageReadGroup, IndexOutOfRangeReturnsError) {
     ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
     ASSERT_EQ(count, 1U);
 
-    const char* val = nullptr; size_t vlen = 0;
+    const char* val = nullptr;
+    size_t vlen = 0;
     // i == count → INDEX_OUT_OF_RANGE
-    EXPECT_EQ(fixpp_group_get_field_string(grp, 1, 448, &val, &vlen),
-              FIXPP_ERR_INDEX_OUT_OF_RANGE);
+    EXPECT_EQ(fixpp_group_get_field_string(grp, 1, 448, &val, &vlen), FIXPP_ERR_INDEX_OUT_OF_RANGE);
     // i > count → INDEX_OUT_OF_RANGE
     EXPECT_EQ(fixpp_group_get_field_string(grp, 99, 448, &val, &vlen),
               FIXPP_ERR_INDEX_OUT_OF_RANGE);
@@ -804,13 +848,16 @@ TEST(MessageReadGroup, AbsentFieldInEntryReturnsTagNotFound) {
     ASSERT_EQ(count, 1U);
 
     // tag 55 (Symbol) is absent from the group entry
-    const char* val = nullptr; size_t vlen = 0;
+    const char* val = nullptr;
+    size_t vlen = 0;
     EXPECT_EQ(fixpp_group_get_field_string(grp, 0, 55, &val, &vlen), FIXPP_ERR_TAG_NOT_FOUND);
 }
 
 TEST(MessageReadGroup, AbsentGroupReturnsTagNotFound) {
     // No 453 in the frame
-    auto buf = make_raw_frame("35=D\x01" "49=S\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=S\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -831,7 +878,9 @@ TEST(MessageReadGroup, AbsentGroupReturnsTagNotFound) {
 TEST(MessageReadGroup, NonGroupTagReturnsTypeMismatch) {
     // tag 49 (SenderCompID) is a scalar, not a group tag
     auto dict = make_group_dict();
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -859,9 +908,9 @@ TEST(MessageReadGroup, GetGroupIntAndDouble) {
     dict.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
-        .add_valid("D", 15)   // Currency (string), used as numeric for test
-        .add_valid("D", 44)   // Price (double)
-        .add_valid("D", 38)   // OrderQty (int)
+        .add_valid("D", 15)  // Currency (string), used as numeric for test
+        .add_valid("D", 44)  // Price (double)
+        .add_valid("D", 38)  // OrderQty (int)
         .set_group_first(453, 448)
         .add_group_member(453, 15)
         .add_group_member(453, 44)
@@ -973,7 +1022,8 @@ TEST(MessageReadGroup, NestedGroupDescent) {
     EXPECT_NE(nested, nullptr);
 
     // Read from nested entry [0]
-    const char* val = nullptr; size_t vlen = 0;
+    const char* val = nullptr;
+    size_t vlen = 0;
     ASSERT_EQ(fixpp_group_get_field_string(nested, 0, 524, &val, &vlen), FIXPP_ERR_OK);
     EXPECT_EQ(std::string_view(val, vlen), "NPA");
 
@@ -1033,7 +1083,8 @@ TEST(MessageReadGroup, NestedGroupDescentTwoOuterEntries) {
     ASSERT_EQ(nested_count0, 1U);
     ASSERT_NE(nested0, nullptr);
 
-    const char* val = nullptr; size_t vlen = 0;
+    const char* val = nullptr;
+    size_t vlen = 0;
     ASSERT_EQ(fixpp_group_get_field_string(nested0, 0, 524, &val, &vlen), FIXPP_ERR_OK);
     EXPECT_EQ(std::string_view(val, vlen), "NPA0");
 
@@ -1080,9 +1131,9 @@ TEST(MessageReadGroup, NestedGroupLastInstanceExtentDoesNotAbsorbTrailingOuterMe
         .set_group_first(453, 448)
         .add_group_member(453, 447)
         .add_group_member(453, 539)
-        .add_group_member(453, 524)   // transitively under 453 (nested delim)
-        .add_group_member(453, 525)   // transitively under 453 (nested member)
-        .add_group_member(453, 999)   // outer trailing scalar, AFTER the nested group
+        .add_group_member(453, 524)  // transitively under 453 (nested delim)
+        .add_group_member(453, 525)  // transitively under 453 (nested member)
+        .add_group_member(453, 999)  // outer trailing scalar, AFTER the nested group
         .set_group_first(539, 524)
         .add_group_member(539, 525);
 
@@ -1152,7 +1203,11 @@ TEST(MessageReadGroup, NestedGroupLastInstanceExtentDoesNotAbsorbTrailingOuterMe
 // NULL out-pointer for EVERY accessor (one call each, all return NULL_HANDLE).
 // Closes the True-branch of "if (bytes_out==nullptr)" etc. for each accessor.
 TEST(MessageRead, NullOutPointerAllAccessors) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "34=42\x01" "44=1.5\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01"
+        "34=42\x01"
+        "44=1.5\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -1194,12 +1249,15 @@ TEST(MessageRead, NullOutPointerAllAccessors) {
 TEST(MessageRead, GroupNullHandleAllAccessors) {
     const fixpp_group_t* null_grp = nullptr;
 
-    const char* sv = nullptr; size_t svlen = 0;
+    const char* sv = nullptr;
+    size_t svlen = 0;
     EXPECT_EQ(fixpp_group_get_field_string(null_grp, 0, 448, &sv, &svlen), FIXPP_ERR_NULL_HANDLE);
 
-    const uint8_t* bv = nullptr; size_t blen = 0;
+    const uint8_t* bv = nullptr;
+    size_t blen = 0;
     // v_out and len_out null checks for string
-    EXPECT_EQ(fixpp_group_get_field_string(null_grp, 0, 448, nullptr, &svlen), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_group_get_field_string(null_grp, 0, 448, nullptr, &svlen),
+              FIXPP_ERR_NULL_HANDLE);
     EXPECT_EQ(fixpp_group_get_field_string(null_grp, 0, 448, &sv, nullptr), FIXPP_ERR_NULL_HANDLE);
 
     int64_t iv = 0;
@@ -1214,16 +1272,20 @@ TEST(MessageRead, GroupNullHandleAllAccessors) {
     EXPECT_EQ(fixpp_group_get_field_decimal(null_grp, 0, 44, &dec), FIXPP_ERR_NULL_HANDLE);
     EXPECT_EQ(fixpp_group_get_field_decimal(null_grp, 0, 44, nullptr), FIXPP_ERR_NULL_HANDLE);
 
-    const fixpp_group_t* nested = nullptr; size_t nc = 0;
+    const fixpp_group_t* nested = nullptr;
+    size_t nc = 0;
     EXPECT_EQ(fixpp_group_get_nested_group(null_grp, 0, 539, &nested, &nc), FIXPP_ERR_NULL_HANDLE);
     EXPECT_EQ(fixpp_group_get_nested_group(null_grp, 0, 539, nullptr, &nc), FIXPP_ERR_NULL_HANDLE);
-    EXPECT_EQ(fixpp_group_get_nested_group(null_grp, 0, 539, &nested, nullptr), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_group_get_nested_group(null_grp, 0, 539, &nested, nullptr),
+              FIXPP_ERR_NULL_HANDLE);
 }
 
 // tag 1137 present in the frame → appl_ver_id filled.
 TEST(MessageRead, VersionWithApplVerId) {
     // Include tag 1137 (DefaultApplVerID) for FIXT
-    auto buf = make_raw_frame("35=D\x01" "1137=FIX.5.0SP2\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "1137=FIX.5.0SP2\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -1240,7 +1302,9 @@ TEST(MessageRead, VersionWithApplVerId) {
 // get_decimal with an invalid decimal string → FIXPP_ERR_DECIMAL_INVALID.
 // Uses tag 44 with a non-numeric value to trigger the decimal_invalid path.
 TEST(MessageRead, GetDecimalInvalid) {
-    auto buf = make_raw_frame("35=D\x01" "44=GARBAGE\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "44=GARBAGE\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -1465,7 +1529,9 @@ TEST(MessageRead, GetMsgTypeEmptyMsgType) {
 // The NullOutPointerAllAccessors test above passes null,null for get_string,
 // which short-circuits on the first operand — this test drives the second.
 TEST(MessageRead, GetStringNullLenOut) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -1480,7 +1546,9 @@ TEST(MessageRead, GetStringNullLenOut) {
 
 // get_bytes on an absent tag: exercises fixpp_msg_get_bytes's if(!res) absent branch.
 TEST(MessageRead, GetBytesAbsentTag) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -1496,7 +1564,9 @@ TEST(MessageRead, GetBytesAbsentTag) {
 
 // get_double on an absent tag: exercises fixpp_msg_get_double's if(!res) absent branch.
 TEST(MessageRead, GetDoubleAbsentTag) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -1620,8 +1690,8 @@ TEST(MessageReadGroup, ParseIntAndDoubleEmptyFieldValue) {
         "35=D\x01"
         "453=1\x01"
         "448=PA\x01"
-        "38=\x01"   // empty value for int tag
-        "44=\x01"); // empty value for double tag
+        "38=\x01"    // empty value for int tag
+        "44=\x01");  // empty value for double tag
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;

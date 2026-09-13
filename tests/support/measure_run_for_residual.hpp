@@ -98,7 +98,6 @@
 #pragma once
 
 #include <asio/io_context.hpp>
-
 #include <chrono>
 #include <cstddef>
 #include <future>

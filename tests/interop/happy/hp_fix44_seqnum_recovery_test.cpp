@@ -43,12 +43,11 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <string>
-#include <tuple>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <string>
+#include <tuple>
 
 #include "hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
@@ -69,8 +68,7 @@ namespace {
 // yield a false non-biting "pass" (SC-004 rule).
 // [feedback_fail_placeholder_red_test]: real DiffResult assertion, not SUCCEED().
 
-TEST(RecoveryInboundGateBite, MutatedTag7BeginSeqNoCausesGateBite)
-{
+TEST(RecoveryInboundGateBite, MutatedTag7BeginSeqNoCausesGateBite) {
     // Synthetic ResendRequest (35=2) with BeginSeqNo(7) and EndSeqNo(16).
     // The admin normalization profile {52,10} excludes ONLY SendingTime and CheckSum.
     // Tag 7 (BeginSeqNo) is a COMPARED tag — a mutation must make the gate bite.
@@ -89,8 +87,7 @@ TEST(RecoveryInboundGateBite, MutatedTag7BeginSeqNoCausesGateBite)
     fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "7");
 }
 
-TEST(RecoveryInboundGateBite, MutatedTag16EndSeqNoCausesGateBite)
-{
+TEST(RecoveryInboundGateBite, MutatedTag16EndSeqNoCausesGateBite) {
     // Synthetic ResendRequest (35=2) — mutate EndSeqNo(16) which is a COMPARED tag.
     const char* expected_text =
         "> 8=FIX.4.4\\x0135=2\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
@@ -104,8 +101,7 @@ TEST(RecoveryInboundGateBite, MutatedTag16EndSeqNoCausesGateBite)
     fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "16");
 }
 
-TEST(RecoveryInboundGateBite, MutatedTag123GapFillFlagCausesGateBite)
-{
+TEST(RecoveryInboundGateBite, MutatedTag123GapFillFlagCausesGateBite) {
     // Synthetic SequenceReset-GapFill (35=4) reply from QFJ with GapFillFlag(123=Y).
     // Mutate 123 (GapFillFlag) — a COMPARED tag under {52,10} → must bite.
     const char* expected_text =
@@ -138,28 +134,28 @@ TEST(RecoveryInboundGateBite, MutatedTag123GapFillFlagCausesGateBite)
 // Wire-frame assertions: golden-based only (rule 3 + R1 architecture).
 // Self-deadline: 30 s (FR-010 recovery).
 
-class HappySeqnumRecoveryInbound
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class HappySeqnumRecoveryInbound : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {
+};
 
 TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     const auto [counterparty, role] = GetParam();
     namespace hp = fixpp::interop::hp;
 
     // ── AdminScenarioDescriptor validation (rule 7 + rule 8) ────────────────
-    const std::string cp_part   = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
+    const std::string cp_part = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
-    const std::string cell_id   = "HP-" + cp_part + "-" + role_part + "-fix44-seqnum-recovery";
+    const std::string cell_id = "HP-" + cp_part + "-" + role_part + "-fix44-seqnum-recovery";
 
     fixpp::interop::AdminScenarioDescriptor desc;
-    desc.cell_id       = cell_id;
+    desc.cell_id = cell_id;
     desc.scenario_group = fixpp::interop::AdminScenarioGroup::recovery_inbound;
-    desc.role          = role;
-    desc.counterparty  = counterparty;
-    desc.spec_ref      = "[FIX-SL §4.5.3/§4.8.2/§4.8.5]";
-    desc.golden_ref    = "happy/golden/" + cell_id + ".fix";
-    desc.induction     = fixpp::interop::AdminInduction::withhold_frame;
+    desc.role = role;
+    desc.counterparty = counterparty;
+    desc.spec_ref = "[FIX-SL §4.5.3/§4.8.2/§4.8.5]";
+    desc.golden_ref = "happy/golden/" + cell_id + ".fix";
+    desc.induction = fixpp::interop::AdminInduction::withhold_frame;
     desc.self_deadline_ms = std::chrono::milliseconds{30000};  // FR-010: 30 s
-    desc.round_trips   = {
+    desc.round_trips = {
         {"US3-1", "[FIX-SL §4.5.3]"},  // fixpp detects gap, emits ResendRequest(7/16)
         {"US3-2", "[FIX-SL §4.8.5]"},  // QFJ replies with GapFill/replay; fixpp applies
         {"US3-4", "[FIX-SL §4.8.2]"},  // both peers at Active, no prefix loss
@@ -177,7 +173,8 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     // Skip for non-QFj counterparties.
     if (counterparty != Counterparty::quickfix_j) {
         GTEST_SKIP() << "skip:not-applicable (recovery_inbound admin round-trip is QFj-only at G1; "
-                        "not configured for " << hp::counterparty_token(counterparty) << ")";
+                        "not configured for "
+                     << hp::counterparty_token(counterparty) << ")";
     }
 
     const char* dir = hp::tls_fixture_dir();
@@ -192,8 +189,8 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
         << "cell endpoint unresolved (parent harness did not lease a port)";
 
     fixpp::interop::InteropEngineFixture fx;
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     const auto id = fixpp::session::SessionId::from_config(cfg);
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
         << "register_session failed";
@@ -203,8 +200,7 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     // ── Drive to Active (logon) — 5 s budget ─────────────────────────────
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active (logon) against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active (logon) against " << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
     auto s = fx.engine().lookup(id);
@@ -284,8 +280,7 @@ INSTANTIATE_TEST_SUITE_P(
 // No AdminScenarioDescriptor (016 T013 predates the 018 descriptor contract).
 // Golden assertion deferred to the T011/T014 enriched cell above.
 
-class HappySeqnumRecovery
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class HappySeqnumRecovery : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
 TEST_P(HappySeqnumRecovery, ResynchronizesWithoutFatalDisconnect) {
     const auto [counterparty, role] = GetParam();
@@ -305,8 +300,8 @@ TEST_P(HappySeqnumRecovery, ResynchronizesWithoutFatalDisconnect) {
         << "cell endpoint unresolved (parent harness did not lease a port)";
 
     fixpp::interop::InteropEngineFixture fx;
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     const auto id = fixpp::session::SessionId::from_config(cfg);
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
         << "register_session failed";
@@ -315,8 +310,7 @@ TEST_P(HappySeqnumRecovery, ResynchronizesWithoutFatalDisconnect) {
 
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active (logon) against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active (logon) against " << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
     auto s = fx.engine().lookup(id);

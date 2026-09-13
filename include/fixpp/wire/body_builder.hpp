@@ -28,8 +28,8 @@
 //     `std::pmr::vector` constructed from `&arena_`. Nested containers are
 //     wired via EXPLICIT mr-parameter constructors (mirrors the C-ABI
 //     OutboundAccumulator/AccumulatorEntry/GroupInstance model,
-//     capi_internal.hpp's GroupInstance/AccumulatorEntry structs + src/capi/message_write.cpp — those
-//     call `entries.emplace_back(mr)`/`instances.emplace_back(arena)`/
+//     capi_internal.hpp's GroupInstance/AccumulatorEntry structs + src/capi/message_write.cpp —
+//     those call `entries.emplace_back(mr)`/`instances.emplace_back(arena)`/
 //     `fields.emplace_back(arena)` explicitly, not uses-allocator
 //     construction), so a bug can never silently default to the global-heap
 //     resource. Any accumulation op that hits arena exhaustion catches
@@ -195,9 +195,9 @@ private:
     //
     // ZERO-HEAP: both node types are std::pmr containers, constructed with an
     // EXPLICIT `std::pmr::memory_resource*` (mirrors AccumulatorEntry(mr) /
-    // GroupInstance(mr), capi_internal.hpp's GroupInstance/AccumulatorEntry structs) so every nested
-    // vector is unambiguously wired to body_builder::arena_ — never the
-    // default global-heap-backed pmr resource.
+    // GroupInstance(mr), capi_internal.hpp's GroupInstance/AccumulatorEntry structs) so every
+    // nested vector is unambiguously wired to body_builder::arena_ — never the default
+    // global-heap-backed pmr resource.
     struct entry_node;
 
     struct group_instance {

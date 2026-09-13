@@ -71,13 +71,12 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
-#include <memory_resource>
-#include <string>
-#include <string_view>
-
 #include <fixpp/core/pmr_arena_upstream.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <memory_resource>
+#include <string>
+#include <string_view>
 
 #include "support/app_message_read_scaffold.hpp"  // fixpp_test_support::make_frame
 #include "support/fix44_dictionary.hpp"
@@ -129,8 +128,8 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 namespace {
 
 using fixpp::wire::access_mode;
-using fixpp::wire::Framer;
 using fixpp::wire::frame_view;
+using fixpp::wire::Framer;
 using fixpp::wire::Parser;
 using fixpp::wire::pmr_carry_buffer;
 

@@ -24,12 +24,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/session/admin_messages.hpp>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-
-#include <fixpp/session/admin_messages.hpp>
 
 namespace {
 
@@ -59,7 +58,10 @@ static std::size_t count_tag(std::span<const std::byte> frame, std::uint32_t tag
         std::uint32_t parsed = 0;
         for (std::size_t k = tag_begin; k < i; ++k) {
             char c = static_cast<char>(frame[k]);
-            if (c < '0' || c > '9') { parsed = 0; break; }
+            if (c < '0' || c > '9') {
+                parsed = 0;
+                break;
+            }
             parsed = parsed * 10U + static_cast<std::uint32_t>(c - '0');
         }
         ++i;  // past '='
@@ -76,7 +78,7 @@ static std::size_t count_tag(std::span<const std::byte> frame, std::uint32_t tag
 }
 
 static std::optional<std::string_view> field_value(std::span<const std::byte> frame,
-                                                    std::uint32_t tag) noexcept {
+                                                   std::uint32_t tag) noexcept {
     std::size_t i = 0;
     const std::size_t n = frame.size();
     while (i < n) {
@@ -90,7 +92,10 @@ static std::optional<std::string_view> field_value(std::span<const std::byte> fr
         std::uint32_t parsed = 0;
         for (std::size_t k = tag_begin; k < i; ++k) {
             char c = static_cast<char>(frame[k]);
-            if (c < '0' || c > '9') { parsed = 0; break; }
+            if (c < '0' || c > '9') {
+                parsed = 0;
+                break;
+            }
             parsed = parsed * 10U + static_cast<std::uint32_t>(c - '0');
         }
         ++i;  // past '='
@@ -137,16 +142,14 @@ TEST(ResendReplyPossDup, Cell1_GapFill_Carries_43Y_And_122_EqOwn52) {
     // (1) Honesty: confirm this IS a GapFill. [FR-003]
     ASSERT_EQ(field_value(frame, 35), "4")
         << "Cell1 pre-condition: MsgType must be 4 (SequenceReset)";
-    ASSERT_EQ(field_value(frame, 123), "Y")
-        << "Cell1 pre-condition: GapFillFlag(123) must be Y";
+    ASSERT_EQ(field_value(frame, 123), "Y") << "Cell1 pre-condition: GapFillFlag(123) must be Y";
 
     // (2) PossDupFlag(43): exactly one occurrence, value Y. [FR-001]
     // RED: builder emits no 43 today → count==0.
     EXPECT_EQ(count_tag(frame, 43), 1u)
         << "Cell1 RED: 43=Y must appear exactly once in the GapFill (FR-001); "
            "today's builder does not append tag 43 → count==0";
-    EXPECT_EQ(field_value(frame, 43), "Y")
-        << "Cell1 RED: PossDupFlag(43) value must be Y (FR-001)";
+    EXPECT_EQ(field_value(frame, 43), "Y") << "Cell1 RED: PossDupFlag(43) value must be Y (FR-001)";
 
     // (3) OrigSendingTime(122): exactly one occurrence. [FR-002]
     // RED: builder emits no 122 today → count==0.
@@ -164,10 +167,10 @@ TEST(ResendReplyPossDup, Cell1_GapFill_Carries_43Y_And_122_EqOwn52) {
     // (5) Standard field set present. [FR-003]
     // (8/52/36 presence is subsumed by the EXPECT_EQ value checks below; 123 by the
     //  ASSERT_EQ at the honesty step. Only 34/49/56 need an explicit presence check.)
-    EXPECT_TRUE(field_value(frame,  34).has_value()) << "Tag 34 (MsgSeqNum) must be present";
-    EXPECT_TRUE(field_value(frame,  49).has_value()) << "Tag 49 (SenderCompID) must be present";
-    EXPECT_TRUE(field_value(frame,  56).has_value()) << "Tag 56 (TargetCompID) must be present";
-    EXPECT_EQ(field_value(frame,   8), kBeginString) << "Tag 8 must match begin_string param";
-    EXPECT_EQ(field_value(frame,  52), kSendingTime) << "Tag 52 must match sending_time param";
-    EXPECT_EQ(field_value(frame,  36), "10")         << "Tag 36 must match new_seqno=10";
+    EXPECT_TRUE(field_value(frame, 34).has_value()) << "Tag 34 (MsgSeqNum) must be present";
+    EXPECT_TRUE(field_value(frame, 49).has_value()) << "Tag 49 (SenderCompID) must be present";
+    EXPECT_TRUE(field_value(frame, 56).has_value()) << "Tag 56 (TargetCompID) must be present";
+    EXPECT_EQ(field_value(frame, 8), kBeginString) << "Tag 8 must match begin_string param";
+    EXPECT_EQ(field_value(frame, 52), kSendingTime) << "Tag 52 must match sending_time param";
+    EXPECT_EQ(field_value(frame, 36), "10") << "Tag 36 must match new_seqno=10";
 }

@@ -61,15 +61,14 @@ struct Message {
 // Rejects (throws std::runtime_error, naming the 1-based line number) a line
 // with the wrong column count or an unknown `originator` — never silently
 // skips it, so a dropped/corrupted line in the middle cannot pass unnoticed.
-inline std::vector<Message> parse_intent_bytes(std::string const& raw)
-{
+inline std::vector<Message> parse_intent_bytes(std::string const& raw) {
     std::vector<Message> messages;
     std::size_t start = 0;
     long line_no = 0;
     while (start < raw.size()) {
         std::size_t const nl = raw.find('\n', start);
-        std::string const line = (nl == std::string::npos) ? raw.substr(start)
-                                                             : raw.substr(start, nl - start);
+        std::string const line =
+            (nl == std::string::npos) ? raw.substr(start) : raw.substr(start, nl - start);
         start = (nl == std::string::npos) ? raw.size() : nl + 1;
         ++line_no;
         if (nl == std::string::npos && line.empty()) {
@@ -88,10 +87,10 @@ inline std::vector<Message> parse_intent_bytes(std::string const& raw)
             col_start = tab + 1;
         }
         if (cols.size() != 5) {
-            throw std::runtime_error(
-                "intent_file.hpp: line " + std::to_string(line_no) + " has " +
-                std::to_string(cols.size()) + " columns, expected 5 "
-                "(step_id\\toriginator\\tmsg_type\\tpath\\tvalue)");
+            throw std::runtime_error("intent_file.hpp: line " + std::to_string(line_no) + " has " +
+                                     std::to_string(cols.size()) +
+                                     " columns, expected 5 "
+                                     "(step_id\\toriginator\\tmsg_type\\tpath\\tvalue)");
         }
         std::string const& step_id = cols[0];
         std::string const& originator = cols[1];
@@ -100,15 +99,14 @@ inline std::vector<Message> parse_intent_bytes(std::string const& raw)
         std::string const& value = cols[4];
 
         if (originator != "fixpp" && originator != "peer") {
-            throw std::runtime_error(
-                "intent_file.hpp: line " + std::to_string(line_no) +
-                " has unknown originator '" + originator + "' (want 'fixpp' or 'peer')");
+            throw std::runtime_error("intent_file.hpp: line " + std::to_string(line_no) +
+                                     " has unknown originator '" + originator +
+                                     "' (want 'fixpp' or 'peer')");
         }
 
-        bool const new_message = messages.empty() ||
-            messages.back().step_id != step_id ||
-            messages.back().originator != originator ||
-            messages.back().msg_type != msg_type;
+        bool const new_message = messages.empty() || messages.back().step_id != step_id ||
+                                 messages.back().originator != originator ||
+                                 messages.back().msg_type != msg_type;
         if (new_message) {
             messages.push_back(Message{step_id, originator, msg_type, {}});
         }
@@ -121,8 +119,7 @@ inline std::vector<Message> parse_intent_bytes(std::string const& raw)
     return messages;
 }
 
-inline std::vector<Message> parse_intent_file(std::string const& file_path)
-{
+inline std::vector<Message> parse_intent_file(std::string const& file_path) {
     std::ifstream in(file_path, std::ios::binary);
     if (!in) {
         throw std::runtime_error("intent_file.hpp: cannot open " + file_path);

@@ -101,35 +101,35 @@ TEST(LogSlice3a, LevelValues) {
     using L = fixpp::log::Level;
     EXPECT_EQ(static_cast<uint8_t>(L::trace), 0u);
     EXPECT_EQ(static_cast<uint8_t>(L::debug), 1u);
-    EXPECT_EQ(static_cast<uint8_t>(L::info),  2u);
-    EXPECT_EQ(static_cast<uint8_t>(L::warn),  3u);
+    EXPECT_EQ(static_cast<uint8_t>(L::info), 2u);
+    EXPECT_EQ(static_cast<uint8_t>(L::warn), 3u);
     EXPECT_EQ(static_cast<uint8_t>(L::error), 4u);
     EXPECT_EQ(static_cast<uint8_t>(L::fatal), 5u);
 }
 
 TEST(LogSlice3a, BuiltinCategoryValues) {
     using namespace fixpp::log::cat;
-    EXPECT_EQ(session,   0x0001u);
-    EXPECT_EQ(wire,      0x0002u);
+    EXPECT_EQ(session, 0x0001u);
+    EXPECT_EQ(wire, 0x0002u);
     EXPECT_EQ(transport, 0x0003u);
-    EXPECT_EQ(tls,       0x0004u);
-    EXPECT_EQ(store,     0x0005u);
-    EXPECT_EQ(otel,      0x0006u);
-    EXPECT_EQ(control,   0x0007u);
-    EXPECT_EQ(user,      0x0008u);
+    EXPECT_EQ(tls, 0x0004u);
+    EXPECT_EQ(store, 0x0005u);
+    EXPECT_EQ(otel, 0x0006u);
+    EXPECT_EQ(control, 0x0007u);
+    EXPECT_EQ(user, 0x0008u);
 }
 
 TEST(LogSlice3a, CategoryBitIndexMapping) {
     // Built-in categories 1..8 occupy bit indices 1..8 (category & 63u).
     using namespace fixpp::log::cat;
-    EXPECT_EQ(session   & 63u, 1u);
-    EXPECT_EQ(wire      & 63u, 2u);
+    EXPECT_EQ(session & 63u, 1u);
+    EXPECT_EQ(wire & 63u, 2u);
     EXPECT_EQ(transport & 63u, 3u);
-    EXPECT_EQ(tls       & 63u, 4u);
-    EXPECT_EQ(store     & 63u, 5u);
-    EXPECT_EQ(otel      & 63u, 6u);
-    EXPECT_EQ(control   & 63u, 7u);
-    EXPECT_EQ(user      & 63u, 8u);
+    EXPECT_EQ(tls & 63u, 4u);
+    EXPECT_EQ(store & 63u, 5u);
+    EXPECT_EQ(otel & 63u, 6u);
+    EXPECT_EQ(control & 63u, 7u);
+    EXPECT_EQ(user & 63u, 8u);
 }
 
 TEST(LogSlice3a, FIXPP_LOG_CATEGORY_DoesNotCollide) {

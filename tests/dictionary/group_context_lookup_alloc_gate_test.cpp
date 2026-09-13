@@ -167,8 +167,9 @@ TEST(GroupContextLookupAllocGate, RepeatedLookupsZeroAlloc) {
             // Correctness must hold on EVERY iteration, not just the
             // sanity check above — fail loudly inside the loop rather than
             // silently accumulating a wrong-but-fast result.
-            ADD_FAILURE() << "iteration " << i << ": group_member_fn/group_member_tags "
-                                                    "resolved incorrectly inside the alloc window";
+            ADD_FAILURE() << "iteration " << i
+                          << ": group_member_fn/group_member_tags "
+                             "resolved incorrectly inside the alloc window";
             break;
         }
     }
@@ -177,8 +178,9 @@ TEST(GroupContextLookupAllocGate, RepeatedLookupsZeroAlloc) {
 
 #if !FIXPP_SANITIZER_REPLACES_NEW
     EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0)
-        << kIterations << " repeated group_member_fn/group_member_tags lookups must not "
-                          "allocate (group_member_fn_t takes no memory_resource — a pure "
-                          "unordered_map lookup over already-built storage, [pin#3-noalloc])";
+        << kIterations
+        << " repeated group_member_fn/group_member_tags lookups must not "
+           "allocate (group_member_fn_t takes no memory_resource — a pure "
+           "unordered_map lookup over already-built storage, [pin#3-noalloc])";
 #endif
 }

@@ -39,12 +39,12 @@
 // operation_aborted} in the AWAITER's frame even though the store method is
 // `noexcept` — the exact mechanism store_then_emit's OUTER catch(...) absorbs
 // from `co_await store_->store()` (see store_then_emit's Step-1 store comment). This
-// store-double cannot reach the reconcile catch(...) arm because ReconcileFaultStore::next_seqnum is
-// synchronous (co_return cur; — no suspension, nothing to cancel), and driving
-// the cancellation race deterministically is inherently flaky — the same
-// no-stable-stimulus rationale the coverage-design record used for Arm (a)'s
-// store_cancelled-on-shutdown-drain. (An earlier draft wrongly waived this as
-// "noexcept → std::terminate → unreachable"; that is disproved by store_then_emit's F5 (Round-A drift) try/catch.)
+// store-double cannot reach the reconcile catch(...) arm because ReconcileFaultStore::next_seqnum
+// is synchronous (co_return cur; — no suspension, nothing to cancel), and driving the cancellation
+// race deterministically is inherently flaky — the same no-stable-stimulus rationale the
+// coverage-design record used for Arm (a)'s store_cancelled-on-shutdown-drain. (An earlier draft
+// wrongly waived this as "noexcept → std::terminate → unreachable"; that is disproved by
+// store_then_emit's F5 (Round-A drift) try/catch.)
 //
 // Harness mirrors test_store_fail_reconcile_breadth.cpp (single-threaded
 // io_context): the reconcile-read fault is deterministic (no strand race to
@@ -64,8 +64,6 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
-
-#include "support/pump_until_ready.hpp"
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
@@ -81,9 +79,10 @@
 #include <string_view>
 #include <vector>
 
+#include "support/extract_tag.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-#include "support/extract_tag.hpp"
+#include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
 
@@ -315,7 +314,8 @@ protected:
         auto open_r = asio::co_spawn(ioc, sess->open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, open_r, 200ms,
                                                         "ReconcileFixture::drive/open")) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ReconcileFixture::drive/open");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ReconcileFixture::drive/open");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReconcileFixture::drive/open";
             // The miss branch must POISON `send_r`: a default-constructed
             // expected_t<void> HAS a value, so an early return that left it alone
@@ -332,7 +332,8 @@ protected:
             ioc, sess->on_inbound_frame(std::span<const std::byte>(peer_logon)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, logon_r, 200ms,
                                                         "ReconcileFixture::drive/logon")) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ReconcileFixture::drive/logon");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ReconcileFixture::drive/logon");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReconcileFixture::drive/logon";
             // Poison `send_r` -- see the note above `drive()`.
             out.send_r = std::unexpected(fixpp::test_support::kWindowMissSentinel);
@@ -347,7 +348,8 @@ protected:
             asio::co_spawn(ioc, sess->send(std::span<const std::byte>(payload)), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, send_fut, 200ms,
                                                         "ReconcileFixture::drive/send")) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ReconcileFixture::drive/send");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ReconcileFixture::drive/send");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReconcileFixture::drive/send";
             // Poison `send_r` -- see the note above `drive()`.
             out.send_r = std::unexpected(fixpp::test_support::kWindowMissSentinel);

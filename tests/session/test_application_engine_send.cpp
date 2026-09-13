@@ -94,8 +94,8 @@ using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace {
 
@@ -184,10 +184,13 @@ bool wait_until(asio::io_context& ioc, Pred pred, std::chrono::milliseconds budg
 
 static std::vector<std::byte> make_app_payload() {
     // Include 35=D so the built frame is parseable and toApp can inspect MsgType.
-    static const char kPayload[] = "35=D\x01" "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
+    static const char kPayload[] =
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01";
     std::vector<std::byte> v;
-    for (const char* p = kPayload; *p; ++p)
-        v.push_back(static_cast<std::byte>(*p));
+    for (const char* p = kPayload; *p; ++p) v.push_back(static_cast<std::byte>(*p));
     return v;
 }
 
@@ -253,7 +256,8 @@ bool setup_engine(asio::io_context& ioc, fixpp::session::Engine& engine,
         ADD_FAILURE() << "engine.start() failed";
         return false;
     }
-    bool ok = wait_until(ioc,
+    bool ok = wait_until(
+        ioc,
         [&] {
             auto a = engine.lookup(out_acc_id);
             auto i = engine.lookup(out_ini_id);
@@ -307,10 +311,9 @@ TEST(ApplicationEngineSend, SendFromForeignThreadCrossesWire) {
         // would be destroyed before the coroutine runs). The thread joins before
         // ioc.run_for, so payload is alive when the coroutine starts.
         std::thread t([&ioc, &engine, &ini_id, &payload, &send_fut]() mutable {
-            send_fut = asio::co_spawn(
-                ioc.get_executor(),
-                engine.send(ini_id, std::span<const std::byte>(payload)),
-                asio::use_future);
+            send_fut = asio::co_spawn(ioc.get_executor(),
+                                      engine.send(ini_id, std::span<const std::byte>(payload)),
+                                      asio::use_future);
         });
         t.join();
         // payload is still alive here (test-body local); the thread has joined.
@@ -320,11 +323,11 @@ TEST(ApplicationEngineSend, SendFromForeignThreadCrossesWire) {
     }
 
     // Drive ioc (on the main thread) until send completes.
-    bool done = wait_until(ioc,
+    bool done = wait_until(
+        ioc,
         [&] {
             return send_fut.valid() &&
-                   send_fut.wait_for(std::chrono::milliseconds{0}) ==
-                       std::future_status::ready;
+                   send_fut.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready;
         },
         2000ms);
     ASSERT_TRUE(done) << "engine.send() from foreign thread did not complete";
@@ -336,8 +339,7 @@ TEST(ApplicationEngineSend, SendFromForeignThreadCrossesWire) {
 
     // Drive ioc until fromApp fires on the receiving (acceptor) session.
     wait_until(ioc, [&] { return app->from_app_count.load() >= 1; }, 1000ms);
-    EXPECT_GE(app->from_app_count.load(), 1)
-        << "fromApp must fire — the send must cross the wire";
+    EXPECT_GE(app->from_app_count.load(), 1) << "fromApp must fire — the send must cross the wire";
 
     // Teardown.
     {
@@ -393,25 +395,21 @@ TEST(ApplicationEngineSend, ReentrantSendFromToAppNoDeadlock) {
         // asio::post guarantees non-blocking deferred execution — no deadlock even
         // when called from within a session strand callback.
         asio::post(exec, [&engine, ini_id, payload, exec, &reentrant_done]() mutable {
-            asio::co_spawn(
-                exec,
-                engine.send(ini_id, std::span<const std::byte>(payload)),
-                [&reentrant_done](std::exception_ptr ep, expected_t<void>) {
-                    if (ep) return;
-                    reentrant_done.store(true);
-                });
+            asio::co_spawn(exec, engine.send(ini_id, std::span<const std::byte>(payload)),
+                           [&reentrant_done](std::exception_ptr ep, expected_t<void>) {
+                               if (ep) return;
+                               reentrant_done.store(true);
+                           });
         });
     };
 
     // Issue the first send (triggers re-entrant fn in toApp).
     {
-        auto sf = asio::co_spawn(ioc,
-            engine.send(ini_id, std::span<const std::byte>(payload)), asio::use_future);
-        bool ok = wait_until(ioc,
-            [&] {
-                return sf.wait_for(std::chrono::milliseconds{0}) ==
-                       std::future_status::ready;
-            },
+        auto sf = asio::co_spawn(ioc, engine.send(ini_id, std::span<const std::byte>(payload)),
+                                 asio::use_future);
+        bool ok = wait_until(
+            ioc,
+            [&] { return sf.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready; },
             2000ms);
         ASSERT_TRUE(ok) << "first engine.send() did not complete";
         EXPECT_TRUE(sf.get().has_value()) << "first engine.send() must succeed";
@@ -479,26 +477,22 @@ TEST(ApplicationEngineSend, ReentrantSendFromFromAppNoDeadlock) {
     auto exec = ioc.get_executor();
     app->from_app_hook = [&engine, ini_id, payload, exec, &reentrant_done]() mutable {
         asio::post(exec, [&engine, ini_id, payload, exec, &reentrant_done]() mutable {
-            asio::co_spawn(
-                exec,
-                engine.send(ini_id, std::span<const std::byte>(payload)),
-                [&reentrant_done](std::exception_ptr ep, expected_t<void>) {
-                    if (ep) return;
-                    reentrant_done.store(true);
-                });
+            asio::co_spawn(exec, engine.send(ini_id, std::span<const std::byte>(payload)),
+                           [&reentrant_done](std::exception_ptr ep, expected_t<void>) {
+                               if (ep) return;
+                               reentrant_done.store(true);
+                           });
         });
     };
 
     // Issue the first send from the initiator — this will arrive at the acceptor
     // and trigger fromApp, which fires the re-entrant hook above.
     {
-        auto sf = asio::co_spawn(ioc,
-            engine.send(ini_id, std::span<const std::byte>(payload)), asio::use_future);
-        bool ok = wait_until(ioc,
-            [&] {
-                return sf.wait_for(std::chrono::milliseconds{0}) ==
-                       std::future_status::ready;
-            },
+        auto sf = asio::co_spawn(ioc, engine.send(ini_id, std::span<const std::byte>(payload)),
+                                 asio::use_future);
+        bool ok = wait_until(
+            ioc,
+            [&] { return sf.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready; },
             2000ms);
         ASSERT_TRUE(ok) << "first engine.send() did not complete";
         EXPECT_TRUE(sf.get().has_value()) << "first engine.send() must succeed";
@@ -560,14 +554,13 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
     ASSERT_NE(fac, nullptr) << "TLS factory failed";
 
     auto clock = make_mock_clock(ioc);
-    auto engine_ptr = std::make_unique<fixpp::session::Engine>(ioc.get_executor(),
-        [&] {
-            fixpp::core::EngineConfig e;
-            e.executor = ioc.get_executor();
-            e.application = app;
-            e.clock = clock;
-            return e;
-        }());
+    auto engine_ptr = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), [&] {
+        fixpp::core::EngineConfig e;
+        e.executor = ioc.get_executor();
+        e.application = app;
+        e.clock = clock;
+        return e;
+    }());
     fixpp::session::Engine& engine = *engine_ptr;
 
     SessionId acc_id, ini_id;
@@ -597,10 +590,9 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
     // The slot is bound to the completion token; asio propagates it into the
     // coroutine's cancellation state.
     auto payload = make_app_payload();
-    auto send_fut = asio::co_spawn(
-        ioc,
-        engine.send(ini_id, std::span<const std::byte>(payload)),
-        asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
+    auto send_fut =
+        asio::co_spawn(ioc, engine.send(ini_id, std::span<const std::byte>(payload)),
+                       asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
 
     // Drive ioc until the hook fires (proving we are inside the counter window).
     bool hooked = wait_until(ioc, [&] { return hook_fired.load(); }, 3000ms);
@@ -611,21 +603,21 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
     //   send_counter_ = 0 → stop() exits drain loop and completes.
     // (A deterministic pre-FIX-A red witness would require an engine-internal
     //  park seam — see NOTE above; this assertion exercises the correct behavior.)
-    bool stop_done = wait_until(ioc,
+    bool stop_done = wait_until(
+        ioc,
         [&] {
             return stop_fut.valid() &&
-                   stop_fut.wait_for(std::chrono::milliseconds{0}) ==
-                       std::future_status::ready;
+                   stop_fut.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready;
         },
         5000ms);
     ASSERT_TRUE(stop_done) << "stop() did not complete within 5s — send_counter_ not "
-                               "drained on cancel-unwind; FIX-A RAII guard required";
+                              "drained on cancel-unwind; FIX-A RAII guard required";
 
     // Drain send_fut (it was cancelled or completed before stop()).
-    bool send_done = wait_until(ioc,
+    bool send_done = wait_until(
+        ioc,
         [&] {
-            return send_fut.wait_for(std::chrono::milliseconds{0}) ==
-                   std::future_status::ready;
+            return send_fut.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready;
         },
         1000ms);
     if (send_done) {

@@ -111,8 +111,8 @@ using namespace std::chrono_literals;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace {
 
@@ -189,7 +189,12 @@ static std::vector<std::byte> make_nos_payload() {
     // Session::send_impl writes 8=/9=/34=/49=/52=/56= then appends app_payload;
     // it does NOT stamp 35=. The payload must carry it. [send_impl]
     static const char k[] =
-        "35=D\x01""11=ORD001\x01""54=1\x01""55=AAPL\x01""40=2\x01""44=100.0\x01";
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01"
+        "40=2\x01"
+        "44=100.0\x01";
     std::vector<std::byte> v;
     for (const char* p = k; *p; ++p) v.push_back(static_cast<std::byte>(*p));
     return v;
@@ -198,7 +203,12 @@ static std::vector<std::byte> make_nos_payload() {
 static std::vector<std::byte> make_exec_report_payload() {
     // ExecutionReport body fields. MsgType (35=8) included for the same reason.
     static const char k[] =
-        "35=8\x01""17=EXEC001\x01""37=ORD001\x01""39=2\x01""150=2\x01""151=0\x01";
+        "35=8\x01"
+        "17=EXEC001\x01"
+        "37=ORD001\x01"
+        "39=2\x01"
+        "150=2\x01"
+        "151=0\x01";
     std::vector<std::byte> v;
     for (const char* p = k; *p; ++p) v.push_back(static_cast<std::byte>(*p));
     return v;
@@ -249,8 +259,8 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
 
     // ── Register acceptor + initiator ─────────────────────────────────────────
     // The leaf cert CN is "fixpp-leaf-rsa2048" (loopback fixture convention).
-    auto make_cfg = [&](const char* sender, const char* target,
-                        fixpp::session::session_role role, const char* peer_compid) {
+    auto make_cfg = [&](const char* sender, const char* target, fixpp::session::session_role role,
+                        const char* peer_compid) {
         fixpp::session::SessionConfig c;
         c.sender_comp_id = sender;
         c.target_comp_id = target;
@@ -270,10 +280,10 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
         return c;
     };
 
-    auto acc_cfg = make_cfg("ACCEPTOR", "INITIATOR",
-                            fixpp::session::session_role::acceptor, "INITIATOR");
-    auto ini_cfg = make_cfg("INITIATOR", "ACCEPTOR",
-                            fixpp::session::session_role::initiator, "ACCEPTOR");
+    auto acc_cfg =
+        make_cfg("ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor, "INITIATOR");
+    auto ini_cfg =
+        make_cfg("INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator, "ACCEPTOR");
     const auto acc_id = SessionId::from_config(acc_cfg);
     const auto ini_id = SessionId::from_config(ini_cfg);
 
@@ -287,8 +297,7 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
 
     bool acc_active = false, ini_active = false;
     auto deadline_logon = std::chrono::steady_clock::now() + 5s;
-    while (std::chrono::steady_clock::now() < deadline_logon &&
-           (!acc_active || !ini_active)) {
+    while (std::chrono::steady_clock::now() < deadline_logon && (!acc_active || !ini_active)) {
         ioc.run_for(100ms);
         ioc.restart();
         auto acc_s = engine.lookup(acc_id);
@@ -304,8 +313,8 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
     // fromApp on the ACCEPTOR session must fire with MsgType "D".
     {
         auto nos = make_nos_payload();
-        auto send_fut = asio::co_spawn(
-            ioc, engine.send(ini_id, std::span<const std::byte>(nos)), asio::use_future);
+        auto send_fut = asio::co_spawn(ioc, engine.send(ini_id, std::span<const std::byte>(nos)),
+                                       asio::use_future);
 
         // Drive until acceptor's fromApp fires with "D" (bounded 3s).
         auto dl = std::chrono::steady_clock::now() + 3s;
@@ -373,8 +382,8 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
     // fromApp on the INITIATOR session must fire with MsgType "8".
     {
         auto er = make_exec_report_payload();
-        auto send_fut = asio::co_spawn(
-            ioc, engine.send(acc_id, std::span<const std::byte>(er)), asio::use_future);
+        auto send_fut = asio::co_spawn(ioc, engine.send(acc_id, std::span<const std::byte>(er)),
+                                       asio::use_future);
 
         // Drive until initiator's fromApp fires with "8" (bounded 3s).
         auto dl = std::chrono::steady_clock::now() + 3s;

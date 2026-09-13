@@ -67,10 +67,9 @@
 
 #pragma once
 
-#include <pugixml.hpp>
-
 #include <filesystem>
 #include <fstream>
+#include <pugixml.hpp>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -101,8 +100,8 @@ inline std::set<std::string> def_msgtypes(std::vector<Entry> const& entries) {
 
 // C1 -- legacy <fix>-schema raw walk (FIX44.xml / FIX50SP2.xml). Mirrors
 // ir.cpp's fail-closed msgcat rule, independently re-implemented.
-inline std::set<std::string> legacy_expected_msgtypes(
-    std::string const& xml_path, std::set<std::string> const& exclude = {}) {
+inline std::set<std::string> legacy_expected_msgtypes(std::string const& xml_path,
+                                                      std::set<std::string> const& exclude = {}) {
     pugi::xml_document doc;
     pugi::xml_parse_result const load = doc.load_file(xml_path.c_str());
     if (!load) {
@@ -123,7 +122,7 @@ inline std::set<std::string> legacy_expected_msgtypes(
             is_app = false;
         } else {
             throw std::runtime_error(xml_path + ": <message msgtype=\"" + msg_type +
-                                      "\"> missing or unrecognized msgcat attribute");
+                                     "\"> missing or unrecognized msgcat attribute");
         }
         if (is_app && !exclude.count(msg_type)) {
             out.insert(msg_type);
@@ -151,7 +150,7 @@ inline std::set<std::string> orchestra_expected_msgtypes(std::string const& xml_
         std::string const category{m.attribute("category").as_string("")};
         if (category.empty()) {
             throw std::runtime_error(xml_path + ": <fixr:message msgType=\"" + msg_type +
-                                      "\"> missing or empty category attribute");
+                                     "\"> missing or empty category attribute");
         }
         if (category != "Session") {
             out.insert(msg_type);
@@ -187,7 +186,8 @@ inline std::set<std::string> parse_registry_msgtypes(std::string const& all_hpp_
     std::string const body = text.substr(begin, end - begin);
     static std::regex const re(R"re(\{"([^"]*)"\},)re");
     std::set<std::string> out;
-    for (auto it = std::sregex_iterator(body.begin(), body.end(), re); it != std::sregex_iterator(); ++it) {
+    for (auto it = std::sregex_iterator(body.begin(), body.end(), re); it != std::sregex_iterator();
+         ++it) {
         out.insert((*it)[1].str());
     }
     return out;
@@ -255,7 +255,8 @@ inline std::set<std::string> parse_build_fn_identifiers(std::string const& versi
         if (!is_builder_file) {
             continue;
         }
-        std::set<std::string> const file_idents = scan_build_fn_identifiers_in_text(read_file(entry.path().string()));
+        std::set<std::string> const file_idents =
+            scan_build_fn_identifiers_in_text(read_file(entry.path().string()));
         out.insert(file_idents.begin(), file_idents.end());
     }
     return out;

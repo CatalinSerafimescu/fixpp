@@ -22,9 +22,8 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/application.hpp>
-#include <fixpp/session/engine.hpp>   // SessionId complete type
+#include <fixpp/session/engine.hpp>  // SessionId complete type
 #include <fixpp/session/session.hpp>
-
 #include <memory>
 
 using namespace fixpp::session;
@@ -63,15 +62,13 @@ public:
         return {};
     }
 
-    void toAdmin(
-        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
-        const SessionId& /*id*/) override {
+    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+                 const SessionId& /*id*/) override {
         ++toAdmin_count;
     }
 
-    expected_t<void> toApp(
-        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
-        const SessionId& /*id*/) override {
+    expected_t<void> toApp(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+                           const SessionId& /*id*/) override {
         ++toApp_count;
         return {};
     }
@@ -163,9 +160,8 @@ TEST(Application019CompileSmoke, InvokeCallbackSafeThrowCaught) {
 // ── invoke_callback_safe: expected_t<void> returning an error (T007) ─────────
 
 TEST(Application019CompileSmoke, InvokeCallbackSafeExpectedError) {
-    auto result = Session::invoke_callback_safe([&]() -> expected_t<void> {
-        return std::unexpected(error::app_do_not_send);
-    });
+    auto result = Session::invoke_callback_safe(
+        [&]() -> expected_t<void> { return std::unexpected(error::app_do_not_send); });
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::app_do_not_send)
         << "error-returning callable must propagate the error unchanged";

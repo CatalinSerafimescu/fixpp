@@ -101,8 +101,9 @@ std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::s
 // (header + MsgSeqNum) around this opaque body (mirrors
 // test_store_fail_closed_persistent.cpp's make_app_payload).
 std::vector<std::byte> make_app_payload(std::string_view clordid) {
-    std::string body = "35=D\x01" + std::string(field(11, clordid)) + "54=1\x01"
-                                                                       "55=AAPL\x01";
+    std::string body = "35=D\x01" + std::string(field(11, clordid)) +
+                       "54=1\x01"
+                       "55=AAPL\x01";
     std::vector<std::byte> v;
     v.reserve(body.size());
     for (char c : body) v.push_back(static_cast<std::byte>(c));
@@ -177,7 +178,9 @@ protected:
 TEST_F(StoreFailOpenVolatileTest, VolatileCapacityExhaustion_DoesNotDisconnect_TransmitProceeds) {
     std::vector<std::vector<std::byte>> wire;
     auto cfg = make_initiator_cfg();
-    cfg.transport_send = [&](std::span<const std::byte> f) { wire.emplace_back(f.begin(), f.end()); };
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire.emplace_back(f.begin(), f.end());
+    };
 
     auto sess = std::make_unique<Session>(engine_, cfg);
 

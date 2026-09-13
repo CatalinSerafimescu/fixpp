@@ -23,11 +23,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
-#include <string>
-#include <thread>
-
 #include <fixpp/tls/certificate.hpp>
 #include <fixpp/tls/pinset.hpp>
+#include <string>
+#include <thread>
 
 namespace {
 
@@ -148,7 +147,8 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
     });
 
     // Wait until the reader has started.
-    while (reader_started.load(std::memory_order_acquire) == 0) { /* spin */ }
+    while (reader_started.load(std::memory_order_acquire) == 0) { /* spin */
+    }
 
     // Writer: alternate add/remove of kFpAdded (kRounds cycles).
     bool added = true;  // pre-seeded above
@@ -232,9 +232,8 @@ TEST(PinsetPublishAcquire, WriterReaderNeverSeesTornPin) {
            "the window opens and present after it closes, so an absent read is the "
            "proof that a find landed between a remove and the next add — without one, "
            "the publish/acquire edge is not exercised";
-    EXPECT_GT(witnessed_stable, 0)
-        << "reader thread did not observe the stable pin — "
-           "snapshot_ invariant not exercised";
+    EXPECT_GT(witnessed_stable, 0) << "reader thread did not observe the stable pin — "
+                                      "snapshot_ invariant not exercised";
     EXPECT_GT(witnessed_consistent, 0)
         << "reader thread never observed the rotating pin FOUND — "
            "find(kFpAdded) succeeding is not implied by observed_absent, which is "

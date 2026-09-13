@@ -6,8 +6,8 @@
 //
 // Every one of the TWELVE C-ABI headers is named explicitly. The umbrella
 // <fix/c_api.h> pulls in only nine of the eleven sub-headers (log.h and otel.h
-// are not among them, c_api.h's "Aggregate split headers" block), so including the umbrella alone would
-// leave two of the twelve unwitnessed.
+// are not among them, c_api.h's "Aggregate split headers" block), so including the umbrella alone
+// would leave two of the twelve unwitnessed.
 //
 // COMPILE-ONLY, by construction: this TU has no main(), and its target is an
 // OBJECT library. contracts §4 requires it — research.md R5 measured a false

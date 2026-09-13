@@ -18,16 +18,15 @@
 #include "witness_comparator.hpp"
 
 #include <algorithm>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/field_type.hpp>
+#include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <memory>
 #include <memory_resource>
 #include <stdexcept>
 #include <unordered_map>
-
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/field_type.hpp>
-#include <fixpp/dict/table_view.hpp>
-#include <fixpp/dict/xml_loader.hpp>
 
 namespace fixpp::interop::readback {
 namespace {
@@ -38,25 +37,17 @@ class LineReader {
 public:
     explicit LineReader(std::string const& text) : s_(text) {}
 
-    void skip_ws()
-    {
+    void skip_ws() {
         while (i_ < s_.size() && (s_[i_] == ' ' || s_[i_] == '\t')) {
             ++i_;
         }
     }
 
-    [[nodiscard]] bool eof() const
-    {
-        return i_ >= s_.size();
-    }
+    [[nodiscard]] bool eof() const { return i_ >= s_.size(); }
 
-    [[nodiscard]] char peek() const
-    {
-        return i_ < s_.size() ? s_[i_] : '\0';
-    }
+    [[nodiscard]] char peek() const { return i_ < s_.size() ? s_[i_] : '\0'; }
 
-    bool consume(char c)
-    {
+    bool consume(char c) {
         skip_ws();
         if (i_ < s_.size() && s_[i_] == c) {
             ++i_;
@@ -74,8 +65,7 @@ public:
     // Not [[nodiscard]]: callers that only care about a value's presence
     // (skip_value, the generic-key loop in parse_stream()) legitimately
     // discard the decoded text.
-    bool parse_string(std::string& out)
-    {
+    bool parse_string(std::string& out) {
         skip_ws();
         if (i_ >= s_.size() || s_[i_] != '"') {
             return false;
@@ -102,8 +92,8 @@ public:
                     }
                     i_ += 6;
                     // Combine a UTF-16 surrogate pair when present.
-                    if (code >= 0xD800 && code <= 0xDBFF && i_ + 5 < s_.size() && s_[i_] == '\\'
-                        && s_[i_ + 1] == 'u') {
+                    if (code >= 0xD800 && code <= 0xDBFF && i_ + 5 < s_.size() && s_[i_] == '\\' &&
+                        s_[i_ + 1] == 'u') {
                         std::uint32_t low = 0;
                         for (int k = 0; k < 4; ++k) {
                             low = low * 16 + hex_digit(s_[i_ + 2 + k]);
@@ -132,8 +122,7 @@ public:
         return true;
     }
 
-    bool parse_number(long long& out)
-    {
+    bool parse_number(long long& out) {
         skip_ws();
         std::size_t const start = i_;
         if (i_ < s_.size() && (s_[i_] == '-' || s_[i_] == '+')) {
@@ -149,8 +138,7 @@ public:
         return true;
     }
 
-    bool parse_bool(bool& out)
-    {
+    bool parse_bool(bool& out) {
         skip_ws();
         if (s_.compare(i_, 4, "true") == 0) {
             out = true;
@@ -166,8 +154,7 @@ public:
     }
 
     // Skips one JSON value of any shape, for keys the caller does not need.
-    void skip_value()
-    {
+    void skip_value() {
         skip_ws();
         if (eof()) {
             return;
@@ -233,16 +220,14 @@ public:
     bool parse_mismatch_array(std::vector<Mismatch>& out);
 
 private:
-    static std::uint32_t hex_digit(char c)
-    {
+    static std::uint32_t hex_digit(char c) {
         if (c >= '0' && c <= '9') return static_cast<std::uint32_t>(c - '0');
         if (c >= 'a' && c <= 'f') return static_cast<std::uint32_t>(c - 'a' + 10);
         if (c >= 'A' && c <= 'F') return static_cast<std::uint32_t>(c - 'A' + 10);
         return 0;
     }
 
-    static void append_utf8(std::string& out, std::uint32_t code)
-    {
+    static void append_utf8(std::string& out, std::uint32_t code) {
         if (code < 0x80) {
             out += static_cast<char>(code);
         } else if (code < 0x800) {
@@ -267,8 +252,7 @@ private:
 // RFC 4648 standard alphabet decode — the inverse of readback_jsonl.hpp's
 // base64_encode(). Returns the decoded raw bytes; malformed input decodes as
 // far as it can (this is a test-support reader, not a hardened boundary).
-std::string base64_decode(std::string const& in)
-{
+std::string base64_decode(std::string const& in) {
     auto decode_char = [](char c) -> int {
         if (c >= 'A' && c <= 'Z') return c - 'A';
         if (c >= 'a' && c <= 'z') return c - 'a' + 26;
@@ -299,8 +283,7 @@ std::string base64_decode(std::string const& in)
     return out;
 }
 
-bool LineReader::parse_field_array(std::vector<FieldEntry>& out)
-{
+bool LineReader::parse_field_array(std::vector<FieldEntry>& out) {
     skip_ws();
     if (!consume('[')) {
         return false;
@@ -367,8 +350,7 @@ bool LineReader::parse_field_array(std::vector<FieldEntry>& out)
     return consume(']');
 }
 
-bool LineReader::parse_mismatch_array(std::vector<Mismatch>& out)
-{
+bool LineReader::parse_mismatch_array(std::vector<Mismatch>& out) {
     skip_ws();
     if (!consume('[')) {
         return false;
@@ -425,8 +407,7 @@ bool LineReader::parse_mismatch_array(std::vector<Mismatch>& out)
 
 }  // namespace
 
-std::vector<ParsedRecord> parse_stream(std::string const& path)
-{
+std::vector<ParsedRecord> parse_stream(std::string const& path) {
     std::vector<ParsedRecord> out;
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -608,18 +589,16 @@ struct Key {
     std::string direction;
     long long occurrence;
 
-    bool operator==(Key const& other) const
-    {
-        return seq_num == other.seq_num && direction == other.direction
-            && occurrence == other.occurrence;
+    bool operator==(Key const& other) const {
+        return seq_num == other.seq_num && direction == other.direction &&
+               occurrence == other.occurrence;
     }
 };
 
 struct KeyHash {
-    std::size_t operator()(Key const& k) const
-    {
-        return std::hash<long long>{}(k.seq_num) ^ (std::hash<std::string>{}(k.direction) << 1)
-            ^ (std::hash<long long>{}(k.occurrence) << 2);
+    std::size_t operator()(Key const& k) const {
+        return std::hash<long long>{}(k.seq_num) ^ (std::hash<std::string>{}(k.direction) << 1) ^
+               (std::hash<long long>{}(k.occurrence) << 2);
     }
 };
 
@@ -638,8 +617,7 @@ struct KeyHash {
 // zeros stripped (at least one digit kept), fraction with trailing zeros
 // stripped. "0100" and "100" compare equal; "190.5" and "190.50000000000001"
 // do NOT — there is no rounding anywhere in this path.
-std::string canonical_decimal(std::string const& raw)
-{
+std::string canonical_decimal(std::string const& raw) {
     if (raw.empty()) {
         return raw;
     }
@@ -683,8 +661,7 @@ std::string canonical_decimal(std::string const& raw)
 // ONLY fallback: canonical exact-decimal comparison. Every non-decimal
 // (STRING-collapsed and otherwise) field compares byte for byte, full stop —
 // no spelling-based heuristic of any kind.
-bool values_equal(std::string const& a, std::string const& b, bool is_decimal)
-{
+bool values_equal(std::string const& a, std::string const& b, bool is_decimal) {
     if (a == b) {
         return true;
     }
@@ -701,8 +678,7 @@ bool values_equal(std::string const& a, std::string const& b, bool is_decimal)
 // `field_type::String` is field_type_of()'s own miss-path default) on a
 // malformed path rather than throwing — this is a best-effort comparator,
 // not a validator.
-std::uint16_t leaf_tag(std::string const& path)
-{
+std::uint16_t leaf_tag(std::string const& path) {
     std::size_t const last_dot = path.find_last_of('.');
     std::string const seg = (last_dot == std::string::npos) ? path : path.substr(last_dot + 1);
     try {
@@ -714,8 +690,7 @@ std::uint16_t leaf_tag(std::string const& path)
 
 }  // namespace
 
-DecimalTagResolver make_fix44_decimal_resolver(std::string const& dict_xml_path)
-{
+DecimalTagResolver make_fix44_decimal_resolver(std::string const& dict_xml_path) {
     // Dictionary is move-only; table_view is built once from it here (not
     // per comparison — [const §XV.1], config-time cost, not per-message).
     // Both are kept alive for the resolver's lifetime via shared_ptr so
@@ -729,10 +704,9 @@ DecimalTagResolver make_fix44_decimal_resolver(std::string const& dict_xml_path)
 }
 
 std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_a,
-                                         std::vector<ParsedRecord> const& stream_b,
-                                         WitnessIdentity const& identity,
-                                         DecimalTagResolver const& is_decimal_tag)
-{
+                                        std::vector<ParsedRecord> const& stream_b,
+                                        WitnessIdentity const& identity,
+                                        DecimalTagResolver const& is_decimal_tag) {
     // Pool `readback` records from BOTH streams — a run's two processes each
     // write their OWN file, and the receiver of a given direction is never
     // the same process as the sender (contracts/readback-jsonl.md §
@@ -753,11 +727,12 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
                 Key const key{rec.seq_num, rec.direction, rec.occurrence};
                 auto const [it, inserted] = readback_by_key.emplace(key, &rec);
                 if (!inserted) {
-                    readback_duplicate_reason[key] = "duplicate readback record at (seq_num="
-                        + std::to_string(rec.seq_num) + ", direction=" + rec.direction
-                        + ", occurrence=" + std::to_string(rec.occurrence)
-                        + "): resident msg_type=" + it->second->msg_type
-                        + ", duplicate msg_type=" + rec.msg_type;
+                    readback_duplicate_reason[key] =
+                        "duplicate readback record at (seq_num=" + std::to_string(rec.seq_num) +
+                        ", direction=" + rec.direction +
+                        ", occurrence=" + std::to_string(rec.occurrence) +
+                        "): resident msg_type=" + it->second->msg_type +
+                        ", duplicate msg_type=" + rec.msg_type;
                 }
             }
         }
@@ -771,8 +746,8 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
             }
 
             WitnessRow row;
-            row.witness_id = identity.cell_id + ":" + sent.script_step_id + ":" + sent.direction
-                + ":" + std::to_string(sent.occurrence);
+            row.witness_id = identity.cell_id + ":" + sent.script_step_id + ":" + sent.direction +
+                             ":" + std::to_string(sent.occurrence);
             row.run_id = identity.run_id;
             row.authoritative = identity.authoritative;
             row.combo_id = identity.combo_id;
@@ -785,15 +760,16 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
             row.direction = sent.direction;
             row.occurrence = sent.occurrence;
 
-            auto const it = readback_by_key.find(Key{sent.seq_num, sent.direction, sent.occurrence});
+            auto const it =
+                readback_by_key.find(Key{sent.seq_num, sent.direction, sent.occurrence});
             if (it == readback_by_key.end()) {
                 // FR-016c: "No readback record ⇒ fail, never pass and never
                 // skip." An empty field set must not compare equal to an
                 // empty intent by accident — so this is checked BEFORE any
                 // field comparison, not modeled as "readback.fields == {}".
                 row.verdict = "fail";
-                row.mismatch.push_back(
-                    Mismatch{.path = "", .cls = "missing", .sent_value = "<record>", .readback_value = ""});
+                row.mismatch.push_back(Mismatch{
+                    .path = "", .cls = "missing", .sent_value = "<record>", .readback_value = ""});
                 rows.push_back(std::move(row));
                 continue;
             }
@@ -807,23 +783,21 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
                 dup_it != readback_duplicate_reason.end()) {
                 row.verdict = "fail";
                 row.mismatch.push_back(Mismatch{.path = "",
-                                                 .cls = "duplicate_record",
-                                                 .sent_value = sent.msg_type,
-                                                 .readback_value = dup_it->second});
+                                                .cls = "duplicate_record",
+                                                .sent_value = sent.msg_type,
+                                                .readback_value = dup_it->second});
                 rows.push_back(std::move(row));
                 continue;
             }
 
             ParsedRecord const& readback = *it->second;
 
-            // FR-018 spurious-hit (spec.md's FR-016c empty-intent-vs-empty-readback row): "Emit a message whose
-            // declared intent set is empty -- the comparator must reject
-            // rather than pass on ∅ == ∅." Distinct from the "readback not
-            // found" branch above (T042/FR-016c): here a readback record
-            // DOES exist, at the correct key, and ALSO declares zero
-            // fields -- the per-field loops below would then find zero
-            // mismatches and wrongly report "pass", comparing nothing
-            // against nothing. Checked here, BEFORE those loops, and
+            // FR-018 spurious-hit (spec.md's FR-016c empty-intent-vs-empty-readback row): "Emit a
+            // message whose declared intent set is empty -- the comparator must reject rather than
+            // pass on ∅ == ∅." Distinct from the "readback not found" branch above (T042/FR-016c):
+            // here a readback record DOES exist, at the correct key, and ALSO declares zero fields
+            // -- the per-field loops below would then find zero mismatches and wrongly report
+            // "pass", comparing nothing against nothing. Checked here, BEFORE those loops, and
             // narrowed to BOTH sides empty: a sent record with zero
             // declared fields against a readback that reports real fields
             // is not this case -- it is already correctly caught below as
@@ -831,9 +805,9 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
             if (sent.fields.empty() && readback.fields.empty()) {
                 row.verdict = "fail";
                 row.mismatch.push_back(Mismatch{.path = "",
-                                                 .cls = "missing",
-                                                 .sent_value = "<empty intent vs empty readback>",
-                                                 .readback_value = ""});
+                                                .cls = "missing",
+                                                .sent_value = "<empty intent vs empty readback>",
+                                                .readback_value = ""});
                 rows.push_back(std::move(row));
                 continue;
             }
@@ -848,9 +822,9 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
             // readback's").
             if (sent.msg_type != readback.msg_type) {
                 mismatches.push_back(Mismatch{.path = "35",
-                                               .cls = "msg_type",
-                                               .sent_value = sent.msg_type,
-                                               .readback_value = readback.msg_type});
+                                              .cls = "msg_type",
+                                              .sent_value = sent.msg_type,
+                                              .readback_value = readback.msg_type});
             }
 
             // FQ-4 part 3: readback-side duplicate paths (data-model.md §2:
@@ -864,9 +838,9 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
                 auto const [rf_it, rf_inserted] = readback_fields.emplace(fe.path, fe.value);
                 if (!rf_inserted) {
                     mismatches.push_back(Mismatch{.path = fe.path,
-                                                   .cls = "duplicate_path",
-                                                   .sent_value = "",
-                                                   .readback_value = fe.value});
+                                                  .cls = "duplicate_path",
+                                                  .sent_value = "",
+                                                  .readback_value = fe.value});
                 }
             }
             // Same treatment for the `sent` side -- the field loop below
@@ -878,9 +852,9 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
                     auto const [s_it, s_inserted] = seen.emplace(fe.path, fe.value);
                     if (!s_inserted) {
                         mismatches.push_back(Mismatch{.path = fe.path,
-                                                       .cls = "duplicate_path",
-                                                       .sent_value = fe.value,
-                                                       .readback_value = ""});
+                                                      .cls = "duplicate_path",
+                                                      .sent_value = fe.value,
+                                                      .readback_value = ""});
                     }
                 }
             }
@@ -888,21 +862,27 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
             for (FieldEntry const& fe : sent.fields) {
                 auto const rb_it = readback_fields.find(fe.path);
                 if (rb_it == readback_fields.end()) {
-                    mismatches.push_back(Mismatch{
-                        .path = fe.path, .cls = "missing", .sent_value = fe.value, .readback_value = ""});
-                } else if (!values_equal(fe.value, rb_it->second, is_decimal_tag(leaf_tag(fe.path)))) {
                     mismatches.push_back(Mismatch{.path = fe.path,
-                                                   .cls = "value_mismatch",
-                                                   .sent_value = fe.value,
-                                                   .readback_value = rb_it->second});
+                                                  .cls = "missing",
+                                                  .sent_value = fe.value,
+                                                  .readback_value = ""});
+                } else if (!values_equal(fe.value, rb_it->second,
+                                         is_decimal_tag(leaf_tag(fe.path)))) {
+                    mismatches.push_back(Mismatch{.path = fe.path,
+                                                  .cls = "value_mismatch",
+                                                  .sent_value = fe.value,
+                                                  .readback_value = rb_it->second});
                 }
             }
             for (FieldEntry const& fe : readback.fields) {
-                bool const declared = std::any_of(sent.fields.begin(), sent.fields.end(),
-                                                   [&](FieldEntry const& s) { return s.path == fe.path; });
+                bool const declared =
+                    std::any_of(sent.fields.begin(), sent.fields.end(),
+                                [&](FieldEntry const& s) { return s.path == fe.path; });
                 if (!declared) {
-                    mismatches.push_back(Mismatch{
-                        .path = fe.path, .cls = "spurious", .sent_value = "", .readback_value = fe.value});
+                    mismatches.push_back(Mismatch{.path = fe.path,
+                                                  .cls = "spurious",
+                                                  .sent_value = "",
+                                                  .readback_value = fe.value});
                 }
             }
 
@@ -920,8 +900,7 @@ namespace {
 // insignificant whitespace, bare decimal integers, fixed key order
 // (path, cls, sent_value, readback_value — the same order Mismatch's members
 // are declared in witness_comparator.hpp).
-std::string render_mismatch_array(std::vector<Mismatch> const& mismatches)
-{
+std::string render_mismatch_array(std::vector<Mismatch> const& mismatches) {
     std::string out = "[";
     bool first = true;
     for (Mismatch const& m : mismatches) {
@@ -941,8 +920,7 @@ std::string render_mismatch_array(std::vector<Mismatch> const& mismatches)
 
 }  // namespace
 
-bool write_witness_rows(std::string const& path, std::vector<WitnessRow> const& rows)
-{
+bool write_witness_rows(std::string const& path, std::vector<WitnessRow> const& rows) {
     // TRUNCATE, same rule as readback_jsonl.hpp::Stream — a witnesses.jsonl
     // surviving from an earlier run at this path would satisfy promotion's
     // reader while describing a DIFFERENT run (data-model.md §4's own "an
@@ -975,8 +953,7 @@ bool write_witness_rows(std::string const& path, std::vector<WitnessRow> const& 
     return static_cast<bool>(out);
 }
 
-std::vector<WitnessRow> parse_witness_rows(std::string const& path)
-{
+std::vector<WitnessRow> parse_witness_rows(std::string const& path) {
     std::vector<WitnessRow> out;
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -1012,7 +989,8 @@ std::vector<WitnessRow> parse_witness_rows(std::string const& path)
                 throw std::runtime_error("witness row: malformed key: " + line);
             }
             if (!r.consume(':')) {
-                throw std::runtime_error("witness row: malformed ':' after key '" + key + "': " + line);
+                throw std::runtime_error("witness row: malformed ':' after key '" + key +
+                                         "': " + line);
             }
             if (key == "witness_id") {
                 r.parse_string(row.witness_id);

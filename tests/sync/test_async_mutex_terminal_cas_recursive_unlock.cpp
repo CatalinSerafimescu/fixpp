@@ -55,7 +55,6 @@
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <fixpp/core/sync/async_mutex.hpp>
@@ -245,7 +244,7 @@ TEST(AsyncMutexTerminalCasRecursiveUnlock, F6FifoExhaustedTerminalCasFailGrantsW
         w_aborted = !r.has_value();
     };
     auto fw = asio::co_spawn(ioc_w, waiter_w(),
-                              asio::bind_cancellation_slot(sig_w.slot(), asio::use_future));
+                             asio::bind_cancellation_slot(sig_w.slot(), asio::use_future));
     std::thread thread_w([&] { ioc_w.run(); });
 
     ASSERT_TRUE(confirm_committed(ioc_w))

@@ -467,18 +467,18 @@ TEST(SyncPoolExhaustionReuse, BoundedCounterPreventsWrapAndReissue) {
     // returned. `run()`'s own completion (not the io_context's outstanding
     // work count) is the signal we actually need.
     bool completed = fixpp::test_support::pump_until_ready(ioc, f, std::chrono::seconds(5),
-                                                             std::chrono::milliseconds(50));
+                                                           std::chrono::milliseconds(50));
     if (!completed) {
         ioc.stop();  // preserve existing failure-state behavior
     }
-    ASSERT_TRUE(completed)
-        << "test driver did not observe run() completion within the bounded "
-           "deadline — see captured diagnostics below";
+    ASSERT_TRUE(completed) << "test driver did not observe run() completion within the bounded "
+                              "deadline — see captured diagnostics below";
     f.get();
 
     ASSERT_TRUE(setup_precondition_ok)
         << "B must have parked and taken bump-allocator slot 0 before C/D ran "
-           "(pool_next_after_b=" << pool_next_after_b << ")";
+           "(pool_next_after_b="
+        << pool_next_after_b << ")";
 
     ASSERT_TRUE(c_result.has_value()) << "attempt C must resolve synchronously";
     EXPECT_FALSE(c_result->has_value());

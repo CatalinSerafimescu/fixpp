@@ -27,17 +27,15 @@
 // Seed corpus: tests/config/fuzz/corpus/toml_config_loader/
 // Full ≥10-min campaign at Gate B (CI), per tasks.md T037.
 
+#include <asio/io_context.hpp>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>             // ::getpid
+#include <cstdio>  // ::getpid
 #include <filesystem>
+#include <fixpp/config/toml_config_loader.hpp>
 #include <fstream>
 #include <memory_resource>
 #include <string>
-
-#include <asio/io_context.hpp>
-
-#include <fixpp/config/toml_config_loader.hpp>
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Static executor: a single io_context whose executor is reused across
@@ -56,8 +54,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // and closed) before load_toml_config is called.
     {
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        f.write(reinterpret_cast<const char*>(data),
-                static_cast<std::streamsize>(size));
+        f.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
         // f closes here — dtor flushes before load_toml_config reads the file.
     }
 

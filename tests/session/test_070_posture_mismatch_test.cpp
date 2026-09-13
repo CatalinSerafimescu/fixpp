@@ -300,10 +300,10 @@ TEST_F(PostureTest, ProductionRefusesMalformed464) {
 }
 
 // Gate B PR #189 FQ-4 — initiator-role posture-mismatch witness. The initiator
-// arm (session.cpp's should_refuse_posture initiator call) fires on the peer's inbound Logon-ack; it was
-// completely uncovered before this change. Same discriminating assertions as
-// (a) above: exactly one NEW outbound frame (the refusal Logout) with the
-// named 35=5/58=<text> shape, plus Disconnected.
+// arm (session.cpp's should_refuse_posture initiator call) fires on the peer's inbound Logon-ack;
+// it was completely uncovered before this change. Same discriminating assertions as (a) above:
+// exactly one NEW outbound frame (the refusal Logout) with the named 35=5/58=<text> shape, plus
+// Disconnected.
 TEST_F(PostureTest, InitiatorRefusesPostureMismatchedLogonAck) {
     auto cfg = make_initiator_cfg(fixpp::session::session_posture::production);
     fixpp::session::Session sess(engine, cfg);

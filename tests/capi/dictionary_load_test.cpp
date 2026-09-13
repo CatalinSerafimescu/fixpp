@@ -26,7 +26,7 @@
 #include "fix/c_api/session.h"  // fixpp_session_config_{create,destroy,set_dictionary}
 
 #ifndef FIXPP_DICT_DIR
-#  error "FIXPP_DICT_DIR must be set by CMake (target_compile_definitions)"
+#error "FIXPP_DICT_DIR must be set by CMake (target_compile_definitions)"
 #endif
 
 // ── Positive: load each bundled dictionary ────────────────────────────────────
@@ -154,8 +154,7 @@ TEST(DictLoadFromXml, MissingFileReturnsConfigInvalid) {
 
 TEST(DictLoadFromXml, MalformedXmlReturnsConfigInvalid) {
     // Write garbage to a temp file; XmlLoader::load throws xml_parse_error.
-    auto tmp = std::filesystem::temp_directory_path() /
-               "fixpp_dict_load_malformed_test.xml";
+    auto tmp = std::filesystem::temp_directory_path() / "fixpp_dict_load_malformed_test.xml";
     {
         std::ofstream f(tmp);
         ASSERT_TRUE(f.is_open()) << "could not create temp file " << tmp;

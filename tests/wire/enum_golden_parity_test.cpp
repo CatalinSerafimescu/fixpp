@@ -50,6 +50,13 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fixpp/core/error.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/reject_reason_map.hpp>
+#include <fixpp/wire/validator.hpp>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -61,14 +68,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <fixpp/core/error.hpp>
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/table_view.hpp>
-#include <fixpp/dict/xml_loader.hpp>
-#include <fixpp/wire/parser.hpp>
-#include <fixpp/wire/reject_reason_map.hpp>
-#include <fixpp/wire/validator.hpp>
 
 #include "support/frame_view_factory.hpp"
 
@@ -93,9 +92,9 @@ struct GoldenRow {
     int tag = 0;
     std::string value;
     bool asserted = false;
-    std::string verdict;              // "accept" | "reject" | "" (n/a)
-    std::optional<int> reason;        // empty for accept
-    std::optional<int> ref_tag_id;    // empty for accept
+    std::string verdict;            // "accept" | "reject" | "" (n/a)
+    std::optional<int> reason;      // empty for accept
+    std::optional<int> ref_tag_id;  // empty for accept
     std::string note;
 };
 
@@ -165,7 +164,8 @@ std::vector<GoldenRow> parse_golden_csv(std::string const& path) {
     for (std::size_t i = 1; i < csv_lines.size(); ++i) {
         auto f = split_csv_line(csv_lines[i]);
         if (f.size() != 11) {
-            ADD_FAILURE() << "golden.csv row " << i << " has " << f.size() << " fields, expected 11";
+            ADD_FAILURE() << "golden.csv row " << i << " has " << f.size()
+                          << " fields, expected 11";
             continue;
         }
         GoldenRow row;
@@ -293,18 +293,18 @@ std::vector<std::byte> row6_frame() {  // MessageEncoding(347)=ZZZZ (header) -> 
 }
 std::vector<std::byte> row7_frame() {  // MatchType(574)=A on TradeCaptureReport -> reject/5/574
     std::string body = fix_header("AE");
-    body += "571=TR1\x01";  // TradeReportID (required)
-    body += "570=N\x01";    // PreviouslyReported (required, BOOLEAN, unconstrained by type)
-    body += "32=100\x01";   // LastQty (required, Float)
-    body += "31=10.5\x01";  // LastPx (required, Float)
-    body += "75=20260714\x01";       // TradeDate (required, String-coarse)
+    body += "571=TR1\x01";      // TradeReportID (required)
+    body += "570=N\x01";        // PreviouslyReported (required, BOOLEAN, unconstrained by type)
+    body += "32=100\x01";       // LastQty (required, Float)
+    body += "31=10.5\x01";      // LastPx (required, Float)
+    body += "75=20260714\x01";  // TradeDate (required, String-coarse)
     body += "60=";
     body += kSendingTime;
-    body += "\x01";          // TransactTime (required)
-    body += "574=A\x01";     // MatchType under test
-    body += "552=1\x01";     // NoSides (required group, count=1)
-    body += "54=1\x01";      // Side (required group delimiter, in-domain)
-    body += "37=ORDER1\x01"; // OrderID (required group member)
+    body += "\x01";           // TransactTime (required)
+    body += "574=A\x01";      // MatchType under test
+    body += "552=1\x01";      // NoSides (required group, count=1)
+    body += "54=1\x01";       // Side (required group delimiter, in-domain)
+    body += "37=ORDER1\x01";  // OrderID (required group member)
     return make_frame("FIX.4.4", body);
 }
 std::vector<std::byte> row8_frame() {  // Side(54)="" (empty x Char) -- asserted:false, DV-1
@@ -343,18 +343,19 @@ std::vector<std::byte> row12_frame() {  // SettlLocation(166)=US on FIX41 Settle
     // multi-char value here would trip the TYPE arm before ever reaching the
     // enum check on 166, corrupting the isolation this row needs.
     std::string body = fix_header("T");
-    body += "160=0\x01";   // SettlInstMode (required, CHAR, enum {0,1,2,3})
-    body += "162=A\x01";   // SettlInstID (required, CHAR, no enum)
-    body += "163=N\x01";   // SettlInstTransType (required, CHAR, enum {C,N,R})
-    body += "165=1\x01";   // SettlInstSource (required, CHAR, enum {1,2})
-    body += "79=B\x01";    // AllocAccount (required, CHAR, no enum)
+    body += "160=0\x01";  // SettlInstMode (required, CHAR, enum {0,1,2,3})
+    body += "162=A\x01";  // SettlInstID (required, CHAR, no enum)
+    body += "163=N\x01";  // SettlInstTransType (required, CHAR, enum {C,N,R})
+    body += "165=1\x01";  // SettlInstSource (required, CHAR, enum {1,2})
+    body += "79=B\x01";   // AllocAccount (required, CHAR, no enum)
     body += "60=";
     body += kSendingTime;
-    body += "\x01";  // TransactTime (required)
+    body += "\x01";        // TransactTime (required)
     body += "166=US\x01";  // SettlLocation under test
     return make_frame("FIX.4.1", body);
 }
-std::vector<std::byte> row13_frame() {  // PossDupFlag(43)=X (header, BOOLEAN) -- asserted:false, DV-5
+std::vector<std::byte>
+row13_frame() {  // PossDupFlag(43)=X (header, BOOLEAN) -- asserted:false, DV-5
     return make_frame("FIX.4.4", fix_header("0") + "43=X\x01");
 }
 
@@ -381,7 +382,7 @@ constexpr std::array<RowSpec, 13> kRowSpecs{{
 }};
 
 struct FixppOutcome {
-    std::string verdict;             // "accept" | "reject"
+    std::string verdict;  // "accept" | "reject"
     std::optional<int> reason;
     std::optional<int> ref_tag_id;
 };
@@ -430,7 +431,8 @@ namespace {
 // stdout only, matching contracts/enum-domain.md C-6.
 TEST(EnumGoldenParity, MatchesQuickFixOnAssertedRowsAndRecordsDivergences) {
     auto rows = parse_golden_csv(FIXPP_GOLDEN_CSV_PATH);
-    ASSERT_EQ(rows.size(), 13u) << "golden.csv row count drifted from the T031-pinned 13-row corpus";
+    ASSERT_EQ(rows.size(), 13u)
+        << "golden.csv row count drifted from the T031-pinned 13-row corpus";
     ASSERT_EQ(kRowSpecs.size(), rows.size());
 
     std::cout << "\n=== T031 SC-009 parity gate: fixpp vs QuickFIX v1.16.0 golden ===\n";
@@ -446,7 +448,8 @@ TEST(EnumGoldenParity, MatchesQuickFixOnAssertedRowsAndRecordsDivergences) {
         std::string const golden_reason = row.reason ? std::to_string(*row.reason) : "-";
         std::string const golden_ref = row.ref_tag_id ? std::to_string(*row.ref_tag_id) : "-";
         std::string const fixpp_reason = outcome.reason ? std::to_string(*outcome.reason) : "-";
-        std::string const fixpp_ref = outcome.ref_tag_id ? std::to_string(*outcome.ref_tag_id) : "-";
+        std::string const fixpp_ref =
+            outcome.ref_tag_id ? std::to_string(*outcome.ref_tag_id) : "-";
 
         std::cout << "row " << row.id << " [" << (row.asserted ? "asserted " : "recorded ")
                   << "] quickfix=(" << row.verdict << "," << golden_reason << "," << golden_ref

@@ -84,8 +84,8 @@
 
 using namespace std::chrono_literals;
 using fixpp::session::Engine;
-using fixpp::session::SessionId;
 using fixpp::session::SessionConfig;
+using fixpp::session::SessionId;
 
 namespace {
 
@@ -103,12 +103,9 @@ constexpr auto kRunWindow = 500ms;
 // FIX protocol implementation or TLS on the peer side.
 // The port is passed by reference and set before the coroutine suspends so the
 // main thread can read it after binding.
-static asio::awaitable<void> run_raw_acceptor(
-    asio::io_context& ioc,
-    uint16_t& bound_port,
-    std::atomic<bool>& port_ready,
-    std::chrono::milliseconds hold_window)
-{
+static asio::awaitable<void> run_raw_acceptor(asio::io_context& ioc, uint16_t& bound_port,
+                                              std::atomic<bool>& port_ready,
+                                              std::chrono::milliseconds hold_window) {
     asio::ip::tcp::acceptor acceptor{ioc};
     asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
     acceptor.open(ep.protocol());
@@ -273,17 +270,21 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     // ── Let the io_context run, witnessed concurrently by the reader ────────
     // Spawn the raw acceptor coroutine.  Hold window = kRunWindow so the socket
     // stays alive for the whole test.
-    asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        asio::error_code ec;
-        // Accept one connection and hold for the window.
-        auto sock = co_await raw_acc.async_accept(asio::redirect_error(asio::use_awaitable, ec));
-        if (!ec) {
-            asio::steady_timer timer{ioc};
-            timer.expires_after(kRunWindow);
-            co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
-            sock.close(ec);
-        }
-    }, asio::detached);
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            asio::error_code ec;
+            // Accept one connection and hold for the window.
+            auto sock =
+                co_await raw_acc.async_accept(asio::redirect_error(asio::use_awaitable, ec));
+            if (!ec) {
+                asio::steady_timer timer{ioc};
+                timer.expires_after(kRunWindow);
+                co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+                sock.close(ec);
+            }
+        },
+        asio::detached);
 
     std::thread ioc_thread([&] {
         ioc.run_for(kRunWindow);
@@ -339,8 +340,8 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
         << "Expected at least one non-null lookup() result — the connect loop should have "
            "called publish_entry (reader_snapshot_ release-store) before the 500ms window "
            "expired.  If this fails, the test window is too short or the loopback connect "
-           "is failing.  null_reads=" << null_reads
-        << " nonnull_reads=" << nonnull_reads;
+           "is failing.  null_reads="
+        << null_reads << " nonnull_reads=" << nonnull_reads;
 
     // Destroy Engine after stop() — strict assert(stopped()) is satisfied.
     engine.reset();

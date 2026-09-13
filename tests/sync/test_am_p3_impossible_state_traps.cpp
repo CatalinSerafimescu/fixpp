@@ -73,7 +73,6 @@
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
-
 #include <cstdlib>
 #include <fixpp/core/sync/async_mutex.hpp>
 
@@ -187,7 +186,7 @@ void chain_walk_fresh_fifo_granted_traps() {
     };
     asio::co_spawn(ioc, holder(), asio::detached);
     for (int i = 0; i < 8; ++i) ioc.poll_one();  // drain H's uncontended grab first
-    ioc.restart();  // see io_context caveat above
+    ioc.restart();                               // see io_context caveat above
 
     auto waiter_b = [mtx]() -> asio::awaitable<void> {
         co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
@@ -239,7 +238,7 @@ void resume_runner_null_awaiter_traps() {
     };
     asio::co_spawn(ioc, holder(), asio::detached);
     for (int i = 0; i < 8; ++i) ioc.poll_one();  // drain H's uncontended grab first
-    ioc.restart();  // see io_context caveat above
+    ioc.restart();                               // see io_context caveat above
 
     auto waiter_b = [mtx]() -> asio::awaitable<void> {
         co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);

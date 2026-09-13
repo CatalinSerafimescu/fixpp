@@ -1,19 +1,16 @@
 // QuickFIX-cpp golden-authoring generator for AS (AllocationReport) — 061-slim T017/T018.
 // OFFLINE TOOLING, not checked in.
-#include <iostream>
 #include <quickfix/fix44/AllocationReport.h>
 
+#include <iostream>
+
 int main() {
-    FIX44::AllocationReport ar(
-        FIX::AllocReportID("ALLOCRPT1"),
-        FIX::AllocTransType(FIX::AllocTransType_NEW),
-        FIX::AllocReportType(9),  // ACCEPT (FIX::AllocReportType_ACCEPT)
-        FIX::AllocStatus(FIX::AllocStatus_ACCEPTED),
-        FIX::AllocNoOrdersType(0),
-        FIX::Side(FIX::Side_BUY),
-        FIX::Quantity(1000),
-        FIX::AvgPx(25.5),
-        FIX::TradeDate("20240101"));
+    FIX44::AllocationReport ar(FIX::AllocReportID("ALLOCRPT1"),
+                               FIX::AllocTransType(FIX::AllocTransType_NEW),
+                               FIX::AllocReportType(9),  // ACCEPT (FIX::AllocReportType_ACCEPT)
+                               FIX::AllocStatus(FIX::AllocStatus_ACCEPTED),
+                               FIX::AllocNoOrdersType(0), FIX::Side(FIX::Side_BUY),
+                               FIX::Quantity(1000), FIX::AvgPx(25.5), FIX::TradeDate("20240101"));
     ar.set(FIX::Symbol("MSFT"));
 
     FIX44::AllocationReport::NoPartyIDs party;

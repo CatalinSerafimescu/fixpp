@@ -82,7 +82,9 @@ inline std::vector<std::byte> make_frame(std::string_view msg_type, std::uint32_
 // Logon frame (35=A), used to bring a session to Active.
 inline std::vector<std::byte> make_logon(std::uint32_t seq, std::string_view sender,
                                          std::string_view target) {
-    return make_frame("A", seq, sender, target, "98=0\x01" "108=30\x01");
+    return make_frame("A", seq, sender, target,
+                      "98=0\x01"
+                      "108=30\x01");
 }
 
 // Possible-duplicate frame: poss_dup injects "43=Y\x01122=...\x01" with 122==52

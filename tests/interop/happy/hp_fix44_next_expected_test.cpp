@@ -49,13 +49,12 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <string>
-#include <tuple>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <string>
+#include <tuple>
 
 #include "hp_support.hpp"
 
@@ -73,19 +72,15 @@ constexpr std::chrono::milliseconds kStopWatchdog{5000};
 // GoogleTest rejects names containing dashes (e.g. "quickfix-cpp").
 // Mirrors hp_fix44_disconnect_reconnect_noreset_test.cpp's local pattern.
 
-std::string next_expected_initiator_name(const ::testing::TestParamInfo<Counterparty>& info)
-{
+std::string next_expected_initiator_name(const ::testing::TestParamInfo<Counterparty>& info) {
     return (info.param == Counterparty::quickfix_cpp) ? "QFcpp_init" : "QFj_init";
 }
 
-std::string next_expected_acceptor_name(const ::testing::TestParamInfo<Counterparty>& info)
-{
+std::string next_expected_acceptor_name(const ::testing::TestParamInfo<Counterparty>& info) {
     return (info.param == Counterparty::quickfix_cpp) ? "QFcpp_acc" : "QFj_acc";
 }
 
-std::string next_expected_bidirectional_name(
-    const ::testing::TestParamInfo<Counterparty>& info)
-{
+std::string next_expected_bidirectional_name(const ::testing::TestParamInfo<Counterparty>& info) {
     return (info.param == Counterparty::quickfix_cpp) ? "QFcpp_bidir" : "QFj_bidir";
 }
 
@@ -109,8 +104,7 @@ std::string next_expected_bidirectional_name(
 
 class NextExpectedInitiator : public ::testing::TestWithParam<Counterparty> {};
 
-TEST_P(NextExpectedInitiator, ProactiveResendNoResendRequest)
-{
+TEST_P(NextExpectedInitiator, ProactiveResendNoResendRequest) {
     const auto counterparty = GetParam();
     namespace hp = fixpp::interop::hp;
 
@@ -143,8 +137,7 @@ TEST_P(NextExpectedInitiator, ProactiveResendNoResendRequest)
     // Witness (a): FSM reaches Active — the 789 Logon exchange completed.
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active against " << hp::counterparty_token(counterparty)
         << "; knob on, counterparty must also have EnableNextExpectedMsgSeqNum=Y";
 
     // Witness (b): outbound seqnum advanced past the Logon (Logon was sent at seq 1).
@@ -155,16 +148,14 @@ TEST_P(NextExpectedInitiator, ProactiveResendNoResendRequest)
 
     // Graceful stop: Logout + disconnect within the watchdog.
     const auto elapsed = fx.stop_within(kStopWatchdog);
-    EXPECT_LT(elapsed, kStopWatchdog)
-        << "Engine::stop() took " << elapsed.count() << " ms (watchdog "
-        << kStopWatchdog.count() << " ms)";
+    EXPECT_LT(elapsed, kStopWatchdog) << "Engine::stop() took " << elapsed.count()
+                                      << " ms (watchdog " << kStopWatchdog.count() << " ms)";
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    AllCounterparties, NextExpectedInitiator,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    next_expected_initiator_name);
+INSTANTIATE_TEST_SUITE_P(AllCounterparties, NextExpectedInitiator,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         next_expected_initiator_name);
 
 // ── Cell 2: NextExpectedAcceptor ─────────────────────────────────────────────
 //
@@ -182,8 +173,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 class NextExpectedAcceptor : public ::testing::TestWithParam<Counterparty> {};
 
-TEST_P(NextExpectedAcceptor, ProactiveResendNoResendRequest)
-{
+TEST_P(NextExpectedAcceptor, ProactiveResendNoResendRequest) {
     const auto counterparty = GetParam();
     namespace hp = fixpp::interop::hp;
 
@@ -215,8 +205,7 @@ TEST_P(NextExpectedAcceptor, ProactiveResendNoResendRequest)
     // Witness (a): FSM reaches Active — the acceptor 789 reply exchange completed.
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active against " << hp::counterparty_token(counterparty)
         << "; knob on, counterparty must also have EnableNextExpectedMsgSeqNum=Y";
 
     // Witness (b): outbound seqnum advanced past the acceptor reply Logon (seq 1).
@@ -226,16 +215,14 @@ TEST_P(NextExpectedAcceptor, ProactiveResendNoResendRequest)
         << "outbound seqnum did not advance past the acceptor reply Logon";
 
     const auto elapsed = fx.stop_within(kStopWatchdog);
-    EXPECT_LT(elapsed, kStopWatchdog)
-        << "Engine::stop() took " << elapsed.count() << " ms (watchdog "
-        << kStopWatchdog.count() << " ms)";
+    EXPECT_LT(elapsed, kStopWatchdog) << "Engine::stop() took " << elapsed.count()
+                                      << " ms (watchdog " << kStopWatchdog.count() << " ms)";
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    AllCounterparties, NextExpectedAcceptor,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    next_expected_acceptor_name);
+INSTANTIATE_TEST_SUITE_P(AllCounterparties, NextExpectedAcceptor,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         next_expected_acceptor_name);
 
 // ── Cell 3: NextExpectedBidirectional ─────────────────────────────────────────
 //
@@ -257,8 +244,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 class NextExpectedBidirectional : public ::testing::TestWithParam<Counterparty> {};
 
-TEST_P(NextExpectedBidirectional, BothGapsRecoverNoResendRequest)
-{
+TEST_P(NextExpectedBidirectional, BothGapsRecoverNoResendRequest) {
     const auto counterparty = GetParam();
     namespace hp = fixpp::interop::hp;
 
@@ -302,15 +288,13 @@ TEST_P(NextExpectedBidirectional, BothGapsRecoverNoResendRequest)
         << "outbound seqnum did not advance past the Logon in the bidirectional cell";
 
     const auto elapsed = fx.stop_within(kStopWatchdog);
-    EXPECT_LT(elapsed, kStopWatchdog)
-        << "Engine::stop() took " << elapsed.count() << " ms (watchdog "
-        << kStopWatchdog.count() << " ms)";
+    EXPECT_LT(elapsed, kStopWatchdog) << "Engine::stop() took " << elapsed.count()
+                                      << " ms (watchdog " << kStopWatchdog.count() << " ms)";
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    AllCounterparties, NextExpectedBidirectional,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    next_expected_bidirectional_name);
+INSTANTIATE_TEST_SUITE_P(AllCounterparties, NextExpectedBidirectional,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         next_expected_bidirectional_name);
 
 }  // namespace

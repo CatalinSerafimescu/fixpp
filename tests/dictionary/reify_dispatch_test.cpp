@@ -466,7 +466,7 @@ TEST(ReifyRoundTrip, HandleMoveAssignPreservesTargetAndResetsSource) {
     // mirroring ReifyMoveTest.* which covers the TYPED owning_<Msg> sibling: the
     // target adopts the source's owned bytes; the moved-from source is a valid
     // null-pimpl husk whose noexcept accessors return defaults (never UB/terminate).
-    ReifyFixture fa{fixpp::test_support::make_nos_frame()};               // v44 NOS,  11=ORD1
+    ReifyFixture fa{fixpp::test_support::make_nos_frame()};                // v44 NOS,  11=ORD1
     ReifyFixture fb{fixpp::test_support::make_allocation_report_frame()};  // v44 AS,  70=ALLOC1
     ASSERT_TRUE(fa.ok());
     ASSERT_TRUE(fb.ok());
@@ -483,8 +483,7 @@ TEST(ReifyRoundTrip, HandleMoveAssignPreservesTargetAndResetsSource) {
     EXPECT_EQ(b->version().application, application_version::v44);
     auto cl = b->field_value(11);
     ASSERT_TRUE(cl.has_value());
-    EXPECT_EQ(cl->as_string(), "ORD1")
-        << "move-assign target adopts the source's owned bytes";
+    EXPECT_EQ(cl->as_string(), "ORD1") << "move-assign target adopts the source's owned bytes";
     EXPECT_FALSE(b->field_value(70).has_value())
         << "target's prior AllocationReport body (70=ALLOC1) is discarded on move-assign";
 

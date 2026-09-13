@@ -452,9 +452,9 @@ protected:
     void feed(Session& sess, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
-                                                         "ResendAnswerReplayTest::feed/frame")) {
+                                                        "ResendAnswerReplayTest::feed/frame")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
-                                                             "ResendAnswerReplayTest::feed/frame");
+                                                            "ResendAnswerReplayTest::feed/frame");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "ResendAnswerReplayTest::feed/frame";
             return;
@@ -525,9 +525,9 @@ TEST_F(ResendAnswerReplayTest, Replay_NoHeaderTagAfterBody_WithNestedRepeatingGr
     auto fut_send =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut_send, kWindow,
-                                                     "Replay_NoHeaderTagAfterBody/send")) {
+                                                    "Replay_NoHeaderTagAfterBody/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
-                                                         "Replay_NoHeaderTagAfterBody/send");
+                                                        "Replay_NoHeaderTagAfterBody/send");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Replay_NoHeaderTagAfterBody/send";
         return;
     }

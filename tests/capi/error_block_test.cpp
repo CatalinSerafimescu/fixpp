@@ -62,11 +62,14 @@ using fixpp_capi::detail::translate_for_consumer;
 // 051 [2i §4.3] amendment: these arms are no longer UNKNOWN. This guards against
 // a regression that re-points them back, AND against a wrong numeric mapping.
 TEST(CapiErrorBlock, SessionAppArmsPublished) {
-    EXPECT_EQ(translate(error::session_invalid_state_for_send), FIXPP_ERR_SESSION_INVALID_STATE);     // 77 -> 1401
-    EXPECT_EQ(translate(error::session_invalid_argument), FIXPP_ERR_SESSION_INVALID_ARGUMENT);        // 119 -> 1400
-    EXPECT_EQ(translate(error::app_do_not_send), FIXPP_ERR_APP_DO_NOT_SEND);                          // 129 -> 1402
-    EXPECT_EQ(translate(error::app_callback_threw), FIXPP_ERR_APP_CALLBACK_THREW);                    // 130 -> 1403
-    EXPECT_EQ(translate(error::app_payload_malformed), FIXPP_ERR_APP_PAYLOAD_MALFORMED);              // 131 -> 1404
+    EXPECT_EQ(translate(error::session_invalid_state_for_send),
+              FIXPP_ERR_SESSION_INVALID_STATE);  // 77 -> 1401
+    EXPECT_EQ(translate(error::session_invalid_argument),
+              FIXPP_ERR_SESSION_INVALID_ARGUMENT);                                  // 119 -> 1400
+    EXPECT_EQ(translate(error::app_do_not_send), FIXPP_ERR_APP_DO_NOT_SEND);        // 129 -> 1402
+    EXPECT_EQ(translate(error::app_callback_threw), FIXPP_ERR_APP_CALLBACK_THREW);  // 130 -> 1403
+    EXPECT_EQ(translate(error::app_payload_malformed),
+              FIXPP_ERR_APP_PAYLOAD_MALFORMED);  // 131 -> 1404
 }
 
 // ── T004: the OTHER 15 session arms stay UNKNOWN (no published code, by design)
@@ -100,8 +103,8 @@ TEST(CapiErrorBlock, ExistingPublishedReachableArms) {
 TEST(CapiErrorBlock, StrerrorNonEmptyForNewCodes) {
     const fixpp_error_t codes[] = {
         FIXPP_ERR_SESSION_INVALID_ARGUMENT, FIXPP_ERR_SESSION_INVALID_STATE,
-        FIXPP_ERR_APP_DO_NOT_SEND, FIXPP_ERR_APP_CALLBACK_THREW,
-        FIXPP_ERR_APP_PAYLOAD_MALFORMED, FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN,
+        FIXPP_ERR_APP_DO_NOT_SEND,          FIXPP_ERR_APP_CALLBACK_THREW,
+        FIXPP_ERR_APP_PAYLOAD_MALFORMED,    FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN,
     };
     for (fixpp_error_t code : codes) {
         const char* s = fixpp_strerror(code);
@@ -123,9 +126,10 @@ TEST(CapiErrorBlock, StrerrorNonEmptyForNewCodes) {
 TEST(CapiErrorBlock, Sc004PerCodeMinorDowngradeBothWays) {
     // (a) a NEW minor-4 code downgrades for a sub-4 consumer, surfaces at >=4.
     const fixpp_error_t newCode = translate(error::session_invalid_argument);
-    ASSERT_EQ(newCode, FIXPP_ERR_SESSION_INVALID_ARGUMENT);  // 1400
-    EXPECT_EQ(translate_for_consumer(newCode, 3), FIXPP_ERR_UNKNOWN);                 // minor 3 < 4 -> downgrade
-    EXPECT_EQ(translate_for_consumer(newCode, 4), FIXPP_ERR_SESSION_INVALID_ARGUMENT);// minor 4 -> real code
+    ASSERT_EQ(newCode, FIXPP_ERR_SESSION_INVALID_ARGUMENT);            // 1400
+    EXPECT_EQ(translate_for_consumer(newCode, 3), FIXPP_ERR_UNKNOWN);  // minor 3 < 4 -> downgrade
+    EXPECT_EQ(translate_for_consumer(newCode, 4),
+              FIXPP_ERR_SESSION_INVALID_ARGUMENT);  // minor 4 -> real code
 
     // (b) an EXISTING minor-2 code SURVIVES unchanged at consumer_minor=3 — the
     //     per-code-table witness (a scalar-bump-to-4 would have broken this).
@@ -243,7 +247,10 @@ TEST(CapiErrorBlock, T022_Arm3_AppPayloadMalformed) {
 
     // Payload with "34=" at a SOH-field boundary → app_payload_malformed (131) →
     // FIXPP_ERR_APP_PAYLOAD_MALFORMED (1404) at consumer_minor=4.
-    std::string malf = "35=D\x01" "34=INJECTED\x01" "55=TESTSYM\x01";
+    std::string malf =
+        "35=D\x01"
+        "34=INJECTED\x01"
+        "55=TESTSYM\x01";
     std::vector<std::uint8_t> bad(malf.begin(), malf.end());
     fixpp_error_t rc = fixpp_session_send(ini_h, bad.data(), bad.size());
     EXPECT_EQ(rc, FIXPP_ERR_APP_PAYLOAD_MALFORMED)

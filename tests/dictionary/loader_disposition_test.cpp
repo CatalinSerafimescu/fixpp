@@ -304,8 +304,7 @@ std::vector<DictFile> const kAllTen{
     {"FIX42", "FIX42.xml", false},       {"FIX43", "FIX43.xml", false},
     {"FIX44", "FIX44.xml", false},       {"FIX50", "FIX50.xml", false},
     {"FIX50SP1", "FIX50SP1.xml", false}, {"FIX50SP2", "FIX50SP2.xml", false},
-    {"FIXT11", "FIXT11.xml", false},
-    {"Orchestra FIX Latest", "OrchestraFIXLatest.xml", true},
+    {"FIXT11", "FIXT11.xml", false},     {"Orchestra FIX Latest", "OrchestraFIXLatest.xml", true},
 };
 
 // ── fixpp#264 fixture: a COMPLETE dictionary whose deepest group context has an
@@ -578,8 +577,7 @@ TEST(LoaderDisposition, DeclaredGroupWithZeroContextsDoesNotFailClosed) {
     // Default policy — this must NOT throw.
     auto dict = fixpp::dict::XmlLoader{}.load_from_string(kZeroContextGroupXml, &mr);
 
-    EXPECT_EQ(dict.group_first_field(600), 610)
-        << "the well-formed sibling must still resolve.";
+    EXPECT_EQ(dict.group_first_field(600), 610) << "the well-formed sibling must still resolve.";
     // NoBad(700) is declared and unresolved, but contributes zero contexts, so
     // C-6.1 must not fire on it (C-3.6). It stays unresolved — informational,
     // not fatal.
@@ -621,8 +619,8 @@ TEST(LoaderDisposition, OrchestraRejectionIsOrchestraParseError) {
     std::vector<std::byte> buf2(2u * 1024u * 1024u);
     std::pmr::monotonic_buffer_resource mr2{buf2.data(), buf2.size()};
     EXPECT_NO_THROW({
-        auto d = fixpp::dict::OrchestraLoader{}.load_from_string(
-            kOrchestraUnresolvableXml, &mr2, unresolved_group_policy::tolerant);
+        auto d = fixpp::dict::OrchestraLoader{}.load_from_string(kOrchestraUnresolvableXml, &mr2,
+                                                                 unresolved_group_policy::tolerant);
         (void)d;
     }) << "C-6.4: tolerant mode must behave identically in both loaders.";
 }
@@ -647,9 +645,9 @@ TEST(LoaderDisposition, ScalarReuseOfGroupTagIsNotACompletenessViolation) {
         << "V1 declares NoGood(600) as a real group; its context must resolve.";
     // V2 contributes NO context for 600 — it is a scalar there. The context
     // store has no V2 entry, so this query MISSES and falls through to the bare
-    // global (the legacy bare group_first_field(no_tag) fallback). That fall-through is the documented
-    // behaviour, not a registration: what this case pins is that the load
-    // SUCCEEDED, i.e. the scalar reuse did not trip C-3.4.
+    // global (the legacy bare group_first_field(no_tag) fallback). That fall-through is the
+    // documented behaviour, not a registration: what this case pins is that the load SUCCEEDED,
+    // i.e. the scalar reuse did not trip C-3.4.
     SUCCEED() << "load succeeded with a NumInGroup-typed tag reused as a scalar";
 }
 
@@ -783,8 +781,7 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalize) {
                           "reject the load.";
     EXPECT_NE(what.find("no per-context delimiter record (FR-023 completeness invariant)"),
               std::string::npos)
-        << "the diagnostic must name the FR-023 completeness invariant specifically; got: "
-        << what;
+        << "the diagnostic must name the FR-023 completeness invariant specifically; got: " << what;
     EXPECT_NE(what.find("600"), std::string::npos)
         << "the diagnostic must name the offending group's NumInGroup tag; got: " << what;
     EXPECT_NE(what.find("V1"), std::string::npos)
@@ -819,8 +816,7 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeOrchestra
                                    "its own orchestra_parse_error (FR-006c).";
     EXPECT_NE(what.find("no per-context delimiter record (FR-023 completeness invariant)"),
               std::string::npos)
-        << "the diagnostic must name the FR-023 completeness invariant specifically; got: "
-        << what;
+        << "the diagnostic must name the FR-023 completeness invariant specifically; got: " << what;
     EXPECT_NE(what.find("600"), std::string::npos)
         << "the diagnostic must name the offending group's NumInGroup tag; got: " << what;
 }
@@ -859,8 +855,7 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeIntTyped)
                           "structural (as_table_view()'s own predicate), not FieldRef.type.";
     EXPECT_NE(what.find("no per-context delimiter record (FR-023 completeness invariant)"),
               std::string::npos)
-        << "the diagnostic must name the FR-023 completeness invariant specifically; got: "
-        << what;
+        << "the diagnostic must name the FR-023 completeness invariant specifically; got: " << what;
     EXPECT_NE(what.find("600"), std::string::npos)
         << "the diagnostic must name the offending group's count tag; got: " << what;
     EXPECT_NE(what.find("V1"), std::string::npos)
@@ -894,8 +889,7 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeIntTypedO
                                    "(FR-006c).";
     EXPECT_NE(what.find("no per-context delimiter record (FR-023 completeness invariant)"),
               std::string::npos)
-        << "the diagnostic must name the FR-023 completeness invariant specifically; got: "
-        << what;
+        << "the diagnostic must name the FR-023 completeness invariant specifically; got: " << what;
     EXPECT_NE(what.find("600"), std::string::npos)
         << "the diagnostic must name the offending group's count tag; got: " << what;
 }
@@ -1006,8 +1000,7 @@ TEST(LoaderDisposition, AllShippedContextsHaveADelimiterRecord) {
                 }
             }
         }
-        EXPECT_EQ(zero, 0u) << "FR-023 / C-3.4: " << d.label << " has " << zero << " of "
-                            << checked
+        EXPECT_EQ(zero, 0u) << "FR-023 / C-3.4: " << d.label << " has " << zero << " of " << checked
                             << " registered top-level contexts resolving delimiter 0, i.e. with "
                                "no Entity-2 record. finalize() should have rejected the load.";
     }

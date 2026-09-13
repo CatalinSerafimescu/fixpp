@@ -29,12 +29,11 @@
 #include <cstdint>
 
 #include "capi_internal.hpp"  // CapiApplication, fixpp_msg, SessionSlot, fixpp_send_cb
-
 #include "support/alloc_guard_markers.hpp"
 
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace {
 

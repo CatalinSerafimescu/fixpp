@@ -321,7 +321,8 @@ TEST(FramerErrorPath, ChecksumMismatchTrailingSOHAbsent) {
 TEST(FramerErrorPath, FrameTooLargeAtFinalSizeCheck) {
     // Build a frame that fits the default max (256 KiB). Set max_frame_bytes
     // to a value LESS than the frame but GREATER than the body (so the body_length
-    // check (`body_length > max_frame_bytes`) passes, but the final `frame_len > max_frame_bytes` check fails).
+    // check (`body_length > max_frame_bytes`) passes, but the final `frame_len > max_frame_bytes`
+    // check fails).
     //
     // body = "35=D\x01 49=SENDER\x01 56=TARGET\x01" = 6+10+10 = 26 bytes.
     // 8=FIX.4.4\x01 = 10 bytes. 9=26\x01 = 6 bytes. Total frame = 10+6+26+7 = 49 bytes.

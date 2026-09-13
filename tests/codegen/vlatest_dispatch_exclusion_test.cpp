@@ -80,7 +80,7 @@ TEST(VlatestDispatchExclusion076, SharedMsgTypeResolvesToV50sp2NotVlatest) {
     version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
 
     auto r = fixpp::dict::dispatch::dispatch_application(mv, "D", application_version::v50sp2,
-                                                          profile, &arena);
+                                                         profile, &arena);
     ASSERT_TRUE(r.has_value())
         << "a FIX-Latest MsgType also present in v50sp2.xml (NewOrderSingle/D) must still "
            "dispatch via the existing v50sp2 arm";
@@ -108,7 +108,7 @@ TEST(VlatestDispatchExclusion076, FixLatestOnlyMsgTypeHitsFailLoudDefault) {
     version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
 
     auto r = fixpp::dict::dispatch::dispatch_application(mv, "EC", application_version::v50sp2,
-                                                          profile, &arena);
+                                                         profile, &arena);
     ASSERT_FALSE(r.has_value())
         << "a FIX-Latest-only MsgType (SettlementStatusRequest/EC, absent from v50sp2.xml) must "
            "NOT dispatch successfully -- neither a v50sp2 misdispatch nor a vlatest owner";

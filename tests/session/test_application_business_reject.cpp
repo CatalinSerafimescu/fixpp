@@ -56,8 +56,8 @@ using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace fixpp::session::test {
 namespace {
@@ -94,7 +94,9 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
 }
 
 static std::vector<std::byte> make_logon_frame() {
-    std::string extra = "98=0\x01" "108=30\x01";
+    std::string extra =
+        "98=0\x01"
+        "108=30\x01";
     return make_raw_frame("FIX.4.2", "A", 1, "TW", "ISLD", extra);
 }
 
@@ -239,7 +241,7 @@ TEST(ApplicationBusinessReject, FromAppReject_EmitsBusinessMessageReject_NotSess
             found_bmr = true;
             bmr_ref_msg_type = extract_field_value(frame, 372);  // RefMsgType
             bmr_ref_seq_num = extract_field_value(frame, 45);    // RefSeqNum
-            bmr_reason = extract_field_value(frame, 380);         // BusinessRejectReason
+            bmr_reason = extract_field_value(frame, 380);        // BusinessRejectReason
         }
         if (mt == "3") {
             found_session_reject = true;

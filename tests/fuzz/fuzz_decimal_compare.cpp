@@ -11,8 +11,8 @@
 #include <cstdint>
 #include <cstring>
 
-#include "fixpp/core/decimal.hpp"
 #include "core/decimal_reference_compare.hpp"
+#include "fixpp/core/decimal.hpp"
 
 using fixpp::core::decimal_traits;
 using fixpp::core::pod_decimal;

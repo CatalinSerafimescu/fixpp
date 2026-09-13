@@ -12,9 +12,8 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/core/error.hpp>
-
 #include <cstdint>
+#include <fixpp/core/error.hpp>
 #include <set>
 #include <string_view>
 

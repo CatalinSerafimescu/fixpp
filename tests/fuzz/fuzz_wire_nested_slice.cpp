@@ -5,11 +5,11 @@
 // shape 062 introduces: a NON-ENVELOPED, mid-frame slice-scoped `{data,
 // len+1}` byte range fed into `OffsetTable::build_nested_subview()` (T005)
 // via the dict-aware nested-build entry point `OffsetTable::nested_group_
-// slices()` (T006, `OffsetTable::consume_group_extent`'s max_group_entries_per_instance cap). The existing
-// fuzz_wire_parser.cpp only ever generates FULL, checksum-terminated frames
-// (via the `frame_view_access` friend factory) — it never drives this
-// slice-scoped shape, which skips frame envelope validation entirely and
-// hands raw interior bytes straight to the dict-aware OffsetTable ctor.
+// slices()` (T006, `OffsetTable::consume_group_extent`'s max_group_entries_per_instance cap). The
+// existing fuzz_wire_parser.cpp only ever generates FULL, checksum-terminated frames (via the
+// `frame_view_access` friend factory) — it never drives this slice-scoped shape, which skips frame
+// envelope validation entirely and hands raw interior bytes straight to the dict-aware OffsetTable
+// ctor.
 //
 // Harness shape: a FIXED, deterministic, minimal valid root frame builds a
 // root OffsetTable (so 100% of fuzzer entropy targets the path under test,
@@ -210,25 +210,27 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Vary nested_no_tag with the fuzzer input so both matching (via
     // always_group_member, i.e. always) and boundary tag values (0,
     // 65535) are exercised across the corpus.
-    std::uint16_t const nested_no_tag = static_cast<std::uint16_t>(
-        static_cast<std::uint16_t>(data[0]) |
-        (size > 1U ? (static_cast<std::uint16_t>(data[1]) << 8) : 0U));
+    std::uint16_t const nested_no_tag =
+        static_cast<std::uint16_t>(static_cast<std::uint16_t>(data[0]) |
+                                   (size > 1U ? (static_cast<std::uint16_t>(data[1]) << 8) : 0U));
 
     // 063 T008: the new context arg — carried but unused in Phase 2.
     fixpp::wire::group_context const ctx{};
 
     // nested_group_slices() is noexcept; any exception escape -> terminate
     // -> libFuzzer crash report.
-    auto slices = root.nested_group_slices(slice_data, slice_len, nested_no_tag, &dict_token,
-                                           &always_group_member,
-                                           fixpp::wire::detail::generation_token{}, ctx).slices;
+    auto slices =
+        root.nested_group_slices(slice_data, slice_len, nested_no_tag, &dict_token,
+                                 &always_group_member, fixpp::wire::detail::generation_token{}, ctx)
+            .slices;
     (void)slices;
 
     // Second call with the SAME (slice, no_tag) key exercises the T006
     // build-once/fetch-cached path over the same adversarial content.
-    auto slices_again = root.nested_group_slices(slice_data, slice_len, nested_no_tag, &dict_token,
-                                                 &always_group_member,
-                                                 fixpp::wire::detail::generation_token{}, ctx).slices;
+    auto slices_again =
+        root.nested_group_slices(slice_data, slice_len, nested_no_tag, &dict_token,
+                                 &always_group_member, fixpp::wire::detail::generation_token{}, ctx)
+            .slices;
     (void)slices_again;
 
     // Third call with a DIFFERENT no_tag over the same slice content widens
@@ -236,12 +238,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // OffsetTable::consume_group_extent (063 T021/T024) — broadening entry-
     // point diversity beyond the single `nested_no_tag` derived above.
     std::uint16_t const nested_no_tag2 = static_cast<std::uint16_t>(
-        size > 3U ? (static_cast<std::uint16_t>(data[2]) |
-                    (static_cast<std::uint16_t>(data[3]) << 8))
-                  : ~nested_no_tag);
-    auto slices2 = root.nested_group_slices(slice_data, slice_len, nested_no_tag2, &dict_token,
-                                            &always_group_member,
-                                            fixpp::wire::detail::generation_token{}, ctx).slices;
+        size > 3U
+            ? (static_cast<std::uint16_t>(data[2]) | (static_cast<std::uint16_t>(data[3]) << 8))
+            : ~nested_no_tag);
+    auto slices2 =
+        root.nested_group_slices(slice_data, slice_len, nested_no_tag2, &dict_token,
+                                 &always_group_member, fixpp::wire::detail::generation_token{}, ctx)
+            .slices;
     (void)slices2;
 
     // Deterministic zero-count exposer (T024): a FIXED "<no_tag>=0<SOH>"
@@ -260,9 +263,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (suffix_len > 0) {
         std::memcpy(zc_buf.data() + prefix_len, slice_data, suffix_len);
     }
-    auto zc_slices = root.nested_group_slices(zc_buf.data(), prefix_len + suffix_len, kZeroCountTag,
-                                              &dict_token, &always_group_member,
-                                              fixpp::wire::detail::generation_token{}, ctx).slices;
+    auto zc_slices =
+        root.nested_group_slices(zc_buf.data(), prefix_len + suffix_len, kZeroCountTag, &dict_token,
+                                 &always_group_member, fixpp::wire::detail::generation_token{}, ctx)
+            .slices;
     (void)zc_slices;
 
     return 0;

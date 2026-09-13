@@ -30,12 +30,12 @@
 #include <opentelemetry/sdk/metrics/meter_provider.h>
 
 // SDK — mock push exporter implementation.
-#include <opentelemetry/sdk/metrics/push_metric_exporter.h>
-#include <opentelemetry/sdk/metrics/export/metric_producer.h>
+#include <opentelemetry/sdk/common/exporter_utils.h>
 #include <opentelemetry/sdk/metrics/data/metric_data.h>
 #include <opentelemetry/sdk/metrics/data/point_data.h>
+#include <opentelemetry/sdk/metrics/export/metric_producer.h>
 #include <opentelemetry/sdk/metrics/instruments.h>
-#include <opentelemetry/sdk/common/exporter_utils.h>
+#include <opentelemetry/sdk/metrics/push_metric_exporter.h>
 
 // SDK — MetricReader wrapping.
 #include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h>
@@ -70,8 +70,8 @@ class MockPushExporter final : public sdk_metrics::PushMetricExporter {
 public:
     MockPushExporter() = default;
 
-    opentelemetry::sdk::common::ExportResult
-    Export(const sdk_metrics::ResourceMetrics& data) noexcept override {
+    opentelemetry::sdk::common::ExportResult Export(
+        const sdk_metrics::ResourceMetrics& data) noexcept override {
         std::lock_guard<std::mutex> lock(mu_);
         received_.push_back(data);
         return opentelemetry::sdk::common::ExportResult::kSuccess;
@@ -83,7 +83,7 @@ public:
     }
 
     bool ForceFlush(std::chrono::microseconds) noexcept override { return true; }
-    bool Shutdown(std::chrono::microseconds)   noexcept override { return true; }
+    bool Shutdown(std::chrono::microseconds) noexcept override { return true; }
 
     // Test accessor.
     std::vector<sdk_metrics::ResourceMetrics> get_received() const {
@@ -110,26 +110,21 @@ private:
 // This is the twin of latest_counter_in_export() in test_dual_metric_export.cpp.
 // Both had the identical defect; fixing only the one that failed first would
 // have left this to surface as a separate mystery.
-int64_t latest_counter_in_export(
-    const std::vector<sdk_metrics::ResourceMetrics>& batches,
-    std::string_view metric_name)
-{
+int64_t latest_counter_in_export(const std::vector<sdk_metrics::ResourceMetrics>& batches,
+                                 std::string_view metric_name) {
     int64_t latest = -1;
 
     for (const auto& rm : batches) {
         int64_t batch_total = 0;
-        bool    in_batch    = false;
+        bool in_batch = false;
 
         for (const auto& scope_m : rm.scope_metric_data_) {
             for (const auto& md : scope_m.metric_data_) {
-                if (std::string_view{md.instrument_descriptor.name_} != metric_name)
-                    continue;
+                if (std::string_view{md.instrument_descriptor.name_} != metric_name) continue;
                 for (const auto& pda : md.point_data_attr_) {
-                    if (const auto* sp =
-                            opentelemetry::nostd::get_if<sdk_metrics::SumPointData>(
-                                &pda.point_data)) {
-                        if (const auto* iv =
-                                opentelemetry::nostd::get_if<int64_t>(&sp->value_)) {
+                    if (const auto* sp = opentelemetry::nostd::get_if<sdk_metrics::SumPointData>(
+                            &pda.point_data)) {
+                        if (const auto* iv = opentelemetry::nostd::get_if<int64_t>(&sp->value_)) {
                             batch_total += *iv;
                             in_batch = true;
                         }
@@ -178,8 +173,7 @@ TEST(OtlpMetricExporterTest, CtorReaderNonNullAndShutdown) {
 
     fixpp::otel::OtlpMetricExporter exp{cfg};
 
-    ASSERT_NE(exp.sdk_reader(), nullptr)
-        << "OtlpMetricExporter::sdk_reader() must return non-null";
+    ASSERT_NE(exp.sdk_reader(), nullptr) << "OtlpMetricExporter::sdk_reader() must return non-null";
     ASSERT_NE(exp.sdk_reader_shared(), nullptr)
         << "OtlpMetricExporter::sdk_reader_shared() must return non-null";
 
@@ -211,33 +205,30 @@ TEST(OtelDualExportBuilderTest, WithPrometheusAndMockOtlpReaderWiresBothReaders)
 
     sdk_metrics::PeriodicExportingMetricReaderOptions reader_opts;
     reader_opts.export_interval_millis = std::chrono::milliseconds{300'000};
-    reader_opts.export_timeout_millis  = std::chrono::milliseconds{5'000};
+    reader_opts.export_timeout_millis = std::chrono::milliseconds{5'000};
 
-    auto mock_reader_up =
-        opentelemetry::sdk::metrics::PeriodicExportingMetricReaderFactory::Create(
-            std::move(mock_up), reader_opts);
-    auto mock_reader =
-        std::shared_ptr<sdk_metrics::MetricReader>(mock_reader_up.release());
+    auto mock_reader_up = opentelemetry::sdk::metrics::PeriodicExportingMetricReaderFactory::Create(
+        std::move(mock_up), reader_opts);
+    auto mock_reader = std::shared_ptr<sdk_metrics::MetricReader>(mock_reader_up.release());
 
     fixpp::otel::PrometheusConfig prom_cfg;
     prom_cfg.host = "127.0.0.1";
     prom_cfg.port = 0;  // ephemeral
 
     auto mp = fixpp::otel::OtelDualExportBuilder{}
-                .with_prometheus(prom_cfg)
-                .with_otlp_reader(mock_reader)
-                .build();
+                  .with_prometheus(prom_cfg)
+                  .with_otlp_reader(mock_reader)
+                  .build();
 
     ASSERT_NE(mp, nullptr) << "OtelDualExportBuilder::build() must return non-null";
 
     // Must be the concrete SDK MeterProvider (both readers registered).
     auto* sdk_mp = dynamic_cast<opentelemetry::sdk::metrics::MeterProvider*>(mp.get());
-    ASSERT_NE(sdk_mp, nullptr)
-        << "build() must return an sdk::metrics::MeterProvider";
+    ASSERT_NE(sdk_mp, nullptr) << "build() must return an sdk::metrics::MeterProvider";
 
     // Create a counter and increment it.
     constexpr int64_t kValue = 7;
-    auto meter   = mp->GetMeter("fixpp.exporters.test");
+    auto meter = mp->GetMeter("fixpp.exporters.test");
     auto counter = meter->CreateUInt64Counter("fixpp.exporters.test.counter");
     ASSERT_NE(counter.get(), nullptr);
     counter->Add(static_cast<uint64_t>(kValue));
@@ -248,14 +239,13 @@ TEST(OtelDualExportBuilderTest, WithPrometheusAndMockOtlpReaderWiresBothReaders)
 
     // The mock OTLP reader must have received at least one batch containing our counter.
     const auto batches = raw_mock->get_received();
-    ASSERT_FALSE(batches.empty())
-        << "MockPushExporter received no batches after ForceFlush; "
-           "the OTLP reader was not registered";
+    ASSERT_FALSE(batches.empty()) << "MockPushExporter received no batches after ForceFlush; "
+                                     "the OTLP reader was not registered";
 
     int64_t otlp_val = latest_counter_in_export(batches, "fixpp.exporters.test.counter");
     EXPECT_EQ(otlp_val, kValue)
-        << "Mock OTLP exporter must capture counter==" << kValue
-        << " in " << batches.size() << " batch(es); "
+        << "Mock OTLP exporter must capture counter==" << kValue << " in " << batches.size()
+        << " batch(es); "
            "the OTLP reader was not wired or ForceFlush did not trigger Export()";
 
     // Shutdown cleanly.
@@ -277,16 +267,13 @@ TEST(OtelDualExportBuilderTest, WithPrometheusAndOtlpCfgBuilderPath) {
     fixpp::otel::OtlpMetricConfig otlp_cfg;
     otlp_cfg.endpoint = "http://127.0.0.1:14318";  // dummy — no export triggered
 
-    auto mp = fixpp::otel::OtelDualExportBuilder{}
-                .with_prometheus(prom_cfg)
-                .with_otlp(otlp_cfg)
-                .build();
+    auto mp =
+        fixpp::otel::OtelDualExportBuilder{}.with_prometheus(prom_cfg).with_otlp(otlp_cfg).build();
 
     ASSERT_NE(mp, nullptr) << "OtelDualExportBuilder::build() must return non-null";
 
     auto* sdk_mp = dynamic_cast<opentelemetry::sdk::metrics::MeterProvider*>(mp.get());
-    ASSERT_NE(sdk_mp, nullptr)
-        << "build() must return an sdk::metrics::MeterProvider";
+    ASSERT_NE(sdk_mp, nullptr) << "build() must return an sdk::metrics::MeterProvider";
 
     // Shutdown cleanly (stops Prometheus civetweb server + OTLP reader).
     sdk_mp->Shutdown();

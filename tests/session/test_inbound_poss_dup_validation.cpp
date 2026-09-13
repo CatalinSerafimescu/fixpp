@@ -77,7 +77,8 @@ TEST_F(PossDupValidationTest, ArmC_MissingOrigSendingTime) {
 
     // The Reject must carry 371=122 (RefTagID pointing to OrigSendingTime).
     auto rj = find_last_reject();
-    EXPECT_EQ(rj.ref_tag_id, "122") << "Arm C: Reject must carry 371=122 (RefTagID=OrigSendingTime)";
+    EXPECT_EQ(rj.ref_tag_id, "122")
+        << "Arm C: Reject must carry 371=122 (RefTagID=OrigSendingTime)";
 
     // The Reject must carry 373=1 (RequiredTagMissing).
     EXPECT_EQ(rj.reason, "1") << "Arm C: Reject must carry 373=1 (RequiredTagMissing)";
@@ -278,8 +279,8 @@ TEST_F(PossDupValidationTest, TooHigh_EngineParity_Pin) {
     feed(sess, frame);
 
     // A ResendRequest(35=2) must be emitted.
-    EXPECT_TRUE(any_resend_request())
-        << "Engine-parity: too-high 43=Y missing 122 must emit ResendRequest(35=2), not Arm C reject";
+    EXPECT_TRUE(any_resend_request()) << "Engine-parity: too-high 43=Y missing 122 must emit "
+                                         "ResendRequest(35=2), not Arm C reject";
 
     // Session must stay Active (too-high arm keeps Active per FR-009).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -342,8 +343,8 @@ TEST_F(PossDupValidationTest, ArmC_MalformedOrigSendingTime) {
     // Seqnum must NOT advance.
     const auto expected_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(expected_after, expected_before)
-        << "RC#1: seqnum must NOT advance when Arm C fires (was " << expected_before
-        << ", got " << expected_after << ")";
+        << "RC#1: seqnum must NOT advance when Arm C fires (was " << expected_before << ", got "
+        << expected_after << ")";
 }
 
 // ── Test 9: RC#3 — stale 52 possdup killed by Guard-3 MaxLatency before Stage-1 ──
@@ -363,10 +364,11 @@ TEST_F(PossDupValidationTest, StaleSendingTime_PossDup_KilledByMaxLatency) {
     // Default MaxLatency threshold = 120 s. Use a 52 that is 300 s (5 min) in the past
     // relative to the mock clock: 2023-12-31T23:55:00 = well outside the 120 s window.
     // 122 is present and valid (equal to 52 → not Arm D by itself).
-    auto frame = make_frame("D", /*seq=*/1, "TW", "ISLD",
-                            "43=Y\x01"
-                            "52=20231231-23:55:00.000\x01"  // 300 s stale — overrides make_frame's 52
-                            "122=20231231-23:55:00.000\x01");  // 122 == stale 52 (not Arm D)
+    auto frame =
+        make_frame("D", /*seq=*/1, "TW", "ISLD",
+                   "43=Y\x01"
+                   "52=20231231-23:55:00.000\x01"     // 300 s stale — overrides make_frame's 52
+                   "122=20231231-23:55:00.000\x01");  // 122 == stale 52 (not Arm D)
     // Note: make_frame injects 52 BEFORE extra_fields so extra 52= overrides if the parser
     // takes the last occurrence; if the parser takes the first, the stale 52 won't override.
     // Use make_frame with a body that has the stale 52 as the ONLY 52 field instead.
@@ -405,13 +407,15 @@ TEST_F(PossDupValidationTest, StaleSendingTime_PossDup_KilledByMaxLatency) {
 
     // Guard-3 fires: session → Disconnected (Reject 371=52/373=10 + Logout + Disconnect).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
-        << "RC#3: stale-52 possdup must be killed by Guard-3 (Disconnected), not tolerated by Arm A";
+        << "RC#3: stale-52 possdup must be killed by Guard-3 (Disconnected), not tolerated by Arm "
+           "A";
 
     // A Reject(35=3) must be emitted by Guard-3 with 371=52/373=10.
     ASSERT_TRUE(any_reject()) << "RC#3: Guard-3 must emit Reject(35=3)";
     auto rj = find_last_reject();
     EXPECT_EQ(rj.ref_tag_id, "52") << "RC#3: Guard-3 Reject must carry 371=52 (SendingTime)";
-    EXPECT_EQ(rj.reason, "10") << "RC#3: Guard-3 Reject must carry 373=10 (SendingTimeAccuracyProblem)";
+    EXPECT_EQ(rj.reason, "10")
+        << "RC#3: Guard-3 Reject must carry 373=10 (SendingTimeAccuracyProblem)";
 
     // A Logout must be emitted (Guard-3 is fatal).
     EXPECT_TRUE(any_logout()) << "RC#3: Guard-3 must emit Logout before disconnecting";
@@ -467,10 +471,8 @@ TEST_F(PossDupValidationTest, AtExpected_Valid_ProcessedOnce_Advances) {
         << "(was " << expected_before << ", got " << expected_after << ")";
 
     // No Reject and no Logout (valid possdup at-expected is not an error).
-    EXPECT_FALSE(any_reject())
-        << "FQ-2: valid at-expected possdup must NOT emit a Reject";
-    EXPECT_FALSE(any_logout())
-        << "FQ-2: valid at-expected possdup must NOT emit a Logout";
+    EXPECT_FALSE(any_reject()) << "FQ-2: valid at-expected possdup must NOT emit a Reject";
+    EXPECT_FALSE(any_logout()) << "FQ-2: valid at-expected possdup must NOT emit a Logout";
 }
 
 }  // namespace

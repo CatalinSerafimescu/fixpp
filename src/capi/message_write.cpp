@@ -35,30 +35,28 @@
 // the MessageView OffsetTable + any group cursors), a MessageView over the copy, and
 // no liveness token. Reads (incl. get_group) are THREAD_SAFE and leak-free.
 
-#include "fix/c_api/message.h"
-#include "fix/c_api/decimal.h"
-#include "fix/c_api/export.h"
-
 #include <algorithm>
 #include <cassert>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <memory>
-#include <memory_resource>
-#include <new>
-#include <span>
-#include <string_view>
-
 #include <fixpp/core/decimal.hpp>  // decimal_traits<pod_decimal>::from_chars — set_double fail-closed guard
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/session/session.hpp>  // session_arena()
 #include <fixpp/wire/framer.hpp>      // frame_view / frame_view_access
 #include <fixpp/wire/parser.hpp>      // MessageView
+#include <memory>
+#include <memory_resource>
+#include <new>
+#include <span>
+#include <string_view>
 
 #include "capi_internal.hpp"
+#include "fix/c_api/decimal.h"
+#include "fix/c_api/export.h"
+#include "fix/c_api/message.h"
 
 // ── frame_view_access — production clone seam ────────────────────────────────
 //
@@ -88,7 +86,9 @@ GroupInstance::~GroupInstance() = default;
 
 GroupInstance::GroupInstance(GroupInstance&&) noexcept = default;
 
-GroupInstance& GroupInstance::operator=(GroupInstance&&) noexcept = default;  // LCOV_EXCL_LINE — move-assign fires only on vector reallocation of GroupInstance; not exercised in current test corpus
+GroupInstance& GroupInstance::operator=(GroupInstance&&) noexcept =
+    default;  // LCOV_EXCL_LINE — move-assign fires only on vector reallocation of GroupInstance;
+              // not exercised in current test corpus
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -219,8 +219,7 @@ static bool append_field(std::byte* buf, std::size_t cap, std::size_t& pos, uint
                          const std::byte* value, std::size_t vlen) noexcept {
     // Compute the tag digits.
     char tagbuf[8];
-    int taglen =
-        static_cast<int>(std::to_chars(tagbuf, tagbuf + sizeof(tagbuf), tag).ptr - tagbuf);
+    int taglen = static_cast<int>(std::to_chars(tagbuf, tagbuf + sizeof(tagbuf), tag).ptr - tagbuf);
     // Need: taglen + 1 (=) + vlen + 1 (\x01)
     std::size_t needed = static_cast<std::size_t>(taglen) + 1 + vlen + 1;
     if (pos + needed > cap) return false;
@@ -239,8 +238,8 @@ extern "C" {
 
 // ── fixpp_msg_create_outbound ─────────────────────────────────────────────────
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* session,
-                                                    const char* msg_type, size_t msg_type_len,
-                                                    fixpp_msg_t** msg_out) {
+                                                         const char* msg_type, size_t msg_type_len,
+                                                         fixpp_msg_t** msg_out) {
     if (msg_out != nullptr) *msg_out = nullptr;
     if (session == nullptr || msg_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
     if (msg_type == nullptr) return FIXPP_ERR_NULL_HANDLE;
@@ -311,7 +310,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* sessio
 
         *msg_out = reinterpret_cast<fixpp_msg_t*>(h);
         return FIXPP_ERR_OK;
-    } catch (...) {  // LCOV_EXCL_LINE — OOM/new-failure during arena creation; untestable in unit tests
+    } catch (
+        ...) {  // LCOV_EXCL_LINE — OOM/new-failure during arena creation; untestable in unit tests
         return FIXPP_ERR_CAPI_CONFIG_INVALID;  // LCOV_EXCL_LINE
     }  // LCOV_EXCL_LINE
 }
@@ -370,8 +370,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg) {
 //   note says "version_mismatch if version not in loaded dicts" — for an outbound
 //   accumulator that hasn't been committed there are no raw wire bytes).
 //   We only support cloning inbound messages in CA-009 scope (T011 tests this path).
-FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
-                                               fixpp_msg_t** clone_out) {
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg_t** clone_out) {
     if (clone_out != nullptr) *clone_out = nullptr;
     if (src == nullptr || clone_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
 
@@ -397,18 +396,27 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
         // Locate the "9=" and "10=" boundaries to compute body_off / body_len
         // for the frame_view we build over the cloned bytes. Uses the
         // fixpp::wire::frame_view_access helper defined above in this TU.
-        auto mk_fv = [](const std::byte* buf, std::size_t len)
-            -> std::optional<fixpp::wire::frame_view> {
+        auto mk_fv = [](const std::byte* buf,
+                        std::size_t len) -> std::optional<fixpp::wire::frame_view> {
             constexpr char SOH = '\x01';
             std::string_view s{reinterpret_cast<const char*>(buf), len};
-            std::size_t p9 = s.starts_with("9=") ? 0 : s.find("\x01" "9=");
-            if (p9 == std::string_view::npos) return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view always has 9=
+            std::size_t p9 = s.starts_with("9=") ? 0
+                                                 : s.find(
+                                                       "\x01"
+                                                       "9=");
+            if (p9 == std::string_view::npos)
+                return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view always has 9=
             if (s[p9] == SOH) ++p9;
             std::size_t soh9 = s.find(SOH, p9);
-            if (soh9 == std::string_view::npos) return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view has SOH after 9=NNN
+            if (soh9 == std::string_view::npos)
+                return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view has SOH after 9=NNN
             std::size_t body_off = soh9 + 1;
-            std::size_t p10 = s.find("\x01" "10=", body_off);
-            if (p10 == std::string_view::npos) return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view always has 10=
+            std::size_t p10 = s.find(
+                "\x01"
+                "10=",
+                body_off);
+            if (p10 == std::string_view::npos)
+                return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view always has 10=
             std::size_t body_len = (p10 + 1) - body_off;
             return fixpp::wire::frame_view_access::make(buf, len, body_off, body_len);
         };
@@ -452,29 +460,31 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
         // classification, unknown_fields), and clone/source fidelity is
         // preserved in the stronger sense that both now decline identically
         // rather than both guessing identically.
-        fixpp::wire::frame_view fv =
-            maybe_fv.value_or(fixpp::wire::frame_view_access::make(owned_frame.get(), frame_len, 0, frame_len));
+        fixpp::wire::frame_view fv = maybe_fv.value_or(
+            fixpp::wire::frame_view_access::make(owned_frame.get(), frame_len, 0, frame_len));
         std::unique_ptr<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>> clone_view;
         if (h->view->is_dict_backed()) {
             clone->owned_tv_ = h->view->membership_copy();
             fixpp::wire::Parser<fixpp::wire::access_mode::Index> clone_parser{*clone->owned_tv_};
             auto parsed = clone_parser.parse(fv, clone_mr);
             if (parsed) {
-                clone_view = std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
-                    std::move(*parsed));
+                clone_view =
+                    std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
+                        std::move(*parsed));
             }
         }
         if (!clone_view) {
             // Dict-free source, OR (practically unreachable — the same bytes the
             // source already parsed successfully) the dict-backed re-parse
             // failed: fall back to the dict-free 2-arg ctor (pre-066 behavior).
-            clone_view = std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
-                fv, clone_mr);
+            clone_view =
+                std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
+                    fv, clone_mr);
         }
 
         clone->tag_ = FIXPP_HANDLE_TAG_MSG;
         clone->flavour = FixppMsgFlavour::inbound;  // reads via view (get_* API)
-        clone->view = clone_view.get();              // points to the owned view
+        clone->view = clone_view.get();             // points to the owned view
         clone->accumulator = nullptr;
         // token is default-constructed (expired) — clone is session-independent (D-9).
         // dict_ is nullptr for clone (no outbound mutation path).
@@ -490,10 +500,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
 
 // ── fixpp_msg_set_string ──────────────────────────────────────────────────────
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_string(fixpp_msg_t* msg, uint16_t tag,
-                                               const char* value, size_t len) {
+                                                    const char* value, size_t len) {
     if (msg == nullptr) return FIXPP_ERR_NULL_HANDLE;
     if (value == nullptr) return FIXPP_ERR_NULL_HANDLE;
-    // Check-before-deref (E-9 / D-9): dead tag → INVALID; inbound → INVALID; token expired → INVALID.
+    // Check-before-deref (E-9 / D-9): dead tag → INVALID; inbound → INVALID; token expired →
+    // INVALID.
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
 
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
@@ -510,7 +521,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_string(fixpp_msg_t* msg, uint16_t t
 
 // ── fixpp_msg_set_bytes ───────────────────────────────────────────────────────
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_bytes(fixpp_msg_t* msg, uint16_t tag,
-                                              const uint8_t* bytes, size_t len) {
+                                                   const uint8_t* bytes, size_t len) {
     if (msg == nullptr) return FIXPP_ERR_NULL_HANDLE;
     if (bytes == nullptr && len > 0) return FIXPP_ERR_NULL_HANDLE;
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
@@ -582,8 +593,7 @@ static fixpp_error_t serialise_double_fixed(double value, char* buf, std::size_t
 }
 
 // ── fixpp_msg_set_double ──────────────────────────────────────────────────────
-FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_double(fixpp_msg_t* msg, uint16_t tag,
-                                                    double value) {
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_double(fixpp_msg_t* msg, uint16_t tag, double value) {
     if (msg == nullptr) return FIXPP_ERR_NULL_HANDLE;
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
 
@@ -604,7 +614,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_double(fixpp_msg_t* msg, uint16_t t
 
 // ── fixpp_msg_set_decimal ─────────────────────────────────────────────────────
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_decimal(fixpp_msg_t* msg, uint16_t tag,
-                                                fixpp_decimal_t value) {
+                                                     fixpp_decimal_t value) {
     if (msg == nullptr) return FIXPP_ERR_NULL_HANDLE;
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
 
@@ -635,8 +645,8 @@ static std::size_t compute_entries_size(const std::pmr::vector<AccumulatorEntry>
             char nb[8];
             int nl = static_cast<int>(std::to_chars(nb, nb + sizeof(nb), e.tag).ptr - nb);
             char cb[16];
-            int cl = static_cast<int>(
-                std::to_chars(cb, cb + sizeof(cb), e.instances.size()).ptr - cb);
+            int cl =
+                static_cast<int>(std::to_chars(cb, cb + sizeof(cb), e.instances.size()).ptr - cb);
             total += static_cast<std::size_t>(nl) + 1 + static_cast<std::size_t>(cl) + 1;
             for (const auto& inst : e.instances) total += compute_entries_size(inst.fields);
         } else {
@@ -654,13 +664,14 @@ static bool serialise_entries(std::byte* buf, std::size_t cap, std::size_t& pos,
     for (const auto& e : entries) {
         if (e.is_group) {
             char cb[16];
-            int cl = static_cast<int>(
-                std::to_chars(cb, cb + sizeof(cb), e.instances.size()).ptr - cb);
+            int cl =
+                static_cast<int>(std::to_chars(cb, cb + sizeof(cb), e.instances.size()).ptr - cb);
             if (!append_field(buf, cap, pos, e.tag, reinterpret_cast<const std::byte*>(cb),
                               static_cast<std::size_t>(cl)))
                 return false;  // LCOV_EXCL_LINE — buffer exact-sized in commit; unreachable
             for (const auto& inst : e.instances)
-                if (!serialise_entries(buf, cap, pos, inst.fields)) return false;  // LCOV_EXCL_LINE — buffer exact-sized
+                if (!serialise_entries(buf, cap, pos, inst.fields))
+                    return false;  // LCOV_EXCL_LINE — buffer exact-sized
         } else {
             if (!append_field(buf, cap, pos, e.tag, e.value_bytes.data(), e.value_bytes.size()))
                 return false;  // LCOV_EXCL_LINE — buffer exact-sized in commit; unreachable
@@ -846,7 +857,7 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
 // Returns TYPE_MISMATCH when group grammar is violated (INV-4: empty instance or
 // non-delimiter-first instance).
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t** payload_out,
-                                           size_t* len_out) {
+                                                size_t* len_out) {
     if (payload_out != nullptr) *payload_out = nullptr;
     if (len_out != nullptr) *len_out = 0;
     if (msg == nullptr || payload_out == nullptr || len_out == nullptr)
@@ -868,9 +879,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
     // empty ancestor chain. `group_context::msg_type` aliases the accumulator's
     // own storage here (see the provenance note on that field), which outlives
     // this whole call.
-    if (fixpp_error_t c = validate_group_grammar(
-            acc.entries, h->dict_.get(), h->session_tv_.get(),
-            fixpp::wire::group_context{.msg_type = acc.msg_type});
+    if (fixpp_error_t c =
+            validate_group_grammar(acc.entries, h->dict_.get(), h->session_tv_.get(),
+                                   fixpp::wire::group_context{.msg_type = acc.msg_type});
         c != FIXPP_ERR_OK) {
         return c;
     }
@@ -922,7 +933,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
 // new — and hold INDICES re-resolved per call (stable under vector reallocation).
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_group_begin(fixpp_msg_t* msg, uint16_t group_tag,
-                                                fixpp_group_builder_t** builder_out) {
+                                                     fixpp_group_builder_t** builder_out) {
     if (builder_out != nullptr) *builder_out = nullptr;
     if (builder_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
@@ -949,7 +960,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_group_begin(fixpp_msg_t* msg, uint16_t 
 }
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_group_builder_add_entry(fixpp_group_builder_t* builder,
-                                                       fixpp_entry_t** entry_out) {
+                                                             fixpp_entry_t** entry_out) {
     if (entry_out != nullptr) *entry_out = nullptr;
     if (entry_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
     auto* b = reinterpret_cast<fixpp_group_builder*>(builder);
@@ -978,8 +989,8 @@ static fixpp_error_t precheck_entry_tag(fixpp_entry_t* entry, uint16_t tag) {
     return FIXPP_ERR_OK;
 }
 
-static fixpp_error_t entry_set_bytes_impl(fixpp_entry_t* entry, uint16_t tag,
-                                          const std::byte* data, std::size_t len) {
+static fixpp_error_t entry_set_bytes_impl(fixpp_entry_t* entry, uint16_t tag, const std::byte* data,
+                                          std::size_t len) {
     auto* e = reinterpret_cast<fixpp_entry*>(entry);
     if (fixpp_error_t c = check_entry(e); c != FIXPP_ERR_OK) return c;
     if (is_framing_tag(tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
@@ -995,13 +1006,13 @@ static fixpp_error_t entry_set_bytes_impl(fixpp_entry_t* entry, uint16_t tag,
 }
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_string(fixpp_entry_t* entry, uint16_t tag,
-                                                 const char* value, size_t len) {
+                                                      const char* value, size_t len) {
     if (value == nullptr) return FIXPP_ERR_NULL_HANDLE;
     return entry_set_bytes_impl(entry, tag, reinterpret_cast<const std::byte*>(value), len);
 }
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry, uint16_t tag,
-                                              int64_t value) {
+                                                   int64_t value) {
     char buf[24];
     auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), value);
     if (ec != std::errc{}) return FIXPP_ERR_WIRE_INVALID_FRAME;
@@ -1010,7 +1021,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry, uint16_
 }
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_double(fixpp_entry_t* entry, uint16_t tag,
-                                                 double value) {
+                                                      double value) {
     if (fixpp_error_t c = precheck_entry_tag(entry, tag); c != FIXPP_ERR_OK) return c;
     char buf[64];
     std::size_t n = 0;
@@ -1020,7 +1031,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_double(fixpp_entry_t* entry, uint
 }
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_decimal(fixpp_entry_t* entry, uint16_t tag,
-                                                  fixpp_decimal_t value) {
+                                                       fixpp_decimal_t value) {
     // Same handle-first ordering as fixpp_entry_set_double (handles.h): the pre-existing
     // path serialised the decimal before validating the entry, so an out-of-domain value
     // masked a null/invalid handle. Validate first.
@@ -1033,7 +1044,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_decimal(fixpp_entry_t* entry, uin
 }
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_group_begin(fixpp_entry_t* entry, uint16_t group_tag,
-                                                  fixpp_group_builder_t** builder_out) {
+                                                       fixpp_group_builder_t** builder_out) {
     if (builder_out != nullptr) *builder_out = nullptr;
     if (builder_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
     auto* e = reinterpret_cast<fixpp_entry*>(entry);
@@ -1060,7 +1071,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_group_begin(fixpp_entry_t* entry, uin
     return FIXPP_ERR_OK;
 }
 
-FIXPP_API_EXPORT fixpp_error_t fixpp_msg_group_end(fixpp_msg_t* msg, fixpp_group_builder_t* builder) {
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_group_end(fixpp_msg_t* msg,
+                                                   fixpp_group_builder_t* builder) {
     if (msg == nullptr || builder == nullptr) return FIXPP_ERR_NULL_HANDLE;
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
     auto* h = reinterpret_cast<fixpp_msg*>(msg);

@@ -592,9 +592,7 @@ fixpp::core::expected_t<void> Logger::shutdown(std::chrono::milliseconds drain_t
 // Convenience for Engine::stop() and other callers that should honor the
 // operator-configured timeout rather than a hardcoded literal.
 // [2k §6.6] / contracts/otel-surface.md shutdown / RC#2.
-fixpp::core::expected_t<void> Logger::shutdown() {
-    return shutdown(impl_->config_.drain_timeout);
-}
+fixpp::core::expected_t<void> Logger::shutdown() { return shutdown(impl_->config_.drain_timeout); }
 
 // drain_timeout() accessor — returns the configured drain timeout.
 // Allows callers to read the configured value (e.g. for logging/metrics).

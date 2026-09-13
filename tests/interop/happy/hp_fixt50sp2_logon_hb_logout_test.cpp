@@ -31,12 +31,6 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
-#include <memory>
-#include <memory_resource>
-#include <string>
-#include <tuple>
-#include <vector>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/version_profile.hpp>
@@ -44,6 +38,11 @@
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <memory>
+#include <memory_resource>
+#include <string>
+#include <tuple>
+#include <vector>
 
 #include "hp_support.hpp"
 
@@ -61,13 +60,12 @@ using FixtParam = std::tuple<Counterparty, Role, application_version>;
 //
 // fixpp's acceptor refuses an inbound FIXT Logon whose DefaultApplVerID(1137)
 // resolves to a version with NO application dictionary in the engine's
-// version_registry (Reject 373=5; Session::on_inbound_frame's DefaultApplVerID check). The registry is built from
-// EngineConfig::dictionaries at Engine construction. A real FIXT-acceptor
-// deployment registers the app dictionaries it services; the interop fixture must
-// do the same or the acceptor cells reject a version they are configured to speak.
-// (The initiator path performs NO serviceability gate — FR-004a is acceptor-only —
-// so the registry is harmless for init cells, but the engine is shared, so we set
-// it unconditionally.) Two version-tagged dicts (the XmlLoader maps
+// version_registry (Reject 373=5; Session::on_inbound_frame's DefaultApplVerID check). The registry
+// is built from EngineConfig::dictionaries at Engine construction. A real FIXT-acceptor deployment
+// registers the app dictionaries it services; the interop fixture must do the same or the acceptor
+// cells reject a version they are configured to speak. (The initiator path performs NO
+// serviceability gate — FR-004a is acceptor-only — so the registry is harmless for init cells, but
+// the engine is shared, so we set it unconditionally.) Two version-tagged dicts (the XmlLoader maps
 // <fix major="5" minor="0" servicepack="2"> → v50sp2, <… 4 4> → v44) so both the
 // fix50sp2 and fix44-over-FIXT acceptor cells resolve serviceable.
 // [mirrors tests/session/test_fixt_logon_establishment.cpp make_dict + FixtSetup]
@@ -159,8 +157,8 @@ TEST_P(HappyFixtLogonHbLogout, LogonHeartbeatLogout) {
         << "cell endpoint unresolved (parent harness did not lease a port)";
 
     fixpp::interop::InteropEngineFixture fx{make_fixt_engine_config()};
-    auto cfg = hp::make_session_config(role, "FIXT.1.1", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIXT.1.1", factory, fx.ioc().get_executor(), *endpoint);
     // The FIXT axis (the only delta vs the FIX.4.4 cell): advertise the application
     // version. begin_string=="FIXT.1.1" + this field set ⇒ is_fixt() holds ⇒ the
     // engine emits Logon(8=FIXT.1.1, 1137=<wire id>). v50sp2 → 1137=9; v44 → 1137=6.
@@ -175,8 +173,7 @@ TEST_P(HappyFixtLogonHbLogout, LogonHeartbeatLogout) {
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
         << "FIXT session did not reach Active (logon) against "
-        << hp::counterparty_token(counterparty)
-        << "; reached state=" << static_cast<int>(reached);
+        << hp::counterparty_token(counterparty) << "; reached state=" << static_cast<int>(reached);
 
     // ── Seqnum delta (FR-007): outbound advanced past the Logon ──────────────
     auto s = fx.engine().lookup(id);

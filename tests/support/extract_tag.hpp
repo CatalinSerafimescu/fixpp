@@ -83,8 +83,7 @@ namespace fixpp::test_support {
     }
     const std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     const std::string needle = std::to_string(tag) + "=";
-    for (auto pos = wire.find(needle); pos != std::string::npos;
-         pos = wire.find(needle, pos + 1)) {
+    for (auto pos = wire.find(needle); pos != std::string::npos; pos = wire.find(needle, pos + 1)) {
         if (pos != 0 && wire[pos - 1] != '\x01') {
             continue;  // e.g. "9112=" is not tag 112
         }

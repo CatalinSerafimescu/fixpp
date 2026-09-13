@@ -140,7 +140,8 @@ TEST(OffsetTableErrorPath, FindOnRedTableReturnsStatusErrorCoversLines142to143) 
     auto found = t.find(35);
     ASSERT_FALSE(found.has_value());
     EXPECT_EQ(found.error(), error::wire_invalid_field_format)
-        << "find()'s `!status_` guard: find() on RED table must return fail<entry>(status_.error())";
+        << "find()'s `!status_` guard: find() on RED table must return "
+           "fail<entry>(status_.error())";
 }
 
 // ── group() on RED table (its `!status_` guard) ──────────────────────────────
@@ -161,7 +162,8 @@ TEST(OffsetTableErrorPath, GroupOnRedTableReturnsStatusErrorCoversLines165to166)
     auto g = t.group(453);
     ASSERT_FALSE(g.has_value());
     EXPECT_EQ(g.error(), error::wire_invalid_field_format)
-        << "group()'s `!status_` guard: group() on RED table must return fail<group_index>(status_.error())";
+        << "group()'s `!status_` guard: group() on RED table must return "
+           "fail<group_index>(status_.error())";
 }
 
 // ── group_slices() bad_alloc degrade (its catch block) ───────────────────────
@@ -284,9 +286,8 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
 
     // Construction must succeed (all construction allocs complete before the
     // (construction_calls + 1)-th call).
-    ASSERT_TRUE(t.build_status().has_value())
-        << "table construction must succeed with the first " << construction_calls
-        << " allocations allowed";
+    ASSERT_TRUE(t.build_status().has_value()) << "table construction must succeed with the first "
+                                              << construction_calls << " allocations allowed";
     EXPECT_GT(t.size(), 0U) << "table must have entries after successful build";
 
     // group_slices(453) triggers the reserve → bad_alloc → catch → {}.

@@ -49,10 +49,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory_resource>
-#include <string>
-#include <vector>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/pmr_arena_upstream.hpp>
 #include <fixpp/dict/table_view.hpp>
@@ -61,6 +57,9 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/view.hpp>
+#include <memory_resource>
+#include <string>
+#include <vector>
 
 #include "support/app_message_read_scaffold.hpp"  // fixpp_test_support::make_frame
 #include "support/fix44_dictionary.hpp"
@@ -73,8 +72,8 @@ namespace fixpp::session::test066 {
 namespace {
 
 using fixpp::wire::access_mode;
-using fixpp::wire::Framer;
 using fixpp::wire::frame_view;
+using fixpp::wire::Framer;
 using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 using fixpp::wire::pmr_carry_buffer;
@@ -123,12 +122,11 @@ TEST(ArenaFit, AppMessageFitsInboundParseArena) {
     std::size_t count = 0;
     bool leg0_has_symbol = false;
 
-    f.app->on_from_app =
-        [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
-            auto slices = msg.offsets().group_slices(555);
-            count = slices.size();
-            if (count >= 1) leg0_has_symbol = slice_has_tag(slices[0], 600);
-        };
+    f.app->on_from_app = [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
+        auto slices = msg.offsets().group_slices(555);
+        count = slices.size();
+        if (count >= 1) leg0_has_symbol = slice_has_tag(slices[0], 600);
+    };
 
     auto suffix = fixpp_test_support::execution_report_two_legs_trailing_suffix();
     auto frame = fixpp_test_support::make_execution_report_frame(suffix, /*seq=*/2, "TW", "ISLD");
@@ -231,8 +229,9 @@ TEST(ArenaFit, NearCapHeadroomProbe) {
     Parser<access_mode::Index> parser{tv};
     auto mv_r = parser.parse(out[0], &mp.pa_mr);
     ASSERT_TRUE(mv_r.has_value())
-        << kLegs << "-leg ExecutionReport must parse within kInboundParseArena=16384 "
-                    "with headroom (no heap fallback)";
+        << kLegs
+        << "-leg ExecutionReport must parse within kInboundParseArena=16384 "
+           "with headroom (no heap fallback)";
 
     auto slices = mv_r->offsets().group_slices(555);
     EXPECT_EQ(slices.size(), static_cast<std::size_t>(kLegs));

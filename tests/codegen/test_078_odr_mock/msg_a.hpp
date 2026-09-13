@@ -16,4 +16,4 @@ struct MsgAArgs {
 void build_MsgA(MsgAArgs const& args);
 bool validate_MsgA(MsgAArgs const& args);
 
-} // namespace test078_mock
+}  // namespace test078_mock

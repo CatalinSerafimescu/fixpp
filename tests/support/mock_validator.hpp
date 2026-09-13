@@ -27,9 +27,9 @@ public:
         on_validate_field =
             [](std::uint16_t, std::span<const std::byte>) { return core::expected_t<void>{}; };
 
-    [[nodiscard]] core::expected_t<void> validate(
-        MessageView<access_mode::Index> const& msg, std::pmr::memory_resource*,
-        std::uint16_t*) const noexcept override {
+    [[nodiscard]] core::expected_t<void> validate(MessageView<access_mode::Index> const& msg,
+                                                  std::pmr::memory_resource*,
+                                                  std::uint16_t*) const noexcept override {
         return on_validate(msg);
     }
     [[nodiscard]] core::expected_t<void> validate_field(

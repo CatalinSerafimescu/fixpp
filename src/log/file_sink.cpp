@@ -181,7 +181,7 @@ void FileSink::flush(std::chrono::milliseconds deadline) noexcept {
     try {
         std::unique_lock<std::mutex> lk(worker_mu_);
         worker_fsync_done_ = false;
-        worker_cmd_        = WorkerCmd::fsync_requested;
+        worker_cmd_ = WorkerCmd::fsync_requested;
         lk.unlock();
         worker_cv_.notify_one();
 
@@ -218,16 +218,14 @@ void FileSink::start_worker() noexcept {
         // Reset state before spawning.
         {
             std::lock_guard<std::mutex> lk(worker_mu_);
-            worker_cmd_         = WorkerCmd::idle;
-            worker_fsync_done_  = false;
+            worker_cmd_ = WorkerCmd::idle;
+            worker_fsync_done_ = false;
         }
         fsync_worker_ = std::thread([this]() {
             while (true) {
                 std::unique_lock<std::mutex> lk(worker_mu_);
                 // Wait until there is a command (fsync_requested or stop).
-                worker_cv_.wait(lk, [this] {
-                    return worker_cmd_ != WorkerCmd::idle;
-                });
+                worker_cv_.wait(lk, [this] { return worker_cmd_ != WorkerCmd::idle; });
 
                 if (worker_cmd_ == WorkerCmd::stop) {
                     return;  // graceful exit

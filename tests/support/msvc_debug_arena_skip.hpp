@@ -26,8 +26,8 @@
 #include <gtest/gtest.h>
 
 #if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && (_ITERATOR_DEBUG_LEVEL >= 1)
-#define FIXPP_SKIP_ON_MSVC_DEBUG_ARENA()                                                       \
-    GTEST_SKIP() << "byte-exact OOM-injection arena is incompatible with MSVC debug STL's "    \
+#define FIXPP_SKIP_ON_MSVC_DEBUG_ARENA()                                                        \
+    GTEST_SKIP() << "byte-exact OOM-injection arena is incompatible with MSVC debug STL's "     \
                     "per-container _Container_proxy allocation (the OOM-degradation behaviour " \
                     "is covered on the windows-msvc-release lane and all Linux lanes)"
 #else
@@ -55,10 +55,10 @@
 // skipped. See feedback_operator_new_witness_breaks_sanitizers /
 // feedback_msvc_debug_container_proxy_null_memory_resource.
 #if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && (_ITERATOR_DEBUG_LEVEL >= 1)
-#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD()                                            \
-    GTEST_SKIP() << "MSVC debug STL heap-allocates a hidden _Container_proxy per std::pmr "     \
-                    "container via global operator new (_ITERATOR_DEBUG_LEVEL), so a "          \
-                    "zero-global-heap read guard cannot hold; the discipline is verified on "   \
+#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD()                                          \
+    GTEST_SKIP() << "MSVC debug STL heap-allocates a hidden _Container_proxy per std::pmr "   \
+                    "container via global operator new (_ITERATOR_DEBUG_LEVEL), so a "        \
+                    "zero-global-heap read guard cannot hold; the discipline is verified on " \
                     "windows-msvc-release + all Linux lanes (debug/asan/tsan/ubsan/libc++)"
 #else
 #define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD() ((void)0)

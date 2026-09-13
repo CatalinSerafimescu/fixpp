@@ -35,23 +35,12 @@
 #pragma once
 
 #include <gtest/gtest.h>
-
 #include <openssl/sha.h>
 
 #include <asio/any_io_executor.hpp>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
-#include <memory>
-#include <memory_resource>
-#include <optional>
-#include <span>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <tuple>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/session.hpp>
@@ -62,6 +51,15 @@
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <fstream>
+#include <memory>
+#include <memory_resource>
+#include <optional>
+#include <span>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <tuple>
 
 #include "support/counterparty_probe.hpp"
 #include "support/golden_diff.hpp"
@@ -105,7 +103,7 @@ inline std::shared_ptr<fixpp::transport::TransportFactory> make_interop_tls_fact
     cs_cfg.private_key_path = dir + "/leaf_rsa2048.key";
     cs_cfg.ca_bundle_path = dir + "/ca.pem";
     auto cs = fixpp::tls::file_cert_source::make_file_cert_source(cs_cfg,
-                                                                 std::pmr::new_delete_resource());
+                                                                  std::pmr::new_delete_resource());
     if (!cs) {
         return nullptr;
     }
@@ -161,10 +159,10 @@ inline std::optional<fixpp::transport::Endpoint> cell_endpoint(Counterparty cp, 
     // fixpp-acceptor: bind endpoint. Parent-leased fixed port if provided, else
     // OS-assigned (port 0) — readable post-start via acceptor_bound_endpoint().
     const char* bind = getenv_s("INTEROP_FIXPP_PORT");
-    return fixpp::transport::Endpoint{
-        "127.0.0.1",
-        (bind != nullptr && *bind != '\0') ? static_cast<std::uint16_t>(std::atoi(bind))  // NOLINT
-                                           : std::uint16_t{0}};
+    return fixpp::transport::Endpoint{"127.0.0.1",
+                                      (bind != nullptr && *bind != '\0')
+                                          ? static_cast<std::uint16_t>(std::atoi(bind))  // NOLINT
+                                          : std::uint16_t{0}};
 }
 
 // Build a fixpp SessionConfig for a (counterparty, role) cell over the baseline
@@ -309,16 +307,14 @@ inline std::string cell_name(const ::testing::TestParamInfo<std::tuple<Counterpa
 // The cell_id is already computed by each TEST_P body (e.g.
 //   "HP-QFj-init-fix44-testrequest-echo").
 // ---------------------------------------------------------------------------
-inline std::string admin_golden_path(const std::string& cell_id)
-{
+inline std::string admin_golden_path(const std::string& cell_id) {
     const char* tls_dir = tls_fixture_dir();
     if (tls_dir == nullptr || tls_dir[0] == '\0') {
         return {};
     }
     std::string base{tls_dir};
     const std::string suffix = "/tls/fixtures";
-    if (base.size() > suffix.size() &&
-        base.substr(base.size() - suffix.size()) == suffix) {
+    if (base.size() > suffix.size() && base.substr(base.size() - suffix.size()) == suffix) {
         base.resize(base.size() - suffix.size());
     }
     return base + "/interop/happy/golden/" + cell_id + ".fix";
@@ -342,8 +338,7 @@ inline std::string admin_golden_path(const std::string& cell_id)
 // ---------------------------------------------------------------------------
 inline void diff_golden_or_skip(
     const std::string& cell_id, const std::string& gpath,
-    const std::set<int>& profile = fixpp::interop::admin_profile_excluded_tags())
-{
+    const std::set<int>& profile = fixpp::interop::admin_profile_excluded_tags()) {
     if (gpath.empty()) {
         GTEST_SKIP() << "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)";
     }
@@ -361,8 +356,8 @@ inline void diff_golden_or_skip(
     const std::string capture_path = gpath.substr(0, gpath.size() - 4) + "-capture.fix";
     std::ifstream cfile{capture_path};
     if (!cfile.is_open()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: "
-                     << capture_path << ")";
+        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: " << capture_path
+                     << ")";
     }
     std::ostringstream css;
     css << cfile.rdbuf();
@@ -372,14 +367,13 @@ inline void diff_golden_or_skip(
     }
 
     const auto expected_frames = fixpp::interop::parse_golden(golden_text);
-    const auto actual_frames   = fixpp::interop::parse_golden(capture_text);
+    const auto actual_frames = fixpp::interop::parse_golden(capture_text);
 
     const fixpp::interop::DiffResult diff =
         fixpp::interop::diff_transcripts(expected_frames, actual_frames, profile);
     EXPECT_TRUE(static_cast<bool>(diff))
         << "Golden transcript mismatch for " << cell_id << ": " << diff.detail
-        << "\n  expected golden: " << gpath
-        << "\n  actual capture:  " << capture_path;
+        << "\n  expected golden: " << gpath << "\n  actual capture:  " << capture_path;
 }
 
 // ---------------------------------------------------------------------------
@@ -390,12 +384,10 @@ inline void diff_golden_or_skip(
 //   EXPECT_LT(stop_elapsed, 3s) << "Engine::stop() ...";
 //   EXPECT_TRUE(fx.stopped())   << "engine did not reach stopped() after Logout";
 // ---------------------------------------------------------------------------
-inline void expect_graceful_stop(InteropEngineFixture& fx)
-{
+inline void expect_graceful_stop(InteropEngineFixture& fx) {
     const auto stop_elapsed = fx.stop_within(3s);
-    EXPECT_LT(stop_elapsed, 3s)
-        << "Engine::stop() (graceful Logout) exceeded the watchdog: "
-        << stop_elapsed.count() << " ms";
+    EXPECT_LT(stop_elapsed, 3s) << "Engine::stop() (graceful Logout) exceeded the watchdog: "
+                                << stop_elapsed.count() << " ms";
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
@@ -409,12 +401,10 @@ inline void expect_graceful_stop(InteropEngineFixture& fx)
 // Usage (one call per positive gate-bite TEST):
 //   hp::expect_gate_bite_on_tag(expected_text, actual_text, "112");
 // ---------------------------------------------------------------------------
-inline void expect_gate_bite_on_tag(std::string_view expected_text,
-                                    std::string_view actual_text,
-                                    std::string_view tag)
-{
+inline void expect_gate_bite_on_tag(std::string_view expected_text, std::string_view actual_text,
+                                    std::string_view tag) {
     const auto expected_frames = fixpp::interop::parse_golden(expected_text);
-    const auto actual_frames   = fixpp::interop::parse_golden(actual_text);
+    const auto actual_frames = fixpp::interop::parse_golden(actual_text);
 
     ASSERT_EQ(expected_frames.size(), actual_frames.size());
 
@@ -422,13 +412,12 @@ inline void expect_gate_bite_on_tag(std::string_view expected_text,
         expected_frames, actual_frames, fixpp::interop::admin_profile_excluded_tags());
 
     EXPECT_FALSE(static_cast<bool>(result))
-        << "gate-bite FAILED: diff_transcripts() reported match when tag "
-        << tag << " differs; detail=" << result.detail;
+        << "gate-bite FAILED: diff_transcripts() reported match when tag " << tag
+        << " differs; detail=" << result.detail;
     EXPECT_EQ(result.status, fixpp::interop::DiffStatus::mismatch)
         << "Expected DiffStatus::mismatch when tag " << tag << " is mutated";
     EXPECT_NE(result.detail.find(std::string(tag)), std::string::npos)
-        << "detail should mention tag " << tag
-        << " as the differing field; got: " << result.detail;
+        << "detail should mention tag " << tag << " as the differing field; got: " << result.detail;
 }
 
 }  // namespace fixpp::interop::hp

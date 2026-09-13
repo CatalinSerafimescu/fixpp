@@ -150,6 +150,7 @@ TEST(AbiSymbolGolden, ErrorEnumUnchanged) {
     // pushed this boundary forward.
     EXPECT_EQ(static_cast<std::uint8_t>(error::app_payload_malformed), 131u)
         << "the pre-062 error-enum boundary (app_payload_malformed) must stay at slot 131";
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132u)), std::string_view{"unknown error"})
+    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132u)),
+              std::string_view{"unknown error"})
         << "slot 132 must remain unknown — 062 introduces no error enumerator (FR-007)";
 }

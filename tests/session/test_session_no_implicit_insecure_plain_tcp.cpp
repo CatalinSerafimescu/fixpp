@@ -88,8 +88,8 @@ TEST(NoImplicitInsecurePlainTcp, ExplicitUnsetWithPlaintextFactoryRejected) {
     engine.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     // Install a plaintext factory as the engine default. If open() resolved
     // this for an unset profile, it would succeed — but it must not.
-    auto plain_factory = fixpp::transport::make_asio_plain_transport_factory(
-        fixpp::transport::Transport::Config{});
+    auto plain_factory =
+        fixpp::transport::make_asio_plain_transport_factory(fixpp::transport::Transport::Config{});
     ASSERT_TRUE(plain_factory.has_value()) << "make_asio_plain_transport_factory failed";
     engine.default_transport_factory = std::move(*plain_factory);
 

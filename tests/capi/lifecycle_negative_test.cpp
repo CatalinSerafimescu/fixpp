@@ -71,7 +71,8 @@ TEST(CapiLifecycleNegative, EngineCreateRejectsMajorMismatch) {
 
 TEST(CapiLifecycleNegative, EngineCreateRejectsPreGaMajorZero) {
     // Pin the GA precondition: this test is only meaningful after the 0→1 GA freeze.
-    static_assert(kMajor == 1, "GA precondition: this test pins that pre-GA major 0 is now rejected");
+    static_assert(kMajor == 1,
+                  "GA precondition: this test pins that pre-GA major 0 is now rejected");
     // This directly witnesses the 0→1 GA freeze's core behavioral change: an old
     // consumer compiled against C-ABI major 0 is now refused with VERSION_MISMATCH.
     // The existing kMajor+1 mismatch test does NOT cover this specific case (it tests
@@ -195,7 +196,7 @@ TEST(CapiLifecycleNegative, RegisterCallbackPreStartThenPostStartRejected) {
     fixpp_session_t* s = nullptr;
     ASSERT_EQ(fixpp_session_open(eng, sc, &s), FIXPP_ERR_OK);
     auto cb = [](const fixpp_msg_t*, void*) {};
-    EXPECT_EQ(fixpp_session_register_callback(s, cb, nullptr), FIXPP_ERR_OK);   // pre-start OK
+    EXPECT_EQ(fixpp_session_register_callback(s, cb, nullptr), FIXPP_ERR_OK);       // pre-start OK
     EXPECT_EQ(fixpp_session_register_callback(s, nullptr, nullptr), FIXPP_ERR_OK);  // clear
     ASSERT_EQ(fixpp_engine_start(eng), FIXPP_ERR_OK);
     // Post-start registration would race fromApp on the strand → enforced reject.

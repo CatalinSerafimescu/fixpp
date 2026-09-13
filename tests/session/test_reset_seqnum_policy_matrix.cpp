@@ -651,9 +651,8 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
                        "[032 contract C4, FR-006, SC-006]";
             }
         }
-        EXPECT_TRUE(found)
-            << "T013 W4b: sequence_numbers_reset event must be emitted on the "
-               "peer_ack_sent_reset_flag arm (bilateral_strict initiator).";
+        EXPECT_TRUE(found) << "T013 W4b: sequence_numbers_reset event must be emitted on the "
+                              "peer_ack_sent_reset_flag arm (bilateral_strict initiator).";
     }
 }
 
@@ -766,8 +765,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
                    "[FR-006, SC-006, C4]";
         }
     }
-    EXPECT_TRUE(found)
-        << "W2 (T003): sequence_numbers_reset event must be emitted on this arm";
+    EXPECT_TRUE(found) << "W2 (T003): sequence_numbers_reset event must be emitted on this arm";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -838,9 +836,8 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
                    "must be true. [032 contract C4, FR-006, SC-004]";
         }
     }
-    EXPECT_TRUE(found)
-        << "T011 W3: sequence_numbers_reset event must be emitted on the "
-           "peer_ack_sent_reset_flag arm.";
+    EXPECT_TRUE(found) << "T011 W3: sequence_numbers_reset event must be emitted on the "
+                          "peer_ack_sent_reset_flag arm.";
 }
 #endif  // FIXPP_TEST_HOOKS
 
@@ -905,8 +902,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
     // Without #ifdef FIXPP_TEST_HOOKS we assert indirectly via the event label;
     // under FIXPP_TEST_HOOKS we also check the counter directly.
 #ifdef FIXPP_TEST_HOOKS
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(),
-              fixpp::session::seqnum_t{1})
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{1})
         << "T012 W7 counter assertion: fresh no-knob peer-spontaneous-at-seq-1 "
            "(latch=false) — outbound MUST stay 1 after the reset; restore_before_send "
            "alone would wrongly set it to 2. [032 contract C1, FR-005, W7]";

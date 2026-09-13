@@ -91,8 +91,8 @@ struct logon_credentials {
         auto mid = frame.find(kMidTag, pos);
 
         // Check frame-start occurrence only when pos==0.
-        bool has_start = (pos == 0) && (frame.size() >= kStartTag.size()) &&
-                         (frame.starts_with(kStartTag));
+        bool has_start =
+            (pos == 0) && (frame.size() >= kStartTag.size()) && (frame.starts_with(kStartTag));
 
         if (!has_start && mid == std::string::npos) {
             // No more 554 fields — copy the rest and stop.

@@ -66,16 +66,16 @@
 #include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
-using fixpp::session::test_support::extract_field;
-using fixpp::session::seqnum_t;
-using fixpp::session::seqnum_min;
-using fixpp::session::seqnum_max;
+using fixpp::session::Application;
 using fixpp::session::direction_t;
 using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
+using fixpp::session::seqnum_max;
+using fixpp::session::seqnum_min;
+using fixpp::session::seqnum_t;
 using fixpp::session::visit_result;
-using fixpp::session::Application;
+using fixpp::session::test_support::extract_field;
 
 namespace fixpp::session::test {
 
@@ -129,7 +129,7 @@ struct ThrowOnRejectApp : Application {
 // ── Frame builders ─────────────────────────────────────────────────────────────
 
 static std::vector<std::byte> build_frame(const std::string& body_str,
-                                           std::string_view begin_string = "FIX.4.4") {
+                                          std::string_view begin_string = "FIX.4.4") {
     std::string hdr;
     hdr += "8=" + std::string(begin_string) + "\x01";
     hdr += "9=" + std::to_string(body_str.size()) + "\x01";
@@ -150,8 +150,8 @@ static std::vector<std::byte> build_frame(const std::string& body_str,
 
 // Build a peer Logon (35=A) from TW→ISLD with the given sending_time value.
 static std::vector<std::byte> make_logon_with_time(std::string_view sending_time,
-                                                    std::uint32_t seq = 1,
-                                                    std::string_view extra = {}) {
+                                                   std::uint32_t seq = 1,
+                                                   std::string_view extra = {}) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -294,8 +294,7 @@ protected:
 
     // Build an acceptor session config.
     // store_factory: if non-null, enables persistent store mode.
-    SessionConfig make_cfg(
-        std::shared_ptr<MessageStoreFactory> store_factory = nullptr) {
+    SessionConfig make_cfg(std::shared_ptr<MessageStoreFactory> store_factory = nullptr) {
         SessionConfig cfg;
         cfg.sender_comp_id = "ISLD";
         cfg.target_comp_id = "TW";
@@ -371,12 +370,12 @@ protected:
             }
             if (mt && *mt == "5") found_logout = true;
         }
-        EXPECT_TRUE(found_reject)  << cell << ": must emit Reject(35=3)";
-        EXPECT_TRUE(found_371_52)  << cell << ": Reject must carry 371=52";
-        EXPECT_TRUE(found_372_a)   << cell << ": Reject must carry 372=A (RefMsgType=Logon)";
-        EXPECT_TRUE(found_373_10)  << cell << ": Reject must carry 373=10";
-        EXPECT_TRUE(found_45_ref)  << cell << ": Reject must carry 45=" << want_45
-                                   << " (RefSeqNum = inbound Logon 34)";
+        EXPECT_TRUE(found_reject) << cell << ": must emit Reject(35=3)";
+        EXPECT_TRUE(found_371_52) << cell << ": Reject must carry 371=52";
+        EXPECT_TRUE(found_372_a) << cell << ": Reject must carry 372=A (RefMsgType=Logon)";
+        EXPECT_TRUE(found_373_10) << cell << ": Reject must carry 373=10";
+        EXPECT_TRUE(found_45_ref) << cell << ": Reject must carry 45=" << want_45
+                                  << " (RefSeqNum = inbound Logon 34)";
         EXPECT_FALSE(found_logout) << cell << ": pre-establishment guard must NOT emit Logout";
     }
 
@@ -392,8 +391,10 @@ protected:
             if (mt && *mt == "3") {
                 auto r34 = extract_field(sp, 34);
                 if (r34) {
-                    try { return static_cast<seqnum_t>(std::stoul(std::string(*r34))); }
-                    catch (...) {}
+                    try {
+                        return static_cast<seqnum_t>(std::stoul(std::string(*r34)));
+                    } catch (...) {
+                    }
                 }
             }
         }
@@ -565,8 +566,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell7_AssignOutboundFails_Disconnected) {
     // [[feedback_witness_asserts_named_postcondition_not_proxy]]
     const seqnum_t mem_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(mem_in, seqnum_min)
-        << "Cell7: inbound must NOT be advanced (52 guard precedes check_inbound); got "
-        << mem_in;
+        << "Cell7: inbound must NOT be advanced (52 guard precedes check_inbound); got " << mem_in;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -647,9 +647,8 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell9_PersistentStore_InboundNotAdvanced) {
     // In-memory inbound must equal the seeded value (ensure_hydrated_ seeded it,
     // guard fired before check_inbound could advance it).
     const seqnum_t mem_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
-    EXPECT_EQ(mem_in, kSeedIn)
-        << "Cell9: in-memory next_inbound must be seeded D=" << kSeedIn
-        << " (NOT seqnum_min=" << seqnum_min << ")";
+    EXPECT_EQ(mem_in, kSeedIn) << "Cell9: in-memory next_inbound must be seeded D=" << kSeedIn
+                               << " (NOT seqnum_min=" << seqnum_min << ")";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -689,8 +688,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell10_Stale52WithExtra1137Field_RejectsOn5
         if (mt && *mt == "3") {
             auto r371 = extract_field(sp, 371);
             if (r371) {
-                EXPECT_EQ(*r371, "52")
-                    << "Cell10: Reject 371 must be 52 (guard fires on stale 52)";
+                EXPECT_EQ(*r371, "52") << "Cell10: Reject 371 must be 52 (guard fires on stale 52)";
             }
         }
     }
@@ -703,9 +701,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell11_BadStalePlusBadCreds_52Wins) {
     auto cfg = make_cfg();
     // Always-reject credential validator.
     cfg.compid_authorization_policy.set_logon_validator(
-        [](std::string_view, fixpp::session::logon_credentials const&) -> bool {
-            return false;
-        });
+        [](std::string_view, fixpp::session::logon_credentials const&) -> bool { return false; });
     Session sess(engine_, cfg);
     open_session(sess);
     captured_frames_.clear();
@@ -820,9 +816,9 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell14_PersistentReconnect_RejectCarriesHyd
     // Reject 34 must equal N (hydrated from store).
     auto rj_seq = reject_seq_num();
     ASSERT_TRUE(rj_seq.has_value()) << "Cell14: Reject must have been emitted";
-    EXPECT_EQ(*rj_seq, kSeedOut)
-        << "Cell14: Reject(34) must equal hydrated durable outbound N=" << kSeedOut
-        << " (guard fires AFTER ensure_hydrated_); got " << *rj_seq;
+    EXPECT_EQ(*rj_seq, kSeedOut) << "Cell14: Reject(34) must equal hydrated durable outbound N="
+                                 << kSeedOut << " (guard fires AFTER ensure_hydrated_); got "
+                                 << *rj_seq;
 
     // Durable inbound unchanged.
     ASSERT_NE(factory->last_store, nullptr) << "Cell14: store was not minted";

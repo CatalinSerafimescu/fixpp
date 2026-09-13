@@ -34,9 +34,8 @@ using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 // tests/codegen/group_entry_read_test.cpp does, so operator[] instantiates
 // against an ACTUAL entry, not a default-constructed group_view.
 std::vector<std::byte> make_frame_062(std::string_view body) {
-    std::string pre =
-        "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
-        std::string(body);
+    std::string pre = "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
+                      std::string(body);
     unsigned sum = 0;
     for (unsigned char c : pre) {
         sum += c;
@@ -53,9 +52,8 @@ MV parse_frame_062(std::vector<std::byte> const& buf, std::pmr::memory_resource*
     fixpp::wire::pmr_carry_buffer carry{buf.size(), mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     EXPECT_TRUE(framed.has_value()) << "Framer::feed failed";
     EXPECT_FALSE(framed->empty()) << "Framer produced no frames";
     // 220: DICT-AWARE. group() is now a dictionary-only operation, so a

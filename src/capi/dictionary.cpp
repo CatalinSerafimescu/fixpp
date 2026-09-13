@@ -15,10 +15,8 @@
 #include <mutex>
 
 #include "capi_internal.hpp"
-
 #include "fix/c_api/dict.h"
 #include "fix/c_api/error.h"
-
 #include "fixpp/dict/load_any.hpp"
 
 // ── Dead-shell registry (retained-shell tombstone, gate-b/r1 comment F4):
@@ -47,18 +45,21 @@ extern "C" {
 
 fixpp_error_t fixpp_dict_load_from_xml(const char* path, fixpp_dict_t** out_dict) {
     // Null output pointer — cannot write *out_dict; return immediately.
-    if (out_dict == nullptr) { return FIXPP_ERR_NULL_HANDLE; }
+    if (out_dict == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
     // *out_dict is NULL on every failure path (FR-003).
     *out_dict = nullptr;
-    if (path == nullptr) { return FIXPP_ERR_NULL_HANDLE; }
+    if (path == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
 
     // Construction-time thunk ([2i §5.2]): catch all exceptions; never let one
     // cross extern "C" (undefined behaviour in C callers; std::terminate for C++).
     try {
-        auto d = fixpp::dict::load_any(std::filesystem::path{path},
-                                       std::pmr::get_default_resource());
-        auto* h = new fixpp_dict{
-            std::make_shared<const fixpp::dict::Dictionary>(std::move(d))};
+        auto d =
+            fixpp::dict::load_any(std::filesystem::path{path}, std::pmr::get_default_resource());
+        auto* h = new fixpp_dict{std::make_shared<const fixpp::dict::Dictionary>(std::move(d))};
         *out_dict = reinterpret_cast<fixpp_dict_t*>(h);
         return FIXPP_ERR_OK;
     } catch (...) {
@@ -68,7 +69,9 @@ fixpp_error_t fixpp_dict_load_from_xml(const char* path, fixpp_dict_t** out_dict
 }
 
 void fixpp_dict_destroy(fixpp_dict_t* dict) {
-    if (dict == nullptr) { return; }
+    if (dict == nullptr) {
+        return;
+    }
     auto* h = reinterpret_cast<fixpp_dict*>(dict);
 
     // Full-critical-section lock (FR-002): covers tag_ check, shared_ptr release,
@@ -76,8 +79,12 @@ void fixpp_dict_destroy(fixpp_dict_t* dict) {
     // threads racing the same-pointer destroy: the second sees tag_==DEAD and no-ops.
     std::unique_lock<std::mutex> lk(s_dict_destroy_mutex);
 
-    if (h->tag_ == FIXPP_HANDLE_TAG_DEAD) { return; }  // already destroyed — safe no-op
-    if (h->tag_ != FIXPP_HANDLE_TAG_DICT) { return; }  // wrong-type handle (gate-b/r2 R2-F1)
+    if (h->tag_ == FIXPP_HANDLE_TAG_DEAD) {
+        return;
+    }  // already destroyed — safe no-op
+    if (h->tag_ != FIXPP_HANDLE_TAG_DICT) {
+        return;
+    }  // wrong-type handle (gate-b/r2 R2-F1)
     // Without this positive-tag gate a non-DICT handle (e.g. fixpp_engine* cast to
     // fixpp_dict_t*) reaches h->dict.reset() below.  On fixpp_engine, dict maps to
     // app_ at the same struct offset → resets app_ to null; then h->tag_=DEAD corrupts

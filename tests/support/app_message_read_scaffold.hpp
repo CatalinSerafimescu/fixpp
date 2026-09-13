@@ -15,7 +15,8 @@
 // non-v44 exemplar can reuse the scaffold; the 5 exemplars are all "FIX.4.4".
 //
 // Consuming test targets MUST define FIXPP_DICT_DATA_DIR (the dictionaries/ path;
-// mirror tests/codegen/CMakeLists.txt's per-target FIXPP_DICT_DATA_DIR definition) so load_fix44() resolves FIX44.xml.
+// mirror tests/codegen/CMakeLists.txt's per-target FIXPP_DICT_DATA_DIR definition) so load_fix44()
+// resolves FIX44.xml.
 #pragma once
 
 #include <gtest/gtest.h>
@@ -54,8 +55,8 @@ inline std::string bytes_to_string(std::span<const std::byte> b) {
 // from a body that already leads with "35=<MsgType>\x01". BodyLength = byte count
 // from the start of the body (35=…) up to but excluding the CheckSum field.
 inline std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view body) {
-    std::string pre = "8=" + std::string(begin_string) + "\x01" + "9=" +
-                      std::to_string(body.size()) + "\x01" + std::string(body);
+    std::string pre = "8=" + std::string(begin_string) + "\x01" +
+                      "9=" + std::to_string(body.size()) + "\x01" + std::string(body);
     unsigned sum = 0;
     for (unsigned char c : pre) sum += c;
     char checksum[16]{};

@@ -63,7 +63,7 @@ bool run_one_round(int n_waiters) {
     auto main_coro = [&]() -> asio::awaitable<void> {
         auto ex = co_await asio::this_coro::executor;
 
-        auto holder = co_await mtx.async_lock();   // hold throughout the reap
+        auto holder = co_await mtx.async_lock();  // hold throughout the reap
         EXPECT_TRUE(holder.has_value());
 
         for (int i = 0; i < n_waiters; ++i) {
@@ -117,8 +117,8 @@ bool run_one_round(int n_waiters) {
         return false;  // hang
     }
 
-    return drain_ok.load() && completed_count.load() == n_waiters &&
-           granted_count.load() == 0 && aborted_count.load() == n_waiters;
+    return drain_ok.load() && completed_count.load() == n_waiters && granted_count.load() == 0 &&
+           aborted_count.load() == n_waiters;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

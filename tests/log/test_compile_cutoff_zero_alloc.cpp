@@ -48,14 +48,13 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
-#include <memory_resource>
-#include <thread>
-#include <vector>
-
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
+#include <memory_resource>
+#include <thread>
+#include <vector>
 
 // ── mallocnesia guard markers ─────────────────────────────────────────────
 // Weak *declarations* with NO body: the binary carries no local definition, so
@@ -68,8 +67,12 @@
 // (the binary still runs plainly for the PMR Gate B1 path).
 #include "support/alloc_guard_markers.hpp"
 namespace {
-inline void guard_start() { if (alloc_guard_start) alloc_guard_start(); }
-inline void guard_end()   { if (alloc_guard_end)   alloc_guard_end(); }
+inline void guard_start() {
+    if (alloc_guard_start) alloc_guard_start();
+}
+inline void guard_end() {
+    if (alloc_guard_end) alloc_guard_end();
+}
 }  // namespace
 
 namespace {
@@ -78,13 +81,10 @@ namespace {
 // Wraps an upstream resource and counts allocations routed through PMR.
 class CountingResource final : public std::pmr::memory_resource {
 public:
-    explicit CountingResource(std::pmr::memory_resource* upstream =
-                                  std::pmr::new_delete_resource())
+    explicit CountingResource(std::pmr::memory_resource* upstream = std::pmr::new_delete_resource())
         : upstream_{upstream} {}
 
-    std::uint64_t alloc_count() const noexcept {
-        return count_.load(std::memory_order_relaxed);
-    }
+    std::uint64_t alloc_count() const noexcept { return count_.load(std::memory_order_relaxed); }
     void reset() noexcept { count_.store(0, std::memory_order_relaxed); }
 
 private:
@@ -122,39 +122,27 @@ public:
 // below should NOT appear in .rodata of this TU.
 constexpr std::uint32_t kFmtDebug =
     static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("zero alloc debug {}"));
-constexpr std::uint32_t kFmtInfo  =
+constexpr std::uint32_t kFmtInfo =
     static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("zero alloc info {}"));
-constexpr std::uint32_t kFmtWarn  =
+constexpr std::uint32_t kFmtWarn =
     static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("zero alloc warn {}"));
 
 // Helper: enqueue one warn-level record via the FIXPP_LOG0 macro.
 // This is the full hot-path that must be zero-alloc.
-inline void emit_warn(fixpp::log::Logger* logger, std::uint64_t seq)
-{
-    FIXPP_LOG0(logger,
-               warn,
-               fixpp::log::cat::session,
-               "zero alloc warn {}",
+inline void emit_warn(fixpp::log::Logger* logger, std::uint64_t seq) {
+    FIXPP_LOG0(logger, warn, fixpp::log::cat::session, "zero alloc warn {}",
                fixpp::log::ArgValue::from_u64(seq));
 }
 
 // Helper: enqueue one debug-level record (should be compiled out by if constexpr).
-inline void emit_debug(fixpp::log::Logger* logger, std::uint64_t seq)
-{
-    FIXPP_LOG0(logger,
-               debug,
-               fixpp::log::cat::session,
-               "zero alloc debug {}",
+inline void emit_debug(fixpp::log::Logger* logger, std::uint64_t seq) {
+    FIXPP_LOG0(logger, debug, fixpp::log::cat::session, "zero alloc debug {}",
                fixpp::log::ArgValue::from_u64(seq));
 }
 
 // Helper: enqueue one info-level record (should be compiled out by if constexpr).
-inline void emit_info(fixpp::log::Logger* logger, std::uint64_t seq)
-{
-    FIXPP_LOG0(logger,
-               info,
-               fixpp::log::cat::session,
-               "zero alloc info {}",
+inline void emit_info(fixpp::log::Logger* logger, std::uint64_t seq) {
+    FIXPP_LOG0(logger, info, fixpp::log::cat::session, "zero alloc info {}",
                fixpp::log::ArgValue::from_u64(seq));
 }
 
@@ -169,8 +157,7 @@ inline void emit_info(fixpp::log::Logger* logger, std::uint64_t seq)
 // can't inspect our own text segment portably.  The CMakeLists.txt companion
 // test (log_alloc_mallocnesia) acts as the binary gate.  Here we verify the
 // run-time behaviour.
-TEST(LogZeroAlloc, CompileTimeCutoffInfoDebugNotEmitted)
-{
+TEST(LogZeroAlloc, CompileTimeCutoffInfoDebugNotEmitted) {
     static_assert(FIXPP_LOG_MIN_LEVEL == 3,
                   "This test must be compiled with FIXPP_LOG_MIN_LEVEL=3 (warn)");
 
@@ -180,7 +167,7 @@ TEST(LogZeroAlloc, CompileTimeCutoffInfoDebugNotEmitted)
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity    = 256u;
+    cfg.capacity = 256u;
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
@@ -199,8 +186,7 @@ TEST(LogZeroAlloc, CompileTimeCutoffInfoDebugNotEmitted)
         << "Only 1 record (warn) should reach the sink; "
            "debug and info are compiled out by FIXPP_LOG_MIN_LEVEL=3";
 
-    EXPECT_EQ(logger->drop_count(), 0u)
-        << "No overflow drops should occur";
+    EXPECT_EQ(logger->drop_count(), 0u) << "No overflow drops should occur";
 }
 
 // ── TS-1b: dual-gate zero-alloc ──────────────────────────────────────────
@@ -216,8 +202,7 @@ TEST(LogZeroAlloc, CompileTimeCutoffInfoDebugNotEmitted)
 // The drain runs, so the ring never saturates (non-overflow path).
 //
 // Warm-up: one call before the guard window to prime any lazy per-thread state.
-TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath)
-{
+TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath) {
     // ── Setup ──────────────────────────────────────────────────────────────
     // PMR counting resource — wraps the default new_delete_resource.
     CountingResource counting_res{};
@@ -236,8 +221,8 @@ TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath)
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity      = 1024u;
-    cfg.on_overflow   = fixpp::log::overflow_policy::drop_newest;
+    cfg.capacity = 1024u;
+    cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
     cfg.ring_resource = &counting_res;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
@@ -261,9 +246,9 @@ TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath)
     // Fill levels to test: 10%, 50%, 95% of 1024 = 102, 512, 972 records.
     // The drain RUNS so these are non-overflow enqueues.
     constexpr std::uint64_t kCapacity = 1024u;
-    constexpr std::uint64_t k10pct    = kCapacity / 10;   // 102
-    constexpr std::uint64_t k50pct    = kCapacity / 2;    // 512
-    constexpr std::uint64_t k95pct    = (kCapacity * 95) / 100;  // 972
+    constexpr std::uint64_t k10pct = kCapacity / 10;          // 102
+    constexpr std::uint64_t k50pct = kCapacity / 2;           // 512
+    constexpr std::uint64_t k95pct = (kCapacity * 95) / 100;  // 972
 
     for (std::uint64_t i = 0; i < k95pct; ++i) {
         emit_warn(logger.get(), i + 1u);
@@ -305,8 +290,7 @@ TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath)
 // The mallocnesia LD_PRELOAD gate is bite-tested in the separate
 // log_alloc_mallocnesia cmake test (it would exit(1) there).
 #ifdef ENABLE_ALLOC_BITE_TEST
-TEST(LogZeroAlloc, BiteTestPmrGateCatchesAlloc)
-{
+TEST(LogZeroAlloc, BiteTestPmrGateCatchesAlloc) {
     CountingResource counting_res{};
     auto* prev_default = std::pmr::get_default_resource();
     std::pmr::set_default_resource(&counting_res);
@@ -316,8 +300,8 @@ TEST(LogZeroAlloc, BiteTestPmrGateCatchesAlloc)
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity      = 256u;
-    cfg.on_overflow   = fixpp::log::overflow_policy::drop_newest;
+    cfg.capacity = 256u;
+    cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
     cfg.ring_resource = &counting_res;
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
 

@@ -3,9 +3,10 @@
 // (research.md R5 — the REQUIRED W/X paired NoMDEntries(268) discriminator:
 // SAME no_tag, delimiter MDEntryType(269) in W vs MDUpdateAction(279) in X).
 // OFFLINE TOOLING, not checked in / not compiled by the main build.
-#include <iostream>
 #include <quickfix/fix44/MarketDataIncrementalRefresh.h>
 #include <quickfix/fix44/MarketDataSnapshotFullRefresh.h>
+
+#include <iostream>
 
 namespace {
 void print_body(std::string const& wire) {

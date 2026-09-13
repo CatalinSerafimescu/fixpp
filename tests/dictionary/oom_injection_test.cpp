@@ -9,7 +9,6 @@
 // std::bad_alloc at a configurable call site.
 
 #include <gtest/gtest.h>
-#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <array>
 #include <cstddef>
@@ -21,6 +20,7 @@
 #include <sstream>
 #include <string>
 
+#include "../support/msvc_debug_arena_skip.hpp"
 #include "support/failing_pmr_resource.hpp"
 
 namespace {

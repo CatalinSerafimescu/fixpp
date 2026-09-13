@@ -58,8 +58,9 @@ namespace fixpp::interop::readback {
 //
 // RE-DERIVATION RECIPE (run it; do not trust this comment's numbers): diff
 // the case labels of
-//   reference-engines/quickfix-cpp/src/C++/Message.cpp   Message::isHeaderField(int) / isTrailerField(int)
-//   reference-engines/quickfixj/.../quickfix/Message.java isHeaderField(int) / isTrailerField(int)
+//   reference-engines/quickfix-cpp/src/C++/Message.cpp   Message::isHeaderField(int) /
+//   isTrailerField(int) reference-engines/quickfixj/.../quickfix/Message.java isHeaderField(int) /
+//   isTrailerField(int)
 // Re-derived 2026-09-11 against the pinned trees: the two engines' built-in
 // HEADER switches enumerate identical FIELD NAMES except QuickFIX-J's carries
 // `ApplExtID` (case ApplExtID.FIELD) where QuickFIX-cpp's does not; the
@@ -69,42 +70,41 @@ namespace fixpp::interop::readback {
 // exactly those field names — not invented, not copied from a paraphrase.
 // ⚠️ ENGINE-PIN-BOUND: re-run the diff on any re-pin of either vendored engine.
 inline bool is_canonical_header_or_trailer_tag(
-    int tag, std::function<bool(int)> const& dictionary_header_tag = {})
-{
+    int tag, std::function<bool(int)> const& dictionary_header_tag = {}) {
     // QuickFIX-cpp's built-in isHeaderField(int) ∪ QuickFIX-J's built-in
     // isHeaderField(int). Which members the two lists disagree on is the
     // recipe's output above, not something to read off this comment.
     static const std::vector<int> kUnionHeaderTags = {
-        8,    // BeginString
-        9,    // BodyLength
-        35,   // MsgType
-        49,   // SenderCompID
-        56,   // TargetCompID
-        115,  // OnBehalfOfCompID
-        128,  // DeliverToCompID
-        90,   // SecureDataLen
-        34,   // MsgSeqNum
-        50,   // SenderSubID
-        142,  // SenderLocationID
-        57,   // TargetSubID
-        143,  // TargetLocationID
-        116,  // OnBehalfOfSubID
-        144,  // OnBehalfOfLocationID
-        129,  // DeliverToSubID
-        145,  // DeliverToLocationID
-        43,   // PossDupFlag
-        97,   // PossResend
-        52,   // SendingTime
-        122,  // OrigSendingTime
-        212,  // XmlDataLen
-        213,  // XmlData
-        347,  // MessageEncoding
-        369,  // LastMsgSeqNumProcessed
-        370,  // OnBehalfOfSendingTime
-        1128, // ApplVerID
-        1129, // CstmApplVerID
-        627,  // NoHops
-        1156, // ApplExtID -- QuickFIX-J's built-in list only (T039/T040)
+        8,     // BeginString
+        9,     // BodyLength
+        35,    // MsgType
+        49,    // SenderCompID
+        56,    // TargetCompID
+        115,   // OnBehalfOfCompID
+        128,   // DeliverToCompID
+        90,    // SecureDataLen
+        34,    // MsgSeqNum
+        50,    // SenderSubID
+        142,   // SenderLocationID
+        57,    // TargetSubID
+        143,   // TargetLocationID
+        116,   // OnBehalfOfSubID
+        144,   // OnBehalfOfLocationID
+        129,   // DeliverToSubID
+        145,   // DeliverToLocationID
+        43,    // PossDupFlag
+        97,    // PossResend
+        52,    // SendingTime
+        122,   // OrigSendingTime
+        212,   // XmlDataLen
+        213,   // XmlData
+        347,   // MessageEncoding
+        369,   // LastMsgSeqNumProcessed
+        370,   // OnBehalfOfSendingTime
+        1128,  // ApplVerID
+        1129,  // CstmApplVerID
+        627,   // NoHops
+        1156,  // ApplExtID -- QuickFIX-J's built-in list only (T039/T040)
     };
     // Message::isTrailerField(int) -- byte-for-byte identical on both engines.
     static const std::vector<int> kTrailerTags = {
@@ -112,7 +112,8 @@ inline bool is_canonical_header_or_trailer_tag(
         89,  // Signature
         10,  // CheckSum
     };
-    if (std::find(kUnionHeaderTags.begin(), kUnionHeaderTags.end(), tag) != kUnionHeaderTags.end()) {
+    if (std::find(kUnionHeaderTags.begin(), kUnionHeaderTags.end(), tag) !=
+        kUnionHeaderTags.end()) {
         return true;
     }
     if (std::find(kTrailerTags.begin(), kTrailerTags.end(), tag) != kTrailerTags.end()) {
@@ -132,8 +133,7 @@ inline bool is_canonical_header_or_trailer_tag(
 // hex) for every byte < 0x20. `/` and every other byte >= 0x20 is emitted
 // literally — `\/` and `\uXXXX` for non-ASCII are FORBIDDEN; byte
 // compatibility (C-7) admits exactly one spelling.
-inline std::string json_escape(std::string const& raw)
-{
+inline std::string json_escape(std::string const& raw) {
     static const char* kHexLower = "0123456789abcdef";
     std::string out;
     out.reserve(raw.size() + 8);
@@ -158,8 +158,7 @@ inline std::string json_escape(std::string const& raw)
 // beyond U+10FFFF: a lax validator would let this emitter call a byte
 // sequence valid that a counterparty calls invalid, and the two would then
 // disagree about WHICH KEY to emit for identical bytes.
-inline bool is_valid_utf8(std::string const& raw)
-{
+inline bool is_valid_utf8(std::string const& raw) {
     auto const* p = reinterpret_cast<unsigned char const*>(raw.data());
     auto const* const end = p + raw.size();
     while (p < end) {
@@ -192,19 +191,18 @@ inline bool is_valid_utf8(std::string const& raw)
             }
             code = (code << 6) | (cont & 0x3FU);
         }
-        if (extra == 1 && code < 0x80U) return false;           // overlong
-        if (extra == 2 && code < 0x800U) return false;          // overlong
-        if (extra == 3 && code < 0x10000U) return false;        // overlong
-        if (code > 0x10FFFFU) return false;                     // out of range
-        if (code >= 0xD800U && code <= 0xDFFFU) return false;   // surrogate
+        if (extra == 1 && code < 0x80U) return false;          // overlong
+        if (extra == 2 && code < 0x800U) return false;         // overlong
+        if (extra == 3 && code < 0x10000U) return false;       // overlong
+        if (code > 0x10FFFFU) return false;                    // out of range
+        if (code >= 0xD800U && code <= 0xDFFFU) return false;  // surrogate
         p += extra + 1;
     }
     return true;
 }
 
 // RFC 4648 standard alphabet, `=` padding, no line breaks.
-inline std::string base64_encode(std::string const& raw)
-{
+inline std::string base64_encode(std::string const& raw) {
     static const char* kAlphabet =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
@@ -240,11 +238,10 @@ inline std::string base64_encode(std::string const& raw)
 // no trailing fractional zeros; UTCTIMESTAMP is pinned to millisecond
 // precision. This is what keeps the three emitters byte-identical (C-7); it
 // is not formatting.
-inline std::string canonical_typed_value(std::string const& fix_type, std::string const& raw)
-{
-    bool const numeric = fix_type == "PRICE" || fix_type == "QTY" || fix_type == "AMT"
-                       || fix_type == "FLOAT" || fix_type == "PRICEOFFSET"
-                       || fix_type == "PERCENTAGE";
+inline std::string canonical_typed_value(std::string const& fix_type, std::string const& raw) {
+    bool const numeric = fix_type == "PRICE" || fix_type == "QTY" || fix_type == "AMT" ||
+                         fix_type == "FLOAT" || fix_type == "PRICEOFFSET" ||
+                         fix_type == "PERCENTAGE";
     if (numeric && raw.find('.') != std::string::npos) {
         std::string trimmed = raw;
         while (!trimmed.empty() && trimmed.back() == '0') {
@@ -285,7 +282,7 @@ inline constexpr char const* kDirectionPeerToFixpp = "peer-to-fixpp";
 struct FieldEntry {
     std::string path;   // "40" | "453[0].448" | "453[1].802[0].523"
     std::string value;  // RAW BYTES as parsed; classification (value / value_b64)
-                         // happens at write time
+                        // happens at write time
 };
 
 struct TypedEntry {
@@ -299,9 +296,9 @@ struct TypedEntry {
 // `required='N'` on Reject(35=3), FIX44.xml) — absent means the emitting
 // Reject omitted them, never a stand-in for a joined-elsewhere value.
 struct RejectInfo {
-    long long ref_seq_num = 0;    // 45
-    int reason = 0;               // 373
-    std::optional<int> ref_tag;   // 371
+    long long ref_seq_num = 0;        // 45
+    int reason = 0;                   // 373
+    std::optional<int> ref_tag;       // 371
     std::optional<std::string> text;  // 58
 };
 
@@ -310,8 +307,7 @@ struct RejectInfo {
 // before a longer one sharing its prefix — is what removes the ENGINE'S WALK
 // ORDER from the record (contract § "Canonical form"). Group instance order
 // survives automatically: the instance index is INSIDE the path.
-inline std::vector<long long> path_tuple(std::string const& path)
-{
+inline std::vector<long long> path_tuple(std::string const& path) {
     std::vector<long long> parts;
     long long current = 0;
     bool in_number = false;
@@ -333,8 +329,7 @@ inline std::vector<long long> path_tuple(std::string const& path)
     return parts;
 }
 
-inline bool path_less(std::string const& lhs, std::string const& rhs)
-{
+inline bool path_less(std::string const& lhs, std::string const& rhs) {
     std::vector<long long> const a = path_tuple(lhs);
     std::vector<long long> const b = path_tuple(rhs);
     return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end());
@@ -365,16 +360,12 @@ public:
     // guaranteed copy elision, [class.copy.elision]) -- Stream holds a
     // std::mutex, so it is neither copyable nor movable, and a named local
     // returned by value here would need NRVO, which is NOT guaranteed.
-    static Stream append_mode_for_test(std::string const& path)
-    {
+    static Stream append_mode_for_test(std::string const& path) {
         return Stream(path, std::ios::app);
     }
 #endif
 
-    [[nodiscard]] bool ok() const
-    {
-        return static_cast<bool>(out_);
-    }
+    [[nodiscard]] bool ok() const { return static_cast<bool>(out_); }
 
     // data-model.md §1a — fixpp's own hello, NOT §1's. fixpp carries "the
     // fields of §1 that apply to it (type, run_id, cell_id, config,
@@ -387,8 +378,7 @@ public:
     // counterparty's hello (see emit_fixpp_fixture.cpp's header).
     void hello(std::string const& run_id, std::string const& cell_id, std::string const& config,
                std::string const& script_digest, std::string const& arm, bool has_validator,
-               std::string const& dictionary_digest)
-    {
+               std::string const& dictionary_digest) {
         std::string line = "{\"type\":\"hello\"";
         line += ",\"run_id\":\"" + json_escape(run_id) + "\"";
         line += ",\"cell_id\":\"" + json_escape(cell_id) + "\"";
@@ -406,8 +396,7 @@ public:
     // INPUTS (C-8), never re-read from the serialized frame.
     void sent(std::string const& msg_type, long long seq_num, std::string const& direction,
               long long occurrence, std::string const& script_step_id,
-              std::vector<FieldEntry> fields)
-    {
+              std::vector<FieldEntry> fields) {
         std::string line = "{\"type\":\"sent\"";
         line += ",\"msg_type\":\"" + json_escape(msg_type) + "\"";
         line += ",\"seq_num\":" + std::to_string(seq_num);
@@ -425,8 +414,7 @@ public:
     // after correlation (comparator's job, not this writer's).
     void readback(std::string const& msg_type, long long seq_num, std::string const& direction,
                   long long occurrence, bool poss_dup, std::vector<FieldEntry> fields,
-                  std::vector<TypedEntry> typed_reads)
-    {
+                  std::vector<TypedEntry> typed_reads) {
         std::string line = "{\"type\":\"readback\"";
         line += ",\"msg_type\":\"" + json_escape(msg_type) + "\"";
         line += ",\"seq_num\":" + std::to_string(seq_num);
@@ -449,10 +437,9 @@ public:
     // as hello() above is (§1a). `occurrence` is the SAME shared arrival
     // counter readback()/sent() use for (seq_num, direction) — never a
     // second, independent count.
-    void disposition(std::string const& msg_type, long long seq_num,
-                      std::string const& direction, long long occurrence,
-                      std::string const& disp, std::optional<RejectInfo> const& reject = std::nullopt)
-    {
+    void disposition(std::string const& msg_type, long long seq_num, std::string const& direction,
+                     long long occurrence, std::string const& disp,
+                     std::optional<RejectInfo> const& reject = std::nullopt) {
         std::string line = "{\"type\":\"disposition\"";
         line += ",\"msg_type\":\"" + json_escape(msg_type) + "\"";
         line += ",\"seq_num\":" + std::to_string(seq_num);
@@ -480,8 +467,7 @@ public:
     // call must not overwrite it).
     void terminal(std::string const& terminal_state, std::string const& run_id,
                   std::string const& cell_id, std::string const& config,
-                  std::string const& script_digest)
-    {
+                  std::string const& script_digest) {
         if (terminal_written_) {
             return;
         }
@@ -503,16 +489,14 @@ private:
     // the RAW BYTES (contract § "C-11 — the live-path charset arm", item 1 —
     // classifying on a decoded string rather than the re-encoded bytes is
     // one of the two ways this rule goes vacuous).
-    static std::string render_value(std::string const& raw)
-    {
+    static std::string render_value(std::string const& raw) {
         if (is_valid_utf8(raw)) {
             return "\"value\":\"" + json_escape(raw) + "\"";
         }
         return "\"value_b64\":\"" + base64_encode(raw) + "\"";
     }
 
-    static std::string render_fields(std::vector<FieldEntry> fields)
-    {
+    static std::string render_fields(std::vector<FieldEntry> fields) {
         std::sort(fields.begin(), fields.end(), [](FieldEntry const& a, FieldEntry const& b) {
             return path_less(a.path, b.path);
         });
@@ -523,14 +507,14 @@ private:
                 out += ",";
             }
             first = false;
-            out += "{\"path\":\"" + json_escape(entry.path) + "\"," + render_value(entry.value) + "}";
+            out +=
+                "{\"path\":\"" + json_escape(entry.path) + "\"," + render_value(entry.value) + "}";
         }
         out += "]";
         return out;
     }
 
-    static std::string render_typed(std::vector<TypedEntry> entries)
-    {
+    static std::string render_typed(std::vector<TypedEntry> entries) {
         std::sort(entries.begin(), entries.end(), [](TypedEntry const& a, TypedEntry const& b) {
             return path_less(a.path, b.path);
         });
@@ -549,8 +533,7 @@ private:
         return out;
     }
 
-    void write_line(std::string const& line)
-    {
+    void write_line(std::string const& line) {
         std::lock_guard<std::mutex> const guard(mutex_);
         out_ << line << '\n';
         out_.flush();
@@ -559,8 +542,7 @@ private:
 #ifdef FIXPP_TEST_HOOKS
     // Reachable only via append_mode_for_test() above.
     Stream(std::string const& path, std::ios::openmode extra_mode)
-        : out_(path, std::ios::binary | extra_mode)
-    {}
+        : out_(path, std::ios::binary | extra_mode) {}
 #endif
 
     std::ofstream out_;

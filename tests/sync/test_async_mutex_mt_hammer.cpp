@@ -15,7 +15,8 @@
 // feedback_coverage_profraw_staleness) on `linux-clang-coverage` found:
 //   - A4/A5/C3/A11 — solidly covered by ORDINARY jittered contention
 //     (hundreds of real CAS retries per run, confirmed).
-//   - F4 (unlock()'s terminal-CAS-fail recursive unlock()) — NOT hit by the brief-literal jittered design (0 hits
+//   - F4 (unlock()'s terminal-CAS-fail recursive unlock()) — NOT hit by the brief-literal jittered
+//   design (0 hits
 //     across 150+ opportunities); IS hit by a jitter-FREE, high-volume burst
 //     (6 total hits observed across 6 independent trial runs) — see the
 //     dual-config note below. The hit rate is low/noisy (~0.3-1.5%), so this
@@ -207,7 +208,8 @@ asio::awaitable<void> jitter(std::mt19937& rng) {
 }
 
 TEST(SeamAsyncMutexMtHammer, RealContentionNoLostWakeupNoDoubleGrant) {
-    const unsigned N = std::max(kWorkerFloor, kWorkerMultiplier * std::thread::hardware_concurrency());
+    const unsigned N =
+        std::max(kWorkerFloor, kWorkerMultiplier * std::thread::hardware_concurrency());
     constexpr unsigned kCycles = kCyclesPerWorker;
 
     for (int rep = 0; rep < kReps; ++rep) {
@@ -241,8 +243,9 @@ TEST(SeamAsyncMutexMtHammer, RealContentionNoLostWakeupNoDoubleGrant) {
                 // Oracle (3): claim-then-check identity CAS.
                 std::uint64_t my_ticket = next_ticket.fetch_add(1, std::memory_order_relaxed);
                 std::uint64_t expected_empty = 0;
-                bool won_ticket = holder_ticket.compare_exchange_strong(
-                    expected_empty, my_ticket, std::memory_order_acq_rel, std::memory_order_acquire);
+                bool won_ticket = holder_ticket.compare_exchange_strong(expected_empty, my_ticket,
+                                                                        std::memory_order_acq_rel,
+                                                                        std::memory_order_acquire);
                 if (!won_ticket) {
                     double_grant_detected.store(true, std::memory_order_relaxed);
                 }
@@ -296,8 +299,8 @@ TEST(SeamAsyncMutexMtHammer, RealContentionNoLostWakeupNoDoubleGrant) {
         ASSERT_FALSE(double_grant_detected.load())
             << "rep=" << rep << ": double-grant detected (oracle 3, identity CAS)";
         ASSERT_LE(peak_holders.load(), 1)
-            << "rep=" << rep << ": mutual exclusion violated (oracle 2, peak=" << peak_holders.load()
-            << ")";
+            << "rep=" << rep
+            << ": mutual exclusion violated (oracle 2, peak=" << peak_holders.load() << ")";
         ASSERT_EQ(completed.load(), static_cast<std::uint64_t>(N) * kCycles)
             << "rep=" << rep << ": lost wakeup (oracle 1)";
     }

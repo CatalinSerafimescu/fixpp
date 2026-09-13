@@ -180,7 +180,7 @@ TEST_F(FixTcCoverageGaps, HeaderFieldsOutOfOrder_MsgTypeNotFirst_Accepted_Diverg
 
     // A Heartbeat with MsgSeqNum(34) placed BEFORE MsgType(35) — header order violation.
     std::string body;
-    body += field(34, "2");   // 34 before 35 (canonical order is 35 first)
+    body += field(34, "2");  // 34 before 35 (canonical order is 35 first)
     body += field(35, "0");
     body += field(49, "TW");
     body += field(52, "20240101-00:00:00.000");
@@ -261,8 +261,8 @@ TEST_F(FixTcCoverageGaps, InboundLogonWhileLogoutSent_Drained_StaysLogoutSent) {
 
     // WE initiate graceful logout → emits Logout, transitions to LogoutSent, then
     // parks awaiting the peer's Logout confirmation (2 s clock-bound timeout).
-    auto close_fut = asio::co_spawn(ioc, s.close(fixpp::session::close_mode::graceful),
-                                    asio::use_future);
+    auto close_fut =
+        asio::co_spawn(ioc, s.close(fixpp::session::close_mode::graceful), asio::use_future);
     ioc.run_for(100ms);
     ASSERT_EQ(s.state(), fixpp::session::fsm_state::LogoutSent)
         << "precondition: graceful close emits Logout and enters LogoutSent";
@@ -351,9 +351,12 @@ TEST_F(FixTcCoverageGaps, RejectResentMessage_DuringResend_RejectsAndContinues) 
         << "a malformed resent frame must elicit exactly one reply (the Reject)";
     const auto& rj = capture.frames.back();
     EXPECT_TRUE(frame_has(rj, "35=3\x01")) << "the reply must be a session-level Reject(35=3)";
-    EXPECT_TRUE(frame_has(rj, "371=122\x01")) << "Reject RefTagID(371) must point at OrigSendingTime";
-    EXPECT_TRUE(frame_has(rj, "373=1\x01")) << "Reject SessionRejectReason(373) must be RequiredTagMissing";
-    EXPECT_TRUE(frame_has(rj, "45=2\x01")) << "Reject RefSeqNum(45) must be the bad resent frame's seq (2)";
+    EXPECT_TRUE(frame_has(rj, "371=122\x01"))
+        << "Reject RefTagID(371) must point at OrigSendingTime";
+    EXPECT_TRUE(frame_has(rj, "373=1\x01"))
+        << "Reject SessionRejectReason(373) must be RequiredTagMissing";
+    EXPECT_TRUE(frame_has(rj, "45=2\x01"))
+        << "Reject RefSeqNum(45) must be the bad resent frame's seq (2)";
 
     // (b) The session does NOT abort recovery: it stays Active (not Disconnected),
     // and the rejected frame did NOT fill the gap (seqnum not advanced — strictly
@@ -368,7 +371,8 @@ TEST_F(FixTcCoverageGaps, RejectResentMessage_DuringResend_RejectsAndContinues) 
     // poison the resend window.
     const std::size_t after_reject = capture.frames.size();
     (void)feed(s, make_fix_frame("FIX.4.2", "0", /*seq=*/2, "TW", "ISLD",
-                                 "43=Y\x01""122=20240101-00:00:00.000\x01"));
+                                 "43=Y\x01"
+                                 "122=20240101-00:00:00.000\x01"));
     EXPECT_EQ(next_inbound(s), 3U)
         << "a corrected resent frame is accepted after the Reject — recovery continues";
     EXPECT_EQ(capture.frames.size(), after_reject)
@@ -412,9 +416,11 @@ TEST_F(FixTcCoverageGaps, SimultaneousResendRequest_ServicesPeerWhileAwaitingOwn
     ASSERT_EQ(capture.frames.size(), before + 1U)
         << "the peer ResendRequest must be serviced with exactly one reply mid-resend";
     const auto& reply = capture.frames.back();
-    EXPECT_TRUE(frame_has(reply, "35=4\x01")) << "reply to the counter-request is a SequenceReset(35=4)";
+    EXPECT_TRUE(frame_has(reply, "35=4\x01"))
+        << "reply to the counter-request is a SequenceReset(35=4)";
     EXPECT_TRUE(frame_has(reply, "123=Y\x01")) << "storeless reply is a GapFill (123=Y)";
-    EXPECT_TRUE(frame_has(reply, "36=4\x01")) << "GapFill NewSeqNo(36)=EndSeqNo+1=4 ties it to [1..3]";
+    EXPECT_TRUE(frame_has(reply, "36=4\x01"))
+        << "GapFill NewSeqNo(36)=EndSeqNo+1=4 ties it to [1..3]";
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
         << "servicing a counter-ResendRequest mid-resend must not tear the session down";
     EXPECT_EQ(next_inbound(s), 3U)
@@ -424,12 +430,15 @@ TEST_F(FixTcCoverageGaps, SimultaneousResendRequest_ServicesPeerWhileAwaitingOwn
     // own recovery completes too. Both outstanding resends resolve; still Active.
     const std::size_t after_reply = capture.frames.size();
     (void)feed(s, make_fix_frame("FIX.4.2", "0", 3, "TW", "ISLD",
-                                 "43=Y\x01""122=20240101-00:00:00.000\x01"));
+                                 "43=Y\x01"
+                                 "122=20240101-00:00:00.000\x01"));
     (void)feed(s, make_fix_frame("FIX.4.2", "0", 4, "TW", "ISLD",
-                                 "43=Y\x01""122=20240101-00:00:00.000\x01"));
+                                 "43=Y\x01"
+                                 "122=20240101-00:00:00.000\x01"));
     EXPECT_EQ(next_inbound(s), 5U) << "our gap [2..4] is fully filled — both directions recovered";
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active) << "session stays Active throughout";
-    EXPECT_EQ(capture.count_msg_type("3"), 0U) << "no Reject anywhere in the bidirectional exchange";
+    EXPECT_EQ(capture.count_msg_type("3"), 0U)
+        << "no Reject anywhere in the bidirectional exchange";
     EXPECT_EQ(capture.frames.size(), after_reply)
         << "the closing PossDup replays are silent (no further admin emit)";
 }

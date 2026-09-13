@@ -129,266 +129,289 @@
 namespace {
 
 std::string read_file(const std::string& path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) throw std::runtime_error("cannot open: " + path);
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("cannot open: " + path);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
 }
 
 std::vector<std::string> split_lines(const std::string& text) {
-  std::vector<std::string> lines;
-  std::istringstream iss(text);
-  std::string line;
-  while (std::getline(iss, line)) lines.push_back(line);
-  return lines;
+    std::vector<std::string> lines;
+    std::istringstream iss(text);
+    std::string line;
+    while (std::getline(iss, line)) lines.push_back(line);
+    return lines;
 }
 
 std::set<int> find_all_ints(const std::string& body, const std::regex& re) {
-  std::set<int> out;
-  for (auto it = std::sregex_iterator(body.begin(), body.end(), re); it != std::sregex_iterator(); ++it) {
-    out.insert(std::stoi((*it)[1].str()));
-  }
-  return out;
+    std::set<int> out;
+    for (auto it = std::sregex_iterator(body.begin(), body.end(), re); it != std::sregex_iterator();
+         ++it) {
+        out.insert(std::stoi((*it)[1].str()));
+    }
+    return out;
 }
 
 // ---------------------------- class side ----------------------------
 
 struct ClassSide {
-  std::set<std::string> msg_types;
-  std::map<std::string, std::set<int>> reachable;  // msg_type -> tags
+    std::set<std::string> msg_types;
+    std::map<std::string, std::set<int>> reachable;  // msg_type -> tags
 };
 
 ClassSide parse_class_side(const std::string& path) {
-  const std::vector<std::string> lines = split_lines(read_file(path));
-  static const std::regex kMsgClassStart(R"(^class (\w+) \{$)");
-  static const std::regex kGrpClassStart(R"(^    class G_(\d+) \{$)");
-  static const std::regex kMsgTypeRe(R"re(static constexpr ::std::string_view msg_type_v = "([^"]*)";)re");
-  static const std::regex kMsgTagRe(R"(view_\.template get<(\d+)>)");
-  static const std::regex kGrpTagRe(R"(::fixpp::wire::get\(ctx_\.span,\s*(\d+),)");
-  static const std::regex kGrpRefRe(R"(group_view<(?:::fixpp::vlatest::groups::)?G_(\d+)>)");
+    const std::vector<std::string> lines = split_lines(read_file(path));
+    static const std::regex kMsgClassStart(R"(^class (\w+) \{$)");
+    static const std::regex kGrpClassStart(R"(^    class G_(\d+) \{$)");
+    static const std::regex kMsgTypeRe(
+        R"re(static constexpr ::std::string_view msg_type_v = "([^"]*)";)re");
+    static const std::regex kMsgTagRe(R"(view_\.template get<(\d+)>)");
+    static const std::regex kGrpTagRe(R"(::fixpp::wire::get\(ctx_\.span,\s*(\d+),)");
+    static const std::regex kGrpRefRe(R"(group_view<(?:::fixpp::vlatest::groups::)?G_(\d+)>)");
 
-  std::map<int, std::string> group_body;
-  std::map<std::string, std::string> msg_body;
+    std::map<int, std::string> group_body;
+    std::map<std::string, std::string> msg_body;
 
-  const size_t n = lines.size();
-  for (size_t i = 0; i < n; ++i) {
-    std::smatch m;
-    if (std::regex_match(lines[i], m, kGrpClassStart)) {
-      const int gid = std::stoi(m[1].str());
-      size_t j = i + 1;
-      std::string body;
-      while (j < n && lines[j] != "    };") { body += lines[j]; body += '\n'; ++j; }
-      if (j >= n) throw std::runtime_error("unterminated group class G_" + std::to_string(gid));
-      group_body[gid] = std::move(body);
-      i = j;
-    } else if (std::regex_match(lines[i], m, kMsgClassStart)) {
-      const std::string name = m[1].str();
-      size_t j = i + 1;
-      std::string body;
-      while (j < n && lines[j] != "};") { body += lines[j]; body += '\n'; ++j; }
-      if (j >= n) throw std::runtime_error("unterminated message class " + name);
-      msg_body[name] = std::move(body);
-      i = j;
+    const size_t n = lines.size();
+    for (size_t i = 0; i < n; ++i) {
+        std::smatch m;
+        if (std::regex_match(lines[i], m, kGrpClassStart)) {
+            const int gid = std::stoi(m[1].str());
+            size_t j = i + 1;
+            std::string body;
+            while (j < n && lines[j] != "    };") {
+                body += lines[j];
+                body += '\n';
+                ++j;
+            }
+            if (j >= n)
+                throw std::runtime_error("unterminated group class G_" + std::to_string(gid));
+            group_body[gid] = std::move(body);
+            i = j;
+        } else if (std::regex_match(lines[i], m, kMsgClassStart)) {
+            const std::string name = m[1].str();
+            size_t j = i + 1;
+            std::string body;
+            while (j < n && lines[j] != "};") {
+                body += lines[j];
+                body += '\n';
+                ++j;
+            }
+            if (j >= n) throw std::runtime_error("unterminated message class " + name);
+            msg_body[name] = std::move(body);
+            i = j;
+        }
     }
-  }
 
-  std::map<int, std::set<int>> cache;
-  std::set<int> in_progress;
-  std::function<const std::set<int>&(int)> closure = [&](int gid) -> const std::set<int>& {
-    auto cached = cache.find(gid);
-    if (cached != cache.end()) return cached->second;
-    if (in_progress.count(gid)) throw std::runtime_error("class-side group cycle at G_" + std::to_string(gid));
-    auto bit = group_body.find(gid);
-    if (bit == group_body.end()) throw std::runtime_error("group_view references undefined G_" + std::to_string(gid));
-    in_progress.insert(gid);
-    std::set<int> result = find_all_ints(bit->second, kGrpTagRe);
-    const std::set<int> refs = find_all_ints(bit->second, kGrpRefRe);
-    result.insert(refs.begin(), refs.end());
-    for (int r : refs) {
-      const std::set<int>& sub = closure(r);
-      result.insert(sub.begin(), sub.end());
-    }
-    in_progress.erase(gid);
-    return cache.emplace(gid, std::move(result)).first->second;
-  };
+    std::map<int, std::set<int>> cache;
+    std::set<int> in_progress;
+    std::function<const std::set<int>&(int)> closure = [&](int gid) -> const std::set<int>& {
+        auto cached = cache.find(gid);
+        if (cached != cache.end()) return cached->second;
+        if (in_progress.count(gid))
+            throw std::runtime_error("class-side group cycle at G_" + std::to_string(gid));
+        auto bit = group_body.find(gid);
+        if (bit == group_body.end())
+            throw std::runtime_error("group_view references undefined G_" + std::to_string(gid));
+        in_progress.insert(gid);
+        std::set<int> result = find_all_ints(bit->second, kGrpTagRe);
+        const std::set<int> refs = find_all_ints(bit->second, kGrpRefRe);
+        result.insert(refs.begin(), refs.end());
+        for (int r : refs) {
+            const std::set<int>& sub = closure(r);
+            result.insert(sub.begin(), sub.end());
+        }
+        in_progress.erase(gid);
+        return cache.emplace(gid, std::move(result)).first->second;
+    };
 
-  ClassSide out;
-  for (auto& [name, body] : msg_body) {
-    std::smatch m;
-    if (!std::regex_search(body, m, kMsgTypeRe)) throw std::runtime_error("no msg_type_v in class " + name);
-    const std::string msg_type = m[1].str();
-    if (!out.msg_types.insert(msg_type).second) {
-      throw std::runtime_error("duplicate msg_type_v on class side: " + msg_type);
+    ClassSide out;
+    for (auto& [name, body] : msg_body) {
+        std::smatch m;
+        if (!std::regex_search(body, m, kMsgTypeRe))
+            throw std::runtime_error("no msg_type_v in class " + name);
+        const std::string msg_type = m[1].str();
+        if (!out.msg_types.insert(msg_type).second) {
+            throw std::runtime_error("duplicate msg_type_v on class side: " + msg_type);
+        }
+        std::set<int> reach = find_all_ints(body, kMsgTagRe);
+        const std::set<int> refs = find_all_ints(body, kGrpRefRe);
+        reach.insert(refs.begin(), refs.end());
+        for (int r : refs) {
+            const std::set<int>& sub = closure(r);
+            reach.insert(sub.begin(), sub.end());
+        }
+        out.reachable[msg_type] = std::move(reach);
     }
-    std::set<int> reach = find_all_ints(body, kMsgTagRe);
-    const std::set<int> refs = find_all_ints(body, kGrpRefRe);
-    reach.insert(refs.begin(), refs.end());
-    for (int r : refs) {
-      const std::set<int>& sub = closure(r);
-      reach.insert(sub.begin(), sub.end());
-    }
-    out.reachable[msg_type] = std::move(reach);
-  }
-  return out;
+    return out;
 }
 
 // -------------------------- manifest side ----------------------------
 
 struct ManifestSide {
-  std::set<std::string> msg_types;
-  std::map<std::string, std::set<int>> reachable;
+    std::set<std::string> msg_types;
+    std::map<std::string, std::set<int>> reachable;
 };
 
 std::vector<std::string> split_tab(const std::string& line) {
-  std::vector<std::string> f;
-  std::string cur;
-  std::istringstream iss(line);
-  while (std::getline(iss, cur, '\t')) f.push_back(cur);
-  return f;
+    std::vector<std::string> f;
+    std::string cur;
+    std::istringstream iss(line);
+    while (std::getline(iss, cur, '\t')) f.push_back(cur);
+    return f;
 }
 
 int group_id_of_path(const std::string& path) {
-  const auto pos = path.rfind('.');
-  const std::string last = (pos == std::string::npos) ? path : path.substr(pos + 1);
-  return std::stoi(last);
+    const auto pos = path.rfind('.');
+    const std::string last = (pos == std::string::npos) ? path : path.substr(pos + 1);
+    return std::stoi(last);
 }
 
 ManifestSide parse_manifest_projected(const std::string& path) {
-  const std::vector<std::string> lines = split_lines(read_file(path));
+    const std::vector<std::string> lines = split_lines(read_file(path));
 
-  std::string cur_msg;
-  std::map<std::string, std::set<int>> top_level;
-  std::map<int, std::set<int>> member_tags;
-  std::set<std::string> msg_types;
+    std::string cur_msg;
+    std::map<std::string, std::set<int>> top_level;
+    std::map<int, std::set<int>> member_tags;
+    std::set<std::string> msg_types;
 
-  for (auto const& line : lines) {
-    if (line.empty() || line[0] == '#') continue;
-    const auto f = split_tab(line);
-    if (f.empty()) continue;
-    if (f[0] == "MSG") {
-      cur_msg = f[1];
-      msg_types.insert(cur_msg);
-    } else if (f[0] == "OCC") {
-      const std::string& gp = f[1];
-      const int tag = std::stoi(f[2]);
-      if (gp == "-") {
-        top_level[cur_msg].insert(tag);
-      } else {
-        member_tags[group_id_of_path(gp)].insert(tag);
-      }
-    }
-  }
-
-  std::map<int, std::set<int>> cache;
-  std::set<int> in_progress;
-  std::function<const std::set<int>&(int)> closure = [&](int gid) -> const std::set<int>& {
-    auto cached = cache.find(gid);
-    if (cached != cache.end()) return cached->second;
-    if (in_progress.count(gid)) throw std::runtime_error("manifest-side group cycle at " + std::to_string(gid));
-    in_progress.insert(gid);
-    std::set<int> result;
-    auto mit = member_tags.find(gid);
-    if (mit != member_tags.end()) {
-      result = mit->second;
-      for (int t : mit->second) {
-        if (member_tags.count(t)) {
-          const std::set<int>& sub = closure(t);
-          result.insert(sub.begin(), sub.end());
+    for (auto const& line : lines) {
+        if (line.empty() || line[0] == '#') continue;
+        const auto f = split_tab(line);
+        if (f.empty()) continue;
+        if (f[0] == "MSG") {
+            cur_msg = f[1];
+            msg_types.insert(cur_msg);
+        } else if (f[0] == "OCC") {
+            const std::string& gp = f[1];
+            const int tag = std::stoi(f[2]);
+            if (gp == "-") {
+                top_level[cur_msg].insert(tag);
+            } else {
+                member_tags[group_id_of_path(gp)].insert(tag);
+            }
         }
-      }
     }
-    in_progress.erase(gid);
-    return cache.emplace(gid, std::move(result)).first->second;
-  };
 
-  ManifestSide out;
-  out.msg_types = std::move(msg_types);
-  for (auto& [msg, tags] : top_level) {
-    std::set<int> reach = tags;
-    for (int t : tags) {
-      if (member_tags.count(t)) {
-        const std::set<int>& sub = closure(t);
-        reach.insert(sub.begin(), sub.end());
-      }
+    std::map<int, std::set<int>> cache;
+    std::set<int> in_progress;
+    std::function<const std::set<int>&(int)> closure = [&](int gid) -> const std::set<int>& {
+        auto cached = cache.find(gid);
+        if (cached != cache.end()) return cached->second;
+        if (in_progress.count(gid))
+            throw std::runtime_error("manifest-side group cycle at " + std::to_string(gid));
+        in_progress.insert(gid);
+        std::set<int> result;
+        auto mit = member_tags.find(gid);
+        if (mit != member_tags.end()) {
+            result = mit->second;
+            for (int t : mit->second) {
+                if (member_tags.count(t)) {
+                    const std::set<int>& sub = closure(t);
+                    result.insert(sub.begin(), sub.end());
+                }
+            }
+        }
+        in_progress.erase(gid);
+        return cache.emplace(gid, std::move(result)).first->second;
+    };
+
+    ManifestSide out;
+    out.msg_types = std::move(msg_types);
+    for (auto& [msg, tags] : top_level) {
+        std::set<int> reach = tags;
+        for (int t : tags) {
+            if (member_tags.count(t)) {
+                const std::set<int>& sub = closure(t);
+                reach.insert(sub.begin(), sub.end());
+            }
+        }
+        out.reachable[msg] = std::move(reach);
     }
-    out.reachable[msg] = std::move(reach);
-  }
-  return out;
+    return out;
 }
 
 std::string describe_tags(const std::vector<int>& s, size_t limit = 30) {
-  std::ostringstream oss;
-  size_t shown = 0;
-  for (int t : s) {
-    if (shown++ >= limit) { oss << "... (" << (s.size() - shown + 1) << " more)"; break; }
-    oss << t << " ";
-  }
-  return oss.str();
+    std::ostringstream oss;
+    size_t shown = 0;
+    for (int t : s) {
+        if (shown++ >= limit) {
+            oss << "... (" << (s.size() - shown + 1) << " more)";
+            break;
+        }
+        oss << t << " ";
+    }
+    return oss.str();
 }
 
 struct Sides {
-  ClassSide cs;
-  ManifestSide ms;
+    ClassSide cs;
+    ManifestSide ms;
 };
 
 Sides build_sides() {
-  Sides s;
-  s.cs = parse_class_side(FIXPP_CODEGEN_VLATEST_MESSAGES_HPP);
-  s.ms = parse_manifest_projected(FIXPP_CODEGEN_VLATEST_MANIFEST);
-  return s;
+    Sides s;
+    s.cs = parse_class_side(FIXPP_CODEGEN_VLATEST_MESSAGES_HPP);
+    s.ms = parse_manifest_projected(FIXPP_CODEGEN_VLATEST_MANIFEST);
+    return s;
 }
 
 }  // namespace
 
 // V-1b leg 1: message-set exact equality (181==181, both directions).
 TEST(VlatestManifestClassConsistency, MessageSetExact181) {
-  Sides s;
-  ASSERT_NO_THROW(s = build_sides());
+    Sides s;
+    ASSERT_NO_THROW(s = build_sides());
 
-  EXPECT_EQ(s.cs.msg_types.size(), 181U) << "class-side (Messages.hpp) message count";
-  EXPECT_EQ(s.ms.msg_types.size(), 181U) << "manifest-side (projected Manifest.txt) message count";
+    EXPECT_EQ(s.cs.msg_types.size(), 181U) << "class-side (Messages.hpp) message count";
+    EXPECT_EQ(s.ms.msg_types.size(), 181U)
+        << "manifest-side (projected Manifest.txt) message count";
 
-  std::vector<std::string> only_class, only_manifest;
-  std::set_difference(s.cs.msg_types.begin(), s.cs.msg_types.end(), s.ms.msg_types.begin(), s.ms.msg_types.end(),
-                       std::back_inserter(only_class));
-  std::set_difference(s.ms.msg_types.begin(), s.ms.msg_types.end(), s.cs.msg_types.begin(), s.cs.msg_types.end(),
-                       std::back_inserter(only_manifest));
+    std::vector<std::string> only_class, only_manifest;
+    std::set_difference(s.cs.msg_types.begin(), s.cs.msg_types.end(), s.ms.msg_types.begin(),
+                        s.ms.msg_types.end(), std::back_inserter(only_class));
+    std::set_difference(s.ms.msg_types.begin(), s.ms.msg_types.end(), s.cs.msg_types.begin(),
+                        s.cs.msg_types.end(), std::back_inserter(only_manifest));
 
-  auto join = [](const std::vector<std::string>& v) {
-    std::ostringstream oss;
-    for (auto const& x : v) oss << x << " ";
-    return oss.str();
-  };
-  EXPECT_TRUE(only_class.empty()) << "msg_types in class side (Messages.hpp) but NOT in manifest: " << join(only_class);
-  EXPECT_TRUE(only_manifest.empty()) << "msg_types in manifest but NOT in class side: " << join(only_manifest);
+    auto join = [](const std::vector<std::string>& v) {
+        std::ostringstream oss;
+        for (auto const& x : v) oss << x << " ";
+        return oss.str();
+    };
+    EXPECT_TRUE(only_class.empty())
+        << "msg_types in class side (Messages.hpp) but NOT in manifest: " << join(only_class);
+    EXPECT_TRUE(only_manifest.empty())
+        << "msg_types in manifest but NOT in class side: " << join(only_manifest);
 }
 
 // V-1b leg 2 (the class-reachable-field PRIMARY HARD GATE): per message,
 // class-reachable(M) == manifest-projected-reachable(M) as an exact set.
 TEST(VlatestManifestClassConsistency, PerMessageReachableFieldSetExact) {
-  Sides s;
-  ASSERT_NO_THROW(s = build_sides());
-  ASSERT_EQ(s.cs.msg_types, s.ms.msg_types) << "message sets differ -- see MessageSetExact181";
+    Sides s;
+    ASSERT_NO_THROW(s = build_sides());
+    ASSERT_EQ(s.cs.msg_types, s.ms.msg_types) << "message sets differ -- see MessageSetExact181";
 
-  std::vector<std::string> mismatches;
-  for (const std::string& mt : s.cs.msg_types) {
-    const std::set<int>& a = s.cs.reachable.at(mt);
-    const std::set<int>& b = s.ms.reachable.at(mt);
-    if (a == b) continue;
-    std::vector<int> only_class, only_manifest;
-    std::set_difference(a.begin(), a.end(), b.begin(), b.end(), std::back_inserter(only_class));
-    std::set_difference(b.begin(), b.end(), a.begin(), a.end(), std::back_inserter(only_manifest));
-    std::ostringstream oss;
-    oss << "msg_type=" << mt << " class-only=[" << describe_tags(only_class) << "] manifest-only=["
-        << describe_tags(only_manifest) << "]";
-    mismatches.push_back(oss.str());
-  }
+    std::vector<std::string> mismatches;
+    for (const std::string& mt : s.cs.msg_types) {
+        const std::set<int>& a = s.cs.reachable.at(mt);
+        const std::set<int>& b = s.ms.reachable.at(mt);
+        if (a == b) continue;
+        std::vector<int> only_class, only_manifest;
+        std::set_difference(a.begin(), a.end(), b.begin(), b.end(), std::back_inserter(only_class));
+        std::set_difference(b.begin(), b.end(), a.begin(), a.end(),
+                            std::back_inserter(only_manifest));
+        std::ostringstream oss;
+        oss << "msg_type=" << mt << " class-only=[" << describe_tags(only_class)
+            << "] manifest-only=[" << describe_tags(only_manifest) << "]";
+        mismatches.push_back(oss.str());
+    }
 
-  EXPECT_TRUE(mismatches.empty()) << mismatches.size() << " message(s) with a class<->manifest reachable-field mismatch:\n"
-                                   << [&] {
-                                        std::ostringstream oss;
-                                        for (auto& m : mismatches) oss << "  " << m << "\n";
-                                        return oss.str();
-                                      }();
+    EXPECT_TRUE(mismatches.empty())
+        << mismatches.size() << " message(s) with a class<->manifest reachable-field mismatch:\n"
+        << [&] {
+               std::ostringstream oss;
+               for (auto& m : mismatches) oss << "  " << m << "\n";
+               return oss.str();
+           }();
 }

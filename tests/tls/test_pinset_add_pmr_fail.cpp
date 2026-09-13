@@ -12,7 +12,6 @@
 // and the allocation throw is caught.
 
 #include <gtest/gtest.h>
-#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <array>
 #include <cstddef>
@@ -20,6 +19,8 @@
 #include <fixpp/tls/certificate.hpp>
 #include <fixpp/tls/pinset.hpp>
 #include <memory_resource>
+
+#include "../support/msvc_debug_arena_skip.hpp"
 
 namespace {
 

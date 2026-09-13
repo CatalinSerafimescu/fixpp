@@ -335,10 +335,10 @@ private:
     // this pointer (never `this`), so `*timer_epochs_` outlives the
     // transport unconditionally even when the owner destroys `this` with no
     // drain (D-4.0 — reconnect_fsm.cpp's connect/handshake-failure "release t (RAII)" arms and
-    // engine.cpp's `run_accept_loop` open()-failure arm all destroy synchronously on the failure arm).
-    // Safe as a default member initializer: every asio_tls_transport ctor is
-    // already throwing ([arch §5.3] carve-out) and one already does a
-    // make_shared (ssl_ctx_ above) inside the same trap_throw boundary.
+    // engine.cpp's `run_accept_loop` open()-failure arm all destroy synchronously on the failure
+    // arm). Safe as a default member initializer: every asio_tls_transport ctor is already throwing
+    // ([arch §5.3] carve-out) and one already does a make_shared (ssl_ctx_ above) inside the same
+    // trap_throw boundary.
     std::shared_ptr<timer_epoch_state> timer_epochs_{std::make_shared<timer_epoch_state>()};
 
     // ── close_async fault seam (#360) ───────────────────────────────────────
@@ -424,7 +424,7 @@ private:
     // handshake bound to socket_. ⚠️ "which is thread-safe" was struck
     // 2026-08-31 (#333): asio's basic_stream_socket @par Thread Safety block
     // says "Shared objects: Unsafe" and carves out only specific SYNCHRONOUS
-// ⚠️ THE ENTRY RESET IS NOT UNIFORM — see the CANCELLATION
+    // ⚠️ THE ENTRY RESET IS NOT UNIFORM — see the CANCELLATION
     // TIMING block in transport.hpp, which is the canonical statement.
     // This comment used to say every public coroutine opens with
     // reset_cancellation_state(enable_total_cancellation()) (D-17). That
@@ -432,8 +432,8 @@ private:
     // installs disable_cancellation{}, and connect/handshake/read/write
     // install the TWO-argument form whose OUT filter maps any accepted
     // cancellation to `terminal` for the composed child op. Derive the
-    // shape from what each method AWAITS; do not assume it from here. No per-transport cancellation_signal
-    // is held — the socket itself is the cancel sink.
+    // shape from what each method AWAITS; do not assume it from here. No per-transport
+    // cancellation_signal is held — the socket itself is the cancel sink.
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

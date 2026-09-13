@@ -253,8 +253,8 @@ TEST(DrainImmediateDestroyAfterReap, RepeatedDestroyIsClean) {
         f.get();
         ASSERT_TRUE(drain_ok) << "Rep " << rep << " drain failed";
         ASSERT_EQ(completed_at_drain_return, N)
-            << "Rep " << rep << ": completed_at_drain_return should be " << N
-            << " but was " << completed_at_drain_return;
+            << "Rep " << rep << ": completed_at_drain_return should be " << N << " but was "
+            << completed_at_drain_return;
     }
 }
 

@@ -85,29 +85,30 @@ fixpp::dict::Dictionary load_tiny_dict(std::pmr::memory_resource* mr) {
 // Mirrors real dicts (e.g. FIX44 NoPartyIDs(453): delimiter PartyID(448) but
 // lowest member PartyIDSource(447)).
 fixpp::dict::Dictionary load_group_dict(std::pmr::memory_resource* mr) {
-    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-                                      R"(<fields>)"
-                                      R"(<field number='8'  name='BeginString' type='STRING'/>)"
-                                      R"(<field number='9'  name='BodyLength'  type='LENGTH'/>)"
-                                      R"(<field number='10' name='CheckSum'    type='STRING'/>)"
-                                      R"(<field number='35' name='MsgType'     type='STRING'/>)"
-                                      R"(<field number='100' name='NoThings'   type='NUMINGROUP'/>)"
-                                      R"(<field number='150' name='ThingB'     type='INT'/>)"
-                                      R"(<field number='200' name='ThingA'     type='STRING'/>)"
-                                      R"(</fields>)"
-                                      R"(<messages>)"
-                                      R"(<message name='Things' msgtype='U' msgcat='app'>)"
-                                      R"(  <field name='BeginString'   required='N'/>)"
-                                      R"(  <field name='BodyLength'    required='N'/>)"
-                                      R"(  <field name='CheckSum'      required='N'/>)"
-                                      R"(  <field name='MsgType' required='N'/>)"
-                                      R"(  <group name='NoThings' required='N'>)"
-                                      R"(    <field name='ThingA' required='N'/>)"  // 200 = delimiter
-                                      R"(    <field name='ThingB' required='N'/>)"  // 150
-                                      R"(  </group>)"
-                                      R"(</message>)"
-                                      R"(</messages>)"
-                                      R"(</fix>)";
+    constexpr std::string_view kXml =
+        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+        R"(<fields>)"
+        R"(<field number='8'  name='BeginString' type='STRING'/>)"
+        R"(<field number='9'  name='BodyLength'  type='LENGTH'/>)"
+        R"(<field number='10' name='CheckSum'    type='STRING'/>)"
+        R"(<field number='35' name='MsgType'     type='STRING'/>)"
+        R"(<field number='100' name='NoThings'   type='NUMINGROUP'/>)"
+        R"(<field number='150' name='ThingB'     type='INT'/>)"
+        R"(<field number='200' name='ThingA'     type='STRING'/>)"
+        R"(</fields>)"
+        R"(<messages>)"
+        R"(<message name='Things' msgtype='U' msgcat='app'>)"
+        R"(  <field name='BeginString'   required='N'/>)"
+        R"(  <field name='BodyLength'    required='N'/>)"
+        R"(  <field name='CheckSum'      required='N'/>)"
+        R"(  <field name='MsgType' required='N'/>)"
+        R"(  <group name='NoThings' required='N'>)"
+        R"(    <field name='ThingA' required='N'/>)"  // 200 = delimiter
+        R"(    <field name='ThingB' required='N'/>)"  // 150
+        R"(  </group>)"
+        R"(</message>)"
+        R"(</messages>)"
+        R"(</fix>)";
     return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
 }
 

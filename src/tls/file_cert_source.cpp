@@ -231,9 +231,9 @@ struct file_cert_source::Impl {
         // leaf_path and private_key_path are MANDATORY for a file_cert_source
         // that supplies local credentials. Accepting empty paths silently and
         // returning a null-handle signer violates data-model E-2 ("default-
-        // construction is NOT permitted") and [2g §4.2]'s "Signer (software-key path)" note (signer must
-        // be software_key_ref{handle = key_, ...} unconditionally on the
-        // success path). F-3 Gate-B/r1 fix.
+        // construction is NOT permitted") and [2g §4.2]'s "Signer (software-key path)" note (signer
+        // must be software_key_ref{handle = key_, ...} unconditionally on the success path). F-3
+        // Gate-B/r1 fix.
         if (c.leaf_path.empty()) {
             throw std::runtime_error("tls_cert_load_failed: leaf_path must not be empty");
         }

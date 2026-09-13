@@ -37,27 +37,26 @@
 #include <thread>
 #include <vector>
 
+#include "capi_internal.hpp"
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
-
-#include "capi_internal.hpp"
-#include "capi_loopback_support.hpp"
-
 #include "fixpp/dict/dictionary.hpp"
 #include "fixpp/dict/xml_loader.hpp"
-
 #include "support/alloc_guard_markers.hpp"
 
 // Wire parser / frame-view: needed for the CloneInboundSuccess test.
-#include <fixpp/wire/parser.hpp>
-#include "support/frame_view_factory.hpp"
 #include <fixpp/dict/table_view.hpp>
+#include <fixpp/wire/parser.hpp>
+
+#include "support/frame_view_factory.hpp"
 
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
 
-// Create an engine with consumer_major=1, consumer_minor=4 (minor 4 = the [1400,1499] block from 051).
+// Create an engine with consumer_major=1, consumer_minor=4 (minor 4 = the [1400,1499] block from
+// 051).
 static fixpp_error_t make_engine(fixpp_engine_t** out) {
     return fixpp_engine_create(make_engine_cfg(), 1, 4, out);
 }
@@ -132,7 +131,7 @@ static constexpr std::string_view kFix42WithNewOrderSingleXml = R"xml(
 // Build a fixpp_session_config using the richer dict (Heartbeat + NewOrderSingle).
 // Endpoint is set separately via set_loopback_endpoint (L-050-5).
 static fixpp_session_config_t* make_session_cfg_app_dict(const char* sender, const char* target,
-                                                          fixpp_session_role role) {
+                                                         fixpp_session_role role) {
     using namespace fixpp::dict;
     // Build the richer dictionary using the same PMR/shared_ptr pattern as
     // make_minimal_dictionary() in tests/support/minimal_dictionary.hpp.
@@ -142,12 +141,11 @@ static fixpp_session_config_t* make_session_cfg_app_dict(const char* sender, con
     Dictionary d = XmlLoader{}.load_from_string(kFix42WithNewOrderSingleXml, mr);
     auto* raw_dict = new Dictionary{std::move(d)};
     auto* raw_buf = buf.release();
-    auto dict_ptr = std::shared_ptr<const Dictionary>{
-        raw_dict, [mr, raw_buf](const Dictionary* p) {
-            delete p;
-            delete mr;
-            delete raw_buf;
-        }};
+    auto dict_ptr = std::shared_ptr<const Dictionary>{raw_dict, [mr, raw_buf](const Dictionary* p) {
+                                                          delete p;
+                                                          delete mr;
+                                                          delete raw_buf;
+                                                      }};
 
     // Build the fixpp_dict handle over our richer dictionary.
     auto* fd = new fixpp_dict{dict_ptr};
@@ -159,8 +157,9 @@ static fixpp_session_config_t* make_session_cfg_app_dict(const char* sender, con
     EXPECT_EQ(fixpp_session_config_set_begin_string(sc, "FIX.4.2"), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_role(sc, role), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(sc, 30), FIXPP_ERR_OK);
-    EXPECT_EQ(fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr,
-                                                nullptr), FIXPP_ERR_OK);
+    EXPECT_EQ(
+        fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr, nullptr),
+        FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_reset_on_logon(sc, role == FIXPP_ROLE_INITIATOR),
               FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_dictionary(sc, dict_handle), FIXPP_ERR_OK);
@@ -172,8 +171,7 @@ static fixpp_session_config_t* make_session_cfg_app_dict(const char* sender, con
 
 // Check that a span of bytes contains the pattern "tag=value\x01" as a
 // contiguous substring (field-boundary-aware check using SOH delimiter).
-static bool span_has_field(const uint8_t* buf, size_t len, uint16_t tag,
-                           std::string_view value) {
+static bool span_has_field(const uint8_t* buf, size_t len, uint16_t tag, std::string_view value) {
     std::string needle = std::to_string(tag) + "=" + std::string(value) + "\x01";
     std::string_view haystack{reinterpret_cast<const char*>(buf), len};
     return haystack.find(needle) != std::string_view::npos;
@@ -289,8 +287,7 @@ static bool setup_loopback_pair(LoopbackPair& pair) {
 
     // initiator session connecting to acceptor
     {
-        fixpp_session_config_t* sc =
-            make_session_cfg("FIXCLI", "FIXSRV", FIXPP_ROLE_INITIATOR);
+        fixpp_session_config_t* sc = make_session_cfg("FIXCLI", "FIXSRV", FIXPP_ROLE_INITIATOR);
         set_loopback_endpoint(sc, "127.0.0.1", port);
         if (fixpp_session_open(pair.initiator_engine, sc, &pair.initiator_session) != FIXPP_ERR_OK)
             return false;
@@ -361,8 +358,7 @@ TEST(MessageWrite, SetFramingTagForbidden) {
     for (uint16_t t : framing_tags) {
         EXPECT_EQ(fixpp_msg_set_string(msg, t, "v", 1), FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN)
             << "tag " << t;
-        EXPECT_EQ(fixpp_msg_set_int(msg, t, 1), FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN)
-            << "tag " << t;
+        EXPECT_EQ(fixpp_msg_set_int(msg, t, 1), FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN) << "tag " << t;
         EXPECT_EQ(fixpp_msg_set_double(msg, t, 1.0), FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN)
             << "tag " << t;
         fixpp_decimal_t d{};
@@ -424,8 +420,7 @@ TEST(MessageWrite, SetTagAbsentFromDictReturnsConfigError) {
 TEST(MessageWrite, SetterTypeMismatchNegativeAndPositive) {
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(make_engine(&eng), FIXPP_ERR_OK);
-    fixpp_session_config_t* sc =
-        make_session_cfg_app_dict("FIXSRV", "FIXCLI", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* sc = make_session_cfg_app_dict("FIXSRV", "FIXCLI", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(sc, "127.0.0.1", 0);
     fixpp_session_t* sess = nullptr;
     ASSERT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
@@ -451,8 +446,7 @@ TEST(MessageWrite, SetterTypeMismatchNegativeAndPositive) {
         << "set_decimal on INT (integer-category) field must return TYPE_MISMATCH";
 
     // Positive: set_int on tag 68 (TotNoOrders, INT) → OK.
-    EXPECT_EQ(fixpp_msg_set_int(msg, 68, 5), FIXPP_ERR_OK)
-        << "set_int on INT field must return OK";
+    EXPECT_EQ(fixpp_msg_set_int(msg, 68, 5), FIXPP_ERR_OK) << "set_int on INT field must return OK";
 
     // Positive: set_double on tag 38 (OrderQty, QTY → float) → OK.
     EXPECT_EQ(fixpp_msg_set_double(msg, 38, 2.5), FIXPP_ERR_OK)
@@ -631,14 +625,11 @@ TEST(MessageWrite, CreateOutboundNullGuards) {
 // deep-copies the payload at entry — the committed span is safe to destroy after send).
 TEST(MessageWrite, CommitSendImmediateDestroyNoUAF) {
     LoopbackPair pair;
-    ASSERT_TRUE(setup_loopback_pair(pair))
-        << "loopback pair setup failed";
+    ASSERT_TRUE(setup_loopback_pair(pair)) << "loopback pair setup failed";
 
     // Create outbound msg on the initiator session
     fixpp_msg_t* msg = nullptr;
-    ASSERT_EQ(
-        fixpp_msg_create_outbound(pair.initiator_session, "0", 1, &msg),
-        FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_create_outbound(pair.initiator_session, "0", 1, &msg), FIXPP_ERR_OK);
     ASSERT_NE(msg, nullptr);
 
     ASSERT_EQ(fixpp_msg_set_string(msg, 112, "ASAN_SEAM", 9), FIXPP_ERR_OK);
@@ -829,9 +820,9 @@ TEST(MessageWrite, SetDoubleFixedNotationAndFailClosed) {
         const char* expect;  // exact fixed-notation field value
     };
     // 1e10 → "1e+10" under %g; 0.00001 → "1e-05" under %g. Both must be plain fixed.
-    for (const Case& c : {Case{1e10, "10000000000"}, Case{0.00001, "0.00001"},
-                          Case{-1234.5, "-1234.5"}, Case{2.5, "2.5"},
-                          Case{-0.0, "0"}}) {  // -0.0 canonicalised to "0", not "-0"
+    for (const Case& c :
+         {Case{1e10, "10000000000"}, Case{0.00001, "0.00001"}, Case{-1234.5, "-1234.5"},
+          Case{2.5, "2.5"}, Case{-0.0, "0"}}) {  // -0.0 canonicalised to "0", not "-0"
         fixpp_msg_t* msg = nullptr;
         ASSERT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
         ASSERT_EQ(fixpp_msg_set_double(msg, 38, c.value), FIXPP_ERR_OK) << c.expect;
@@ -842,7 +833,8 @@ TEST(MessageWrite, SetDoubleFixedNotationAndFailClosed) {
             << "set_double(" << c.value << ") must serialise as fixed '" << c.expect << "'";
         // No scientific-notation escape anywhere in the field.
         std::string_view hay{reinterpret_cast<const char*>(payload), len};
-        EXPECT_EQ(hay.find("38=1e"), std::string_view::npos) << "must not emit scientific '38=1e...'";
+        EXPECT_EQ(hay.find("38=1e"), std::string_view::npos)
+            << "must not emit scientific '38=1e...'";
         EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
     }
 
@@ -927,21 +919,20 @@ TEST(MessageWrite, SC001_CreateOutboundRoundTripPeerReceivesAppMsg) {
         bool ready = false;
     } slot;
 
-    ASSERT_EQ(
-        fixpp_session_register_callback(
-            acc_sess,
-            [](const fixpp_msg_t* msg, void* ud) {
-                auto* s = static_cast<RecvSlot*>(ud);
-                const char* mt = nullptr;
-                size_t mt_len = 0;
-                fixpp_msg_get_msg_type(msg, &mt, &mt_len);
-                std::unique_lock<std::mutex> lk(s->mu);
-                if (mt && mt_len > 0) s->received_mt.assign(mt, mt_len);
-                s->ready = true;
-                s->cv.notify_one();
-            },
-            &slot),
-        FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_session_register_callback(
+                  acc_sess,
+                  [](const fixpp_msg_t* msg, void* ud) {
+                      auto* s = static_cast<RecvSlot*>(ud);
+                      const char* mt = nullptr;
+                      size_t mt_len = 0;
+                      fixpp_msg_get_msg_type(msg, &mt, &mt_len);
+                      std::unique_lock<std::mutex> lk(s->mu);
+                      if (mt && mt_len > 0) s->received_mt.assign(mt, mt_len);
+                      s->ready = true;
+                      s->cv.notify_one();
+                  },
+                  &slot),
+              FIXPP_ERR_OK);
 
     ASSERT_EQ(fixpp_engine_start(acc_eng), FIXPP_ERR_OK);
 
@@ -1017,8 +1008,7 @@ TEST(MessageWrite, SC001_CreateOutboundRoundTripPeerReceivesAppMsg) {
         bool got = slot.cv.wait_for(lk, 4000ms, [&slot] { return slot.ready; });
         EXPECT_TRUE(got) << "acceptor recv callback did not fire for NewOrderSingle 'D'";
         if (got) {
-            EXPECT_EQ(slot.received_mt, "D")
-                << "peer received message must have MsgType 'D'";
+            EXPECT_EQ(slot.received_mt, "D") << "peer received message must have MsgType 'D'";
         }
     }
 
@@ -1060,8 +1050,7 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(make_engine(&eng), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* sc =
-        make_session_cfg_app_dict("FIXSRV", "FIXCLI", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* sc = make_session_cfg_app_dict("FIXSRV", "FIXCLI", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(sc, "127.0.0.1", 0);
     fixpp_session_t* sess = nullptr;
     ASSERT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
@@ -1077,17 +1066,17 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
         ASSERT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &warmup), FIXPP_ERR_OK);
         ASSERT_NE(warmup, nullptr);
 
-        (void)fixpp_msg_set_string(warmup, 11, "WU_STR", 6);   // STRING field
+        (void)fixpp_msg_set_string(warmup, 11, "WU_STR", 6);  // STRING field
         const uint8_t wu_bytes[] = {'W', 'U'};
-        (void)fixpp_msg_set_bytes(warmup, 58, wu_bytes, sizeof(wu_bytes)); // type-agnostic
-        (void)fixpp_msg_set_int(warmup, 68, 999);               // INT field (TotNoOrders)
-        (void)fixpp_msg_set_double(warmup, 38, 1.5);            // Float (QTY) field
+        (void)fixpp_msg_set_bytes(warmup, 58, wu_bytes, sizeof(wu_bytes));  // type-agnostic
+        (void)fixpp_msg_set_int(warmup, 68, 999);     // INT field (TotNoOrders)
+        (void)fixpp_msg_set_double(warmup, 38, 1.5);  // Float (QTY) field
         fixpp_decimal_t wu_dec{};
         wu_dec.mantissa = 250;
         wu_dec.exponent = -2;
         (void)fixpp_msg_set_decimal(warmup, 38, wu_dec);        // Float (QTY) field
         (void)fixpp_msg_remove_tag(warmup, 55);                 // PMR-vector erase warm-up
-        (void)fixpp_msg_set_string(warmup, 55, "WU_RESTR", 8); // re-set after remove
+        (void)fixpp_msg_set_string(warmup, 55, "WU_RESTR", 8);  // re-set after remove
 
         const uint8_t* wup = nullptr;
         size_t wul = 0;
@@ -1115,16 +1104,16 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     // set_int: tag 68 (TotNoOrders, INT) — integer-category field.
     // remove_tag: remove tag 11 after setting it (idempotent erase from PMR
     //   vector; no global heap).  Then re-set tag 11 so commit has it.
-    fixpp_error_t rc_str     = FIXPP_ERR_OK;
-    fixpp_error_t rc_bytes   = FIXPP_ERR_OK;
-    fixpp_error_t rc_int     = FIXPP_ERR_OK;
-    fixpp_error_t rc_dbl     = FIXPP_ERR_OK;
-    fixpp_error_t rc_dec     = FIXPP_ERR_OK;
-    fixpp_error_t rc_remove  = FIXPP_ERR_OK;
-    fixpp_error_t rc_restr   = FIXPP_ERR_OK;  // re-set after remove
-    fixpp_error_t rc_commit  = FIXPP_ERR_OK;
-    const uint8_t* payload   = nullptr;
-    size_t payload_len       = 0;
+    fixpp_error_t rc_str = FIXPP_ERR_OK;
+    fixpp_error_t rc_bytes = FIXPP_ERR_OK;
+    fixpp_error_t rc_int = FIXPP_ERR_OK;
+    fixpp_error_t rc_dbl = FIXPP_ERR_OK;
+    fixpp_error_t rc_dec = FIXPP_ERR_OK;
+    fixpp_error_t rc_remove = FIXPP_ERR_OK;
+    fixpp_error_t rc_restr = FIXPP_ERR_OK;  // re-set after remove
+    fixpp_error_t rc_commit = FIXPP_ERR_OK;
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
     fixpp_decimal_t dec{};
     dec.mantissa = 100;
     dec.exponent = 0;
@@ -1132,26 +1121,26 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
 
     if (alloc_guard_start) alloc_guard_start();
 
-    rc_str    = fixpp_msg_set_string(msg, 11, "GUARD_STR", 9);         // STRING field (ClOrdID)
-    rc_bytes  = fixpp_msg_set_bytes(msg, 58,                           // TEXT field, type-agnostic
-                                    kBytesPayload, sizeof(kBytesPayload));
-    rc_int    = fixpp_msg_set_int(msg, 68, 42);                        // INT field (TotNoOrders)
-    rc_dbl    = fixpp_msg_set_double(msg, 38, 2.5);                    // Float/QTY field
-    rc_dec    = fixpp_msg_set_decimal(msg, 38, dec);                   // Float/QTY (overwrite)
-    rc_remove = fixpp_msg_remove_tag(msg, 11);                         // PMR-vector erase
-    rc_restr  = fixpp_msg_set_string(msg, 11, "GUARD_RESTR", 11);     // re-set after remove
+    rc_str = fixpp_msg_set_string(msg, 11, "GUARD_STR", 9);  // STRING field (ClOrdID)
+    rc_bytes = fixpp_msg_set_bytes(msg, 58,                  // TEXT field, type-agnostic
+                                   kBytesPayload, sizeof(kBytesPayload));
+    rc_int = fixpp_msg_set_int(msg, 68, 42);                      // INT field (TotNoOrders)
+    rc_dbl = fixpp_msg_set_double(msg, 38, 2.5);                  // Float/QTY field
+    rc_dec = fixpp_msg_set_decimal(msg, 38, dec);                 // Float/QTY (overwrite)
+    rc_remove = fixpp_msg_remove_tag(msg, 11);                    // PMR-vector erase
+    rc_restr = fixpp_msg_set_string(msg, 11, "GUARD_RESTR", 11);  // re-set after remove
     rc_commit = fixpp_msg_commit(msg, &payload, &payload_len);
 
     if (alloc_guard_end) alloc_guard_end();  // exits(1) under mallocnesia if any global alloc fired
 
     // ── Assert results AFTER the window ───────────────────────────────────────
-    EXPECT_EQ(rc_str,    FIXPP_ERR_OK) << "set_string(tag 11, STRING field) failed";
-    EXPECT_EQ(rc_bytes,  FIXPP_ERR_OK) << "set_bytes(tag 58, type-agnostic) failed";
-    EXPECT_EQ(rc_int,    FIXPP_ERR_OK) << "set_int(tag 68, INT field) failed";
-    EXPECT_EQ(rc_dbl,    FIXPP_ERR_OK) << "set_double(tag 38, Float/QTY field) failed";
-    EXPECT_EQ(rc_dec,    FIXPP_ERR_OK) << "set_decimal(tag 38, Float/QTY field) failed";
+    EXPECT_EQ(rc_str, FIXPP_ERR_OK) << "set_string(tag 11, STRING field) failed";
+    EXPECT_EQ(rc_bytes, FIXPP_ERR_OK) << "set_bytes(tag 58, type-agnostic) failed";
+    EXPECT_EQ(rc_int, FIXPP_ERR_OK) << "set_int(tag 68, INT field) failed";
+    EXPECT_EQ(rc_dbl, FIXPP_ERR_OK) << "set_double(tag 38, Float/QTY field) failed";
+    EXPECT_EQ(rc_dec, FIXPP_ERR_OK) << "set_decimal(tag 38, Float/QTY field) failed";
     EXPECT_EQ(rc_remove, FIXPP_ERR_OK) << "remove_tag(tag 11) failed";
-    EXPECT_EQ(rc_restr,  FIXPP_ERR_OK) << "re-set_string(tag 11) after remove failed";
+    EXPECT_EQ(rc_restr, FIXPP_ERR_OK) << "re-set_string(tag 11) after remove failed";
     EXPECT_EQ(rc_commit, FIXPP_ERR_OK) << "commit failed";
     EXPECT_NE(payload, nullptr) << "committed payload must not be null";
     EXPECT_GT(payload_len, 0u) << "committed payload must be non-empty";
@@ -1172,8 +1161,7 @@ struct GroupFixture {
     fixpp_msg_t* msg = nullptr;
     GroupFixture() {
         EXPECT_EQ(make_engine(&eng), FIXPP_ERR_OK);
-        fixpp_session_config_t* sc =
-            make_session_cfg_app_dict("CLI", "SRV", FIXPP_ROLE_INITIATOR);
+        fixpp_session_config_t* sc = make_session_cfg_app_dict("CLI", "SRV", FIXPP_ROLE_INITIATOR);
         set_loopback_endpoint(sc, "127.0.0.1", 0);
         EXPECT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
         EXPECT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
@@ -1227,7 +1215,7 @@ TEST(MessageWriteGroup, NestedGroupBuildCommit) {
     const uint8_t* p = nullptr;
     size_t plen = 0;
     ASSERT_EQ(fixpp_msg_commit(f.msg, &p, &plen), FIXPP_ERR_OK);
-    EXPECT_TRUE(span_has_field(p, plen, 78, "1"));   // NoAllocs=1
+    EXPECT_TRUE(span_has_field(p, plen, 78, "1"));  // NoAllocs=1
     EXPECT_TRUE(span_has_field(p, plen, 79, "ACC1"));
     EXPECT_TRUE(span_has_field(p, plen, 539, "1"));  // NoNested=1
     EXPECT_TRUE(span_has_field(p, plen, 524, "NP1"));
@@ -1347,9 +1335,9 @@ TEST(MessageWriteGroup, WellFormedGroupCommitStillPasses) {
     size_t plen = 0;
     EXPECT_EQ(fixpp_msg_commit(f.msg, &p, &plen), FIXPP_ERR_OK)
         << "well-formed group (delimiter-first, non-empty) must commit successfully";
-    EXPECT_TRUE(span_has_field(p, plen, 78, "1"));   // NoAllocs=1
-    EXPECT_TRUE(span_has_field(p, plen, 79, "ACC1")); // AllocAccount
-    EXPECT_TRUE(span_has_field(p, plen, 80, "50"));   // AllocQty
+    EXPECT_TRUE(span_has_field(p, plen, 78, "1"));     // NoAllocs=1
+    EXPECT_TRUE(span_has_field(p, plen, 79, "ACC1"));  // AllocAccount
+    EXPECT_TRUE(span_has_field(p, plen, 80, "50"));    // AllocQty
 }
 
 // ── Coverage gap closers ──────────────────────────────────────────────────────
@@ -1673,19 +1661,19 @@ static std::vector<std::byte> make_raw_frame_for_write_test(std::string const& b
 
 struct InboundHandleForWrite {
     fixpp_msg msg{};
-    const fixpp_msg_t* ptr() const noexcept {
-        return reinterpret_cast<const fixpp_msg_t*>(&msg);
-    }
+    const fixpp_msg_t* ptr() const noexcept { return reinterpret_cast<const fixpp_msg_t*>(&msg); }
 };
 
 }  // anonymous namespace
 
 TEST(MessageWrite, CloneInboundSuccess) {
-    using fixpp::wire::MessageView;
     using fixpp::wire::access_mode;
+    using fixpp::wire::MessageView;
 
     // Build a frame with two known fields: tag 35=D (MsgType), tag 49=SENDERID
-    auto src_buf = make_raw_frame_for_write_test("35=D\x01" "49=SENDERID\x01");
+    auto src_buf = make_raw_frame_for_write_test(
+        "35=D\x01"
+        "49=SENDERID\x01");
     auto fv = fixpp::wire::test::make_frame_view(src_buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;

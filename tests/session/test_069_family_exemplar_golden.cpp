@@ -104,9 +104,8 @@ TEST(FamilyGolden069, TradeCaptureReport_AE) {
     fixpp::v44::groups::G_552_1Args side{};
     side.side = '1';
     side.order_id = "ORDER1";
-    side.party_i_ds =
-        std::optional<std::span<const fixpp::v44::groups::G_453Args>>{
-            std::span<const fixpp::v44::groups::G_453Args>{parties}};
+    side.party_i_ds = std::optional<std::span<const fixpp::v44::groups::G_453Args>>{
+        std::span<const fixpp::v44::groups::G_453Args>{parties}};
     std::array<fixpp::v44::groups::G_552_1Args, 1> sides{side};
 
     fixpp::v44::groups::G_555_3Args leg{};
@@ -172,9 +171,8 @@ TEST(FamilyGolden069, CollateralInquiry_BB) {
     args.account = "ACCT1";
     args.account_type = 1;
     args.coll_inquiry_id = "COLLINQ1";
-    args.coll_inquiry_qualifier =
-        std::optional<std::span<const fixpp::v44::groups::G_938Args>>{
-            std::span<const fixpp::v44::groups::G_938Args>{quals}};
+    args.coll_inquiry_qualifier = std::optional<std::span<const fixpp::v44::groups::G_938Args>>{
+        std::span<const fixpp::v44::groups::G_938Args>{quals}};
 
     std::array<std::byte, 1024> out{};
     auto r = fixpp::v44::build_CollateralInquiry(std::span<std::byte>{out}, args);
@@ -243,9 +241,8 @@ TEST(FamilyGolden069, RegistrationInstructions_O) {
     std::array<fixpp::v44::groups::G_473Args, 1> dtls{dtl};
 
     fixpp::v44::RegistrationInstructionsArgs args{};
-    args.regist_dtls =
-        std::optional<std::span<const fixpp::v44::groups::G_473Args>>{
-            std::span<const fixpp::v44::groups::G_473Args>{dtls}};
+    args.regist_dtls = std::optional<std::span<const fixpp::v44::groups::G_473Args>>{
+        std::span<const fixpp::v44::groups::G_473Args>{dtls}};
     args.regist_ref_id = "REGREF1";
     args.regist_id = "REGID1";
     args.regist_trans_type = '0';

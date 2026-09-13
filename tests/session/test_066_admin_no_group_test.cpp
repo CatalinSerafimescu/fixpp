@@ -54,14 +54,13 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
-#include <string>
-#include <string_view>
-
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/view.hpp>
+#include <string>
+#include <string_view>
 
 #include "support/fix44_group_frame_bodies.hpp"
 #include "support/group_dispatch_fixture.hpp"
@@ -135,12 +134,11 @@ TEST(AdminNoGroupWitness, NoGroupNewOrderSingleDispatchesAndReadsScalarsCorrectl
     bool symbol_ok = false;
     bool side_ok = false;
 
-    f.app->on_from_app =
-        [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
-            cl_ord_id_ok = msg_has_tag_value(msg, 11, "CLORD-NOGRP-1");
-            symbol_ok = msg_has_tag_value(msg, 55, "AAPL");
-            side_ok = msg_has_tag_value(msg, 54, "1");
-        };
+    f.app->on_from_app = [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
+        cl_ord_id_ok = msg_has_tag_value(msg, 11, "CLORD-NOGRP-1");
+        symbol_ok = msg_has_tag_value(msg, 55, "AAPL");
+        side_ok = msg_has_tag_value(msg, 54, "1");
+    };
 
     std::string body =
         "35=D\x01"
@@ -180,11 +178,10 @@ TEST(AdminNoGroupWitness, GroupBearingMessageWithUnreadGroupDispatchesLikeNoGrou
     f.open_to_active(sess);
 
     bool order_id_ok = false;
-    f.app->on_from_app =
-        [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
-            // Deliberately reads ONLY a scalar field — never NoLegs(555).
-            order_id_ok = msg_has_tag_value(msg, 37, "ORDID-1");
-        };
+    f.app->on_from_app = [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
+        // Deliberately reads ONLY a scalar field — never NoLegs(555).
+        order_id_ok = msg_has_tag_value(msg, 37, "ORDID-1");
+    };
 
     auto suffix = fixpp_test_support::execution_report_two_legs_trailing_suffix();
     auto frame = fixpp_test_support::make_execution_report_frame(suffix, /*seq=*/2, "TW", "ISLD");

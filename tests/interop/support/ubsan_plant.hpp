@@ -31,9 +31,9 @@ namespace fixpp::interop::support {
 // performs a signed integer overflow, which UBSan's signed-integer-overflow
 // check reports as "runtime error: signed integer overflow ...". No-op
 // unless FIXPP_INTEROP_UBSAN_PLANT is set to a non-empty value.
-inline void maybe_run_ubsan_plant()
-{
-    char const* v = std::getenv("FIXPP_INTEROP_UBSAN_PLANT");  // NOLINT(concurrency-mt-unsafe) -- single-threaded test setup
+inline void maybe_run_ubsan_plant() {
+    char const* v = std::getenv("FIXPP_INTEROP_UBSAN_PLANT");  // NOLINT(concurrency-mt-unsafe) --
+                                                               // single-threaded test setup
     if (v == nullptr || v[0] == '\0') {
         return;
     }

@@ -241,8 +241,8 @@ TEST(FileCertSourceFactory, SuccessLoadsChainDepth8) {
 }
 
 // ── Gate-B/r1 F-3 negative tests + success-path signer assertion ─────────────
-// [2g §4.2]'s "Signer (software-key path)" bullet: file_cert_source::load_credentials returns local_credentials
-// whose signer is software_key_ref{handle = key_, ...} unconditionally on the
+// [2g §4.2]'s "Signer (software-key path)" bullet: file_cert_source::load_credentials returns
+// local_credentials whose signer is software_key_ref{handle = key_, ...} unconditionally on the
 // success path. data-model E-2: "default-construction is NOT permitted" for signer.
 // [2g §6.6] tls_sign_callback_unavailable: null-handle signer is the exact
 // broken state the variant exists to refuse.
@@ -287,9 +287,9 @@ TEST(FileCertSourceFactory, BothPathsEmptySurfacesCertLoadFailed) {
 }
 
 // ── Success path: software_key_ref handle must be non-null ────────────────────
-// Verifies [2g §4.2]'s "Signer (software-key path)" bullet contract: the success path always yields a
-// software_key_ref with a non-null ossl_pkey handle. Previously, empty paths
-// would silently produce a null-handle signer (data-model E-2 violation).
+// Verifies [2g §4.2]'s "Signer (software-key path)" bullet contract: the success path always yields
+// a software_key_ref with a non-null ossl_pkey handle. Previously, empty paths would silently
+// produce a null-handle signer (data-model E-2 violation).
 TEST(FileCertSourceFactory, SuccessPathSignerHandleIsNonNull) {
     file_cert_source::Config cfg;
     cfg.leaf_path = fixture("leaf_rsa2048.pem");
@@ -328,7 +328,8 @@ TEST(FileCertSourceFactory, SuccessPathSignerHandleIsNonNull) {
     ASSERT_TRUE(got_creds) << "load_credentials must succeed and coroutine must complete";
     ASSERT_TRUE(creds_ok) << "load_credentials must return a valid result";
 
-    // [2g §4.2]'s "Signer (software-key path)" bullet: signer MUST be software_key_ref with non-null handle.
+    // [2g §4.2]'s "Signer (software-key path)" bullet: signer MUST be software_key_ref with
+    // non-null handle.
     ASSERT_TRUE(std::holds_alternative<fixpp::tls::software_key_ref>(creds.signer))
         << "Success path signer must be software_key_ref variant (not async_signer_ref)";
     auto const& ref = std::get<fixpp::tls::software_key_ref>(creds.signer);

@@ -74,9 +74,9 @@ namespace {
 
 // Build a Logon(35=A) frame on FIX.4.4 with a caller-chosen EncryptMethod(98).
 static std::vector<std::byte> make_fix44_logon_frame(std::uint32_t msg_seq_num,
-                                                      std::string_view sender_comp_id,
-                                                      std::string_view target_comp_id,
-                                                      int heartbt_int, int encrypt_method) {
+                                                     std::string_view sender_comp_id,
+                                                     std::string_view target_comp_id,
+                                                     int heartbt_int, int encrypt_method) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(msg_seq_num) + "\x01";

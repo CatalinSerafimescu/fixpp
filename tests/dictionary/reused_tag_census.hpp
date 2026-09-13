@@ -18,16 +18,14 @@
 // reachability-restricted structural set (contracts/group-detection.md C1/
 // C2), passed in by the caller. NOT `Dictionary::group_first_field()`: that
 // accessor's backing `groups_` table is populated once per DECLARED
-// `<component>` regardless of message-reachability (`LoaderState::expand_field_list`'s `groups_.push_back`),
-// so in isolation it is the unrestricted *struct* set (confirmed
-// empirically: it disagrees with the oracle on FIX50/FIX50SP1 by exactly
-// {384, 627}, the two declared-but-unreachable groups C2 documents), and it
-// also still carries the not-yet-fixed component-recursion gap on FIX50SP2
-// (differs by {1499, 1669, 1919} until T012b lands) — using it here would
-// launder that pre-existing defect into this census's witness rather than
-// exposing it. The independent oracle keeps this census non-circular per the
-// FR-018/D-6 single-oracle guarantee: it is unaffected by both the T023
-// predicate change AND the T012b loader fix.
+// `<component>` regardless of message-reachability (`LoaderState::expand_field_list`'s
+// `groups_.push_back`), so in isolation it is the unrestricted *struct* set (confirmed empirically:
+// it disagrees with the oracle on FIX50/FIX50SP1 by exactly {384, 627}, the two
+// declared-but-unreachable groups C2 documents), and it also still carries the not-yet-fixed
+// component-recursion gap on FIX50SP2 (differs by {1499, 1669, 1919} until T012b lands) — using it
+// here would launder that pre-existing defect into this census's witness rather than exposing it.
+// The independent oracle keeps this census non-circular per the FR-018/D-6 single-oracle guarantee:
+// it is unaffected by both the T023 predicate change AND the T012b loader fix.
 
 #pragma once
 
@@ -79,7 +77,7 @@ struct DictCensus {
 // test with the independent oracle's reachability-restricted structural set
 // — see the file header for why.
 inline DictCensus census_for(Dictionary const& dict, std::string name,
-                              std::set<std::uint16_t> const& group_tags) {
+                             std::set<std::uint16_t> const& group_tags) {
     DictCensus dc;
     dc.name = std::move(name);
 
@@ -149,7 +147,7 @@ inline DictCensus census_for(Dictionary const& dict, std::string name,
 // Shared so the census and its derived collision guards always enumerate
 // exactly the same dict set.
 inline constexpr std::array<std::string_view, 9> kRuntimeDicts{
-    "FIX40.xml", "FIX41.xml", "FIX42.xml",   "FIX43.xml",    "FIX44.xml",
+    "FIX40.xml", "FIX41.xml",    "FIX42.xml",    "FIX43.xml",  "FIX44.xml",
     "FIX50.xml", "FIX50SP1.xml", "FIX50SP2.xml", "FIXT11.xml",
 };
 

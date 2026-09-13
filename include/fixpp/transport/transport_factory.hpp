@@ -29,10 +29,10 @@
 #include <asio/ip/tcp.hpp>
 #include <atomic>
 #include <cstdint>
-#include <fixpp/core/error.hpp>            // defines core::expected_t<T>
+#include <fixpp/core/error.hpp>                          // defines core::expected_t<T>
 #include <fixpp/core/sync/detail/atomic_shared_ptr.hpp>  // 046 (NFR-017): libc++ fallback primitive
-#include <fixpp/tls/cert_source.hpp>       // for reload_credentials (013 T012)
-#include <fixpp/tls/security_profile.hpp>  // [2g §4.5] SslCtxConfig (LOCKED)
+#include <fixpp/tls/cert_source.hpp>                     // for reload_credentials (013 T012)
+#include <fixpp/tls/security_profile.hpp>                // [2g §4.5] SslCtxConfig (LOCKED)
 #include <fixpp/transport/transport.hpp>
 #include <memory>
 #include <memory_resource>

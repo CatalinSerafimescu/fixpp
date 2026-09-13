@@ -8,4 +8,4 @@ namespace test078_mock {
 
 void build_MsgA(MsgAArgs const& args) { (void)args; }
 
-} // namespace test078_mock
+}  // namespace test078_mock

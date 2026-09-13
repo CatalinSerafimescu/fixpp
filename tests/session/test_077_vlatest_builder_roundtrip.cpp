@@ -53,8 +53,8 @@
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/orchestra_loader.hpp>
-#include <fixpp/vlatest/all.hpp>  // GENERATED (077) -- build_<Msg>/<Msg>Args/groups::G_...Args
 #include <fixpp/vlatest/Messages.hpp>
+#include <fixpp/vlatest/all.hpp>  // GENERATED (077) -- build_<Msg>/<Msg>Args/groups::G_...Args
 #include <memory_resource>
 #include <optional>
 #include <span>
@@ -86,7 +86,7 @@ fixpp::dict::Dictionary load_vlatest(std::pmr::memory_resource* mr) {
 // TU-local scan_slice_for_tag -- duplicated here since this is a standalone
 // executable, not joined to that TU).
 std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> slice,
-                                                    std::uint16_t tag) {
+                                                   std::uint16_t tag) {
     std::string_view sv{reinterpret_cast<char const*>(slice.data()), slice.size()};
     std::size_t pos = 0;
     while (pos < sv.size()) {
@@ -252,9 +252,10 @@ TEST_F(VlatestBuilderRoundtrip077, TradeCaptureReportInstrumentLegsUnderlyings) 
     auto underlying_slices = mv.offsets().group_slices(711);
     ASSERT_EQ(underlying_slices.size(), 1u) << "NoUnderlyings(711) must carry exactly 1 entry";
     std::span<const std::byte> const underlying_entry0{underlying_slices[0].data,
-                                                        underlying_slices[0].len};
+                                                       underlying_slices[0].len};
     auto underlying_symbol = scan_slice_for_tag(underlying_entry0, 311);
-    ASSERT_TRUE(underlying_symbol.has_value()) << "UnderlyingSymbol(311) not found in NoUnderlyings entry";
+    ASSERT_TRUE(underlying_symbol.has_value())
+        << "UnderlyingSymbol(311) not found in NoUnderlyings entry";
     EXPECT_EQ(*underlying_symbol, "AE_underlying_symbol");
     auto underlying_security_id = scan_slice_for_tag(underlying_entry0, 309);
     ASSERT_TRUE(underlying_security_id.has_value())

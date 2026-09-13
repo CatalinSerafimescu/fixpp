@@ -64,10 +64,10 @@ TEST(TopLevelReadRegression, TopLevelNonGroupReadUnchanged) {
     // support (string, char, int, decimal), so a regression shared with the
     // entry-class rewrite would show up here too.
     auto buf = make_raw_frame(
-        "35=D\x01"    // MsgType (string)
-        "34=42\x01"   // MsgSeqNum (int)
+        "35=D\x01"         // MsgType (string)
+        "34=42\x01"        // MsgSeqNum (int)
         "11=CLORD-99\x01"  // ClOrdID (string)
-        "40=2\x01"    // OrdType (char)
+        "40=2\x01"         // OrdType (char)
         "38=150.25\x01");  // OrderQty (decimal)
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());

@@ -17,10 +17,9 @@
 #pragma once
 
 #include <cstdint>
-#include <span>
-
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/group_view.hpp>  // fixpp::wire::group_context
+#include <span>
 
 namespace fixpp_test_support {
 

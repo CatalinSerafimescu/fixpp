@@ -38,8 +38,7 @@
 // These are declared in the fixpp_capi detail namespace (not exported).
 namespace fixpp_capi::detail {
 fixpp_error_t translate(fixpp::core::error e) noexcept;
-fixpp_error_t translate_for_consumer(fixpp_error_t code,
-                                     uint16_t consumer_minor) noexcept;
+fixpp_error_t translate_for_consumer(fixpp_error_t code, uint16_t consumer_minor) noexcept;
 }  // namespace fixpp_capi::detail
 
 using fixpp::core::error;
@@ -54,7 +53,7 @@ namespace {
 
 // FIXPP_CAPI_DATA_DIR is injected by CMake (points to tests/capi/).
 #ifndef FIXPP_CAPI_DATA_DIR
-#  define FIXPP_CAPI_DATA_DIR "."
+#define FIXPP_CAPI_DATA_DIR "."
 #endif
 
 // Build the name→enumerator lookup at compile time via a hand-written
@@ -67,7 +66,7 @@ namespace {
 
 struct EnumEntry {
     std::string_view name;
-    error            value;
+    error value;
 };
 
 // clang-format off
@@ -192,8 +191,7 @@ constexpr std::array kEnumTable{
 };
 // clang-format on
 
-static_assert(kEnumTable.size() == 116u,
-              "E-3-test: enumerator table must have exactly 116 rows");
+static_assert(kEnumTable.size() == 116u, "E-3-test: enumerator table must have exactly 116 rows");
 
 // Build a name→code lookup from the CSV oracle.
 // Format: lines starting with '#' are comments; data lines are "name,FIXPP_ERR_SYMBOL".
@@ -213,7 +211,7 @@ std::unordered_map<std::string, std::string> load_csv() {
         if (comma == std::string::npos) {
             continue;
         }
-        std::string name   = line.substr(0, comma);
+        std::string name = line.substr(0, comma);
         std::string symbol = line.substr(comma + 1);
         result[name] = symbol;
     }
@@ -289,14 +287,12 @@ TEST(CapiError, CorrectnessOracle) {
 
     for (const auto& entry : kEnumTable) {
         auto it = csv.find(std::string(entry.name));
-        ASSERT_NE(it, csv.end())
-            << "Enumerator '" << entry.name << "' not found in CSV";
+        ASSERT_NE(it, csv.end()) << "Enumerator '" << entry.name << "' not found in CSV";
         fixpp_error_t expected = symbol_to_code(it->second);
-        fixpp_error_t actual   = translate(entry.value);
+        fixpp_error_t actual = translate(entry.value);
         EXPECT_EQ(actual, expected)
-            << "translate(" << entry.name << ") returned " << actual
-            << " but CSV oracle says " << expected
-            << " (" << it->second << ")";
+            << "translate(" << entry.name << ") returned " << actual << " but CSV oracle says "
+            << expected << " (" << it->second << ")";
     }
 }
 
@@ -309,35 +305,35 @@ TEST(CapiError, ExplicitUnknownOverrides) {
     EXPECT_EQ(translate(error::out_of_memory), FIXPP_ERR_UNKNOWN);
 
     // session_* (66-77): override + L-049-2 deferral
-    EXPECT_EQ(translate(error::session_invalid_logon),           FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_compid_mismatch),         FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_begin_string_unsupported),FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_seqnum_too_low),          FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_sending_time_accuracy),   FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_invalid_logon), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_compid_mismatch), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_begin_string_unsupported), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_seqnum_too_low), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_sending_time_accuracy), FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::session_msg_type_invalid_for_state), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_logout_timeout),          FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_logout_timeout), FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::session_test_request_unanswered), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_admin_not_supported),     FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_invalid_config),          FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_admin_not_supported), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_invalid_config), FIXPP_ERR_UNKNOWN);
     // session_invalid_state_for_send (77) → now PUBLISHED in 051 (see Published051SessionAppArms).
 
     // session_* (116-121): override + L-049-2 deferral (session_invalid_argument now published)
-    EXPECT_EQ(translate(error::session_seqnum_reset_mismatch),   FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_compid_unauthorized),     FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_testreqid_mismatch),      FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_seqnum_too_high),         FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_unknown_acceptor_session),FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_seqnum_reset_mismatch), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_compid_unauthorized), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_testreqid_mismatch), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_seqnum_too_high), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::session_unknown_acceptor_session), FIXPP_ERR_UNKNOWN);
 
     // log_* (122-126): override — 1000-1099 unpublished in [2i §4.3]
-    EXPECT_EQ(translate(error::log_queue_overflow),    FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::log_sink_open_failed),  FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::log_queue_overflow), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::log_sink_open_failed), FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::log_sink_write_failed), FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::log_sink_flush_failed), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::log_drain_timeout),     FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::log_drain_timeout), FIXPP_ERR_UNKNOWN);
 
     // otel_* (127-128): override — 1010/1011 unpublished
-    EXPECT_EQ(translate(error::otel_export_failed),       FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::otel_provider_init_failed),FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::otel_export_failed), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate(error::otel_provider_init_failed), FIXPP_ERR_UNKNOWN);
 
     // app_* (129-131): PUBLISHED in 051 [2i §4.3] amendment (see Published051SessionAppArms).
 }
@@ -347,11 +343,14 @@ TEST(CapiError, ExplicitUnknownOverrides) {
 // 15 session arms + all log/otel arms stay UNKNOWN above, by design (L-049-2 /
 // L-051-1). Mirrors the csv oracle rows + error_block_test.
 TEST(CapiError, Published051SessionAppArms) {
-    EXPECT_EQ(translate(error::session_invalid_state_for_send), FIXPP_ERR_SESSION_INVALID_STATE);     // 77 -> 1401
-    EXPECT_EQ(translate(error::session_invalid_argument),       FIXPP_ERR_SESSION_INVALID_ARGUMENT);  // 119 -> 1400
-    EXPECT_EQ(translate(error::app_do_not_send),               FIXPP_ERR_APP_DO_NOT_SEND);            // 129 -> 1402
-    EXPECT_EQ(translate(error::app_callback_threw),            FIXPP_ERR_APP_CALLBACK_THREW);         // 130 -> 1403
-    EXPECT_EQ(translate(error::app_payload_malformed),         FIXPP_ERR_APP_PAYLOAD_MALFORMED);      // 131 -> 1404
+    EXPECT_EQ(translate(error::session_invalid_state_for_send),
+              FIXPP_ERR_SESSION_INVALID_STATE);  // 77 -> 1401
+    EXPECT_EQ(translate(error::session_invalid_argument),
+              FIXPP_ERR_SESSION_INVALID_ARGUMENT);                                  // 119 -> 1400
+    EXPECT_EQ(translate(error::app_do_not_send), FIXPP_ERR_APP_DO_NOT_SEND);        // 129 -> 1402
+    EXPECT_EQ(translate(error::app_callback_threw), FIXPP_ERR_APP_CALLBACK_THREW);  // 130 -> 1403
+    EXPECT_EQ(translate(error::app_payload_malformed),
+              FIXPP_ERR_APP_PAYLOAD_MALFORMED);  // 131 -> 1404
 }
 
 // ---------------------------------------------------------------------------
@@ -360,16 +359,16 @@ TEST(CapiError, Published051SessionAppArms) {
 
 TEST(CapiError, CancelledReuseArms) {
     // 10 arms mapped to CANCELLED via "Joins FIXPP_ERR_CANCELLED" prose.
-    EXPECT_EQ(translate(error::sync_lock_aborted),          FIXPP_ERR_CANCELLED);  // slot 43
-    EXPECT_EQ(translate(error::clock_sleeps_cancelled),     FIXPP_ERR_CANCELLED);  // slot 49
-    EXPECT_EQ(translate(error::dispatch_aborted),           FIXPP_ERR_CANCELLED);  // slot 55
-    EXPECT_EQ(translate(error::store_cancelled),            FIXPP_ERR_CANCELLED);  // slot 65
-    EXPECT_EQ(translate(error::tls_load_cancelled),         FIXPP_ERR_CANCELLED);  // slot 93
-    EXPECT_EQ(translate(error::transport_connect_cancelled),FIXPP_ERR_CANCELLED);  // slot 111
-    EXPECT_EQ(translate(error::transport_read_cancelled),   FIXPP_ERR_CANCELLED);  // slot 112
-    EXPECT_EQ(translate(error::transport_write_cancelled),  FIXPP_ERR_CANCELLED);  // slot 113
-    EXPECT_EQ(translate(error::transport_handshake_cancelled), FIXPP_ERR_CANCELLED); // slot 114
-    EXPECT_EQ(translate(error::transport_accept_cancelled), FIXPP_ERR_CANCELLED);  // slot 115
+    EXPECT_EQ(translate(error::sync_lock_aborted), FIXPP_ERR_CANCELLED);              // slot 43
+    EXPECT_EQ(translate(error::clock_sleeps_cancelled), FIXPP_ERR_CANCELLED);         // slot 49
+    EXPECT_EQ(translate(error::dispatch_aborted), FIXPP_ERR_CANCELLED);               // slot 55
+    EXPECT_EQ(translate(error::store_cancelled), FIXPP_ERR_CANCELLED);                // slot 65
+    EXPECT_EQ(translate(error::tls_load_cancelled), FIXPP_ERR_CANCELLED);             // slot 93
+    EXPECT_EQ(translate(error::transport_connect_cancelled), FIXPP_ERR_CANCELLED);    // slot 111
+    EXPECT_EQ(translate(error::transport_read_cancelled), FIXPP_ERR_CANCELLED);       // slot 112
+    EXPECT_EQ(translate(error::transport_write_cancelled), FIXPP_ERR_CANCELLED);      // slot 113
+    EXPECT_EQ(translate(error::transport_handshake_cancelled), FIXPP_ERR_CANCELLED);  // slot 114
+    EXPECT_EQ(translate(error::transport_accept_cancelled), FIXPP_ERR_CANCELLED);     // slot 115
 }
 
 // ---------------------------------------------------------------------------
@@ -378,9 +377,9 @@ TEST(CapiError, CancelledReuseArms) {
 
 TEST(CapiError, WireAmbiguousArms) {
     // 30 wire_frame_too_large → WIRE_LIMIT_EXCEEDED (capacity / DoS-bound)
-    EXPECT_EQ(translate(error::wire_frame_too_large),   FIXPP_ERR_WIRE_LIMIT_EXCEEDED);
+    EXPECT_EQ(translate(error::wire_frame_too_large), FIXPP_ERR_WIRE_LIMIT_EXCEEDED);
     // 37 wire_tag_out_of_range → WIRE_LIMIT_EXCEEDED (capacity / tag number bound)
-    EXPECT_EQ(translate(error::wire_tag_out_of_range),  FIXPP_ERR_WIRE_LIMIT_EXCEEDED);
+    EXPECT_EQ(translate(error::wire_tag_out_of_range), FIXPP_ERR_WIRE_LIMIT_EXCEEDED);
     // 39 wire_header_out_of_order → WIRE_CONFORMANCE (protocol validation)
     EXPECT_EQ(translate(error::wire_header_out_of_order), FIXPP_ERR_WIRE_CONFORMANCE);
 }
@@ -456,13 +455,16 @@ TEST(CapiError, StrerrorNonNull) {
 
 TEST(CapiError, StrerrorUnknownSentinel) {
     // Codes not in E-2: negative, gaps in ranges, reserved-but-not-yet-defined.
-    EXPECT_STREQ(fixpp_strerror(-1),     "unknown error");
-    EXPECT_STREQ(fixpp_strerror(11),     "unknown error");  // gap: 11 undefined (CAPI_CONFIG_INVALID=10; wire starts at 100)
-    EXPECT_STREQ(fixpp_strerror(99),     "unknown error");  // gap: 11-99 undefined
-    EXPECT_STREQ(fixpp_strerror(199),    "unknown error");  // gap: 103-199 undefined
-    EXPECT_STREQ(fixpp_strerror(999),    "unknown error");  // gap: reserved ctrl-plane 900-901 boundary
-    EXPECT_STREQ(fixpp_strerror(1000),   "unknown error");  // reserved log/otel block
-    EXPECT_STREQ(fixpp_strerror(99999),  "unknown error");
+    EXPECT_STREQ(fixpp_strerror(-1), "unknown error");
+    EXPECT_STREQ(
+        fixpp_strerror(11),
+        "unknown error");  // gap: 11 undefined (CAPI_CONFIG_INVALID=10; wire starts at 100)
+    EXPECT_STREQ(fixpp_strerror(99), "unknown error");   // gap: 11-99 undefined
+    EXPECT_STREQ(fixpp_strerror(199), "unknown error");  // gap: 103-199 undefined
+    EXPECT_STREQ(fixpp_strerror(999),
+                 "unknown error");  // gap: reserved ctrl-plane 900-901 boundary
+    EXPECT_STREQ(fixpp_strerror(1000), "unknown error");  // reserved log/otel block
+    EXPECT_STREQ(fixpp_strerror(99999), "unknown error");
 }
 
 // ---------------------------------------------------------------------------
@@ -495,19 +497,22 @@ TEST(CapiError, DowngradeConsumer) {
     constexpr uint16_t kConsumerMinor = 1u;
 
     // Representative codes from each domain block:
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_CANCELLED,           kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_UNKNOWN,             kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_BUFFER_TOO_SMALL,    kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_WIRE_INVALID_FRAME,  kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_DICT_CONFIG,         kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_THREAD_CONFIG,       kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_STORE_RUNTIME,       kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_SYNC_RUNTIME,        kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_TLS_CONFIG,          kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_TRANSPORT_LIFECYCLE, kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_DECIMAL_INVALID,     kConsumerMinor), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_CANCELLED, kConsumerMinor), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_UNKNOWN, kConsumerMinor), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_BUFFER_TOO_SMALL, kConsumerMinor),
+              FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_WIRE_INVALID_FRAME, kConsumerMinor),
+              FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_DICT_CONFIG, kConsumerMinor), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_THREAD_CONFIG, kConsumerMinor), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_STORE_RUNTIME, kConsumerMinor), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_SYNC_RUNTIME, kConsumerMinor), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_TLS_CONFIG, kConsumerMinor), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_TRANSPORT_LIFECYCLE, kConsumerMinor),
+              FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_DECIMAL_INVALID, kConsumerMinor), FIXPP_ERR_UNKNOWN);
     // FIXPP_ERR_OK (introducing_minor=2) → UNKNOWN for consumer_minor=1
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_OK,                  kConsumerMinor), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_OK, kConsumerMinor), FIXPP_ERR_UNKNOWN);
 }
 
 // ---------------------------------------------------------------------------
@@ -518,16 +523,21 @@ TEST(CapiError, DowngradePassthrough) {
     // consumer_minor=2 matches introducing_minor=2 → code passes through unchanged.
     constexpr uint16_t kConsumerMinor = 2u;
 
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_CANCELLED,           kConsumerMinor), FIXPP_ERR_CANCELLED);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_UNKNOWN,             kConsumerMinor), FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_BUFFER_TOO_SMALL,    kConsumerMinor), FIXPP_ERR_BUFFER_TOO_SMALL);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_WIRE_INVALID_FRAME,  kConsumerMinor), FIXPP_ERR_WIRE_INVALID_FRAME);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_DECIMAL_INVALID,     kConsumerMinor), FIXPP_ERR_DECIMAL_INVALID);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_CANCELLED, kConsumerMinor), FIXPP_ERR_CANCELLED);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_UNKNOWN, kConsumerMinor), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_BUFFER_TOO_SMALL, kConsumerMinor),
+              FIXPP_ERR_BUFFER_TOO_SMALL);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_WIRE_INVALID_FRAME, kConsumerMinor),
+              FIXPP_ERR_WIRE_INVALID_FRAME);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_DECIMAL_INVALID, kConsumerMinor),
+              FIXPP_ERR_DECIMAL_INVALID);
 
     // consumer_minor=3 (future; more permissive) → also passthrough.
     constexpr uint16_t kConsumerMinorFuture = 3u;
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_CANCELLED,           kConsumerMinorFuture), FIXPP_ERR_CANCELLED);
-    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_DECIMAL_INVALID,     kConsumerMinorFuture), FIXPP_ERR_DECIMAL_INVALID);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_CANCELLED, kConsumerMinorFuture),
+              FIXPP_ERR_CANCELLED);
+    EXPECT_EQ(translate_for_consumer(FIXPP_ERR_DECIMAL_INVALID, kConsumerMinorFuture),
+              FIXPP_ERR_DECIMAL_INVALID);
 }
 
 // ---------------------------------------------------------------------------
@@ -542,38 +552,38 @@ TEST(CapiError, DowngradePassthrough) {
 // Verify that the E-2 numeric values match what the header defines.
 // If someone accidentally redefined FIXPP_ERR_DECIMAL_INVALID to 10 (old provisional),
 // this would trip here.
-static_assert(FIXPP_ERR_OK                   == 0);
-static_assert(FIXPP_ERR_CANCELLED            == 1);
-static_assert(FIXPP_ERR_UNKNOWN              == 2);
-static_assert(FIXPP_ERR_NULL_HANDLE          == 3);
-static_assert(FIXPP_ERR_INVALID_HANDLE       == 4);
-static_assert(FIXPP_ERR_VERSION_MISMATCH     == 5);
-static_assert(FIXPP_ERR_BUFFER_TOO_SMALL     == 6);
-static_assert(FIXPP_ERR_TYPE_MISMATCH        == 7);
-static_assert(FIXPP_ERR_TAG_NOT_FOUND        == 8);
-static_assert(FIXPP_ERR_INDEX_OUT_OF_RANGE   == 9);
-static_assert(FIXPP_ERR_CAPI_CONFIG_INVALID  == 10);
-static_assert(FIXPP_ERR_WIRE_INVALID_FRAME   == 100);
-static_assert(FIXPP_ERR_WIRE_LIMIT_EXCEEDED  == 101);
-static_assert(FIXPP_ERR_WIRE_CONFORMANCE     == 102);
-static_assert(FIXPP_ERR_DICT_CONFIG          == 200);
-static_assert(FIXPP_ERR_DICT_LIMIT_EXCEEDED  == 201);
-static_assert(FIXPP_ERR_DICT_OOM             == 202);
-static_assert(FIXPP_ERR_THREAD_CONFIG        == 300);
+static_assert(FIXPP_ERR_OK == 0);
+static_assert(FIXPP_ERR_CANCELLED == 1);
+static_assert(FIXPP_ERR_UNKNOWN == 2);
+static_assert(FIXPP_ERR_NULL_HANDLE == 3);
+static_assert(FIXPP_ERR_INVALID_HANDLE == 4);
+static_assert(FIXPP_ERR_VERSION_MISMATCH == 5);
+static_assert(FIXPP_ERR_BUFFER_TOO_SMALL == 6);
+static_assert(FIXPP_ERR_TYPE_MISMATCH == 7);
+static_assert(FIXPP_ERR_TAG_NOT_FOUND == 8);
+static_assert(FIXPP_ERR_INDEX_OUT_OF_RANGE == 9);
+static_assert(FIXPP_ERR_CAPI_CONFIG_INVALID == 10);
+static_assert(FIXPP_ERR_WIRE_INVALID_FRAME == 100);
+static_assert(FIXPP_ERR_WIRE_LIMIT_EXCEEDED == 101);
+static_assert(FIXPP_ERR_WIRE_CONFORMANCE == 102);
+static_assert(FIXPP_ERR_DICT_CONFIG == 200);
+static_assert(FIXPP_ERR_DICT_LIMIT_EXCEEDED == 201);
+static_assert(FIXPP_ERR_DICT_OOM == 202);
+static_assert(FIXPP_ERR_THREAD_CONFIG == 300);
 static_assert(FIXPP_ERR_THREAD_SESSION_LIFECYCLE == 301);
-static_assert(FIXPP_ERR_THREAD_RUNTIME       == 302);
-static_assert(FIXPP_ERR_STORE_RUNTIME        == 400);
-static_assert(FIXPP_ERR_STORE_CONSISTENCY    == 401);
-static_assert(FIXPP_ERR_STORE_CONFIG         == 402);
-static_assert(FIXPP_ERR_STORE_VISITOR        == 403);
-static_assert(FIXPP_ERR_SYNC_RUNTIME         == 500);
-static_assert(FIXPP_ERR_TLS_CONFIG           == 600);
-static_assert(FIXPP_ERR_TLS_HANDSHAKE        == 601);
-static_assert(FIXPP_ERR_TLS_PINSET           == 602);
-static_assert(FIXPP_ERR_TLS_RUNTIME          == 603);
-static_assert(FIXPP_ERR_TRANSPORT_LIFECYCLE  == 700);
-static_assert(FIXPP_ERR_TRANSPORT_IO         == 701);
-static_assert(FIXPP_ERR_TRANSPORT_HANDSHAKE  == 702);
-static_assert(FIXPP_ERR_TRANSPORT_CONFIG     == 703);
-static_assert(FIXPP_ERR_DECIMAL_INVALID      == 800);
+static_assert(FIXPP_ERR_THREAD_RUNTIME == 302);
+static_assert(FIXPP_ERR_STORE_RUNTIME == 400);
+static_assert(FIXPP_ERR_STORE_CONSISTENCY == 401);
+static_assert(FIXPP_ERR_STORE_CONFIG == 402);
+static_assert(FIXPP_ERR_STORE_VISITOR == 403);
+static_assert(FIXPP_ERR_SYNC_RUNTIME == 500);
+static_assert(FIXPP_ERR_TLS_CONFIG == 600);
+static_assert(FIXPP_ERR_TLS_HANDSHAKE == 601);
+static_assert(FIXPP_ERR_TLS_PINSET == 602);
+static_assert(FIXPP_ERR_TLS_RUNTIME == 603);
+static_assert(FIXPP_ERR_TRANSPORT_LIFECYCLE == 700);
+static_assert(FIXPP_ERR_TRANSPORT_IO == 701);
+static_assert(FIXPP_ERR_TRANSPORT_HANDSHAKE == 702);
+static_assert(FIXPP_ERR_TRANSPORT_CONFIG == 703);
+static_assert(FIXPP_ERR_DECIMAL_INVALID == 800);
 static_assert(FIXPP_ERR_DECIMAL_PRECISION_LOSS == 801);

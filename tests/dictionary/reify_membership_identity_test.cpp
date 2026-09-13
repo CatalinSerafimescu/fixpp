@@ -22,16 +22,15 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <fixpp/core/error.hpp>
+#include <fixpp/dict/reify.hpp>
+#include <fixpp/dict/version_profile.hpp>
+#include <fixpp/wire/message_view_contract.hpp>
 #include <memory_resource>
 #include <optional>
 #include <span>
 #include <string>
 #include <vector>
-
-#include <fixpp/core/error.hpp>
-#include <fixpp/dict/reify.hpp>
-#include <fixpp/dict/version_profile.hpp>
-#include <fixpp/wire/message_view_contract.hpp>
 
 #include "support/fix44_dictionary.hpp"
 #include "support/fix44_group_frame_bodies.hpp"
@@ -66,9 +65,9 @@ TEST(ReifyMembershipIdentity, GroupMembershipSurvivesSourceDestruction) {
         fixpp::wire::pmr_carry_buffer carry{frame_bytes.size(), &parse_arena};
         fixpp::wire::Framer framer{};
         fixpp::wire::frame_view fvs[1]{};
-        auto framed = framer.feed(
-            std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()}, carry,
-            std::span<fixpp::wire::frame_view>{fvs, 1});
+        auto framed =
+            framer.feed(std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()}, carry,
+                        std::span<fixpp::wire::frame_view>{fvs, 1});
         ASSERT_TRUE(framed.has_value());
         ASSERT_FALSE(framed->empty());
 
@@ -141,9 +140,9 @@ TEST(ReifyMembershipIdentity, InteriorTruncationSurvivesSourceDestruction) {
         fixpp::wire::pmr_carry_buffer carry{frame_bytes.size(), &parse_arena};
         fixpp::wire::Framer framer{};
         fixpp::wire::frame_view fvs[1]{};
-        auto framed = framer.feed(
-            std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()}, carry,
-            std::span<fixpp::wire::frame_view>{fvs, 1});
+        auto framed =
+            framer.feed(std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()}, carry,
+                        std::span<fixpp::wire::frame_view>{fvs, 1});
         ASSERT_TRUE(framed.has_value());
         ASSERT_FALSE(framed->empty());
 

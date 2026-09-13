@@ -11,21 +11,21 @@
 // and a downstream "still Active" assertion would pass having proven nothing.
 // This is the direct pin for that entry-restart requirement (b1-review.out Q7).
 
+#include "support/interop_fixture.hpp"
+
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
+#include <asio/awaitable.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <atomic>
 #include <chrono>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
-#include <asio/awaitable.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <memory>
 #include <stdexcept>
-
-#include "support/interop_fixture.hpp"
 
 using namespace std::chrono_literals;
 
@@ -41,8 +41,8 @@ TEST(InteropEngineFixtureRunUntil, RevivesContextStoppedAtEntry) {
     std::atomic<bool> posted_work_ran{false};
     asio::post(fx.ioc(), [&] { posted_work_ran.store(true, std::memory_order_release); });
 
-    const bool ready = fx.run_until(
-        [&] { return posted_work_ran.load(std::memory_order_acquire); }, 1s);
+    const bool ready =
+        fx.run_until([&] { return posted_work_ran.load(std::memory_order_acquire); }, 1s);
 
     EXPECT_TRUE(ready) << "run_until must restart a context stopped at entry, "
                           "or posted work is never dispatched within the deadline";
@@ -70,15 +70,16 @@ TEST(InteropEngineFixtureRunUntil, RevivesContextStoppedAtEntry) {
 //   MISS  -> exactly one non-fatal failure naming the bound   (this test)
 //   CLEAN -> no failure at all                                (the test below)
 TEST(InteropEngineFixtureTeardown, BoundedStopMissReportsNamedFailure) {
-    EXPECT_NONFATAL_FAILURE(
-        ([] {
-            // 0 ms teardown bound: stop_within's `while (now < t0 + bound)` body
-            // never executes, so stop() is co_spawned but never pumped and cannot
-            // complete. No hanging session and no wall-clock cost is needed.
-            fixpp::interop::InteropEngineFixture fx{{}, std::chrono::milliseconds{0}};
-            fx.start();
-        }()),
-        "Engine::stop() did not finish");
+    EXPECT_NONFATAL_FAILURE(([] {
+                                // 0 ms teardown bound: stop_within's `while (now < t0 + bound)`
+                                // body never executes, so stop() is co_spawned but never pumped and
+                                // cannot complete. No hanging session and no wall-clock cost is
+                                // needed.
+                                fixpp::interop::InteropEngineFixture fx{
+                                    {}, std::chrono::milliseconds{0}};
+                                fx.start();
+                            }()),
+                            "Engine::stop() did not finish");
 }
 
 // Counter-direction: an engine that stops cleanly must leave the branch silent.
@@ -98,13 +99,13 @@ TEST(InteropEngineFixtureTeardown, BoundedStopMissReportsNamedFailure) {
 TEST(InteropEngineFixtureTeardown, MissPathReleasesTheIoContextInsteadOfDestroyingIt) {
     std::atomic<int> ioc_destructions{0};
 
-    EXPECT_NONFATAL_FAILURE(
-        ([&ioc_destructions] {
-            fixpp::interop::InteropEngineFixture fx{{}, std::chrono::milliseconds{0}};
-            fx.observe_io_context_destruction(&ioc_destructions);
-            fx.start();
-        }()),
-        "Engine::stop() did not finish");
+    EXPECT_NONFATAL_FAILURE(([&ioc_destructions] {
+                                fixpp::interop::InteropEngineFixture fx{
+                                    {}, std::chrono::milliseconds{0}};
+                                fx.observe_io_context_destruction(&ioc_destructions);
+                                fx.start();
+                            }()),
+                            "Engine::stop() did not finish");
 
     EXPECT_EQ(ioc_destructions.load(std::memory_order_relaxed), 0)
         << "~io_context RAN on the teardown-miss path. The Engine is leaked on that path, so "
@@ -140,8 +141,7 @@ TEST(InteropEngineFixtureTeardown, CleanStopReportsNothing) {
     std::weak_ptr<fixpp::core::Clock> weak_clock;
     {
         asio::io_context probe_ioc;
-        auto clock =
-            std::make_shared<fixpp::core::system_clock_source>(probe_ioc.get_executor());
+        auto clock = std::make_shared<fixpp::core::system_clock_source>(probe_ioc.get_executor());
         weak_clock = clock;
         fixpp::core::EngineConfig cfg;
         cfg.clock = clock;
@@ -161,8 +161,7 @@ TEST(InteropEngineFixtureTeardown, CleanStopReportsNothing) {
     fixpp::interop::InteropEngineFixture fx;
     fx.start();
     const auto elapsed = fx.stop_within(std::chrono::seconds{5});
-    EXPECT_LT(elapsed, std::chrono::seconds{5})
-        << "an idle engine must stop well inside the bound";
+    EXPECT_LT(elapsed, std::chrono::seconds{5}) << "an idle engine must stop well inside the bound";
     // stop_completed(), NOT stopped(). stopped() is the predicate this whole
     // change exists to discredit — it is true from step 1 of teardown onward, so
     // asserting it here would leave this counter-direction test green even if
@@ -176,8 +175,8 @@ TEST(InteropEngineFixtureTeardown, CleanStopReportsNothing) {
 //
 // Engine::stop() stores stopped_=true at STEP 1 of its teardown
 // (`Engine::stop()`'s inner Step-1 store) and only then cancels loops, joins them, closes
-// sessions and clears the registry (through `Engine::stop()`'s Step 5 `registry_.clear()`). So there is a real
-// window in which Engine::stopped() reports true while teardown frames are still
+// sessions and clears the registry (through `Engine::stop()`'s Step 5 `registry_.clear()`). So
+// there is a real window in which Engine::stopped() reports true while teardown frames are still
 // suspended in the io_context.
 //
 // A teardown check written against stopped() takes its "safe, nothing to do"
@@ -258,15 +257,14 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
     EXPECT_NONFATAL_FAILURE(
         ([&weak_clock] {
             asio::io_context probe_ioc;
-            auto clock = std::make_shared<fixpp::core::system_clock_source>(
-                probe_ioc.get_executor());
+            auto clock =
+                std::make_shared<fixpp::core::system_clock_source>(probe_ioc.get_executor());
             weak_clock = clock;
 
             fixpp::core::EngineConfig cfg;
             cfg.clock = clock;
 
-            fixpp::interop::InteropEngineFixture fx{std::move(cfg),
-                                                    std::chrono::milliseconds{0}};
+            fixpp::interop::InteropEngineFixture fx{std::move(cfg), std::chrono::milliseconds{0}};
             fx.start();
 
             // Drop the test's own strong reference, so after ~fx the ONLY thing
@@ -290,10 +288,10 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
 //
 // Withdraws two round-1 waivers that both rested on "no test seam exists to make
 // Engine::stop() throw". One does: every interop target compiles with
-// FIXPP_TEST_HOOKS (tests/interop/CMakeLists.txt's per-target compile-definitions call), Engine exposes
-// set_post_send_drain_hook() (its definition in engine.hpp), and stop() co_awaits it
-// (`Engine::stop()`'s `test_hook_post_send_drain_` await) BEFORE step 4 (session close) and step 5 (registry clear).
-// A throwing hook therefore aborts teardown midway — exactly the state to test.
+// FIXPP_TEST_HOOKS (tests/interop/CMakeLists.txt's per-target compile-definitions call), Engine
+// exposes set_post_send_drain_hook() (its definition in engine.hpp), and stop() co_awaits it
+// (`Engine::stop()`'s `test_hook_post_send_drain_` await) BEFORE step 4 (session close) and step 5
+// (registry clear). A throwing hook therefore aborts teardown midway — exactly the state to test.
 //
 // The defect this pins was introduced by the round-1 fix for P1-3. Wrapping the
 // whole destructor in ONE try/catch meant a throw out of stop_within() jumped
@@ -332,8 +330,8 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
     EXPECT_NONFATAL_FAILURE(
         ([&weak_clock, &ioc_destructions] {
             asio::io_context probe_ioc;
-            auto clock = std::make_shared<fixpp::core::system_clock_source>(
-                probe_ioc.get_executor());
+            auto clock =
+                std::make_shared<fixpp::core::system_clock_source>(probe_ioc.get_executor());
             weak_clock = clock;
             fixpp::core::EngineConfig cfg;
             cfg.clock = clock;
@@ -372,9 +370,9 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
 //
 // The reason is an ORDERING, not a guarantee, and the distinction matters enough
 // to write down. Engine::stop() opens with an idempotency guard,
-// `if (stopped_.load(acquire)) co_return;` (`Engine::stop()`'s outer idempotency guard), so a second
-// operation that starts AFTER the first has set the flag returns immediately.
-// But the authoritative store happens in the INNER control-strand body
+// `if (stopped_.load(acquire)) co_return;` (`Engine::stop()`'s outer idempotency guard), so a
+// second operation that starts AFTER the first has set the flag returns immediately. But the
+// authoritative store happens in the INNER control-strand body
 // (`Engine::stop()`'s inner Step-1 store), which does NOT re-check the flag before storing. Two
 // operations that both clear the outer check before either inner body runs would
 // therefore BOTH execute a full teardown. The measured single entry reflects the
@@ -410,41 +408,41 @@ TEST(InteropEngineFixtureTeardown, ExactlyOneTeardownBodyRunsAndItsFailureIsNotM
     std::atomic<int> hook_entries{0};
 
     EXPECT_NONFATAL_FAILURE(
-        ([&hook_entries] {
-            fixpp::interop::InteropEngineFixture fx;
-            fx.start();
-            fx.engine().set_post_send_drain_hook(
-                [&hook_entries]() -> asio::awaitable<void> {
+        (
+            [&hook_entries] {
+                fixpp::interop::InteropEngineFixture fx;
+                fx.start();
+                fx.engine().set_post_send_drain_hook([&hook_entries]() -> asio::awaitable<void> {
                     hook_entries.fetch_add(1, std::memory_order_relaxed);
                     throw std::runtime_error("post-send-drain hook throws (gate-b/r3 P1-2)");
                     co_return;
                 });
 
-            // Spawn operation #1 and drive it far enough to reach the throwing
-            // hook, so its future is ready-with-exception rather than pending.
-            (void)fx.stop_within(std::chrono::milliseconds{0});
-            fx.ioc().restart();
-            fx.ioc().run_for(std::chrono::seconds{2});
+                // Spawn operation #1 and drive it far enough to reach the throwing
+                // hook, so its future is ready-with-exception rather than pending.
+                (void)fx.stop_within(std::chrono::milliseconds{0});
+                fx.ioc().restart();
+                fx.ioc().run_for(std::chrono::seconds{2});
 
-            // The second call must observe THAT operation and rethrow. A freshly
-            // spawned stop() would return normally (stopped_ is already true) and
-            // silently mask the first one's failure.
-            bool rethrew = false;
-            try {
-                (void)fx.stop_within(std::chrono::seconds{5});
-            } catch (const std::runtime_error&) {
-                rethrew = true;
-            }
-            EXPECT_TRUE(rethrew)
-                << "the second stop_within() did not rethrow the in-flight "
-                   "operation's exception. The mutation this test was written "
-                   "against is a lost spawn-once guard, which masks the first "
-                   "operation by co_spawning a fresh stop() that returns normally. "
-                   "This assertion observes only that the expected exception did "
-                   "not surface — other changes could suppress or alter it without "
-                   "respawning, so read it as 'the failure was masked', not as a "
-                   "unique diagnosis (gate-b/r6 P2-3).";
-        }()),
+                // The second call must observe THAT operation and rethrow. A freshly
+                // spawned stop() would return normally (stopped_ is already true) and
+                // silently mask the first one's failure.
+                bool rethrew = false;
+                try {
+                    (void)fx.stop_within(std::chrono::seconds{5});
+                } catch (const std::runtime_error&) {
+                    rethrew = true;
+                }
+                EXPECT_TRUE(rethrew)
+                    << "the second stop_within() did not rethrow the in-flight "
+                       "operation's exception. The mutation this test was written "
+                       "against is a lost spawn-once guard, which masks the first "
+                       "operation by co_spawning a fresh stop() that returns normally. "
+                       "This assertion observes only that the expected exception did "
+                       "not surface — other changes could suppress or alter it without "
+                       "respawning, so read it as 'the failure was masked', not as a "
+                       "unique diagnosis (gate-b/r6 P2-3).";
+            }()),
         "Engine::stop() did not finish");
 
     EXPECT_EQ(hook_entries.load(std::memory_order_relaxed), 1)

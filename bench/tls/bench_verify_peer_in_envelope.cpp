@@ -14,13 +14,12 @@
 // environments may show higher variance; the test label "bench" allows the CI
 // matrix to skip or note-only.
 
-#include <fixpp/tls/security_profile.hpp>
-
 #include <benchmark/benchmark.h>
 
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <fixpp/tls/security_profile.hpp>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -33,20 +32,19 @@ using fixpp::core::error;
 namespace {
 
 class bench_cs final : public cert_source {
- public:
-    asio::awaitable<fixpp::core::expected_t<local_credentials>>
-    load_credentials() override {
-        co_return fixpp::core::expected_t<local_credentials>{
-            std::unexpect, error::tls_load_cancelled};
+public:
+    asio::awaitable<fixpp::core::expected_t<local_credentials>> load_credentials() override {
+        co_return fixpp::core::expected_t<local_credentials>{std::unexpect,
+                                                             error::tls_load_cancelled};
     }
-    fixpp::core::expected_t<std::span<const Certificate>>
-    load_trust_anchors() [[clang::lifetimebound]] override {
+    fixpp::core::expected_t<std::span<const Certificate>> load_trust_anchors()
+        [[clang::lifetimebound]] override {
         return std::span<const Certificate>{};
     }
 };
 
 class bench_clock final : public fixpp::core::Clock {
- public:
+public:
     explicit bench_clock(std::chrono::system_clock::time_point t) : t_{t} {}
     fixpp::core::utc_time_point now() const noexcept override { return t_; }
     fixpp::core::steady_time_point steady_now() const noexcept override {
@@ -54,32 +52,33 @@ class bench_clock final : public fixpp::core::Clock {
     }
     asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override { co_return; }
     void cancel_sleeps() noexcept override {}
- private:
+
+private:
     std::chrono::system_clock::time_point t_;
 };
 
 // Static DER buffers (shared across benchmarks; within-cap sizes).
-static std::array<std::byte, 512>  g_small_der{};
+static std::array<std::byte, 512> g_small_der{};
 static std::array<std::byte, 16385> g_big_der{};  // 16 KiB + 1 → DER-too-large
 
 SslCtxConfig make_mtls_ca_cfg() {
     auto now = std::chrono::system_clock::now();
     SslCtxConfig cfg;
     cfg.profile = SecurityProfile::mtls_ca;
-    cfg.cs      = std::make_shared<bench_cs>();
-    cfg.clock   = std::make_shared<bench_clock>(now);
+    cfg.cs = std::make_shared<bench_cs>();
+    cfg.clock = std::make_shared<bench_clock>(now);
     return cfg;
 }
 
 Certificate make_valid_ecdsa_p256() {
     auto now = std::chrono::system_clock::now();
     Certificate c{};
-    c.raw_der_      = std::span<const std::byte>{g_small_der};
-    c.alg_          = signature_algorithm::ecdsa;
-    c.curve_        = ecdsa_curve::p256;
+    c.raw_der_ = std::span<const std::byte>{g_small_der};
+    c.alg_ = signature_algorithm::ecdsa;
+    c.curve_ = ecdsa_curve::p256;
     c.x509_version_ = 3;
-    c.not_before_   = now - std::chrono::hours{24};
-    c.not_after_    = now + std::chrono::hours{24};
+    c.not_before_ = now - std::chrono::hours{24};
+    c.not_after_ = now + std::chrono::hours{24};
     return c;
 }
 
@@ -88,7 +87,7 @@ Certificate make_valid_ecdsa_p256() {
 // ── BM: in-envelope chain — depth 1, ECDSA-P256, 0 SANs ─────────────────────
 
 static void BM_VerifyPeer_ValidEcdsaP256(benchmark::State& state) {
-    auto cfg  = make_mtls_ca_cfg();
+    auto cfg = make_mtls_ca_cfg();
     auto cert = make_valid_ecdsa_p256();
     std::span<const Certificate> chain{&cert, 1};
 
@@ -147,7 +146,7 @@ static void BM_VerifyPeer_SanTooMany(benchmark::State& state) {
     auto cert = make_valid_ecdsa_p256();
 
     // 65 SAN entries — exceeds cap of 64.
-    static const std::array<std::string_view, 65> sans = [](){
+    static const std::array<std::string_view, 65> sans = []() {
         std::array<std::string_view, 65> a{};
         for (auto& s : a) s = "example.com";
         return a;
@@ -169,8 +168,8 @@ BENCHMARK(BM_VerifyPeer_SanTooMany)->Unit(benchmark::kMicrosecond);
 static void BM_VerifyPeer_RsaTooLarge(benchmark::State& state) {
     auto cfg = make_mtls_ca_cfg();
     auto cert = make_valid_ecdsa_p256();
-    cert.alg_          = signature_algorithm::rsa_pss;
-    cert.rsa_key_bits_  = 16384;  // above default cap 8192
+    cert.alg_ = signature_algorithm::rsa_pss;
+    cert.rsa_key_bits_ = 16384;  // above default cap 8192
 
     std::span<const Certificate> chain{&cert, 1};
     for (auto _ : state) {

@@ -19,7 +19,7 @@
 #include <memory_resource>
 #include <string_view>
 
-#include "fixpp/core/error.hpp"  // error enum + expected_t<T>
+#include "fixpp/core/error.hpp"                 // error enum + expected_t<T>
 #include "fixpp/session/logon_credentials.hpp"  // logon_credentials — T021/033 US2
 #include "fixpp/tls/peer_identity.hpp"
 

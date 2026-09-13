@@ -423,8 +423,7 @@ TEST(StoreShutdownOrdering, FileStoreOffloadDrainBeforePoolJoin) {
                 FileStoreFactory factory{cfg};
                 auto ms = factory.make("SENDER", "TARGET", nullptr, 1024 * 1024, nullptr);
                 if (!ms) co_return nullptr;
-                co_return std::shared_ptr<FileStore>(
-                    static_cast<FileStore*>(ms->release()));
+                co_return std::shared_ptr<FileStore>(static_cast<FileStore*>(ms->release()));
             },
             asio::use_future);
         ASSERT_EQ(fut.wait_for(std::chrono::seconds(10)), std::future_status::ready)
@@ -442,9 +441,9 @@ TEST(StoreShutdownOrdering, FileStoreOffloadDrainBeforePoolJoin) {
             [s = store]() -> asio::awaitable<void> {
                 for (int i = 1; i <= 3; ++i) {
                     auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                    auto r = co_await s->store(static_cast<seqnum_t>(i),
-                                               std::span<const std::byte>(frame),
-                                               direction_t::outbound);
+                    auto r =
+                        co_await s->store(static_cast<seqnum_t>(i),
+                                          std::span<const std::byte>(frame), direction_t::outbound);
                     EXPECT_TRUE(r.has_value()) << "store seq=" << i << " failed";
                 }
             },
@@ -539,8 +538,7 @@ TEST(StoreShutdownOrdering, FileStoreFlushForCloseIsGenuineOffload) {
                 FileStoreFactory factory{cfg};
                 auto ms = factory.make("SENDER", "TARGET", nullptr, 1024 * 1024, nullptr);
                 if (!ms) co_return false;
-                auto store = std::shared_ptr<FileStore>(
-                    static_cast<FileStore*>(ms->release()));
+                auto store = std::shared_ptr<FileStore>(static_cast<FileStore*>(ms->release()));
 
                 for (int i = 1; i <= 5; ++i) {
                     auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
@@ -574,8 +572,7 @@ TEST(StoreShutdownOrdering, FileStoreFlushForCloseIsGenuineOffload) {
                 FileStoreFactory factory2{cfg};
                 auto ms2 = factory2.make("SENDER", "TARGET", nullptr, 1024 * 1024, nullptr);
                 if (!ms2) co_return seqnum_t{0};
-                auto store2 = std::shared_ptr<FileStore>(
-                    static_cast<FileStore*>(ms2->release()));
+                auto store2 = std::shared_ptr<FileStore>(static_cast<FileStore*>(ms2->release()));
                 auto r = co_await store2->next_seqnum(direction_t::outbound, /*increment=*/false);
                 co_return r.has_value() ? *r : seqnum_t{0};
             },

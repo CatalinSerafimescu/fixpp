@@ -20,12 +20,11 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <string>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/transport/reconnect_policy.hpp>
+#include <string>
 
 #include "hp_support.hpp"
 
@@ -59,8 +58,8 @@ TEST_P(HappyDisconnectReconnectNoReset, ReconnectPreservesSequenceContinuity) {
         << "cell endpoint unresolved (parent harness did not lease a port)";
 
     fixpp::interop::InteropEngineFixture fx;
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     auto policy = fixpp::transport::ReconnectPolicy::defaults_quickfix_compat(nullptr);
     policy.max_attempts = 5;
     cfg.reconnect_policy = policy;
@@ -73,8 +72,7 @@ TEST_P(HappyDisconnectReconnectNoReset, ReconnectPreservesSequenceContinuity) {
 
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active (logon) against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active (logon) against " << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
     auto s = fx.engine().lookup(id);
@@ -86,9 +84,8 @@ TEST_P(HappyDisconnectReconnectNoReset, ReconnectPreservesSequenceContinuity) {
     // ResetSeqNumFlag=N, continuity of sequence numbers, and no spurious reset
     // from the proxy capture and golden diff.
     const auto elapsed = fx.stop_within(kStopWatchdog);
-    EXPECT_LT(elapsed, kStopWatchdog)
-        << "Engine::stop() (graceful Logout) took " << elapsed.count()
-        << " ms (watchdog " << kStopWatchdog.count() << " ms)";
+    EXPECT_LT(elapsed, kStopWatchdog) << "Engine::stop() (graceful Logout) took " << elapsed.count()
+                                      << " ms (watchdog " << kStopWatchdog.count() << " ms)";
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
@@ -96,9 +93,8 @@ std::string cell_name(const ::testing::TestParamInfo<Counterparty>& info) {
     return (info.param == Counterparty::quickfix_cpp) ? "QFcpp_init" : "QFj_init";
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Fix44, HappyDisconnectReconnectNoReset,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    cell_name);
+INSTANTIATE_TEST_SUITE_P(Fix44, HappyDisconnectReconnectNoReset,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         cell_name);
 
 }  // namespace

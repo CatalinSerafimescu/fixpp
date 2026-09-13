@@ -56,19 +56,19 @@
 
 #include <gtest/gtest.h>
 
-#include "support/temp_dir.hpp"  // fixpp::test_support::remove_temp_dir (#404)
-#include "logger_owner_release.hpp"  // fixpp::config_test::release_log_owners
-
 #include <asio/io_context.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
-#include <fixpp/log/file_sink.hpp>      // FileSink — white-box OTLP order test
+#include <fixpp/log/file_sink.hpp>  // FileSink — white-box OTLP order test
 #include <fixpp/log/logger.hpp>
-#include <fixpp/log/syslog_sink.hpp>    // SyslogSink + FIXPP_HAS_SYSLOG (facility cell)
+#include <fixpp/log/syslog_sink.hpp>  // SyslogSink + FIXPP_HAS_SYSLOG (facility cell)
 #include <fstream>
 #include <string>
+
+#include "logger_owner_release.hpp"  // fixpp::config_test::release_log_owners
+#include "support/temp_dir.hpp"      // fixpp::test_support::remove_temp_dir (#404)
 
 // White-box OTLP sink count+order test: call detail::resolve_engine_logger
 // directly to inspect pending sinks before construct_loggers_if_clean runs.
@@ -120,7 +120,6 @@ std::filesystem::path fixture_dir() {
     return std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}};
 }
 
-
 }  // namespace
 
 // =============================================================================
@@ -157,12 +156,10 @@ TEST(LoadLogger, T008_EquivalenceFileSink) {
 
     auto result = load_fixture("logger_happy.toml");
 
-    ASSERT_TRUE(result.has_value())
-        << "logger_happy.toml must load successfully; diagnostics:\n"
-        << (result.has_value() ? "" : diag_string(result.error()));
+    ASSERT_TRUE(result.has_value()) << "logger_happy.toml must load successfully; diagnostics:\n"
+                                    << (result.has_value() ? "" : diag_string(result.error()));
 
-    ASSERT_EQ(result->sessions.size(), std::size_t{1})
-        << "expected exactly one session";
+    ASSERT_EQ(result->sessions.size(), std::size_t{1}) << "expected exactly one session";
 
     // RED assertion: resolver not yet written → engine.logger is null.
     // After T010–T013 land, this ASSERT_NE must pass.
@@ -196,9 +193,8 @@ TEST(LoadLogger, T008_EquivalenceFileSink) {
             }
         }
     }
-    EXPECT_TRUE(found)
-        << "Expected a log file starting with 'fixpp_t008' in " << log_dir
-        << "; file not found — wrong directory or base_name in resolved logger";
+    EXPECT_TRUE(found) << "Expected a log file starting with 'fixpp_t008' in " << log_dir
+                       << "; file not found — wrong directory or base_name in resolved logger";
 
     // #404: no end-of-test cleanup existed here either, and this directory is
     // under FIXPP_CONFIG_FIXTURE_DIR -- the SOURCE TREE (gitignored via
@@ -237,9 +233,7 @@ TEST(LoadLogger, T008_DuplicateFileSinkFanout) {
     const auto tmp_toml = std::filesystem::temp_directory_path() / "fixpp_t008_fanout.toml";
     {
         std::ofstream out{tmp_toml};
-        auto esc = [](std::filesystem::path const& p) {
-            return p.generic_string();
-        };
+        auto esc = [](std::filesystem::path const& p) { return p.generic_string(); };
         out << "[clock]\nkind = \"system\"\n\n"
             << "[store]\nkind = \"memory\"\n\n"
             << "[cert_source]\nkind = \"file\"\n"
@@ -497,7 +491,9 @@ TEST(LoadLogger, T008_OtlpSinkCountAndOrder) {
         "\n"
         "[[logger.sinks]]\n"
         "kind      = \"file\"\n"
-        "directory = \"" + log_dir.generic_string() + "\"\n"
+        "directory = \"" +
+        log_dir.generic_string() +
+        "\"\n"
         "base_name = \"wb_otlp_test\"\n"
         "\n"
         "[[logger.sinks]]\n"
@@ -518,26 +514,20 @@ TEST(LoadLogger, T008_OtlpSinkCountAndOrder) {
     fixpp::config::SourceLoc loc{1, 1};
 
     fixpp::config::detail::resolve_engine_logger(
-        *logger_tbl_ptr,
-        "logger",
-        loc,
-        /*base_dir=*/std::filesystem::temp_directory_path(),
-        opts,
-        pending,
-        acc,
+        *logger_tbl_ptr, "logger", loc,
+        /*base_dir=*/std::filesystem::temp_directory_path(), opts, pending, acc,
         /*is_engine=*/true,
-        /*session_index=*/0
-    );
+        /*session_index=*/0);
 
     // No errors — both sinks are valid
-    ASSERT_TRUE(acc.empty())
-        << "Expected no diagnostics for a valid file+otlp [logger]; got:\n"
-        << [&]{
-            std::string s;
-            auto diags = std::move(acc).release();
-            for (auto& d : diags) s += "[" + d.key_path + "] " + d.message + "\n";
-            return s;
-        }();
+    ASSERT_TRUE(acc.empty()) << "Expected no diagnostics for a valid file+otlp [logger]; got:\n"
+                             << [&] {
+                                    std::string s;
+                                    auto diags = std::move(acc).release();
+                                    for (auto& d : diags)
+                                        s += "[" + d.key_path + "] " + d.message + "\n";
+                                    return s;
+                                }();
 
     // Engine slot must be populated
     ASSERT_TRUE(pending.engine.has_value())
@@ -587,10 +577,8 @@ TEST(LoadLogger, T008_OtlpSinkCountAndOrder) {
 
 TEST(LoadLogger, T008_OtlpSinkResolvedNegative) {
     // Runtime TOML: file sink (valid) + otlp sink with no endpoint (invalid).
-    const auto tmp_toml =
-        std::filesystem::temp_directory_path() / "fixpp_t008_otlp_neg.toml";
-    const auto log_dir =
-        std::filesystem::temp_directory_path() / "fixpp_t008_otlp_neg_dir";
+    const auto tmp_toml = std::filesystem::temp_directory_path() / "fixpp_t008_otlp_neg.toml";
+    const auto log_dir = std::filesystem::temp_directory_path() / "fixpp_t008_otlp_neg_dir";
     {
         std::error_code ec;
         std::filesystem::create_directories(log_dir, ec);
@@ -612,7 +600,8 @@ TEST(LoadLogger, T008_OtlpSinkResolvedNegative) {
             // Sink 0: valid file sink
             << "[[logger.sinks]]\n"
             << "kind      = \"file\"\n"
-            << "directory = \"" << esc(log_dir) << "\"\n\n"
+            << "directory = \"" << esc(log_dir)
+            << "\"\n\n"
             // Sink 1: otlp with NO endpoint — must trigger missing_required
             << "[[logger.sinks]]\n"
             << "kind = \"otlp\"\n"
@@ -648,15 +637,13 @@ TEST(LoadLogger, T008_OtlpSinkResolvedNegative) {
     using RC = fixpp::config::reason_class;
     bool found = false;
     for (const auto& d : result.error()) {
-        if (d.reason == RC::missing_required &&
-            d.key_path.find("endpoint") != std::string::npos) {
+        if (d.reason == RC::missing_required && d.key_path.find("endpoint") != std::string::npos) {
             found = true;
             break;
         }
     }
-    EXPECT_TRUE(found)
-        << "expected missing_required on endpoint for the otlp sink; diagnostics:\n"
-        << diag_string(result.error());
+    EXPECT_TRUE(found) << "expected missing_required on endpoint for the otlp sink; diagnostics:\n"
+                       << diag_string(result.error());
 
     // #404: the load FAILED here, so no Logger exists and nothing ever opened a
     // file in log_dir -- no owner to release, just the directory to remove.
@@ -725,9 +712,9 @@ TEST(LoadLogger, T009_AbsentLoggerIsNull) {
 
 TEST(LoadLogger, T027_QuickstartLoad) {
     // Create temporary directories for the file sinks.
-    const auto log_dir     = std::filesystem::temp_directory_path() / "fixpp_qs_t027_logs";
-    const auto acme_dir    = std::filesystem::temp_directory_path() / "fixpp_qs_t027_acme";
-    const auto toml_path   = std::filesystem::temp_directory_path() / "fixpp_qs_t027.toml";
+    const auto log_dir = std::filesystem::temp_directory_path() / "fixpp_qs_t027_logs";
+    const auto acme_dir = std::filesystem::temp_directory_path() / "fixpp_qs_t027_acme";
+    const auto toml_path = std::filesystem::temp_directory_path() / "fixpp_qs_t027.toml";
     {
         std::error_code ec;
         std::filesystem::remove_all(log_dir, ec);
@@ -756,7 +743,8 @@ TEST(LoadLogger, T027_QuickstartLoad) {
           << "ca_file   = \"" << (fixture_dir() / "ca.pem").generic_string() << "\"\n\n"
           << "[dictionary]\n"
           << "kind = \"path\"\n"
-          << "path = \"" << (fixture_dir() / "FIX44.xml").generic_string() << "\"\n\n"
+          << "path = \"" << (fixture_dir() / "FIX44.xml").generic_string()
+          << "\"\n\n"
           // ── Logger from quickstart.md ──────────────────────────────────────
           << "[logger]\n"
           << "capacity      = 65536\n"
@@ -826,8 +814,8 @@ TEST(LoadLogger, T027_QuickstartLoad) {
     // Shutdown loggers.
     {
         [[maybe_unused]] auto r = result->engine.logger->shutdown();
-        if (result->sessions[0].config.logger_override)
-            [[maybe_unused]] auto r2 = result->sessions[0].config.logger_override->shutdown();
+        if (result->sessions[0].config.logger_override) [[maybe_unused]]
+            auto r2 = result->sessions[0].config.logger_override->shutdown();
     }
     // #404: the shutdown() above is not enough on its own -- see release_log_owners.
     fixpp::config_test::release_log_owners(*result);
@@ -847,12 +835,12 @@ TEST(LoadLogger, T027_QuickstartLoad) {
 TEST(LoadLogger, T026_LoggerLevelScalarsWhiteBox) {
     const std::string toml_text =
         "[logger]\n"
-        "capacity           = 8192\n"        // non-default (default 65536); valid pow2
-        "on_overflow        = \"block\"\n"   // non-default (default drop_newest)
-        "drain_cpu_affinity = 3\n"           // non-default (default -1)
+        "capacity           = 8192\n"       // non-default (default 65536); valid pow2
+        "on_overflow        = \"block\"\n"  // non-default (default drop_newest)
+        "drain_cpu_affinity = 3\n"          // non-default (default -1)
         "\n"
         "[[logger.sinks]]\n"
-        "kind = \"file\"\n";                 // no directory -> default; no preflight
+        "kind = \"file\"\n";  // no directory -> default; no preflight
 
     auto parsed = toml::parse(toml_text);
     const toml::table* logger_tbl = parsed.get_as<toml::table>("logger");
@@ -904,10 +892,10 @@ TEST(LoadLogger, T026_SyslogFacilitySuccessWhiteBox) {
     fixpp::config::LoadOptions opts;
     opts.resource = std::pmr::get_default_resource();
 
-    fixpp::config::detail::resolve_engine_logger(
-        *logger_tbl, "logger", fixpp::config::SourceLoc{},
-        std::filesystem::temp_directory_path(), opts, pending, acc,
-        /*is_engine=*/true, /*session_index=*/0);
+    fixpp::config::detail::resolve_engine_logger(*logger_tbl, "logger", fixpp::config::SourceLoc{},
+                                                 std::filesystem::temp_directory_path(), opts,
+                                                 pending, acc,
+                                                 /*is_engine=*/true, /*session_index=*/0);
 
     ASSERT_TRUE(acc.empty()) << "syslog sink with a valid facility must resolve cleanly";
     ASSERT_TRUE(pending.engine.has_value());
@@ -940,7 +928,8 @@ TEST(LoadLogger, T026_SyslogFacilitySuccessWhiteBox) {
 //   • max_keep_count — pruning settles archived count at EXACTLY max_keep_count
 //                       once rotations exceed it; the default (8) would leave ~8,
 //                       not 2.  Same-second archive collisions are counter-
-//                       disambiguated (FileSink::rotate's collision counter), so the count is exact.
+//                       disambiguated (FileSink::rotate's collision counter), so the count is
+//                       exact.
 //
 // This complements the white-box scalar cells (T026_LoggerLevelScalars,
 // T026_SyslogFacility) which witness the logger-level cfg fields directly; the
@@ -966,8 +955,10 @@ TEST(LoadLogger, T026_FileSinkRotationParamsBehavioral) {
         out << "[clock]\nkind = \"system\"\n\n"
             << "[store]\nkind = \"memory\"\n\n"
             << "[cert_source]\nkind = \"file\"\n"
-            << "cert_file = \"" << (fixture_dir() / "leaf_ecdsa_p256.pem").generic_string() << "\"\n"
-            << "key_file  = \"" << (fixture_dir() / "leaf_ecdsa_p256.key").generic_string() << "\"\n"
+            << "cert_file = \"" << (fixture_dir() / "leaf_ecdsa_p256.pem").generic_string()
+            << "\"\n"
+            << "key_file  = \"" << (fixture_dir() / "leaf_ecdsa_p256.key").generic_string()
+            << "\"\n"
             << "ca_file   = \"" << (fixture_dir() / "ca.pem").generic_string() << "\"\n\n"
             << "[dictionary]\nkind = \"path\"\n"
             << "path = \"" << (fixture_dir() / "FIX44.xml").generic_string() << "\"\n\n"
@@ -991,9 +982,8 @@ TEST(LoadLogger, T026_FileSinkRotationParamsBehavioral) {
         std::filesystem::remove(tmp_toml, ec);
     }
 
-    ASSERT_TRUE(result.has_value())
-        << "file-sink rotation TOML must load; diagnostics:\n"
-        << (result.has_value() ? "" : diag_string(result.error()));
+    ASSERT_TRUE(result.has_value()) << "file-sink rotation TOML must load; diagnostics:\n"
+                                    << (result.has_value() ? "" : diag_string(result.error()));
     ASSERT_NE(result->engine.logger, nullptr) << "engine.logger must be non-null";
 
     // Emit more records than max_keep_count; max_file_bytes=1 rotates on each.
@@ -1029,8 +1019,7 @@ TEST(LoadLogger, T026_FileSinkRotationParamsBehavioral) {
         << ".*.log\" files after >max_keep_count rotations; got " << archived
         << " — a wrong base_name (0), a defaulted max_file_bytes (0, no rotation), "
            "or a defaulted max_keep_count (~8) would each miss this.";
-    EXPECT_TRUE(live_present)
-        << "the live file \"" << live_name << "\" must exist in " << sink_dir;
+    EXPECT_TRUE(live_present) << "the live file \"" << live_name << "\" must exist in " << sink_dir;
 
     // #404: see release_log_owners -- shutdown() alone leaves the handle open.
     fixpp::config_test::release_log_owners(*result);

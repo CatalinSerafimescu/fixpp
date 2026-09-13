@@ -430,9 +430,8 @@ TEST(ReadFirstFrameBounded, B5) {
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
-    auto fut = asio::co_spawn(
-        ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
-        asio::use_future);
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
+                              asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B5")) {
         return;
     }
@@ -1284,9 +1283,8 @@ TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
 //
 // Construction: an empty Script (no inbound_bytes, no inbound_chunks) makes
 // every async_read_some hit the mock's exhaustion path immediately
-// (mock_transport::async_read_some's exhaustion check, read_cursor_ >= inbound_bytes.size() == 0 ==>
-// transport_read_eof) with no latency, so the deadline arm (500ms) cannot
-// win the join.
+// (mock_transport::async_read_some's exhaustion check, read_cursor_ >= inbound_bytes.size() == 0
+// ==> transport_read_eof) with no latency, so the deadline arm (500ms) cannot win the join.
 TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
     constexpr std::size_t kMaxBytes = 4096;
     constexpr auto kDeadline = std::chrono::milliseconds{500};
@@ -1313,7 +1311,8 @@ TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
         << describe(result);
     EXPECT_EQ(result.error(), error::transport_read_eof)
         << "coverage cell: expected the read arm's error to PROPAGATE VERBATIM "
-           "(read_first_frame_bounded's read-error propagation; contracts/read_first_frame_bounded.md), got "
+           "(read_first_frame_bounded's read-error propagation; "
+           "contracts/read_first_frame_bounded.md), got "
         << describe(result);
     EXPECT_NE(result.error(), error::transport_read_cancelled)
         << "coverage cell: mapping every read error to a cancellation-attributable "

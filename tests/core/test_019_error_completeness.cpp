@@ -11,9 +11,8 @@
 
 #include <gtest/gtest.h>
 
-#include <fixpp/core/error.hpp>
-
 #include <cstdint>
+#include <fixpp/core/error.hpp>
 #include <set>
 #include <string_view>
 
@@ -36,7 +35,7 @@ struct SlotCase {
 };
 
 static const SlotCase k019_slots[] = {
-    {error::app_do_not_send,    129, "app_do_not_send"},
+    {error::app_do_not_send, 129, "app_do_not_send"},
     {error::app_callback_threw, 130, "app_callback_threw"},
 };
 
@@ -71,8 +70,7 @@ TEST(Error019Completeness, ExactSetEquality) {
 
 TEST(Error019Completeness, SlotValues) {
     // Slot 128 is the pre-019 boundary (017's otel_provider_init_failed).
-    EXPECT_EQ(static_cast<std::uint8_t>(error::otel_provider_init_failed),
-              k_slot_before_019);
+    EXPECT_EQ(static_cast<std::uint8_t>(error::otel_provider_init_failed), k_slot_before_019);
 
     // Verify each 019 enumerator occupies its contracted slot.
     for (const auto& c : k019_slots) {
@@ -86,8 +84,7 @@ TEST(Error019Completeness, SlotValues) {
 TEST(Error019Completeness, ErrorMessageNonEmpty) {
     for (const auto& c : k019_slots) {
         std::string_view msg = fixpp::core::error_message(c.e);
-        EXPECT_FALSE(msg.empty())
-            << "error_message(" << c.name << ") must not be empty";
+        EXPECT_FALSE(msg.empty()) << "error_message(" << c.name << ") must not be empty";
         EXPECT_NE(msg, "unknown error")
             << "error_message(" << c.name << ") returned 'unknown error'";
     }
@@ -98,10 +95,8 @@ TEST(Error019Completeness, ErrorMessageNonEmpty) {
 TEST(Error019Completeness, ToStringNonEmpty) {
     for (const auto& c : k019_slots) {
         std::string_view s = fixpp::core::to_string(c.e);
-        EXPECT_FALSE(s.empty())
-            << "to_string(" << c.name << ") must not be empty";
-        EXPECT_NE(s, "unknown error")
-            << "to_string(" << c.name << ") returned 'unknown error'";
+        EXPECT_FALSE(s.empty()) << "to_string(" << c.name << ") must not be empty";
+        EXPECT_NE(s, "unknown error") << "to_string(" << c.name << ") returned 'unknown error'";
     }
 }
 

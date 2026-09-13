@@ -61,12 +61,11 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <string>
-#include <variant>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <string>
+#include <variant>
 
 #include "hp_support.hpp"
 
@@ -126,8 +125,7 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     EXPECT_EQ(reached, fsm_state::Active)
         << "acceptor did not reach Active on peer received-141 Logon(141=Y,34=1) "
         << "(reset_on_logon=false / 013-only path); counterparty="
-        << hp::counterparty_token(counterparty)
-        << "; reached state=" << static_cast<int>(reached);
+        << hp::counterparty_token(counterparty) << "; reached state=" << static_cast<int>(reached);
 
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
@@ -140,12 +138,12 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     // sent 141=Y (FR-018's reset-event emission, reset_on_logon=false here). A plain non-reset
     // Logon emits NO such event. This discriminates received-141 from a plain Logon
     // (which would also reach Active with next_inbound==2..3 under a harness
-    // misconfiguration). Idiom mirrors BilateralStrict_Initiator_CountersResetToOne's recent_events() check.
+    // misconfiguration). Idiom mirrors BilateralStrict_Initiator_CountersResetToOne's
+    // recent_events() check.
     {
         bool reset_event_seen = false;
         for (const auto& ev : s->recent_events()) {
-            if (auto* r =
-                    std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+            if (auto* r = std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
                 EXPECT_TRUE(r->by_peer_request)
                     << "received-141 cell: by_peer_request must be true (peer sent 141=Y)";
                 reset_event_seen = true;
@@ -186,9 +184,11 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     // (The parent harness configures the peer initiator with ResetOnLogon=Y, so the
     // peer sends 141=Y + a subsequent admin message at 34=2.)
     const bool got_seq2 = fx.run_until(
-        [&]{ auto s2 = fx.engine().lookup(id);
-             return s2 && s2->seqnum_mgr_test_access().next_inbound_unsafe()
-                             == fixpp::session::seqnum_t{3}; },
+        [&] {
+            auto s2 = fx.engine().lookup(id);
+            return s2 && s2->seqnum_mgr_test_access().next_inbound_unsafe() ==
+                             fixpp::session::seqnum_t{3};
+        },
         std::chrono::milliseconds{5000});
     EXPECT_TRUE(got_seq2)
         << "peer's post-reset 34=2 not accepted in-sequence (next_inbound did not reach 3) — "
@@ -205,11 +205,10 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     hp::expect_graceful_stop(fx);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Fix44, ReceivedResetAcceptor,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    [](const ::testing::TestParamInfo<Counterparty>& info) {
-        return (info.param == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
-    });
+INSTANTIATE_TEST_SUITE_P(Fix44, ReceivedResetAcceptor,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         [](const ::testing::TestParamInfo<Counterparty>& info) {
+                             return (info.param == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
+                         });
 
 }  // namespace

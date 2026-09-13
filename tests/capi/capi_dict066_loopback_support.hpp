@@ -23,12 +23,10 @@
 
 #include <gtest/gtest.h>
 
-#include "fix/c_api/engine.h"
-#include "fix/c_api/session.h"
-
 #include "capi_internal.hpp"          // fixpp_dict internals
 #include "capi_loopback_support.hpp"  // make_engine_cfg / wait_for_* / set_loopback_endpoint
-
+#include "fix/c_api/engine.h"
+#include "fix/c_api/session.h"
 #include "fixpp/session/session_config.hpp"  // SessionId::from_config
 #include "support/fix44_dictionary.hpp"
 
@@ -41,24 +39,22 @@ inline fixpp_dict_t* make_fix44_dict_handle() {
     return reinterpret_cast<fixpp_dict_t*>(d);
 }
 
-inline void destroy_fix44_dict_handle(fixpp_dict_t* h) {
-    delete reinterpret_cast<fixpp_dict*>(h);
-}
+inline void destroy_fix44_dict_handle(fixpp_dict_t* h) { delete reinterpret_cast<fixpp_dict*>(h); }
 
 // Build a plaintext session-config builder through the real setters + the
 // FIX44 dict seam. Endpoint is set separately via
 // fixpp::capi_test::set_loopback_endpoint (L-050-5).
 inline fixpp_session_config_t* make_session_cfg_fix44(const char* sender, const char* target,
-                                                       fixpp_session_role role) {
+                                                      fixpp_session_role role) {
     fixpp_session_config_t* sc = nullptr;
     EXPECT_EQ(fixpp_session_config_create(&sc), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_comp_ids(sc, sender, target), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_begin_string(sc, "FIX.4.4"), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_role(sc, role), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(sc, 30), FIXPP_ERR_OK);
-    EXPECT_EQ(fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr,
-                                                 nullptr),
-              FIXPP_ERR_OK);
+    EXPECT_EQ(
+        fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr, nullptr),
+        FIXPP_ERR_OK);
     // Initiator resets to seq 1 on logon so a fresh pair logs on cleanly
     // (mirrors capi_loopback_support.hpp's make_session_cfg).
     EXPECT_EQ(fixpp_session_config_set_reset_on_logon(sc, role == FIXPP_ROLE_INITIATOR),

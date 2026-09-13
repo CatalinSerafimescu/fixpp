@@ -28,14 +28,12 @@
 #include <string_view>
 #include <vector>
 
-#include "fix/c_api/engine.h"
-#include "fix/c_api/message.h"
-#include "fix/c_api/session.h"
-
 #include "capi_internal.hpp"
 #include "capi_loopback_support.hpp"
 #include "dictionary_internal.hpp"  // 083 T049: as_table_view_call_count() seam
-
+#include "fix/c_api/engine.h"
+#include "fix/c_api/message.h"
+#include "fix/c_api/session.h"
 #include "fixpp/dict/dictionary.hpp"
 #include "fixpp/dict/orchestra_loader.hpp"
 #include "fixpp/dict/xml_loader.hpp"
@@ -142,8 +140,7 @@ fixpp_session_config_t* make_cfg_with_dict(std::string_view xml, const char* sen
     Dictionary d = XmlLoader{}.load_from_string(xml, mr);
     auto* raw_dict = new Dictionary{std::move(d)};
     auto* raw_buf = buf.release();
-    auto dict_ptr = std::shared_ptr<const Dictionary>{raw_dict,
-                                                      [mr, raw_buf](const Dictionary* p) {
+    auto dict_ptr = std::shared_ptr<const Dictionary>{raw_dict, [mr, raw_buf](const Dictionary* p) {
                                                           delete p;
                                                           delete mr;
                                                           delete raw_buf;
@@ -173,8 +170,7 @@ fixpp_session_config_t* make_cfg_from_file(const char* filename, const char* beg
     auto* mr = new std::pmr::monotonic_buffer_resource{storage, kArena};
     Dictionary d = XmlLoader{}.load(std::filesystem::path{FIXPP_DICT_DATA_DIR} / filename, mr);
     auto* raw_dict = new Dictionary{std::move(d)};
-    auto dict_ptr = std::shared_ptr<const Dictionary>{raw_dict,
-                                                      [mr, storage](const Dictionary* p) {
+    auto dict_ptr = std::shared_ptr<const Dictionary>{raw_dict, [mr, storage](const Dictionary* p) {
                                                           delete p;
                                                           delete mr;
                                                           delete[] storage;
@@ -271,8 +267,7 @@ std::vector<DictFile> const kAllTen{
     {"FIX42", "FIX42.xml", false},       {"FIX43", "FIX43.xml", false},
     {"FIX44", "FIX44.xml", false},       {"FIX50", "FIX50.xml", false},
     {"FIX50SP1", "FIX50SP1.xml", false}, {"FIX50SP2", "FIX50SP2.xml", false},
-    {"FIXT11", "FIXT11.xml", false},
-    {"Orchestra FIX Latest", "OrchestraFIXLatest.xml", true},
+    {"FIXT11", "FIXT11.xml", false},     {"Orchestra FIX Latest", "OrchestraFIXLatest.xml", true},
 };
 
 }  // namespace
@@ -599,10 +594,10 @@ TEST(CapiGroupDelimiterCtx, DisclosedDelimiterMoveRejectsOldOrder) {
 //
 // This is D-10's total-regression pin. T028/T030 delete the one-level component
 // scan that used to populate the global `GroupDef.first_field_tag`, and the
-// same global is what `is_group_collision`, `fixpp_msg_group_begin` and `fixpp_entry_group_begin` use
-// as a bare predicate. If the repopulating projection ever leaves it 0, the C
-// ABI's group_begin rejects EVERY group through a GA-frozen ABI — and the whole
-// hazard is that this would otherwise be found by a client after release.
+// same global is what `is_group_collision`, `fixpp_msg_group_begin` and `fixpp_entry_group_begin`
+// use as a bare predicate. If the repopulating projection ever leaves it 0, the C ABI's group_begin
+// rejects EVERY group through a GA-frozen ABI — and the whole hazard is that this would otherwise
+// be found by a client after release.
 //
 // C-9.5: those three sites are deliberately NOT converted to context-keyed
 // lookups. Making them so would reject a group whose context the caller has not

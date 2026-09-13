@@ -41,7 +41,6 @@
 // delimiter-variance finding here does not indicate a live parsing defect
 // — see the printed report for the full reasoning.
 
-#include "required_scope_oracle.hpp"  // 082 T008: independent group-tag census
 #include "reused_tag_census.hpp"
 
 #include <gtest/gtest.h>
@@ -63,6 +62,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "required_scope_oracle.hpp"  // 082 T008: independent group-tag census
 
 namespace {
 
@@ -212,7 +213,8 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
             };
             EXPECT_EQ(oracle.group_tags.size(), kExpectedGroupTags.at(fname))
                 << fname << ": oracle group_tags count vs literal C2 registered-after constant";
-            EXPECT_EQ(fixpp_test::required_scope_oracle::count_zero_member_groups_quickfix(path), 0U)
+            EXPECT_EQ(fixpp_test::required_scope_oracle::count_zero_member_groups_quickfix(path),
+                      0U)
                 << fname << ": zero-member-<group> count vs literal 0 (FR-023/K11/P1-NON)";
         }
         if (fname == "FIX40.xml") {
@@ -223,7 +225,7 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
             EXPECT_EQ(oracle.group_tags, kExpected) << "FIX41 group-tag set vs literal C2 set";
         } else if (fname == "FIX42.xml") {
             std::set<std::uint16_t> const kExpected{33,  73,  78,  124, 136, 146, 199, 215, 267,
-                                                     268, 295, 296, 382, 384, 386, 398, 420, 428};
+                                                    268, 295, 296, 382, 384, 386, 398, 420, 428};
             EXPECT_EQ(oracle.group_tags, kExpected) << "FIX42 group-tag set vs literal C2 set";
         }
 
@@ -326,8 +328,7 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
 // exercised by the loop above. Same rationale as there: pinned against C2's
 // literal 524, not against a loaded Dictionary/table_view.
 TEST(ReusedTagCensus, OrchestraFixLatestGroupTagsMatchesLiteralConstant) {
-    auto const path =
-        std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / "OrchestraFIXLatest.xml";
+    auto const path = std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / "OrchestraFIXLatest.xml";
     auto const oracle = fixpp_test::required_scope_oracle::build_orchestra_oracle(path);
     EXPECT_EQ(oracle.group_tags.size(), 524U)
         << "Orchestra FIX Latest: oracle group_tags count vs literal C2 registered-after constant";

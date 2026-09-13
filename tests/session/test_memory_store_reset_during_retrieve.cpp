@@ -148,10 +148,10 @@ public:
             // Drive reset() + two stores during the retrieve() walk suspension.
             auto rr = co_await store_->reset();
             reset_result = rr.has_value() ? 0 : static_cast<int>(rr.error());
-            auto s1 = co_await store_->store(
-                1, std::span<const std::byte>(new1_), direction_t::outbound);
-            auto s2 = co_await store_->store(
-                2, std::span<const std::byte>(new2_), direction_t::outbound);
+            auto s1 =
+                co_await store_->store(1, std::span<const std::byte>(new1_), direction_t::outbound);
+            auto s2 =
+                co_await store_->store(2, std::span<const std::byte>(new2_), direction_t::outbound);
             stores_ok = s1.has_value() && s2.has_value();
             // Read the SAME span AFTER the suspension. This is what witnesses the
             // materialisation: with the fix, `payload` points at retrieve()'s

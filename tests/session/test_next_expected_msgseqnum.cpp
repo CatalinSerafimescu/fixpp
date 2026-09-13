@@ -19,6 +19,7 @@
 // US1-US3 witnesses (T007-T021) are added in later phases.
 // Production-shape: drives bytes through Session::on_inbound_frame().
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 
@@ -31,7 +32,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <fstream>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -45,6 +45,7 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fstream>
 #include <future>
 #include <map>
 #include <memory>
@@ -52,8 +53,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <gtest/gtest-spi.h>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -371,8 +370,7 @@ struct Fixture {
     // grace slice then dispatches the work and the future becomes ready. (The
     // grace's positive companion, PumpWindowMiss.ZeroWindowStillReadyViaBoundaryGrace
     // at the bottom of this file, pins that it is live, not decorative.)
-    void feed(const std::vector<std::byte>& frame,
-              std::chrono::steady_clock::duration window = 5s,
+    void feed(const std::vector<std::byte>& frame, std::chrono::steady_clock::duration window = 5s,
               std::chrono::steady_clock::duration grace = fixpp::test_support::kPumpSlice) {
         auto fut = asio::co_spawn(ioc, session->on_inbound_frame(std::span<const std::byte>(frame)),
                                   asio::use_future);
@@ -699,7 +697,8 @@ TEST(Honor, Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest) {
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
-        << fixpp::test_support::kWindowMiss << "Honor.Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest";
+        << fixpp::test_support::kWindowMiss
+        << "Honor.Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest";
     (void)open_fut.get();
 
     // Seed outbound counter to 6 so that:
@@ -772,7 +771,8 @@ TEST(Honor, Initiator_XltN_ResendsExactRange_NoResendRequest) {
     // open() emits the initiator Logon at seq=1 and transitions to LogonSent.
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
-        << fixpp::test_support::kWindowMiss << "Honor.Initiator_XltN_ResendsExactRange_NoResendRequest";
+        << fixpp::test_support::kWindowMiss
+        << "Honor.Initiator_XltN_ResendsExactRange_NoResendRequest";
     (void)open_fut.get();
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
 
@@ -1003,7 +1003,8 @@ TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore_789Caller) {
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
-        << fixpp::test_support::kWindowMiss << "WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore_789Caller";
+        << fixpp::test_support::kWindowMiss
+        << "WalkExtraction.TwoValueEnd_ExplicitEndBeyondStore_789Caller";
     (void)open_fut.get();
 
     // Seed outbound=8: reply Logon at seq=8 → peek_outbound=9 at honor time (N=9).
@@ -1053,7 +1054,8 @@ TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore_789Caller) {
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
-        << fixpp::test_support::kWindowMiss << "WalkExtraction.TwoValueEnd_EndSeqNo0_EmptyStore_789Caller";
+        << fixpp::test_support::kWindowMiss
+        << "WalkExtraction.TwoValueEnd_EndSeqNo0_EmptyStore_789Caller";
     (void)open_fut.get();
 
     // Seed outbound=5: reply Logon at seq=5 → peek_outbound=6 at honor (N=6).
@@ -1110,7 +1112,8 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor) {
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
-        << fixpp::test_support::kWindowMiss << "BehindSide.KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor";
+        << fixpp::test_support::kWindowMiss
+        << "BehindSide.KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor";
     (void)open_fut.get();
 
     // Seed inbound counter to X=2 (simulates: we have seen seq 1, expect 2 next).
@@ -1185,7 +1188,8 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator) {
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
-        << fixpp::test_support::kWindowMiss << "BehindSide.KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator";
+        << fixpp::test_support::kWindowMiss
+        << "BehindSide.KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator";
     (void)open_fut.get();
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
 
@@ -1258,7 +1262,8 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery) {
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
-        << fixpp::test_support::kWindowMiss << "BehindSide.Bidirectional_BothGaps_RecoverNoDoubleRecovery";
+        << fixpp::test_support::kWindowMiss
+        << "BehindSide.Bidirectional_BothGaps_RecoverNoDoubleRecovery";
     (void)open_fut.get();
 
     // next_inbound_=2 (we've seen peer seq 1), next_outbound_=5 (we sent [1..4]).
@@ -1319,7 +1324,8 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery) {
 // Knob on. Behind-side: session goes Active with next_inbound_=X=2. The peer
 // fails to send its resend. The next live frame from the peer arrives at seq=6
 // (which is too-high relative to our next_inbound_=2). The Active arm
-// (`Session::on_inbound_frame`'s I-NEX-10/D-11 guard) issues a ResendRequest — the recovery-of-last-resort path.
+// (`Session::on_inbound_frame`'s I-NEX-10/D-11 guard) issues a ResendRequest — the
+// recovery-of-last-resort path.
 TEST(BehindSide, LostResend_SelfHealsViaActiveArm) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
@@ -1403,7 +1409,8 @@ TEST(Suppression, KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh) {
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
         auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
-            << fixpp::test_support::kWindowMiss << "Suppression.KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh";
+            << fixpp::test_support::kWindowMiss
+            << "Suppression.KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh";
         (void)open_fut.get();
 
         // next_inbound_=2; peer Logon arrives at seq=4 (too-high).
@@ -1444,7 +1451,8 @@ TEST(Suppression, KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh) {
         fix2->session = std::make_unique<fixpp::session::Session>(fix2->eng, fix2->cfg);
         auto open_fut2 = asio::co_spawn(fix2->ioc, fix2->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix2->ioc, open_fut2, 1s))
-            << fixpp::test_support::kWindowMiss << "Suppression.KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh";
+            << fixpp::test_support::kWindowMiss
+            << "Suppression.KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh";
         (void)open_fut2.get();
 
         // next_inbound_=2; peer Logon at seq=4 (too-high).
@@ -2265,7 +2273,8 @@ TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
         auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
-            << fixpp::test_support::kWindowMiss << "Honor.Integrity_ToAdminThrow_SurfacesAppCallbackThrew";
+            << fixpp::test_support::kWindowMiss
+            << "Honor.Integrity_ToAdminThrow_SurfacesAppCallbackThrew";
         (void)open_fut.get();
 
         // outbound=4 → reply Logon seq=4 → N=5. X=9 > N=5 → 789-Logout → toAdmin(2) throws.
@@ -2316,7 +2325,8 @@ TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
         fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
         auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
         ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 2s))
-            << fixpp::test_support::kWindowMiss << "Honor.Integrity_ToAdminThrow_SurfacesAppCallbackThrew";
+            << fixpp::test_support::kWindowMiss
+            << "Honor.Integrity_ToAdminThrow_SurfacesAppCallbackThrew";
         (void)open_fut.get();
         ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
 

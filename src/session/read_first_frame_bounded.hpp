@@ -122,7 +122,7 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
     for (;;) {
         try {
             co_await clock.sleep_until(deadline);
-            co_return;  // the deadline was actually reached
+            co_return;                        // the deadline was actually reached
         } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch) — the decision is
                                               // made below; there is nothing to do in the handler.
             // operation_aborted, and it does NOT say which of two very different
@@ -213,8 +213,8 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
 //
 // [FR-014; E-2; data-model "Bounded first-frame read"]
 [[nodiscard]] inline asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(
-    fixpp::transport::Transport& transport, std::vector<std::byte>& buf,
-    fixpp::core::Clock& clock, std::chrono::milliseconds deadline, std::size_t max_bytes) {
+    fixpp::transport::Transport& transport, std::vector<std::byte>& buf, fixpp::core::Clock& clock,
+    std::chrono::milliseconds deadline, std::size_t max_bytes) {
     using fixpp::core::error;
 
     using namespace asio::experimental::awaitable_operators;

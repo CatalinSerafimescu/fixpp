@@ -30,25 +30,23 @@
 
 #include <benchmark/benchmark.h>
 
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_config.hpp>
-#include <fixpp/session/session_fsm.hpp>
 
 // Bench target includes ${CMAKE_SOURCE_DIR} (library root) via
 // add_bench_with_test_include in bench/session/CMakeLists.txt.
@@ -65,8 +63,8 @@ static std::string field_str(int tag, std::string_view val) {
 }
 
 static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_t seq,
-                                                std::string_view s, std::string_view t,
-                                                int hbt = 5) {
+                                               std::string_view s, std::string_view t,
+                                               int hbt = 5) {
     std::string body;
     body += field_str(35, "A");
     body += field_str(34, std::to_string(seq));
@@ -96,31 +94,31 @@ static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_
 // ── Shared bench state ────────────────────────────────────────────────────────
 
 struct HeartbeatBenchState {
-    asio::io_context                         ioc;
+    asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clk;
-    fixpp::core::EngineConfig                engine;
-    std::atomic<std::size_t>                 emit_count{0};
+    fixpp::core::EngineConfig engine;
+    std::atomic<std::size_t> emit_count{0};
     std::unique_ptr<fixpp::session::Session> sess;
 
     HeartbeatBenchState() {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{};
         clk = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
-        engine.clock    = clk;
+        engine.clock = clk;
         engine.executor = ioc.get_executor();
     }
 
     void setup() {
         fixpp::session::SessionConfig cfg;
-        cfg.sender_comp_id    = "ISLD";
-        cfg.target_comp_id    = "TW";
-        cfg.begin_string      = "FIX.4.2";
+        cfg.sender_comp_id = "ISLD";
+        cfg.target_comp_id = "TW";
+        cfg.begin_string = "FIX.4.2";
         cfg.heartbeat_interval = 5s;
-        cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
-        cfg.transport_send    = [this](std::span<const std::byte>) { ++emit_count; };
-        cfg.role              = fixpp::session::session_role::acceptor;
+        cfg.transport_send = [this](std::span<const std::byte>) { ++emit_count; };
+        cfg.role = fixpp::session::session_role::acceptor;
 
         sess = std::make_unique<fixpp::session::Session>(engine, cfg);
 
@@ -138,9 +136,7 @@ struct HeartbeatBenchState {
     }
 
     // Returns true if session is in Active state.
-    bool is_active() const {
-        return sess && sess->state() == fixpp::session::fsm_state::Active;
-    }
+    bool is_active() const { return sess && sess->state() == fixpp::session::fsm_state::Active; }
 };
 
 // ── BM_Session_HeartbeatTimerFire ────────────────────────────────────────────
@@ -172,12 +168,9 @@ void BM_Session_HeartbeatTimerFire(benchmark::State& state) {
     }
 
     state.counters["heartbeats_per_iter"] =
-        benchmark::Counter(static_cast<double>(heartbeats_fired),
-                           benchmark::Counter::kIsRate,
+        benchmark::Counter(static_cast<double>(heartbeats_fired), benchmark::Counter::kIsRate,
                            benchmark::Counter::kIs1000);
 }
-BENCHMARK(BM_Session_HeartbeatTimerFire)
-    ->Unit(benchmark::kMicrosecond)
-    ->MinTime(0.5);
+BENCHMARK(BM_Session_HeartbeatTimerFire)->Unit(benchmark::kMicrosecond)->MinTime(0.5);
 
 }  // namespace

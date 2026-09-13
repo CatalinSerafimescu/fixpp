@@ -95,9 +95,9 @@ std::vector<std::byte> make_frame(std::string_view body_fields) {
 // members of the outer group" framing).
 table_view make_bare_nested_delim_dict() {
     table_view tv;
-    for (std::uint16_t const t : {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10},
-                                  std::uint16_t{35}, std::uint16_t{100}, std::uint16_t{200},
-                                  std::uint16_t{201}}) {
+    for (std::uint16_t const t :
+         {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10}, std::uint16_t{35},
+          std::uint16_t{100}, std::uint16_t{200}, std::uint16_t{201}}) {
         tv.add_valid("X", t);
     }
     tv.set_group_first(100, 200);  // NoOuter: delimiter = NoInner's own count tag
@@ -153,18 +153,23 @@ constexpr std::string_view kNestedDelimContextXml =
 // The two #208 B-2 forms, as bytes. `MT` selects the fixture's msg_type so the
 // bare ("X") and populated-store ("Y") twins share one byte layout.
 std::vector<std::byte> make_two_instance_frame(char mt) {
-    std::string body = "35=?\x01"
-                       "100=2\x01"
-                       "200=1\x01" "201=A\x01"
-                       "200=1\x01" "201=B\x01";
+    std::string body =
+        "35=?\x01"
+        "100=2\x01"
+        "200=1\x01"
+        "201=A\x01"
+        "200=1\x01"
+        "201=B\x01";
     body[3] = mt;
     return make_frame(body);
 }
 
 std::vector<std::byte> make_one_instance_frame(char mt) {
-    std::string body = "35=?\x01"
-                       "100=1\x01"
-                       "200=1\x01" "201=A\x01";
+    std::string body =
+        "35=?\x01"
+        "100=1\x01"
+        "200=1\x01"
+        "201=A\x01";
     body[3] = mt;
     return make_frame(body);
 }
@@ -182,8 +187,12 @@ std::string_view slice_text(group_slice const& gs) {
 // last byte of its InnerField value — the delimiter count field itself plus
 // the one member of the nested group it heads. Derived from the fixture's
 // bytes; NEVER captured from the implementation.
-constexpr std::string_view kInstance1 = "200=1\x01" "201=A";
-constexpr std::string_view kInstance2 = "200=1\x01" "201=B";
+constexpr std::string_view kInstance1 =
+    "200=1\x01"
+    "201=A";
+constexpr std::string_view kInstance2 =
+    "200=1\x01"
+    "201=B";
 
 }  // namespace
 
@@ -197,10 +206,13 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg1Exten
     // each instance opened by its delimiter 200 (itself NoInner's count tag,
     // with one nested InnerField(201) member per instance).
     auto tv = make_bare_nested_delim_dict();
-    auto buf = make_frame("35=X\x01"
-                          "100=2\x01"
-                          "200=1\x01" "201=A\x01"
-                          "200=1\x01" "201=B\x01");
+    auto buf = make_frame(
+        "35=X\x01"
+        "100=2\x01"
+        "200=1\x01"
+        "201=A\x01"
+        "200=1\x01"
+        "201=B\x01");
 
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value()) << "make_frame_view failed";
@@ -209,15 +221,16 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg1Exten
     // ctor) — offsets().group() only exercises consume_group_extent's
     // membership-driven descent when opaque_dict_/group_member_fn_ are
     // threaded; the dict-free fallback (consume_group_extent's `opaque_dict_
-    // == nullptr` early return) degrades to rest-of-message and would not exercise the defect at all.
+    // == nullptr` early return) degrades to rest-of-message and would not exercise the defect at
+    // all.
     Parser<access_mode::Index> parser{tv};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value()) << "parser.parse failed";
 
     auto gi = mv->offsets().group(100);
-    ASSERT_TRUE(gi.has_value())
-        << "group(100) lookup itself failed, error=" << static_cast<int>(gi.error());
+    ASSERT_TRUE(gi.has_value()) << "group(100) lookup itself failed, error="
+                                << static_cast<int>(gi.error());
 
     // ── Hand-derivation of the expected post-fix entry_count(), from the
     // fixture's own entry layout — NEVER captured from the implementation.
@@ -319,9 +332,12 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg2Insta
     ASSERT_EQ(res.slices.size(), kDeclared)
         << "W-10a leg 2 (C-8.0c, SC-016): group_slices_status(100) must materialize one slice "
            "per DECLARED instance. TODAY this is expected RED at 1 — consume_group_extent's "
-           "bare `++k` at the instance-opening delimiter (consume_one's position-1 call) truncates the "
-           "extent to entries [4,5), so the boundary loop (group_slices_status's is_boundary lambda) has only "
-           "the first delimiter to split on. observed=" << res.slices.size();
+           "bare `++k` at the instance-opening delimiter (consume_one's position-1 call) truncates "
+           "the "
+           "extent to entries [4,5), so the boundary loop (group_slices_status's is_boundary "
+           "lambda) has only "
+           "the first delimiter to split on. observed="
+        << res.slices.size();
 
     // Boundaries, not merely the count: two different splits can yield the
     // same N. Hand-derived above from the fixture's bytes.
@@ -352,7 +368,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg2OneIn
     ASSERT_EQ(res.slices.size(), 1U)
         << "W-10a leg 2 regression guard: the ONE-instance form must still yield exactly one "
            "slice. A fix that descends unconditionally, or that consumes the delimiter twice, "
-           "would split this single instance. observed=" << res.slices.size();
+           "would split this single instance. observed="
+        << res.slices.size();
 
     // Post-fix target, RED today: pre-fix the extent stops after the bare
     // `++k`, so the lone slice covers "200=1" only and omits its nested member.
@@ -399,15 +416,19 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg3Valid
         auto const r = v.validate(*vmv, &scratch_mr, nullptr);
         ASSERT_TRUE(r.has_value())
             << "leg 3 precondition: the inbound path must ACCEPT this shape (green since T017). "
-               "error=" << (r.has_value() ? 0 : static_cast<int>(r.error()));
+               "error="
+            << (r.has_value() ? 0 : static_cast<int>(r.error()));
     }
     // Control — acceptance above is count-sensitive, so it really does pin
     // N = 2 rather than merely "the frame parsed".
     {
-        auto bad = make_frame("35=X\x01"
-                              "100=3\x01"
-                              "200=1\x01" "201=A\x01"
-                              "200=1\x01" "201=B\x01");
+        auto bad = make_frame(
+            "35=X\x01"
+            "100=3\x01"
+            "200=1\x01"
+            "201=A\x01"
+            "200=1\x01"
+            "201=B\x01");
         auto bad_fv = fixpp::wire::test::make_frame_view(bad);
         ASSERT_TRUE(bad_fv.has_value()) << "make_frame_view failed";
         dictionary_driven_validator v{make_bare_nested_delim_dict()};
@@ -438,7 +459,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg3Valid
         << "W-10a leg 3 (SC-016 / FR-021b): the typed-read split must report the SAME instance "
            "count the inbound validator accepted. TODAY this is expected RED — validation "
            "accepts 2 (since T017) while the extent walk still truncates to 1, which is exactly "
-           "the silent instance loss C-8.0c exists to close. observed=" << res.slices.size();
+           "the silent instance loss C-8.0c exists to close. observed="
+        << res.slices.size();
     EXPECT_EQ(slice_text(res.slices[0]), kInstance1);
     EXPECT_EQ(slice_text(res.slices[1]), kInstance2);
 }
@@ -481,7 +503,8 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Populated
     ASSERT_EQ(res.slices.size(), 2U)
         << "W-10a legs 2/3 on a loader-produced dictionary: the descent must fire on the member "
            "sets a real XmlLoader registers, not only on a hand-built table_view. TODAY expected "
-           "RED at 1. observed=" << res.slices.size();
+           "RED at 1. observed="
+        << res.slices.size();
     EXPECT_EQ(slice_text(res.slices[0]), kInstance1);
     EXPECT_EQ(slice_text(res.slices[1]), kInstance2);
 }
@@ -500,11 +523,11 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Populated
 //
 // ── Why the error code is NOT the discriminator ─────────────────────────────
 // `overflow` is a `bool&` threaded from `group()`'s `bool overflow = false`
-// (`group()`'s local overflow flag), so the depth-cap branch's `overflow = true` (consume_group_extent's kMaxGroupDepth guard)
-// reaches `group()`'s overflow check and `err_group_too_large` is returned
-// WHETHER OR NOT the mirror is present. The mirror controls *when* the walk
-// returns, never *what* it reports. The error code is asserted below because
-// the contract requires it, but it decides nothing.
+// (`group()`'s local overflow flag), so the depth-cap branch's `overflow = true`
+// (consume_group_extent's kMaxGroupDepth guard) reaches `group()`'s overflow check and
+// `err_group_too_large` is returned WHETHER OR NOT the mirror is present. The mirror controls
+// *when* the walk returns, never *what* it reports. The error code is asserted below because the
+// contract requires it, but it decides nothing.
 //
 // ── The discriminator: a `group_member_fn_` invocation count ────────────────
 // Supplied through the EXISTING construction-time `group_member_fn_t` seam
@@ -549,8 +572,8 @@ constexpr std::size_t kCapHittingIndex = 15;
 
 table_view make_chain_dict() {
     table_view tv;
-    for (std::uint16_t const t : {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10},
-                                  std::uint16_t{35}}) {
+    for (std::uint16_t const t :
+         {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10}, std::uint16_t{35}}) {
         tv.add_valid("Z", t);
     }
     for (std::size_t i = 0; i <= kChainGroups; ++i) {
@@ -623,8 +646,7 @@ ChainRun run_chain(table_view const& tv, std::vector<std::byte> const& buf,
                                    &fixpp_test_support::context_group_delim_fn};
     auto const gi = table.group(kChainBase);
     out.probe_calls = g_probe_calls;
-    out.group_too_large =
-        !gi.has_value() && gi.error() == fixpp::core::error::wire_group_too_large;
+    out.group_too_large = !gi.has_value() && gi.error() == fixpp::core::error::wire_group_too_large;
     for (auto const& e : table.entries()) {
         out.layout.push_back(e);
         if (e.tag == static_cast<std::uint16_t>(kChainBase + kCapHittingIndex)) {
@@ -687,13 +709,13 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg4Depth
            "vacuous. The fixture is not reaching consume_group_extent.";
     EXPECT_EQ(run2.probe_calls, run8.probe_calls)
         << "W-10a leg 4 (C-8.0c.3): once the depth cap trips, consume_group_extent must RETURN "
-           "— mirroring the `if (overflow) { return k; }` in consume_one's position-1 step — not burn "
+           "— mirroring the `if (overflow) { return k; }` in consume_one's position-1 step — not "
+           "burn "
            "`declared` no-op outer iterations. Each wasted iteration costs exactly one further "
            "group_member_fn_ evaluation (the delimiter-position descent probe), so an un-mirrored "
            "implementation's total GROWS with the cap-hitting frame's declared count while a "
-           "mirrored one's is invariant. declared=2 -> " << run2.probe_calls
-        << " calls; declared=8 -> " << run8.probe_calls << " calls.";
-
+           "mirrored one's is invariant. declared=2 -> "
+        << run2.probe_calls << " calls; declared=8 -> " << run8.probe_calls << " calls.";
 }
 
 // ============================================================================
@@ -804,8 +826,8 @@ constexpr std::string_view kDivergentDelimXml =
 // than shared because the Parser's is an unnamed closure with no other
 // accessor; any divergence between the two would show up as the three
 // unchanged probes disagreeing, which is the very thing this case asserts.
-bool divergent_member_fn(void const* d, fixpp::wire::group_context const& ctx,
-                         std::uint16_t no_tag, std::uint16_t tag) noexcept {
+bool divergent_member_fn(void const* d, fixpp::wire::group_context const& ctx, std::uint16_t no_tag,
+                         std::uint16_t tag) noexcept {
     auto const members = static_cast<table_view const*>(d)->group_member_tags(
         ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
     for (auto const member_tag : members) {
@@ -818,10 +840,13 @@ bool divergent_member_fn(void const* d, fixpp::wire::group_context const& ctx,
 
 // msg_type E, group written in D's (global) member order, two instances.
 std::vector<std::byte> make_divergent_frame() {
-    return make_frame("35=E\x01"
-                      "100=2\x01"
-                      "201=A\x01" "202=x\x01"
-                      "201=B\x01" "202=y\x01");
+    return make_frame(
+        "35=E\x01"
+        "100=2\x01"
+        "201=A\x01"
+        "202=x\x01"
+        "201=B\x01"
+        "202=y\x01");
 }
 
 }  // namespace
@@ -851,7 +876,8 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
         ASSERT_EQ(tv.group_first_field(t), 0U)
             << "exclusion 1: tag " << t << " must not be a group globally.";
         ASSERT_EQ(tv.group_first_field("E", root_path, t), 0U)
-            << "exclusion 1: tag " << t << " must not be a group in context E either — if it "
+            << "exclusion 1: tag " << t
+            << " must not be a group in context E either — if it "
                "were, C-8.0c's delimiter-position descent would fire and the extent bound this "
                "case asserts UNCHANGED is one 083 deliberately moves (T009 / W-10a leg 2).";
     }
@@ -880,8 +906,7 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     //     GLOBAL first field (201) to E's member set. It is already a declared
     //     member, so the injection was provably a no-op on this fixture — the
     //     precise statement of "divergent but not polluted".
-    ASSERT_NE(std::find(ctx_sorted.begin(), ctx_sorted.end(), std::uint16_t{201}),
-              ctx_sorted.end())
+    ASSERT_NE(std::find(ctx_sorted.begin(), ctx_sorted.end(), std::uint16_t{201}), ctx_sorted.end())
         << "exclusion 2: the global first field must already be a declared member of E's group, "
            "so the removed injection cannot have changed this member set.";
     // (d) "every nested context the extent walk descends through" is EMPTY:
@@ -890,7 +915,8 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     std::array<std::uint16_t, 1> const child_path{100};
     for (auto const member_tag : ctx_members) {
         ASSERT_EQ(tv.group_first_field("E", child_path, member_tag), 0U)
-            << "exclusion 2: member " << member_tag << " must not head a nested group — the "
+            << "exclusion 2: member " << member_tag
+            << " must not head a nested group — the "
                "extent walk must descend through NO nested context, so the set of nested member "
                "sets to compare is empty by construction rather than by inspection.";
     }
@@ -911,8 +937,8 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     std::pmr::monotonic_buffer_resource oracle_arena;
     fixpp::wire::OffsetTable pre{*fv, &oracle_arena, &tv, &divergent_member_fn, nullptr};
     ASSERT_TRUE(pre.build_status().has_value()) << "oracle table failed to build";
-    // The ROOT context MessageView seeds unconditionally (its dict-aware ctor's `set_group_context` call);
-    // reproduce it so the two tables differ in the delimiter callback ALONE.
+    // The ROOT context MessageView seeds unconditionally (its dict-aware ctor's `set_group_context`
+    // call); reproduce it so the two tables differ in the delimiter callback ALONE.
     pre.set_group_context(fixpp::wire::group_context{.msg_type = "E"});
 
     // ── UNCHANGED probe 1: the extent bound ─────────────────────────────────
@@ -938,8 +964,10 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     EXPECT_FALSE(pre_overflow);
     EXPECT_EQ(post_extent, pre_extent)
         << "C-8.0: consume_group_extent's bound is membership-driven and its local `delim` stays "
-           "WIRE-derived (consume_group_extent's `delim` lookup). With both exclusions asserted above, 083 must "
-           "not move it. pre=" << pre_extent << " post=" << post_extent;
+           "WIRE-derived (consume_group_extent's `delim` lookup). With both exclusions asserted "
+           "above, 083 must "
+           "not move it. pre="
+        << pre_extent << " post=" << post_extent;
 
     // ── UNCHANGED probe 2: group(no_tag)'s group_index ──────────────────────
     auto const post_gi = post.group(100);
@@ -983,15 +1011,22 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     // each subsequent 202 opens the next.
     ASSERT_EQ(pre_res.slices.size(), 2U)
         << "oracle: the pre-083 wire-derived rule splits this frame at 201.";
-    EXPECT_EQ(slice_text(pre_res.slices[0]), "201=A\x01" "202=x");
-    EXPECT_EQ(slice_text(pre_res.slices[1]), "201=B\x01" "202=y");
+    EXPECT_EQ(slice_text(pre_res.slices[0]),
+              "201=A\x01"
+              "202=x");
+    EXPECT_EQ(slice_text(pre_res.slices[1]),
+              "201=B\x01"
+              "202=y");
 
     ASSERT_EQ(post_res.slices.size(), 3U)
         << "W-10: the split — and ONLY the split — must move on a divergent context. Post-083 the "
            "boundary is E's dictionary delimiter FieldB(202), not the wire's first tag. "
-           "observed=" << post_res.slices.size();
+           "observed="
+        << post_res.slices.size();
     EXPECT_EQ(slice_text(post_res.slices[0]), "201=A");
-    EXPECT_EQ(slice_text(post_res.slices[1]), "202=x\x01" "201=B");
+    EXPECT_EQ(slice_text(post_res.slices[1]),
+              "202=x\x01"
+              "201=B");
     EXPECT_EQ(slice_text(post_res.slices[2]), "202=y");
 
     // Non-vacuity: the two splits must actually DIFFER, so a future change that

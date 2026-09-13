@@ -258,7 +258,7 @@ TEST(RoundTripProperty, ZeroCountGroupPreservedByteIdentical) {
     auto original = make_frame(
         "35=0\x01"
         "34=1\x01"
-        "627=0\x01"      // NoHops=0 — present-but-empty group
+        "627=0\x01"        // NoHops=0 — present-but-empty group
         "112=HELLO\x01");  // non-member field following the zero count
     std::vector<std::byte> scratch_buf;
     auto round_tripped = structural_round_trip(original, scratch_buf);

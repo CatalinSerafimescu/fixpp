@@ -36,7 +36,7 @@
 // (libc++ Tier-2 lane) does not need the SDK installed. Default to 1 (ON) if
 // the macro is not defined so a cmake-less build stays backward-compatible.
 #ifndef FIXPP_BUILD_OTEL
-#  define FIXPP_BUILD_OTEL 1
+#define FIXPP_BUILD_OTEL 1
 #endif
 #if FIXPP_BUILD_OTEL
 #include <fixpp/otel/providers.hpp>
@@ -288,7 +288,7 @@ std::shared_ptr<Session> Engine::lookup(SessionId const& id) const {
         ~LeasedHandle() noexcept { counter->fetch_sub(1, std::memory_order_release); }
     };
     std::atomic<std::uint64_t>* lease_ctr_ptr = &lease_counter_;  // mutable (debug-only)
-    lease_ctr_ptr->fetch_add(1, std::memory_order_relaxed);  // new handle issued
+    lease_ctr_ptr->fetch_add(1, std::memory_order_relaxed);       // new handle issued
 
     auto leased = std::make_shared<LeasedHandle>(raw_handle, lease_ctr_ptr);
     // Return an aliasing shared_ptr<Session> that SHARES the LeasedHandle's control
@@ -802,7 +802,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         constexpr std::size_t kFirstFrameMaxBytes = 4096;
         // Contract P3 (contracts/read_first_frame_bounded.md): 1 <= max_bytes <
         // SIZE_MAX — the upper bound keeps max_bytes + 1 representable
-        // (read_first_frame_bounded's two `max_bytes + 1` computations both wrap at SIZE_MAX otherwise).
+        // (read_first_frame_bounded's two `max_bytes + 1` computations both wrap at SIZE_MAX
+        // otherwise).
         static_assert(kFirstFrameMaxBytes >= 1 && kFirstFrameMaxBytes < SIZE_MAX);
         constexpr auto kFirstFrameDeadline = std::chrono::milliseconds{5000};
 
@@ -821,8 +822,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // (step 3) before anything the engine owns is torn down — the same
             // ordering the accept loop already relies on for listeners_.
             auto read_r = co_await read_first_frame_bounded(
-                *transport, frame_buf, *engine_cfg.clock, kFirstFrameDeadline,
-                kFirstFrameMaxBytes);
+                *transport, frame_buf, *engine_cfg.clock, kFirstFrameDeadline, kFirstFrameMaxBytes);
             if (!read_r.has_value()) {
                 transport->close();
                 continue;  // timeout / over-budget / read-error → reclaim
@@ -1038,7 +1038,8 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     // to the session strand. Auto-satisfied because:
     //   - The loop runs on *entry.session_strand (T010 — co_spawn on strand).
     //   - drive_reconnect() → drive_reconnect_attempt() → co_await this_coro::executor
-    //     = the session strand (`ReconnectFsm::drive_reconnect_attempt`) → factory_->make(exec, ...) uses it.
+    //     = the session strand (`ReconnectFsm::drive_reconnect_attempt`) → factory_->make(exec,
+    //     ...) uses it.
     //   - The factory-path ctor stores exec as socket_'s executor.
     // This assert fires if reconnect_fsm.cpp regresses to bare exec_ (R8 lynchpin).
     // session_strand is invariantly emplaced in start() before the loop spawns (T005).
@@ -1520,7 +1521,7 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // object alive even after Engine destruction so the guard's decrement is
     // always safe — the decrement never touches `this`.
     // [gate-b/r2 P1; spec.md FR-012/R7; Engine::stop()'s send_counter_ drain contract]
-    auto sc = send_counter_;   // shared_ptr copy — keepalive on counter object
+    auto sc = send_counter_;  // shared_ptr copy — keepalive on counter object
     sc->fetch_add(1, std::memory_order_seq_cst);
     counter_guard send_guard{sc};
 
@@ -1564,9 +1565,9 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
 
             // Session null (loop not yet published) → reject on the control strand.
             // NOTE: kl->state() (fsm_state_) is single-writer on the per-session
-            // strand (`state()`'s single-writer-per-session-strand contract); reading it here (control strand) would be a
-            // data race under MT. The Active check is moved entirely into Step C
-            // (session-strand lambda) where fsm_state_ is owned.
+            // strand (`state()`'s single-writer-per-session-strand contract); reading it here
+            // (control strand) would be a data race under MT. The Active check is moved entirely
+            // into Step C (session-strand lambda) where fsm_state_ is owned.
             // [#1 gate-b/r1: data race fix — spec.md §C-1/C-0/D0]
             if (!kl) {
                 co_return std::unexpected(core::error::session_invalid_state_for_send);

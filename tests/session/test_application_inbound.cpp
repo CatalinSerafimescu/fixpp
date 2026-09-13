@@ -65,8 +65,8 @@ using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace fixpp::session::test {
 namespace {
@@ -111,9 +111,11 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
 static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
                                                std::uint32_t seq = 1,
                                                std::string_view sender = "TW",
-                                               std::string_view target = "ISLD",
-                                               int heartbt = 30) {
-    std::string extra = "98=0\x01" "108=" + std::to_string(heartbt) + "\x01";
+                                               std::string_view target = "ISLD", int heartbt = 30) {
+    std::string extra =
+        "98=0\x01"
+        "108=" +
+        std::to_string(heartbt) + "\x01";
     return make_raw_frame(begin_string, "A", seq, sender, target, extra);
 }
 
@@ -145,8 +147,8 @@ public:
     bool from_admin_reject = false;
     error from_admin_reject_code = error::app_do_not_send;
 
-    expected_t<void> fromAdmin(
-        const MessageView<access_mode::Index>& msg, const SessionId& id) override {
+    expected_t<void> fromAdmin(const MessageView<access_mode::Index>& msg,
+                               const SessionId& id) override {
         auto mt_fv = msg.get(35);
         std::string mt = mt_fv ? std::string(mt_fv->as_string()) : "<none>";
         calls.push_back({"fromAdmin", mt, id.sender_comp_id});
@@ -156,8 +158,8 @@ public:
         return {};
     }
 
-    expected_t<void> fromApp(
-        const MessageView<access_mode::Index>& msg, const SessionId& id) override {
+    expected_t<void> fromApp(const MessageView<access_mode::Index>& msg,
+                             const SessionId& id) override {
         auto mt_fv = msg.get(35);
         std::string mt = mt_fv ? std::string(mt_fv->as_string()) : "<none>";
         calls.push_back({"fromApp", mt, id.sender_comp_id});
@@ -192,7 +194,7 @@ struct InboundFixture {
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.transport_send = [](std::span<const std::byte>) {};  // no-op
-        (void)app;  // app goes on engine, not config
+        (void)app;                                               // app goes on engine, not config
         return cfg;
     }
 
@@ -324,7 +326,8 @@ TEST(ApplicationInbound, INV6_FSMInvalidMessage_NeverReachesCallback) {
     f.feed(sess, app_frame);
 
     // No callback should fire.
-    EXPECT_TRUE(app->calls.empty()) << "INV-6: FSM-rejected message must not reach fromApp/fromAdmin";
+    EXPECT_TRUE(app->calls.empty())
+        << "INV-6: FSM-rejected message must not reach fromApp/fromAdmin";
 }
 
 // ── Test 4: SC-001 — ordering: A then B → fromApp fires A before B ────────────

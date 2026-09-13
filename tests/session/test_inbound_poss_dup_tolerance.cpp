@@ -47,7 +47,8 @@ TEST_F(PossDupToleranceTest, ArmA_Admin_Ignored) {
     // Feed a too-low admin frame (Reject 35=3) with 43=Y at seq=1.
     auto frame = make_possdup_frame("3", /*seq=*/1, "TW", "ISLD", /*poss_dup=*/true,
                                     // Reject body fields: 45=RefSeqNum, 373=reason
-                                    "45=1\x01" "373=0\x01");
+                                    "45=1\x01"
+                                    "373=0\x01");
     feed(sess, frame);
 
     // Session must stay Active (not Disconnected).
@@ -60,8 +61,7 @@ TEST_F(PossDupToleranceTest, ArmA_Admin_Ignored) {
         << "INV-1: expected inbound seqnum must not advance on Arm A admin-ignore";
 
     // NO Logout wire frame emitted.
-    EXPECT_FALSE(any_logout())
-        << "Arm A admin-ignore must NOT emit a Logout wire frame";
+    EXPECT_FALSE(any_logout()) << "Arm A admin-ignore must NOT emit a Logout wire frame";
 
     // No Reject (35=3) emitted toward peer for a too-low possdup admin frame.
     // (captured_frames also includes the outbound Logon from open(); that is 35=A.)
@@ -143,7 +143,8 @@ TEST_F(PossDupToleranceTest, ArmA_Admin_Idempotent) {
     drive_to_active(sess);
 
     auto frame = make_possdup_frame("3", /*seq=*/1, "TW", "ISLD", /*poss_dup=*/true,
-                                    "45=1\x01" "373=0\x01");
+                                    "45=1\x01"
+                                    "373=0\x01");
 
     const std::size_t frames_before = captured_frames.size();
 
@@ -175,7 +176,9 @@ TEST_F(PossDupToleranceTest, ArmB_Regression_Pin_NoLogout) {
     drive_to_active(sess);
 
     // Too-low Reject (35=3, seq=1) without 43=Y — Arm B fatal path.
-    auto frame = make_frame("3", /*seq=*/1, "TW", "ISLD", "45=1\x01" "373=0\x01");
+    auto frame = make_frame("3", /*seq=*/1, "TW", "ISLD",
+                            "45=1\x01"
+                            "373=0\x01");
     feed(sess, frame);
 
     // Session must transition to Disconnected.
@@ -209,7 +212,8 @@ TEST_F(PossDupToleranceTest, ArmA_Admin_NoSideEffects) {
 
     // Feed a too-low admin possdup frame. This is the Arm A admin-ignore path.
     auto frame = make_possdup_frame("3", /*seq=*/1, "TW", "ISLD", /*poss_dup=*/true,
-                                    "45=1\x01" "373=0\x01");
+                                    "45=1\x01"
+                                    "373=0\x01");
     feed(sess, frame);
 
     // Session stays Active (Arm A admin-ignore survives).

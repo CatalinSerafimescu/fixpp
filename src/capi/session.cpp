@@ -12,6 +12,8 @@
 
 #include "fix/c_api/session.h"
 
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -20,14 +22,10 @@
 #include <stdexcept>
 #include <utility>
 
-#include <asio/co_spawn.hpp>
-#include <asio/use_future.hpp>
-
 #include "capi_internal.hpp"
-
 #include "fixpp/core/error.hpp"
 #include "fixpp/dict/dictionary_snapshot.hpp"  // fixpp#215 item 1 (Option C)
-#include "fixpp/session/session.hpp"  // Session::close/executor/is_open, close_mode
+#include "fixpp/session/session.hpp"           // Session::close/executor/is_open, close_mode
 
 namespace {
 
@@ -224,9 +222,9 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
                 // wrapper destruction entirely — the strand's ref-counted impl is
                 // long-lived (Session is alive for the duration of close's .get()).
                 const asio::any_io_executor& close_exec = sess->executor().underlying();
-                auto fut = asio::co_spawn(close_exec,
-                                          sess->close(fixpp::session::close_mode::graceful),
-                                          asio::use_future);
+                auto fut =
+                    asio::co_spawn(close_exec, sess->close(fixpp::session::close_mode::graceful),
+                                   asio::use_future);
                 fixpp::core::expected_t<void> r = fut.get();
                 if (!r.has_value()) {
                     // Established-then-reaped idempotent close (issue #151): a session

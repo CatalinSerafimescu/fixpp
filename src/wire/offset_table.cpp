@@ -7,16 +7,16 @@
 #include <chrono>  // noexcept seed fallback entropy (W-P3-2)
 #include <cstddef>
 #include <cstdint>
-#include <random>  // per-process overlay seed (W-P3-2)
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/errors.hpp>  // wire::err_* / fail<T> (module error vocab)
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/group_view.hpp>  // group_context complete type (063 T006/T008)
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
-#include <fixpp/wire/view.hpp>  // group_slice
+#include <fixpp/wire/view.hpp>      // group_slice
 #include <memory_resource>
 #include <new>
+#include <random>  // per-process overlay seed (W-P3-2)
 #include <span>
 
 namespace fixpp::wire {
@@ -100,10 +100,11 @@ std::uint32_t compute_process_seed() noexcept {
         std::random_device rd;
         return static_cast<std::uint32_t>(rd());
     } catch (...) {
-        auto ticks = static_cast<std::uint64_t>(
-            std::chrono::steady_clock::now().time_since_epoch().count());
+        auto ticks =
+            static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
         static int anchor = 0;
-        std::uint64_t x = ticks ^ static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&anchor));
+        std::uint64_t x =
+            ticks ^ static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&anchor));
         x ^= x >> 30U;
         x *= 0xbf58476d1ce4e5b9ULL;
         x ^= x >> 27U;
@@ -435,10 +436,8 @@ static std::uint32_t parse_declared_count(std::byte const* base,
     return parse_bounded_u32(std::span<std::byte const>{base + e.offset, e.length});
 }
 
-std::size_t OffsetTable::consume_group_extent(std::size_t count_idx,
-                                              group_context const& ctx,
-                                              std::uint8_t depth,
-                                              bool& overflow) const noexcept {
+std::size_t OffsetTable::consume_group_extent(std::size_t count_idx, group_context const& ctx,
+                                              std::uint8_t depth, bool& overflow) const noexcept {
     if (depth >= kMaxGroupDepth) {
         overflow = true;  // T022: nesting deeper than K=16 -> err_group_too_large
         return count_idx;
@@ -491,8 +490,7 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx,
     auto consume_one = [&](std::size_t at) noexcept -> std::size_t {
         if (at + 1U < entries_.size() &&
             group_member_fn_(opaque_dict_, child, entries_[at].tag, entries_[at + 1U].tag)) {
-            return consume_group_extent(at, child, static_cast<std::uint8_t>(depth + 1U),
-                                        overflow);
+            return consume_group_extent(at, child, static_cast<std::uint8_t>(depth + 1U), overflow);
         }
         return at + 1U;  // ordinary tag — no nested descent
     };
@@ -614,10 +612,11 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     // 085: the flat per-instance cap loop that used to run here
     // unconditionally, after what was then a dict-aware/dict-free if/else,
     // was removed from the dictionary path. Why it could go: consume_group_extent's per-instance
-    // cap check (the `max_group_entries_per_instance` comparison) already caps the same nesting-aware instances whose
-    // extent its own return, immediately after that check, returns; the flat partition that used to run
-    // here merely refined that one, and consume_group_extent returns as soon as its own check
-    // breaches — so the flat loop's cap comparison could never be the first to fire on this path.
+    // cap check (the `max_group_entries_per_instance` comparison) already caps the same
+    // nesting-aware instances whose extent its own return, immediately after that check, returns;
+    // the flat partition that used to run here merely refined that one, and consume_group_extent
+    // returns as soon as its own check breaches — so the flat loop's cap comparison could never be
+    // the first to fire on this path.
     //
     // 220: the dict-free arm that loop was relocated INTO is now gone as
     // well — this function declines for a dict-free table at its entry
@@ -930,9 +929,9 @@ OffsetTable* OffsetTable::build_nested_subview(
 // bug the T004 checklist audit caught (cache-hit vs final exit diverging).
 //   (a) t == nullptr           — shell alloc failed / cached failed build;
 //   (c) build_status() OOM     — ctor build() degraded to out_of_memory
-//                                (`OffsetTable::build`'s `catch (std::bad_alloc const&)`); scoped to OOM so
-//                                a malformed-data degradation stays not-failed
-//                                (FR-007 disjointness);
+//                                (`OffsetTable::build`'s `catch (std::bad_alloc const&)`); scoped
+//                                to OOM so a malformed-data degradation stays not-failed (FR-007
+//                                disjointness);
 //   (b) group_slices_status()  — the sub-table's own slice materialization
 //                                caught bad_alloc (feedback_status_origin_
 //                                must_cover_all_alloc_catch_sites).
@@ -944,7 +943,8 @@ static nested_slices_result resolve_nested_result(OffsetTable const* table,
     bool const sub_build_oom =  // mode (c)
         !table->build_status() && table->build_status().error() == core::error::out_of_memory;
     auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
-    return nested_slices_result{.slices = s.slices, .alloc_failed = s.alloc_failed || sub_build_oom};
+    return nested_slices_result{.slices = s.slices,
+                                .alloc_failed = s.alloc_failed || sub_build_oom};
 }
 
 // 062 T006: single flat nested-subview cache (see offset_table.hpp for the
@@ -1026,8 +1026,8 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
                                                       std::size_t slice_len,
                                                       std::uint16_t nested_no_tag,
                                                       group_context const& ctx) const noexcept {
-    return nested_group_slices(slice_data, slice_len, nested_no_tag, opaque_dict_,
-                               group_member_fn_, token_for_nested_cache(), ctx);
+    return nested_group_slices(slice_data, slice_len, nested_no_tag, opaque_dict_, group_member_fn_,
+                               token_for_nested_cache(), ctx);
 }
 
 }  // namespace fixpp::wire

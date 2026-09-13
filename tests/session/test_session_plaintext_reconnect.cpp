@@ -186,9 +186,8 @@ TEST(PlaintextReconnectTest, PlaintextReconnectSkipsHandshakeAndLeavesPeerIdNull
     //     is_plaintext_ guard were dropped, the FSM would dynamic_cast the mock
     //     to TlsTransport (succeeds) and run async_handshake, which fails with no
     //     real peer → r would be an error.
-    ASSERT_TRUE(r.has_value())
-        << "plaintext reconnect must succeed via the handshake-skip branch "
-           "(connect → install, no async_handshake)";
+    ASSERT_TRUE(r.has_value()) << "plaintext reconnect must succeed via the handshake-skip branch "
+                                  "(connect → install, no async_handshake)";
 
     // (c) D-10 #2 MUST: a plaintext reconnect installs an empty handshake_result{},
     //     so live_peer_id_ stays nullopt — no fake peer identity.

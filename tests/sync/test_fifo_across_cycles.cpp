@@ -138,7 +138,8 @@ TEST(SeamFifoAcrossCycles, ResidualExhaustedBeforeLaterArrival) {
     };
 
     auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
-    ASSERT_TRUE(pump_until(ioc, [&] { return holder_acquired; }, 16))
+    ASSERT_TRUE(pump_until(
+        ioc, [&] { return holder_acquired; }, 16))
         << "setup: holder failed to acquire";
 
     // W1, W2, W3 park (in this arrival order) while H holds.
@@ -152,10 +153,12 @@ TEST(SeamFifoAcrossCycles, ResidualExhaustedBeforeLaterArrival) {
 
     // Cycle 1: release H -> grants W1; splices residual [W2, W3].
     release_h = true;
-    ASSERT_TRUE(pump_until(ioc, [&] { return granted_order.size() >= 1; }, 48))
+    ASSERT_TRUE(pump_until(
+        ioc, [&] { return granted_order.size() >= 1; }, 48))
         << "cycle 1: W1 must be granted";
     ASSERT_EQ(granted_order.size(), 1u);
-    EXPECT_EQ(granted_order[0], 1) << "cycle 1 must grant W1 (holder's uncontended-then-drained slot)";
+    EXPECT_EQ(granted_order[0], 1)
+        << "cycle 1 must grant W1 (holder's uncontended-then-drained slot)";
 
     // W4 arrives strictly AFTER W1 became holder — parks on the FRESH
     // state_ LIFO, chronologically after the [W2, W3] residual already
@@ -169,7 +172,8 @@ TEST(SeamFifoAcrossCycles, ResidualExhaustedBeforeLaterArrival) {
     // W2, NOT the later-arriving-but-already-parked W4. This is the core
     // discriminating step.
     release_w[1] = true;
-    ASSERT_TRUE(pump_until(ioc, [&] { return granted_order.size() >= 2; }, 48))
+    ASSERT_TRUE(pump_until(
+        ioc, [&] { return granted_order.size() >= 2; }, 48))
         << "cycle 2: someone must be granted";
     ASSERT_EQ(granted_order.size(), 2u);
     EXPECT_EQ(granted_order[1], 2)
@@ -178,7 +182,8 @@ TEST(SeamFifoAcrossCycles, ResidualExhaustedBeforeLaterArrival) {
 
     // Cycle 3: release W2 -> residual [W3] -> grants W3.
     release_w[2] = true;
-    ASSERT_TRUE(pump_until(ioc, [&] { return granted_order.size() >= 3; }, 48))
+    ASSERT_TRUE(pump_until(
+        ioc, [&] { return granted_order.size() >= 3; }, 48))
         << "cycle 3: someone must be granted";
     ASSERT_EQ(granted_order.size(), 3u);
     EXPECT_EQ(granted_order[2], 3) << "residual must exhaust W3 before the fresh-arrival W4";
@@ -186,7 +191,8 @@ TEST(SeamFifoAcrossCycles, ResidualExhaustedBeforeLaterArrival) {
     // Cycle 4: release W3 -> residual now empty -> falls through to the
     // fresh state_ LIFO -> finally grants W4.
     release_w[3] = true;
-    ASSERT_TRUE(pump_until(ioc, [&] { return granted_order.size() >= 4; }, 48))
+    ASSERT_TRUE(pump_until(
+        ioc, [&] { return granted_order.size() >= 4; }, 48))
         << "cycle 4: W4 must finally be granted";
     ASSERT_EQ(granted_order.size(), 4u);
     EXPECT_EQ(granted_order[3], 4);
@@ -280,11 +286,13 @@ TEST(SeamFifoAcrossCycles, RepeatedScenarioIsDeterministic) {
         auto all_ready = [&](std::future<void>& f) {
             return f.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
         };
-        while (std::chrono::steady_clock::now() < deadline &&
-               !(all_ready(fh) && all_ready(f1) && all_ready(f2) && all_ready(f3) && all_ready(f4))) {
+        while (
+            std::chrono::steady_clock::now() < deadline &&
+            !(all_ready(fh) && all_ready(f1) && all_ready(f2) && all_ready(f3) && all_ready(f4))) {
             ioc.poll_one();
         }
-        ASSERT_TRUE(all_ready(fh) && all_ready(f1) && all_ready(f2) && all_ready(f3) && all_ready(f4));
+        ASSERT_TRUE(all_ready(fh) && all_ready(f1) && all_ready(f2) && all_ready(f3) &&
+                    all_ready(f4));
         fh.get();
         f1.get();
         f2.get();

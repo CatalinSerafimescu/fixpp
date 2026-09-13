@@ -3,11 +3,10 @@
 // helper (contracts/load_any.md). Mirrors OrchestraLoader::load's
 // ifstream+pugixml open/parse idiom (src/dictionary/orchestra_loader.cpp).
 
-#include <fixpp/dict/load_any.hpp>
-
 #include <cassert>
 #include <filesystem>
 #include <fixpp/core/decimal_helpers.hpp>
+#include <fixpp/dict/load_any.hpp>
 #include <fixpp/dict/loader_policy.hpp>  // unresolved_group_policy (fixpp#215 item 4)
 #include <fixpp/dict/orchestra_loader.hpp>
 #include <fixpp/dict/xml_loader.hpp>
@@ -33,7 +32,7 @@ Dictionary load_any(std::filesystem::path const& path, std::pmr::memory_resource
         auto const result = doc.load(in);
         if (!result) {
             throw dict::xml_parse_error(std::string{"dict::xml_parse_error: "} +
-                                         result.description());
+                                        result.description());
         }
 
         // document_element() = the first ELEMENT child (skips any leading
@@ -52,9 +51,10 @@ Dictionary load_any(std::filesystem::path const& path, std::pmr::memory_resource
         if (name == "fixr:repository") {
             return OrchestraLoader{}.load(path, mr, policy);
         }
-        throw dict::xml_parse_error(std::string{"dict::xml_parse_error: unrecognized dictionary root "
-                                                 "element <"} +
-                                     std::string{name} + "> (expected <fix> or <fixr:repository>)");
+        throw dict::xml_parse_error(
+            std::string{"dict::xml_parse_error: unrecognized dictionary root "
+                        "element <"} +
+            std::string{name} + "> (expected <fix> or <fixr:repository>)");
     });
 }
 

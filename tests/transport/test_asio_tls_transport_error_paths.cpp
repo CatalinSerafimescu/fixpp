@@ -206,10 +206,9 @@ struct RefusedPort {
     std::string host;  // 127.0.0.2 — a different loopback address, never bound
 
     RefusedPort()
-        : holder{holder_ioc,
-                 asio::ip::tcp::endpoint{asio::ip::address_v4::loopback(), 0}}
-        , port{holder.local_endpoint().port()}
-        , host{"127.0.0.2"} {}
+        : holder{holder_ioc, asio::ip::tcp::endpoint{asio::ip::address_v4::loopback(), 0}},
+          port{holder.local_endpoint().port()},
+          host{"127.0.0.2"} {}
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,8 +250,7 @@ std::unique_ptr<RawClientServerPair> make_raw_client_server_pair() {
     pair->raw_ctx.emplace(asio::ssl::context::tls_client);
     pair->raw_ctx->load_verify_file(fixture_path("ca.pem"));
     pair->raw_ctx->use_certificate_chain_file(fixture_path("leaf_rsa2048.pem"));
-    pair->raw_ctx->use_private_key_file(fixture_path("leaf_rsa2048.key"),
-                                        asio::ssl::context::pem);
+    pair->raw_ctx->use_private_key_file(fixture_path("leaf_rsa2048.key"), asio::ssl::context::pem);
     pair->raw_ctx->set_verify_mode(asio::ssl::verify_none);
 
     asio::co_spawn(
@@ -354,8 +352,8 @@ TEST(AsioTlsTransportErrorPaths, HandshakeTimeoutMapsToTransportHandshakeTimeout
 
     // Plain TCP acceptor — it accepts the connection but never speaks TLS,
     // so the client handshake will wait indefinitely until cancelled.
-    asio::ip::tcp::acceptor acceptor{
-        ioc, asio::ip::tcp::endpoint{asio::ip::address_v4::loopback(), 0}};
+    asio::ip::tcp::acceptor acceptor{ioc,
+                                     asio::ip::tcp::endpoint{asio::ip::address_v4::loopback(), 0}};
     const auto port = static_cast<std::uint16_t>(acceptor.local_endpoint().port());
 
     auto cs = make_cert_source(fixture_path("leaf_rsa2048.pem"), fixture_path("leaf_rsa2048.key"));
@@ -381,8 +379,8 @@ TEST(AsioTlsTransportErrorPaths, HandshakeTimeoutMapsToTransportHandshakeTimeout
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
             asio::error_code ec;
-            auto sock = co_await acceptor.async_accept(
-                asio::redirect_error(asio::use_awaitable, ec));
+            auto sock =
+                co_await acceptor.async_accept(asio::redirect_error(asio::use_awaitable, ec));
             if (!ec) {
                 accepted_socket.emplace(std::move(sock));
             }
@@ -444,8 +442,8 @@ TEST(AsioTlsTransportErrorPaths, HandshakeTimeoutMapsToTransportHandshakeTimeout
         ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
             asio::error_code ec;
-            auto sock = co_await acceptor.async_accept(
-                asio::redirect_error(asio::use_awaitable, ec));
+            auto sock =
+                co_await acceptor.async_accept(asio::redirect_error(asio::use_awaitable, ec));
             if (!ec) {
                 accepted_socket2.emplace(std::move(sock));
             }
@@ -624,15 +622,14 @@ TEST(AsioTlsTransportErrorPaths, WriteAfterPeerTcpCloseMapsToTransportWriteError
 
     // Phase 2: server writes to the dead connection → write error.
     // The RST has already been received, so the kernel will fail the write.
-    const std::array<std::byte, 4> payload{
-        std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}};
+    const std::array<std::byte, 4> payload{std::byte{0x01}, std::byte{0x02}, std::byte{0x03},
+                                           std::byte{0x04}};
     std::optional<expected_t<std::size_t>> write_result;
 
     asio::co_spawn(
         pair->ioc.get_executor(),
         [&]() -> asio::awaitable<void> {
-            write_result =
-                co_await server_raw->async_write(std::span<const std::byte>{payload});
+            write_result = co_await server_raw->async_write(std::span<const std::byte>{payload});
         },
         asio::detached);
 

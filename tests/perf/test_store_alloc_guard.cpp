@@ -40,6 +40,7 @@
 //       --gtest_filter='*Mallocnesia*'
 
 #include <gtest/gtest.h>
+
 #include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>

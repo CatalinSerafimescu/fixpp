@@ -24,9 +24,9 @@
 
 #include <atomic>
 #include <filesystem>
-#include <system_error>  // std::error_code, used in both branches
 #include <string>
 #include <string_view>
+#include <system_error>  // std::error_code, used in both branches
 
 #ifdef _WIN32
 // Used ONLY by the Windows retry backoff below; kept out of every POSIX TU.
@@ -52,8 +52,8 @@ inline std::filesystem::path unique_temp_dir(std::string_view tag) {
     static std::atomic<unsigned> ctr{0};
     const auto seq = ctr.fetch_add(1, std::memory_order_relaxed);
     auto p = std::filesystem::temp_directory_path() /
-             (std::string("fixpp_test_") + std::string(tag) + "_" +
-              std::to_string(current_pid()) + "_" + std::to_string(seq));
+             (std::string("fixpp_test_") + std::string(tag) + "_" + std::to_string(current_pid()) +
+              "_" + std::to_string(seq));
     std::filesystem::create_directories(p);
     return p;
 }

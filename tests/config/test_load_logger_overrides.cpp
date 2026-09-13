@@ -45,9 +45,6 @@
 
 #include <gtest/gtest.h>
 
-#include "support/temp_dir.hpp"           // fixpp::test_support::remove_temp_dir (#404)
-#include "logger_owner_release.hpp"      // fixpp::config_test::release_log_owners
-
 #include <asio/io_context.hpp>
 #include <chrono>
 #include <filesystem>
@@ -56,6 +53,9 @@
 #include <fixpp/log/logger.hpp>
 #include <string>
 #include <vector>
+
+#include "logger_owner_release.hpp"  // fixpp::config_test::release_log_owners
+#include "support/temp_dir.hpp"      // fixpp::test_support::remove_temp_dir (#404)
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -113,8 +113,7 @@ TEST(LoadLoggerOverrides, T018_MultiSessionOverride) {
         << "logger_multisession.toml must load successfully; diagnostics:\n"
         << (result.has_value() ? "" : diag_string(result.error()));
 
-    ASSERT_EQ(result->sessions.size(), std::size_t{2})
-        << "expected exactly two sessions";
+    ASSERT_EQ(result->sessions.size(), std::size_t{2}) << "expected exactly two sessions";
 
     // ── Assertion (a): engine logger is non-null ──────────────────────────────
     //
@@ -146,10 +145,10 @@ TEST(LoadLoggerOverrides, T018_MultiSessionOverride) {
     // verify a file appears in the OVERRIDE's dir (logs/t018_session0) and NOT
     // in the engine's dir (logs/t018_engine).
     //
-    // This is the strong discriminant per [[feedback_witness_asserts_named_postcondition_not_proxy]]:
-    // instance-inequality alone doesn't prove the override was built from the
-    // session's OWN config block (two make_shared calls on the engine's config
-    // would give distinct instances but identical dir targets).
+    // This is the strong discriminant per
+    // [[feedback_witness_asserts_named_postcondition_not_proxy]]: instance-inequality alone doesn't
+    // prove the override was built from the session's OWN config block (two make_shared calls on
+    // the engine's config would give distinct instances but identical dir targets).
     {
         auto& override_logger = *session0_override;
         FIXPP_LOG0(&override_logger, info, fixpp::log::cat::session,
@@ -172,8 +171,7 @@ TEST(LoadLoggerOverrides, T018_MultiSessionOverride) {
         }
     }
     EXPECT_TRUE(found_in_session0_dir)
-        << "Expected a log file starting with 'fixpp_t018_session0' in "
-        << session0_log_dir
+        << "Expected a log file starting with 'fixpp_t018_session0' in " << session0_log_dir
         << "; file not found — override logger wrote to wrong directory, or "
            "the session override was not built from session[0]'s [session.logger] config";
 
@@ -192,8 +190,7 @@ TEST(LoadLoggerOverrides, T018_MultiSessionOverride) {
         }
     }
     EXPECT_TRUE(found_in_engine_dir)
-        << "Expected a log file starting with 'fixpp_t018_engine' in "
-        << engine_log_dir
+        << "Expected a log file starting with 'fixpp_t018_engine' in " << engine_log_dir
         << "; engine logger file not found in its configured directory";
 
     // Shutdown engine logger too (resource cleanup).
@@ -245,10 +242,8 @@ TEST(LoadLoggerOverrides, T018_MultiSessionOverride) {
 
 TEST(LoadLoggerOverrides, DefaultLoggerMergedToSessions) {
     // Pre-create all sink directories the fixture references.
-    const auto engine_dir =
-        fixture_dir() / "logs" / "t_defaultmerge_engine";
-    const auto default_dir =
-        fixture_dir() / "logs" / "t_defaultmerge_default";
+    const auto engine_dir = fixture_dir() / "logs" / "t_defaultmerge_engine";
+    const auto default_dir = fixture_dir() / "logs" / "t_defaultmerge_default";
     {
         std::error_code ec;
         std::filesystem::remove_all(engine_dir, ec);
@@ -265,8 +260,7 @@ TEST(LoadLoggerOverrides, DefaultLoggerMergedToSessions) {
         << "logger_default_merged.toml must load successfully; diagnostics:\n"
         << (result.has_value() ? "" : diag_string(result.error()));
 
-    ASSERT_EQ(result->sessions.size(), std::size_t{2})
-        << "expected exactly two sessions";
+    ASSERT_EQ(result->sessions.size(), std::size_t{2}) << "expected exactly two sessions";
 
     // Engine logger must be non-null (built from the top-level [logger]).
     ASSERT_NE(result->engine.logger, nullptr)
@@ -277,14 +271,12 @@ TEST(LoadLoggerOverrides, DefaultLoggerMergedToSessions) {
     const auto& s0_override = result->sessions[0].config.logger_override;
     const auto& s1_override = result->sessions[1].config.logger_override;
 
-    ASSERT_NE(s0_override, nullptr)
-        << "sessions[0].config.logger_override must be non-null: "
-           "[default.logger] should be inherited (MERGED). "
-           "If null, the impl is RAW — escalate.";
-    ASSERT_NE(s1_override, nullptr)
-        << "sessions[1].config.logger_override must be non-null: "
-           "[default.logger] should be inherited (MERGED). "
-           "If null, the impl is RAW — escalate.";
+    ASSERT_NE(s0_override, nullptr) << "sessions[0].config.logger_override must be non-null: "
+                                       "[default.logger] should be inherited (MERGED). "
+                                       "If null, the impl is RAW — escalate.";
+    ASSERT_NE(s1_override, nullptr) << "sessions[1].config.logger_override must be non-null: "
+                                       "[default.logger] should be inherited (MERGED). "
+                                       "If null, the impl is RAW — escalate.";
 
     // Both must be DISTINCT instances (per-session construction, not aliased).
     EXPECT_NE(s0_override.get(), s1_override.get())

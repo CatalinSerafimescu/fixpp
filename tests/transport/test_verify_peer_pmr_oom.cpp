@@ -17,7 +17,6 @@
 // Constitutional: [arch §5.3] no exceptions across public surface.
 
 #include <gtest/gtest.h>
-#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <cstddef>
 #include <fixpp/core/error.hpp>
@@ -28,6 +27,8 @@
 #include <new>
 #include <span>
 #include <string_view>
+
+#include "../support/msvc_debug_arena_skip.hpp"
 
 namespace {
 

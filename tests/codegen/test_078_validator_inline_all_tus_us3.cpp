@@ -22,8 +22,8 @@
 // success/error and offending tag) for the same Args -- FR-009/SC-004's
 // validator equivalence is result-identity, not byte-identity.
 //
-// Anchors: specs/078-precompiled-builder-libs/spec.md's "One-definition-rule at the link/inline boundary" Edge Case,
-// FR-006/FR-007, SC-004 (validator leg); quickstart.md Scenario 4d;
+// Anchors: specs/078-precompiled-builder-libs/spec.md's "One-definition-rule at the link/inline
+// boundary" Edge Case, FR-006/FR-007, SC-004 (validator leg); quickstart.md Scenario 4d;
 // tests/codegen/test_078_validator_mixing_us3.cpp (mixed-message precedent,
 // does not cover same-message mixing);
 // tools/codegen/fixpp-codegen/emit_builders.cpp (emitter contract comment).
@@ -32,12 +32,12 @@
 #include <fixpp/v44/messages/Email.hpp>
 #undef FIXPP_VALIDATORS_HEADER_ONLY_Email
 
-#include "test_078_validator_inline_all_tus_us3_support.hpp"
-
 #include <gtest/gtest.h>
 
 #include <array>
 #include <fixpp/core/error.hpp>
+
+#include "test_078_validator_inline_all_tus_us3_support.hpp"
 
 namespace {
 

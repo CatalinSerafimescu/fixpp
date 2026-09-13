@@ -972,7 +972,7 @@ TEST(BusinessMessagesRoundtrip, SendFromInsideFromApp_NoDeadlockNoUAF) {
         stop_fut.get();
     }
 
-    wg.reset();   // release guard → workers exit when the queue drains
+    wg.reset();  // release guard → workers exit when the queue drains
     ioc.stop();
     t1.join();
     t2.join();

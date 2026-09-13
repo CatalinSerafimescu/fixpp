@@ -9,4 +9,4 @@ struct GroupArgs {
     int value = 0;
 };
 
-} // namespace test078_mock
+}  // namespace test078_mock

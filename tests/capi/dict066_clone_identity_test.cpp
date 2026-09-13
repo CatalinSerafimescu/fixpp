@@ -29,13 +29,11 @@
 #include <thread>
 #include <vector>
 
+#include "capi_dict066_loopback_support.hpp"
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
-
-#include "capi_dict066_loopback_support.hpp"
-#include "capi_loopback_support.hpp"
-
 #include "support/fix44_group_frame_bodies.hpp"
 #include "support/wait_until.hpp"
 
@@ -93,8 +91,7 @@ TEST(GroupMembershipCloneIdentity, CloneTrailingFieldAbsentFromLastInstance) {
 
                 const char* tv = nullptr;
                 std::size_t tvlen = 0;
-                c->last_trailing_rc =
-                    fixpp_group_get_field_string(grp, count - 1, 60, &tv, &tvlen);
+                c->last_trailing_rc = fixpp_group_get_field_string(grp, count - 1, 60, &tv, &tvlen);
                 if (c->last_trailing_rc == FIXPP_ERR_OK) {
                     c->last_trailing_val = std::string_view(tv, tvlen);
                 }
@@ -125,14 +122,16 @@ TEST(GroupMembershipCloneIdentity, CloneTrailingFieldAbsentFromLastInstance) {
     auto payload = fixpp_test_support::make_execution_report_app_payload(suffix);
     ASSERT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_OK);
 
-    (void)fixpp::test_support::wait_for_flag(ctx.fired, 5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
+    (void)fixpp::test_support::wait_for_flag(ctx.fired,
+                                             5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
 
     ASSERT_TRUE(ctx.fired.load()) << "the group-bearing ExecutionReport must reach the acceptor's "
                                      "registered receive callback";
 
     // Non-discriminating sanity checks — the clone must resolve the group at
     // all, and each leg's own declared member must read correctly.
-    ASSERT_EQ(ctx.clone_rc, FIXPP_ERR_OK) << "fixpp_msg_clone must succeed on a live inbound handle";
+    ASSERT_EQ(ctx.clone_rc, FIXPP_ERR_OK)
+        << "fixpp_msg_clone must succeed on a live inbound handle";
     ASSERT_NE(ctx.clone, nullptr);
     ASSERT_EQ(ctx.get_group_rc, FIXPP_ERR_OK) << "clone must resolve NoLegs(555) as a group";
     EXPECT_EQ(ctx.group_count, 2U) << "clone NoLegs(555)=2 must yield exactly 2 instances";
@@ -234,12 +233,14 @@ TEST(GroupMembershipCloneIdentity, CloneInteriorTruncationMatchesSource) {
     auto payload = fixpp_test_support::make_execution_report_app_payload(suffix);
     ASSERT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_OK);
 
-    (void)fixpp::test_support::wait_for_flag(ctx.fired, 5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
+    (void)fixpp::test_support::wait_for_flag(ctx.fired,
+                                             5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
 
     ASSERT_TRUE(ctx.fired.load()) << "the interior-undeclared-tag ExecutionReport must reach the "
                                      "acceptor's registered receive callback";
 
-    ASSERT_EQ(ctx.clone_rc, FIXPP_ERR_OK) << "fixpp_msg_clone must succeed on a live inbound handle";
+    ASSERT_EQ(ctx.clone_rc, FIXPP_ERR_OK)
+        << "fixpp_msg_clone must succeed on a live inbound handle";
     ASSERT_NE(ctx.clone, nullptr);
     ASSERT_EQ(ctx.get_group_rc, FIXPP_ERR_OK) << "clone must resolve NoLegs(555) as a group";
     ASSERT_GE(ctx.group_count, 1U);

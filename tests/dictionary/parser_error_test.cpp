@@ -112,8 +112,8 @@ TEST(ParserError, NonXmlGarbage) {
 
 // ---------------------------------------------------------------------------
 // TC-PE-06..09 — defensive structural checks in `<fix>` header parsing
-// (LoaderState::parse_version()'s defensive structural checks; complements AC-L4 which exercises the
-// resolve_version→Unknown path, not the from_chars-failure path).
+// (LoaderState::parse_version()'s defensive structural checks; complements AC-L4 which exercises
+// the resolve_version→Unknown path, not the from_chars-failure path).
 // ---------------------------------------------------------------------------
 
 // TC-PE-06: Root element is not <fix> — must throw xml_parse_error.

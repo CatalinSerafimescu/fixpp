@@ -76,8 +76,8 @@ using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace fixpp::session::test {
 namespace {
@@ -122,8 +122,7 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
 static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
                                                std::uint32_t seq = 1,
                                                std::string_view sender = "TW",
-                                               std::string_view target = "ISLD",
-                                               int heartbt = 0) {
+                                               std::string_view target = "ISLD", int heartbt = 0) {
     std::string extra = std::string("98=0\x01") + "108=" + std::to_string(heartbt) + "\x01";
     return make_raw_frame(begin_string, "A", seq, sender, target, extra);
 }
@@ -134,8 +133,7 @@ static std::vector<std::byte> make_logout_frame(std::uint32_t seq = 2,
     return make_raw_frame("FIX.4.2", "5", seq, sender, target);
 }
 
-static std::vector<std::byte> make_sequence_reset_frame(std::uint32_t seq,
-                                                        std::uint32_t new_seqno,
+static std::vector<std::byte> make_sequence_reset_frame(std::uint32_t seq, std::uint32_t new_seqno,
                                                         bool gap_fill = false,
                                                         std::string_view sender = "TW",
                                                         std::string_view target = "ISLD") {
@@ -353,8 +351,8 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_GracefulClose) {
     f.open_to_active(sess);
 
     // Start graceful close in the background.
-    auto close_fut = asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful),
-                                    asio::use_future);
+    auto close_fut =
+        asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
     // #289 STAGING BARRIER: wait until Logout is emitted and close() is PARKED on its
     // mock-clock sleep. A fixed `run_for(100ms)` here was a wall-clock hope; if the
     // coroutine has not parked when it expires, the advance below lands on a timer
@@ -404,12 +402,14 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_TerminalClose) {
     f.open_to_active(sess);
 
     // Terminal close.
-    auto close_fut = asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::terminal),
-                                    asio::use_future);
+    auto close_fut =
+        asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, close_fut, 300ms,
                                                     "OnLogoutFiresOnce_TerminalClose/close")) {
-        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "OnLogoutFiresOnce_TerminalClose/close");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "OnLogoutFiresOnce_TerminalClose/close";
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "OnLogoutFiresOnce_TerminalClose/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "OnLogoutFiresOnce_TerminalClose/close";
         return;
     }
     (void)close_fut.get();
@@ -440,12 +440,14 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_CallbackThrew) {
     // Drive terminal close; since onLogout throws, the throw→terminal-close
     // path re-enters close(terminal) — but the fire-once guard ensures onLogout
     // does NOT fire a second time.
-    auto close_fut = asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::terminal),
-                                    asio::use_future);
+    auto close_fut =
+        asio::co_spawn(f.ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, close_fut, 300ms,
                                                     "OnLogoutFiresOnce_CallbackThrew/close")) {
-        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "OnLogoutFiresOnce_CallbackThrew/close");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "OnLogoutFiresOnce_CallbackThrew/close";
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "OnLogoutFiresOnce_CallbackThrew/close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "OnLogoutFiresOnce_CallbackThrew/close";
         return;
     }
     (void)close_fut.get();

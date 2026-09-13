@@ -40,7 +40,8 @@ TEST_F(ResendAbortOnFailingWrite, FailedWriteMidResendAbortsAndDisconnects) {
 
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Disconnected)
         << "a failed write mid-resend MUST abort the resend and disconnect "
-           "(QFJ-646); session stayed in state=" << static_cast<int>(s.state());
+           "(QFJ-646); session stayed in state="
+        << static_cast<int>(s.state());
 
     // The abort means no further resend frames were captured after the failure
     // (the failing write threw before append; the session did not keep writing).

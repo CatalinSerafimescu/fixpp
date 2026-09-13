@@ -898,8 +898,8 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
 // of the Logon's seqnum.
 //
 // Fix: unify all outbound seqnum advance through SeqnumManager.
-// Anchors: 005 contracts/session.hpp's send() decl (I-3); 005 data-model.md E3; 009 spec.md FR-001(a).
-// [gate-b/r1-red: F-01 absolute seqnum integrity post-logon]
+// Anchors: 005 contracts/session.hpp's send() decl (I-3); 005 data-model.md E3; 009 spec.md
+// FR-001(a). [gate-b/r1-red: F-01 absolute seqnum integrity post-logon]
 TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo) {
     std::vector<std::vector<std::byte>> outbound_frames;
 
@@ -1015,8 +1015,8 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree) {
 //   (b) leave session in Disconnected state.
 //
 // Bug: store_then_emit catches transport throw in catch(...) and returns
-// expected_t<void>{} unconditionally (pre-live_write_serialized_ live-write path). The transport error
-// is silently swallowed. Callers see ok; state stays Active.
+// expected_t<void>{} unconditionally (pre-live_write_serialized_ live-write path). The transport
+// error is silently swallowed. Callers see ok; state stays Active.
 //
 // Anchors: 009 spec.md US1 AC3; 005 data-model.md I-3.
 // [gate-b/r1-red: F-02/F-03 transport failure surface]
@@ -1157,7 +1157,8 @@ TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_Reaches
     //     must be surfaced, not silently discarded with (void)assign_r.
     EXPECT_FALSE(inbound_result.has_value())
         << "on_inbound_frame must return an error when assign_outbound() overflows; "
-        << "got ok (bug: (void)assign_r in on_inbound_frame's TestRequest branch discards overflow). "
+        << "got ok (bug: (void)assign_r in on_inbound_frame's TestRequest branch discards "
+           "overflow). "
         << "[gate-b/r2-red: RC#G F-10; data-model.md E3]";
 
     // (b) Session must be Disconnected after session-fatal overflow.

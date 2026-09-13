@@ -76,14 +76,13 @@
 #include <fixpp/v44/messages/NewOrderSingle.hpp>  // force-inlined build_ body
 #undef FIXPP_BUILDERS_HEADER_ONLY_NewOrderSingle
 
-#include <fixpp/v44/messages/ExecutionReport.hpp>  // declaration only -- resolves from fixpp::builders::v44
-
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstddef>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/v44/messages/ExecutionReport.hpp>  // declaration only -- resolves from fixpp::builders::v44
 #include <memory_resource>
 #include <span>
 #include <string>

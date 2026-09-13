@@ -112,8 +112,7 @@ TEST(SeamRaceCancelPreDrain, ThreeWaitersOneRacingCancel) {
         // Post cancel on the middle waiter (index 1) onto thread_b — races
         // with the upcoming drain walk after this coroutine's own unlock
         // (on thread_a).
-        asio::post(ioc_b.get_executor(),
-                   [&sigs] { sigs[1].emit(asio::cancellation_type::total); });
+        asio::post(ioc_b.get_executor(), [&sigs] { sigs[1].emit(asio::cancellation_type::total); });
 
         // One yield so this coroutine's own progress toward unlock may
         // interleave with thread_b processing the posted cancel.
@@ -298,7 +297,8 @@ TEST(SeamRaceCancelPreDrain, MutexFreeAfterRace) {
             ioc_b, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
     for (int i = 0; i < 32; ++i) ioc_b.poll_one();
-    ASSERT_EQ(total.load(std::memory_order_acquire), 0) << "setup: a waiter resolved before parking";
+    ASSERT_EQ(total.load(std::memory_order_acquire), 0)
+        << "setup: a waiter resolved before parking";
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
     std::thread thread_a([&] { ioc_a.run(); });

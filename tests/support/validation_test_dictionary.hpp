@@ -208,8 +208,8 @@ make_validation_test_dictionary_required_order_qty() {
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
 
-    fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(
-        kValidationTestFix42XmlRequiredOrderQty, mr);
+    fixpp::dict::Dictionary d =
+        fixpp::dict::XmlLoader{}.load_from_string(kValidationTestFix42XmlRequiredOrderQty, mr);
 
     auto* raw_dict = new fixpp::dict::Dictionary{std::move(d)};
     auto* raw_buf = buf.release();

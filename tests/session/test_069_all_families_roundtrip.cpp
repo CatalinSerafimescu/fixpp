@@ -36,9 +36,10 @@
 //          precedent); tests/session/test_067_builder_failclosed.cpp (T013
 //          disposition precedent, wire_required_field_missing);
 //          tests/session/test_067_completeness.cpp (set-equality diagnostic
-//          precedent, ExactSetEqualityOverBuilderRegistryKeys); include/fixpp/wire/builder_validate.hpp
-//          (validate_required, wire_required_field_missing at its scalar and group-empty checks);
-//          src/capi/message_read.cpp's scan_slice_for_tag (precedent).
+//          precedent, ExactSetEqualityOverBuilderRegistryKeys);
+//          include/fixpp/wire/builder_validate.hpp (validate_required, wire_required_field_missing
+//          at its scalar and group-empty checks); src/capi/message_read.cpp's scan_slice_for_tag
+//          (precedent).
 
 #include <gtest/gtest.h>
 
@@ -49,8 +50,8 @@
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
-#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) -- build_<Msg>/validate_<Msg>/<Msg>Args/builder_registry
 #include <fixpp/v44/Messages.hpp>
+#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) -- build_<Msg>/validate_<Msg>/<Msg>Args/builder_registry
 #include <memory_resource>
 #include <optional>
 #include <set>
@@ -1939,10 +1940,10 @@ TEST_F(AllFamiliesRoundtrip069, CoverageSetEqualityOverAllEmittedBuilders) {
 // ── T013 [US2] new-family required-field fail-closed witnesses ──────────
 // Disposition: fixpp::core::error::wire_required_field_missing (the SAME
 // enum test_067_builder_failclosed.cpp's RequiredGroupZero_ValidateRejects
-// asserts -- validate_required's required-scalar check (missing scalar) and its required-group-empty check (empty
-// required group) both return it). Each witness seeds every OTHER required
-// field and omits EXACTLY the one under test, so the reject is attributable
-// to that field (feedback_witness_asserts_named_postcondition_not_proxy (d)).
+// asserts -- validate_required's required-scalar check (missing scalar) and its
+// required-group-empty check (empty required group) both return it). Each witness seeds every OTHER
+// required field and omits EXACTLY the one under test, so the reject is attributable to that field
+// (feedback_witness_asserts_named_postcondition_not_proxy (d)).
 
 // Nested: TradeCaptureReport(AE)'s TrdCapRptSideGrp/NoSides is REQUIRED
 // (dictionaries/FIX44.xml's TrdCapRptSideGrp component) with a required entry field Side(54)

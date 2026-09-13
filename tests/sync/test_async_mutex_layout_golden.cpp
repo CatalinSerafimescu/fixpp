@@ -46,10 +46,11 @@ using fixpp::sync::async_mutex;
 #ifndef _MSC_VER
 static_assert(alignof(async_mutex) == 16,
               "async_mutex alignment must be 16 (LIFO pointer alignment constraint)");
-static_assert(sizeof(async_mutex) == 131120,
-              "async_mutex sizeof changed — update this golden and document the reason. "
-              "Pre-048 baseline: 131152. Post-048 (removes active_acquirers_count_+drain_latch_ptr_, "
-              "adds in_flight_resumers_+draining_complete_): 131120.");
+static_assert(
+    sizeof(async_mutex) == 131120,
+    "async_mutex sizeof changed — update this golden and document the reason. "
+    "Pre-048 baseline: 131152. Post-048 (removes active_acquirers_count_+drain_latch_ptr_, "
+    "adds in_flight_resumers_+draining_complete_): 131120.");
 #endif  // !_MSC_VER
 
 // Size constants.  sizeof(async_mutex)==131120 is pinned by static_assert above;
@@ -107,8 +108,7 @@ TEST(AsyncMutexLayoutGolden, DISABLED_PrintActualValues) {
     // Run with --gtest_also_run_disabled_tests to print the actual values.
     GTEST_LOG_(INFO) << "sizeof(async_mutex)  = " << sizeof(async_mutex)
                      << " (expected: " << k048Expected << ")";
-    GTEST_LOG_(INFO) << "alignof(async_mutex) = " << alignof(async_mutex)
-                     << " (expected: 16)";
+    GTEST_LOG_(INFO) << "alignof(async_mutex) = " << alignof(async_mutex) << " (expected: 16)";
 }
 
 }  // namespace

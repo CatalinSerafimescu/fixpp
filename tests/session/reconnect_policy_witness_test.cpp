@@ -68,7 +68,7 @@ std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const std::
     cs_cfg.private_key_path = dir + "/leaf_rsa2048.key";
     cs_cfg.ca_bundle_path = dir + "/ca.pem";
     auto cs = fixpp::tls::file_cert_source::make_file_cert_source(cs_cfg,
-                                                                 std::pmr::new_delete_resource());
+                                                                  std::pmr::new_delete_resource());
     if (!cs) {
         return nullptr;
     }

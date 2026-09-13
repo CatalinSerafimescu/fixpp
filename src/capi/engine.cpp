@@ -5,9 +5,9 @@
 // [2i §4.2/§4.10] / specs/050-c-abi-session-send-recv/contracts/{lifecycle-surface,
 // send-and-receive}.md.
 //
-// The structural novelty: the C++ Engine owns NO worker threads (engine.hpp — "the engine owns NO worker threads");
-// the C-ABI boundary owns an internal io_context + worker thread(s) + a work-guard
-// (research D-2). Lifecycle = register-then-start-once:
+// The structural novelty: the C++ Engine owns NO worker threads (engine.hpp — "the engine owns NO
+// worker threads"); the C-ABI boundary owns an internal io_context + worker thread(s) + a
+// work-guard (research D-2). Lifecycle = register-then-start-once:
 //   create → session_open ×N (= register_session, pre-start) → start (= Engine::start)
 //          → drive → session_close → destroy (= co_await stop() + join + ~Engine).
 //
@@ -16,6 +16,8 @@
 
 #include "fix/c_api/engine.h"
 
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -23,11 +25,7 @@
 #include <utility>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/use_future.hpp>
-
 #include "capi_internal.hpp"
-
 #include "fix/c_api/version.h"  // FIXPP_C_ABI_VERSION_MAJOR
 #include "fixpp/core/system_clock_source.hpp"
 
@@ -149,7 +147,8 @@ fixpp::core::expected_t<void> CapiApplication::toApp(
 // L-050-z witness seam: counts live EngineState instances.  Incremented in
 // EngineState ctor, decremented in EngineState dtor (both in capi_internal.hpp
 // via the extern reference).  live_state_count() is the test accessor.
-std::atomic<long> g_engine_state_live_count{0};  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<long> g_engine_state_live_count{
+    0};  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 long live_state_count() noexcept {
     return g_engine_state_live_count.load(std::memory_order_relaxed);
@@ -186,8 +185,8 @@ fixpp_error_t fixpp_engine_create(fixpp_engine_config_t* cfg, uint16_t consumer_
         fixpp::core::EngineConfig eng_cfg;
         eng_cfg.executor = e->state_->ioc_.get_executor();
         if (cfg->want_realtime_clock) {
-            e->state_->clock_ = std::make_shared<fixpp::core::system_clock_source>(
-                e->state_->ioc_.get_executor());
+            e->state_->clock_ =
+                std::make_shared<fixpp::core::system_clock_source>(e->state_->ioc_.get_executor());
             eng_cfg.clock = e->state_->clock_;  // null clock → Engine::start() rejects
         }
         eng_cfg.application = e->app_;  // the trampoline (NOT consumer-settable)
@@ -240,8 +239,8 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
         // Validated-and-failed (e.g. null clock): no loops spawned; leave
         // engine_started_ false so the error is reported as the config error,
         // not "already started".
-        return fixpp_capi::detail::translate_for_consumer(
-            fixpp_capi::detail::translate(r.error()), engine->consumer_minor);
+        return fixpp_capi::detail::translate_for_consumer(fixpp_capi::detail::translate(r.error()),
+                                                          engine->consumer_minor);
     }
     engine->engine_started_ = true;
 
@@ -250,9 +249,7 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
     try {
         engine->state_->workers_.reserve(engine->worker_threads_);
         for (std::uint32_t i = 0; i < engine->worker_threads_; ++i) {
-            engine->state_->workers_.emplace_back([st = engine->state_.get()] {
-                st->ioc_.run();
-            });
+            engine->state_->workers_.emplace_back([st = engine->state_.get()] { st->ioc_.run(); });
         }
     } catch (...) {
         // Thread creation failed. Any workers that DID launch still drive the
@@ -287,7 +284,8 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
 // into app_->slots_ — they must survive until the process exits.
 //
 // fixpp_engine_destroy is SINGLE_THREAD ([2i §4.10]) so no lock is needed.
-static std::vector<fixpp_engine_t*>* s_dead_shells =  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static std::vector<fixpp_engine_t*>*
+    s_dead_shells =  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
     new std::vector<fixpp_engine_t*>();
 
 void fixpp_engine_destroy(fixpp_engine_t* engine) {
@@ -308,9 +306,8 @@ void fixpp_engine_destroy(fixpp_engine_t* engine) {
         // asserts stopped(), which inits false and is only set by stop(), so even
         // a never-started engine must stop() or the dtor would std::abort. stop()
         // is idempotent from any state.
-        auto stop_fut = asio::co_spawn(engine->state_->ioc_,
-                                       engine->state_->engine_->stop(),
-                                       asio::use_future);
+        auto stop_fut =
+            asio::co_spawn(engine->state_->ioc_, engine->state_->engine_->stop(), asio::use_future);
         if (!engine->state_->workers_.empty()) {
             // Workers drive the io_context → they execute stop().
             stop_fut.get();

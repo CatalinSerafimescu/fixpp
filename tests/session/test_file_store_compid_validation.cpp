@@ -17,10 +17,10 @@
 #include <unistd.h>  // not used directly on Windows; FileStoreFactory owns all fd I/O
 #endif
 
-#include <exception>
 #include <asio/thread_pool.hpp>
 #include <climits>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/file_store.hpp>

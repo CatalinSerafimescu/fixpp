@@ -48,15 +48,14 @@
 //   FIXPP_DICT_DATA_DIR  — absolute path to the `dictionaries/` directory
 //                          (set by bench/dictionary/CMakeLists.txt).
 
-#include <fixpp/dict/xml_loader.hpp>
+#include <benchmark/benchmark.h>
 
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <fixpp/dict/xml_loader.hpp>
 #include <memory_resource>
 #include <string>
-
-#include <benchmark/benchmark.h>
 
 namespace {
 

@@ -36,13 +36,12 @@
 
 #include <array>
 #include <chrono>
-#include <memory_resource>
-#include <vector>
-
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
+#include <memory_resource>
+#include <vector>
 
 namespace {
 
@@ -65,15 +64,14 @@ public:
 // and share across iterations. Reset counters between benchmarks if needed.
 fixpp::log::Logger* g_logger = nullptr;
 
-void setup_logger()
-{
+void setup_logger() {
     if (g_logger != nullptr) return;
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
     sinks.push_back(std::make_unique<NullSink>());
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity    = 65536u;  // default 64k-slot ring
+    cfg.capacity = 65536u;  // default 64k-slot ring
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     g_logger = new fixpp::log::Logger(std::move(cfg), std::move(sinks));
@@ -85,31 +83,22 @@ void setup_logger()
 //
 // Measures enqueue() with zero arguments (no ArgValue building overhead).
 // This is the absolute floor for enqueue latency on the non-overflow path.
-static void BM_LogEnqueue_NoArg(benchmark::State& state)
-{
+static void BM_LogEnqueue_NoArg(benchmark::State& state) {
     setup_logger();
 
     static constexpr std::array<std::uint8_t, 16> kZeroTraceId{};
-    static constexpr auto kFmtId = static_cast<std::uint32_t>(
-        fixpp::log::detail::crc32_str("overflow test {}"));
-    auto ts = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
+    static constexpr auto kFmtId =
+        static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("overflow test {}"));
+    auto ts = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
 
     for (auto _ : state) {
-        g_logger->enqueue(
-            fixpp::log::Level::info,
-            fixpp::log::cat::session,
-            kFmtId,
-            kZeroTraceId,
-            0u,
-            ts,
-            {});
+        g_logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, kFmtId, kZeroTraceId,
+                          0u, ts, {});
         benchmark::ClobberMemory();
     }
 
     // Report drop count so we can verify non-overflow path was measured.
-    state.counters["drop_count"] = benchmark::Counter(
-        static_cast<double>(g_logger->drop_count()));
+    state.counters["drop_count"] = benchmark::Counter(static_cast<double>(g_logger->drop_count()));
 }
 BENCHMARK(BM_LogEnqueue_NoArg)
     ->Iterations(10'000'000)
@@ -121,32 +110,23 @@ BENCHMARK(BM_LogEnqueue_NoArg)
 // Measures enqueue() with one uint64_t argument — the common case for
 // numeric fields (seqnum, session id, etc.). Includes ArgValue::from_u64()
 // construction inline (the gated cost per [2k §6.2]).
-static void BM_LogEnqueue_OneU64Arg(benchmark::State& state)
-{
+static void BM_LogEnqueue_OneU64Arg(benchmark::State& state) {
     setup_logger();
 
     static constexpr std::array<std::uint8_t, 16> kZeroTraceId{};
-    static constexpr auto kFmtId = static_cast<std::uint32_t>(
-        fixpp::log::detail::crc32_str("overflow test {}"));
-    auto ts = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
+    static constexpr auto kFmtId =
+        static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("overflow test {}"));
+    auto ts = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
 
     std::uint64_t counter = 0;
     for (auto _ : state) {
         benchmark::DoNotOptimize(counter);
-        g_logger->enqueue(
-            fixpp::log::Level::info,
-            fixpp::log::cat::session,
-            kFmtId,
-            kZeroTraceId,
-            0u,
-            ts,
-            {fixpp::log::ArgValue::from_u64(counter++)});
+        g_logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, kFmtId, kZeroTraceId,
+                          0u, ts, {fixpp::log::ArgValue::from_u64(counter++)});
         benchmark::ClobberMemory();
     }
 
-    state.counters["drop_count"] = benchmark::Counter(
-        static_cast<double>(g_logger->drop_count()));
+    state.counters["drop_count"] = benchmark::Counter(static_cast<double>(g_logger->drop_count()));
 }
 BENCHMARK(BM_LogEnqueue_OneU64Arg)
     ->Iterations(10'000'000)
@@ -158,43 +138,35 @@ BENCHMARK(BM_LogEnqueue_OneU64Arg)
 // Same as OneU64Arg but uses Statistics to report p99/p999/mean.
 // Google Benchmark reports these automatically when --benchmark_report_aggregates_only=false
 // and repetitions > 1.
-static void BM_LogEnqueue_Stats(benchmark::State& state)
-{
+static void BM_LogEnqueue_Stats(benchmark::State& state) {
     setup_logger();
     g_logger->reset_drop_count();
 
     static constexpr std::array<std::uint8_t, 16> kZeroTraceId{};
-    static constexpr auto kFmtId = static_cast<std::uint32_t>(
-        fixpp::log::detail::crc32_str("overflow test {}"));
-    auto ts = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
+    static constexpr auto kFmtId =
+        static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("overflow test {}"));
+    auto ts = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
 
     std::uint64_t counter = 0;
     for (auto _ : state) {
         benchmark::DoNotOptimize(counter);
-        g_logger->enqueue(
-            fixpp::log::Level::info,
-            fixpp::log::cat::session,
-            kFmtId,
-            kZeroTraceId,
-            0u,
-            ts,
-            {fixpp::log::ArgValue::from_u64(counter++)});
+        g_logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, kFmtId, kZeroTraceId,
+                          0u, ts, {fixpp::log::ArgValue::from_u64(counter++)});
         benchmark::ClobberMemory();
     }
 
-    state.counters["drop_count"] = benchmark::Counter(
-        static_cast<double>(g_logger->drop_count()));
+    state.counters["drop_count"] = benchmark::Counter(static_cast<double>(g_logger->drop_count()));
 }
 BENCHMARK(BM_LogEnqueue_Stats)
     ->Repetitions(5)
     ->Unit(benchmark::kNanosecond)
-    ->ComputeStatistics("p99",  [](std::vector<double> const& v) -> double {
-        if (v.empty()) return 0.0;
-        auto s = v;
-        std::sort(s.begin(), s.end());
-        return s[static_cast<std::size_t>(s.size() * 0.99)];
-    })
+    ->ComputeStatistics("p99",
+                        [](std::vector<double> const& v) -> double {
+                            if (v.empty()) return 0.0;
+                            auto s = v;
+                            std::sort(s.begin(), s.end());
+                            return s[static_cast<std::size_t>(s.size() * 0.99)];
+                        })
     ->ComputeStatistics("p999", [](std::vector<double> const& v) -> double {
         if (v.empty()) return 0.0;
         auto s = v;

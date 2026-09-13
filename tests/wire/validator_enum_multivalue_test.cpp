@@ -177,7 +177,7 @@ TEST(ValidatorEnumMultivalue, FullMultiValueCensusTableDriven) {
         for (auto const tag : entry.tags) {
             auto const ev = dict.enum_values(tag);
             ASSERT_GE(ev.size(), 2u) << "tag " << tag << " in " << entry.file
-                                      << " must declare >=2 codes (measured census)";
+                                     << " must declare >=2 codes (measured census)";
             std::vector<std::string> codes;
             codes.reserve(ev.size());
             for (auto const& e : ev) {

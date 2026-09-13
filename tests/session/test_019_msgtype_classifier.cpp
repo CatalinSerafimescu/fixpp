@@ -37,9 +37,11 @@ TEST(MsgTypeClassifier, AppMsgTypesReturnFalse) {
     // Standard FIX application MsgTypes.
     EXPECT_FALSE(is_admin_msgtype("D")) << "NewOrderSingle (35=D) must NOT be classified as admin";
     EXPECT_FALSE(is_admin_msgtype("8")) << "ExecutionReport (35=8) must NOT be classified as admin";
-    EXPECT_FALSE(is_admin_msgtype("j")) << "BusinessMsgReject (35=j) must NOT be classified as admin";
+    EXPECT_FALSE(is_admin_msgtype("j"))
+        << "BusinessMsgReject (35=j) must NOT be classified as admin";
     EXPECT_FALSE(is_admin_msgtype("W")) << "MarketDataFull (35=W) must NOT be classified as admin";
-    EXPECT_FALSE(is_admin_msgtype("V")) << "MarketDataRequest (35=V) must NOT be classified as admin";
+    EXPECT_FALSE(is_admin_msgtype("V"))
+        << "MarketDataRequest (35=V) must NOT be classified as admin";
 }
 
 // ── Explicitly excluded: dup-Logon-in-Active (35=A) ──────────────────────────
@@ -57,9 +59,9 @@ TEST(MsgTypeClassifier, DupLogonExplicitlyExcluded) {
 // ── Edge cases ────────────────────────────────────────────────────────────────
 
 TEST(MsgTypeClassifier, EdgeCases) {
-    EXPECT_FALSE(is_admin_msgtype(""))     << "empty string must NOT be admin";
-    EXPECT_FALSE(is_admin_msgtype("00"))   << "'00' (two chars) must NOT be admin";
-    EXPECT_FALSE(is_admin_msgtype(" "))    << "space must NOT be admin";
-    EXPECT_FALSE(is_admin_msgtype("z"))    << "unknown 'z' must NOT be admin";
-    EXPECT_FALSE(is_admin_msgtype("9"))    << "'9' must NOT be admin (no such admin type)";
+    EXPECT_FALSE(is_admin_msgtype("")) << "empty string must NOT be admin";
+    EXPECT_FALSE(is_admin_msgtype("00")) << "'00' (two chars) must NOT be admin";
+    EXPECT_FALSE(is_admin_msgtype(" ")) << "space must NOT be admin";
+    EXPECT_FALSE(is_admin_msgtype("z")) << "unknown 'z' must NOT be admin";
+    EXPECT_FALSE(is_admin_msgtype("9")) << "'9' must NOT be admin (no such admin type)";
 }

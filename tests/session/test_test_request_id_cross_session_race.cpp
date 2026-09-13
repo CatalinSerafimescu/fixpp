@@ -77,9 +77,9 @@
 #include <thread>
 #include <vector>
 
+#include "support/extract_tag.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-#include "support/extract_tag.hpp"
 #include "support/pump_until_ready.hpp"
 
 // (#303) The teardown guard below deliberately LEAKS the SessionFixtures on the
@@ -210,9 +210,9 @@
 // the ignore removed the leak APPEARS, from tests that still report [ OK ].
 //
 // Shape follows the repo's established sanitizer-detection idiom (two separate
-// #if blocks, not an #elif chain) — see the LSan-detection idiom in tests/interop/support/interop_fixture.cpp.
-// An #elif chain would skip the __SANITIZE_ADDRESS__ arm on any compiler that
-// defines __has_feature without reporting address_sanitizer through it.
+// #if blocks, not an #elif chain) — see the LSan-detection idiom in
+// tests/interop/support/interop_fixture.cpp. An #elif chain would skip the __SANITIZE_ADDRESS__ arm
+// on any compiler that defines __has_feature without reporting address_sanitizer through it.
 //
 // MSVC is excluded deliberately: windows-msvc-asan is a real tier2 lane whose
 // profile sets /fsanitize=address, so __SANITIZE_ADDRESS__ IS defined there, but
@@ -1173,14 +1173,14 @@ TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
         "8=FIX.4.2\x01"
         "35=1\x01"
         "112=TR1";  // deliberately NO trailing SOH
-    EXPECT_EQ(extract_tag(std::span<const std::byte>{
-                              reinterpret_cast<const std::byte*>(unterminated_frame.data()),
-                              unterminated_frame.size()},
+    EXPECT_EQ(extract_tag(std::span<const std::byte>{reinterpret_cast<const std::byte*>(
+                                                         unterminated_frame.data()),
+                                                     unterminated_frame.size()},
                           112),
               "");
-    EXPECT_EQ(extract_tag(std::span<const std::byte>{
-                              reinterpret_cast<const std::byte*>(unterminated_frame.data()),
-                              unterminated_frame.size()},
+    EXPECT_EQ(extract_tag(std::span<const std::byte>{reinterpret_cast<const std::byte*>(
+                                                         unterminated_frame.data()),
+                                                     unterminated_frame.size()},
                           35),
               "1");
 
@@ -1374,9 +1374,9 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
         auto tr_ids_b = sB->transport.collect_test_req_ids();
 
         std::string latest_a = tr_ids_a.back();
-        auto& hb_a = frames.emplace_back(
-            make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A", latest_a,
-                           fix_sending_time(clock->now())));
+        auto& hb_a =
+            frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq_a++, "TARGET_A", "SENDER_A",
+                                               latest_a, fix_sending_time(clock->now())));
         auto fut_a = asio::co_spawn(
             ioc,
             sA->session->on_inbound_frame(std::span<const std::byte>{hb_a.data(), hb_a.size()}),
@@ -1386,9 +1386,9 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
         (void)fut_a.get();
 
         std::string latest_b = tr_ids_b.back();
-        auto& hb_b = frames.emplace_back(
-            make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B", latest_b,
-                           fix_sending_time(clock->now())));
+        auto& hb_b =
+            frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq_b++, "TARGET_B", "SENDER_B",
+                                               latest_b, fix_sending_time(clock->now())));
         auto fut_b = asio::co_spawn(
             ioc,
             sB->session->on_inbound_frame(std::span<const std::byte>{hb_b.data(), hb_b.size()}),
@@ -1719,8 +1719,8 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
                               fixpp::core::mock_clock& clk, std::uint32_t& hb_seq,
                               std::string_view sender, std::string_view target,
                               std::string_view tr_id) {
-        auto& hb = frames.emplace_back(
-            make_heartbeat("FIX.4.2", hb_seq++, sender, target, tr_id, fix_sending_time(clk.now())));
+        auto& hb = frames.emplace_back(make_heartbeat("FIX.4.2", hb_seq++, sender, target, tr_id,
+                                                      fix_sending_time(clk.now())));
         return asio::co_spawn(
             ex, sx.session->on_inbound_frame(std::span<const std::byte>{hb.data(), hb.size()}),
             asio::use_future);
@@ -1760,8 +1760,7 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // two are sequential but UNRELATED — B's clock is not advanced until after A's
     // emission is observed — so there is no single event for one deadline to bound.
     // The loop's paired wait is the opposite case and does share one; see it.
-    ASSERT_TRUE(
-        sA.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
+    ASSERT_TRUE(sA.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
         << kWaitBudgetMiss << "waiting for session A's first TestRequest";
     ASSERT_EQ(sA.transport.collect_test_req_ids().size(), 1u)
         << "session A emitted more than one TestRequest before its first Heartbeat";
@@ -1777,8 +1776,7 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // #289 batch 19 -- ESCALATION ROW: KIND F, same disposition and same
     // measurement as the first advance in this test. See it there.
     clock_b->advance(std::chrono::milliseconds{1500});
-    ASSERT_TRUE(
-        sB.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
+    ASSERT_TRUE(sB.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
         << kWaitBudgetMiss << "waiting for session B's first TestRequest";
     ASSERT_EQ(sB.transport.collect_test_req_ids().size(), 1u)
         << "session B emitted more than one TestRequest before its first Heartbeat";
@@ -1821,8 +1819,8 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
         // (e.g. +2 this iteration, +0 the next) while the cumulative equality
         // after the loop only reports a confusing final count. Safe to assert as
         // an equality here: after the wait returns, each emitter is parked on its
-        // grace sleep (run_liveness_loop's post-TestRequest wait) and the only clock advancer is this
-        // blocked test thread, so the size is stable at exactly `want`.
+        // grace sleep (run_liveness_loop's post-TestRequest wait) and the only clock advancer is
+        // this blocked test thread, so the size is stable at exactly `want`.
         ASSERT_EQ(sA.transport.test_req_id_count(), want)
             << "session A emitted more than one TestRequest at iteration " << i;
         ASSERT_EQ(sB.transport.test_req_id_count(), want)
@@ -2375,8 +2373,7 @@ TEST(CrossSessionTeardown, PositiveBudgetWithNoFixturesIsStillResidual) {
             asio::executor_work_guard<asio::io_context::executor_type> work_guard(
                 ioc.get_executor());
 
-            quiesce_or_release_on_exit guard{
-                ioc_owner, *clock, {}, std::chrono::milliseconds{1}};
+            quiesce_or_release_on_exit guard{ioc_owner, *clock, {}, std::chrono::milliseconds{1}};
         }()),
         "was not observed to run out of work");
 

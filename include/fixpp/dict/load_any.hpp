@@ -13,7 +13,7 @@
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
 // NOLINTNEXTLINE(misc-include-cleaner)
-#include <fixpp/dict/error.hpp>  // re-exported: load_any() throws dict::xml_parse_error
+#include <fixpp/dict/error.hpp>          // re-exported: load_any() throws dict::xml_parse_error
 #include <fixpp/dict/loader_policy.hpp>  // unresolved_group_policy (fixpp#215 item 4)
 #include <memory_resource>
 

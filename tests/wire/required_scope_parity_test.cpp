@@ -187,7 +187,7 @@ GoldenGroupRows load_golden_groups(std::string const& csv_path) {
             continue;
         }
         GroupContextKey key{fields[1], parse_path_list(fields[2]),
-                             static_cast<std::uint16_t>(std::stoul(fields[3]))};
+                            static_cast<std::uint16_t>(std::stoul(fields[3]))};
         rows[fields[0]].emplace(std::move(key), parse_tag_list(fields[4]));
     }
     return rows;
@@ -215,7 +215,7 @@ struct KnownSupersetContext {
     std::string dict;
     GroupContextKey key;
     std::set<std::uint16_t> extra_tags;  // required per the oracle (D-3), NOT required per real
-                                          // QuickFIX (golden) — fixpp is the stricter superset here.
+                                         // QuickFIX (golden) — fixpp is the stricter superset here.
 };
 
 std::vector<KnownSupersetContext> const kKnownSupersetContexts{
@@ -245,16 +245,19 @@ std::vector<KnownSupersetContext> const kKnownSupersetContexts{
     {"FIX50SP1", GroupContextKey{"i", {}, 296}, {295}},
 };
 
-std::set<std::uint16_t> const* find_known_superset_extra(std::string const& dict, GroupContextKey const& key) {
+std::set<std::uint16_t> const* find_known_superset_extra(std::string const& dict,
+                                                         GroupContextKey const& key) {
     for (auto const& c : kKnownSupersetContexts) {
-        if (c.dict == dict && !(c.key < key) && !(key < c.key)) {  // GroupContextKey has only operator<
+        if (c.dict == dict && !(c.key < key) &&
+            !(key < c.key)) {  // GroupContextKey has only operator<
             return &c.extra_tags;
         }
     }
     return nullptr;
 }
 
-std::string describe_diff(std::set<std::uint16_t> const& expected, std::set<std::uint16_t> const& actual) {
+std::string describe_diff(std::set<std::uint16_t> const& expected,
+                          std::set<std::uint16_t> const& actual) {
     std::vector<std::uint16_t> missing;
     std::vector<std::uint16_t> extra;
     std::ranges::set_difference(expected, actual, std::back_inserter(missing));
@@ -283,8 +286,8 @@ struct DictCase {
 };
 
 std::vector<DictCase> const kQuickfixDicts{
-    {"FIX40", "FIX40.xml"},     {"FIX41", "FIX41.xml"},     {"FIX42", "FIX42.xml"},
-    {"FIX43", "FIX43.xml"},     {"FIX44", "FIX44.xml"},     {"FIX50", "FIX50.xml"},
+    {"FIX40", "FIX40.xml"},       {"FIX41", "FIX41.xml"},       {"FIX42", "FIX42.xml"},
+    {"FIX43", "FIX43.xml"},       {"FIX44", "FIX44.xml"},       {"FIX50", "FIX50.xml"},
     {"FIX50SP1", "FIX50SP1.xml"}, {"FIX50SP2", "FIX50SP2.xml"}, {"FIXT11", "FIXT11.xml"},
 };
 
@@ -331,7 +334,8 @@ TEST(RequiredScopeParity, QuickFixGoldenMatchesOracleAcrossNineDicts) {
             golden_msg_types.insert(msg_type);
         }
         EXPECT_EQ(oracle_msg_types, golden_msg_types)
-            << dc.label << ": golden.csv message-type set differs from the oracle's — "
+            << dc.label
+            << ": golden.csv message-type set differs from the oracle's — "
                "regenerate the golden (quickfix_required_golden_regen_diff) or investigate a "
                "genuine dictionary drift";
 
@@ -448,7 +452,8 @@ TEST(RequiredScopeParity, QuickFixGroupGoldenMatchesOracleAcrossNineDicts) {
 #ifndef FIXPP_DICT_DATA_DIR
 #error "FIXPP_DICT_DATA_DIR must be defined by CMake"
 #endif
-    std::cout << "\n=== 081 T020: QuickFIX per-group required-set parity (9 dicts, Concern B) ===\n";
+    std::cout
+        << "\n=== 081 T020: QuickFIX per-group required-set parity (9 dicts, Concern B) ===\n";
 
     GoldenGroupRows const golden = load_golden_groups(FIXPP_REQUIRED_GOLDEN_GROUPS_CSV);
     ASSERT_FALSE(golden.empty()) << "golden_groups.csv produced zero data rows — parse failure?";
@@ -479,13 +484,14 @@ TEST(RequiredScopeParity, QuickFixGroupGoldenMatchesOracleAcrossNineDicts) {
             EXPECT_TRUE(git == golden.end() || git->second.empty())
                 << dc.label << ": oracle found zero body group contexts, but golden_groups.csv has "
                 << (git != golden.end() ? git->second.size() : 0) << " row(s) for it";
-            std::cout << "  " << dc.label << ": 0 group context(s) (oracle+golden agree — dict has no "
-                                              "body-level groups)\n";
+            std::cout << "  " << dc.label
+                      << ": 0 group context(s) (oracle+golden agree — dict has no "
+                         "body-level groups)\n";
             continue;
         }
-        ASSERT_NE(git, golden.end())
-            << "golden_groups.csv has no rows for dictionary " << dc.label << " but the oracle found "
-            << oracle_keys.size() << " real group context(s) — all silently missing";
+        ASSERT_NE(git, golden.end()) << "golden_groups.csv has no rows for dictionary " << dc.label
+                                     << " but the oracle found " << oracle_keys.size()
+                                     << " real group context(s) — all silently missing";
         auto const& golden_ctx = git->second;
 
         std::set<GroupContextKey> golden_keys;
@@ -499,10 +505,10 @@ TEST(RequiredScopeParity, QuickFixGroupGoldenMatchesOracleAcrossNineDicts) {
         // overload, which only needs a strict-weak-ordering `<`.
         std::vector<GroupContextKey> missing_from_golden;
         std::vector<GroupContextKey> extra_in_golden;
-        std::set_difference(oracle_keys.begin(), oracle_keys.end(), golden_keys.begin(), golden_keys.end(),
-                             std::back_inserter(missing_from_golden));
-        std::set_difference(golden_keys.begin(), golden_keys.end(), oracle_keys.begin(), oracle_keys.end(),
-                             std::back_inserter(extra_in_golden));
+        std::set_difference(oracle_keys.begin(), oracle_keys.end(), golden_keys.begin(),
+                            golden_keys.end(), std::back_inserter(missing_from_golden));
+        std::set_difference(golden_keys.begin(), golden_keys.end(), oracle_keys.begin(),
+                            oracle_keys.end(), std::back_inserter(extra_in_golden));
         EXPECT_TRUE(missing_from_golden.empty())
             << dc.label << ": " << missing_from_golden.size()
             << " context(s) in the oracle but missing from golden_groups.csv — e.g. "
@@ -532,13 +538,14 @@ TEST(RequiredScopeParity, QuickFixGroupGoldenMatchesOracleAcrossNineDicts) {
                 golden_plus_extra.insert(carve_out_extra->begin(), carve_out_extra->end());
                 EXPECT_EQ(expected, golden_plus_extra)
                     << dc.label << " " << describe_context(key)
-                    << " (081 W-204-1-lineage stricter-superset carve-out): expected oracle == golden ∪ "
+                    << " (081 W-204-1-lineage stricter-superset carve-out): expected oracle == "
+                       "golden ∪ "
                        "named-extra-tags: "
                     << describe_diff(expected, golden_plus_extra);
                 ++carve_out_hits;
             } else {
-                EXPECT_EQ(expected, git2->second) << dc.label << " " << describe_context(key) << ": "
-                                                   << describe_diff(expected, git2->second);
+                EXPECT_EQ(expected, git2->second) << dc.label << " " << describe_context(key)
+                                                  << ": " << describe_diff(expected, git2->second);
             }
             ++checked;
         }
@@ -546,15 +553,17 @@ TEST(RequiredScopeParity, QuickFixGroupGoldenMatchesOracleAcrossNineDicts) {
         total_contexts += checked;
     }
 
-    std::cout << "  total group contexts checked across 9 QuickFIX dicts: " << total_contexts << "\n";
-    std::cout << "  named stricter-superset carve-out contexts exercised: " << carve_out_hits << " (expect "
-              << kKnownSupersetContexts.size() << ")\n";
+    std::cout << "  total group contexts checked across 9 QuickFIX dicts: " << total_contexts
+              << "\n";
+    std::cout << "  named stricter-superset carve-out contexts exercised: " << carve_out_hits
+              << " (expect " << kKnownSupersetContexts.size() << ")\n";
     EXPECT_GT(total_contexts, 0u);
     // The carve-out itself stays a real pin: if a declared context vanishes
     // (dictionary edit, oracle rework, etc.), or MORE contexts than declared
     // start hitting the carve-out lookup, that is itself a finding to
     // re-examine — not silently absorbed.
     EXPECT_EQ(carve_out_hits, kKnownSupersetContexts.size())
-        << "the named stricter-superset carve-out contexts were not exercised exactly as declared — "
+        << "the named stricter-superset carve-out contexts were not exercised exactly as declared "
+           "— "
            "re-examine kKnownSupersetContexts against the current oracle/golden";
 }

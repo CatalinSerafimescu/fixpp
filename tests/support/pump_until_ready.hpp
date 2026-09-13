@@ -1035,8 +1035,7 @@ inline void drain_or_report(asio::io_context& ioc, const char* site,
             return;
         }
         if (!ioc.stopped()) {
-            ADD_FAILURE()
-                << kDrainResidual << ", " << kDrainResidualCause << "Site: " << site;
+            ADD_FAILURE() << kDrainResidual << ", " << kDrainResidualCause << "Site: " << site;
         }
     } catch (...) {
         // (gate-b/r1) Nothing may escape a teardown frame -- see pump_or_report_throw's
@@ -1193,8 +1192,8 @@ template <class Fut>
 // `asio::error::operation_aborted` (`mock_clock::cancel_sleeps()`);
 // `mock_clock::sleep_until` initiates with a `void(std::error_code)` signature
 // under `use_awaitable`, which THROWS `std::system_error` on a non-zero code
-// (same function's `async_initiate` comment); and `run_liveness_loop`'s `catch (const std::system_error&)` sits
-// OUTSIDE its `while (fsm_state_ == fsm_state::Active)` loop
+// (same function's `async_initiate` comment); and `run_liveness_loop`'s `catch (const
+// std::system_error&)` sits OUTSIDE its `while (fsm_state_ == fsm_state::Active)` loop
 // (src/session/session.cpp), so the throw crosses the loop boundary and converts
 // to a clean `co_return`. A single cancel therefore DOES terminate a sleeping
 // liveness loop -- it does not merely wake it to sleep again. Worth writing down:
@@ -1203,13 +1202,13 @@ template <class Fut>
 //
 // WHAT THE ONE-SHOT PAIR MISSES is therefore only this: `sleep_until` re-registers
 // freely whenever the deadline is still in the future
-// (`mock_clock::sleep_until`'s waiter-registration branch), and `cancel_sleeps()` installs nothing to
-// reject a LATER registration. So a miss branch whose drain itself COMPLETES A
-// STATE TRANSITION that co_spawns a sleeping coroutine -- `run_liveness_loop`'s
-// `sleep_until` and `run_logout_phase1`'s are the two known instances -- arms its
-// sleep AFTER the single cancel has already run. Nothing then releases it, and the
-// pair burns the whole budget before reporting a residual the caller has no lever
-// to clear. Alternating the cancel with the drain closes exactly that window.
+// (`mock_clock::sleep_until`'s waiter-registration branch), and `cancel_sleeps()` installs nothing
+// to reject a LATER registration. So a miss branch whose drain itself COMPLETES A STATE TRANSITION
+// that co_spawns a sleeping coroutine -- `run_liveness_loop`'s `sleep_until` and
+// `run_logout_phase1`'s are the two known instances -- arms its sleep AFTER the single cancel has
+// already run. Nothing then releases it, and the pair burns the whole budget before reporting a
+// residual the caller has no lever to clear. Alternating the cancel with the drain closes exactly
+// that window.
 //
 // THREE BUCKETS, NOT TWO, and the discriminator is WHERE the miss falls -- whether
 // the drain performs the transition, not merely whether the fixture has a clock.
@@ -1232,18 +1231,19 @@ template <class Fut>
 //
 // It terminates, for reasons read from the source rather than inferred from a
 // green suite, and the strongest one is structural, though it covers only five
-// of the seven sites. At those five (TestRequestReplyWriteErrorDisconnectsSession, CloseCancelsBlockedPublicSend, GracefulCloseCancelsBlockedPublicSend, CallerCancelledMidCloseDoesNotWedgeSecondClose, BudgetMissQuiescesBeforeSessionTeardown)
+// of the seven sites. At those five (TestRequestReplyWriteErrorDisconnectsSession,
+// CloseCancelsBlockedPublicSend, GracefulCloseCancelsBlockedPublicSend,
+// CallerCancelledMidCloseDoesNotWedgeSecondClose, BudgetMissQuiescesBeforeSessionTeardown)
 // `teardown_clock` is a freshly-constructed source that nothing but the guard
 // holds, and the guard only ever calls `cancel_sleeps()` on it — so nothing can
 // register a sleep there and `inflight` is empty BY CONSTRUCTION, and the
 // per-slice cancel is INERT at those five sites, with nothing for it to do. The
-// other two (LivenessHeartbeatWriteErrorStopsLoop, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf) share their clock with the session (`eng.clock =
-// clock`), so the lever is live there, and it rests on two mechanisms that hold
-// in the general case: the map holds `weak_ptr`, and only entries that still
-// lock get a post; and `sleep_until` installs an RAII `dereg` guard that erases
-// its entry on scope exit, covering the deadline-reached, cancelled and
-// exception paths alike. So even a shared clock's cancelled sleep de-registers
-// as its frame unwinds and later slices post nothing.
+// other two (LivenessHeartbeatWriteErrorStopsLoop, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf)
+// share their clock with the session (`eng.clock = clock`), so the lever is live there, and it
+// rests on two mechanisms that hold in the general case: the map holds `weak_ptr`, and only entries
+// that still lock get a post; and `sleep_until` installs an RAII `dereg` guard that erases its
+// entry on scope exit, covering the deadline-reached, cancelled and exception paths alike. So even
+// a shared clock's cancelled sleep de-registers as its frame unwinds and later slices post nothing.
 //
 // Cost, measured at -O0 with ASan (the preset that actually runs this): on an
 // empty container both clock types are indistinguishable from a loop with no
@@ -1435,8 +1435,8 @@ inline void cancel_and_drain_or_report(asio::io_context& ioc, fixpp::core::Clock
 //     the strand after is a heap-use-after-free EVERY TIME, not on a race.
 //     This reaches further than it looks: under the default
 //     `threading_mode::per_session_strand` a Session's bound executor IS such a
-//     strand (`SessionConfig::mode`'s `per_session_strand` default; `session_executor`'s private state),
-//     and so is `Engine::control_strand_` (its member declaration in engine.hpp). A BARE
+//     strand (`SessionConfig::mode`'s `per_session_strand` default; `session_executor`'s private
+//     state), and so is `Engine::control_strand_` (its member declaration in engine.hpp). A BARE
 //     `io_context::executor_type` is NOT affected — it is untracked and its
 //     destructor touches nothing — so an `executor_override` may outlive the
 //     context safely. Measured both arms under ASan; only the strand faults.

@@ -584,7 +584,8 @@ struct OsFile {
         }
     }
 
-    [[nodiscard]] bool pwrite_all(const void* buf, std::size_t n, std::int64_t offset) const noexcept {
+    [[nodiscard]] bool pwrite_all(const void* buf, std::size_t n,
+                                  std::int64_t offset) const noexcept {
         const auto* p = static_cast<const char*>(buf);
         std::size_t remaining = n;
         std::int64_t off = offset;
@@ -690,12 +691,12 @@ struct FileStoreImpl {
     std::pmr::vector<std::byte> retrieve_scratch_;
 
     // 035: monotonic epoch bumped by reset() on the strand at/after the live-handle
-    // swap (`FileStore::reset()`'s "T015: bump epoch"); snapshotted by retrieve() under the mutex at
-    // index-snapshot time and re-checked before each per-frame pread in the walk.
-    // A mismatch means a reset() ran during a visitor.on_frame() suspension —
-    // retrieve() returns store_io_failure (clean-fail, never reads a swapped handle).
-    // Plain scalar — mutated strand-only (like every other impl_ field per Decision 3),
-    // so no atomic is needed. (data-model §1)
+    // swap (`FileStore::reset()`'s "T015: bump epoch"); snapshotted by retrieve() under the mutex
+    // at index-snapshot time and re-checked before each per-frame pread in the walk. A mismatch
+    // means a reset() ran during a visitor.on_frame() suspension — retrieve() returns
+    // store_io_failure (clean-fail, never reads a swapped handle). Plain scalar — mutated
+    // strand-only (like every other impl_ field per Decision 3), so no atomic is needed.
+    // (data-model §1)
     std::uint64_t generation_{0};
 
     // Per-direction frame index (rebuilt during open/restart scan).
@@ -1179,8 +1180,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                 // io_ok flip, which would leave the frame + counter on disk and
                 // desync the durable counter). Statics have static storage duration
                 // (not captured); reachable on the pool thread.
-                if (g_force_store_pwrite_fail_once.exchange(
-                        false, std::memory_order_relaxed)) {
+                if (g_force_store_pwrite_fail_once.exchange(false, std::memory_order_relaxed)) {
                     g_store_pwrite_fail_count.fetch_add(1, std::memory_order_relaxed);
                     return false;
                 }

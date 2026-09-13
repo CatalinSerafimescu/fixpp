@@ -99,8 +99,8 @@ RawCensus raw_scan(std::filesystem::path const& xml_path) {
     }
     auto const fields_node = doc.child("fix").child("fields");
     for (auto const& f : fields_node.children("field")) {
-        std::size_t const value_count =
-            static_cast<std::size_t>(std::distance(f.children("value").begin(), f.children("value").end()));
+        std::size_t const value_count = static_cast<std::size_t>(
+            std::distance(f.children("value").begin(), f.children("value").end()));
         if (value_count > 0) {
             ++rc.enum_backed_fields;
             rc.total_codes += value_count;
@@ -171,8 +171,9 @@ TEST(XmlEnumCodeset, PerDictionaryEnumBackedFieldAndCodeCountsMatchCensus) {
     auto storage = std::make_unique<std::byte[]>(kArenaBytes);
     std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
 
-    std::cout << "\n=== 075 T028 SC-002/FR-001: per-dictionary enum-backed-field / total-code census "
-                 "(nine XmlLoader dicts) ===\n";
+    std::cout
+        << "\n=== 075 T028 SC-002/FR-001: per-dictionary enum-backed-field / total-code census "
+           "(nine XmlLoader dicts) ===\n";
 
     for (auto const& row : kExpectedCensus) {
         auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / std::string{row.file};
@@ -200,19 +201,22 @@ TEST(XmlEnumCodeset, PerDictionaryEnumBackedFieldAndCodeCountsMatchCensus) {
             }
         }
 
-        std::cout << "  " << row.file << ": raw=" << raw.enum_backed_fields << "/" << raw.total_codes
-                  << " loader=" << loader_enum_backed_fields << "/" << loader_total_codes
-                  << " expected=" << row.enum_backed_fields << "/" << row.total_codes << "\n";
+        std::cout << "  " << row.file << ": raw=" << raw.enum_backed_fields << "/"
+                  << raw.total_codes << " loader=" << loader_enum_backed_fields << "/"
+                  << loader_total_codes << " expected=" << row.enum_backed_fields << "/"
+                  << row.total_codes << "\n";
 
         EXPECT_EQ(raw.enum_backed_fields, row.enum_backed_fields)
             << row.file << ": raw-XML enum-backed field count drifted from the T001 census";
         EXPECT_EQ(raw.total_codes, row.total_codes)
             << row.file << ": raw-XML total declared code count drifted from the T001 census";
         EXPECT_EQ(loader_enum_backed_fields, row.enum_backed_fields)
-            << row.file << ": Dictionary::enum_values() enum-backed field count diverges from the "
-                            "raw shipped XML — the loader is silently dropping or adding codesets";
+            << row.file
+            << ": Dictionary::enum_values() enum-backed field count diverges from the "
+               "raw shipped XML — the loader is silently dropping or adding codesets";
         EXPECT_EQ(loader_total_codes, row.total_codes)
-            << row.file << ": Dictionary::enum_values() total code count diverges from the raw "
-                            "shipped XML — the loader is silently dropping or adding codes";
+            << row.file
+            << ": Dictionary::enum_values() total code count diverges from the raw "
+               "shipped XML — the loader is silently dropping or adding codes";
     }
 }

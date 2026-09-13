@@ -22,13 +22,13 @@
 // COROUTINE NOTE: ASSERT_* macros internally call return, which is illegal
 // inside a coroutine. Use EXPECT_* + guard `if (!...) co_return;` instead.
 
-#include <chrono>  // std::chrono — was reaching this transitively (#404)
 #include <gtest/gtest.h>
 
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
+#include <chrono>  // std::chrono — was reaching this transitively (#404)
 #include <cstddef>
 #include <filesystem>
 #include <fixpp/core/error.hpp>

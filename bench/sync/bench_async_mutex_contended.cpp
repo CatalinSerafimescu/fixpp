@@ -15,9 +15,7 @@
 #include <asio/io_context.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
-
 #include <chrono>
-
 #include <fixpp/core/sync/async_mutex.hpp>
 
 namespace {
@@ -33,26 +31,30 @@ double contended_cycle_seconds(fixpp::sync::completion_policy pol) {
     asio::io_context ioc;
     fixpp::sync::async_mutex m{pol};
     auto t0 = bench_clock::now();
-    asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        for (int i = 0; i < kHandoffs; ++i) {
-            auto g = co_await m.async_lock();
-            benchmark::DoNotOptimize(&g);
-            if ((i & 1023) == 0)
-                co_await asio::post(co_await asio::this_coro::executor,
-                                    asio::use_awaitable);
-        }
-        co_return;
-    }, asio::detached);
-    asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        for (int i = 0; i < kHandoffs; ++i) {
-            auto g = co_await m.async_lock();
-            benchmark::DoNotOptimize(&g);
-            if ((i & 1023) == 0)
-                co_await asio::post(co_await asio::this_coro::executor,
-                                    asio::use_awaitable);
-        }
-        co_return;
-    }, asio::detached);
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            for (int i = 0; i < kHandoffs; ++i) {
+                auto g = co_await m.async_lock();
+                benchmark::DoNotOptimize(&g);
+                if ((i & 1023) == 0)
+                    co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+            }
+            co_return;
+        },
+        asio::detached);
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            for (int i = 0; i < kHandoffs; ++i) {
+                auto g = co_await m.async_lock();
+                benchmark::DoNotOptimize(&g);
+                if ((i & 1023) == 0)
+                    co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+            }
+            co_return;
+        },
+        asio::detached);
     ioc.run();
     auto t1 = bench_clock::now();
     return std::chrono::duration<double>(t1 - t0).count();
@@ -61,8 +63,7 @@ double contended_cycle_seconds(fixpp::sync::completion_policy pol) {
 // Row 2: contended async_lock (the suspend path), default dispatch policy.
 void BM_AsyncMutex_AsyncLock_Contended(benchmark::State& state) {
     for (auto _ : state) {
-        double s = contended_cycle_seconds(
-            fixpp::sync::completion_policy::dispatch);
+        double s = contended_cycle_seconds(fixpp::sync::completion_policy::dispatch);
         state.SetIterationTime(s / (2 * kHandoffs));
     }
 }
@@ -88,10 +89,8 @@ BENCHMARK(BM_AsyncMutex_AsyncLock_Contended)->UseManualTime()->Iterations(3);
 // #12: |post − dispatch| per-handoff delta (expected ≈ 0 post-E-3).
 void BM_AsyncMutex_DispatchVsPost_Delta(benchmark::State& state) {
     for (auto _ : state) {
-        double d = contended_cycle_seconds(
-            fixpp::sync::completion_policy::dispatch);
-        double p = contended_cycle_seconds(
-            fixpp::sync::completion_policy::post);
+        double d = contended_cycle_seconds(fixpp::sync::completion_policy::dispatch);
+        double p = contended_cycle_seconds(fixpp::sync::completion_policy::post);
         double delta = (p - d) / (2 * kHandoffs);
         if (delta < 0) delta = -delta;
         state.SetIterationTime(delta);

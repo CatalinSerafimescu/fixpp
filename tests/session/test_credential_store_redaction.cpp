@@ -15,10 +15,10 @@
 // _fixtures_/test_double_fsm.hpp) are included for later phases (T005 US1
 // disk-byte witnesses); they add zero link cost for the Phase-2 masker unit.
 
-#include <chrono>  // std::chrono — was reaching this transitively (#404)
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>  // std::chrono — was reaching this transitively (#404)
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/session/logon_credentials.hpp>

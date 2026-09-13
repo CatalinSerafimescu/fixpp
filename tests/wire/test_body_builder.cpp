@@ -148,10 +148,11 @@ TEST(BodyBuilder, FlatMessage_ByteExact) {
     auto r = bb.commit(std::span<std::byte>{buf});
     ASSERT_TRUE(r.has_value());
 
-    std::string expected = "35=X\x01"
-                            "11=CLORD1\x01"
-                            "54=1\x01"
-                            "38=100\x01";
+    std::string expected =
+        "35=X\x01"
+        "11=CLORD1\x01"
+        "54=1\x01"
+        "38=100\x01";
     EXPECT_EQ(bytes_to_string(*r), expected);
 }
 
@@ -174,8 +175,9 @@ TEST(BodyBuilder, Inv2_FramingTagRejected) {
 // SOH + a forged tag (`"X\x0149=EVIL"`) would splice `49=EVIL` in right after
 // the MsgType, forging a framing tag past the body boundary (C1/INV-2).
 TEST(BodyBuilder, Inv2_MsgTypeFramingInjectionRejected) {
-    body_builder bb{"X\x01"
-                     "49=EVIL"};
+    body_builder bb{
+        "X\x01"
+        "49=EVIL"};
     ASSERT_TRUE(bb.field(11, std::string_view{"CLORD1"}).has_value());
 
     std::array<std::byte, kBufSize> buf{};
@@ -219,8 +221,9 @@ TEST(BodyBuilder, Inv3_DecimalCanonicalBytes) {
     auto r = bb.commit(std::span<std::byte>{buf});
     ASSERT_TRUE(r.has_value());
 
-    EXPECT_EQ(bytes_to_string(*r), "35=X\x01"
-                                    "44=190.5\x01");
+    EXPECT_EQ(bytes_to_string(*r),
+              "35=X\x01"
+              "44=190.5\x01");
 }
 
 // ── C3: group count-precedence, 2 instances ─────────────────────────────────
@@ -243,10 +246,11 @@ TEST(BodyBuilder, GroupCountPrecedence_TwoInstances) {
     auto r = bb.commit(std::span<std::byte>{buf});
     ASSERT_TRUE(r.has_value());
 
-    EXPECT_EQ(bytes_to_string(*r), "35=X\x01"
-                                    "453=2\x01"
-                                    "448=P1\x01"
-                                    "448=P2\x01");
+    EXPECT_EQ(bytes_to_string(*r),
+              "35=X\x01"
+              "453=2\x01"
+              "448=P1\x01"
+              "448=P2\x01");
 }
 
 // ── Nested 2-level LIFO, byte-exact ──────────────────────────────────────────
@@ -272,11 +276,12 @@ TEST(BodyBuilder, NestedTwoLevel_ByteExact) {
     auto r = bb.commit(std::span<std::byte>{buf});
     ASSERT_TRUE(r.has_value());
 
-    EXPECT_EQ(bytes_to_string(*r), "35=X\x01"
-                                    "453=1\x01"
-                                    "448=P1\x01"
-                                    "802=1\x01"
-                                    "523=S1\x01");
+    EXPECT_EQ(bytes_to_string(*r),
+              "35=X\x01"
+              "453=1\x01"
+              "448=P1\x01"
+              "802=1\x01"
+              "523=S1\x01");
 }
 
 // ── Nested 3-level LIFO, byte-exact (E shape: 73->453->802) ─────────────────
@@ -310,13 +315,14 @@ TEST(BodyBuilder, NestedThreeLevel_ByteExact) {
     auto r = bb.commit(std::span<std::byte>{buf});
     ASSERT_TRUE(r.has_value());
 
-    EXPECT_EQ(bytes_to_string(*r), "35=E\x01"
-                                    "73=1\x01"
-                                    "11=ORD1\x01"
-                                    "453=1\x01"
-                                    "448=PID1\x01"
-                                    "802=1\x01"
-                                    "523=SUB1\x01");
+    EXPECT_EQ(bytes_to_string(*r),
+              "35=E\x01"
+              "73=1\x01"
+              "11=ORD1\x01"
+              "453=1\x01"
+              "448=PID1\x01"
+              "802=1\x01"
+              "523=SUB1\x01");
 }
 
 // ── Count-of-zero: present-but-empty group ──────────────────────────────────
@@ -334,8 +340,9 @@ TEST(BodyBuilder, CountZero_PresentButEmpty) {
     auto r = bb.commit(std::span<std::byte>{buf});
     ASSERT_TRUE(r.has_value());
 
-    EXPECT_EQ(bytes_to_string(*r), "35=X\x01"
-                                    "453=0\x01");
+    EXPECT_EQ(bytes_to_string(*r),
+              "35=X\x01"
+              "453=0\x01");
 }
 
 // ── Never-opened: distinct from count-zero — no tag emitted at all ─────────
@@ -348,8 +355,9 @@ TEST(BodyBuilder, NeverOpened_NoTagEmitted) {
     ASSERT_TRUE(r.has_value());
 
     std::string body = bytes_to_string(*r);
-    EXPECT_EQ(body, "35=X\x01"
-                     "11=CLORD1\x01");
+    EXPECT_EQ(body,
+              "35=X\x01"
+              "11=CLORD1\x01");
     EXPECT_EQ(body.find("453="), std::string::npos) << "optional group never opened -> no No-tag";
 }
 
@@ -536,8 +544,7 @@ TEST(BodyBuilder, NoGlobalHeap_CountingNew) {
     EXPECT_EQ(after, before)
         << "body_builder construction + field()/group_begin()/add_entry()/set_string()/"
            "group_end()/commit() must not call global ::operator new (alloc delta = "
-        << (after - before)
-        << "); mallocnesia LD_PRELOAD is the CI-tier cross-check";
+        << (after - before) << "); mallocnesia LD_PRELOAD is the CI-tier cross-check";
 #endif  // FIXPP_SANITIZER_REPLACES_NEW
 }
 

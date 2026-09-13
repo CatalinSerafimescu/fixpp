@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/error.hpp>
@@ -16,7 +17,6 @@
 #include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <iterator>
-#include <cstddef>
 #include <memory_resource>
 #include <string>
 #include <string_view>
@@ -87,7 +87,8 @@ TEST(LoadAny, ClassicFileParityWithDirectXmlLoader) {
 // `fixr:repository` throws dict::xml_parse_error (fail-closed, G2). Written
 // to a temp file at test runtime — no checked-in fixture.
 TEST(LoadAny, UnrecognizedRootThrowsXmlParseError) {
-    auto const path = std::filesystem::temp_directory_path() / "load_any_test_unrecognized_root.xml";
+    auto const path =
+        std::filesystem::temp_directory_path() / "load_any_test_unrecognized_root.xml";
     {
         std::ofstream out(path, std::ios::binary);
         out << "<foo><bar/></foo>";
@@ -214,11 +215,11 @@ constexpr std::string_view kOrchestraUnresolvableXml =
 
 // Default policy: the Orchestra loader throws the DERIVED orchestra_parse_error,
 // not the base xml_parse_error — the Orchestra fuzz harness catches only the
-// derived type (see loader_disposition_test.cpp's `OrchestraRejectionIsOrchestraParseError`), so asserting the base
-// type here would be a weaker pin than its XML twin's.
+// derived type (see loader_disposition_test.cpp's `OrchestraRejectionIsOrchestraParseError`), so
+// asserting the base type here would be a weaker pin than its XML twin's.
 TEST(LoadAny, OrchestraDefaultPolicyStaysFailClosed) {
-    auto const path =
-        write_temp_xml("load_any_test_orchestra_unresolvable_default.xml", kOrchestraUnresolvableXml);
+    auto const path = write_temp_xml("load_any_test_orchestra_unresolvable_default.xml",
+                                     kOrchestraUnresolvableXml);
     std::pmr::monotonic_buffer_resource mr;
     bool caught_derived = false;
     try {
@@ -256,7 +257,8 @@ TEST(LoadAny, OrchestraTolerantPolicyReachesTheConcreteLoader) {
 }
 
 TEST(LoadAny, DefaultPolicyStaysFailClosed) {
-    auto const path = write_temp_xml("load_any_test_unresolvable_default.xml", kUnresolvableGroupXml);
+    auto const path =
+        write_temp_xml("load_any_test_unresolvable_default.xml", kUnresolvableGroupXml);
     std::pmr::monotonic_buffer_resource mr;
     // Called with NO policy argument — pins that the added trailing parameter
     // DEFAULTS to fail_closed, not merely that it exists.

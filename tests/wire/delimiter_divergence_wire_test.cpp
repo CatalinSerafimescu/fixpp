@@ -44,16 +44,14 @@
 // is absent from `table_view::valid_tags_for("AX")` (built solely from
 // `message_fields("AX")`, `Dictionary::message_fields` — a per-message-type
 // computation entirely independent of the group-context pollution
-// mechanism (`set_group_first_ctx`'s `add_group_member_ctx` injection). `dictionary_driven_validator::
-// validate()`'s Step 1 ("(a) Unexpected tag check", its own comment marker)
-// walks EVERY field in the frame — including fields inside a group's body,
-// since `MessageView::begin()/end()` is a flat, dict-free byte scan with no
-// notion of group nesting (its `field_iterator`) — and runs BEFORE Step 3's
-// group-structure walk. So ANY AX frame containing tag 32 anywhere is
-// rejected with `wire_unexpected_tag` at Step 1, REGARDLESS of the
-// group-context member-set pollution, both TODAY and AFTER this feature
-// (083's scope never touches `add_valid_tag`/`valid_tags_for`). This is
-// confirmed empirically below
+// mechanism (`set_group_first_ctx`'s `add_group_member_ctx` injection).
+// `dictionary_driven_validator:: validate()`'s Step 1 ("(a) Unexpected tag check", its own comment
+// marker) walks EVERY field in the frame — including fields inside a group's body, since
+// `MessageView::begin()/end()` is a flat, dict-free byte scan with no notion of group nesting (its
+// `field_iterator`) — and runs BEFORE Step 3's group-structure walk. So ANY AX frame containing tag
+// 32 anywhere is rejected with `wire_unexpected_tag` at Step 1, REGARDLESS of the group-context
+// member-set pollution, both TODAY and AFTER this feature (083's scope never touches
+// `add_valid_tag`/`valid_tags_for`). This is confirmed empirically below
 // (PollutedContextInjectedTagIsNotIndependentlyValid) and is not specific
 // to AX: the mechanism is dictionary-agnostic — a "polluted" member is
 // BY DEFINITION a tag the polluted context's OWN declaration does not
@@ -189,19 +187,34 @@ expected_t<void> run_validate(dictionary_driven_validator const& v,
 // (FIX44.xml's `CollateralRequest` message declaration).
 std::string fix44_ax_required_prefix() {
     return "35=AX\x01"
-           "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-           "894=COLLREQ1\x01" "895=0\x01" "60=20240101-00:00:00\x01";
+           "34=1\x01"
+           "49=SENDER\x01"
+           "52=20240101-00:00:00\x01"
+           "56=TARGET\x01"
+           "894=COLLREQ1\x01"
+           "895=0\x01"
+           "60=20240101-00:00:00\x01";
 }
 
 // FIX44 AllocationInstruction(J) message-level required prefix: AllocID(70),
 // AllocTransType(71, enum), AllocType(626, enum), AllocNoOrdersType(857,
 // enum), Side(54, enum), Quantity(53), AvgPx(6), TradeDate(75) + standard
-// header (FIX44.xml's `AllocationInstruction` message declaration). Instrument(required='Y') carries no required
-// direct fields of its own (FIX44.xml's `Instrument` component declaration, all required='N').
+// header (FIX44.xml's `AllocationInstruction` message declaration). Instrument(required='Y')
+// carries no required direct fields of its own (FIX44.xml's `Instrument` component declaration, all
+// required='N').
 std::string fix44_j_required_prefix() {
     return "35=J\x01"
-           "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-           "70=ALLOC1\x01" "71=0\x01" "626=1\x01" "857=0\x01" "54=1\x01" "53=100\x01" "6=10.5\x01"
+           "34=1\x01"
+           "49=SENDER\x01"
+           "52=20240101-00:00:00\x01"
+           "56=TARGET\x01"
+           "70=ALLOC1\x01"
+           "71=0\x01"
+           "626=1\x01"
+           "857=0\x01"
+           "54=1\x01"
+           "53=100\x01"
+           "6=10.5\x01"
            "75=20240101\x01";
 }
 
@@ -227,8 +240,8 @@ TEST(DelimiterDivergenceWire, DivergentContextRejectedWhileFirstSeenAccepted) {
 
     // Divergent context: CollateralRequest(AX), NoExecs(124) opened with the
     // group's TRUE declaration-order delimiter, ExecID(17) — the tag the
-    // dictionary actually declares for ExecCollGrp (FIX44.xml's `ExecCollGrp` component declaration).
-    // Today the context's REGISTERED delimiter is still the dictionary-wide
+    // dictionary actually declares for ExecCollGrp (FIX44.xml's `ExecCollGrp` component
+    // declaration). Today the context's REGISTERED delimiter is still the dictionary-wide
     // first-seen value (32, LastQty), so opening with 17 is rejected
     // (wire_required_field_missing at consume_group's `ents[i].tag != delim_tag` guard — the first
     // instance's opening tag doesn't match delim_tag).
@@ -302,17 +315,15 @@ TEST(DelimiterDivergenceWire, WrongOpeningTagStillRejected) {
 // the injected/polluted member of every one of FIX44's six polluted
 // NoExecs(124) contexts (AX/AY/AZ/BA/BB/BG) — is absent from
 // `valid_tags_for("AX")`. Given that, `dictionary_driven_validator::
-// validate()`'s Step 1 (its "(a) Unexpected tag check" comment marker, which runs over EVERY field in
-// the frame BEFORE Step 3's group-structure walk, per parser.hpp's flat
-// dict-free field_iterator) rejects any AX frame containing tag 32 anywhere
-// with wire_unexpected_tag, independent of the group-context pollution at
-// `set_group_first_ctx`'s `add_group_member_ctx` injection (whose scope is `group_ctx_`/`group_member_tags`,
-// never `valid_`/`valid_tags_for`). So AX/NoExecs(124) — the "cleanest"
-// divergent context per quickstart.md §1, and FIX44's ONLY polluted
-// NoExecs(124) family — cannot demonstrate FR-010a's over-permissive-
-// membership leniency: a message carrying tag 32 inside the group is
-// REJECTED today, for a reason (Step 1's unrelated valid-tag gate) that has
-// nothing to do with the pollution this feature removes, and stays
+// validate()`'s Step 1 (its "(a) Unexpected tag check" comment marker, which runs over EVERY field
+// in the frame BEFORE Step 3's group-structure walk, per parser.hpp's flat dict-free
+// field_iterator) rejects any AX frame containing tag 32 anywhere with wire_unexpected_tag,
+// independent of the group-context pollution at `set_group_first_ctx`'s `add_group_member_ctx`
+// injection (whose scope is `group_ctx_`/`group_member_tags`, never `valid_`/`valid_tags_for`). So
+// AX/NoExecs(124) — the "cleanest" divergent context per quickstart.md §1, and FIX44's ONLY
+// polluted NoExecs(124) family — cannot demonstrate FR-010a's over-permissive- membership leniency:
+// a message carrying tag 32 inside the group is REJECTED today, for a reason (Step 1's unrelated
+// valid-tag gate) that has nothing to do with the pollution this feature removes, and stays
 // rejected after (083 does not touch `add_valid_tag`). The two cases below
 // (C1/C2) record this as the shapes tried and the negative result, per
 // FR-010a/FR-007a's own escape clause ("If measurement shows [it] is
@@ -333,8 +344,8 @@ TEST(DelimiterDivergenceWire, PollutedContextInjectedTagIsNotIndependentlyValid)
     auto const tv = d44.as_table_view();
 
     constexpr std::uint16_t kNoExecs = 124;
-    constexpr std::uint16_t kInjectedTag = 32;    // LastQty — today's wrong global delimiter
-    constexpr std::uint16_t kTrueMember = 17;     // ExecID — AX's true (only) declared member
+    constexpr std::uint16_t kInjectedTag = 32;  // LastQty — today's wrong global delimiter
+    constexpr std::uint16_t kTrueMember = 17;   // ExecID — AX's true (only) declared member
     std::array<std::uint16_t, 0> const root{};
 
     // 083 T033 — FLIPPED from the pre-fix scaffolding these two assertions
@@ -505,14 +516,16 @@ TEST(DelimiterDivergenceWire, TrailingMessageFieldNotSwallowedIntoLastInstance) 
 // dictionaries/FIX50SP2.xml (declaration order, component recursion) and
 // cross-checked against research.md's T007 sample table where a row
 // exists for that context:
-//   1677 NoPartyRiskLimits      -> PartyRiskLimitsReport(CM)           -> true delim 1671 (NoPartyDetails)
-//   1772 NoPartyEntitlements    -> PartyEntitlementsReport(CV)         -> true delim 1671 (NoPartyDetails)
-//   40204 NoPhysicalSettlTerms  -> IOI(6), path {}                      -> true delim 40209 (research.md T007)
-//   41599 NoLegPhysicalSettlTerms -> IOI(6), path {555}                 -> true delim 41604 (research.md T007)
-//   42060 NoUnderlyingPhysicalSettlTerms -> IOI(6), path {711}          -> true delim 42065 (research.md T007)
-//   1499 NoAsgnReqs             -> StreamAssignmentRequest(CC)          -> true delim 453 (NoPartyIDs, research.md T007)
-//   1669 NoRiskLimits           -> PartyRiskLimitsReport(CM), path {1677} -> true delim 1529 (research.md T007)
-//   1919 NoPriceMovements       -> SecurityList(y), path {146}          -> true delim 1920 (spec.md Baseline: "1919->1920")
+//   1677 NoPartyRiskLimits      -> PartyRiskLimitsReport(CM)           -> true delim 1671
+//   (NoPartyDetails) 1772 NoPartyEntitlements    -> PartyEntitlementsReport(CV)         -> true
+//   delim 1671 (NoPartyDetails) 40204 NoPhysicalSettlTerms  -> IOI(6), path {} -> true delim 40209
+//   (research.md T007) 41599 NoLegPhysicalSettlTerms -> IOI(6), path {555}                 -> true
+//   delim 41604 (research.md T007) 42060 NoUnderlyingPhysicalSettlTerms -> IOI(6), path {711} ->
+//   true delim 42065 (research.md T007) 1499 NoAsgnReqs             -> StreamAssignmentRequest(CC)
+//   -> true delim 453 (NoPartyIDs, research.md T007) 1669 NoRiskLimits           ->
+//   PartyRiskLimitsReport(CM), path {1677} -> true delim 1529 (research.md T007) 1919
+//   NoPriceMovements       -> SecurityList(y), path {146}          -> true delim 1920 (spec.md
+//   Baseline: "1919->1920")
 //
 // 1669 and 1919 are nested inside a PARENT group (1677, 146 respectively);
 // 1669's parent (1677) is itself one of the five wrong-delimiter contexts,
@@ -536,22 +549,41 @@ TEST(DelimiterDivergenceWire, NamedCountTagSubsetAccepts) {
     std::vector<Case> const cases{
         // 1677 NoPartyRiskLimits, PartyRiskLimitsReport(CM), true delim 1671.
         {1677, "1677 NoPartyRiskLimits (CM)",
-         "35=CM\x01" "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
+         "35=CM\x01"
+         "34=1\x01"
+         "49=SENDER\x01"
+         "52=20240101-00:00:00\x01"
+         "56=TARGET\x01"
          "1667=RPT1\x01"
          "1677=2\x01"
-         "1671=1\x01" "1691=PD1\x01"
-         "1671=1\x01" "1691=PD2\x01"},
+         "1671=1\x01"
+         "1691=PD1\x01"
+         "1671=1\x01"
+         "1691=PD2\x01"},
         // 1772 NoPartyEntitlements, PartyEntitlementsReport(CV), true delim 1671.
         {1772, "1772 NoPartyEntitlements (CV)",
-         "35=CV\x01" "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
+         "35=CV\x01"
+         "34=1\x01"
+         "49=SENDER\x01"
+         "52=20240101-00:00:00\x01"
+         "56=TARGET\x01"
          "1771=RPT2\x01"
          "1772=2\x01"
-         "1671=1\x01" "1691=PD1\x01"
-         "1671=1\x01" "1691=PD2\x01"},
+         "1671=1\x01"
+         "1691=PD1\x01"
+         "1671=1\x01"
+         "1691=PD2\x01"},
         // 40204 NoPhysicalSettlTerms, IOI(6), path {}, true delim 40209.
         {40204, "40204 NoPhysicalSettlTerms (IOI)",
-         "35=6\x01" "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-         "23=IOI1\x01" "28=N\x01" "54=1\x01" "27=S\x01"
+         "35=6\x01"
+         "34=1\x01"
+         "49=SENDER\x01"
+         "52=20240101-00:00:00\x01"
+         "56=TARGET\x01"
+         "23=IOI1\x01"
+         "28=N\x01"
+         "54=1\x01"
+         "27=S\x01"
          "40204=2\x01"
          "40209=0\x01"
          "40209=0\x01"},
@@ -559,8 +591,15 @@ TEST(DelimiterDivergenceWire, NamedCountTagSubsetAccepts) {
         // Nested inside ONE instance of NoLegs(555), opened with its own
         // true delimiter LegSymbol(600).
         {41599, "41599 NoLegPhysicalSettlTerms (IOI/NoLegs)",
-         "35=6\x01" "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-         "23=IOI1\x01" "28=N\x01" "54=1\x01" "27=S\x01"
+         "35=6\x01"
+         "34=1\x01"
+         "49=SENDER\x01"
+         "52=20240101-00:00:00\x01"
+         "56=TARGET\x01"
+         "23=IOI1\x01"
+         "28=N\x01"
+         "54=1\x01"
+         "27=S\x01"
          "555=1\x01"
          "600=LEGSYM1\x01"
          "41599=2\x01"
@@ -570,8 +609,15 @@ TEST(DelimiterDivergenceWire, NamedCountTagSubsetAccepts) {
         // delim 42065. Nested inside ONE instance of NoUnderlyings(711),
         // opened with its own true delimiter UnderlyingSymbol(311).
         {42060, "42060 NoUnderlyingPhysicalSettlTerms (IOI/NoUnderlyings)",
-         "35=6\x01" "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-         "23=IOI1\x01" "28=N\x01" "54=1\x01" "27=S\x01"
+         "35=6\x01"
+         "34=1\x01"
+         "49=SENDER\x01"
+         "52=20240101-00:00:00\x01"
+         "56=TARGET\x01"
+         "23=IOI1\x01"
+         "28=N\x01"
+         "54=1\x01"
+         "27=S\x01"
          "711=1\x01"
          "311=UND1\x01"
          "42060=2\x01"
@@ -582,11 +628,18 @@ TEST(DelimiterDivergenceWire, NamedCountTagSubsetAccepts) {
         // 453"; Parties' own first child is a group, not a scalar, so the
         // pre-fix one-level scan resolves nothing).
         {1499, "1499 NoAsgnReqs (CC)",
-         "35=CC\x01" "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-         "1497=SR1\x01" "1498=1\x01"
+         "35=CC\x01"
+         "34=1\x01"
+         "49=SENDER\x01"
+         "52=20240101-00:00:00\x01"
+         "56=TARGET\x01"
+         "1497=SR1\x01"
+         "1498=1\x01"
          "1499=2\x01"
-         "453=1\x01" "448=PARTY1\x01"
-         "453=1\x01" "448=PARTY2\x01"},
+         "453=1\x01"
+         "448=PARTY1\x01"
+         "453=1\x01"
+         "448=PARTY2\x01"},
         // 1669 NoRiskLimits, PartyRiskLimitsReport(CM), path {1677}, true
         // delim 1529 (NoRiskLimitTypes). Currently UNREGISTERED (spec.md
         // Baseline: "1669->1529"). Nested inside ONE instance of the
@@ -594,7 +647,11 @@ TEST(DelimiterDivergenceWire, NamedCountTagSubsetAccepts) {
         // delimiter contexts above — see the file comment on why this
         // fixture has two preconditions.
         {1669, "1669 NoRiskLimits (CM, nested under 1677)",
-         "35=CM\x01" "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
+         "35=CM\x01"
+         "34=1\x01"
+         "49=SENDER\x01"
+         "52=20240101-00:00:00\x01"
+         "56=TARGET\x01"
          "1667=RPT1\x01"
          "1677=1\x01"
          "1671=0\x01"
@@ -607,7 +664,11 @@ TEST(DelimiterDivergenceWire, NamedCountTagSubsetAccepts) {
         // NoRelatedSym(146), opened with its own (already-correct)
         // delimiter Symbol(55).
         {1919, "1919 NoPriceMovements (SecurityList, nested under 146)",
-         "35=y\x01" "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
+         "35=y\x01"
+         "34=1\x01"
+         "49=SENDER\x01"
+         "52=20240101-00:00:00\x01"
+         "56=TARGET\x01"
          "146=1\x01"
          "55=SYM1\x01"
          "1919=2\x01"
@@ -624,7 +685,8 @@ TEST(DelimiterDivergenceWire, NamedCountTagSubsetAccepts) {
             << "tag " << c.tag << " (" << c.name
             << "): POST-FIX TARGET is ACCEPTED with an instance count of two (SC-004). "
                "TODAY's actual verdict: "
-            << (result.has_value() ? "ACCEPTED" : "REJECTED, error=" +
-                                                        std::to_string(static_cast<int>(result.error())));
+            << (result.has_value()
+                    ? "ACCEPTED"
+                    : "REJECTED, error=" + std::to_string(static_cast<int>(result.error())));
     }
 }

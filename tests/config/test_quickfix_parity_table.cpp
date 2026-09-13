@@ -37,7 +37,7 @@ namespace {
 
 struct QfKey {
     std::string_view name;
-    int              source_line; // SessionSettings.h line number
+    int source_line;  // SessionSettings.h line number
 };
 
 // All session-establishment const char[] keys from SessionSettings.h (36–239).
@@ -219,7 +219,7 @@ enum class Disposition {
 
 struct ParityRow {
     std::string_view qf_key;
-    Disposition      disposition;
+    Disposition disposition;
     // For Mapped rows: the concrete 044 loader key accepted by scalar_mappers.cpp
     // or selector_resolver.cpp.  Empty for all non-Mapped dispositions.
     std::string_view key_044;
@@ -609,7 +609,7 @@ const std::set<std::string_view> kLoaderAccepted044Keys = {
     "dictionary.path",
 };
 
-} // anonymous namespace
+}  // anonymous namespace
 
 // ── T030 tests ───────────────────────────────────────────────────────────────
 
@@ -662,8 +662,7 @@ TEST(QuickFixParityTable, CoverageExact) {
 // Test 2: every row has a non-empty notes field.
 TEST(QuickFixParityTable, AllRowsHaveNotes) {
     for (const auto& row : kParity) {
-        EXPECT_FALSE(row.notes.empty())
-            << "Row for QF key '" << row.qf_key << "' has empty notes";
+        EXPECT_FALSE(row.notes.empty()) << "Row for QF key '" << row.qf_key << "' has empty notes";
     }
 }
 
@@ -672,17 +671,15 @@ TEST(QuickFixParityTable, AllRowsHaveNotes) {
 //         mistyped 044 keys.
 TEST(QuickFixParityTable, MappedKeysExistInLoader) {
     for (const auto& row : kParity) {
-        bool is_mapped = (row.disposition == Disposition::Mapped
-                          || row.disposition == Disposition::Mapped_TlsViaSelectors);
+        bool is_mapped = (row.disposition == Disposition::Mapped ||
+                          row.disposition == Disposition::Mapped_TlsViaSelectors);
         if (!is_mapped) {
             continue;
         }
         EXPECT_FALSE(row.key_044.empty())
-            << "Row for QF key '" << row.qf_key
-            << "' is Mapped but has empty key_044";
+            << "Row for QF key '" << row.qf_key << "' is Mapped but has empty key_044";
         EXPECT_TRUE(kLoaderAccepted044Keys.count(row.key_044))
-            << "Row for QF key '" << row.qf_key
-            << "' claims 044 key '" << row.key_044
+            << "Row for QF key '" << row.qf_key << "' claims 044 key '" << row.key_044
             << "' which is NOT in kLoaderAccepted044Keys";
     }
 }
@@ -690,29 +687,26 @@ TEST(QuickFixParityTable, MappedKeysExistInLoader) {
 // Test 4: non-Mapped rows have empty key_044 (no phantom mapping).
 TEST(QuickFixParityTable, NonMappedRowsHaveNoKey044) {
     for (const auto& row : kParity) {
-        bool is_mapped = (row.disposition == Disposition::Mapped
-                          || row.disposition == Disposition::Mapped_TlsViaSelectors);
+        bool is_mapped = (row.disposition == Disposition::Mapped ||
+                          row.disposition == Disposition::Mapped_TlsViaSelectors);
         if (is_mapped) {
             continue;
         }
-        EXPECT_TRUE(row.key_044.empty())
-            << "Non-Mapped row for QF key '" << row.qf_key
-            << "' unexpectedly has key_044 = '" << row.key_044 << "'";
+        EXPECT_TRUE(row.key_044.empty()) << "Non-Mapped row for QF key '" << row.qf_key
+                                         << "' unexpectedly has key_044 = '" << row.key_044 << "'";
     }
 }
 
 // Test 5: schedule keys are all classified as OutOfScope_Schedule.
 TEST(QuickFixParityTable, ScheduleKeysAreOutOfScope) {
     const std::set<std::string_view> schedule_keys = {
-        "StartTime", "EndTime", "StartDay", "EndDay",
-        "NonStopSession", "UseLocalTime",
-        "LogonTime", "LogoutTime", "LogonDay", "LogoutDay",
+        "StartTime",    "EndTime",   "StartDay",   "EndDay",   "NonStopSession",
+        "UseLocalTime", "LogonTime", "LogoutTime", "LogonDay", "LogoutDay",
     };
     for (const auto& row : kParity) {
         if (schedule_keys.count(row.qf_key)) {
             EXPECT_EQ(row.disposition, Disposition::OutOfScope_Schedule)
-                << "Schedule key '" << row.qf_key
-                << "' must be OutOfScope_Schedule";
+                << "Schedule key '" << row.qf_key << "' must be OutOfScope_Schedule";
         }
     }
 }
@@ -732,7 +726,6 @@ TEST(QuickFixParityTable, GapRowCount) {
     //   CertificateRevocationListFile, CertificateRevocationListDirectory,
     //   AllowedRemoteAddresses, SSLProtocol, SSLCipherSuite, TLSCipherSuites
     // Total: 11 gaps.
-    EXPECT_EQ(gaps, 11)
-        << "Unexpected number of Gap rows; update the count when gaps are "
-           "resolved or new ones are identified";
+    EXPECT_EQ(gaps, 11) << "Unexpected number of Gap rows; update the count when gaps are "
+                           "resolved or new ones are identified";
 }

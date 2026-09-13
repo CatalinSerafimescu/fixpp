@@ -10,14 +10,12 @@
 // Outer group 100 (NoOuter) is delimited by 200 — which is ITSELF a nested
 // group's (NoInner's) own count tag. `consume_group` (include/fixpp/wire/
 // validator.hpp) consumes the instance-opening delimiter with a
-// bare `++i` (consume_group's position-1 `else` branch) instead of descending into the nested group, so the
-// second instance's opening tag (the second `200=1`) is never reached: the
-// scanner treats the whole two-instance message as containing only one
-// instance, `actual_count(1) != declared_count(2)`, and the message is
-// REJECTED. The one-instance form of the SAME shape happens to pass by
-// coincidence (`actual_count(1) == declared_count(1)`) without the
-// descent ever running — which is exactly why this went unnoticed
-// (contracts/consume_group.md "Problem").
+// bare `++i` (consume_group's position-1 `else` branch) instead of descending into the nested
+// group, so the second instance's opening tag (the second `200=1`) is never reached: the scanner
+// treats the whole two-instance message as containing only one instance, `actual_count(1) !=
+// declared_count(2)`, and the message is REJECTED. The one-instance form of the SAME shape happens
+// to pass by coincidence (`actual_count(1) == declared_count(1)`) without the descent ever running
+// — which is exactly why this went unnoticed (contracts/consume_group.md "Problem").
 //
 // Two witnesses, per the gate rewritten at Gate A round 1
 // (contracts/consume_group.md "Gate between the two"):
@@ -125,9 +123,9 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 // [inside the nested group] are not members of the outer group" framing.
 table_view make_bare_nested_delim_dict() {
     table_view tv;
-    for (std::uint16_t const t : {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10},
-                                  std::uint16_t{35}, std::uint16_t{100}, std::uint16_t{200},
-                                  std::uint16_t{201}}) {
+    for (std::uint16_t const t :
+         {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10}, std::uint16_t{35},
+          std::uint16_t{100}, std::uint16_t{200}, std::uint16_t{201}}) {
         tv.add_valid("X", t);
     }
     tv.set_group_first(100, 200);  // NoOuter: delimiter = NoInner's own count tag
@@ -185,8 +183,8 @@ constexpr std::uint16_t kChainBaseTag = 1000;
 
 table_view make_chain_dict(std::uint16_t base_tag, std::size_t total_groups) {
     table_view tv;
-    for (std::uint16_t const t : {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10},
-                                  std::uint16_t{35}}) {
+    for (std::uint16_t const t :
+         {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10}, std::uint16_t{35}}) {
         tv.add_valid("Z", t);
     }
     // total_groups group-count tags (base_tag .. base_tag+total_groups-1)
@@ -213,7 +211,7 @@ std::string chain_tail(std::uint16_t base_tag, std::size_t total_groups,
         body += std::to_string(static_cast<unsigned>(base_tag + i)) + "=1\x01";
     }
     body += std::to_string(static_cast<unsigned>(base_tag + total_groups)) + "=" +
-           std::string(leaf_value) + "\x01";
+            std::string(leaf_value) + "\x01";
     return body;
 }
 
@@ -237,10 +235,13 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterTwoInstanceRejectedTodayOneInstance
     {
         auto tv = make_bare_nested_delim_dict();
         dictionary_driven_validator v{std::move(tv)};
-        auto buf = make_frame("35=X\x01"
-                              "100=2\x01"
-                              "200=1\x01" "201=A\x01"
-                              "200=1\x01" "201=B\x01");
+        auto buf = make_frame(
+            "35=X\x01"
+            "100=2\x01"
+            "200=1\x01"
+            "201=A\x01"
+            "200=1\x01"
+            "201=B\x01");
         std::pmr::monotonic_buffer_resource arena;
         auto mv = parse_index(buf, arena);
         std::array<std::byte, 2048> scratch_buf{};
@@ -251,7 +252,8 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterTwoInstanceRejectedTodayOneInstance
             << "POST-FIX TARGET (W-1, C-4.1): the two-instance #208 B-2 shape — outer group "
                "100's delimiter (200) is itself nested group 200's own count tag — must be "
                "ACCEPTED with an instance count of 2. TODAY this is expected REJECTED because "
-               "consume_group's instance-opening `++i` (its position-1 `else` branch) does not descend "
+               "consume_group's instance-opening `++i` (its position-1 `else` branch) does not "
+               "descend "
                "into the nested group, so the second instance is never reached. error="
             << (result.has_value() ? 0 : static_cast<int>(result.error()));
     }
@@ -264,9 +266,11 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterTwoInstanceRejectedTodayOneInstance
     {
         auto tv = make_bare_nested_delim_dict();
         dictionary_driven_validator v{std::move(tv)};
-        auto buf = make_frame("35=X\x01"
-                              "100=1\x01"
-                              "200=1\x01" "201=A\x01");
+        auto buf = make_frame(
+            "35=X\x01"
+            "100=1\x01"
+            "200=1\x01"
+            "201=A\x01");
         std::pmr::monotonic_buffer_resource arena;
         auto mv = parse_index(buf, arena);
         std::array<std::byte, 2048> scratch_buf{};
@@ -308,9 +312,10 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterTwoInstanceRejectedTodayOneInstance
 TEST(ConsumeGroupNestedDelim, NestedFailureAtDelimiterPositionPropagatesFailClosed) {
     auto tv = make_bare_nested_delim_dict();
     dictionary_driven_validator v{std::move(tv)};
-    auto buf = make_frame("35=X\x01"
-                          "100=1\x01"
-                          "200=1\x01");
+    auto buf = make_frame(
+        "35=X\x01"
+        "100=1\x01"
+        "200=1\x01");
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, arena);
     std::array<std::byte, 2048> scratch_buf{};
@@ -319,7 +324,8 @@ TEST(ConsumeGroupNestedDelim, NestedFailureAtDelimiterPositionPropagatesFailClos
     std::uint16_t ref_tag = 0;
     auto result = v.validate(mv, &scratch_mr, &ref_tag);
     ASSERT_FALSE(result.has_value())
-        << "FAIL-CLOSED (consume_group's position-1 descent): NoInner(200) declares one instance but the "
+        << "FAIL-CLOSED (consume_group's position-1 descent): NoInner(200) declares one instance "
+           "but the "
            "frame ends before its delimiter 201, so the nested consume_group invoked from the "
            "DELIMITER position fails. The outer consume_group must propagate that failure. "
            "Accepting here would mean a malformed nested group at the instance-opening "
@@ -358,7 +364,7 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterDescendsOnPopulatedContextStore) {
     // Equal pointers here would mean this witness exercises only the same
     // bare path as W-1, defeating the entire point of W-1a.
     ASSERT_NE(tv.group_member_tags("Y", path900, kNoOuter).data(),
-             tv.group_member_tags(kNoOuter).data())
+              tv.group_member_tags(kNoOuter).data())
         << "W-1a requires the context-keyed group_member_tags(\"Y\", [900], 100) lookup to HIT "
            "group_ctx_ under NoOuter's real (non-empty) parent path, not fall through to the "
            "bare/global fallback — otherwise this case would silently degrade into a second "
@@ -369,11 +375,15 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterDescendsOnPopulatedContextStore) {
 
     // Same #208 B-2 two-instance shape as W-1, wrapped one level deeper so
     // NoOuter(100) sits under parent path [900] rather than at the root.
-    auto buf = make_frame("35=Y\x01"
-                          "900=1\x01" "901=W1\x01"
-                          "100=2\x01"
-                          "200=1\x01" "201=A\x01"
-                          "200=1\x01" "201=B\x01");
+    auto buf = make_frame(
+        "35=Y\x01"
+        "900=1\x01"
+        "901=W1\x01"
+        "100=2\x01"
+        "200=1\x01"
+        "201=A\x01"
+        "200=1\x01"
+        "201=B\x01");
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, arena);
     std::array<std::byte, 2048> scratch_buf{};

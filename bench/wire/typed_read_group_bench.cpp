@@ -54,16 +54,15 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <memory_resource>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <memory_resource>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -81,43 +80,44 @@ constexpr std::size_t kCarryArena = 512;
 //                   false. Ordinary shape.
 //   'C' — ModeCMsg: NoOuter(100) delimited by NoInner(200), which is itself a
 //                   nested group's count tag. FR-021 mode (c).
-constexpr std::string_view kBenchXml =
-    R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-    R"(<fields>)"
-    R"(<field number='8' name='BeginString' type='STRING'/>)"
-    R"(<field number='9' name='BodyLength' type='INT'/>)"
-    R"(<field number='10' name='CheckSum' type='STRING'/>)"
-    R"(<field number='35' name='MsgType' type='STRING'/>)"
-    R"(<field number='100' name='NoOuter' type='NUMINGROUP'/>)"
-    R"(<field number='200' name='NoInner' type='NUMINGROUP'/>)"
-    R"(<field number='201' name='OuterField' type='STRING'/>)"
-    R"(<field number='202' name='InnerField' type='STRING'/>)"
-    R"(</fields>)"
-    R"(<messages>)"
-    R"(<message name='FlatMsg' msgtype='F' msgcat='app'>)"
-    R"(<field name='BeginString' required='N'/>)"
-    R"(<field name='BodyLength' required='N'/>)"
-    R"(<field name='MsgType' required='N'/>)"
-    R"(<field name='CheckSum' required='N'/>)"
-    R"(<group name='NoOuter' required='N'>)"
-    R"(<field name='OuterField' required='N'/>)"
-    R"(</group></message>)"
-    R"(<message name='ModeCMsg' msgtype='C' msgcat='app'>)"
-    R"(<field name='BeginString' required='N'/>)"
-    R"(<field name='BodyLength' required='N'/>)"
-    R"(<field name='MsgType' required='N'/>)"
-    R"(<field name='CheckSum' required='N'/>)"
-    R"(<group name='NoOuter' required='N'>)"
-    R"(<group name='NoInner' required='N'>)"
-    R"(<field name='InnerField' required='N'/>)"
-    R"(</group></group></message>)"
-    R"(</messages></fix>)";
+constexpr std::string_view kBenchXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                       R"(<fields>)"
+                                       R"(<field number='8' name='BeginString' type='STRING'/>)"
+                                       R"(<field number='9' name='BodyLength' type='INT'/>)"
+                                       R"(<field number='10' name='CheckSum' type='STRING'/>)"
+                                       R"(<field number='35' name='MsgType' type='STRING'/>)"
+                                       R"(<field number='100' name='NoOuter' type='NUMINGROUP'/>)"
+                                       R"(<field number='200' name='NoInner' type='NUMINGROUP'/>)"
+                                       R"(<field number='201' name='OuterField' type='STRING'/>)"
+                                       R"(<field number='202' name='InnerField' type='STRING'/>)"
+                                       R"(</fields>)"
+                                       R"(<messages>)"
+                                       R"(<message name='FlatMsg' msgtype='F' msgcat='app'>)"
+                                       R"(<field name='BeginString' required='N'/>)"
+                                       R"(<field name='BodyLength' required='N'/>)"
+                                       R"(<field name='MsgType' required='N'/>)"
+                                       R"(<field name='CheckSum' required='N'/>)"
+                                       R"(<group name='NoOuter' required='N'>)"
+                                       R"(<field name='OuterField' required='N'/>)"
+                                       R"(</group></message>)"
+                                       R"(<message name='ModeCMsg' msgtype='C' msgcat='app'>)"
+                                       R"(<field name='BeginString' required='N'/>)"
+                                       R"(<field name='BodyLength' required='N'/>)"
+                                       R"(<field name='MsgType' required='N'/>)"
+                                       R"(<field name='CheckSum' required='N'/>)"
+                                       R"(<group name='NoOuter' required='N'>)"
+                                       R"(<group name='NoInner' required='N'>)"
+                                       R"(<field name='InnerField' required='N'/>)"
+                                       R"(</group></group></message>)"
+                                       R"(</messages></fix>)";
 
 [[nodiscard]] std::vector<std::byte> build_frame(std::string_view body) {
     std::string pre = std::string("8=FIX.4.4\x01") + "9=" + std::to_string(body.size()) + "\x01";
     pre.append(body);
     unsigned sum = 0;
-    for (unsigned char c : pre) { sum += c; }
+    for (unsigned char c : pre) {
+        sum += c;
+    }
     sum %= 256U;
     char chk[8]{};
     std::snprintf(chk, sizeof(chk), "10=%03u\x01", sum);

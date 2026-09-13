@@ -34,12 +34,11 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <string>
-#include <tuple>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <string>
+#include <tuple>
 
 #include "happy/hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
@@ -58,8 +57,7 @@ namespace {
 // DiffStatus::mismatch.  NEVER mutate 52, 122, or 10 (canonicalized → would
 // yield a false non-biting "pass", violating SC-004).
 
-TEST(PossDupReplaySurvivesGateBite, MutatedTag43PossDupFlagCausesGateBite)
-{
+TEST(PossDupReplaySurvivesGateBite, MutatedTag43PossDupFlagCausesGateBite) {
     // Synthetic replayed frame (35=D) carrying PossDupFlag(43)=Y and
     // OrigSendingTime(122). Tag 43 is a COMPARED tag under {52,122,10}.
     const char* expected_text =
@@ -78,7 +76,7 @@ TEST(PossDupReplaySurvivesGateBite, MutatedTag43PossDupFlagCausesGateBite)
     //   - tag 10  (CheckSum)        is excluded → equal regardless of value.
     //   - tag 43  (PossDupFlag)     is INCLUDED → must match verbatim → MISMATCH.
     const auto expected_frames = fixpp::interop::parse_golden(expected_text);
-    const auto actual_frames   = fixpp::interop::parse_golden(actual_text);
+    const auto actual_frames = fixpp::interop::parse_golden(actual_text);
 
     ASSERT_EQ(expected_frames.size(), actual_frames.size());
 
@@ -93,8 +91,7 @@ TEST(PossDupReplaySurvivesGateBite, MutatedTag43PossDupFlagCausesGateBite)
         << "detail should mention tag 43; got: " << result.detail;
 }
 
-TEST(PossDupReplaySurvivesGateBite, MutatedTag34MsgSeqNumCausesGateBite)
-{
+TEST(PossDupReplaySurvivesGateBite, MutatedTag34MsgSeqNumCausesGateBite) {
     // Tag 34 (MsgSeqNum) is a COMPARED tag under {52,122,10} — mutation must bite.
     const char* expected_text =
         "< 8=FIX.4.4\\x0135=D\\x0149=CPTY_ACC\\x0156=FIXPP_INIT"
@@ -107,7 +104,7 @@ TEST(PossDupReplaySurvivesGateBite, MutatedTag34MsgSeqNumCausesGateBite)
         "\\x0152=20260603-10:00:01.000\\x0110=001\\x01\n";
 
     const auto expected_frames = fixpp::interop::parse_golden(expected_text);
-    const auto actual_frames   = fixpp::interop::parse_golden(actual_text);
+    const auto actual_frames = fixpp::interop::parse_golden(actual_text);
 
     ASSERT_EQ(expected_frames.size(), actual_frames.size());
 
@@ -140,8 +137,7 @@ TEST(PossDupReplaySurvivesGateBite, MutatedTag34MsgSeqNumCausesGateBite)
 // Golden assertion: diff using poss_dup_profile {52,122,10}; skip if golden
 // absent (capture deferred to first paired live run).
 
-class PossDupReplaySurvives
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class PossDupReplaySurvives : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
 TEST_P(PossDupReplaySurvives, ReplayedPossDupFrameDoesNotDisconnect) {
     const auto [counterparty, role] = GetParam();
@@ -162,8 +158,8 @@ TEST_P(PossDupReplaySurvives, ReplayedPossDupFrameDoesNotDisconnect) {
         << "cell endpoint unresolved (parent harness did not lease a port)";
 
     fixpp::interop::InteropEngineFixture fx;
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory,
-                                       fx.ioc().get_executor(), *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     const auto id = fixpp::session::SessionId::from_config(cfg);
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
         << "register_session failed";
@@ -173,8 +169,7 @@ TEST_P(PossDupReplaySurvives, ReplayedPossDupFrameDoesNotDisconnect) {
     // ── Drive to Active ────────────────────────────────────────────────────────
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active against " << hp::counterparty_token(counterparty)
         << "; state=" << static_cast<int>(reached);
     if (reached != fsm_state::Active) {
         hp::expect_graceful_stop(fx);
@@ -216,16 +211,18 @@ TEST_P(PossDupReplaySurvives, ReplayedPossDupFrameDoesNotDisconnect) {
     // inbound seqnum invariant is validated more precisely by the unit tests in
     // tests/session/test_inbound_poss_dup_tolerance.cpp (T004).
     const auto inbound_after = s->seqnum_mgr_test_access().next_inbound_unsafe();
-    (void)inbound_before_replay;  // used via golden + unit tests; live state may include additional frames
+    (void)inbound_before_replay;  // used via golden + unit tests; live state may include additional
+                                  // frames
     EXPECT_GE(inbound_after, inbound_before_replay)
         << "inbound seqnum regressed (should be >= pre-replay value)";
 
     // ── Golden assertion: poss_dup profile {52,122,10} ────────────────────────
     // Structural tags 34/43/35 compared verbatim (gate-biting). Golden captured
     // by `run_interop_cell.py --update-goldens` at first paired run; absent → skip.
-    const std::string cp_part   = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
+    const std::string cp_part = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
-    const std::string cell_id   = "PD-" + cp_part + "-" + role_part + "-fix44-poss-dup-replay-survives";
+    const std::string cell_id =
+        "PD-" + cp_part + "-" + role_part + "-fix44-poss-dup-replay-survives";
     hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id),
                             fixpp::interop::poss_dup_profile_excluded_tags());
 
@@ -235,9 +232,8 @@ TEST_P(PossDupReplaySurvives, ReplayedPossDupFrameDoesNotDisconnect) {
 
 INSTANTIATE_TEST_SUITE_P(
     Fix44, PossDupReplaySurvives,
-    ::testing::Combine(
-        ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-        ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
+    ::testing::Combine(::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                       ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
     fixpp::interop::hp::cell_name);
 
 }  // namespace

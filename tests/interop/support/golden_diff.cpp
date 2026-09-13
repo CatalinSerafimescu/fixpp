@@ -25,22 +25,17 @@ struct ParsedFrame {
     std::string error;
 };
 
-DiffResult mismatch(char dir, std::size_t frame_index, std::string tag_or_structure)
-{
-    return {
-        DiffStatus::mismatch,
-        "mismatch:" + std::string(1, dir) + ":" + std::to_string(frame_index) + ":" + tag_or_structure
-    };
+DiffResult mismatch(char dir, std::size_t frame_index, std::string tag_or_structure) {
+    return {DiffStatus::mismatch, "mismatch:" + std::string(1, dir) + ":" +
+                                      std::to_string(frame_index) + ":" + tag_or_structure};
 }
 
-bool is_digit(std::byte value)
-{
+bool is_digit(std::byte value) {
     const int digit = std::to_integer<int>(value);
     return digit >= '0' && digit <= '9';
 }
 
-int parse_tag(std::span<const std::byte> bytes, bool& ok)
-{
+int parse_tag(std::span<const std::byte> bytes, bool& ok) {
     ok = !bytes.empty();
     int tag = 0;
 
@@ -56,8 +51,7 @@ int parse_tag(std::span<const std::byte> bytes, bool& ok)
     return tag;
 }
 
-ParsedFrame split_fields(std::span<const std::byte> bytes)
-{
+ParsedFrame split_fields(std::span<const std::byte> bytes) {
     ParsedFrame parsed;
     std::size_t field_begin = 0;
 
@@ -67,9 +61,8 @@ ParsedFrame split_fields(std::span<const std::byte> bytes)
     }
 
     while (field_begin < bytes.size()) {
-        const auto field_end_it = std::find(bytes.begin() + static_cast<std::ptrdiff_t>(field_begin),
-                                           bytes.end(),
-                                           soh);
+        const auto field_end_it =
+            std::find(bytes.begin() + static_cast<std::ptrdiff_t>(field_begin), bytes.end(), soh);
         if (field_end_it == bytes.end()) {
             parsed.error = "missing-field";
             return parsed;
@@ -82,8 +75,7 @@ ParsedFrame split_fields(std::span<const std::byte> bytes)
         }
 
         const auto field_begin_it = bytes.begin() + static_cast<std::ptrdiff_t>(field_begin);
-        const auto equal_it = std::find(field_begin_it,
-                                        field_end_it,
+        const auto equal_it = std::find(field_begin_it, field_end_it,
                                         static_cast<std::byte>(static_cast<unsigned char>('=')));
         if (equal_it == field_end_it || equal_it == field_begin_it) {
             parsed.error = "missing-field";
@@ -97,10 +89,7 @@ ParsedFrame split_fields(std::span<const std::byte> bytes)
             return parsed;
         }
 
-        parsed.fields.push_back(Field{
-            tag,
-            std::vector<std::byte>{equal_it + 1, field_end_it}
-        });
+        parsed.fields.push_back(Field{tag, std::vector<std::byte>{equal_it + 1, field_end_it}});
         field_begin = field_end + 1;
     }
 
@@ -108,9 +97,7 @@ ParsedFrame split_fields(std::span<const std::byte> bytes)
 }
 
 std::vector<Field> normalized_fields(std::span<const std::byte> bytes,
-                                     const std::set<int>& excluded_tags,
-                                     std::string& error)
-{
+                                     const std::set<int>& excluded_tags, std::string& error) {
     ParsedFrame parsed = split_fields(bytes);
     if (!parsed.error.empty()) {
         error = parsed.error;
@@ -127,22 +114,17 @@ std::vector<Field> normalized_fields(std::span<const std::byte> bytes,
     return normalized;
 }
 
-bool values_equal(const std::vector<std::byte>& lhs, const std::vector<std::byte>& rhs)
-{
+bool values_equal(const std::vector<std::byte>& lhs, const std::vector<std::byte>& rhs) {
     return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 
-std::vector<std::byte> decode_frame_bytes(std::string_view text)
-{
+std::vector<std::byte> decode_frame_bytes(std::string_view text) {
     std::vector<std::byte> bytes;
     bytes.reserve(text.size());
 
     for (std::size_t index = 0; index < text.size(); ++index) {
-        if (index + 3 < text.size()
-            && text[index] == '\\'
-            && text[index + 1] == 'x'
-            && text[index + 2] == '0'
-            && text[index + 3] == '1') {
+        if (index + 3 < text.size() && text[index] == '\\' && text[index + 1] == 'x' &&
+            text[index + 2] == '0' && text[index + 3] == '1') {
             bytes.push_back(soh);
             index += 3;
             continue;
@@ -154,15 +136,11 @@ std::vector<std::byte> decode_frame_bytes(std::string_view text)
     return bytes;
 }
 
-bool is_valid_dir(char dir)
-{
-    return dir == '>' || dir == '<';
-}
+bool is_valid_dir(char dir) { return dir == '>' || dir == '<'; }
 
 }  // namespace
 
-std::vector<GoldenFrame> parse_golden(std::string_view text)
-{
+std::vector<GoldenFrame> parse_golden(std::string_view text) {
     std::vector<GoldenFrame> frames;
     std::size_t line_begin = 0;
 
@@ -178,15 +156,9 @@ std::vector<GoldenFrame> parse_golden(std::string_view text)
         }
 
         if (!line.empty() && line.size() >= 2 && is_valid_dir(line[0]) && line[1] == ' ') {
-            frames.push_back(GoldenFrame{
-                line[0],
-                decode_frame_bytes(line.substr(2))
-            });
+            frames.push_back(GoldenFrame{line[0], decode_frame_bytes(line.substr(2))});
         } else if (!line.empty()) {
-            frames.push_back(GoldenFrame{
-                '?',
-                decode_frame_bytes(line)
-            });
+            frames.push_back(GoldenFrame{'?', decode_frame_bytes(line)});
         }
 
         if (line_end == text.size()) {
@@ -200,8 +172,7 @@ std::vector<GoldenFrame> parse_golden(std::string_view text)
 
 DiffResult diff_transcripts(std::span<const GoldenFrame> expected,
                             std::span<const GoldenFrame> actual,
-                            const std::set<int>& excluded_tags)
-{
+                            const std::set<int>& excluded_tags) {
     if (expected.size() != actual.size()) {
         const std::size_t frame_index = std::min(expected.size(), actual.size());
         char dir = '>';
@@ -229,12 +200,10 @@ DiffResult diff_transcripts(std::span<const GoldenFrame> expected,
 
         std::string expected_error;
         std::string actual_error;
-        const std::vector<Field> expected_fields = normalized_fields(expected_frame.bytes,
-                                                                     excluded_tags,
-                                                                     expected_error);
-        const std::vector<Field> actual_fields = normalized_fields(actual_frame.bytes,
-                                                                   excluded_tags,
-                                                                   actual_error);
+        const std::vector<Field> expected_fields =
+            normalized_fields(expected_frame.bytes, excluded_tags, expected_error);
+        const std::vector<Field> actual_fields =
+            normalized_fields(actual_frame.bytes, excluded_tags, actual_error);
         if (!expected_error.empty()) {
             return mismatch(expected_frame.dir, frame_index, expected_error);
         }
@@ -247,10 +216,12 @@ DiffResult diff_transcripts(std::span<const GoldenFrame> expected,
             const Field& expected_field = expected_fields[field_index];
             const Field& actual_field = actual_fields[field_index];
             if (expected_field.tag != actual_field.tag) {
-                return mismatch(expected_frame.dir, frame_index, std::to_string(expected_field.tag));
+                return mismatch(expected_frame.dir, frame_index,
+                                std::to_string(expected_field.tag));
             }
             if (!values_equal(expected_field.value, actual_field.value)) {
-                return mismatch(expected_frame.dir, frame_index, std::to_string(expected_field.tag));
+                return mismatch(expected_frame.dir, frame_index,
+                                std::to_string(expected_field.tag));
             }
         }
 

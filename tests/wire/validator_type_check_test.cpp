@@ -284,8 +284,7 @@ TEST(ValidatorTypeCheck, ValidateFieldEnumOutOfDomainRejected) {
     // "X" is not in {"1","2"} — enum_valid() is real, so this must reject.
     auto val = bv("X");
     auto rc = v.validate_field(54, std::span<const std::byte>{val.data(), val.size()});
-    ASSERT_FALSE(rc.has_value())
-        << "out-of-domain enum value must be rejected (FR-020/FR-006)";
+    ASSERT_FALSE(rc.has_value()) << "out-of-domain enum value must be rejected (FR-020/FR-006)";
     EXPECT_EQ(rc.error(), error::wire_field_value_out_of_range);
 }
 
@@ -316,8 +315,7 @@ TEST(ValidatorTypeCheck, ValidateFieldEnumMultiValueOneUndeclaredRejected) {
 
     auto val = bv("1 ZZ 6");  // "ZZ" not declared
     auto rc = v.validate_field(18, std::span<const std::byte>{val.data(), val.size()});
-    ASSERT_FALSE(rc.has_value())
-        << "multi-value field with one undeclared token must be rejected";
+    ASSERT_FALSE(rc.has_value()) << "multi-value field with one undeclared token must be rejected";
     EXPECT_EQ(rc.error(), error::wire_field_value_out_of_range);
 }
 
@@ -352,41 +350,39 @@ TEST(ValidatorTypeCheck, ValidateFieldEnumEmptyValueAccepted) {
 //
 // ⚠️ Mutation (T015/C3-1 discriminator): build the enum-domain table only
 // from message_fields() (instead of walking the dictionary's OWN enum store,
-// `Dictionary::as_table_view()`'s `enum_runs_` walk) ⇒ store-only tags stay unconstrained ⇒ this test's
-// reject assertion MUST go RED. This is the ONLY witness in the bundle with
-// power against that regression — validate_field() calls enum_valid() as its
-// FIRST statement with NO field_valid_for precheck,
-// so a reachability-built table would silently ACCEPT here.
+// `Dictionary::as_table_view()`'s `enum_runs_` walk) ⇒ store-only tags stay unconstrained ⇒ this
+// test's reject assertion MUST go RED. This is the ONLY witness in the bundle with power against
+// that regression — validate_field() calls enum_valid() as its FIRST statement with NO
+// field_valid_for precheck, so a reachability-built table would silently ACCEPT here.
 Dictionary load_appl_ver_id_store_only_dict(std::pmr::memory_resource* mr) {
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='5' minor='0' servicepack='2'>)"
-        R"(<fields>)"
-        R"(<field number='8'    name='BeginString' type='STRING'/>)"
-        R"(<field number='9'    name='BodyLength'  type='LENGTH'/>)"
-        R"(<field number='10'   name='CheckSum'    type='STRING'/>)"
-        R"(<field number='35'   name='MsgType'     type='STRING'/>)"
-        R"(<field number='1128' name='ApplVerID'   type='STRING'>)"
-        R"(<value enum='0'  description='FIX27'/>)"
-        R"(<value enum='1'  description='FIX30'/>)"
-        R"(<value enum='2'  description='FIX40'/>)"
-        R"(<value enum='3'  description='FIX41'/>)"
-        R"(<value enum='4'  description='FIX42'/>)"
-        R"(<value enum='5'  description='FIX43'/>)"
-        R"(<value enum='6'  description='FIX44'/>)"
-        R"(<value enum='7'  description='FIX50'/>)"
-        R"(<value enum='8'  description='FIX50SP1'/>)"
-        R"(<value enum='9'  description='FIX50SP2'/>)"
-        R"(<value enum='10' description='FIXLatest'/>)"
-        R"(</field>)"
-        R"(</fields>)"
-        R"(<messages>)"
-        R"(<message name='Heartbeat' msgtype='0' msgcat='admin'>)"
-        R"(  <field name='BeginString' required='N'/>)"
-        R"(  <field name='BodyLength'  required='N'/>)"
-        R"(  <field name='MsgType'     required='N'/>)"
-        R"(</message>)"
-        R"(</messages>)"
-        R"(</fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='5' minor='0' servicepack='2'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='8'    name='BeginString' type='STRING'/>)"
+                                      R"(<field number='9'    name='BodyLength'  type='LENGTH'/>)"
+                                      R"(<field number='10'   name='CheckSum'    type='STRING'/>)"
+                                      R"(<field number='35'   name='MsgType'     type='STRING'/>)"
+                                      R"(<field number='1128' name='ApplVerID'   type='STRING'>)"
+                                      R"(<value enum='0'  description='FIX27'/>)"
+                                      R"(<value enum='1'  description='FIX30'/>)"
+                                      R"(<value enum='2'  description='FIX40'/>)"
+                                      R"(<value enum='3'  description='FIX41'/>)"
+                                      R"(<value enum='4'  description='FIX42'/>)"
+                                      R"(<value enum='5'  description='FIX43'/>)"
+                                      R"(<value enum='6'  description='FIX44'/>)"
+                                      R"(<value enum='7'  description='FIX50'/>)"
+                                      R"(<value enum='8'  description='FIX50SP1'/>)"
+                                      R"(<value enum='9'  description='FIX50SP2'/>)"
+                                      R"(<value enum='10' description='FIXLatest'/>)"
+                                      R"(</field>)"
+                                      R"(</fields>)"
+                                      R"(<messages>)"
+                                      R"(<message name='Heartbeat' msgtype='0' msgcat='admin'>)"
+                                      R"(  <field name='BeginString' required='N'/>)"
+                                      R"(  <field name='BodyLength'  required='N'/>)"
+                                      R"(  <field name='MsgType'     required='N'/>)"
+                                      R"(</message>)"
+                                      R"(</messages>)"
+                                      R"(</fix>)";
     return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
 }
 
@@ -643,7 +639,7 @@ table_view make_group_grammar_201() {
     table_view t;
     t.add_valid("D", 8).add_valid("D", 9).add_valid("D", 10).add_valid("D", 35);
     t.add_valid("D", 100).add_valid("D", 200).add_valid("D", 300).add_valid("D", 400);
-    t.set_group_first(100, 200);      // NoX=100, delimiter=200 (also adds 200 as member)
+    t.set_group_first(100, 200);  // NoX=100, delimiter=200 (also adds 200 as member)
     t.add_group_member(100, 300);
     t.add_group_member(100, 400);
     t.add_group_required_member(100, 300);  // 300 required in EVERY instance
@@ -657,8 +653,11 @@ TEST(ValidatorTypeCheck, Fixpp201GroupInstanceMissingRequiredMemberRejected) {
     auto buf = make_frame(
         "35=D\x01"
         "100=2\x01"
-        "200=a\x01" "300=x\x01" "400=y\x01"   // instance 1: complete
-        "200=b\x01" "400=z\x01");               // instance 2: MISSING required 300
+        "200=a\x01"
+        "300=x\x01"
+        "400=y\x01"  // instance 1: complete
+        "200=b\x01"
+        "400=z\x01");  // instance 2: MISSING required 300
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -680,8 +679,11 @@ TEST(ValidatorTypeCheck, Fixpp201GroupAllInstancesCompleteAccepted) {
     auto buf = make_frame(
         "35=D\x01"
         "100=2\x01"
-        "200=a\x01" "300=x\x01" "400=y\x01"
-        "200=b\x01" "300=w\x01");
+        "200=a\x01"
+        "300=x\x01"
+        "400=y\x01"
+        "200=b\x01"
+        "300=w\x01");
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -803,9 +805,18 @@ TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportOmitsOptionalGroupAccepted) 
     // 52/56) — NO 711 (NoUnderlyings) group present.
     auto buf = make_frame(
         "35=AP\x01"
-        "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-        "1=ACCT1\x01" "581=1\x01" "715=20240101\x01" "721=RPT1\x01" "728=0\x01"
-        "730=1.5\x01" "731=1\x01" "734=1.4\x01");
+        "34=1\x01"
+        "49=SENDER\x01"
+        "52=20240101-00:00:00\x01"
+        "56=TARGET\x01"
+        "1=ACCT1\x01"
+        "581=1\x01"
+        "715=20240101\x01"
+        "721=RPT1\x01"
+        "728=0\x01"
+        "730=1.5\x01"
+        "731=1\x01"
+        "734=1.4\x01");
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -817,8 +828,8 @@ TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportOmitsOptionalGroupAccepted) 
     auto result = v.validate(mv, &scratch_mr, &ref_tag);
     EXPECT_TRUE(result.has_value())
         << "conforming FIX44 AP omitting the optional NoUnderlyings group must be "
-           "accepted; err=" << (result.has_value() ? 0 : static_cast<int>(result.error()))
-        << " ref_tag=" << ref_tag;
+           "accepted; err="
+        << (result.has_value() ? 0 : static_cast<int>(result.error())) << " ref_tag=" << ref_tag;
 }
 
 // ── T006: FIX50SP2 TradeCaptureReport(AE) — real-frame validate() BLOCKED ──
@@ -863,8 +874,16 @@ TEST(ValidatorTypeCheck, Fixpp201Fix42AllocationOmitsOptionalGroupAccepted) {
     // Side(54), Symbol(55), Shares(53), AvgPx(6), TradeDate(75) + header.
     auto buf = make_frame(
         "35=J\x01"
-        "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-        "70=ALLOC1\x01" "71=0\x01" "54=1\x01" "55=SYM\x01" "53=100\x01" "6=10.5\x01"
+        "34=1\x01"
+        "49=SENDER\x01"
+        "52=20240101-00:00:00\x01"
+        "56=TARGET\x01"
+        "70=ALLOC1\x01"
+        "71=0\x01"
+        "54=1\x01"
+        "55=SYM\x01"
+        "53=100\x01"
+        "6=10.5\x01"
         "75=20240101\x01");
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
@@ -877,8 +896,8 @@ TEST(ValidatorTypeCheck, Fixpp201Fix42AllocationOmitsOptionalGroupAccepted) {
     auto result = v.validate(mv, &scratch_mr, &ref_tag);
     EXPECT_TRUE(result.has_value())
         << "conforming FIX42 Allocation omitting the optional NoAllocs group must be "
-           "accepted; err=" << (result.has_value() ? 0 : static_cast<int>(result.error()))
-        << " ref_tag=" << ref_tag;
+           "accepted; err="
+        << (result.has_value() ? 0 : static_cast<int>(result.error())) << " ref_tag=" << ref_tag;
 }
 
 // ── T010/T011: FIX44 AP / NoUnderlyings(711) — malformed instance reject,
@@ -889,9 +908,18 @@ TEST(ValidatorTypeCheck, Fixpp201Fix42AllocationOmitsOptionalGroupAccepted) {
 namespace {
 std::string fix44_ap_required_prefix() {
     return "35=AP\x01"
-           "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-           "1=ACCT1\x01" "581=1\x01" "715=20240101\x01" "721=RPT1\x01" "728=0\x01"
-           "730=1.5\x01" "731=1\x01" "734=1.4\x01";
+           "34=1\x01"
+           "49=SENDER\x01"
+           "52=20240101-00:00:00\x01"
+           "56=TARGET\x01"
+           "1=ACCT1\x01"
+           "581=1\x01"
+           "715=20240101\x01"
+           "721=RPT1\x01"
+           "728=0\x01"
+           "730=1.5\x01"
+           "731=1\x01"
+           "734=1.4\x01";
 }
 }  // namespace
 
@@ -912,11 +940,13 @@ TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportOptionalGroupInstanceMissing
 
     // Instance 1 complete (311/732/733); instance 2 omits 733. NoUnderlyings is
     // optional → accepted under 081 Concern B group-gating.
-    auto buf = make_frame(
-        fix44_ap_required_prefix() +
-        "711=2\x01"
-        "311=SYMA\x01" "732=1.1\x01" "733=1\x01"
-        "311=SYMB\x01" "732=2.2\x01");
+    auto buf = make_frame(fix44_ap_required_prefix() +
+                          "711=2\x01"
+                          "311=SYMA\x01"
+                          "732=1.1\x01"
+                          "733=1\x01"
+                          "311=SYMB\x01"
+                          "732=2.2\x01");
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -936,11 +966,14 @@ TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportAllGroupInstancesCompleteAcc
     auto d44 = load_real_dict("FIX44.xml", &mr);
     dictionary_driven_validator v{d44.as_table_view()};
 
-    auto buf = make_frame(
-        fix44_ap_required_prefix() +
-        "711=2\x01"
-        "311=SYMA\x01" "732=1.1\x01" "733=1\x01"
-        "311=SYMB\x01" "732=2.2\x01" "733=2\x01");
+    auto buf = make_frame(fix44_ap_required_prefix() +
+                          "711=2\x01"
+                          "311=SYMA\x01"
+                          "732=1.1\x01"
+                          "733=1\x01"
+                          "311=SYMB\x01"
+                          "732=2.2\x01"
+                          "733=2\x01");
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -1016,8 +1049,13 @@ TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportAllGroupInstancesCompleteAcc
 // validator rejected naming `Side(54)`; it was right and the derivation was wrong.
 std::string fix42_new_order_list_prefix() {
     return "35=E\x01"
-           "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-           "66=LIST1\x01" "394=1\x01" "68=1\x01";
+           "34=1\x01"
+           "49=SENDER\x01"
+           "52=20240101-00:00:00\x01"
+           "56=TARGET\x01"
+           "66=LIST1\x01"
+           "394=1\x01"
+           "68=1\x01";
 }
 
 }  // namespace
@@ -1056,7 +1094,10 @@ TEST(ValidatorTypeCheck, Fix42NewOrderListRequiredGroupInstanceMissingMemberReje
     // `ref_tag == 67` assertion below mean "it named the right member" rather
     // than "it named some member".
     auto buf = make_frame(fix42_new_order_list_prefix() +
-                          "73=1\x01" "11=ORD1\x01" "55=SYM\x01" "54=1\x01");
+                          "73=1\x01"
+                          "11=ORD1\x01"
+                          "55=SYM\x01"
+                          "54=1\x01");
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -1086,7 +1127,11 @@ TEST(ValidatorTypeCheck, Fix42NewOrderListCompleteGroupInstanceAccepted) {
 
     // Same frame plus ListSeqNo(67) — all four required members now present.
     auto buf = make_frame(fix42_new_order_list_prefix() +
-                          "73=1\x01" "11=ORD1\x01" "67=1\x01" "55=SYM\x01" "54=1\x01");
+                          "73=1\x01"
+                          "11=ORD1\x01"
+                          "67=1\x01"
+                          "55=SYM\x01"
+                          "54=1\x01");
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -1098,6 +1143,6 @@ TEST(ValidatorTypeCheck, Fix42NewOrderListCompleteGroupInstanceAccepted) {
     auto result = v.validate(mv, &scratch_mr, &ref_tag);
     EXPECT_TRUE(result.has_value())
         << "a conforming FIX42 NewOrderList with a complete NoOrders(73) instance must be "
-           "ACCEPTED; err=" << (result.has_value() ? 0 : static_cast<int>(result.error()))
-        << " ref_tag=" << ref_tag;
+           "ACCEPTED; err="
+        << (result.has_value() ? 0 : static_cast<int>(result.error())) << " ref_tag=" << ref_tag;
 }

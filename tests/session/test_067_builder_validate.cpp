@@ -39,10 +39,10 @@
 // correctly DERIVED from `FieldRef.rule` (as this feature mandates, R3) must
 // exclude it -- asserting rejection on a missing Symbol would be asserting
 // the table is WRONG. ClOrdID(11) IS genuinely Required
-// (`{11, field_presence::Required}`, dictionaries/FIX44.xml's NewOrderSingle ClOrdID field) and serves
-// as the discriminating substitute for the SAME top-level-required-field
-// intent. Flagged to the orchestrator; not a design re-derivation (the
-// generation MECHANISM is unchanged) -- just a factual tag correction.
+// (`{11, field_presence::Required}`, dictionaries/FIX44.xml's NewOrderSingle ClOrdID field) and
+// serves as the discriminating substitute for the SAME top-level-required-field intent. Flagged to
+// the orchestrator; not a design re-derivation (the generation MECHANISM is unchanged) -- just a
+// factual tag correction.
 //
 // Anchors: specs/067-codegen-writer-emitter/contracts/generated-builder.md
 //          G5; data-model.md §1.3/§1.4/§2; research.md R3;
@@ -163,8 +163,7 @@ TEST(BuilderValidate067, WvsXPerOccurrenceRequiredSetDivergence) {
         fixpp::v44::MarketDataSnapshotFullRefreshArgs args{};
         args.symbol = seed.symbol;
         args.md_req_id = seed.md_req_id;
-        args.md_entries =
-            std::span<const fixpp::v44::groups::G_268_1Args>{entries};
+        args.md_entries = std::span<const fixpp::v44::groups::G_268_1Args>{entries};
         auto r = fixpp::v44::validate_MarketDataSnapshotFullRefresh(args);
         EXPECT_TRUE(r.has_value()) << "W entry WITH MDEntryType(269) must validate clean";
     }
@@ -178,8 +177,7 @@ TEST(BuilderValidate067, WvsXPerOccurrenceRequiredSetDivergence) {
         fixpp::v44::MarketDataSnapshotFullRefreshArgs args{};
         args.symbol = "MSFT";
         args.md_req_id = "MDR-W1";
-        args.md_entries =
-            std::span<const fixpp::v44::groups::G_268_1Args>{entries};
+        args.md_entries = std::span<const fixpp::v44::groups::G_268_1Args>{entries};
         auto r = fixpp::v44::validate_MarketDataSnapshotFullRefresh(args);
         ASSERT_FALSE(r.has_value())
             << "W entry MISSING MDEntryType(269) must fail (269 required in W)";
@@ -196,8 +194,7 @@ TEST(BuilderValidate067, WvsXPerOccurrenceRequiredSetDivergence) {
         std::array<fixpp::v44::groups::G_268_2Args, 1> entries{entry_args};
         fixpp::v44::MarketDataIncrementalRefreshArgs args{};
         args.md_req_id = seed.md_req_id;
-        args.md_entries =
-            std::span<const fixpp::v44::groups::G_268_2Args>{entries};
+        args.md_entries = std::span<const fixpp::v44::groups::G_268_2Args>{entries};
         auto r = fixpp::v44::validate_MarketDataIncrementalRefresh(args);
         EXPECT_TRUE(r.has_value())
             << "X entry WITHOUT MDEntryType(269) but WITH MDUpdateAction(279) must validate "
@@ -211,8 +208,7 @@ TEST(BuilderValidate067, WvsXPerOccurrenceRequiredSetDivergence) {
         std::array<fixpp::v44::groups::G_268_2Args, 1> entries{entry_args};
         fixpp::v44::MarketDataIncrementalRefreshArgs args{};
         args.md_req_id = "MDR-X1";
-        args.md_entries =
-            std::span<const fixpp::v44::groups::G_268_2Args>{entries};
+        args.md_entries = std::span<const fixpp::v44::groups::G_268_2Args>{entries};
         auto r = fixpp::v44::validate_MarketDataIncrementalRefresh(args);
         ASSERT_FALSE(r.has_value())
             << "X entry MISSING MDUpdateAction(279) must fail (279 required in X)";

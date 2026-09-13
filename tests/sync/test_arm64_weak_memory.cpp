@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
@@ -26,7 +27,6 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <fixpp/core/sync/async_mutex.hpp>
@@ -207,7 +207,7 @@ void run_cancellation_epoch() {
         auto r = co_await mtx->async_lock();
         resume_thread_id.store(std::this_thread::get_id(), std::memory_order_release);
         waiter_aborted.store(!r.has_value() && r.error() == error::sync_lock_aborted,
-                              std::memory_order_release);
+                             std::memory_order_release);
         waiter_resolved.store(true, std::memory_order_release);
     };
 
@@ -216,7 +216,7 @@ void run_cancellation_epoch() {
     ASSERT_TRUE(holder_acquired) << "setup: holder failed to acquire";
 
     asio::co_spawn(ioc_b, waiter_coro(),
-                    asio::bind_cancellation_slot(cancel_sig.slot(), asio::detached));
+                   asio::bind_cancellation_slot(cancel_sig.slot(), asio::detached));
     for (int i = 0; i < 16 && !waiter_resolved.load(std::memory_order_acquire); ++i)
         ioc_b.poll_one();
     ASSERT_FALSE(waiter_resolved.load(std::memory_order_acquire))
@@ -284,7 +284,7 @@ void run_drain_reap_epoch() {
         auto r = co_await mtx->async_lock();
         resume_thread_id.store(std::this_thread::get_id(), std::memory_order_release);
         waiter_aborted.store(!r.has_value() && r.error() == error::sync_lock_aborted,
-                              std::memory_order_release);
+                             std::memory_order_release);
         waiter_resolved.store(true, std::memory_order_release);
     };
     asio::co_spawn(ioc_b, waiter_coro(), asio::detached);

@@ -22,11 +22,10 @@
 
 #include <benchmark/benchmark.h>
 
-#include <fixpp/transport/transport.hpp>
-#include <fixpp/transport/transport_errors.hpp>
-
 #include <array>
 #include <cstddef>
+#include <fixpp/transport/transport.hpp>
+#include <fixpp/transport/transport_errors.hpp>
 
 namespace {
 

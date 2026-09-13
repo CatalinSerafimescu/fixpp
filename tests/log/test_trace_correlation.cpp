@@ -99,14 +99,13 @@ struct LoggerBundle {
 
 LoggerBundle make_logger(std::uint32_t capacity = 4096) {
     LoggerBundle b;
-    auto  sink = std::make_unique<CaptureSink>();
+    auto sink = std::make_unique<CaptureSink>();
     b.sink_ptr = sink.get();
 
     LoggerConfig cfg;
     cfg.capacity = capacity;
 
-    std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks(
-        std::pmr::get_default_resource());
+    std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks(std::pmr::get_default_resource());
     sinks.push_back(std::move(sink));
 
     b.logger = std::make_unique<Logger>(std::move(cfg), std::move(sinks));
@@ -116,7 +115,8 @@ LoggerBundle make_logger(std::uint32_t capacity = 4096) {
 // Wait (busy-poll max 2 s) for at least `n` records in the sink.
 bool wait_for_records(CaptureSink* sink, std::size_t n,
                       std::chrono::milliseconds timeout = std::chrono::seconds{2}) {
-    return fixpp::test_support::wait_until_observed([sink, n] { return sink->count() >= n; }, timeout);
+    return fixpp::test_support::wait_until_observed([sink, n] { return sink->count() >= n; },
+                                                    timeout);
 }
 
 // Helper: convert std::array<std::byte,16> to std::array<std::uint8_t,16>
@@ -135,12 +135,11 @@ TEST(TraceCorrelation, SlogCarriesSessionTrace) {
     tc.trace_id.fill(std::byte{0xAA});
     // span_id: std::array<std::byte,8> — fill with 0xBB.
     tc.span_id.fill(std::byte{0xBB});
-    const std::uint64_t expected_span_id =
-        std::bit_cast<std::uint64_t>(tc.span_id);
+    const std::uint64_t expected_span_id = std::bit_cast<std::uint64_t>(tc.span_id);
 
     // (a) Emit via FIXPP_SLOG — caller passes tc explicitly, no co_await.
-    FIXPP_SLOG(logger.get(), info, tc, fixpp::log::cat::session,
-               "slog test {}", ArgValue::from_u64(1u));
+    FIXPP_SLOG(logger.get(), info, tc, fixpp::log::cat::session, "slog test {}",
+               ArgValue::from_u64(1u));
 
     // Wait for the drain thread to deliver the record.
     ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
@@ -167,9 +166,8 @@ TEST(TraceCorrelation, ElogCarriesEngineTrace) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
-    eng_cfg.clock    = std::make_shared<fixpp::core::mock_clock>(
-        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{},
-        ioc.get_executor());
+    eng_cfg.clock = std::make_shared<fixpp::core::mock_clock>(
+        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{}, ioc.get_executor());
 
     eng_cfg.engine_trace_context.trace_id.fill(std::byte{0xCC});
     eng_cfg.engine_trace_context.span_id.fill(std::byte{0xDD});
@@ -179,8 +177,8 @@ TEST(TraceCorrelation, ElogCarriesEngineTrace) {
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
     // (b) Emit via FIXPP_ELOG — reads engine.engine_trace_context() internally.
-    FIXPP_ELOG(logger.get(), info, engine, fixpp::log::cat::control,
-               "elog test {}", ArgValue::from_u64(2u));
+    FIXPP_ELOG(logger.get(), info, engine, fixpp::log::cat::control, "elog test {}",
+               ArgValue::from_u64(2u));
 
     ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
 
@@ -211,8 +209,8 @@ TEST(TraceCorrelation, Log0AllZeros) {
     auto [sink_ptr, logger] = make_logger();
 
     // (c) FIXPP_LOG0 — context-free; trace_id and span_id must be all-zeros.
-    FIXPP_LOG0(logger.get(), info, fixpp::log::cat::session,
-               "log0 test {}", ArgValue::from_u64(3u));
+    FIXPP_LOG0(logger.get(), info, fixpp::log::cat::session, "log0 test {}",
+               ArgValue::from_u64(3u));
 
     ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
 
@@ -221,12 +219,10 @@ TEST(TraceCorrelation, Log0AllZeros) {
 
     // trace_id: all-zeros (Record::trace_id is std::array<std::uint8_t,16>)
     std::array<std::uint8_t, 16> zero_trace{};
-    EXPECT_EQ(records[0].trace_id, zero_trace)
-        << "FIXPP_LOG0 must produce all-zero trace_id";
+    EXPECT_EQ(records[0].trace_id, zero_trace) << "FIXPP_LOG0 must produce all-zero trace_id";
 
     // span_id: zero (Record::span_id is uint64_t)
-    EXPECT_EQ(records[0].span_id, std::uint64_t{0})
-        << "FIXPP_LOG0 must produce zero span_id";
+    EXPECT_EQ(records[0].span_id, std::uint64_t{0}) << "FIXPP_LOG0 must produce zero span_id";
 }
 
 // ── (d-slog) [RC#3] SLOG timestamp is wall-clock (system_clock::now()) ───────
@@ -241,18 +237,15 @@ TEST(TraceCorrelation, SlogTimestampIsWallClock) {
     auto [sink_ptr, logger] = make_logger();
 
     // Record wall-clock bounds before and after the SLOG call.
-    auto before = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
+    auto before = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
 
     fixpp::otel::trace_context tc{};
     tc.trace_id.fill(std::byte{0x11});
     tc.span_id.fill(std::byte{0x22});
 
-    FIXPP_SLOG(logger.get(), info, tc, fixpp::log::cat::session,
-               "test message");
+    FIXPP_SLOG(logger.get(), info, tc, fixpp::log::cat::session, "test message");
 
-    auto after = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
+    auto after = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
 
     ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
 
@@ -262,12 +255,10 @@ TEST(TraceCorrelation, SlogTimestampIsWallClock) {
     // SLOG timestamp must be a real wall-clock time (between before and after),
     // not zero and not a future/past sentinel.
     // This asserts the documented behavior: SLOG is wall-clock, not mock-clock.
-    EXPECT_GE(records[0].timestamp.time_since_epoch().count(),
-              before.time_since_epoch().count())
+    EXPECT_GE(records[0].timestamp.time_since_epoch().count(), before.time_since_epoch().count())
         << "SLOG timestamp must be >= system_clock::now() captured before the call";
 
-    EXPECT_LE(records[0].timestamp.time_since_epoch().count(),
-              after.time_since_epoch().count())
+    EXPECT_LE(records[0].timestamp.time_since_epoch().count(), after.time_since_epoch().count())
         << "SLOG timestamp must be <= system_clock::now() captured after the call";
 
     // Confirm the timestamp is non-zero (it is a real wall-clock sample).
@@ -290,8 +281,7 @@ TEST(TraceCorrelation, ElogTimestampFromMockClock) {
     // accidentally match).
     using namespace std::chrono_literals;
     auto const known_utc = fixpp::core::utc_time_point{
-        std::chrono::duration_cast<std::chrono::system_clock::duration>(
-            std::chrono::hours{100})};
+        std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::hours{100})};
 
     asio::io_context ioc;
     auto mock_clk = std::make_shared<fixpp::core::mock_clock>(
@@ -299,15 +289,15 @@ TEST(TraceCorrelation, ElogTimestampFromMockClock) {
 
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
-    eng_cfg.clock    = mock_clk;
+    eng_cfg.clock = mock_clk;
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
     // Record mock.now() BEFORE the emit (deterministic — mock clock doesn't advance).
     auto const expected_ts = mock_clk->now();
 
-    FIXPP_ELOG(logger.get(), info, engine, fixpp::log::cat::control,
-               "clock test {}", ArgValue::from_u64(4u));
+    FIXPP_ELOG(logger.get(), info, engine, fixpp::log::cat::control, "clock test {}",
+               ArgValue::from_u64(4u));
 
     ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
 
@@ -318,7 +308,8 @@ TEST(TraceCorrelation, ElogTimestampFromMockClock) {
     // [E1 remediation]: FIXPP_ELOG reads engine.clock()->now() for the timestamp.
     EXPECT_EQ(records[0].timestamp, expected_ts)
         << "FIXPP_ELOG must use the engine's injected clock (FR-006 routing). "
-           "expected (mock.now())=" << expected_ts.time_since_epoch().count()
+           "expected (mock.now())="
+        << expected_ts.time_since_epoch().count()
         << " got=" << records[0].timestamp.time_since_epoch().count()
         << " (if got != expected, FIXPP_ELOG is using system_clock instead)";
 

@@ -397,9 +397,9 @@ TEST(OrchestraFailClosed, QuickFixXmlFedToOrchestraLoaderThrows) {
     fixpp::dict::OrchestraLoader loader;
     auto const fix44 = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
     // FIX44.xml's root is <fix major="4" minor="4" ...>, not <fixr:repository>
-    // (verified: dictionaries/FIX44.xml's root `<fix>` element), so this hits parse_root_and_version's
-    // root check deterministically (not a downstream unknown-datatype/dangling-
-    // ref path).
+    // (verified: dictionaries/FIX44.xml's root `<fix>` element), so this hits
+    // parse_root_and_version's root check deterministically (not a downstream
+    // unknown-datatype/dangling- ref path).
     EXPECT_THROW((void)loader.load(fix44, &mr), fixpp::dict::orchestra_parse_error);
 }
 

@@ -48,7 +48,7 @@
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
 #include <fixpp/session/retrieve_visitor.hpp>       // 013 FR-010/FR-012: resend store-walk visitor
 #include <fixpp/session/security_profile.hpp>  // SecurityProfile::kind::unset sentinel check (lives in `session` per [arch §6]'s `SecurityProfile` bullet)
-#include <fixpp/session/sending_time.hpp>  // 005 US5: check_sending_time (T055)
+#include <fixpp/session/sending_time.hpp>      // 005 US5: check_sending_time (T055)
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/seqnum_manager.hpp>  // 005 US2: SeqnumManager (T031)
 #include <fixpp/session/session.hpp>
@@ -554,12 +554,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::live_write_serialized_(
 // Does NOT rebind transport_send_ — live writes go through live_write_serialized_()
 // which reads live_transport_shared_() at call time (FQ-A gate-b/r2).
 // Does NOT transition the FSM — the acceptor stays NotConnected; the gate at
-// the acceptor's live-binding CompID-authorization gate (arm 1-live) fires when on_inbound_frame processes the first Logon.
-// [data-model §E-2; T011; FR-005/006/008; contracts C1 step 5; T-041; FQ-A]
+// the acceptor's live-binding CompID-authorization gate (arm 1-live) fires when on_inbound_frame
+// processes the first Logon. [data-model §E-2; T011; FR-005/006/008; contracts C1 step 5; T-041;
+// FQ-A]
 void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transport> transport,
                                         fixpp::transport::handshake_result hr) noexcept {
     // 1. Store live peer identity for the acceptor authorization gate (E-4).
-    //    Consumed one-shot by the acceptor's live-binding CompID-authorization gate (arm 1-live) in on_inbound_frame.
+    //    Consumed one-shot by the acceptor's live-binding CompID-authorization gate (arm 1-live) in
+    //    on_inbound_frame.
     //
     //    043 T013 (D-10 #3 MUST): for insecure_plain_tcp, live_peer_id_ MUST stay
     //    nullopt — the acceptor handshake was skipped; there is no peer identity.
@@ -584,8 +586,8 @@ void Session::attach_accepted_transport(std::unique_ptr<fixpp::transport::Transp
 //   fatal  → a store failure propagates → caller can block reaching Active (C2.6
 //             knob-driven Logon path).
 //   logged → store failure swallowed (I-07 logged-then-proceed; matching the
-//             existing store_is_persistent_-ternary disposition pattern for the 013-only 141 path and
-//             all teardown paths).
+//             existing store_is_persistent_-ternary disposition pattern for the 013-only 141 path
+//             and all teardown paths).
 // seqnum_mgr_.reset_to_one() failure always propagates regardless of disposition
 // (the live-counter reset is the primary gate; a store failure is I-07-able but
 // a seqnum-manager failure is not).
@@ -1011,8 +1013,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         }
         inbound_tv_ = fixpp::dict::shared_dictionary_view(cfg_.dict_snapshot);
     } else {
-        inbound_tv_ = std::make_shared<const fixpp::dict::table_view>(
-            cfg_.dictionary->as_table_view());
+        inbound_tv_ =
+            std::make_shared<const fixpp::dict::table_view>(cfg_.dictionary->as_table_view());
     }
 
     // RC#1 (gate-b/r1): default-constructed security_profile sentinel →
@@ -1065,9 +1067,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     //
     // #2 (P2-defensive): begin_string=="FIXT.1.1" with is_fixt()=true but
     //    app_version_registry_==nullptr → the acceptor serviceability gate at
-    //    inbound Logon (the 033 T018 DefaultApplVerID(1137) gate) is skipped. Structurally unreachable in
-    //    production (engine always passes non-null), but the test-ctor default is null.
-    //    Closing here at open()-time is cheaper than carrying a documented fail-open.
+    //    inbound Logon (the 033 T018 DefaultApplVerID(1137) gate) is skipped. Structurally
+    //    unreachable in production (engine always passes non-null), but the test-ctor default is
+    //    null. Closing here at open()-time is cheaper than carrying a documented fail-open.
     //    [session_config.hpp's `default_appl_ver_id` field; data-model.md E3; FR-004/FR-004a]
     //
     // #3 (042, production-reachable): begin_string=="FIXT.1.1" with a non-null
@@ -1095,8 +1097,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // gate-b/r1 FQ-3 (finding #3): credential delimiter injection validation.
     //
     // username/password are copied verbatim into append_raw() in build_logon
-    // (admin_messages.cpp's `build_logon`, 553/554 append_raw calls) with no SOH/= validation. A configured value
-    // containing SOH (\x01) or '=' can inject arbitrary FIX fields. This is the
+    // (admin_messages.cpp's `build_logon`, 553/554 append_raw calls) with no SOH/= validation. A
+    // configured value containing SOH (\x01) or '=' can inject arbitrary FIX fields. This is the
     // known feedback_delimiter_injection_verbatim_field_copy anti-pattern.
     //
     // Floor: reject any byte < 0x20 (incl. SOH \x01) or '=' (0x3D) in
@@ -1265,8 +1267,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         // inbound_tv_ is non-null whenever cfg_.dictionary is — both are set by the
         // same guarded block above.
         if (cfg_.dictionary && inbound_tv_) {
-            validator_ =
-                std::make_unique<fixpp::wire::dictionary_driven_validator>(*inbound_tv_);
+            validator_ = std::make_unique<fixpp::wire::dictionary_driven_validator>(*inbound_tv_);
         }
         // If dictionary is null despite the guard, validator_ stays null → the
         // validate gate in on_inbound_frame skips (fail-closed skip, not crash).
@@ -1823,8 +1824,7 @@ struct SendingTimeStamp {
     // Emits PossDupFlag(43)=Y + OrigSendingTime(122)=<orig_sending_time>. Shared
     // by the header/body-boundary insertion point and the degenerate no-body
     // fallback below, so the two emit sites cannot silently diverge.
-    const auto append_possdup =
-        [&](std::string_view ost_val) -> fixpp::core::expected_t<void> {
+    const auto append_possdup = [&](std::string_view ost_val) -> fixpp::core::expected_t<void> {
         std::byte y[] = {static_cast<std::byte>('Y')};
         if (auto r = w.append_raw(43, std::span<const std::byte>{y}); !r) {
             return std::unexpected(r.error());
@@ -1852,8 +1852,8 @@ struct SendingTimeStamp {
             auto fr = scan_field(i);
             if (!fr.ok) continue;
             if (fr.tag == 52) {
-                orig_sending_time = std::string_view{
-                    reinterpret_cast<const char*>(fr.value.data()), fr.value.size()};
+                orig_sending_time = std::string_view{reinterpret_cast<const char*>(fr.value.data()),
+                                                     fr.value.size()};
                 break;
             }
         }
@@ -2504,7 +2504,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
                 if (live_peer_id_.has_value() && is_mtls) {
                     // (1) Live acceptor path: use real handshake peer_id set by
-                    //     attach_accepted_transport. Mirrors the initiator's live-reconnect CompID-authorization arm.
+                    //     attach_accepted_transport. Mirrors the initiator's live-reconnect
+                    //     CompID-authorization arm.
                     const fixpp::tls::peer_identity& auth_pid = *live_peer_id_;
                     const std::string_view asserted_compid = cfg_.target_comp_id;
                     auto auth_r =
@@ -2649,11 +2650,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             // Valid Logon + in-seq: transition to LogonReceived, then emit
             // the acceptor's own Logon reply and transition to Active.
-            // [spec.md FR-005 §US2 AC2; 005 data-model.md's `NotConnected` row; F1 Round-A drift fix]
-            // RC#B (gate-b/r1-green): gate the LogonReceived→Active transition on
-            // successful reply build AND emit. Build/emit failure → Disconnected.
-            // [009 spec.md FR-005; 005 data-model.md's `NotConnected` row "reply Logon, agreed
-            // HeartBtInt"]
+            // [spec.md FR-005 §US2 AC2; 005 data-model.md's `NotConnected` row; F1 Round-A drift
+            // fix] RC#B (gate-b/r1-green): gate the LogonReceived→Active transition on successful
+            // reply build AND emit. Build/emit failure → Disconnected. [009 spec.md FR-005; 005
+            // data-model.md's `NotConnected` row "reply Logon, agreed HeartBtInt"]
             record_state_transition_(fsm_state::LogonReceived);
 
             // Emit the acceptor reply Logon using the same admin-builder path
@@ -2734,10 +2734,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     peer_sent_reset;
                 const seqnum_t reply_seq = seqnum_mgr_.peek_outbound();
                 n_pre_outbound = reply_seq;  // 031: capture N_pre before the reply consumes it
-                // 027 T013 I-NEX-1, E-OBO: acceptor reply is built AFTER check_inbound (above in this handler)
-                // which already advanced next_inbound_. Advertise plain next_inbound_unsafe() —
-                // NO +1 (E-OBO). Value is cause-dependent under 141 reset (data-model Reset table).
-                // [contract C2, I-NEX-1, E-OBO]
+                // 027 T013 I-NEX-1, E-OBO: acceptor reply is built AFTER check_inbound (above in
+                // this handler) which already advanced next_inbound_. Advertise plain
+                // next_inbound_unsafe() — NO +1 (E-OBO). Value is cause-dependent under 141 reset
+                // (data-model Reset table). [contract C2, I-NEX-1, E-OBO]
                 const std::optional<fixpp::session::seqnum_t> acpt_next_expected =
                     cfg_.enable_next_expected_msg_seq_num
                         ? std::optional<fixpp::session::seqnum_t>{seqnum_mgr_.next_inbound_unsafe()}
@@ -3305,7 +3305,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // Row 8: redeliver opt-in — call fromApp with the original
                             // frame (which carries 43=Y, so fromApp sees it flagged possdup).
                             // Same invocation pattern as the in-sequence fromApp dispatch
-                            // at the 019 T011 in-sequence fromApp dispatch. No seqnum advance (INV-1).
+                            // at the 019 T011 in-sequence fromApp dispatch. No seqnum advance
+                            // (INV-1).
                             auto cb_r = parse_and_dispatch_(
                                 frame, kInboundParseArena, [&](auto& mv, auto& sid) {
                                     return engine_.application->fromApp(mv, sid);
@@ -4229,8 +4230,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             }
 
             // 027 T015/T021 — initiator 789 honor (BEFORE Active transition).
-            // [gate-b/r1 FQ-1: mirror the acceptor's honor_peer_next_expected_ ordering — C6/C8/D-0]
-            // On X>N or invalid-789, honor_peer_next_expected_() records Disconnected
+            // [gate-b/r1 FQ-1: mirror the acceptor's honor_peer_next_expected_ ordering —
+            // C6/C8/D-0] On X>N or invalid-789, honor_peer_next_expected_() records Disconnected
             // and returns false/*h789==false; the session MUST NOT enter Active first.
             // On X<N (resend) or X==N (no-op), returns true and we proceed to Active.
             // [contract C4/C6/C8, data-model I-NEX-2/3/4/9/11, D-6/D-10]
@@ -4997,9 +4998,9 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
                     }
                     auto assign_r = co_await seqnum_mgr_.assign_outbound();
                     if (!assign_r) {
-                        // Overflow or closed: session-fatal per 005 data-model.md §E3 (Sequence-number state).
-                        // Liveness loop is fire-and-forget (no expected_t return):
-                        // log by transitioning to Disconnected and stopping the loop.
+                        // Overflow or closed: session-fatal per 005 data-model.md §E3
+                        // (Sequence-number state). Liveness loop is fire-and-forget (no expected_t
+                        // return): log by transitioning to Disconnected and stopping the loop.
                         record_state_transition_(fsm_state::Disconnected);
                         co_return;
                     }
@@ -5443,9 +5444,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
             cfg_.target_comp_id, new_seqno, cfg_.begin_string, st52_sr.value);
         if (!gf) {
             // Build failure (buffer too small for configured CompIDs) — fail closed.
-            // Mirrors build_logon fail-closed precedent (emit_initiator_logon_'s reset_on_logon arm): an outbound
-            // admin frame that cannot be constructed must NOT report success. Silent
-            // success here would leave the peer's ResendRequest silently unfilled (data-loss).
+            // Mirrors build_logon fail-closed precedent (emit_initiator_logon_'s reset_on_logon
+            // arm): an outbound admin frame that cannot be constructed must NOT report success.
+            // Silent success here would leave the peer's ResendRequest silently unfilled
+            // (data-loss).
             co_return false;
         }
         // 019 T014: toAdmin before SequenceReset-GapFill. [FR-008/010]
@@ -5581,7 +5583,8 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
                 lo_st52.value);
             if (lo_result) {
                 // 019 FR-008/010: toAdmin before every engine-originated admin emit.
-                // [gate-b/r1 FQ-2: mirror the file-wide fire_to_admin_-before-assign_outbound admin-emit ordering]
+                // [gate-b/r1 FQ-2: mirror the file-wide fire_to_admin_-before-assign_outbound
+                // admin-emit ordering]
                 if (!fire_to_admin_(*lo_result)) {
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -5624,7 +5627,8 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
                 cfg_.target_comp_id, text_sv, cfg_.begin_string, lo_st52.value);
             if (lo_result) {
                 // 019 FR-008/010: toAdmin before every engine-originated admin emit.
-                // [gate-b/r1 FQ-2: mirror the file-wide fire_to_admin_-before-assign_outbound admin-emit ordering]
+                // [gate-b/r1 FQ-2: mirror the file-wide fire_to_admin_-before-assign_outbound
+                // admin-emit ordering]
                 if (!fire_to_admin_(*lo_result)) {
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -5644,7 +5648,8 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
         // 031 INV-NEX-RANGE: the resend range endpoint reads the LIVE peek_outbound()-1
         // (= N_pre on the acceptor arm), NOT n789-1 (= next_outbound_ref-1). Behaviorally
         // inert at this call site (end_is_through_current=true forces eff_end=our_last,
-        // per replay_outbound_range_'s eff_end formula), but written explicitly for contract-fidelity and robustness.
+        // per replay_outbound_range_'s eff_end formula), but written explicitly for
+        // contract-fidelity and robustness.
         auto rr789 = co_await replay_outbound_range_(x789, seqnum_mgr_.peek_outbound() - 1U,
                                                      /*end_is_through_current=*/true);
         if (!rr789) {

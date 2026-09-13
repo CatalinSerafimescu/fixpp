@@ -62,7 +62,6 @@
 //
 // [const §XV.9]: tests/-only.
 #include <gtest/gtest.h>
-
 #include <openssl/sha.h>
 
 #include <algorithm>
@@ -75,6 +74,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/session/application.hpp>
+#include <fixpp/session/engine.hpp>
+#include <fixpp/session/memory_store_factory.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_fsm.hpp>
+#include <fixpp/v44/Messages.hpp>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -88,15 +94,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include <fixpp/core/decimal_alias.hpp>
-#include <fixpp/session/application.hpp>
-#include <fixpp/session/engine.hpp>
-#include <fixpp/session/memory_store_factory.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_fsm.hpp>
-
-#include <fixpp/v44/Messages.hpp>
 
 #include "conversation/support/conv_wire.hpp"
 #include "happy/hp_support.hpp"
@@ -114,21 +111,20 @@ namespace rb = fixpp::interop::readback;
 using fixpp::interop::Counterparty;
 using fixpp::interop::Role;
 using fixpp::session::Application;
-using fixpp::session::SessionId;
 using fixpp::session::fsm_state;
-using fixpp::wire::MessageView;
+using fixpp::session::SessionId;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace {
 
-std::string env_or_empty(char const* key)
-{
-    char const* v = std::getenv(key);  // NOLINT(concurrency-mt-unsafe) -- single-threaded test setup
+std::string env_or_empty(char const* key) {
+    char const* v =
+        std::getenv(key);  // NOLINT(concurrency-mt-unsafe) -- single-threaded test setup
     return v == nullptr ? std::string() : std::string(v);
 }
 
-std::string sha256_hex_file(std::string const& path)
-{
+std::string sha256_hex_file(std::string const& path) {
     std::ifstream f(path, std::ios::binary);
     std::ostringstream oss;
     oss << f.rdbuf();
@@ -144,10 +140,10 @@ std::string sha256_hex_file(std::string const& path)
     return out;
 }
 
-std::string now_utc_ms()
-{
+std::string now_utc_ms() {
     auto const now = std::chrono::system_clock::now();
-    auto const ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    auto const ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
     std::time_t const t = std::chrono::system_clock::to_time_t(now);
     std::tm tm{};
     // `gmtime_r` is POSIX and absent from the MSVC CRT; `gmtime_s` is its
@@ -160,21 +156,19 @@ std::string now_utc_ms()
 #endif
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%04d%02d%02d-%02d:%02d:%02d.%03d", tm.tm_year + 1900,
-                 tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
-                 static_cast<int>(ms.count()));
+                  tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+                  static_cast<int>(ms.count()));
     return buf;
 }
 
-std::string dec_to_str(fixpp::decimal_t const& d)
-{
+std::string dec_to_str(fixpp::decimal_t const& d) {
     std::array<std::byte, 64> buf{};
     auto r = d.format(buf);
     if (!r.has_value()) return {};
     return std::string(reinterpret_cast<char const*>(buf.data()), *r);
 }
 
-std::string typed_val(int tag, std::string raw)
-{
+std::string typed_val(int tag, std::string raw) {
     return rb::canonical_typed_value(conv::fix_type_for_tag(tag), raw);
 }
 
@@ -185,27 +179,30 @@ std::string typed_val(int tag, std::string raw)
 // omitted (typed_reads is descriptive only -- witness_comparator.hpp's
 // ParsedRecord does not read it; FR-006 ranges over `fields`).
 std::vector<rb::TypedEntry> typed_reads_for(std::string const& mt,
-                                            MessageView<access_mode::Index> const& msg)
-{
+                                            MessageView<access_mode::Index> const& msg) {
     std::vector<rb::TypedEntry> out;
     std::array<std::byte, 256> arena_buf{};
     std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
                                               std::pmr::null_memory_resource()};
     auto push_sv = [&](int tag, fixpp::core::expected_t<std::string_view> r) {
-        if (r.has_value()) out.push_back({std::to_string(tag), conv::fix_type_for_tag(tag),
-                                          typed_val(tag, std::string(*r))});
+        if (r.has_value())
+            out.push_back({std::to_string(tag), conv::fix_type_for_tag(tag),
+                           typed_val(tag, std::string(*r))});
     };
     auto push_char = [&](int tag, fixpp::core::expected_t<char> r) {
-        if (r.has_value()) out.push_back({std::to_string(tag), conv::fix_type_for_tag(tag),
-                                          typed_val(tag, std::string(1, *r))});
+        if (r.has_value())
+            out.push_back({std::to_string(tag), conv::fix_type_for_tag(tag),
+                           typed_val(tag, std::string(1, *r))});
     };
     auto push_int = [&](int tag, fixpp::core::expected_t<std::int32_t> r) {
-        if (r.has_value()) out.push_back({std::to_string(tag), conv::fix_type_for_tag(tag),
-                                          typed_val(tag, std::to_string(*r))});
+        if (r.has_value())
+            out.push_back({std::to_string(tag), conv::fix_type_for_tag(tag),
+                           typed_val(tag, std::to_string(*r))});
     };
     auto push_dec = [&](int tag, fixpp::core::expected_t<fixpp::decimal_t> r) {
-        if (r.has_value()) out.push_back({std::to_string(tag), conv::fix_type_for_tag(tag),
-                                          typed_val(tag, dec_to_str(*r))});
+        if (r.has_value())
+            out.push_back(
+                {std::to_string(tag), conv::fix_type_for_tag(tag), typed_val(tag, dec_to_str(*r))});
     };
 
     if (mt == "8") {  // ExecutionReport: B-02, B-06
@@ -264,16 +261,22 @@ std::vector<rb::TypedEntry> typed_reads_for(std::string const& mt,
 // B-11 (which fixpp itself replies to with B-08/B-10/B-12, see the reply_step
 // switch in fromApp below). Named here so the T054 typed-read assertion can
 // look up each capture's script-declared intent by step_id.
-std::string peer_step_id_for_stage(int stage)
-{
+std::string peer_step_id_for_stage(int stage) {
     switch (stage) {
-        case 0: return "B-02";
-        case 1: return "B-04";
-        case 2: return "B-06";
-        case 3: return "B-07";
-        case 4: return "B-09";
-        case 5: return "B-11";
-        default: return {};
+        case 0:
+            return "B-02";
+        case 1:
+            return "B-04";
+        case 2:
+            return "B-06";
+        case 3:
+            return "B-07";
+        case 4:
+            return "B-09";
+        case 5:
+            return "B-11";
+        default:
+            return {};
     }
 }
 
@@ -350,8 +353,7 @@ public:
     std::vector<std::function<void()>> pending_before_hello;
 
     template <typename F>
-    void write_or_defer(F&& write_call)
-    {
+    void write_or_defer(F&& write_call) {
         std::lock_guard<std::mutex> lk(hello_mu);
         if (hello_written) {
             write_call();
@@ -360,8 +362,7 @@ public:
         }
     }
 
-    void mark_hello_written()
-    {
+    void mark_hello_written() {
         std::lock_guard<std::mutex> lk(hello_mu);
         for (auto& fn : pending_before_hello) {
             fn();
@@ -370,22 +371,19 @@ public:
         hello_written = true;
     }
 
-    long long next_occurrence(long long seq, std::string const& dir)
-    {
+    long long next_occurrence(long long seq, std::string const& dir) {
         std::lock_guard<std::mutex> lk(occ_mu);
         return occurrences[{seq, dir}]++;
     }
 
     // Called synchronously right before Engine::send() for a fixpp-originated
     // message — the call site IS the builder-input capture (C-8).
-    void arm_pending_sent(std::string step_id, std::vector<rb::FieldEntry> fields)
-    {
+    void arm_pending_sent(std::string step_id, std::vector<rb::FieldEntry> fields) {
         pending_sent = PendingSent{std::move(step_id), std::move(fields)};
     }
 
     fixpp::core::expected_t<void> toApp(MessageView<access_mode::Index> const& msg,
-                                        SessionId const& /*id*/) override
-    {
+                                        SessionId const& /*id*/) override {
         if (stream != nullptr && pending_sent.has_value()) {
             PendingSent p = std::move(*pending_sent);
             pending_sent.reset();
@@ -404,8 +402,7 @@ public:
     }
 
     fixpp::core::expected_t<void> fromApp(MessageView<access_mode::Index> const& msg,
-                                          SessionId const& id) override
-    {
+                                          SessionId const& id) override {
         std::string const mt(msg.msg_type());
         long long const seq = msg.msg_seq_num();
         bool poss_dup = false;
@@ -432,8 +429,9 @@ public:
             // arrival counter the readback record above just consumed — one
             // shared counter serves both, never a second independent count.
             rb::Stream* s = stream;
-            write_or_defer([s, mt, seq, occ]() { s->disposition(mt, seq, rb::kDirectionPeerToFixpp, occ,
-                                                                  "accepted"); });
+            write_or_defer([s, mt, seq, occ]() {
+                s->disposition(mt, seq, rb::kDirectionPeerToFixpp, occ, "accepted");
+            });
             write_or_defer([s, mt, seq, occ, poss_dup, fields = std::move(fields),
                             typed = std::move(typed)]() mutable {
                 s->readback(mt, seq, rb::kDirectionPeerToFixpp, occ, poss_dup, std::move(fields),
@@ -442,9 +440,12 @@ public:
         }
 
         std::string reply_step;
-        if (stage == 3) reply_step = "B-08";       // reply to B-07
-        else if (stage == 4) reply_step = "B-10";  // reply to B-09
-        else if (stage == 5) reply_step = "B-12";  // reply to B-11
+        if (stage == 3)
+            reply_step = "B-08";  // reply to B-07
+        else if (stage == 4)
+            reply_step = "B-10";  // reply to B-09
+        else if (stage == 5)
+            reply_step = "B-12";  // reply to B-11
         if (reply_step.empty() || intent_index == nullptr) {
             return {};
         }
@@ -507,8 +508,7 @@ public:
     // data-model §13's own text; they are still written because §13 defines
     // `accepted` at fromApp/fromAdmin delivery, not at "joins something".
     fixpp::core::expected_t<void> fromAdmin(MessageView<access_mode::Index> const& msg,
-                                            SessionId const& /*id*/) override
-    {
+                                            SessionId const& /*id*/) override {
         if (stream != nullptr) {
             long long const seq = msg.msg_seq_num();
             long long const occ = next_occurrence(seq, std::string(rb::kDirectionPeerToFixpp));
@@ -528,8 +528,7 @@ public:
     // FSM delivery) -- so this call site and the two above are mutually
     // exclusive per arrival, and next_occurrence's shared counter assigns the
     // correct ordinal whichever of the three fires.
-    void toAdmin(MessageView<access_mode::Index> const& msg, SessionId const& /*id*/) override
-    {
+    void toAdmin(MessageView<access_mode::Index> const& msg, SessionId const& /*id*/) override {
         if (stream == nullptr || msg.msg_type() != "3") {
             return;
         }
@@ -556,13 +555,13 @@ public:
         long long const occ = next_occurrence(ref_seq, std::string(rb::kDirectionPeerToFixpp));
         rb::Stream* s = stream;
         write_or_defer([s, ref_msg_type, ref_seq, occ, reject]() {
-            s->disposition(ref_msg_type, ref_seq, rb::kDirectionPeerToFixpp, occ, "rejected", reject);
+            s->disposition(ref_msg_type, ref_seq, rb::kDirectionPeerToFixpp, occ, "rejected",
+                           reject);
         });
     }
 };
 
-std::string run_dir_of(std::string const& readback_path)
-{
+std::string run_dir_of(std::string const& readback_path) {
     std::size_t const slash = readback_path.find_last_of('/');
     return slash == std::string::npos ? std::string(".") : readback_path.substr(0, slash);
 }
@@ -575,8 +574,7 @@ std::string run_dir_of(std::string const& readback_path)
 // <fix-with-pipes>" lines to) for that exact signature. Returns an empty
 // string when the signature is not found -- the caller's own diagnostic
 // then stands alone, unembellished.
-std::string describe_a_resend_rejection(std::string const& run_dir)
-{
+std::string describe_a_resend_rejection(std::string const& run_dir) {
     std::ifstream f(run_dir + "/counterparty-transcript.txt");
     std::string line;
     while (std::getline(f, line)) {
@@ -585,7 +583,8 @@ std::string describe_a_resend_rejection(std::string const& run_dir)
             return "peer rejected fixpp's B-01 replay with Reject(35=3) 373=14 "
                    "(\"Tag specified out of required order\") field=43 -- "
                    "PossDupFlag(43)/OrigSendingTime(122) landed after a body field instead "
-                   "of standard-header position. Wire line: " + line;
+                   "of standard-header position. Wire line: " +
+                   line;
         }
     }
     return {};
@@ -593,8 +592,7 @@ std::string describe_a_resend_rejection(std::string const& run_dir)
 
 }  // namespace
 
-TEST(Conversation, Cell)
-{
+TEST(Conversation, Cell) {
     // T098a (FR-021a): off-by-default UBSan plant, see ubsan_plant.hpp for
     // the gate and the arms it exists for.
     fixpp::interop::support::maybe_run_ubsan_plant();
@@ -681,8 +679,8 @@ TEST(Conversation, Cell)
     ecfg.application = app;
     fixpp::interop::InteropEngineFixture fx{std::move(ecfg)};
 
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory,
-                                       fx.ioc().get_executor(), *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     cfg.dictionary = prod.dictionary;
     cfg.validate_inbound_messages = (arm == "validation-on");
     // A-RESEND / A-GAPFILL: give fixpp a persistent outbound store so it can
@@ -691,12 +689,11 @@ TEST(Conversation, Cell)
     // GapFill (a storeless session cannot replay app bodies -- Session::
     // replay_outbound_range_'s `if (!store_ || our_last == 0 ...)` early
     // branch). Same precedent as
-    // hp_fix44_recovery_outbound_answer_test.cpp's FixppAnswersResendRequestAndPeerResyncs: unbounded
-    // policy, exempt from the bounded-store DoS construction guard that
-    // would otherwise abort session open under the engine's default
-    // max_store_memory_bytes. Test-only store; applies to every combo (the
-    // guard/policy choice is not combo-specific), so this is NOT gated on
-    // qfj_combo_probe.
+    // hp_fix44_recovery_outbound_answer_test.cpp's FixppAnswersResendRequestAndPeerResyncs:
+    // unbounded policy, exempt from the bounded-store DoS construction guard that would otherwise
+    // abort session open under the engine's default max_store_memory_bytes. Test-only store;
+    // applies to every combo (the guard/policy choice is not combo-specific), so this is NOT gated
+    // on qfj_combo_probe.
     cfg.store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>(
         fixpp::session::MemoryStore::Config{.policy = fixpp::session::capacity_policy::unbounded});
     std::string const sender_id = cfg.sender_comp_id;
@@ -713,7 +710,8 @@ TEST(Conversation, Cell)
     ASSERT_TRUE(stream.ok()) << "cannot open fixpp readback stream: " << readback_path;
     app->stream = &stream;
 
-    ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value()) << "register_session failed";
+    ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
+        << "register_session failed";
     fx.start();
 
     // ── A-LOGON ──────────────────────────────────────────────────────────────
@@ -724,7 +722,8 @@ TEST(Conversation, Cell)
     ASSERT_NE(sess, nullptr);
 
     bool const has_validator = sess->has_validator_for_test();
-    stream.hello(run_id, cell_id, config, actual_digest, arm, has_validator, prod.dictionary_digest);
+    stream.hello(run_id, cell_id, config, actual_digest, arm, has_validator,
+                 prod.dictionary_digest);
     // Flushes any admin-arrival disposition ConvApp buffered while
     // drive_to_active() was pumping (T061a fix, ConvApp::write_or_defer's own
     // header comment) -- MUST run immediately after stream.hello() so no
@@ -748,7 +747,9 @@ TEST(Conversation, Cell)
     // to reflect the auto-ResendRequest (Logon=1, A-TESTREQ Heartbeat=2,
     // ResendRequest=3) before A-REJECT claims the next slot. ────────────────
     bool const gapfill_advanced = fx.run_until(
-        [&] { return sess->seqnum_mgr_test_access().peek_outbound() >= fixpp::session::seqnum_t{3}; },
+        [&] {
+            return sess->seqnum_mgr_test_access().peek_outbound() >= fixpp::session::seqnum_t{3};
+        },
         3s);
     EXPECT_TRUE(gapfill_advanced)
         << "A-GAPFILL: fixpp's automatic ResendRequest was not observed (outbound seq stalled at "
@@ -764,10 +765,11 @@ TEST(Conversation, Cell)
                 auto seq_r = co_await sess->seqnum_mgr_test_access().assign_outbound();
                 if (!seq_r.has_value()) co_return std::unexpected(seq_r.error());
                 std::array<std::byte, 512> buf{};
-                std::vector<intent::FieldEntry> const reject_fields = {
-                    {"112", "TR-ADMIN-0002"}, {"55", "OUT-OF-CONTEXT"}};
-                auto frame_r = conv::build_frame_via_writer(buf, "1", *seq_r, sender_id, target_id,
-                                                            begin_string, now_utc_ms(), reject_fields);
+                std::vector<intent::FieldEntry> const reject_fields = {{"112", "TR-ADMIN-0002"},
+                                                                       {"55", "OUT-OF-CONTEXT"}};
+                auto frame_r =
+                    conv::build_frame_via_writer(buf, "1", *seq_r, sender_id, target_id,
+                                                 begin_string, now_utc_ms(), reject_fields);
                 if (!frame_r.has_value()) co_return std::unexpected(frame_r.error());
                 co_return co_await sess->store_then_emit_test_access(*seq_r, *frame_r);
             },  // ⛔ NO trailing `()` — pass the CALLABLE, never its invocation.
@@ -798,11 +800,10 @@ TEST(Conversation, Cell)
     // transcript for the SPECIFIC Reject(35=3) signature this exchange
     // produces (RefMsgType=1/TestRequest, SessionRejectReason=2/"Tag not
     // defined for this message type"); tolerate a disconnect as the
-    // documented alternative outcome (KNOWN-LIMITATIONS.md's session-reject-vs-disconnect section: only
-    // QuickFIX-J 3.0.1 is CONFIRMED to emit Reject(35=3) on this pinned
-    // input -- measured here to hold for QuickFIX-cpp too, but the task's
-    // own tolerance is kept so a counterparty rebuild that changes this
-    // behavior does not spuriously fail this cell). Neither outcome is a
+    // documented alternative outcome (KNOWN-LIMITATIONS.md's session-reject-vs-disconnect section:
+    // only QuickFIX-J 3.0.1 is CONFIRMED to emit Reject(35=3) on this pinned input -- measured here
+    // to hold for QuickFIX-cpp too, but the task's own tolerance is kept so a counterparty rebuild
+    // that changes this behavior does not spuriously fail this cell). Neither outcome is a
     // "fidelity pass" (T058) -- this assertion exists ONLY to prove the cell
     // WOULD fail if the peer did neither, which today it could not.
     {
@@ -892,9 +893,9 @@ TEST(Conversation, Cell)
                 if (!seq_r.has_value()) co_return std::unexpected(seq_r.error());
                 assigned_seq = *seq_r;
                 std::array<std::byte, 512> buf{};
-                auto frame_r = conv::build_frame_via_writer(buf, decl.msg_type, *seq_r, sender_id,
-                                                            target_id, begin_string, now_utc_ms(),
-                                                            decl.fields);
+                auto frame_r =
+                    conv::build_frame_via_writer(buf, decl.msg_type, *seq_r, sender_id, target_id,
+                                                 begin_string, now_utc_ms(), decl.fields);
                 if (!frame_r.has_value()) co_return std::unexpected(frame_r.error());
                 co_return co_await sess->store_then_emit_test_access(*seq_r, *frame_r);
             },  // ⛔ NO trailing `()` — see the A-REJECT site above for why.
@@ -917,7 +918,7 @@ TEST(Conversation, Cell)
         long long const seq_ll = static_cast<long long>(static_cast<std::uint32_t>(assigned_seq));
         long long const occ = app->next_occurrence(seq_ll, std::string(rb::kDirectionFixppToPeer));
         stream.sent(decl.msg_type, seq_ll, rb::kDirectionFixppToPeer, occ, "B-05",
-                   std::move(sent_fields));
+                    std::move(sent_fields));
         return true;
     };
 
@@ -937,7 +938,8 @@ TEST(Conversation, Cell)
     ASSERT_TRUE(fx.run_until([&] { return app->inbound_business_count.load() >= 6; }, 8s))
         << "conversation did not complete; inbound_business_count="
         << app->inbound_business_count.load();
-    EXPECT_EQ(app->reactive_sends_failed.load(), 0) << "one or more reactive replies failed to send";
+    EXPECT_EQ(app->reactive_sends_failed.load(), 0)
+        << "one or more reactive replies failed to send";
 
     // Settle for the peer's own last readback/transcript writes.
     fx.run_until([] { return false; }, 300ms);
@@ -956,7 +958,8 @@ TEST(Conversation, Cell)
     // occurrence number comes from the SAME shared counter occurrence 0 used
     // (app->next_occurrence), so the two can never disagree by construction.
     if (qfj_combo_probe) {
-        ASSERT_GE(app->b01_seq.load(), 0) << "A-RESEND: B-01's fixpp-outbound seq_num was never captured";
+        ASSERT_GE(app->b01_seq.load(), 0)
+            << "A-RESEND: B-01's fixpp-outbound seq_num was never captured";
         std::string const run_dir_early = run_dir_of(readback_path);
         std::string const cp_path_early = run_dir_early + "/counterparty-readback.jsonl";
         bool replay_observed = fx.run_until(
@@ -964,7 +967,8 @@ TEST(Conversation, Cell)
                 auto const cp_records_poll = rb::parse_stream(cp_path_early);
                 for (auto const& r : cp_records_poll) {
                     if (r.kind == rb::ParsedRecord::Kind::Readback && r.msg_type == "D" &&
-                        r.direction == std::string(rb::kDirectionFixppToPeer) && r.occurrence == 1) {
+                        r.direction == std::string(rb::kDirectionFixppToPeer) &&
+                        r.occurrence == 1) {
                         return true;
                     }
                 }
@@ -1070,15 +1074,15 @@ TEST(Conversation, Cell)
     // (A-RESEND's replay, "declared_inapplicable" excludes it on C1/C2 only)
     // -- 13 keys. Derived from census.yaml, not an independent literal.
     std::size_t const expected_rows = qfj_combo_probe ? 13u : 12u;
-    std::string const known_cause_tail =
-        qfj_combo_probe ? [&] {
-            std::string const c = describe_a_resend_rejection(run_dir);
-            return c.empty() ? std::string() : (" -- " + c);
-        }()
-                        : std::string();
+    std::string const known_cause_tail = qfj_combo_probe ? [&] {
+        std::string const c = describe_a_resend_rejection(run_dir);
+        return c.empty() ? std::string() : (" -- " + c);
+    }()
+                                                         : std::string();
     EXPECT_EQ(rows.size(), expected_rows)
-        << "expected " << expected_rows << " business-step witness rows (census.yaml keys for combo "
-        << combo << ", spec.md § Conversation census)" << known_cause_tail;
+        << "expected " << expected_rows
+        << " business-step witness rows (census.yaml keys for combo " << combo
+        << ", spec.md § Conversation census)" << known_cause_tail;
     if (qfj_combo_probe) {
         // A-RESEND's whole point is B-01 occurrence 1 (spec.md's declared_
         // inapplicable note); rows.size()==13 alone is satisfied by ANY 13th
@@ -1147,17 +1151,16 @@ TEST(Conversation, Cell)
         EXPECT_GT(cap.entries.size(), 0u)
             << "T054: zero typed fields captured for step " << cap.step_id;
         for (auto const& te : cap.entries) {
-            auto declared = std::find_if(
-                it->second.fields.begin(), it->second.fields.end(),
-                [&](intent::FieldEntry const& f) { return f.path == te.path; });
+            auto declared =
+                std::find_if(it->second.fields.begin(), it->second.fields.end(),
+                             [&](intent::FieldEntry const& f) { return f.path == te.path; });
             if (declared == it->second.fields.end()) {
                 continue;  // no script-declared counterpart (e.g. peer-engine-minted ID) --
                            // nothing to compare against, not an assertable absence.
             }
             std::string const expected = rb::canonical_typed_value(te.fix_type, declared->value);
-            EXPECT_EQ(te.value, expected)
-                << "T054: step " << cap.step_id << " tag " << te.path
-                << " typed-read=" << te.value << " declared=" << expected;
+            EXPECT_EQ(te.value, expected) << "T054: step " << cap.step_id << " tag " << te.path
+                                          << " typed-read=" << te.value << " declared=" << expected;
         }
     }
 

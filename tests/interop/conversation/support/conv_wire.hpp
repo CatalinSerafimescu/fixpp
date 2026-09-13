@@ -15,16 +15,12 @@
 // group — only B-01, fixpp-originated, does).
 #pragma once
 
-#include "support/readback_jsonl.hpp"  // FieldEntry, is_canonical_header_or_trailer_tag
-#include "support/intent_file.hpp"
-
+#include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/wire/body_builder.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/writer.hpp>
-
-#include <cstdint>
 #include <map>
 #include <memory_resource>
 #include <span>
@@ -34,6 +30,9 @@
 #include <utility>
 #include <vector>
 
+#include "support/intent_file.hpp"
+#include "support/readback_jsonl.hpp"  // FieldEntry, is_canonical_header_or_trailer_tag
+
 namespace fixpp::interop::conversation {
 
 // Delimiter (first-field) tag for each group this script uses. body_builder
@@ -41,11 +40,12 @@ namespace fixpp::interop::conversation {
 // script's own B-01 field order (spec.md § Conversation census, "Field
 // content the census presumes") fixes these two: NoPartyIDs(453) ->
 // PartyID(448) first; NoPartySubIDs(802) -> PartySubID(523) first.
-inline int group_delimiter_tag(int no_tag)
-{
+inline int group_delimiter_tag(int no_tag) {
     switch (no_tag) {
-        case 453: return 448;  // NoPartyIDs -> PartyID
-        case 802: return 523;  // NoPartySubIDs -> PartySubID
+        case 453:
+            return 448;  // NoPartyIDs -> PartyID
+        case 802:
+            return 523;  // NoPartySubIDs -> PartySubID
         default:
             throw std::runtime_error(
                 "conv_wire.hpp: no known delimiter tag for group " + std::to_string(no_tag) +
@@ -61,13 +61,13 @@ struct ParsedPath {
     int leaf_tag = 0;
 };
 
-inline ParsedPath parse_field_path(std::string const& path)
-{
+inline ParsedPath parse_field_path(std::string const& path) {
     ParsedPath out;
     std::size_t pos = 0;
     while (pos < path.size()) {
         std::size_t dot = path.find('.', pos);
-        std::string token = (dot == std::string::npos) ? path.substr(pos) : path.substr(pos, dot - pos);
+        std::string token =
+            (dot == std::string::npos) ? path.substr(pos) : path.substr(pos, dot - pos);
         bool const is_last = (dot == std::string::npos);
         std::size_t bracket = token.find('[');
         if (bracket == std::string::npos) {
@@ -94,8 +94,7 @@ inline ParsedPath parse_field_path(std::string const& path)
 // builder inputs" rule.
 [[nodiscard]] inline fixpp::core::expected_t<std::span<std::byte>> build_body_from_intent(
     std::span<std::byte> out, std::string_view msg_type,
-    std::vector<fixpp::interop::intent::FieldEntry> const& fields)
-{
+    std::vector<fixpp::interop::intent::FieldEntry> const& fields) {
     fixpp::wire::body_builder bb(msg_type);
 
     struct Level {
@@ -146,7 +145,7 @@ inline ParsedPath parse_field_path(std::string const& path)
                     lvl.handle = *r;
                 } else {
                     auto r = stack[i - 1].entry.group_begin(static_cast<std::uint16_t>(no_tag),
-                                                             static_cast<std::uint16_t>(delim));
+                                                            static_cast<std::uint16_t>(delim));
                     if (!r.has_value()) return std::unexpected(r.error());
                     lvl.handle = *r;
                 }
@@ -167,7 +166,7 @@ inline ParsedPath parse_field_path(std::string const& path)
             }
         } else {
             if (auto r = stack.back().entry.set_string(static_cast<std::uint16_t>(parsed.leaf_tag),
-                                                        f.value);
+                                                       f.value);
                 !r.has_value()) {
                 return std::unexpected(r.error());
             }
@@ -195,8 +194,7 @@ inline ParsedPath parse_field_path(std::string const& path)
 // one) -- e.g. two entries for B-01 (spec.md § Conversation census): {"453",
 // "2"} and, one level down, {"453[0].802","2"} + {"453[1].802","1"}.
 inline std::vector<fixpp::interop::intent::FieldEntry> derive_group_count_fields(
-    std::vector<fixpp::interop::intent::FieldEntry> const& fields)
-{
+    std::vector<fixpp::interop::intent::FieldEntry> const& fields) {
     // key: the path PREFIX identifying the parent context ("" for the root,
     // "453[0]" for inside PartyID instance 0); value: no_tag -> highest
     // instance index seen + 1 (the count).
@@ -214,8 +212,8 @@ inline std::vector<fixpp::interop::intent::FieldEntry> derive_group_count_fields
     std::vector<fixpp::interop::intent::FieldEntry> out;
     for (auto const& [prefix, by_tag] : counts) {
         for (auto const& [no_tag, count] : by_tag) {
-            std::string const path = prefix.empty() ? std::to_string(no_tag)
-                                                     : prefix + "." + std::to_string(no_tag);
+            std::string const path =
+                prefix.empty() ? std::to_string(no_tag) : prefix + "." + std::to_string(no_tag);
             out.push_back({path, std::to_string(count)});
         }
     }
@@ -227,8 +225,7 @@ inline std::vector<fixpp::interop::intent::FieldEntry> derive_group_count_fields
 // expansion — none of this combo's peer-originated steps declare one.
 template <fixpp::wire::access_mode Mode>
 inline std::vector<fixpp::interop::readback::FieldEntry> collect_body_fields(
-    fixpp::wire::MessageView<Mode> const& msg)
-{
+    fixpp::wire::MessageView<Mode> const& msg) {
     std::vector<fixpp::interop::readback::FieldEntry> out;
     for (auto it = msg.begin(); !(it == msg.end()); ++it) {
         auto const& f = *it;
@@ -247,15 +244,13 @@ inline std::vector<fixpp::interop::readback::FieldEntry> collect_body_fields(
 // does not read `typed_reads` at all — see file scope note there). Covers
 // exactly the tags this script's `typed_reads` declarations name (FIX44.xml
 // datatypes, verified against the production dictionary).
-inline std::string fix_type_for_tag(int tag)
-{
+inline std::string fix_type_for_tag(int tag) {
     static const std::map<int, std::string> kTypes = {
-        {1, "STRING"},     {6, "PRICE"},      {11, "STRING"},    {14, "QTY"},
-        {17, "STRING"},    {37, "STRING"},    {38, "QTY"},       {39, "CHAR"},
-        {40, "CHAR"},      {41, "STRING"},    {44, "PRICE"},     {45, "SEQNUM"},
-        {54, "CHAR"},      {55, "STRING"},    {60, "UTCTIMESTAMP"},
-        {102, "INT"},      {112, "STRING"},   {150, "CHAR"},     {151, "QTY"},
-        {371, "INT"},      {372, "STRING"},   {373, "INT"},      {434, "CHAR"},
+        {1, "STRING"},   {6, "PRICE"},    {11, "STRING"}, {14, "QTY"},    {17, "STRING"},
+        {37, "STRING"},  {38, "QTY"},     {39, "CHAR"},   {40, "CHAR"},   {41, "STRING"},
+        {44, "PRICE"},   {45, "SEQNUM"},  {54, "CHAR"},   {55, "STRING"}, {60, "UTCTIMESTAMP"},
+        {102, "INT"},    {112, "STRING"}, {150, "CHAR"},  {151, "QTY"},   {371, "INT"},
+        {372, "STRING"}, {373, "INT"},    {434, "CHAR"},
     };
     auto it = kTypes.find(tag);
     return it == kTypes.end() ? std::string() : it->second;
@@ -287,10 +282,8 @@ inline std::string fix_type_for_tag(int tag)
 // fields handed to it as `fields` here.
 [[nodiscard]] inline fixpp::core::expected_t<std::span<std::byte>> build_frame_via_writer(
     std::span<std::byte> out, std::string_view msg_type, fixpp::session::seqnum_t seq,
-    std::string_view sender_comp_id, std::string_view target_comp_id,
-    std::string_view begin_string, std::string_view sending_time,
-    std::vector<fixpp::interop::intent::FieldEntry> const& fields)
-{
+    std::string_view sender_comp_id, std::string_view target_comp_id, std::string_view begin_string,
+    std::string_view sending_time, std::vector<fixpp::interop::intent::FieldEntry> const& fields) {
     auto sv_to_bytes = [](std::string_view sv) {
         return std::span<std::byte const>(reinterpret_cast<std::byte const*>(sv.data()), sv.size());
     };
@@ -301,9 +294,11 @@ inline std::string fix_type_for_tag(int tag)
         std::string const seqstr = std::to_string(static_cast<std::uint32_t>(seq));
         if (auto r = w.append_raw(34, sv_to_bytes(seqstr)); !r) return std::unexpected(r.error());
     }
-    if (auto r = w.append_raw(49, sv_to_bytes(sender_comp_id)); !r) return std::unexpected(r.error());
+    if (auto r = w.append_raw(49, sv_to_bytes(sender_comp_id)); !r)
+        return std::unexpected(r.error());
     if (auto r = w.append_raw(52, sv_to_bytes(sending_time)); !r) return std::unexpected(r.error());
-    if (auto r = w.append_raw(56, sv_to_bytes(target_comp_id)); !r) return std::unexpected(r.error());
+    if (auto r = w.append_raw(56, sv_to_bytes(target_comp_id)); !r)
+        return std::unexpected(r.error());
     for (auto const& f : fields) {
         int const tag = std::stoi(f.path);
         if (auto r = w.append_raw(static_cast<std::uint16_t>(tag), sv_to_bytes(f.value)); !r) {

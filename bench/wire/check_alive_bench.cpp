@@ -29,9 +29,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <span>
-
 #include <fixpp/wire/view.hpp>
+#include <span>
 
 namespace {
 
@@ -67,8 +66,7 @@ static void BM_CheckAlive_200tag(benchmark::State& state) {
     // Report per-access time so the 2× verdict is easy to read.
     state.counters["ns_per_access"] =
         benchmark::Counter(static_cast<double>(state.iterations() * 200),
-                           benchmark::Counter::kIsRate |
-                               benchmark::Counter::kInvert);
+                           benchmark::Counter::kIsRate | benchmark::Counter::kInvert);
 }
 BENCHMARK(BM_CheckAlive_200tag);
 
@@ -89,8 +87,7 @@ static void BM_Bytes_200tag(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * 200);
     state.counters["ns_per_access"] =
         benchmark::Counter(static_cast<double>(state.iterations() * 200),
-                           benchmark::Counter::kIsRate |
-                               benchmark::Counter::kInvert);
+                           benchmark::Counter::kIsRate | benchmark::Counter::kInvert);
 }
 BENCHMARK(BM_Bytes_200tag);
 

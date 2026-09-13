@@ -76,7 +76,8 @@ TEST_F(InboundSequenceResetArms, NewSeqNoBelowExpectedRejects) {
 
     EXPECT_TRUE(any_reject_value_incorrect(capture))
         << "NewSeqNo < expected must emit Reject(35=3, 373=5 ValueIsIncorrect)";
-    EXPECT_EQ(next_inbound(s), 2U) << "a below-expected NewSeqNo must not move the counter backward";
+    EXPECT_EQ(next_inbound(s), 2U)
+        << "a below-expected NewSeqNo must not move the counter backward";
 }
 
 }  // namespace

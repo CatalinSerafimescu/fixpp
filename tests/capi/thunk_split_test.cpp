@@ -57,11 +57,10 @@
 #pragma warning(disable : 4611)
 #endif
 
+#include "capi_internal.hpp"          // fixpp_capi::detail::set_send_throw_hook (FIXPP_TEST_HOOKS)
+#include "capi_loopback_support.hpp"  // make_test_dict_handle (L-050-1 dict seam)
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
-
-#include "capi_internal.hpp"        // fixpp_capi::detail::set_send_throw_hook (FIXPP_TEST_HOOKS)
-#include "capi_loopback_support.hpp"  // make_test_dict_handle (L-050-1 dict seam)
 
 using namespace fixpp::capi_test;
 
@@ -100,9 +99,9 @@ struct ScopedAbortTrap {
     ScopedAbortTrap() { old_handler_ = std::signal(SIGABRT, abort_trap_handler); }
     ~ScopedAbortTrap() { std::signal(SIGABRT, old_handler_); }
 #else
-    struct sigaction old_sa {};
+    struct sigaction old_sa{};
     ScopedAbortTrap() {
-        struct sigaction sa {};
+        struct sigaction sa{};
         sa.sa_handler = abort_trap_handler;
         sigemptyset(&sa.sa_mask);
         sa.sa_flags = 0;  // no SA_RESTART — we longjmp out
@@ -124,7 +123,7 @@ TEST(CapiThunkSplit, AbortTrapMechanismCatchesSameThreadAbort) {
     ScopedAbortTrap trap;
     g_abort_caught = 0;
     if (FIXPP_ABORT_SETJMP(g_abort_jmp) == 0) {
-        std::abort();          // simulate the steady-state invariant-violation abort
+        std::abort();  // simulate the steady-state invariant-violation abort
         ADD_FAILURE() << "std::abort() returned — unreachable";
     }
     EXPECT_EQ(g_abort_caught, 1)
@@ -164,8 +163,7 @@ TEST(CapiThunkSplit, ConstructionTimeThunkRejectsWithoutAbort) {
         // Empty CompID is rejected eagerly by the setter (construction-time).
         fixpp_session_config_t* sc = nullptr;
         ASSERT_EQ(fixpp_session_config_create(&sc), FIXPP_ERR_OK);
-        EXPECT_EQ(fixpp_session_config_set_comp_ids(sc, "", ""),
-                  FIXPP_ERR_CAPI_CONFIG_INVALID);
+        EXPECT_EQ(fixpp_session_config_set_comp_ids(sc, "", ""), FIXPP_ERR_CAPI_CONFIG_INVALID);
         fixpp_session_config_destroy(sc);
 
         fixpp_engine_destroy(eng2);
@@ -196,9 +194,9 @@ fixpp_session_t* open_unstarted_session(fixpp_engine_t** out_engine) {
     EXPECT_EQ(fixpp_session_config_set_begin_string(sc, "FIX.4.2"), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_role(sc, FIXPP_ROLE_INITIATOR), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(sc, 30), FIXPP_ERR_OK);
-    EXPECT_EQ(fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP,
-                                                nullptr, nullptr),
-              FIXPP_ERR_OK);
+    EXPECT_EQ(
+        fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr, nullptr),
+        FIXPP_ERR_OK);
     fixpp_dict_t* d = make_test_dict_handle();
     EXPECT_EQ(fixpp_session_config_set_dictionary(sc, d), FIXPP_ERR_OK);
     destroy_test_dict_handle(d);

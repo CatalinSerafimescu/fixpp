@@ -41,7 +41,8 @@ fixpp::core::expected_t<std::span<std::byte>> build(std::span<std::byte> out,
 // (a) exact contiguous group in configuration order, delimiter 372 first.
 TEST(SupportedMsgTypes, EmitsContiguousGroupInOrder) {
     std::array<std::byte, 512> buf{};
-    std::vector<supported_msg_type> types{{msg_direction::send, "D"}, {msg_direction::receive, "8"}};
+    std::vector<supported_msg_type> types{{msg_direction::send, "D"},
+                                          {msg_direction::receive, "8"}};
     auto r = build(std::span<std::byte>{buf.data(), buf.size()}, types);
     ASSERT_TRUE(r.has_value());
     const std::string w = wire_of(*r);

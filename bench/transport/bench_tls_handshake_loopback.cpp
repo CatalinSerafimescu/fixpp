@@ -23,7 +23,8 @@
 //
 // Build:
 //   cmake --build build/linux-clang-debug --target bench_tls_handshake_loopback -j2
-//   FIXPP_TLS_FIXTURE_DIR=tests/tls/fixtures ./build/linux-clang-debug/bench/transport/bench_tls_handshake_loopback
+//   FIXPP_TLS_FIXTURE_DIR=tests/tls/fixtures
+//   ./build/linux-clang-debug/bench/transport/bench_tls_handshake_loopback
 
 #include <benchmark/benchmark.h>
 
@@ -32,51 +33,49 @@
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
-#include <memory>
-#include <stdexcept>
-#include <string>
-#include <thread>
-
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <thread>
 
 // Listener lives in src/ (not a public header).
 #include "transport/asio_listener.hpp"
 
 namespace {
 
+using fixpp::transport::asio_listener;
 using fixpp::transport::Endpoint;
 using fixpp::transport::TlsTransport;
-using fixpp::transport::asio_listener;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Build an SslCtxConfig from the fixture directory (mtls_ca, no expiry).
 // ─────────────────────────────────────────────────────────────────────────────
 fixpp::tls::SslCtxConfig make_ssl_cfg(const std::string& fixture_dir) {
     fixpp::tls::file_cert_source::Config cs_cfg;
-    cs_cfg.leaf_path        = fixture_dir + "/leaf_rsa2048.pem";
+    cs_cfg.leaf_path = fixture_dir + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = fixture_dir + "/leaf_rsa2048.key";
-    cs_cfg.ca_bundle_path   = fixture_dir + "/ca.pem";
+    cs_cfg.ca_bundle_path = fixture_dir + "/ca.pem";
 
-    auto cs = fixpp::tls::file_cert_source::make_file_cert_source(
-        cs_cfg, std::pmr::new_delete_resource());
+    auto cs = fixpp::tls::file_cert_source::make_file_cert_source(cs_cfg,
+                                                                  std::pmr::new_delete_resource());
     if (!cs.has_value()) {
         throw std::runtime_error("bench: failed to build file_cert_source");
     }
 
     fixpp::tls::SslCtxConfig cfg;
     cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
-    cfg.cs      = std::move(*cs);
-    cfg.clock   = nullptr;  // skip expiry — fixture certs may be stale
-    cfg.caps    = fixpp::tls::CertSourceCaps{};
+    cfg.cs = std::move(*cs);
+    cfg.clock = nullptr;  // skip expiry — fixture certs may be stale
+    cfg.caps = fixpp::tls::CertSourceCaps{};
     return cfg;
 }
 
@@ -121,7 +120,7 @@ public:
         // Build the server listener (OS-assigned port).
         asio_listener::Config listener_cfg;
         listener_cfg.bind_endpoint = Endpoint{"127.0.0.1", 0, /*backlog=*/32};
-        listener_cfg.ssl_cfg       = ssl_cfg_;
+        listener_cfg.ssl_cfg = ssl_cfg_;
         listener_ = std::make_unique<asio_listener>(server_ioc_.get_executor(), listener_cfg);
         server_port_ = listener_->bound_endpoint().port;
 
@@ -132,7 +131,9 @@ public:
     }
 
     void TearDown(const benchmark::State& /*state*/) override {
-        if (!ready_) { return; }
+        if (!ready_) {
+            return;
+        }
         // Cancel the listener and stop the server ioc.
         (void)listener_->cancel();
         server_ioc_.stop();
@@ -145,7 +146,9 @@ public:
     // Run one full TLS handshake (accept + connect + both-side handshakes).
     // Returns latency in microseconds. Returns -1 if fixtures unavailable.
     double run_one_handshake() {
-        if (!ready_) { return -1.0; }
+        if (!ready_) {
+            return -1.0;
+        }
 
         asio::io_context client_ioc;
         bool server_hs_ok = false;
@@ -158,9 +161,13 @@ public:
             [&, this]() -> asio::awaitable<void> {
                 try {
                     auto ar = co_await listener_->async_accept();
-                    if (!ar.has_value()) { co_return; }
+                    if (!ar.has_value()) {
+                        co_return;
+                    }
                     auto* tls = dynamic_cast<TlsTransport*>(ar->get());
-                    if (!tls) { co_return; }
+                    if (!tls) {
+                        co_return;
+                    }
                     auto hs = co_await tls->async_handshake(ssl_cfg_);
                     server_hs_ok = hs.has_value();
                 } catch (...) {
@@ -175,15 +182,21 @@ public:
             client_ioc.get_executor(),
             [&, this]() -> asio::awaitable<bool> {
                 auto t = client_factory_->make(client_ioc.get_executor(), ssl_cfg_, nullptr);
-                if (!t.has_value()) { co_return false; }
+                if (!t.has_value()) {
+                    co_return false;
+                }
                 auto* transport = t->get();
 
                 Endpoint ep{"127.0.0.1", server_port_, 0};
                 auto conn = co_await (*t)->async_connect(ep);
-                if (!conn.has_value()) { co_return false; }
+                if (!conn.has_value()) {
+                    co_return false;
+                }
 
                 auto* tls = dynamic_cast<TlsTransport*>(transport);
-                if (!tls) { co_return false; }
+                if (!tls) {
+                    co_return false;
+                }
                 auto hs = co_await tls->async_handshake(ssl_cfg_);
                 co_return hs.has_value();
             },
@@ -201,14 +214,14 @@ public:
     }
 
 private:
-    std::string                                           fixture_dir_;
-    fixpp::tls::SslCtxConfig                              ssl_cfg_;
-    std::shared_ptr<fixpp::transport::TransportFactory>   client_factory_;
-    asio::io_context                                      server_ioc_;
-    std::unique_ptr<asio_listener>                        listener_;
-    std::uint16_t                                         server_port_{0};
-    std::thread                                           server_thread_;
-    bool                                                  ready_{false};
+    std::string fixture_dir_;
+    fixpp::tls::SslCtxConfig ssl_cfg_;
+    std::shared_ptr<fixpp::transport::TransportFactory> client_factory_;
+    asio::io_context server_ioc_;
+    std::unique_ptr<asio_listener> listener_;
+    std::uint16_t server_port_{0};
+    std::thread server_thread_;
+    bool ready_{false};
 };
 
 BENCHMARK_DEFINE_F(TlsHandshakeFixture, Handshake1Rtt)(benchmark::State& state) {

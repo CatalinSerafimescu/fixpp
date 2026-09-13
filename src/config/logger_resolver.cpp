@@ -34,7 +34,8 @@
 // Unconditional include: syslog_sink.hpp self-#defines FIXPP_HAS_SYSLOG on a
 // POSIX platform that has <syslog.h> (there is no CMake define). It MUST be
 // included before any #ifdef FIXPP_HAS_SYSLOG test, or the macro is never seen
-// and the syslog branch is dead on every build (matches scalar_mappers.cpp's `syslog_sink.hpp` include).
+// and the syslog branch is dead on every build (matches scalar_mappers.cpp's `syslog_sink.hpp`
+// include).
 #include <fixpp/log/syslog_sink.hpp>
 
 #ifdef FIXPP_CONFIG_HAS_OTLP
@@ -311,7 +312,8 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                 .key_path = kp(sink_kp, "facility"),
                 .reason = reason_class::malformed_value,
                 .location = loc_node(*n),
-                .message = "syslog facility must be a string (e.g. \"user\", \"daemon\", \"local0\")",
+                .message =
+                    "syslog facility must be a string (e.g. \"user\", \"daemon\", \"local0\")",
             });
         }
 
@@ -418,10 +420,10 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                     header.resize(n_read);
                     // Strip leading whitespace before checking magic.
                     const auto first_nonws = header.find_first_not_of(" \t\r\n\xEF\xBB\xBF");
-                    const bool has_pem_magic =
-                        (first_nonws != std::string::npos) &&
-                        (header.size() - first_nonws >= kPemMagic.size()) &&
-                        (std::string_view{header}.substr(first_nonws, kPemMagic.size()) == kPemMagic);
+                    const bool has_pem_magic = (first_nonws != std::string::npos) &&
+                                               (header.size() - first_nonws >= kPemMagic.size()) &&
+                                               (std::string_view{header}.substr(
+                                                    first_nonws, kPemMagic.size()) == kPemMagic);
                     if (!has_pem_magic) {
                         acc.add(LoadDiagnostic{
                             .key_path = kp(sink_kp, "cert_source"),
@@ -767,8 +769,7 @@ void construct_loggers_if_clean(PendingLoggerSet&& pending, ConfigBundle& bundle
     // Engine slot
     if (pending.engine.has_value()) {
         auto& pl = *pending.engine;
-        bundle.engine.logger =
-            std::make_shared<fixpp::log::Logger>(pl.cfg, std::move(pl.sinks));
+        bundle.engine.logger = std::make_shared<fixpp::log::Logger>(pl.cfg, std::move(pl.sinks));
     }
 
     // Per-session slots (US3/T019 — wired in Phase 5)

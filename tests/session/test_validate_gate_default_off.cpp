@@ -251,7 +251,8 @@ TEST(ValidateGateDefaultOff, T016_ValidatorNotConstructed_SC005) {
     ASSERT_TRUE(fut.get().has_value()) << "open() must succeed";
 
     // Direct structural assertion: no validator constructed.
-    // [SC-005; FR-002; 041 T016; open()'s validate_inbound_messages guard; session.hpp FIXPP_TEST_HOOKS]
+    // [SC-005; FR-002; 041 T016; open()'s validate_inbound_messages guard; session.hpp
+    // FIXPP_TEST_HOOKS]
     EXPECT_FALSE(sess.has_validator_for_test())
         << "T016/SC-005: validator_ must be null when validate_inbound_messages==false "
            "(flag gates construction in open(); dict IS set in this config, "

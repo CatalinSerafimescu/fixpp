@@ -791,15 +791,13 @@ TEST(FixtCredentials, FQ2_ThrowingLogonValidator_SessionDisconnectsNoTerminate) 
     run_sync_creds(s, [&] { return acceptor.open(); });
 
     // Send a credentialed inbound FIXT Logon to trigger authorize_logon.
-    auto logon = make_fixt_logon_frame_with_creds(
-        "FIXT.1.1", 1, "TW", "ISLD", 30, "9",
-        /*username=*/"attacker", /*password=*/"boom");
+    auto logon = make_fixt_logon_frame_with_creds("FIXT.1.1", 1, "TW", "ISLD", 30, "9",
+                                                  /*username=*/"attacker", /*password=*/"boom");
 
     // Pre-fix: this call terminates the process via std::terminate.
     // Post-fix: it returns normally (the throw is absorbed inside authorize_logon).
     auto r = run_sync_creds(s, [&] {
-        return acceptor.on_inbound_frame(
-            std::span<const std::byte>{logon.data(), logon.size()});
+        return acceptor.on_inbound_frame(std::span<const std::byte>{logon.data(), logon.size()});
     });
 
     // The session must NOT be Active — a throwing validator must reject.
@@ -828,24 +826,21 @@ TEST(FixtCredentials, FQ3a_PasswordWithSOH_ReturnsInvalidConfig_NoWireEmit) {
 
     std::vector<std::byte> emitted;
     auto cfg = s.make_initiator_cfg(application_version::v50sp2);
-    cfg.password = std::string("p") + "\x01" + "113=x";  // SOH injection: would forge tag 113 on the wire
-    cfg.transport_send = [&](std::span<const std::byte> f) {
-        emitted.assign(f.begin(), f.end());
-    };
+    cfg.password =
+        std::string("p") + "\x01" + "113=x";  // SOH injection: would forge tag 113 on the wire
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
 
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
     auto result = run_sync_creds(s, [&] { return sess.open(); });
 
     // Must reject — credential contains a SOH delimiter.
-    ASSERT_FALSE(result.has_value())
-        << "open() must fail when password contains SOH (FQ-3a)";
+    ASSERT_FALSE(result.has_value()) << "open() must fail when password contains SOH (FQ-3a)";
     EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
         << "Error must be invalid_session_config for SOH-containing password; "
         << "got: " << static_cast<int>(result.error());
 
     // No wire frame emitted.
-    EXPECT_TRUE(emitted.empty())
-        << "No frame must be emitted when open() rejects (FQ-3a)";
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects (FQ-3a)";
 
     // Verify the injected tag does NOT appear on the wire (belt-and-suspenders:
     // if open() correctly rejected, emitted is empty and this trivially holds).
@@ -860,22 +855,19 @@ TEST(FixtCredentials, FQ3b_UsernameWithSOH_ReturnsInvalidConfig_NoWireEmit) {
 
     std::vector<std::byte> emitted;
     auto cfg = s.make_initiator_cfg(application_version::v50sp2);
-    cfg.username = std::string("u") + "\x01" + "554=x";  // SOH injection: would forge tag 554 on the wire
-    cfg.transport_send = [&](std::span<const std::byte> f) {
-        emitted.assign(f.begin(), f.end());
-    };
+    cfg.username =
+        std::string("u") + "\x01" + "554=x";  // SOH injection: would forge tag 554 on the wire
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
 
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
     auto result = run_sync_creds(s, [&] { return sess.open(); });
 
-    ASSERT_FALSE(result.has_value())
-        << "open() must fail when username contains SOH (FQ-3b)";
+    ASSERT_FALSE(result.has_value()) << "open() must fail when username contains SOH (FQ-3b)";
     EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
         << "Error must be invalid_session_config for SOH-containing username; "
         << "got: " << static_cast<int>(result.error());
 
-    EXPECT_TRUE(emitted.empty())
-        << "No frame must be emitted when open() rejects (FQ-3b)";
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects (FQ-3b)";
 }
 
 // FQ-3c: username containing '=' (0x3D) — injection via tag separator.
@@ -887,21 +879,17 @@ TEST(FixtCredentials, FQ3c_UsernameWithEquals_ReturnsInvalidConfig_NoWireEmit) {
     std::vector<std::byte> emitted;
     auto cfg = s.make_initiator_cfg(application_version::v50sp2);
     cfg.username = "u=x";  // '=' injection: closes the tag=value separator prematurely
-    cfg.transport_send = [&](std::span<const std::byte> f) {
-        emitted.assign(f.begin(), f.end());
-    };
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
 
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
     auto result = run_sync_creds(s, [&] { return sess.open(); });
 
-    ASSERT_FALSE(result.has_value())
-        << "open() must fail when username contains '=' (FQ-3c)";
+    ASSERT_FALSE(result.has_value()) << "open() must fail when username contains '=' (FQ-3c)";
     EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
         << "Error must be invalid_session_config for '='-containing username; "
         << "got: " << static_cast<int>(result.error());
 
-    EXPECT_TRUE(emitted.empty())
-        << "No frame must be emitted when open() rejects (FQ-3c)";
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects (FQ-3c)";
 }
 
 // FQ-3d: password containing '=' (0x3D) — injection via tag separator.
@@ -912,21 +900,17 @@ TEST(FixtCredentials, FQ3d_PasswordWithEquals_ReturnsInvalidConfig_NoWireEmit) {
     std::vector<std::byte> emitted;
     auto cfg = s.make_initiator_cfg(application_version::v50sp2);
     cfg.password = "p=x";  // '=' injection: closes the tag=value separator prematurely
-    cfg.transport_send = [&](std::span<const std::byte> f) {
-        emitted.assign(f.begin(), f.end());
-    };
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
 
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
     auto result = run_sync_creds(s, [&] { return sess.open(); });
 
-    ASSERT_FALSE(result.has_value())
-        << "open() must fail when password contains '=' (FQ-3d)";
+    ASSERT_FALSE(result.has_value()) << "open() must fail when password contains '=' (FQ-3d)";
     EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
         << "Error must be invalid_session_config for '='-containing password; "
         << "got: " << static_cast<int>(result.error());
 
-    EXPECT_TRUE(emitted.empty())
-        << "No frame must be emitted when open() rejects (FQ-3d)";
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects (FQ-3d)";
 }
 
 // FQ-3e: password containing a sub-0x20 control byte other than SOH (\x01).
@@ -939,9 +923,7 @@ TEST(FixtCredentials, FQ3e_PasswordWithControlByte_ReturnsInvalidConfig_NoWireEm
     std::vector<std::byte> emitted;
     auto cfg = s.make_initiator_cfg(application_version::v50sp2);
     cfg.password = std::string("p") + "\x1f" + "x";  // \x1f = 0x1F, below 0x20, not SOH
-    cfg.transport_send = [&](std::span<const std::byte> f) {
-        emitted.assign(f.begin(), f.end());
-    };
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
 
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
     auto result = run_sync_creds(s, [&] { return sess.open(); });
@@ -952,8 +934,7 @@ TEST(FixtCredentials, FQ3e_PasswordWithControlByte_ReturnsInvalidConfig_NoWireEm
         << "Error must be invalid_session_config for control-byte-containing password; "
         << "got: " << static_cast<int>(result.error());
 
-    EXPECT_TRUE(emitted.empty())
-        << "No frame must be emitted when open() rejects (FQ-3e)";
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects (FQ-3e)";
 }
 
 }  // namespace fixpp_fixt_creds

@@ -8,7 +8,8 @@
 //
 // Defines PendingLogger and PendingLoggerSet — the loader-local vessels that
 // park resolved logger specs between the resolve, preflight, and construct
-// steps (data-model E-3/E-5, research D-7, contracts/observability_config.hpp's resolver contracts block).
+// steps (data-model E-3/E-5, research D-7, contracts/observability_config.hpp's resolver contracts
+// block).
 //
 // Allocator scope (research D-7 / analyze C1):
 //   N-1 (arena-bound): LoggerConfig cfg + pmr::vector<unique_ptr<Sink>> sinks

@@ -5,10 +5,9 @@
 // engine header (contracts/include-interface.md §1 row 4).
 //
 // ⚠️ THIS FILE IS AN ORDINARY BUILD TARGET (an OBJECT library) AND MUST COMPILE.
-// Building it IS the assertion: run_consumer_witness.cmake's `if(NOT _build_rc EQUAL 0)` gate raises
-// FATAL_ERROR on ANY non-zero build exit, which is exactly the gate this probe
-// needs, and the driver names the target in _required_targets so deleting it
-// fails the build too.
+// Building it IS the assertion: run_consumer_witness.cmake's `if(NOT _build_rc EQUAL 0)` gate
+// raises FATAL_ERROR on ANY non-zero build exit, which is exactly the gate this probe needs, and
+// the driver names the target in _required_targets so deleting it fails the build too.
 //
 // It was the SOURCE argument of a configure-time try_compile() until Gate B r3,
 // when CI (windows-msvc-debug) proved that form cannot resolve Conan's

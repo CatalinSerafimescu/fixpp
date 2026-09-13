@@ -54,27 +54,26 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <fixpp/session/engine.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <tuple>
 
-#include <fixpp/session/engine.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_fsm.hpp>
-
 #include "hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
 
 using namespace std::chrono_literals;
+using fixpp::interop::admin_profile_excluded_tags;
 using fixpp::interop::Counterparty;
+using fixpp::interop::diff_transcripts;
 using fixpp::interop::DiffResult;
 using fixpp::interop::DiffStatus;
-using fixpp::interop::Role;
-using fixpp::interop::admin_profile_excluded_tags;
-using fixpp::interop::diff_transcripts;
 using fixpp::interop::parse_golden;
+using fixpp::interop::Role;
 using fixpp::session::fsm_state;
 
 namespace {
@@ -115,8 +114,8 @@ inline void expect_idle_cadence_or_skip(const std::string& gpath) {
     const std::string capture_path = gpath.substr(0, gpath.size() - 4) + "-capture.fix";
     std::ifstream cfile{capture_path};
     if (!cfile) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: "
-                     << capture_path << ")";
+        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: " << capture_path
+                     << ")";
     }
     std::stringstream css;
     css << cfile.rdbuf();
@@ -128,7 +127,10 @@ inline void expect_idle_cadence_or_skip(const std::string& gpath) {
     const auto frames = fixpp::interop::parse_golden(capture_text);
     const auto is_heartbeat = [](const auto& f) {
         const std::string_view w{reinterpret_cast<const char*>(f.bytes.data()), f.bytes.size()};
-        return w.find("\x01" "35=0" "\x01") != std::string_view::npos;
+        return w.find(
+                   "\x01"
+                   "35=0"
+                   "\x01") != std::string_view::npos;
     };
     int out_hb = 0, in_hb = 0;
     for (const auto& f : frames) {
@@ -160,8 +162,7 @@ inline void expect_idle_cadence_or_skip(const std::string& gpath) {
 // diff_transcripts must bite (frame-count mismatch is a mismatch).
 // NOTE: frame counts differ (3 vs 2) so this test cannot use expect_gate_bite_on_tag
 // (which asserts equal sizes); kept inline.
-TEST(IdleCadenceGateBite, DroppedHeartbeatCausesGateBite)
-{
+TEST(IdleCadenceGateBite, DroppedHeartbeatCausesGateBite) {
     // Three Heartbeat(35=0) frames in the expected direction — fixpp-to-peer (>).
     // MsgSeqNum(34) differs per-beat (3,4,5) — a COMPARED tag under {52,10}.
     const char* expected_text =
@@ -180,7 +181,7 @@ TEST(IdleCadenceGateBite, DroppedHeartbeatCausesGateBite)
         "\\x0134=4\\x0152=20260603-10:00:02.000\\x0110=002\\x01\n";
 
     auto expected_frames = parse_golden(expected_text);
-    auto actual_frames   = parse_golden(actual_text);
+    auto actual_frames = parse_golden(actual_text);
 
     ASSERT_EQ(expected_frames.size(), 3u);
     ASSERT_EQ(actual_frames.size(), 2u);
@@ -189,12 +190,13 @@ TEST(IdleCadenceGateBite, DroppedHeartbeatCausesGateBite)
     //   - tag 52 (SendingTime) is excluded → equal regardless of value.
     //   - tag 10 (CheckSum)    is excluded → equal regardless of value.
     //   - frame-count mismatch (3 vs 2) is detected → MISMATCH.
-    const DiffResult result = diff_transcripts(expected_frames, actual_frames,
-                                               admin_profile_excluded_tags());
+    const DiffResult result =
+        diff_transcripts(expected_frames, actual_frames, admin_profile_excluded_tags());
 
     EXPECT_FALSE(static_cast<bool>(result))
         << "gate-bite FAILED: diff_transcripts() reported match when a Heartbeat "
-           "was dropped from the actual transcript; detail=" << result.detail;
+           "was dropped from the actual transcript; detail="
+        << result.detail;
     EXPECT_EQ(result.status, DiffStatus::mismatch)
         << "Expected DiffStatus::mismatch when actual has fewer frames than expected";
 }
@@ -202,8 +204,7 @@ TEST(IdleCadenceGateBite, DroppedHeartbeatCausesGateBite)
 // (B) Inject a TestRequest(35=1) into the actual transcript.
 // The expected golden has only Heartbeat(35=0); the actual spuriously contains a
 // TestRequest.  diff_transcripts must bite on the mismatched MsgType(35).
-TEST(IdleCadenceGateBite, InjectedTestRequestCausesGateBite)
-{
+TEST(IdleCadenceGateBite, InjectedTestRequestCausesGateBite) {
     // Expected: one Heartbeat(35=0).
     const char* expected_text =
         "> 8=FIX.4.4\\x0135=0\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
@@ -238,28 +239,28 @@ TEST(IdleCadenceGateBite, InjectedTestRequestCausesGateBite)
 // is configured in the QFJ parent harness per T017 [PARENT]). For QFcpp the
 // induction mechanism is not yet configured; those cells skip:not-applicable.
 
-class HappyIdleHeartbeatCadence
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class HappyIdleHeartbeatCadence : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {
+};
 
 TEST_P(HappyIdleHeartbeatCadence, BothDirectionsAtNegotiatedCadence) {
     const auto [counterparty, role] = GetParam();
     namespace hp = fixpp::interop::hp;
 
     // ── AdminScenarioDescriptor validation (rule 7 + rule 8) ────────────────
-    const std::string cp_part   = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
+    const std::string cp_part = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
-    const std::string cell_id   = "HP-" + cp_part + "-" + role_part + "-fix44-idle-cadence";
+    const std::string cell_id = "HP-" + cp_part + "-" + role_part + "-fix44-idle-cadence";
 
     fixpp::interop::AdminScenarioDescriptor desc;
-    desc.cell_id        = cell_id;
+    desc.cell_id = cell_id;
     desc.scenario_group = fixpp::interop::AdminScenarioGroup::idle_cadence;
-    desc.role           = role;
-    desc.counterparty   = counterparty;
-    desc.spec_ref       = "[FIX-SL §4.5.1]";
-    desc.golden_ref     = "happy/golden/" + cell_id + ".fix";
-    desc.induction      = fixpp::interop::AdminInduction::idle_observation;
+    desc.role = role;
+    desc.counterparty = counterparty;
+    desc.spec_ref = "[FIX-SL §4.5.1]";
+    desc.golden_ref = "happy/golden/" + cell_id + ".fix";
+    desc.induction = fixpp::interop::AdminInduction::idle_observation;
     desc.self_deadline_ms = std::chrono::milliseconds{10000};  // FR-010: 10 s
-    desc.round_trips    = {
+    desc.round_trips = {
         {"US2-1", "[FIX-SL §4.5.1]"},  // ≥3 Heartbeats per direction, no TestRequest
         {"US2-2", "[FIX-SL §4.5.1]"},  // inter-HB interval matches 108=1s, session Active
     };
@@ -296,8 +297,8 @@ TEST_P(HappyIdleHeartbeatCadence, BothDirectionsAtNegotiatedCadence) {
     // per direction.  The liveness loop fires a TestRequest only after 1 full
     // heartbeat_interval of inbound silence; with QFJ emitting a beat ~every 1s the
     // inbound stream is never 1s-silent → no TestRequest triggered (FR-002 sizing).
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     cfg.heartbeat_interval = std::chrono::seconds{1};  // FR-002: 108=1s cadence
     const auto id = fixpp::session::SessionId::from_config(cfg);
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
@@ -309,8 +310,7 @@ TEST_P(HappyIdleHeartbeatCadence, BothDirectionsAtNegotiatedCadence) {
     // Drive to Active within 5 s.
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active (logon) against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active (logon) against " << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
     auto s = fx.engine().lookup(id);

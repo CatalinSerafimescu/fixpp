@@ -65,8 +65,9 @@ void assert_unchanged(std::array<std::byte, N> const& buf, char const* label) {
     SCOPED_TRACE(label);
     for (std::size_t i = 0; i < buf.size(); ++i) {
         if (buf[i] != kSentinel) {
-            ADD_FAILURE() << "buf[" << i << "] modified on a fail-closed path (expected 0xAB, got 0x"
-                          << std::hex << static_cast<unsigned>(buf[i]) << ")";
+            ADD_FAILURE() << "buf[" << i
+                          << "] modified on a fail-closed path (expected 0xAB, got 0x" << std::hex
+                          << static_cast<unsigned>(buf[i]) << ")";
             return;
         }
     }
@@ -102,8 +103,9 @@ TEST(BuilderFailClosed067, UndersizedOut_Untouched) {
 TEST(BuilderFailClosed067, SohInValue_RejectedBeforeAnyByteReachesOut) {
     std::pmr::monotonic_buffer_resource arena{4096};
     auto args = make_valid_new_order_single_args(&arena);
-    args.cl_ord_id = "ORD\x01"
-                     "49=EVIL";  // session-tag injection attempt
+    args.cl_ord_id =
+        "ORD\x01"
+        "49=EVIL";  // session-tag injection attempt
 
     std::array<std::byte, 1024> out{};
     out.fill(kSentinel);
@@ -124,9 +126,13 @@ TEST(BuilderFailClosed067, BoolLocateReqd_SerializesYN_NeverOneZero) {
         auto r = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
         ASSERT_TRUE(r.has_value()) << "build_NewOrderSingle failed";
         std::string body = bytes_to_string(*r);
-        EXPECT_NE(body.find("\x01" "114=Y\x01"), std::string::npos)
+        EXPECT_NE(body.find("\x01"
+                            "114=Y\x01"),
+                  std::string::npos)
             << "LocateReqd(114)=true must serialize as 114=Y";
-        EXPECT_EQ(body.find("\x01" "114=1\x01"), std::string::npos)
+        EXPECT_EQ(body.find("\x01"
+                            "114=1\x01"),
+                  std::string::npos)
             << "LocateReqd(114) must NEVER serialize as the int64 path (114=1)";
     }
     {
@@ -136,9 +142,13 @@ TEST(BuilderFailClosed067, BoolLocateReqd_SerializesYN_NeverOneZero) {
         auto r = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
         ASSERT_TRUE(r.has_value()) << "build_NewOrderSingle failed";
         std::string body = bytes_to_string(*r);
-        EXPECT_NE(body.find("\x01" "114=N\x01"), std::string::npos)
+        EXPECT_NE(body.find("\x01"
+                            "114=N\x01"),
+                  std::string::npos)
             << "LocateReqd(114)=false must serialize as 114=N";
-        EXPECT_EQ(body.find("\x01" "114=0\x01"), std::string::npos)
+        EXPECT_EQ(body.find("\x01"
+                            "114=0\x01"),
+                  std::string::npos)
             << "LocateReqd(114) must NEVER serialize as the int64 path (114=0)";
     }
 }
@@ -157,12 +167,20 @@ TEST(BuilderFailClosed067, LengthDataCoupling_AutoDerivedLengthBothEmitted) {
 
     // EncodedTextLen(354) auto-derived == 11, EncodedText(355) verbatim,
     // Length BEFORE Data (354 < 355, tag-ascending top-level regime).
-    EXPECT_NE(body.find("\x01" "354=11\x01"), std::string::npos)
+    EXPECT_NE(body.find("\x01"
+                        "354=11\x01"),
+              std::string::npos)
         << "EncodedTextLen(354) must auto-derive to the byte length (11)";
-    EXPECT_NE(body.find("\x01" "355=hello world\x01"), std::string::npos)
+    EXPECT_NE(body.find("\x01"
+                        "355=hello world\x01"),
+              std::string::npos)
         << "EncodedText(355) must carry the value verbatim";
-    auto const pos354 = body.find("\x01" "354=");
-    auto const pos355 = body.find("\x01" "355=");
+    auto const pos354 = body.find(
+        "\x01"
+        "354=");
+    auto const pos355 = body.find(
+        "\x01"
+        "355=");
     ASSERT_NE(pos354, std::string::npos);
     ASSERT_NE(pos355, std::string::npos);
     EXPECT_LT(pos354, pos355) << "Length(354) must be emitted BEFORE Data(355), coupled";
@@ -186,8 +204,7 @@ TEST(BuilderFailClosed067, WvsXPerOccurrenceDelimiterDiscrimination) {
         fixpp::v44::MarketDataSnapshotFullRefreshArgs args{};
         args.symbol = seed.symbol;
         args.md_req_id = seed.md_req_id;
-        args.md_entries =
-            std::span<const fixpp::v44::groups::G_268_1Args>{entries};
+        args.md_entries = std::span<const fixpp::v44::groups::G_268_1Args>{entries};
 
         std::array<std::byte, 2048> out{};
         auto r = fixpp::v44::build_MarketDataSnapshotFullRefresh(std::span<std::byte>{out}, args);
@@ -195,8 +212,13 @@ TEST(BuilderFailClosed067, WvsXPerOccurrenceDelimiterDiscrimination) {
         std::string body = bytes_to_string(*r);
         // W's entry opens on MDEntryType(269); MDUpdateAction(279) is not a
         // W group member at all.
-        EXPECT_NE(body.find("\x01" "269="), std::string::npos) << "W entry must contain MDEntryType(269)";
-        EXPECT_EQ(body.find("\x01" "279="), std::string::npos)
+        EXPECT_NE(body.find("\x01"
+                            "269="),
+                  std::string::npos)
+            << "W entry must contain MDEntryType(269)";
+        EXPECT_EQ(body.find("\x01"
+                            "279="),
+                  std::string::npos)
             << "W's NoMDEntries has no MDUpdateAction(279) member at all";
     }
 
@@ -214,15 +236,18 @@ TEST(BuilderFailClosed067, WvsXPerOccurrenceDelimiterDiscrimination) {
 
         fixpp::v44::MarketDataIncrementalRefreshArgs args{};
         args.md_req_id = seed.md_req_id;
-        args.md_entries =
-            std::span<const fixpp::v44::groups::G_268_2Args>{entries};
+        args.md_entries = std::span<const fixpp::v44::groups::G_268_2Args>{entries};
 
         std::array<std::byte, 2048> out{};
         auto r = fixpp::v44::build_MarketDataIncrementalRefresh(std::span<std::byte>{out}, args);
         ASSERT_TRUE(r.has_value()) << "build_MarketDataIncrementalRefresh failed";
         std::string body = bytes_to_string(*r);
-        auto const pos279 = body.find("\x01" "279=");
-        auto const pos269 = body.find("\x01" "269=");
+        auto const pos279 = body.find(
+            "\x01"
+            "279=");
+        auto const pos269 = body.find(
+            "\x01"
+            "269=");
         ASSERT_NE(pos279, std::string::npos) << "X entry must contain MDUpdateAction(279)";
         ASSERT_NE(pos269, std::string::npos) << "X entry must contain MDEntryType(269)";
         EXPECT_LT(pos279, pos269)
@@ -275,7 +300,9 @@ TEST(BuilderFailClosed067, OptionalGroupNullopt_OmitsNoGroupTagEntirely) {
     auto r = fixpp::v44::build_NewOrderList(std::span<std::byte>{out}, args);
     ASSERT_TRUE(r.has_value()) << "build_NewOrderList failed";
     std::string body = bytes_to_string(*r);
-    EXPECT_EQ(body.find("\x01" "453="), std::string::npos)
+    EXPECT_EQ(body.find("\x01"
+                        "453="),
+              std::string::npos)
         << "an OPTIONAL group left nullopt must omit its No<G> tag (453=NoPartyIDs) from the "
            "wire entirely";
 }

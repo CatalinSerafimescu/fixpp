@@ -431,18 +431,17 @@ TEST(FixTimeNanos, Format_Is27CharsUnderUBSan) {
     // AND UBSan fires on min_size[3] OOB read.
     // GREEN (post-impl T007): length == 27.
     ASSERT_TRUE(r.has_value()) << "utc_time_to_fix_string must succeed with a 32-byte buffer";
-    EXPECT_EQ(r->size(), 27u)
-        << "nanos format must be 27 chars (YYYYMMDD-HH:MM:SS.sssssssss), got " << r->size()
-        << "; [data-model E2 / contract C2 / Gate A RC#5]";
+    EXPECT_EQ(r->size(), 27u) << "nanos format must be 27 chars (YYYYMMDD-HH:MM:SS.sssssssss), got "
+                              << r->size() << "; [data-model E2 / contract C2 / Gate A RC#5]";
 
     // The 9 fraction digits (positions 18..26) must equal the ns remainder (123456789).
     // (Only meaningful once length == 27; wrapped in ASSERT so we don't OOB-read on failure.)
     ASSERT_EQ(r->size(), 27u);
     const std::string formatted(r->data(), r->size());
-    const std::string_view frac = std::string_view(formatted).substr(18, 9);  // after "YYYYMMDD-HH:MM:SS."
-    EXPECT_EQ(frac, "123456789")
-        << "nanos fraction digits must equal ns_rem (123456789); got " << frac
-        << "; [data-model E2 / contract C2]";
+    const std::string_view frac =
+        std::string_view(formatted).substr(18, 9);  // after "YYYYMMDD-HH:MM:SS."
+    EXPECT_EQ(frac, "123456789") << "nanos fraction digits must equal ns_rem (123456789); got "
+                                 << frac << "; [data-model E2 / contract C2]";
 }
 
 // T004(2): parse(format(t, nanos)) == time_point_cast<nanoseconds>(t).
@@ -455,14 +454,14 @@ TEST(FixTimeNanos, RoundTrip_Lossless) {
     auto r = roundtrip(tp, fix_time_precision::nanos);
     EXPECT_TRUE(r.format_ok) << "utc_time_to_fix_string failed for nanos";
     // RED pre-impl: length 17, parse returns millis-truncated value != nanos cast.
-    EXPECT_TRUE(r.parse_ok)  << "fix_string_to_utc_time failed for nanos-formatted string: "
-                              << r.formatted;
-    // The oracle: parsed == time_point_cast to the native duration of utc_time_point (I-NST-2 / New-3).
+    EXPECT_TRUE(r.parse_ok) << "fix_string_to_utc_time failed for nanos-formatted string: "
+                            << r.formatted;
+    // The oracle: parsed == time_point_cast to the native duration of utc_time_point (I-NST-2 /
+    // New-3).
     const auto expected = time_point_cast<utc_time_point::duration>(tp);
     EXPECT_EQ(r.parsed_tp, expected)
         << "nanos round-trip not lossless; parsed=" << r.parsed_tp.time_since_epoch().count()
-        << " expected=" << expected.time_since_epoch().count()
-        << "; [I-NST-2 / FR-005 / New-3]";
+        << " expected=" << expected.time_since_epoch().count() << "; [I-NST-2 / FR-005 / New-3]";
 }
 
 // T004(3): millis and micros format is byte-identical to pre-feature output.
@@ -470,7 +469,8 @@ TEST(FixTimeNanos, RoundTrip_Lossless) {
 // [FR-003 / SC-002 / I-NST-1]
 TEST(FixTimeNanos, MillisMicros_ByteIdentical_NoRegression) {
     using namespace std::chrono;
-    const auto tp = time_point_cast<utc_time_point::duration>(utc_time_point{seconds{1704067200}} + nanoseconds{123456789});
+    const auto tp = time_point_cast<utc_time_point::duration>(utc_time_point{seconds{1704067200}} +
+                                                              nanoseconds{123456789});
 
     std::array<char, 32> buf_ms{};
     std::array<char, 32> buf_us{};
@@ -478,7 +478,7 @@ TEST(FixTimeNanos, MillisMicros_ByteIdentical_NoRegression) {
 
     auto r_ms = utc_time_to_fix_string(tp, fix_time_precision::millis, std::span<char>{buf_ms});
     auto r_us = utc_time_to_fix_string(tp, fix_time_precision::micros, std::span<char>{buf_us});
-    auto r_s  = utc_time_to_fix_string(tp, fix_time_precision::seconds, std::span<char>{buf_s});
+    auto r_s = utc_time_to_fix_string(tp, fix_time_precision::seconds, std::span<char>{buf_s});
 
     ASSERT_TRUE(r_ms.has_value());
     ASSERT_TRUE(r_us.has_value());
@@ -514,7 +514,8 @@ TEST(FixTimeParse, LenientWidths_1to9) {
     // Base time point: 20240101-00:00:00 (2024-01-01T00:00:00Z)
     // epoch seconds: 1704067200
     const std::int64_t base_sec = 1704067200LL;
-    const auto base_tp = utc_time_point{std::chrono::duration_cast<utc_time_point::duration>(nanoseconds{base_sec * 1'000'000'000LL})};
+    const auto base_tp = utc_time_point{std::chrono::duration_cast<utc_time_point::duration>(
+        nanoseconds{base_sec * 1'000'000'000LL})};
 
     // Bare 17-char: no dot, no fraction — parses to base_tp (ns scale = seconds).
     {
@@ -529,30 +530,30 @@ TEST(FixTimeParse, LenientWidths_1to9) {
     // Expected ns offset = frac_val * 10^(9-N).
     // Scale factors for N=1..9:
     constexpr std::int64_t scale[10] = {
-        0,           // unused (N=0)
-        100'000'000, // N=1: *1e8
-        10'000'000,  // N=2: *1e7
-        1'000'000,   // N=3: *1e6
-        100'000,     // N=4: *1e5
-        10'000,      // N=5: *1e4
-        1'000,       // N=6: *1e3
-        100,         // N=7: *1e2
-        10,          // N=8: *1e1
-        1,           // N=9: *1e0
+        0,            // unused (N=0)
+        100'000'000,  // N=1: *1e8
+        10'000'000,   // N=2: *1e7
+        1'000'000,    // N=3: *1e6
+        100'000,      // N=4: *1e5
+        10'000,       // N=5: *1e4
+        1'000,        // N=6: *1e3
+        100,          // N=7: *1e2
+        10,           // N=8: *1e1
+        1,            // N=9: *1e0
     };
 
     // Test each width with a known fraction.
     // frac string: "1", "12", "123", "1234", "12345", "123456", "1234567", "12345678", "123456789"
     const char* fracs[] = {
-        "1",         // N=1 → +100_000_000 ns
-        "12",        // N=2 → +120_000_000 ns
-        "123",       // N=3 → +123_000_000 ns
-        "1234",      // N=4 → +123_400_000 ns
-        "12345",     // N=5 → +123_450_000 ns
-        "123456",    // N=6 → +123_456_000 ns
-        "1234567",   // N=7 → +123_456_700 ns
-        "12345678",  // N=8 → +123_456_780 ns
-        "123456789", // N=9 → +123_456_789 ns
+        "1",          // N=1 → +100_000_000 ns
+        "12",         // N=2 → +120_000_000 ns
+        "123",        // N=3 → +123_000_000 ns
+        "1234",       // N=4 → +123_400_000 ns
+        "12345",      // N=5 → +123_450_000 ns
+        "123456",     // N=6 → +123_456_000 ns
+        "1234567",    // N=7 → +123_456_700 ns
+        "12345678",   // N=8 → +123_456_780 ns
+        "123456789",  // N=9 → +123_456_789 ns
     };
 
     for (int n = 1; n <= 9; ++n) {
@@ -560,17 +561,17 @@ TEST(FixTimeParse, LenientWidths_1to9) {
         SCOPED_TRACE("width=" + std::to_string(n) + " ts=" + ts);
 
         auto r = fix_string_to_utc_time(std::span<const char>(ts.data(), ts.size()));
-        ASSERT_TRUE(r.has_value())
-            << "width " << n << " must parse; [FR-004/SC-003]";
+        ASSERT_TRUE(r.has_value()) << "width " << n << " must parse; [FR-004/SC-003]";
 
         // Expected: base + (frac_val * scale[n]) nanoseconds.
         // frac_val is the integer value of fracs[n-1].
         std::int64_t frac_val = 0;
-        for (int i = 0; i < n; ++i) frac_val = frac_val * 10 + (fracs[n-1][i] - '0');
+        for (int i = 0; i < n; ++i) frac_val = frac_val * 10 + (fracs[n - 1][i] - '0');
         const auto expected_ns = nanoseconds{base_sec * 1'000'000'000LL + frac_val * scale[n]};
         // utc_time_point::duration is nanoseconds (pinned for cross-stdlib portability);
         // no duration_cast needed — ns is the native precision of utc_time_point.
-        const auto expected_tp = utc_time_point{duration_cast<utc_time_point::duration>(expected_ns)};
+        const auto expected_tp =
+            utc_time_point{duration_cast<utc_time_point::duration>(expected_ns)};
         EXPECT_EQ(*r, expected_tp)
             << "width " << n << " ns offset mismatch; [data-model E3 / I-NST-3]";
     }
@@ -580,7 +581,8 @@ TEST(FixTimeParse, LenientWidths_1to9) {
         const std::string_view ts4 = "20240101-00:00:00.1234";
         auto r4 = fix_string_to_utc_time(std::span<const char>(ts4.data(), ts4.size()));
         ASSERT_TRUE(r4.has_value()) << ".1234 (4-digit) must parse";
-        const auto expected4 = utc_time_point{std::chrono::duration_cast<utc_time_point::duration>(nanoseconds{base_sec * 1'000'000'000LL + 123'400'000LL})};
+        const auto expected4 = utc_time_point{std::chrono::duration_cast<utc_time_point::duration>(
+            nanoseconds{base_sec * 1'000'000'000LL + 123'400'000LL})};
         EXPECT_EQ(*r4, expected4)
             << "oracle: parse('.1234') must yield +123_400_000 ns; [data-model E3 / contract C3]";
     }
@@ -602,8 +604,8 @@ TEST(FixTimeParse, RejectMalformed) {
     // Reject via the "at least 1 fraction digit" rule (length 18 = 17+dot+0 digits).
     {
         const std::string_view empty_frac = "20240101-00:00:00.";
-        auto r = fix_string_to_utc_time(
-            std::span<const char>(empty_frac.data(), empty_frac.size()));
+        auto r =
+            fix_string_to_utc_time(std::span<const char>(empty_frac.data(), empty_frac.size()));
         EXPECT_FALSE(r.has_value())
             << "empty fraction '…SS.' (length 18) must reject; [contract C3 / FR-008]";
     }
@@ -612,8 +614,7 @@ TEST(FixTimeParse, RejectMalformed) {
     // The lenient parser must scan each fraction char; a non-ASCII-digit char rejects.
     {
         const std::string_view nondigit = "20240101-00:00:00.12a";
-        auto r = fix_string_to_utc_time(
-            std::span<const char>(nondigit.data(), nondigit.size()));
+        auto r = fix_string_to_utc_time(std::span<const char>(nondigit.data(), nondigit.size()));
         EXPECT_FALSE(r.has_value())
             << "non-digit fraction '…SS.12a' must reject; [contract C3 / FR-008]";
     }
@@ -625,8 +626,8 @@ TEST(FixTimeParse, RejectMalformed) {
     // if it were accepted (arithmetic-based gate), it would fit; the width gate must catch it.
     {
         const std::string_view ten_digits = "20240101-00:00:00.1234567890";
-        auto r = fix_string_to_utc_time(
-            std::span<const char>(ten_digits.data(), ten_digits.size()));
+        auto r =
+            fix_string_to_utc_time(std::span<const char>(ten_digits.data(), ten_digits.size()));
         EXPECT_FALSE(r.has_value())
             << "10-digit fraction (length 28, width > 9) must reject via WIDTH GATE; "
                "[Gate A RC#4 / contract C3 / FR-008]";
@@ -634,16 +635,14 @@ TEST(FixTimeParse, RejectMalformed) {
         // Also test 9_999_999_999 — maximum safe-int64 10-digit value.
         // Rejected by width gate (len=28>27), NOT by arithmetic.
         const std::string_view max10 = "20240101-00:00:00.9999999999";
-        auto r2 = fix_string_to_utc_time(
-            std::span<const char>(max10.data(), max10.size()));
+        auto r2 = fix_string_to_utc_time(std::span<const char>(max10.data(), max10.size()));
         EXPECT_FALSE(r2.has_value())
             << "max 10-digit value 9_999_999_999 (length 28) must reject via WIDTH GATE; "
                "[Gate A RC#4 / contract C3]";
 
         // 11 digits (length 29) also rejected by width gate.
         const std::string_view eleven = "20240101-00:00:00.12345678901";
-        auto r3 = fix_string_to_utc_time(
-            std::span<const char>(eleven.data(), eleven.size()));
+        auto r3 = fix_string_to_utc_time(std::span<const char>(eleven.data(), eleven.size()));
         EXPECT_FALSE(r3.has_value())
             << "11-digit fraction (length 29) must reject via WIDTH GATE; [contract C3]";
     }
@@ -665,8 +664,7 @@ TEST(FixTimeParse, Nanos27_RoundTrip) {
     ASSERT_EQ(ts27.size(), 27u) << "sanity: ts27 must be 27 chars";
 
     auto r = fix_string_to_utc_time(std::span<const char>(ts27.data(), ts27.size()));
-    ASSERT_TRUE(r.has_value())
-        << "27-char nanos form must parse; [data-model E3 / contract C3]";
+    ASSERT_TRUE(r.has_value()) << "27-char nanos form must parse; [data-model E3 / contract C3]";
 
     // Expected: 2024-01-01T00:00:00.123456789Z
     const std::int64_t base_sec = 1704067200LL;
@@ -677,10 +675,11 @@ TEST(FixTimeParse, Nanos27_RoundTrip) {
         << "27-char nanos parse must yield +123_456_789 ns; [I-NST-2 / New-3 / contract C3]";
 
     // Also verify via the roundtrip() helper (tests the format→parse oracle).
-    const auto tp = utc_time_point{std::chrono::duration_cast<utc_time_point::duration>(nanoseconds{base_sec * 1'000'000'000LL + 123'456'789LL})};
+    const auto tp = utc_time_point{std::chrono::duration_cast<utc_time_point::duration>(
+        nanoseconds{base_sec * 1'000'000'000LL + 123'456'789LL})};
     auto rt = roundtrip(tp, fix_time_precision::nanos);
     EXPECT_TRUE(rt.format_ok) << "format for nanos must succeed";
-    EXPECT_TRUE(rt.parse_ok)  << "parse of nanos-formatted string must succeed";
+    EXPECT_TRUE(rt.parse_ok) << "parse of nanos-formatted string must succeed";
     EXPECT_EQ(rt.parsed_tp, time_point_cast<utc_time_point::duration>(tp))
         << "nanos roundtrip not lossless; [I-NST-2 / FR-005]";
 }

@@ -39,8 +39,8 @@
 #include <cstddef>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/v44/messages/ExecutionReport.hpp>
-#include <fixpp/v44/messages/News.hpp>
 #include <fixpp/v44/messages/NewOrderSingle.hpp>
+#include <fixpp/v44/messages/News.hpp>
 #include <memory_resource>
 #include <span>
 

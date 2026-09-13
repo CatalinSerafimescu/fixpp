@@ -241,121 +241,121 @@ public:
     }
 
     // ---- Index random access ---------------------------------------------
-[[nodiscard]] OffsetTable const& offsets() const noexcept
-    [[clang::lifetimebound]] requires(Mode == access_mode::Index) { return table_; }
+    [[nodiscard]] OffsetTable const& offsets() const noexcept
+        [[clang::lifetimebound]] requires(Mode == access_mode::Index) { return table_; }
 
-template <std::uint16_t Tag>
-[[nodiscard]] core::expected_t<field_view> get() const noexcept
-    [[clang::lifetimebound]] requires(Mode == access_mode::Index) { return get(Tag); }
+    template <std::uint16_t Tag>
+    [[nodiscard]] core::expected_t<field_view> get() const noexcept
+        [[clang::lifetimebound]] requires(Mode == access_mode::Index) { return get(Tag); }
 
-[[nodiscard]] core::expected_t<field_view> get(std::uint16_t tag) const noexcept
-    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-        auto e = table_.find(tag);
-        if (!e) {
-            return core::expected_t<field_view>{std::unexpect, e.error()};
+    [[nodiscard]] core::expected_t<field_view> get(std::uint16_t tag) const noexcept
+        [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
+            auto e = table_.find(tag);
+            if (!e) {
+                return core::expected_t<field_view>{std::unexpect, e.error()};
+            }
+            return field_view_access::make(bytes().data() + e->offset, e->length, token());
         }
-        return field_view_access::make(bytes().data() + e->offset, e->length, token());
-    }
 
-// 004-authored 001 wire FLOAT-field accessor leg (D-17, FR-006 /
-// [2b §7.1]). The wire layer performs NO decoding: it hands the field's
-// raw bytes across the 2a trait-decode boundary to
-// fixpp::decimal_t::parse(span, mr). (C1) the trait call is fenced by
-// core::detail::trap_throw so a throwing custom FIXPP_DECIMAL_T trait
-// cannot escape the noexcept parse->fromApp window (FR-013, [arch §5.3]).
-[[nodiscard]] core::expected_t<fixpp::decimal_t> get_decimal(
-    std::uint16_t tag, std::pmr::memory_resource* mr) const noexcept
-    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-        auto fv = get(tag);
-        if (!fv) {
-            return core::expected_t<fixpp::decimal_t>{std::unexpect, fv.error()};
+    // 004-authored 001 wire FLOAT-field accessor leg (D-17, FR-006 /
+    // [2b §7.1]). The wire layer performs NO decoding: it hands the field's
+    // raw bytes across the 2a trait-decode boundary to
+    // fixpp::decimal_t::parse(span, mr). (C1) the trait call is fenced by
+    // core::detail::trap_throw so a throwing custom FIXPP_DECIMAL_T trait
+    // cannot escape the noexcept parse->fromApp window (FR-013, [arch §5.3]).
+    [[nodiscard]] core::expected_t<fixpp::decimal_t> get_decimal(
+        std::uint16_t tag, std::pmr::memory_resource* mr) const noexcept
+        [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
+            auto fv = get(tag);
+            if (!fv) {
+                return core::expected_t<fixpp::decimal_t>{std::unexpect, fv.error()};
+            }
+            auto span = fv->bytes();
+            // trap_throw wraps the (possibly throwing) trait; result is
+            // expected<expected<decimal_t>> — flatten it.
+            auto wrapped = core::detail::trap_throw(
+                [span, mr]() { return fixpp::decimal_t::parse(span, mr); });
+            if (!wrapped) {
+                return core::expected_t<fixpp::decimal_t>{std::unexpect, wrapped.error()};
+            }
+            return *wrapped;
         }
-        auto span = fv->bytes();
-        // trap_throw wraps the (possibly throwing) trait; result is
-        // expected<expected<decimal_t>> — flatten it.
-        auto wrapped =
-            core::detail::trap_throw([span, mr]() { return fixpp::decimal_t::parse(span, mr); });
-        if (!wrapped) {
-            return core::expected_t<fixpp::decimal_t>{std::unexpect, wrapped.error()};
+
+    template <std::uint16_t NoTag, class GroupT>
+    [[nodiscard]] group_view<GroupT> group() const noexcept
+        [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
+            // Instance slices are materialized once into the OffsetTable's
+            // per-message mr arena (delimiter-aware: each reappearance of the
+            // group's first field starts a new occurrence, document order; the
+            // dictionary-driven nested-group refinement is layered by 2c's
+            // GroupT). group_view only borrows the arena span — no thread-local,
+            // no cross-view aliasing, zero-alloc after the first build.
+            //
+            // 062 T007: thread the base entry_context every generated entry
+            // needs to read its own fields (span/outer_occurrence_id are
+            // per-entry — group_view::operator[] fills those in from the SAME
+            // instance slice it borrows). parent_cache_owner = THIS root
+            // OffsetTable; the field is `const OffsetTable*` because the only
+            // method a nested descent ever reaches through it is the const
+            // nested_group_slices() (which mutates only its own `mutable` cache).
+            // 063 T007: the ROOT context — {msg_type, path=[]} — is this message's
+            // own context (depth 0, plan.md Context-propagation mechanism). Set on
+            // `table_` BEFORE group_slices() so group()'s membership predicate
+            // calls see it; the entry_context each returned entry carries gets the
+            // context PUSHED with NoTag (its own container path + own no_tag), so
+            // a later nested descent from one of these entries seeds the correct
+            // sub-table context (offset_table.hpp/.cpp T008).
+            group_context const root_ctx{.msg_type = msg_type()};
+            table_.set_group_context(root_ctx);
+            entry_context ctx{};
+            ctx.mr = mr_;
+            ctx.opaque_dict = opaque_dict_;
+            ctx.group_member_fn = group_member_fn_;
+            ctx.gen = token();
+            ctx.parent_cache_owner = &table_;
+            ctx.group_ctx = root_ctx.pushed(NoTag);
+            return group_view<GroupT>{table_.group_slices(NoTag), ctx};
         }
-        return *wrapped;
-    }
 
-template <std::uint16_t NoTag, class GroupT>
-[[nodiscard]] group_view<GroupT> group() const noexcept
-    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-        // Instance slices are materialized once into the OffsetTable's
-        // per-message mr arena (delimiter-aware: each reappearance of the
-        // group's first field starts a new occurrence, document order; the
-        // dictionary-driven nested-group refinement is layered by 2c's
-        // GroupT). group_view only borrows the arena span — no thread-local,
-        // no cross-view aliasing, zero-alloc after the first build.
-        //
-        // 062 T007: thread the base entry_context every generated entry
-        // needs to read its own fields (span/outer_occurrence_id are
-        // per-entry — group_view::operator[] fills those in from the SAME
-        // instance slice it borrows). parent_cache_owner = THIS root
-        // OffsetTable; the field is `const OffsetTable*` because the only
-        // method a nested descent ever reaches through it is the const
-        // nested_group_slices() (which mutates only its own `mutable` cache).
-        // 063 T007: the ROOT context — {msg_type, path=[]} — is this message's
-        // own context (depth 0, plan.md Context-propagation mechanism). Set on
-        // `table_` BEFORE group_slices() so group()'s membership predicate
-        // calls see it; the entry_context each returned entry carries gets the
-        // context PUSHED with NoTag (its own container path + own no_tag), so
-        // a later nested descent from one of these entries seeds the correct
-        // sub-table context (offset_table.hpp/.cpp T008).
-        group_context const root_ctx{.msg_type = msg_type()};
-        table_.set_group_context(root_ctx);
-        entry_context ctx{};
-        ctx.mr = mr_;
-        ctx.opaque_dict = opaque_dict_;
-        ctx.group_member_fn = group_member_fn_;
-        ctx.gen = token();
-        ctx.parent_cache_owner = &table_;
-        ctx.group_ctx = root_ctx.pushed(NoTag);
-        return group_view<GroupT>{table_.group_slices(NoTag), ctx};
-    }
-
-// [2b §4.8] Contract: unknown_fields() uses the dict pointer threaded from the
-// Parser that constructed this MessageView — no caller-supplied argument.
-// Walks the offset table and yields entries whose tag is not `field_valid_for`-
-// known in the dict, exempting framing tags 8/9/10. Builds and caches the kv
-// list in the per-message arena (mr_) on first call; idempotent.
-// ([PR68-02] fix — the dict is captured at Parser construction time.)
-// When dict_ptr_ is null (default/dict-free construction), no tag is classified
-// as known so all non-framing tags are yielded as unknown.
-[[nodiscard]] unknown_fields_view unknown_fields() const noexcept
-    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-        if (unk_items_built_) {
+    // [2b §4.8] Contract: unknown_fields() uses the dict pointer threaded from the
+    // Parser that constructed this MessageView — no caller-supplied argument.
+    // Walks the offset table and yields entries whose tag is not `field_valid_for`-
+    // known in the dict, exempting framing tags 8/9/10. Builds and caches the kv
+    // list in the per-message arena (mr_) on first call; idempotent.
+    // ([PR68-02] fix — the dict is captured at Parser construction time.)
+    // When dict_ptr_ is null (default/dict-free construction), no tag is classified
+    // as known so all non-framing tags are yielded as unknown.
+    [[nodiscard]] unknown_fields_view unknown_fields() const noexcept
+        [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
+            if (unk_items_built_) {
+                return unknown_fields_view{
+                    std::span<unknown_fields_view::kv const>{unk_items_.data(), unk_items_.size()},
+                    token()};
+            }
+            unk_items_built_ = true;
+            std::string_view const mtype = msg_type();
+            auto const raw = bytes();
+            // Framing tags 8/9/10 are always exempt from unknown classification.
+            constexpr std::uint16_t kBeginString = 8;
+            constexpr std::uint16_t kBodyLength = 9;
+            constexpr std::uint16_t kCheckSum = 10;
+            for (auto const& e : table_.entries()) {
+                if (e.tag == kBeginString || e.tag == kBodyLength || e.tag == kCheckSum) {
+                    continue;  // framing — never unknown
+                }
+                // classify_fn_ is nullptr for dict-free views (all non-framing =
+                // unknown); otherwise classify via the bound fn + opaque dict.
+                bool const known =
+                    (classify_fn_ != nullptr) && classify_fn_(opaque_dict_, mtype, e.tag);
+                if (!known) {
+                    unk_items_.push_back(unknown_fields_view::kv{
+                        .tag = e.tag, .data = raw.data() + e.offset, .len = e.length});
+                }
+            }
             return unknown_fields_view{
                 std::span<unknown_fields_view::kv const>{unk_items_.data(), unk_items_.size()},
                 token()};
         }
-        unk_items_built_ = true;
-        std::string_view const mtype = msg_type();
-        auto const raw = bytes();
-        // Framing tags 8/9/10 are always exempt from unknown classification.
-        constexpr std::uint16_t kBeginString = 8;
-        constexpr std::uint16_t kBodyLength = 9;
-        constexpr std::uint16_t kCheckSum = 10;
-        for (auto const& e : table_.entries()) {
-            if (e.tag == kBeginString || e.tag == kBodyLength || e.tag == kCheckSum) {
-                continue;  // framing — never unknown
-            }
-            // classify_fn_ is nullptr for dict-free views (all non-framing =
-            // unknown); otherwise classify via the bound fn + opaque dict.
-            bool const known =
-                (classify_fn_ != nullptr) && classify_fn_(opaque_dict_, mtype, e.tag);
-            if (!known) {
-                unk_items_.push_back(unknown_fields_view::kv{
-                    .tag = e.tag, .data = raw.data() + e.offset, .len = e.length});
-            }
-        }
-        return unknown_fields_view{
-            std::span<unknown_fields_view::kv const>{unk_items_.data(), unk_items_.size()},
-            token()};
-    }
 
     // 066-dict-backed-inbound-parse T003 (mechanism (b)): the ONE internal
     // membership-copy accessor shared by `fixpp_msg_clone` and the `reify`
@@ -380,28 +380,29 @@ template <std::uint16_t NoTag, class GroupT>
     // defeating the dedicated OOM error code and violating fail-closed.
     [[nodiscard]] fixpp::dict::table_view membership_copy() const;
 
-// 066-dict-backed-inbound-parse T007/T008: companion predicate to
-// membership_copy() — true iff THIS view is itself dict-backed
-// (opaque_dict_ non-null). A clone/reify propagation site MUST bind its
-// re-framed MessageView dict-backed ONLY when this is true: binding a
-// non-null opaque_dict at an (empty) copy from a genuinely dict-free
-// source would flip OffsetTable::group()/consume_group_extent from the
-// dict-free DECLINE (gated on pointer NULLITY, not table content) to the
-// membership walk over an empty table — NOT the "clone/reify stays
-// dict-free" degenerate case data-model.md / contracts/inbound-parse.md C4
-// requires.
-//
-// 220: this sentence used to end "...from the POSITIONAL dict-free
-// fallback", which no longer exists — group() declines dict-free. Note
-// what that costs the rationale and what it does not: for GROUPS the two
-// states are no longer distinguishable from outside (both yield absent,
-// hence TYPE_MISMATCH), so the predicate is no longer load-bearing THERE.
-// It remains load-bearing for the non-group reasons this method also
-// gates — field classification and unknown_fields(), which do read table
-// CONTENT and so do differ between "no dictionary" and "an empty one".
-[[nodiscard]] bool is_dict_backed() const noexcept { return opaque_dict_ != nullptr; }
+    // 066-dict-backed-inbound-parse T007/T008: companion predicate to
+    // membership_copy() — true iff THIS view is itself dict-backed
+    // (opaque_dict_ non-null). A clone/reify propagation site MUST bind its
+    // re-framed MessageView dict-backed ONLY when this is true: binding a
+    // non-null opaque_dict at an (empty) copy from a genuinely dict-free
+    // source would flip OffsetTable::group()/consume_group_extent from the
+    // dict-free DECLINE (gated on pointer NULLITY, not table content) to the
+    // membership walk over an empty table — NOT the "clone/reify stays
+    // dict-free" degenerate case data-model.md / contracts/inbound-parse.md C4
+    // requires.
+    //
+    // 220: this sentence used to end "...from the POSITIONAL dict-free
+    // fallback", which no longer exists — group() declines dict-free. Note
+    // what that costs the rationale and what it does not: for GROUPS the two
+    // states are no longer distinguishable from outside (both yield absent,
+    // hence TYPE_MISMATCH), so the predicate is no longer load-bearing THERE.
+    // It remains load-bearing for the non-group reasons this method also
+    // gates — field classification and unknown_fields(), which do read table
+    // CONTENT and so do differ between "no dictionary" and "an empty one".
+    [[nodiscard]] bool is_dict_backed() const noexcept { return opaque_dict_ != nullptr; }
 
-private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag) const noexcept {
+private:
+    [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag) const noexcept {
         if constexpr (Mode == access_mode::Index) {
             auto e = table_.find(tag);
             if (!e) {

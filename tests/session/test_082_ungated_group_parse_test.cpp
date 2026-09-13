@@ -121,7 +121,8 @@ bool slice_has_field(fixpp::wire::group_slice const& s, std::uint16_t tag, std::
 
 class CallbackCapturingApplication : public Application {
 public:
-    using ViewCallback = std::function<void(fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const&)>;
+    using ViewCallback =
+        std::function<void(fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const&)>;
     ViewCallback on_from_app;
     int from_app_calls = 0;
 
@@ -210,13 +211,14 @@ struct AllocationFixture {
         }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
-        std::string body = "35=A\x01"
-                            "34=1\x01"
-                            "49=TW\x01"
-                            "52=20240101-00:00:00.000\x01"
-                            "56=ISLD\x01"
-                            "98=0\x01"
-                            "108=30\x01";
+        std::string body =
+            "35=A\x01"
+            "34=1\x01"
+            "49=TW\x01"
+            "52=20240101-00:00:00.000\x01"
+            "56=ISLD\x01"
+            "98=0\x01"
+            "108=30\x01";
         auto logon = fixpp_test_support::make_frame(begin_string, body);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(
@@ -259,17 +261,17 @@ std::vector<std::byte> make_allocation_frame(std::string_view begin_string, std:
     body += "49=TW\x01";
     body += "52=20240101-00:00:00.000\x01";
     body += "56=ISLD\x01";
-    body += "70=ALLOC1\x01";  // AllocID
-    body += "71=0\x01";       // AllocTransType
-    body += "73=2\x01";       // NoOrders = 2
-    body += "11=CLA\x01";     // leg #1: ClOrdID
-    body += "37=OA\x01";      // leg #1: OrderID
-    body += "11=CLB\x01";     // leg #2: ClOrdID
-    body += "37=OB\x01";      // leg #2: OrderID
-    body += "54=1\x01";       // TRAILING outer field, immediately AFTER the group: Side
-    body += "55=SYM\x01";     // Symbol
-    body += "53=100\x01";     // Shares
-    body += "6=10.5\x01";     // AvgPx
+    body += "70=ALLOC1\x01";    // AllocID
+    body += "71=0\x01";         // AllocTransType
+    body += "73=2\x01";         // NoOrders = 2
+    body += "11=CLA\x01";       // leg #1: ClOrdID
+    body += "37=OA\x01";        // leg #1: OrderID
+    body += "11=CLB\x01";       // leg #2: ClOrdID
+    body += "37=OB\x01";        // leg #2: OrderID
+    body += "54=1\x01";         // TRAILING outer field, immediately AFTER the group: Side
+    body += "55=SYM\x01";       // Symbol
+    body += "53=100\x01";       // Shares
+    body += "6=10.5\x01";       // AvgPx
     body += "75=20240101\x01";  // TradeDate
     return fixpp_test_support::make_frame(begin_string, body);
 }
@@ -298,7 +300,8 @@ TEST(UngatedGroupParse, AllocationNoOrdersGroupScopedNotFlatAcrossFix40Fix41Fix4
         // deliberate, per the task text: keeps the parse axis and the
         // validation axis from being conflated.
         ASSERT_FALSE(cfg.validate_inbound_messages)
-            << v.label << ": SessionConfig default changed -- this test relies on OFF being default";
+            << v.label
+            << ": SessionConfig default changed -- this test relies on OFF being default";
         Session sess(f.engine_cfg, cfg);
         f.open_to_active(sess);
 
@@ -307,7 +310,8 @@ TEST(UngatedGroupParse, AllocationNoOrdersGroupScopedNotFlatAcrossFix40Fix41Fix4
         std::size_t count = 0;
         bool leg0_has_own = false;
         bool leg1_has_own = false;
-        bool last_has_trailing_side = true;  // default true: an un-run callback must not silently pass
+        bool last_has_trailing_side =
+            true;  // default true: an un-run callback must not silently pass
 
         f.app->on_from_app =
             [&](fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const& msg) {
@@ -332,7 +336,8 @@ TEST(UngatedGroupParse, AllocationNoOrdersGroupScopedNotFlatAcrossFix40Fix41Fix4
         // (b) SC-008a first leg: read-shape movement must not imply a NEW
         // rejection. Must hold BOTH before and after T023.
         EXPECT_EQ(f.app->from_app_calls, 1)
-            << v.label << ": Allocation(J) must reach fromApp with validate_inbound_messages OFF "
+            << v.label
+            << ": Allocation(J) must reach fromApp with validate_inbound_messages OFF "
                "(SC-008a first leg -- read shape changes, acceptance must not)";
         EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
             << v.label << ": session must remain Active";
@@ -343,10 +348,13 @@ TEST(UngatedGroupParse, AllocationNoOrdersGroupScopedNotFlatAcrossFix40Fix41Fix4
         // predicate is ever consulted), so group_slices(73) returns EMPTY
         // (count == 0), not 2.
         EXPECT_EQ(count, 2u)
-            << v.label << ": NoOrders(73)=2 must yield exactly 2 group instances "
+            << v.label
+            << ": NoOrders(73)=2 must yield exactly 2 group instances "
                "(group-scoped resolution) -- RED pre-T023 (group unregistered -> empty span)";
-        EXPECT_TRUE(leg0_has_own) << v.label << ": leg #1's own ClOrdID(11)=CLA/OrderID(37)=OA must be present";
-        EXPECT_TRUE(leg1_has_own) << v.label << ": leg #2's own ClOrdID(11)=CLB/OrderID(37)=OB must be present";
+        EXPECT_TRUE(leg0_has_own)
+            << v.label << ": leg #1's own ClOrdID(11)=CLA/OrderID(37)=OA must be present";
+        EXPECT_TRUE(leg1_has_own)
+            << v.label << ": leg #2's own ClOrdID(11)=CLB/OrderID(37)=OB must be present";
 
         // DISCRIMINATING: proves group-scoped, not flat/positionally-
         // absorbed-to-end-of-message -- the trailing outer field Side(54),
@@ -354,7 +362,8 @@ TEST(UngatedGroupParse, AllocationNoOrdersGroupScopedNotFlatAcrossFix40Fix41Fix4
         // immediately after the group in the wire body, must NOT be part of
         // the last group instance.
         EXPECT_FALSE(last_has_trailing_side)
-            << v.label << ": trailing Side(54) must NOT be part of the last NoOrders(73) instance "
+            << v.label
+            << ": trailing Side(54) must NOT be part of the last NoOrders(73) instance "
                "(group-scoped, not flat/positional)";
     }
 }

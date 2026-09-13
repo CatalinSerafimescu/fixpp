@@ -73,7 +73,8 @@ struct owning_message_handle::impl {
     // (data-model.md "Reify owning handle owned table_view" degenerate case).
     // Heap-owned (table_view's own containers use the default/global
     // allocator, independent of `bytes_`'s mr) and self-contained — safe to
-    // outlive the source session/Dictionary (table_view.hpp's "may legally outlive the Dictionary" note).
+    // outlive the source session/Dictionary (table_view.hpp's "may legally outlive the Dictionary"
+    // note).
     std::optional<table_view> owned_tv_;
     mutable std::optional<wire::MessageView<wire::access_mode::Index>> view_cache_;
 
@@ -143,7 +144,8 @@ wire::MessageView<wire::access_mode::Index> const& owning_message_handle::view()
                 // bytes the source already parsed successfully) the
                 // dict-backed re-parse failed: fall back to the dict-free
                 // 2-arg ctor (pre-066 behavior).
-                pimpl_->view_cache_.emplace((*framed)[0], pimpl_->bytes_.get_allocator().resource());
+                pimpl_->view_cache_.emplace((*framed)[0],
+                                            pimpl_->bytes_.get_allocator().resource());
             }
         } else {
             pimpl_->view_cache_.emplace();
@@ -187,7 +189,7 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
         if (view.is_dict_backed()) {
             handle.pimpl_->owned_tv_ = view.membership_copy();
         }
-        return handle;                                       // move (custom noexcept move ctor)
+        return handle;  // move (custom noexcept move ctor)
     } catch (std::bad_alloc const&) {
         return std::unexpected{core::error::dict_reify_oom};
     }

@@ -544,9 +544,10 @@ TEST_F(HbTrTest, InboundHeartbeatEmitsNoEcho) {
     }
     EXPECT_EQ(outbound_hb, 0)
         << "inbound Heartbeat(35=0) must NOT trigger an outbound Heartbeat echo "
-           "(FIX: a Heartbeat is never answered; 005's data-model.md Active row) — got " << outbound_hb;
-    EXPECT_TRUE(outbound.empty())
-        << "inbound Heartbeat must produce zero outbound frames; got " << outbound.size();
+           "(FIX: a Heartbeat is never answered; 005's data-model.md Active row) — got "
+        << outbound_hb;
+    EXPECT_TRUE(outbound.empty()) << "inbound Heartbeat must produce zero outbound frames; got "
+                                  << outbound.size();
 }
 
 }  // namespace fixpp::session::test

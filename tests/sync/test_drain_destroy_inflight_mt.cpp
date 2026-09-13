@@ -86,7 +86,7 @@ void run_one_cycle() {
 
     asio::io_context ioc_drain;   // the drain-owning strand's executor
     asio::io_context ioc_waiter;  // the waiter's OWN executor — serviced by a
-                                   // genuinely different OS thread below
+                                  // genuinely different OS thread below
 
     // ── Step 1 (deterministic, single-threaded): holder acquires ───────────
     // No background thread has started yet — polling ioc_drain from the
@@ -102,9 +102,9 @@ void run_one_cycle() {
         co_await yield_n(N * 20);
         // `g` destructs here -> the REAL unlock(). By now draining_ is long
         // since true, so this unlock() takes the draining_ short-circuit
-        // path (`async_mutex::unlock()`'s `draining_` short-circuit) and does NOT touch the waiter list —
-        // the parked-then-reaped waiter below is exclusively the drain's
-        // concern, never granted by this unlock().
+        // path (`async_mutex::unlock()`'s `draining_` short-circuit) and does NOT touch the waiter
+        // list — the parked-then-reaped waiter below is exclusively the drain's concern, never
+        // granted by this unlock().
     };
     asio::co_spawn(ioc_drain, holder_coro(), asio::detached);
     for (int i = 0; i < 16 && !holder_acquired; ++i) ioc_drain.poll_one();
@@ -136,7 +136,7 @@ void run_one_cycle() {
         auto r = co_await mtx->async_lock();
         resume_thread_id.store(std::this_thread::get_id(), std::memory_order_release);
         waiter_aborted.store(!r.has_value() && r.error() == error::sync_lock_aborted,
-                              std::memory_order_release);
+                             std::memory_order_release);
         waiter_resolved.store(true, std::memory_order_release);
     };
     asio::co_spawn(ioc_waiter, waiter_coro(), asio::detached);
@@ -219,9 +219,7 @@ void run_one_cycle() {
         << "the resume must NOT have run inline on the drain's thread (thread_a)";
 }
 
-TEST(DrainDestroyInflightMt, CrossExecutorReapThenDestroyIsSafe) {
-    run_one_cycle();
-}
+TEST(DrainDestroyInflightMt, CrossExecutorReapThenDestroyIsSafe) { run_one_cycle(); }
 
 TEST(DrainDestroyInflightMt, RepeatedCrossExecutorReapThenDestroyIsClean) {
     constexpr int kReps = 20;

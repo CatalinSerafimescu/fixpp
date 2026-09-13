@@ -23,10 +23,10 @@
 #include <cstdint>
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
-#include <fixpp/session/session_types.hpp>  // 070: session_posture/msg_direction/supported_msg_type (shared w/ admin_messages.hpp)
 #include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)
 #include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
-#include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
+#include <fixpp/session/session_types.hpp>  // 070: session_posture/msg_direction/supported_msg_type (shared w/ admin_messages.hpp)
+#include <fixpp/tap/tap_consumer.hpp>  // value-typed member ⇒ complete type
 #include <functional>
 #include <memory>
 #include <memory_resource>
@@ -183,7 +183,8 @@ struct SessionConfig {
     std::shared_ptr<fixpp::tls::cert_source> cert_source;
     fixpp::session::SecurityProfile
         security_profile;  // no-implicit-default (N-P2-3); kind::unset → Session::open() rejects
-                           // (FR-018; lives in `session` per architecture.md's SecurityProfile enum row)
+                           // (FR-018; lives in `session` per architecture.md's SecurityProfile enum
+                           // row)
 
     std::shared_ptr<const fixpp::dict::Dictionary> dictionary;           // required
     std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;  // optional
@@ -211,7 +212,8 @@ struct SessionConfig {
     // snapshot; the type cannot be copied, moved, or value-constructed, so the
     // only way to seat a view here is to derive it from `dictionary` through
     // that factory.
-    std::shared_ptr<const fixpp::dict::dictionary_snapshot> dict_snapshot;  // null → open() builds one
+    std::shared_ptr<const fixpp::dict::dictionary_snapshot>
+        dict_snapshot;  // null → open() builds one
 
     std::optional<std::chrono::seconds> heartbeat_interval;           // value owned by 005
     std::optional<std::chrono::milliseconds> test_request_threshold;  // value owned by 005
@@ -482,9 +484,9 @@ struct SessionConfig {
     //   DefaultApplVerID(1137) on every outbound FIXT.1.1 Logon (initiator + acceptor
     //   reply). REQUIRED when begin_string=="FIXT.1.1"; unset => FIX.4.x path (byte-
     //   identical, INV-FIXT-1 / SC-002). Type: dict::application_version enum (NOT a
-    //   raw wire string) — prevents "1137" index-reuse bugs (version_profile.hpp's wire↔C++ mapping table).
-    //   An Unknown or missing value with begin_string=="FIXT.1.1" fails before Logon.
-    //   [033 data-model.md E3; research R2/R3; FR-001/FR-003]
+    //   raw wire string) — prevents "1137" index-reuse bugs (version_profile.hpp's wire↔C++ mapping
+    //   table). An Unknown or missing value with begin_string=="FIXT.1.1" fails before Logon. [033
+    //   data-model.md E3; research R2/R3; FR-001/FR-003]
     std::optional<fixpp::dict::application_version> default_appl_ver_id;
 
     // username / password: optional FIX Logon credentials emitted as

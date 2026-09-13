@@ -44,15 +44,14 @@ struct Arena {
 TEST(XmlLoaderEnum, DuplicateEnumValueIsDedupedNotAnError) {
     Arena a;
     fixpp::dict::XmlLoader loader;
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='1' name='Account' type='STRING'>)"
-        R"(<value enum='X' description='First'/>)"
-        R"(<value enum='Y' description='Second'/>)"
-        R"(<value enum='X' description='DuplicateIgnored'/>)"
-        R"(</field>)"
-        R"(</fields><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='1' name='Account' type='STRING'>)"
+                                      R"(<value enum='X' description='First'/>)"
+                                      R"(<value enum='Y' description='Second'/>)"
+                                      R"(<value enum='X' description='DuplicateIgnored'/>)"
+                                      R"(</field>)"
+                                      R"(</fields><messages/></fix>)";
 
     auto d = loader.load_from_string(kXml, &a.mr);
 
@@ -75,13 +74,12 @@ TEST(XmlLoaderEnum, DuplicateEnumValueIsDedupedNotAnError) {
 TEST(XmlLoaderEnum, ValueMissingEnumAttributeThrowsXmlParseError) {
     Arena a;
     fixpp::dict::XmlLoader loader;
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='1' name='Account' type='STRING'>)"
-        R"(<value description='NoEnumAttribute'/>)"
-        R"(</field>)"
-        R"(</fields><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='1' name='Account' type='STRING'>)"
+                                      R"(<value description='NoEnumAttribute'/>)"
+                                      R"(</field>)"
+                                      R"(</fields><messages/></fix>)";
 
     try {
         (void)loader.load_from_string(kXml, &a.mr);
@@ -102,13 +100,12 @@ TEST(XmlLoaderEnum, ValueMissingEnumAttributeThrowsXmlParseError) {
 TEST(XmlLoaderEnum, ValueMissingDescriptionIsLegalAndEmpty) {
     Arena a;
     fixpp::dict::XmlLoader loader;
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='1' name='Account' type='STRING'>)"
-        R"(<value enum='X'/>)"
-        R"(</field>)"
-        R"(</fields><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='1' name='Account' type='STRING'>)"
+                                      R"(<value enum='X'/>)"
+                                      R"(</field>)"
+                                      R"(</fields><messages/></fix>)";
 
     auto d = loader.load_from_string(kXml, &a.mr);
 

@@ -22,9 +22,9 @@ extern "C" {
  */
 fixpp_version_t fixpp_version(void) {
     fixpp_version_t v;
-    v.major     = FIXPP_C_ABI_VERSION_MAJOR;
-    v.minor     = FIXPP_C_ABI_VERSION_MINOR;
-    v.patch     = FIXPP_C_ABI_VERSION_PATCH;
+    v.major = FIXPP_C_ABI_VERSION_MAJOR;
+    v.minor = FIXPP_C_ABI_VERSION_MINOR;
+    v.patch = FIXPP_C_ABI_VERSION_PATCH;
     v._reserved = 0;
     return v;
 }
@@ -41,11 +41,11 @@ fixpp_version_t fixpp_version(void) {
  */
 fixpp_version_t fixpp_library_version(void) {
     fixpp_version_t v;
-    v.major     = FIXPP_VERSION_MAJOR;
-    v.minor     = FIXPP_VERSION_MINOR;
-    v.patch     = FIXPP_VERSION_PATCH;
+    v.major = FIXPP_VERSION_MAJOR;
+    v.minor = FIXPP_VERSION_MINOR;
+    v.patch = FIXPP_VERSION_PATCH;
     v._reserved = 0;
     return v;
 }
 
-} // extern "C"
+}  // extern "C"

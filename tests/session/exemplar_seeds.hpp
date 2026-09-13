@@ -42,7 +42,7 @@ struct NewOrderListOrderSeed {
     std::int64_t list_seq_no;
     char side;
     std::string_view symbol;
-    std::string_view order_qty;  // raw ASCII decimal literal
+    std::string_view order_qty;                      // raw ASCII decimal literal
     std::span<const NewOrderListPartySeed> parties;  // empty -> NoPartyIDs=0
 };
 
@@ -53,7 +53,8 @@ inline constexpr std::array<NewOrderListPartySubIdSeed, 1> kNewOrderListOrd1Subs
 }};
 
 inline constexpr std::array<NewOrderListPartySeed, 1> kNewOrderListOrd1Parties{{
-    NewOrderListPartySeed{"PARTY1", 'D', 1, std::span<const NewOrderListPartySubIdSeed>{kNewOrderListOrd1Subs}},
+    NewOrderListPartySeed{"PARTY1", 'D', 1,
+                          std::span<const NewOrderListPartySubIdSeed>{kNewOrderListOrd1Subs}},
 }};
 
 // order 2 (ORD2): NoPartyIDs=0 (present-but-empty) -> empty parties span.
@@ -114,21 +115,21 @@ inline constexpr std::array<AllocationReportPartySubIdSeed, 1> kAllocationReport
 }};
 
 inline constexpr std::array<AllocationReportPartySeed, 1> kAllocationReportParties{{
-    AllocationReportPartySeed{"PARTY1", 'D', 1,
-                              std::span<const AllocationReportPartySubIdSeed>{kAllocationReportSubs}},
+    AllocationReportPartySeed{
+        "PARTY1", 'D', 1, std::span<const AllocationReportPartySubIdSeed>{kAllocationReportSubs}},
 }};
 
 struct AllocationReportSeed {
     std::string_view msg_type = "AS";
     std::string_view begin_string = "FIX.4.4";
     std::string_view alloc_report_id = "ALLOCRPT1";
-    char alloc_trans_type = '0';       // New
-    std::int64_t alloc_report_type = 9;  // Accept
-    std::int64_t alloc_status = 0;       // Accepted
+    char alloc_trans_type = '0';            // New
+    std::int64_t alloc_report_type = 9;     // Accept
+    std::int64_t alloc_status = 0;          // Accepted
     std::int64_t alloc_no_orders_type = 0;  // NotSpecified (data-model §3.1 AS note)
-    char side = '1';                   // Buy
-    std::string_view quantity = "1000";  // raw ASCII decimal literal
-    std::string_view avg_px = "25.5";    // raw ASCII decimal literal
+    char side = '1';                        // Buy
+    std::string_view quantity = "1000";     // raw ASCII decimal literal
+    std::string_view avg_px = "25.5";       // raw ASCII decimal literal
     std::string_view trade_date = "20240101";
     std::string_view symbol = "MSFT";
     std::span<const AllocationReportPartySeed> parties =
@@ -146,7 +147,7 @@ struct NewOrderSingleSeed {
     std::string_view begin_string = "FIX.4.4";
     std::string_view cl_ord_id = "ORD-001";
     std::string_view symbol = "MSFT";
-    char side = '1';  // Buy
+    char side = '1';                     // Buy
     std::string_view order_qty = "100";  // raw ASCII decimal literal
     std::string_view price = "190.5";    // raw ASCII decimal literal
     std::string_view transact_time = "20240101-10:00:00";

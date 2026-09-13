@@ -5,7 +5,8 @@
 //   - digit_count for values ≥ 100000 (5..10 digits)
 //   - write_byte overflow (pos_ >= dst_.size())
 //   - write_span overflow
-//   - write_tag_eq overflow (member: Writer::write_tag_eq's npos check; free fn: its own bound check)
+//   - write_tag_eq overflow (member: Writer::write_tag_eq's npos check; free fn: its own bound
+//   check)
 //   - append_raw with prior overflow set
 //   - append_raw error when tag write fails (its write_tag_eq call)
 //   - append_raw error when 9= '9' byte overflows (its '9' write_byte call)
@@ -13,7 +14,8 @@
 //   - append_raw error when 9= placeholder SOH overflows (its trailing write_byte)
 //   - commit() with overflow_ set
 //   - commit() body_start_ == npos (no fields written)
-//   - commit() body_length exceeds placeholder width → err_frame_too_large (its actual_digits check)
+//   - commit() body_length exceeds placeholder width → err_frame_too_large (its actual_digits
+//   check)
 //   - commit() no room for 10= field
 //   - open_group() error path (append_raw fails)
 //   - group_writer::append_field null owner (its owner_==nullptr guard)

@@ -756,8 +756,8 @@ TEST(BusinessMessagesBuild, Builder_ScratchOverflow_PerFieldGuards) {
         const std::string big(len, 'A');
         const auto r = fixpp::session::build_new_order_single(std::span<std::byte>{out}, big, "S",
                                                               '1', qty, px, "20240101-10:00:00");
-        EXPECT_FALSE(r.has_value())
-            << "NOS cl_ord_id len=" << len << " must overflow the internal body cap and fail-closed";
+        EXPECT_FALSE(r.has_value()) << "NOS cl_ord_id len=" << len
+                                    << " must overflow the internal body cap and fail-closed";
         EXPECT_TRUE(
             std::all_of(out.begin(), out.end(), [](std::byte b) { return b == std::byte{0xCDU}; }))
             << "NOS overflow must not write to out (INV-4 atomicity), len=" << len;
@@ -778,9 +778,8 @@ TEST(BusinessMessagesBuild, Builder_ScratchOverflow_PerFieldGuards) {
         const std::string big(len, 'A');
         const auto r = fixpp::session::build_execution_report(std::span<std::byte>{out}, big, "E",
                                                               'F', '2', "S", '1', zero, qty, px);
-        EXPECT_FALSE(r.has_value())
-            << "ExecRpt order_id len=" << len
-            << " must overflow the internal body cap and fail-closed";
+        EXPECT_FALSE(r.has_value()) << "ExecRpt order_id len=" << len
+                                    << " must overflow the internal body cap and fail-closed";
         EXPECT_TRUE(
             std::all_of(out.begin(), out.end(), [](std::byte b) { return b == std::byte{0xCDU}; }))
             << "ExecRpt overflow must not write to out (INV-4 atomicity), len=" << len;

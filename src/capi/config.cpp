@@ -11,16 +11,14 @@
 // session.cpp; on failure it is untouched and the caller still owns it.
 // THREAD: SINGLE_THREAD per handle. All symbols here are construction-time.
 
-#include "fix/c_api/engine.h"
-#include "fix/c_api/session.h"
-
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "capi_internal.hpp"
-
+#include "fix/c_api/engine.h"
+#include "fix/c_api/session.h"
 #include "fixpp/session/memory_store.hpp"
 #include "fixpp/session/memory_store_factory.hpp"
 #include "fixpp/session/security_profile.hpp"
@@ -180,8 +178,7 @@ fixpp_error_t fixpp_session_config_set_security(fixpp_session_config_t* cfg,
             // explicit FIXPP_SECURITY_INSECURE_PLAIN_TCP choice).
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            cfg->cfg.security_profile.k =
-                fixpp::session::SecurityProfile::kind::insecure_plain_tcp;
+            cfg->cfg.security_profile.k = fixpp::session::SecurityProfile::kind::insecure_plain_tcp;
 #pragma clang diagnostic pop
             return FIXPP_ERR_OK;
     }
@@ -219,7 +216,7 @@ fixpp_error_t fixpp_session_config_set_reset_on_logon(fixpp_session_config_t* cf
 }
 
 fixpp_error_t fixpp_session_config_set_reset_seqnum_policy(fixpp_session_config_t* cfg,
-                                                            fixpp_reset_seqnum_policy kind) {
+                                                           fixpp_reset_seqnum_policy kind) {
     if (cfg == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
@@ -246,7 +243,7 @@ fixpp_error_t fixpp_session_config_set_reset_seqnum_policy(fixpp_session_config_
 }
 
 fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg, const char* host,
-                                                     uint16_t port) {
+                                                    uint16_t port) {
     if (cfg == nullptr || host == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
@@ -257,10 +254,10 @@ fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg,
     // violation → fatal-log + abort, never translated.  Mirrors
     // fixpp_session_acceptor_bound_endpoint in session.cpp.
     try {
-        // Mirror the L-050-5 seam (tests/capi/capi_loopback_support.hpp's `set_loopback_endpoint`), now public:
-        // set the reconnect_endpoint so the engine's auto-derived plaintext factory
-        // can connect (initiator) or bind (acceptor), and install the transport_send
-        // placeholder that the accept loop rebinds to the live socket.
+        // Mirror the L-050-5 seam (tests/capi/capi_loopback_support.hpp's `set_loopback_endpoint`),
+        // now public: set the reconnect_endpoint so the engine's auto-derived plaintext factory can
+        // connect (initiator) or bind (acceptor), and install the transport_send placeholder that
+        // the accept loop rebinds to the live socket.
         cfg->cfg.reconnect_endpoint = fixpp::transport::Endpoint{host, port};
         cfg->cfg.transport_send = [](std::span<const std::byte>) {};
     } catch (...) {

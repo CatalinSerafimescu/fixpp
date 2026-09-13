@@ -68,9 +68,9 @@
 #include <fixpp/transport/test/mock_transport.hpp>
 
 #include "_fixtures_/store_temp_dir.hpp"
+#include "support/extract_tag.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-#include "support/extract_tag.hpp"
 
 using namespace std::chrono_literals;
 
@@ -130,8 +130,8 @@ std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::s
 // make_logon_reset: build a Logon with 141=Y (ResetSeqNumFlag). Needed for the
 // Variant C cold-open peer ack — bilateral_strict rejects a peer ack without
 // 141=Y (the RC#C bilateral_strict initiator-path guard).
-std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq,
-                                        std::string_view s, std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                        std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -142,8 +142,9 @@ std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq,
 // Minimal app payload (35=D). Session::send builds the full wire frame
 // (header + MsgSeqNum) around this opaque body.
 std::vector<std::byte> make_app_payload(std::string_view clordid) {
-    std::string body = "35=D\x01" + std::string(field(11, clordid)) + "54=1\x01"
-                                                                       "55=AAPL\x01";
+    std::string body = "35=D\x01" + std::string(field(11, clordid)) +
+                       "54=1\x01"
+                       "55=AAPL\x01";
     std::vector<std::byte> v;
     v.reserve(body.size());
     for (char c : body) v.push_back(static_cast<std::byte>(c));
@@ -214,8 +215,8 @@ protected:
     // fixture's directory, wired for BOTH the cold-open transport_send path
     // AND a MockReconnectFactory (the drive_reconnect() vehicle).
     fixpp::session::SessionConfig make_initiator_cfg(reset_seqnum_policy policy,
-                                                      bool reset_on_logon,
-                                                      std::shared_ptr<MockReconnectFactory> tf) {
+                                                     bool reset_on_logon,
+                                                     std::shared_ptr<MockReconnectFactory> tf) {
         FileStore::Config fcfg;
         fcfg.directory = dir_;
         fcfg.sender_comp_id = "INITR";
@@ -258,7 +259,9 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
     auto transport_fac = std::make_shared<MockReconnectFactory>();
     auto cfg = make_initiator_cfg(reset_seqnum_policy::bilateral_lenient,
                                   /*reset_on_logon=*/false, transport_fac);
-    cfg.transport_send = [&](std::span<const std::byte> f) { wire.emplace_back(f.begin(), f.end()); };
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire.emplace_back(f.begin(), f.end());
+    };
 
     auto sess = std::make_unique<Session>(engine_, cfg);
 
@@ -302,8 +305,8 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
     // failed store call; without the reconcile this would read k+1). This is
     // the single discriminating assertion for the reconcile itself.
     EXPECT_EQ(sess->seqnum_mgr_test_access().peek_outbound(), k)
-        << "the reconcile must reseed the wire counter down to the durable value k="
-        << k << " at disconnect time, before any reconnect";
+        << "the reconcile must reseed the wire counter down to the durable value k=" << k
+        << " at disconnect time, before any reconnect";
     EXPECT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_before)
         << "the reconcile is outbound-only; inbound sequencing must be unaffected";
 
@@ -339,7 +342,9 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
     auto transport_fac = std::make_shared<MockReconnectFactory>();
     auto cfg = make_initiator_cfg(reset_seqnum_policy::bilateral_lenient,
                                   /*reset_on_logon=*/true, transport_fac);
-    cfg.transport_send = [&](std::span<const std::byte> f) { wire.emplace_back(f.begin(), f.end()); };
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire.emplace_back(f.begin(), f.end());
+    };
 
     auto sess = std::make_unique<Session>(engine_, cfg);
 
@@ -417,11 +422,13 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
 TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNotClean) {
     std::vector<std::vector<std::byte>> wire;
     auto transport_fac = std::make_shared<MockReconnectFactory>();
-    // bilateral_strict IS the production default (SessionConfig::reset_seqnum_policy_field's default) —
-    // pass it explicitly here for test clarity, no reset knob.
+    // bilateral_strict IS the production default (SessionConfig::reset_seqnum_policy_field's
+    // default) — pass it explicitly here for test clarity, no reset knob.
     auto cfg = make_initiator_cfg(reset_seqnum_policy::bilateral_strict,
                                   /*reset_on_logon=*/false, transport_fac);
-    cfg.transport_send = [&](std::span<const std::byte> f) { wire.emplace_back(f.begin(), f.end()); };
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire.emplace_back(f.begin(), f.end());
+    };
 
     auto sess = std::make_unique<Session>(engine_, cfg);
 
@@ -435,7 +442,8 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
         << "bilateral_strict must unconditionally emit 141=Y on the cold-open Logon";
 
     // bilateral_strict REQUIRES the peer's ack to also carry 141=Y, else the
-    // initiator disconnects with session_seqnum_reset_mismatch (the RC#C bilateral_strict initiator-path guard).
+    // initiator disconnects with session_seqnum_reset_mismatch (the RC#C bilateral_strict
+    // initiator-path guard).
     auto peer_logon = make_logon_reset("FIX.4.2", 1, "ACCEPTR", "INITR");
     auto logon_r =
         asio::co_spawn(sx_, sess->on_inbound_frame(std::span<const std::byte>(peer_logon)),
@@ -495,7 +503,9 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
     // recovery here would enshrine the wrong behaviour as a passing test).
     EXPECT_EQ(extract_tag(recon_bytes, 34), std::to_string(k))
         << "059 does not worsen L-029-3: the reconnect Logon carries the "
-           "RECONCILED (non-1) seq k=" << k << ", matching the pre-existing "
+           "RECONCILED (non-1) seq k="
+        << k
+        << ", matching the pre-existing "
            "malformed-Logon shape (an un-reconciled k+1 would also be non-1)";
     EXPECT_EQ(extract_tag(recon_bytes, 141), "Y")
         << "bilateral_strict unconditionally emits 141=Y on reconnect; combined with "

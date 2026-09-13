@@ -14,12 +14,11 @@
 
 #include <benchmark/benchmark.h>
 
-#include <fixpp/transport/transport.hpp>
-#include <fixpp/transport/transport_errors.hpp>
-
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <fixpp/transport/transport.hpp>
+#include <fixpp/transport/transport_errors.hpp>
 
 namespace {
 
@@ -27,13 +26,16 @@ namespace {
 // Approximate content: 35=D NewOrderSingle.
 inline std::array<std::byte, 84> make_fix_frame() {
     constexpr char kFrameStr[] =
-        "8=FIX.4.4\x01" "9=60\x01"
-        "35=D\x01" "49=SENDER\x01" "56=TARGET\x01"
-        "34=1\x01" "52=20260527-09:30:00\x01"
+        "8=FIX.4.4\x01"
+        "9=60\x01"
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01"
+        "34=1\x01"
+        "52=20260527-09:30:00\x01"
         "10=123\x01";
     std::array<std::byte, 84> frame{};
-    std::memcpy(frame.data(), kFrameStr,
-                std::min(sizeof(kFrameStr) - 1, frame.size()));
+    std::memcpy(frame.data(), kFrameStr, std::min(sizeof(kFrameStr) - 1, frame.size()));
     return frame;
 }
 

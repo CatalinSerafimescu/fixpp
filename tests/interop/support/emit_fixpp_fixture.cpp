@@ -35,15 +35,14 @@
 // `readback_protocol`/`dictionary_enabled`/`counterparty_digest`/
 // `typed_accessor_arm`, none of which describe fixpp. Only lines 2-4
 // (`sent`/`readback`/`terminal`) are C-7-bound across all three emitters.
-#include "readback_jsonl.hpp"
-
 #include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
 
-int main(int argc, char** argv)
-{
+#include "readback_jsonl.hpp"
+
+int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "usage: %s <output-path>\n", argv[0]);
         return 2;
@@ -115,20 +114,22 @@ int main(int argc, char** argv)
     // ACTUAL C-6 classification, the same function 089 T052's inbound
     // readback builder is meant to call.
     f.erase(std::remove_if(f.begin(), f.end(),
-                            [](fixpp::interop::readback::FieldEntry const& e) {
-                                bool const top_level = !e.path.empty()
-                                    && std::all_of(e.path.begin(), e.path.end(),
-                                                    [](char c) { return c >= '0' && c <= '9'; });
-                                return top_level
-                                    && fixpp::interop::readback::is_canonical_header_or_trailer_tag(
-                                           std::stoi(e.path));
-                            }),
+                           [](fixpp::interop::readback::FieldEntry const& e) {
+                               bool const top_level =
+                                   !e.path.empty() &&
+                                   std::all_of(e.path.begin(), e.path.end(),
+                                               [](char c) { return c >= '0' && c <= '9'; });
+                               return top_level &&
+                                      fixpp::interop::readback::is_canonical_header_or_trailer_tag(
+                                          std::stoi(e.path));
+                           }),
             f.end());
-    s.readback("D", 7, "fixpp-to-peer", 0, false, f,
-               {{"55", "STRING", fixpp::interop::readback::canonical_typed_value("STRING", "AAPL")},
-                {"44", "PRICE", fixpp::interop::readback::canonical_typed_value("PRICE", "190.500")},
-                {"60", "UTCTIMESTAMP",
-                 fixpp::interop::readback::canonical_typed_value("UTCTIMESTAMP", "20260101-00:00:00")}});
+    s.readback(
+        "D", 7, "fixpp-to-peer", 0, false, f,
+        {{"55", "STRING", fixpp::interop::readback::canonical_typed_value("STRING", "AAPL")},
+         {"44", "PRICE", fixpp::interop::readback::canonical_typed_value("PRICE", "190.500")},
+         {"60", "UTCTIMESTAMP",
+          fixpp::interop::readback::canonical_typed_value("UTCTIMESTAMP", "20260101-00:00:00")}});
 
     // data-model.md §13 / T061a: fixpp's OWN disposition record -- fixpp-only,
     // like the §1a hello, so it is pinned by its OWN committed expected line

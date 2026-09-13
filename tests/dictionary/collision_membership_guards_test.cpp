@@ -96,7 +96,7 @@ Dictionary load(std::filesystem::path const& path, std::pmr::memory_resource* mr
 // by the injected delimiter now yields a case (or stops yielding one) via the
 // `continue` in `derive_cases_for_dict` below. Re-derive rather than re-baseline.
 std::optional<std::uint16_t> first_tag_only_in(std::vector<std::uint16_t> const& a,
-                                                std::vector<std::uint16_t> const& b) {
+                                               std::vector<std::uint16_t> const& b) {
     for (auto const t : a) {
         if (!contains(b, t)) {
             return t;
@@ -109,9 +109,9 @@ struct CollisionCase {
     std::string_view dict_file;
     std::uint16_t no_tag;
 
-    std::string msg_type_present;              // context whose variant HAS discriminator_tag
+    std::string msg_type_present;  // context whose variant HAS discriminator_tag
     std::vector<std::uint16_t> path_present;
-    std::string msg_type_absent;               // context whose variant LACKS discriminator_tag
+    std::string msg_type_absent;  // context whose variant LACKS discriminator_tag
     std::vector<std::uint16_t> path_absent;
     std::uint16_t discriminator_tag;
 };
@@ -244,13 +244,13 @@ TEST_P(CollisionMembershipGuards, ContextResolvesToTheCorrectVariant) {
 }
 
 INSTANTIATE_TEST_SUITE_P(PerCensusedCollision, CollisionMembershipGuards,
-                        ::testing::ValuesIn(collision_cases()),
-                        [](::testing::TestParamInfo<CollisionCase> const& info) {
-                            std::string name{info.param.dict_file};
-                            name.erase(std::remove(name.begin(), name.end(), '.'), name.end());
-                            name += "_tag" + std::to_string(info.param.no_tag);
-                            return name;
-                        });
+                         ::testing::ValuesIn(collision_cases()),
+                         [](::testing::TestParamInfo<CollisionCase> const& info) {
+                             std::string name{info.param.dict_file};
+                             name.erase(std::remove(name.begin(), name.end(), '.'), name.end());
+                             name += "_tag" + std::to_string(info.param.no_tag);
+                             return name;
+                         });
 
 // SC-002 completeness pin: the parameterization above must cover EVERY
 // colliding no_tag the T016 census finds — an EXACT count, not a lower
@@ -267,9 +267,8 @@ TEST(CollisionMembershipGuards, CoversEveryCensusedCollisionExactly) {
     // reused-tag collisions: FIX40 tag 73, FIX41 tag 73, FIX42 tags
     // {73, 78, 146, 268, 295, 296, 420}. 69 -> 78.
     std::map<std::string_view, std::size_t> expected_per_dict{
-        {"FIX40.xml", 1},  {"FIX41.xml", 1},     {"FIX42.xml", 7},
-        {"FIX43.xml", 9},  {"FIX44.xml", 12},    {"FIX50.xml", 13},
-        {"FIX50SP1.xml", 14}, {"FIX50SP2.xml", 21},
+        {"FIX40.xml", 1},  {"FIX41.xml", 1},  {"FIX42.xml", 7},     {"FIX43.xml", 9},
+        {"FIX44.xml", 12}, {"FIX50.xml", 13}, {"FIX50SP1.xml", 14}, {"FIX50SP2.xml", 21},
     };
     std::size_t const expected_total = 1 + 1 + 7 + 9 + 12 + 13 + 14 + 21;
 

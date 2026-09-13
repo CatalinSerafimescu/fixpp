@@ -121,7 +121,7 @@ constexpr std::size_t kScratch = 2048;
 struct NosFields {
     std::string sending_time = "20240101-00:00:00";
     std::string seq_num = "1";
-    std::string appl_ext_id;  // empty => omitted (1156 is optional)
+    std::string appl_ext_id;              // empty => omitted (1156 is optional)
     std::uint16_t omit_required_tag = 0;  // 0 => omit nothing
 };
 
@@ -154,7 +154,7 @@ std::vector<std::byte> well_formed_new_order_single(NosFields const& f = {}) {
 // / 212 XmlDataLen) injected immediately AFTER 35=D so Step-0's header-order
 // check does not preempt the Step-1 type check being pinned here.
 std::vector<std::byte> new_order_single_with_length_field(std::uint16_t tag,
-                                                           std::string_view value) {
+                                                          std::string_view value) {
     NosFields f;
     std::string body = "35=D\x01";
     body += std::to_string(tag) + "=" + std::string{value} + "\x01";
@@ -177,7 +177,8 @@ struct FixtHeaderValidateTest : ::testing::TestWithParam<char const*> {};
 // feed a well-formed NewOrderSingle carrying standard header+trailer.
 // GREEN: accepted. (RED, pre-fix: rejected wire_unexpected_tag, ref_tag==8 —
 // see the mechanism pin tests/wire/validator_production_table_view_test.cpp's
-// `UnknownMsgTypeRejectsLikePreHoistFieldValidFor` for the identical "empty valid-tag view -> first field is 8" proof.)
+// `UnknownMsgTypeRejectsLikePreHoistFieldValidFor` for the identical "empty valid-tag view -> first
+// field is 8" proof.)
 TEST_P(FixtHeaderValidateTest, WellFormedApplicationFrameAccepted) {
     std::pmr::monotonic_buffer_resource mr;
     auto dict = load_real_dict(GetParam(), &mr);
@@ -232,9 +233,15 @@ TEST_P(FixtHeaderValidateTest, OmittedHeaderFieldNotRejectedByValidate) {
     auto dict = load_real_dict(GetParam(), &mr);
     dictionary_driven_validator v{dict.as_table_view()};
 
-    std::string body = "35=D\x01"
-                        "34=1\x01" "49=SENDER\x01" "56=TARGET\x01"  // NOTE: 52 omitted
-                        "11=CLORD1\x01" "54=1\x01" "60=20240101-00:00:00\x01" "40=2\x01";
+    std::string body =
+        "35=D\x01"
+        "34=1\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01"  // NOTE: 52 omitted
+        "11=CLORD1\x01"
+        "54=1\x01"
+        "60=20240101-00:00:00\x01"
+        "40=2\x01";
     auto buf = make_frame(body);
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
@@ -365,8 +372,7 @@ TEST_P(FixtHeaderValidateTest, MalformedSignatureLengthRejected) {
                                                    std::pmr::null_memory_resource()};
     std::uint16_t ref_tag = 0;
     auto result = v.validate(mv, &scratch_mr, &ref_tag);
-    ASSERT_FALSE(result.has_value())
-        << GetParam() << ": SignatureLength(93)=abc must be rejected";
+    ASSERT_FALSE(result.has_value()) << GetParam() << ": SignatureLength(93)=abc must be rejected";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range);
     EXPECT_EQ(ref_tag, std::uint16_t{93});
 }
@@ -410,14 +416,13 @@ TEST_P(FixtHeaderValidateTest, WellFormedLengthFieldsStillAccepted) {
         std::uint16_t ref_tag = 0;
         auto result = v.validate(mv, &scratch_mr, &ref_tag);
         EXPECT_TRUE(result.has_value())
-            << GetParam() << ": tag " << tag
-            << "=5 (well-formed LENGTH) must be accepted; err="
+            << GetParam() << ": tag " << tag << "=5 (well-formed LENGTH) must be accepted; err="
             << (result.has_value() ? 0 : static_cast<int>(result.error()))
             << " ref_tag=" << ref_tag;
     }
 }
 
 INSTANTIATE_TEST_SUITE_P(Fix50Family, FixtHeaderValidateTest,
-                        ::testing::Values("FIX50.xml", "FIX50SP1.xml", "FIX50SP2.xml"));
+                         ::testing::Values("FIX50.xml", "FIX50SP1.xml", "FIX50SP2.xml"));
 
 }  // namespace

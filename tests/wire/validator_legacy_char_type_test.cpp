@@ -45,12 +45,6 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <memory_resource>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/field_type.hpp>
@@ -58,6 +52,11 @@
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
+#include <memory_resource>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/frame_view_factory.hpp"
 
@@ -176,8 +175,7 @@ Outcome run(char const* dict_file, std::string_view begin_string) {
 TEST(LegacyCharType, Fix41HeartbeatAccepted) {
     auto const outcome = run("FIX41.xml", "FIX.4.1");
     EXPECT_TRUE(outcome.accepted) << "FIX41 Heartbeat must be accepted; got reject error="
-                                  << static_cast<int>(outcome.err)
-                                  << " ref_tag=" << outcome.ref_tag
+                                  << static_cast<int>(outcome.err) << " ref_tag=" << outcome.ref_tag
                                   << " (pre-T044 this rejected on BeginString(8), "
                                      "wire_field_value_out_of_range, ref_tag=8)";
 }

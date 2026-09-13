@@ -27,11 +27,10 @@
 
 #include <array>
 #include <cstddef>
-#include <string>
-#include <string_view>
-
 #include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/tls/peer_identity.hpp>
+#include <string>
+#include <string_view>
 
 namespace {
 
@@ -59,7 +58,7 @@ static fixpp::session::CompIdAuthorizationPolicy make_policy() {
 
 void BM_CompidAuthorize_HitCN(benchmark::State& state) {
     const auto policy = make_policy();
-    const auto pid    = make_cn_pid();
+    const auto pid = make_cn_pid();
 
     for (auto _ : state) {
         auto result = policy.authorize(pid, "ACME01");

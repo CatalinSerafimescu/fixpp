@@ -785,7 +785,6 @@ TEST(InflightExclusivity, PlaintextConnectRetryableAfterFailedAttempt) {
     ioc.run_for(200ms);
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Cells 10-11: close() DURING DNS RESOLUTION must not resurrect the Transport
 // (#347).
@@ -1643,8 +1642,8 @@ TEST(InflightExclusivity, DestroyWithNoDrainDoesNotFaultInFlightGuard) {
             },
             asio::detached);
 
-        ioc.poll();          // start the coroutine; it suspends in async_resolve
-        client.reset();      // D-4.0: destroy the Transport with the op in flight
+        ioc.poll();      // start the coroutine; it suspends in async_resolve
+        client.reset();  // D-4.0: destroy the Transport with the op in flight
         asio::error_code ig;
         acc.close(ig);
         // ioc destructor here destroys the suspended frame -> ~inflight_flag_guard

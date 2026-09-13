@@ -59,7 +59,8 @@ TEST_F(ThornyRejectFixture, Qfj557_GenerateRejectAdvancesInboundSeqnumOverRun) {
     }
     EXPECT_GE(reject_count, 2U)
         << "two consecutive invalid app messages must each produce a Reject(35=3); "
-           "got " << reject_count << " — quickfix-j#557 seqnum-advancement gap";
+           "got "
+        << reject_count << " — quickfix-j#557 seqnum-advancement gap";
 
     // The inbound counter must have advanced past BOTH messages.
     EXPECT_EQ(next_inbound(s), 4U)

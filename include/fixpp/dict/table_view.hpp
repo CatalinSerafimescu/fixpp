@@ -708,8 +708,9 @@ public:
         // empty string, were it ever inserted) permanently clears the
         // fast-path flag so the byte-exact `codes` fallback drives the check.
         if (value.size() == 1) {
-            domain.single_char_mask[static_cast<std::size_t>(static_cast<unsigned char>(value[0])) >>
-                                    6U] |=
+            domain
+                .single_char_mask[static_cast<std::size_t>(static_cast<unsigned char>(value[0])) >>
+                                  6U] |=
                 (std::uint64_t{1}
                  << (static_cast<std::size_t>(static_cast<unsigned char>(value[0])) & 63U));
         } else {

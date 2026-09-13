@@ -126,10 +126,12 @@ struct DictOracle {
 //
 // NOLINTNEXTLINE(misc-no-recursion) — recursive XML walk by design, mirrors
 // (but shares no code with) LoaderState::expand_field_list.
-inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std::uint16_t> const& tag_by_name,
-                       std::unordered_map<std::string, pugi::xml_node> const& components_by_name,
-                       std::string const& msg_type, std::vector<std::uint16_t>& group_path, bool component_and,
-                       bool group_scope_and, std::set<std::uint16_t>& msg_required, DictOracle& oracle) {
+inline void qfix_walk(pugi::xml_node parent,
+                      std::unordered_map<std::string, std::uint16_t> const& tag_by_name,
+                      std::unordered_map<std::string, pugi::xml_node> const& components_by_name,
+                      std::string const& msg_type, std::vector<std::uint16_t>& group_path,
+                      bool component_and, bool group_scope_and,
+                      std::set<std::uint16_t>& msg_required, DictOracle& oracle) {
     for (auto const& child : parent.children()) {
         std::string_view const name{child.name()};
         if (name == "field") {
@@ -140,14 +142,15 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
                                          "\"> not declared in <fields> block");
             }
             auto const tag = it->second;
-            bool const own_req = std::string_view{child.attribute("required").as_string("N")} == "Y";
+            bool const own_req =
+                std::string_view{child.attribute("required").as_string("N")} == "Y";
             bool const msg_final = own_req && component_and && group_path.empty();
             if (msg_final || is_header_trailer_tag(tag)) {
                 msg_required.insert(tag);
             }
             if (!group_path.empty()) {
-                GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
-                                    group_path.back()};
+                GroupContextKey key{
+                    msg_type, {group_path.begin(), group_path.end() - 1}, group_path.back()};
                 oracle.group_members[key].insert(tag);
                 oracle.group_delims.try_emplace(key, tag);
                 if (own_req && group_scope_and) {
@@ -168,14 +171,15 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
             // carries the reachability restriction; independent of own_req/
             // group_path/members, matching C1's predicate exactly).
             oracle.group_tags.insert(no_tag);
-            bool const own_req = std::string_view{child.attribute("required").as_string("N")} == "Y";
+            bool const own_req =
+                std::string_view{child.attribute("required").as_string("N")} == "Y";
             bool const msg_final = own_req && component_and && group_path.empty();
             if (msg_final || is_header_trailer_tag(no_tag)) {
                 msg_required.insert(no_tag);
             }
             if (!group_path.empty()) {
-                GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
-                                    group_path.back()};
+                GroupContextKey key{
+                    msg_type, {group_path.begin(), group_path.end() - 1}, group_path.back()};
                 oracle.group_members[key].insert(no_tag);
                 oracle.group_delims.try_emplace(key, no_tag);
                 if (own_req && group_scope_and) {
@@ -195,7 +199,8 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
                 throw std::runtime_error("required_scope_oracle: <component name=\"" + cname +
                                          "\"> not defined in <components> block");
             }
-            bool const comp_req = std::string_view{child.attribute("required").as_string("N")} == "Y";
+            bool const comp_req =
+                std::string_view{child.attribute("required").as_string("N")} == "Y";
             qfix_walk(cit->second, tag_by_name, components_by_name, msg_type, group_path,
                       component_and && comp_req, group_scope_and && comp_req, msg_required, oracle);
         }
@@ -216,7 +221,7 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
 // corroborate; the header/trailer carve-out itself stays pinned by Contract
 // 1's census only ([[feedback_parity_corpus_row_needs_a_surface_the_reference_engine_has]]).
 inline DictOracle build_quickfix_oracle(std::filesystem::path const& xml_path,
-                                         bool include_header_trailer = true) {
+                                        bool include_header_trailer = true) {
     pugi::xml_document doc;
     auto const result = doc.load_file(xml_path.c_str());
     if (!result) {
@@ -262,10 +267,12 @@ inline DictOracle build_quickfix_oracle(std::filesystem::path const& xml_path,
 // separate reset-at-group-boundary accumulator above (Orchestra twin).
 //
 // NOLINTNEXTLINE(misc-no-recursion)
-inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, pugi::xml_node> const& components_by_id,
-                       std::unordered_map<std::uint32_t, pugi::xml_node> const& groups_by_id,
-                       std::string const& msg_type, std::vector<std::uint16_t>& group_path, bool component_and,
-                       bool group_scope_and, std::set<std::uint16_t>& msg_required, DictOracle& oracle) {
+inline void orch_walk(pugi::xml_node parent,
+                      std::unordered_map<std::uint32_t, pugi::xml_node> const& components_by_id,
+                      std::unordered_map<std::uint32_t, pugi::xml_node> const& groups_by_id,
+                      std::string const& msg_type, std::vector<std::uint16_t>& group_path,
+                      bool component_and, bool group_scope_and,
+                      std::set<std::uint16_t>& msg_required, DictOracle& oracle) {
     for (auto const& child : parent.children()) {
         std::string_view const name{child.name()};
         if (name == "fixr:fieldRef") {
@@ -277,8 +284,8 @@ inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, p
                 msg_required.insert(tag);
             }
             if (!group_path.empty()) {
-                GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
-                                    group_path.back()};
+                GroupContextKey key{
+                    msg_type, {group_path.begin(), group_path.end() - 1}, group_path.back()};
                 oracle.group_members[key].insert(tag);
                 oracle.group_delims.try_emplace(key, tag);
                 if (own_req && group_scope_and) {
@@ -308,8 +315,8 @@ inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, p
                 msg_required.insert(no_tag);
             }
             if (!group_path.empty()) {
-                GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
-                                    group_path.back()};
+                GroupContextKey key{
+                    msg_type, {group_path.begin(), group_path.end() - 1}, group_path.back()};
                 oracle.group_members[key].insert(no_tag);
                 oracle.group_delims.try_emplace(key, no_tag);
                 if (own_req && group_scope_and) {
@@ -327,7 +334,8 @@ inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, p
             auto const cit = components_by_id.find(cid);
             if (cit == components_by_id.end()) {
                 throw std::runtime_error("required_scope_oracle: <fixr:componentRef id=\"" +
-                                         std::to_string(cid) + "\"> not defined in <fixr:components>");
+                                         std::to_string(cid) +
+                                         "\"> not defined in <fixr:components>");
             }
             bool const comp_req =
                 std::string_view{child.attribute("presence").as_string("")} == "required";

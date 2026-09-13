@@ -98,9 +98,7 @@ field_data_type xml_type_to_data_type(std::string_view s) {
 struct ExpectedEntry {
     std::uint16_t tag;
     field_type type;
-    friend bool operator<(ExpectedEntry const& a, ExpectedEntry const& b) {
-        return a.tag < b.tag;
-    }
+    friend bool operator<(ExpectedEntry const& a, ExpectedEntry const& b) { return a.tag < b.tag; }
     friend bool operator==(ExpectedEntry const& a, ExpectedEntry const& b) {
         return a.tag == b.tag && a.type == b.type;
     }
@@ -195,13 +193,13 @@ TEST(FixtHeaderMerge, BakedTableEqualsFixt11HeaderTrailerCensusExactSet) {
 // SC-003 false-reject of routed FIXT traffic).
 TEST(FixtHeaderMerge, NoHopsGroupTagsPresentFlatWithCorrectTypes) {
     auto const actual = baked_framing_set();
-    EXPECT_TRUE(actual.contains(ExpectedEntry{627, field_type::Int}))   // NoHops
+    EXPECT_TRUE(actual.contains(ExpectedEntry{627, field_type::Int}))  // NoHops
         << "627 NoHops must be present (Int)";
     EXPECT_TRUE(actual.contains(ExpectedEntry{628, field_type::String}))  // HopCompID
         << "628 HopCompID must be present (String)";
     EXPECT_TRUE(actual.contains(ExpectedEntry{629, field_type::String}))  // HopSendingTime
         << "629 HopSendingTime must be present (String)";
-    EXPECT_TRUE(actual.contains(ExpectedEntry{630, field_type::Int}))   // HopRefID
+    EXPECT_TRUE(actual.contains(ExpectedEntry{630, field_type::Int}))  // HopRefID
         << "630 HopRefID must be present (Int)";
 }
 
@@ -219,8 +217,8 @@ TEST_P(FixtHeaderContainmentTest, FramingTagsAcceptedByValidatorNeverLeakIntoSha
     // (verified: empty <header/>, and none of {8,9,10,34,49,52,56,1128,1156}
     // appear as scalar message fields of D in any FIX50/FIX50SP1/FIX50SP2
     // dictionary) — "not genuinely message-declared" per the contract.
-    constexpr std::array<std::uint16_t, 9> kCuratedFramingTags{8,   9,    10,  34,  49,
-                                                               52,  56,   1128, 1156};
+    constexpr std::array<std::uint16_t, 9> kCuratedFramingTags{8,  9,  10,   34,  49,
+                                                               52, 56, 1128, 1156};
     constexpr std::string_view kMsgType = "D";
 
     for (auto const tag : kCuratedFramingTags) {
@@ -237,6 +235,6 @@ TEST_P(FixtHeaderContainmentTest, FramingTagsAcceptedByValidatorNeverLeakIntoSha
 }
 
 INSTANTIATE_TEST_SUITE_P(Fix50Family, FixtHeaderContainmentTest,
-                        ::testing::Values("FIX50.xml", "FIX50SP1.xml", "FIX50SP2.xml"));
+                         ::testing::Values("FIX50.xml", "FIX50SP1.xml", "FIX50SP2.xml"));
 
 }  // namespace

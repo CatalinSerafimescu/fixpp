@@ -155,8 +155,8 @@ TEST(ExemplarRoundtripE, BuildMatchesGoldenAndRoundTripsThreeLevel) {
     std::vector<GoldenFrame> expected = parse_golden(golden_text);
     ASSERT_EQ(expected.size(), 1U);
 
-    std::vector<GoldenFrame> actual{GoldenFrame{
-        '>', std::vector<std::byte>{body.begin(), body.end()}}};
+    std::vector<GoldenFrame> actual{
+        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 
@@ -306,8 +306,8 @@ TEST(ExemplarRoundtrip9, BuildMatchesGoldenAndRoundTrips) {
     std::vector<GoldenFrame> expected = parse_golden(golden_text);
     ASSERT_EQ(expected.size(), 1U);
 
-    std::vector<GoldenFrame> actual{GoldenFrame{
-        '>', std::vector<std::byte>{body.begin(), body.end()}}};
+    std::vector<GoldenFrame> actual{
+        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 
@@ -376,7 +376,8 @@ struct BuiltAllocationReportParams {
     AllocationReportParams params;
 };
 
-BuiltAllocationReportParams build_allocation_report_params_from_seed(std::pmr::memory_resource* mr) {
+BuiltAllocationReportParams build_allocation_report_params_from_seed(
+    std::pmr::memory_resource* mr) {
     const auto& seed = fixpp_test_support::kAllocationReportSeed;
 
     BuiltAllocationReportParams built;
@@ -414,8 +415,7 @@ TEST(ExemplarRoundtripAS, BuildMatchesGoldenAndRoundTripsTwoLevel) {
     BuiltAllocationReportParams built = build_allocation_report_params_from_seed(&arena);
 
     std::array<std::byte, 2048> out{};
-    auto built_r =
-        fixpp::session::build_allocation_report(std::span<std::byte>{out}, built.params);
+    auto built_r = fixpp::session::build_allocation_report(std::span<std::byte>{out}, built.params);
     ASSERT_TRUE(built_r.has_value()) << "build_allocation_report failed";
     std::span<const std::byte> body = *built_r;
 
@@ -426,8 +426,8 @@ TEST(ExemplarRoundtripAS, BuildMatchesGoldenAndRoundTripsTwoLevel) {
     std::vector<GoldenFrame> expected = parse_golden(golden_text);
     ASSERT_EQ(expected.size(), 1U);
 
-    std::vector<GoldenFrame> actual{GoldenFrame{
-        '>', std::vector<std::byte>{body.begin(), body.end()}}};
+    std::vector<GoldenFrame> actual{
+        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 
@@ -525,8 +525,7 @@ TEST(ExemplarRoundtripAS, ByteExactCanonicalDecimal) {
     BuiltAllocationReportParams built = build_allocation_report_params_from_seed(&arena);
 
     std::array<std::byte, 2048> out{};
-    auto built_r =
-        fixpp::session::build_allocation_report(std::span<std::byte>{out}, built.params);
+    auto built_r = fixpp::session::build_allocation_report(std::span<std::byte>{out}, built.params);
     ASSERT_TRUE(built_r.has_value()) << "build_allocation_report failed";
 
     std::string body = bytes_to_string(*built_r);
@@ -546,8 +545,8 @@ TEST(ExemplarRoundtripD, BuildMatchesGoldenAndRoundTrips) {
 
     std::array<std::byte, 1024> out{};
     auto built_r = fixpp::session::build_new_order_single(std::span<std::byte>{out}, seed.cl_ord_id,
-                                                           seed.symbol, seed.side, order_qty, price,
-                                                           seed.transact_time);
+                                                          seed.symbol, seed.side, order_qty, price,
+                                                          seed.transact_time);
     ASSERT_TRUE(built_r.has_value()) << "build_new_order_single failed";
     std::span<const std::byte> body = *built_r;
 
@@ -557,8 +556,8 @@ TEST(ExemplarRoundtripD, BuildMatchesGoldenAndRoundTrips) {
     std::vector<GoldenFrame> expected = parse_golden(golden_text);
     ASSERT_EQ(expected.size(), 1U);
 
-    std::vector<GoldenFrame> actual{GoldenFrame{
-        '>', std::vector<std::byte>{body.begin(), body.end()}}};
+    std::vector<GoldenFrame> actual{
+        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 
@@ -610,8 +609,8 @@ TEST(ExemplarRoundtripD, ByteExactCanonicalDecimal) {
 
     std::array<std::byte, 1024> out{};
     auto built_r = fixpp::session::build_new_order_single(std::span<std::byte>{out}, seed.cl_ord_id,
-                                                           seed.symbol, seed.side, order_qty, price,
-                                                           seed.transact_time);
+                                                          seed.symbol, seed.side, order_qty, price,
+                                                          seed.transact_time);
     ASSERT_TRUE(built_r.has_value()) << "build_new_order_single failed";
 
     std::string body = bytes_to_string(*built_r);
@@ -643,8 +642,8 @@ TEST(ExemplarRoundtrip8, BuildMatchesGoldenAndRoundTrips) {
     std::vector<GoldenFrame> expected = parse_golden(golden_text);
     ASSERT_EQ(expected.size(), 1U);
 
-    std::vector<GoldenFrame> actual{GoldenFrame{
-        '>', std::vector<std::byte>{body.begin(), body.end()}}};
+    std::vector<GoldenFrame> actual{
+        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 
@@ -730,8 +729,7 @@ TEST(ExemplarRoundtripAS, OrderMutationDetectsSubEntryReorder) {
     BuiltAllocationReportParams built = build_allocation_report_params_from_seed(&arena);
 
     std::array<std::byte, 2048> out{};
-    auto built_r =
-        fixpp::session::build_allocation_report(std::span<std::byte>{out}, built.params);
+    auto built_r = fixpp::session::build_allocation_report(std::span<std::byte>{out}, built.params);
     ASSERT_TRUE(built_r.has_value()) << "build_allocation_report failed";
     std::span<const std::byte> body = *built_r;
 
@@ -748,15 +746,16 @@ TEST(ExemplarRoundtripAS, OrderMutationDetectsSubEntryReorder) {
     const std::string correct_order = "523=SUB1\\x01803=1\\x01";
     const std::string swapped_order = "803=1\\x01523=SUB1\\x01";
     auto pos = golden_text.find(correct_order);
-    ASSERT_NE(pos, std::string::npos) << "golden text does not contain the expected sub-entry order";
+    ASSERT_NE(pos, std::string::npos)
+        << "golden text does not contain the expected sub-entry order";
     std::string mutated_golden = golden_text;
     mutated_golden.replace(pos, correct_order.size(), swapped_order);
 
     std::vector<GoldenFrame> mutated_expected = parse_golden(mutated_golden);
     ASSERT_EQ(mutated_expected.size(), 1U);
 
-    std::vector<GoldenFrame> actual{GoldenFrame{
-        '>', std::vector<std::byte>{body.begin(), body.end()}}};
+    std::vector<GoldenFrame> actual{
+        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(mutated_expected, actual, shape_oracle_profile());
     EXPECT_FALSE(static_cast<bool>(diff))
         << "golden diff should have detected the sub-entry reorder mutation but reported match";

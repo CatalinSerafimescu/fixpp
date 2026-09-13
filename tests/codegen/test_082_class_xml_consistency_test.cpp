@@ -23,8 +23,8 @@
 //
 // ── CLASS-SIDE EXTRACTION RULE ───────────────────────────────────────────────
 // Ported from the version-agnostic rule documented at
-// `vlatest_manifest_class_consistency_test.cpp`'s "CLASS-SIDE EXTRACTION RULE", and re-verified empirically
-// against the real generated `v42` header before this test was written:
+// `vlatest_manifest_class_consistency_test.cpp`'s "CLASS-SIDE EXTRACTION RULE", and re-verified
+// empirically against the real generated `v42` header before this test was written:
 //   - MESSAGE class:   `^class <Name> {$`      (0-indent) … `^};$`
 //   - GROUP flyweight: `^    class G_<N> {$`   (4-indent) … `^    };$`,
 //                      in `namespace fixpp::<ns>::groups`.
@@ -292,7 +292,7 @@ struct ClassSide {
 // The union, over every context of `no_tag`, of that context's DIRECT members.
 // This is what a version-wide-shared flyweight must carry (see banner).
 [[nodiscard]] std::set<std::uint16_t> union_direct_members(DictOracle const& o,
-                                                            std::uint16_t no_tag) {
+                                                           std::uint16_t no_tag) {
     std::set<std::uint16_t> out;
     for (auto const& [key, members] : o.group_members) {
         if (key.no_tag == no_tag) {
@@ -305,7 +305,7 @@ struct ClassSide {
 // Groups appearing at a message's TOP level == the contexts of that msg_type
 // whose ancestor path is empty (`GroupContextKey.path` excludes no_tag itself).
 [[nodiscard]] std::set<std::uint16_t> top_level_groups(DictOracle const& o,
-                                                        std::string const& msg_type) {
+                                                       std::string const& msg_type) {
     std::set<std::uint16_t> out;
     for (auto const& [key, members] : o.group_members) {
         if (key.msg_type == msg_type && key.path.empty()) {
@@ -357,8 +357,9 @@ TEST(Class082XmlConsistency, FlyweightSetEqualsStructuralGroupTags) {
         // Population pins FIRST — a scanner that parsed nothing must FAIL here
         // rather than agree with an empty structural set.
         ASSERT_EQ(cs.messages.size(), c.expect_messages)
-            << c.ns << ": parsed message-class count drifted from the pin -- re-derive, and "
-                       "suspect the extraction rule before the emitter";
+            << c.ns
+            << ": parsed message-class count drifted from the pin -- re-derive, and "
+               "suspect the extraction rule before the emitter";
         ASSERT_EQ(cs.flyweights.size(), c.expect_groups)
             << c.ns << ": parsed `class G_` flyweight count drifted from the pin";
 
@@ -367,8 +368,10 @@ TEST(Class082XmlConsistency, FlyweightSetEqualsStructuralGroupTags) {
             class_tags.insert(tag);
         }
         EXPECT_EQ(oracle.group_tags, class_tags)
-            << c.ns << ": the emitted `class G_` set must equal the raw-XML reachable group-tag "
-                       "set EXACTLY, both directions -- " << describe(oracle.group_tags, class_tags);
+            << c.ns
+            << ": the emitted `class G_` set must equal the raw-XML reachable group-tag "
+               "set EXACTLY, both directions -- "
+            << describe(oracle.group_tags, class_tags);
     }
 }
 
@@ -380,8 +383,9 @@ TEST(Class082XmlConsistency, PerMessageTopLevelGroupRefsMatchStructure) {
         auto const oracle = build_quickfix_oracle(xml_of(c));
 
         ASSERT_EQ(cs.msg_types.size(), c.expect_messages)
-            << c.ns << ": every message class must expose a `msg_type_v` -- a missing one would "
-                       "silently drop that message from this leg";
+            << c.ns
+            << ": every message class must expose a `msg_type_v` -- a missing one would "
+               "silently drop that message from this leg";
 
         std::size_t checked = 0;
         for (auto const& [name, msg_type] : cs.msg_types) {
@@ -422,7 +426,8 @@ TEST(Class082XmlConsistency, FlyweightDirectMembersEqualUnionOverContexts) {
             EXPECT_EQ(structural, direct)
                 << c.ns << " G_" << tag
                 << ": flyweight direct members must equal the UNION of this tag's per-context "
-                   "declared direct members, EXACTLY -- " << describe(structural, direct);
+                   "declared direct members, EXACTLY -- "
+                << describe(structural, direct);
             ++checked;
         }
         ASSERT_EQ(checked, c.expect_groups) << c.ns << ": not every flyweight was checked";

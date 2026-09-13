@@ -55,7 +55,7 @@ namespace {
 // Spin until fixpp_session_acceptor_bound_endpoint returns a non-zero port or
 // the deadline elapses.  Returns 0 on timeout.
 uint16_t poll_bound_port(fixpp_session_t* session,
-                          std::chrono::milliseconds deadline = std::chrono::milliseconds{3000}) {
+                         std::chrono::milliseconds deadline = std::chrono::milliseconds{3000}) {
     using clock = std::chrono::steady_clock;
     const auto until = clock::now() + deadline;
     for (;;) {
@@ -69,7 +69,7 @@ uint16_t poll_bound_port(fixpp_session_t* session,
 
 // Spin until fixpp_session_is_established returns true or the deadline elapses.
 bool poll_established(fixpp_session_t* session,
-                       std::chrono::milliseconds deadline = std::chrono::milliseconds{4000}) {
+                      std::chrono::milliseconds deadline = std::chrono::milliseconds{4000}) {
     using clock = std::chrono::steady_clock;
     const auto until = clock::now() + deadline;
     for (;;) {
@@ -86,12 +86,12 @@ bool poll_established(fixpp_session_t* session,
 // contract ([2i §10]).
 std::vector<uint8_t> make_app_payload(const char* clord_id) {
     std::string p;
-    p += "35=D\x01";                                 // MsgType = NewOrderSingle
-    p += std::string("11=") + clord_id + "\x01";    // ClOrdID
-    p += "55=TESTSYM\x01";                           // Symbol
-    p += "54=1\x01";                                 // Side = Buy
-    p += "38=100\x01";                               // OrderQty
-    p += "40=1\x01";                                 // OrdType = Market
+    p += "35=D\x01";                              // MsgType = NewOrderSingle
+    p += std::string("11=") + clord_id + "\x01";  // ClOrdID
+    p += "55=TESTSYM\x01";                        // Symbol
+    p += "54=1\x01";                              // Side = Buy
+    p += "38=100\x01";                            // OrderQty
+    p += "40=1\x01";                              // OrdType = Market
     return std::vector<uint8_t>(p.begin(), p.end());
 }
 
@@ -106,8 +106,7 @@ TEST(PublicRoundtrip, SetTcpEndpointNullHost) {
     fixpp_session_config_t* cfg = nullptr;
     ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
     ASSERT_NE(cfg, nullptr);
-    EXPECT_EQ(fixpp_session_config_set_tcp_endpoint(cfg, nullptr, 9000),
-              FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_session_config_set_tcp_endpoint(cfg, nullptr, 9000), FIXPP_ERR_NULL_HANDLE);
     fixpp_session_config_destroy(cfg);
 }
 
@@ -115,8 +114,7 @@ TEST(PublicRoundtrip, SetTcpEndpointEmptyHost) {
     fixpp_session_config_t* cfg = nullptr;
     ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
     ASSERT_NE(cfg, nullptr);
-    EXPECT_EQ(fixpp_session_config_set_tcp_endpoint(cfg, "", 9000),
-              FIXPP_ERR_CAPI_CONFIG_INVALID);
+    EXPECT_EQ(fixpp_session_config_set_tcp_endpoint(cfg, "", 9000), FIXPP_ERR_CAPI_CONFIG_INVALID);
     fixpp_session_config_destroy(cfg);
 }
 
@@ -152,10 +150,12 @@ TEST(PublicRoundtrip, SetResetSeqnumPolicyNullCfg) {
 TEST(PublicRoundtrip, SetResetSeqnumPolicyValidValues) {
     fixpp_session_config_t* cfg = nullptr;
     ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
-    EXPECT_EQ(fixpp_session_config_set_reset_seqnum_policy(cfg, FIXPP_RESET_SEQNUM_BILATERAL_STRICT),
-              FIXPP_ERR_OK);
-    EXPECT_EQ(fixpp_session_config_set_reset_seqnum_policy(cfg, FIXPP_RESET_SEQNUM_BILATERAL_LENIENT),
-              FIXPP_ERR_OK);
+    EXPECT_EQ(
+        fixpp_session_config_set_reset_seqnum_policy(cfg, FIXPP_RESET_SEQNUM_BILATERAL_STRICT),
+        FIXPP_ERR_OK);
+    EXPECT_EQ(
+        fixpp_session_config_set_reset_seqnum_policy(cfg, FIXPP_RESET_SEQNUM_BILATERAL_LENIENT),
+        FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_reset_seqnum_policy(cfg, FIXPP_RESET_SEQNUM_UNILATERAL),
               FIXPP_ERR_OK);
     fixpp_session_config_destroy(cfg);
@@ -211,9 +211,9 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
     ASSERT_EQ(fixpp_session_config_set_begin_string(acc_sc, "FIX.4.2"), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_session_config_set_role(acc_sc, FIXPP_ROLE_ACCEPTOR), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_session_config_set_heartbeat_seconds(acc_sc, 30), FIXPP_ERR_OK);
-    ASSERT_EQ(
-        fixpp_session_config_set_security(acc_sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr, nullptr),
-        FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_session_config_set_security(acc_sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr,
+                                                nullptr),
+              FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_session_config_set_reset_on_logon(acc_sc, true), FIXPP_ERR_OK);
     // E1 witness step 1: pass dictionary, then destroy handle
     ASSERT_EQ(fixpp_session_config_set_dictionary(acc_sc, acc_dict), FIXPP_ERR_OK);
@@ -240,9 +240,9 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
     // the public C-ABI and sets flags, so a future accidental app-message source
     // cannot satisfy the receipt check with the wrong message content.
     struct RecvResult {
-        std::atomic<int>  count{0};
-        std::atomic<bool> msg_type_d{false};        // tag 35 == "D"
-        std::atomic<bool> clord_id_order001{false}; // tag 11 == "ORDER-001"
+        std::atomic<int> count{0};
+        std::atomic<bool> msg_type_d{false};         // tag 35 == "D"
+        std::atomic<bool> clord_id_order001{false};  // tag 11 == "ORDER-001"
     };
     RecvResult recv_result;
     ASSERT_EQ(fixpp_session_register_callback(
@@ -250,20 +250,19 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
                   [](const fixpp_msg_t* inbound, void* ud) {
                       auto* r = static_cast<RecvResult*>(ud);
                       const char* val = nullptr;
-                      size_t      len = 0;
+                      size_t len = 0;
                       // Assert tag 35 == "D" (NewOrderSingle). Store with relaxed before
                       // the release store on count so flags are visible after count is seen.
                       if (fixpp_msg_get_msg_type(inbound, &val, &len) == FIXPP_ERR_OK) {
-                          r->msg_type_d.store(
-                              val != nullptr && len == 1 && val[0] == 'D',
-                              std::memory_order_relaxed);
+                          r->msg_type_d.store(val != nullptr && len == 1 && val[0] == 'D',
+                                              std::memory_order_relaxed);
                       }
                       // Assert tag 11 == "ORDER-001" (ClOrdID from make_app_payload)
-                      val = nullptr; len = 0;
+                      val = nullptr;
+                      len = 0;
                       if (fixpp_msg_get_string(inbound, 11, &val, &len) == FIXPP_ERR_OK) {
                           r->clord_id_order001.store(
-                              val != nullptr &&
-                              std::string_view(val, len) == "ORDER-001",
+                              val != nullptr && std::string_view(val, len) == "ORDER-001",
                               std::memory_order_relaxed);
                       }
                       // Release store on count LAST: the poll's acquire load on count
@@ -297,9 +296,9 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
     ASSERT_EQ(fixpp_session_config_set_begin_string(ini_sc, "FIX.4.2"), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_session_config_set_role(ini_sc, FIXPP_ROLE_INITIATOR), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_session_config_set_heartbeat_seconds(ini_sc, 30), FIXPP_ERR_OK);
-    ASSERT_EQ(
-        fixpp_session_config_set_security(ini_sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr, nullptr),
-        FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_session_config_set_security(ini_sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr,
+                                                nullptr),
+              FIXPP_ERR_OK);
     // Both sides reset seqnums on logon (141=Y) — the clean fresh-pair case (T011).
     ASSERT_EQ(fixpp_session_config_set_reset_on_logon(ini_sc, true), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_session_config_set_dictionary(ini_sc, ini_dict), FIXPP_ERR_OK);

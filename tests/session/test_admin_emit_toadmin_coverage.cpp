@@ -828,13 +828,13 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
     std::array<std::byte, 512> expected_buf{};
     const seqnum_t rj_seq = 2;   // peek_outbound=2 after Logon (seq=1)
     const seqnum_t ref_seq = 2;  // fed "D" frame was at seq=2
-    auto expected_r = fixpp::session::build_reject(
-        std::span<std::byte>{expected_buf.data(), expected_buf.size()},
-        rj_seq, "ISLD", "TW", ref_seq,
-        0,     // RefTagID: n/a for MsgType/veto rejection
-        "D",   // RefMsgType: the fed frame's 35= value
-        3,     // SessionRejectReason = 3 (unknown msg type)
-        "FIX.4.2", kGoodSendingTime);
+    auto expected_r =
+        fixpp::session::build_reject(std::span<std::byte>{expected_buf.data(), expected_buf.size()},
+                                     rj_seq, "ISLD", "TW", ref_seq,
+                                     0,    // RefTagID: n/a for MsgType/veto rejection
+                                     "D",  // RefMsgType: the fed frame's 35= value
+                                     3,    // SessionRejectReason = 3 (unknown msg type)
+                                     "FIX.4.2", kGoodSendingTime);
     ASSERT_TRUE(expected_r.has_value())
         << "build_reject oracle must succeed (fixed args; buffer large enough)";
 
@@ -853,8 +853,8 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
     EXPECT_EQ(captured_reject.size(), expected_bytes.size())
         << "SC-005: captured Reject size must equal builder output size";
     if (captured_reject.size() == expected_bytes.size()) {
-        EXPECT_EQ(std::memcmp(captured_reject.data(), expected_bytes.data(),
-                              captured_reject.size()), 0)
+        EXPECT_EQ(
+            std::memcmp(captured_reject.data(), expected_bytes.data(), captured_reject.size()), 0)
             << "SC-005/FR-006: no-app Reject frame must be byte-for-byte identical to "
                "build_reject() output — the 036 fire_to_admin_ wiring must not mutate "
                "the no-app wire path (fire_to_admin_'s null-app short-circuit)";
@@ -872,10 +872,11 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
 //   Result: Logout(35=5) must be byte-for-byte identical to build_logout() output.
 //
 // The text "SendingTime(52) accuracy" is the static literal from the stale-time
-// branch (Guard-3's stale-SendingTime literal). All other args are deterministic with the fixed clock.
-// Seqnum: our outbound Logon used seq=1; Guard-3 Logout peek_outbound()==2.
+// branch (Guard-3's stale-SendingTime literal). All other args are deterministic with the fixed
+// clock. Seqnum: our outbound Logon used seq=1; Guard-3 Logout peek_outbound()==2.
 //
-// Anchors: spec.md SC-005/FR-006; fire_to_admin_'s null-app short-circuit / Guard-3's stale-time literal; FQ-2 triage.
+// Anchors: spec.md SC-005/FR-006; fire_to_admin_'s null-app short-circuit / Guard-3's stale-time
+// literal; FQ-2 triage.
 // ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitNoAppCoverageTest, Logout_Guard3_NoApp_ByteIdentical) {
@@ -907,8 +908,7 @@ TEST_F(AdminEmitNoAppCoverageTest, Logout_Guard3_NoApp_ByteIdentical) {
     std::array<std::byte, 256> expected_buf{};
     const seqnum_t lo_seq = 2;
     auto expected_r = fixpp::session::build_logout(
-        std::span<std::byte>{expected_buf.data(), expected_buf.size()},
-        lo_seq, "ISLD", "TW",
+        std::span<std::byte>{expected_buf.data(), expected_buf.size()}, lo_seq, "ISLD", "TW",
         "SendingTime(52) accuracy",  // text from Guard-3's stale-time literal
         "FIX.4.2", kGoodSendingTime);
     ASSERT_TRUE(expected_r.has_value())
@@ -928,8 +928,8 @@ TEST_F(AdminEmitNoAppCoverageTest, Logout_Guard3_NoApp_ByteIdentical) {
     EXPECT_EQ(captured_logout.size(), expected_bytes.size())
         << "SC-005: captured Guard-3 Logout size must equal builder output size";
     if (captured_logout.size() == expected_bytes.size()) {
-        EXPECT_EQ(std::memcmp(captured_logout.data(), expected_bytes.data(),
-                              captured_logout.size()), 0)
+        EXPECT_EQ(
+            std::memcmp(captured_logout.data(), expected_bytes.data(), captured_logout.size()), 0)
             << "SC-005/FR-006: no-app Guard-3 Logout must be byte-for-byte identical to "
                "build_logout() output — fire_to_admin_'s null-app short-circuit must be a no-op "
                "on the no-app path";
@@ -995,8 +995,8 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
 // T007 — Reject_SequenceResetVeto
 //
 // Scenario: acceptor Active; fromAdmin_rejects=true; feed SequenceReset(35=4)
-//   Reset-mode (123 absent) → fromAdmin veto → Reject (on_inbound_frame's SeqReset-veto arm, reason=3).
-//   Session survives (best-effort site: co_return ok after emit attempt).
+//   Reset-mode (123 absent) → fromAdmin veto → Reject (on_inbound_frame's SeqReset-veto arm,
+//   reason=3). Session survives (best-effort site: co_return ok after emit attempt).
 // Pre-036: fire_to_admin_ NOT called → toAdmin_delta==0 → RED.
 // Post-036: fire_to_admin_ wired in `if (assign_r)` block → delta==1 → GREEN.
 //
@@ -1004,8 +1004,8 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
 //   (ValueIsIncorrect). This distinguishes T007 (fromAdmin veto)
 //   from T012 (NewSeqNo too-low, 373=5).
 //
-// Anchors: spec.md FR-001/FR-002; on_inbound_frame's SeqReset-veto arm; plan.md Decision-1 SeqReset-veto.
-// ════════════════════════════════════════════════════════════════════════════
+// Anchors: spec.md FR-001/FR-002; on_inbound_frame's SeqReset-veto arm; plan.md Decision-1
+// SeqReset-veto. ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
     app->fromAdmin_rejects = true;  // veto on the SequenceReset fromAdmin call.
@@ -1216,8 +1216,8 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
 // Post-036: fire_to_admin_ wired inside `if (assign_r)` block →
 //           toAdmin_delta==2 → GREEN.
 //
-// Anchors: spec.md FR-001/FR-002; on_inbound_frame's Logout-veto arm; plan.md Decision-1 Logout-veto.
-// ════════════════════════════════════════════════════════════════════════════
+// Anchors: spec.md FR-001/FR-002; on_inbound_frame's Logout-veto arm; plan.md Decision-1
+// Logout-veto. ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
     app->fromAdmin_rejects = true;  // veto on inbound Logout.
@@ -1279,8 +1279,8 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
 // Discriminator: assert 373=5 (ValueIsIncorrect) — distinguishes this from
 //   T007 which emits 373=3 (fromAdmin veto path).
 //
-// Anchors: spec.md FR-001/FR-002; apply_inbound_sequence_reset's too-low arm; plan.md Decision-1 SeqReset-too-low.
-// ════════════════════════════════════════════════════════════════════════════
+// Anchors: spec.md FR-001/FR-002; apply_inbound_sequence_reset's too-low arm; plan.md Decision-1
+// SeqReset-too-low. ════════════════════════════════════════════════════════════════════════════
 
 TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
     // CRITICAL: fromAdmin_rejects=false so fromAdmin ACCEPTS the SeqReset.
@@ -1420,7 +1420,8 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
 //
 // The 036 site emit_session_reject_ emits 35=3.
 // Throw on 35=3 → C1 arm → unexpected(app_callback_threw) + Disconnected.
-// Anchors: spec.md FR-003; plan.md ARM-1; on_inbound_frame's fromAdmin-veto Reject site → emit_session_reject_.
+// Anchors: spec.md FR-003; plan.md ARM-1; on_inbound_frame's fromAdmin-veto Reject site →
+// emit_session_reject_.
 
 TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto_Throw) {
     app->fromAdmin_rejects = true;

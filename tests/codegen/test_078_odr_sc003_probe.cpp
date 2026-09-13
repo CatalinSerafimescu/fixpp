@@ -5,7 +5,7 @@
 // binary + nm check, wired below in CMakeLists.txt.
 #include <gtest/gtest.h>
 
-#include "test_078_odr_mock/msg_a.validator.inl" // force-inline validate_MsgA (leg i)
+#include "test_078_odr_mock/msg_a.validator.inl"  // force-inline validate_MsgA (leg i)
 #include "test_078_odr_mock/msg_b.hpp"
 
 namespace test078_mock {
@@ -32,4 +32,4 @@ TEST(Test078OdrSc003Probe, BothLibsLinkWithNoDuplicateSymbol) {
     EXPECT_TRUE(validate_MsgB(MsgBArgs{{1}}));
 }
 
-} // namespace test078_mock
+}  // namespace test078_mock

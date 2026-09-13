@@ -53,16 +53,17 @@
 // backlog via NETLINK_SOCK_DIAG — Linux-only, guarded at compile time.
 #if defined(__linux__)
 #include <arpa/inet.h>
-#include <cerrno>
-#include <cstring>
-#include <fstream>
-#include <limits>
 #include <linux/inet_diag.h>
 #include <linux/netlink.h>
 #include <linux/sock_diag.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#include <fstream>
+#include <limits>
 #endif
 
 namespace {
@@ -330,7 +331,7 @@ struct connect_probe_result {
 // the counts below are computed first, and the close+drain that follows cannot
 // change them.
 connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16_t port, int probes,
-                                               std::chrono::milliseconds per_connect) {
+                                              std::chrono::milliseconds per_connect) {
     // ⚠️ reserve() is LOAD-BEARING here, not an optimisation. Every socket below
     // has an outstanding async_connect whose handler holds that socket's address,
     // and asio leaves the behaviour undefined if a socket is moved while an async
@@ -348,7 +349,8 @@ connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16
         sockets.back().async_connect(ep, [&outcome, i](asio::error_code ec) {
             if (!ec) {
                 outcome[static_cast<std::size_t>(i)] = connect_outcome::completed;
-            } else if (ec == asio::error::connection_refused || ec == asio::error::connection_reset) {
+            } else if (ec == asio::error::connection_refused ||
+                       ec == asio::error::connection_reset) {
                 outcome[static_cast<std::size_t>(i)] = connect_outcome::refused_or_reset;
             } else if (ec != asio::error::operation_aborted) {
                 outcome[static_cast<std::size_t>(i)] = connect_outcome::other_error;
@@ -364,9 +366,15 @@ connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16
     connect_probe_result result;
     for (auto o : outcome) {
         switch (o) {
-            case connect_outcome::completed: ++result.completed; break;
-            case connect_outcome::refused_or_reset: ++result.refused_or_reset; break;
-            case connect_outcome::other_error: ++result.other_error; break;
+            case connect_outcome::completed:
+                ++result.completed;
+                break;
+            case connect_outcome::refused_or_reset:
+                ++result.refused_or_reset;
+                break;
+            case connect_outcome::other_error:
+                ++result.other_error;
+                break;
             case connect_outcome::undecided_in_window:
                 ++result.undecided_in_window;
                 break;
@@ -420,8 +428,8 @@ TEST(ListenerAcceptor, CancelIsIdempotent) {
 //
 // Spawns async_accept; before any client connects, calls listener.cancel().
 // The acceptor's close() surfaces operation_aborted; the listener maps to
-// transport_accept_cancelled per [2h §6.6] `transport_accept_cancelled` row. FR-025 Option-A action (2).
-// ════════════════════════════════════════════════════════════════════════════
+// transport_accept_cancelled per [2h §6.6] `transport_accept_cancelled` row. FR-025 Option-A action
+// (2). ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, CancelCompletesInflightAcceptWithCancelled) {
     asio::io_context ioc;
     asio_listener listener{ioc.get_executor(), make_listener_cfg()};
@@ -1087,7 +1095,7 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
 
     asio::io_context client_ioc;
     const auto r_control = count_completed_connects(client_ioc, control.bound_endpoint().port,
-                                                      kProbes, kControlPerConnect);
+                                                    kProbes, kControlPerConnect);
     const auto r_low =
         count_completed_connects(client_ioc, low.bound_endpoint().port, kProbes, kPerConnect);
     const auto r_high =
@@ -1137,8 +1145,9 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
     //      Endpoint::backlog FORWARDING: a listen() that ignored the config and
     //      hardcoded some small depth still satisfies (ii), and dies here.
     EXPECT_GT(r_high.completed, r_low.completed)
-        << "backlog=" << kHighBacklog << " admitted no more connections than backlog="
-        << kLowBacklog << " (" << r_high.completed << " vs " << r_low.completed
+        << "backlog=" << kHighBacklog
+        << " admitted no more connections than backlog=" << kLowBacklog << " (" << r_high.completed
+        << " vs " << r_low.completed
         << ") — the listener is not forwarding Endpoint::backlog to listen()";
     EXPECT_EQ(r_high.other_error, 0)
         << "backlog=" << kHighBacklog << " produced " << r_high.other_error

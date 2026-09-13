@@ -83,8 +83,8 @@
 #include <vector>
 
 #include "_fixtures_/store_temp_dir.hpp"
-#include "sync/sync_test_support.hpp"
 #include "support/wait_until.hpp"
+#include "sync/sync_test_support.hpp"
 
 namespace {
 
@@ -129,8 +129,7 @@ static void hold_probe(std::thread::id) noexcept {
     // Result deliberately discarded: the bound is a safety valve, and on a miss
     // the test FAILs on the subsequent assertions rather than hanging here.
     (void)fixpp::test_support::wait_until_observed(
-        [] { return g_arm_a_release.load(std::memory_order_acquire); },
-        std::chrono::seconds{10});
+        [] { return g_arm_a_release.load(std::memory_order_acquire); }, std::chrono::seconds{10});
 }
 
 // Slow probe: brief sleep (arm (b) no-wedge cell only).
