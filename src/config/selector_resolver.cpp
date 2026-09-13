@@ -480,7 +480,7 @@ static std::shared_ptr<transport::TransportFactory> build_tls_factory(
     }
 
     // Convert unique_ptr → shared_ptr (D-6).
-    return std::shared_ptr<transport::TransportFactory>(std::move(*factory_result));
+    return {std::move(*factory_result)};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

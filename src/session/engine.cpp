@@ -364,7 +364,6 @@ namespace {
 // FirstFrameIds + scan_first_frame_ids are now defined in scan_first_frame_ids.hpp
 // (040 US2 Phase 4: moved from anonymous namespace to enable direct unit testing).
 // Bring them into scope for all callers in this TU via using declarations.
-using fixpp::session::detail::FirstFrameIds;
 using fixpp::session::detail::scan_first_frame_ids;
 
 // read_first_frame_bounded is now defined in read_first_frame_bounded.hpp

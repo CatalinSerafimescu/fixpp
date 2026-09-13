@@ -474,7 +474,7 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
             done_ = true;
             return;
         }
-        if (!fixpp::wire::accumulate_tag_digit(tag, static_cast<unsigned char>(c))) {
+        if (!fixpp::wire::accumulate_tag_digit(tag, c)) {
             done_ = true;
             return;
         }
@@ -621,12 +621,8 @@ public:
                   auto const members = static_cast<dict_t const*>(d)->group_member_tags(
                       ctx.msg_type,
                       std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
-                  for (auto const member_tag : members) {
-                      if (member_tag == tag) {
-                          return true;
-                      }
-                  }
-                  return false;
+                  return std::ranges::any_of(
+                      members, [tag](std::uint16_t const member_tag) { return member_tag == tag; });
               }},
           // 083 T057 (C-8.1): the delimiter sibling of the membership lambda,
           // resolving through the SAME opaque_dict and the SAME context key.

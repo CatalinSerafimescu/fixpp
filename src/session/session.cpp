@@ -1109,7 +1109,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // [feedback_delimiter_injection_verbatim_field_copy; FR-007; data-model E3]
     {
         auto is_invalid_cred_byte = [](unsigned char c) noexcept -> bool {
-            return c < 0x20u || c == static_cast<unsigned char>('=');
+            return c < 0x20U || c == static_cast<unsigned char>('=');
         };
         if (cfg_.username.has_value()) {
             for (unsigned char c : *cfg_.username) {
@@ -1719,6 +1719,7 @@ struct SendingTimeStamp {
         : buf(o.buf), value(buf.data(), o.value.size()) {}
     SendingTimeStamp(SendingTimeStamp&& o) noexcept
         : buf(o.buf), value(buf.data(), o.value.size()) {}
+    // NOLINTNEXTLINE(cert-oop54-cpp) -- self-assignment copies buf onto itself; safe
     SendingTimeStamp& operator=(const SendingTimeStamp& o) noexcept {
         buf = o.buf;
         value = std::string_view{buf.data(), o.value.size()};
@@ -1811,14 +1812,14 @@ struct SendingTimeStamp {
         if (i >= n || stored[i] != EQ || !tag_ok) {
             while (i < n && stored[i] != SOH) ++i;
             if (i < n) ++i;
-            return {false, 0, {}};
+            return {.ok = false, .tag = 0, .value = {}};
         }
         ++i;  // skip '='
         const std::size_t vstart = i;
         while (i < n && stored[i] != SOH) ++i;
         std::span<const std::byte> val{stored.data() + vstart, i - vstart};
         if (i < n) ++i;  // skip SOH
-        return {true, tag, val};
+        return {.ok = true, .tag = tag, .value = val};
     };
 
     // Emits PossDupFlag(43)=Y + OrigSendingTime(122)=<orig_sending_time>. Shared
@@ -2087,7 +2088,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2; const §VIII.5]
 std::optional<Session::RejectDecision> Session::validate_inbound_(
     std::span<const std::byte> frame,
-    fixpp::session::detail::FrameHeader const& hdr) const noexcept {
+    fixpp::session::detail::FrameHeader const& /*hdr*/) const noexcept {
     std::array<std::byte, kInboundParseArena> vg_buf{};
     std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
                                               ::fixpp::detail::arena_upstream()};
@@ -2113,7 +2114,7 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
     auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr, &vg_ref_tag);
     if (!val_r) {
         const int vg_reason = fixpp::wire::wire_error_to_session_reject_reason(val_r.error());
-        return RejectDecision{vg_reason, vg_ref_tag};
+        return RejectDecision{.reason = vg_reason, .ref_tag_id = vg_ref_tag};
     }
     return std::nullopt;
 }
@@ -2178,6 +2179,7 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
 // not before — at-least-once delivery (INV-H2); seqnum gate is here.
 //
 // LogoutSent / Disconnected: all inbound silently drained (defined cells).
+// NOLINTNEXTLINE(readability-function-size,hicpp-function-size)
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     std::span<const std::byte> frame) noexcept {
     // 070-fix44-closeout S-030: negotiated MaxMessageSize(383) enforcement. Once

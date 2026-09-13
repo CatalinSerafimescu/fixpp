@@ -56,7 +56,7 @@ struct group_context;
 // Trivially copyable (span + bool) — zero-alloc wire-read discipline
 // preserved.
 struct nested_slices_result {
-    std::span<group_slice const> slices{};
+    std::span<group_slice const> slices;
     bool alloc_failed = false;
 };
 static_assert(std::is_trivially_copyable_v<nested_slices_result>);
@@ -68,7 +68,7 @@ static_assert(std::is_trivially_copyable_v<nested_slices_result>);
 // top-level caller (C-ABI top-level group getter, `MessageView::group<>()`)
 // is unaffected (L-073-1, deferred).
 struct group_slices_result {
-    std::span<group_slice const> slices{};
+    std::span<group_slice const> slices;
     bool alloc_failed = false;
 };
 static_assert(std::is_trivially_copyable_v<group_slices_result>);
@@ -426,7 +426,7 @@ private:
     // group_index_/nested_cache_ below); default-empty on a table that never
     // calls it (dict-free ctors — group_member_fn_ is null there, so this
     // state is never read).
-    mutable std::string_view group_ctx_msg_type_{};
+    mutable std::string_view group_ctx_msg_type_;
     mutable std::array<std::uint16_t, kMaxGroupDepth> group_ctx_parent_path_{};
     mutable std::uint8_t group_ctx_depth_ = 0;
     std::pmr::vector<entry> entries_;

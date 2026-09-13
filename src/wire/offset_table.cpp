@@ -907,11 +907,11 @@ OffsetTable* OffsetTable::build_nested_subview(
         // never the dict-free fallback. Placement-new into arena (`mr`) memory:
         // the sub-OffsetTable is owned by the per-message arena and freed with
         // it, not heap-owned (gsl::owner not adopted in this codebase).
-        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
         // 083 T057 (C-8.1): the delimiter callback MUST be supplied here too. A
         // missed site would silently take C-8.4's dict-free fallback on nested
         // splits only -- the "context seeded lazily on ONE path leaves sibling
         // paths default" shape, invisible to any root-level test.
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
         auto* table = ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn, group_delim_fn);
         // 063 T008: seed the new sub-table's stored context VERBATIM (no
         // further push — see nested_group_slices()'s doc comment).

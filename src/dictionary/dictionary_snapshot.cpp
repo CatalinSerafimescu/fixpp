@@ -40,7 +40,7 @@ std::shared_ptr<const table_view> shared_dictionary_view(
         return nullptr;
     }
     table_view const* p = &snap->view();
-    return std::shared_ptr<const table_view>(std::move(snap), p);  // aliasing ctor
+    return {std::move(snap), p};  // aliasing ctor
 }
 
 }  // namespace fixpp::dict

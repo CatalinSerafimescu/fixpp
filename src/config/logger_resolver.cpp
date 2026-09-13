@@ -207,7 +207,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
         if (const auto* n = sink_tbl.get("max_keep_count"); n && n->is_integer()) {
             const auto v = n->as_integer()->get();
             // Gate B r1 #5: negative value wraps to UINT32_MAX; reject with out_of_range.
-            if (v < 0 || v > static_cast<long long>(std::numeric_limits<std::uint32_t>::max())) {
+            if (v < 0 || std::cmp_greater(v, std::numeric_limits<std::uint32_t>::max())) {
                 acc.add(LoadDiagnostic{
                     .key_path = kp(sink_kp, "max_keep_count"),
                     .reason = reason_class::out_of_range,
@@ -312,8 +312,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                 .key_path = kp(sink_kp, "facility"),
                 .reason = reason_class::malformed_value,
                 .location = loc_node(*n),
-                .message =
-                    "syslog facility must be a string (e.g. \"user\", \"daemon\", \"local0\")",
+                .message = R"(syslog facility must be a string (e.g. "user", "daemon", "local0"))",
             });
         }
 
@@ -466,7 +465,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                 .key_path = kp(sink_kp, "export_timeout"),
                 .reason = reason_class::malformed_value,
                 .location = loc_node(*n),
-                .message = "export_timeout must be a duration string (e.g. \"10s\", \"500ms\")",
+                .message = R"(export_timeout must be a duration string (e.g. "10s", "500ms"))",
             });
         }
 
@@ -580,7 +579,7 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
     // capacity — uint32, power of 2
     if (const auto* n = logger_tbl.get("capacity"); n && n->is_integer()) {
         const auto v = n->as_integer()->get();
-        if (v < 0 || v > static_cast<long long>(std::numeric_limits<std::uint32_t>::max())) {
+        if (v < 0 || std::cmp_greater(v, std::numeric_limits<std::uint32_t>::max())) {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "capacity"),
                 .reason = reason_class::out_of_range,
@@ -625,7 +624,7 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
             .key_path = kp(key_prefix, "on_overflow"),
             .reason = reason_class::malformed_value,
             .location = loc_node(*n),
-            .message = "on_overflow must be a string (\"drop_newest\" or \"block\")",
+            .message = R"(on_overflow must be a string ("drop_newest" or "block"))",
         });
     }
 
@@ -642,7 +641,7 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
             .key_path = kp(key_prefix, "drain_timeout"),
             .reason = reason_class::malformed_value,
             .location = loc_node(*n),
-            .message = "drain_timeout must be a duration string (e.g. \"5000ms\", \"5s\")",
+            .message = R"(drain_timeout must be a duration string (e.g. "5000ms", "5s"))",
         });
     }
 
@@ -758,6 +757,8 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
 // A non-empty accumulator → no Logger constructed, nothing opened.
 // ---------------------------------------------------------------------------
 
+// Members are moved element-wise below.
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 void construct_loggers_if_clean(PendingLoggerSet&& pending, ConfigBundle& bundle,
                                 DiagnosticAccumulator& acc) {
     // The whole-file accumulator must be empty (FR-015 / research D-7).

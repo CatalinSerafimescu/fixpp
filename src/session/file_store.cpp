@@ -706,7 +706,7 @@ struct FileStoreImpl {
 
     // ── Sentinel write ─────────────────────────────────────────────────────
 
-    bool write_sentinel(std::int64_t offset) const noexcept {
+    [[nodiscard]] bool write_sentinel(std::int64_t offset) const noexcept {
         RecordHeader hdr{};
         SentinelPayload pl{};
         pl.magic = kSentinelMagic;
@@ -740,7 +740,7 @@ struct FileStoreImpl {
 
     // ── Counter record write ───────────────────────────────────────────────
 
-    bool write_counter(std::int64_t offset, seqnum_t ni, seqnum_t no) const noexcept {
+    [[nodiscard]] bool write_counter(std::int64_t offset, seqnum_t ni, seqnum_t no) const noexcept {
         RecordHeader hdr{};
         CounterPayload pl{};
         pl.next_inbound = ni;

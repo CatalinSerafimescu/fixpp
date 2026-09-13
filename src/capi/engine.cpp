@@ -136,7 +136,6 @@ fixpp::core::expected_t<void> CapiApplication::toApp(
         case FIXPP_TOAPP_VETO:
             return std::unexpected(fixpp::core::error::app_do_not_send);
         case FIXPP_TOAPP_ERROR:
-            return std::unexpected(fixpp::core::error::app_callback_threw);
         default:
             // Out-of-range verdict is a defined C-ABI-misuse path: treat as ERROR,
             // NOT silently coerced to send. [contracts/toapp-callback.md D-8]
@@ -147,8 +146,8 @@ fixpp::core::expected_t<void> CapiApplication::toApp(
 // L-050-z witness seam: counts live EngineState instances.  Incremented in
 // EngineState ctor, decremented in EngineState dtor (both in capi_internal.hpp
 // via the extern reference).  live_state_count() is the test accessor.
-std::atomic<long> g_engine_state_live_count{
-    0};  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<long> g_engine_state_live_count{0};
 
 long live_state_count() noexcept {
     return g_engine_state_live_count.load(std::memory_order_relaxed);
@@ -177,6 +176,7 @@ fixpp_error_t fixpp_engine_create(fixpp_engine_config_t* cfg, uint16_t consumer_
 
     fixpp_engine* e = nullptr;
     try {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) -- C-ABI handle
         e = new fixpp_engine{};  // constructs state_ = make_unique<EngineState>()
         e->consumer_minor = consumer_minor;
         e->worker_threads_ = cfg->worker_threads == 0 ? 1U : cfg->worker_threads;
@@ -205,13 +205,14 @@ fixpp_error_t fixpp_engine_create(fixpp_engine_config_t* cfg, uint16_t consumer_
             if (e->state_) {
                 e->state_->work_guard_.reset();
             }
+            // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
             delete e;
         }
         return FIXPP_ERR_CAPI_CONFIG_INVALID;
     }
 
     // Consume the builder (moved logically into the engine; invalidated).
-    delete cfg;
+    delete cfg;  // NOLINT(cppcoreguidelines-owning-memory)
     *out_engine = e;
     return FIXPP_ERR_OK;
 }
@@ -284,9 +285,11 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
 // into app_->slots_ — they must survive until the process exits.
 //
 // fixpp_engine_destroy is SINGLE_THREAD ([2i §4.10]) so no lock is needed.
-static std::vector<fixpp_engine_t*>*
-    s_dead_shells =  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-    new std::vector<fixpp_engine_t*>();
+// Deliberately leaked (never deleted), and an allocation failure at static init
+// terminates -- the correct outcome for a process that cannot allocate at start.
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-owning-memory,bugprone-throwing-static-initialization,cert-err58-cpp)
+static std::vector<fixpp_engine_t*>* s_dead_shells = new std::vector<fixpp_engine_t*>();
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-owning-memory,bugprone-throwing-static-initialization,cert-err58-cpp)
 
 void fixpp_engine_destroy(fixpp_engine_t* engine) {
     if (engine == nullptr) {

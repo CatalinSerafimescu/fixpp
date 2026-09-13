@@ -118,6 +118,7 @@ fixpp::core::expected_t<void> FileSink::open() {
     // line endings ("\n") and bytes_written_ byte-exact across platforms (no
     // CRLF translation on Windows). path::string() yields a char* path for
     // std::fopen (path::c_str() is wchar_t* on Windows).
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) -- closed with std::fclose
     stream_ = std::fopen(live_path_.string().c_str(), "ab");
     if (stream_ == nullptr) {
         return std::unexpected(fixpp::core::error::log_sink_open_failed);
@@ -217,7 +218,7 @@ void FileSink::start_worker() noexcept {
     try {
         // Reset state before spawning.
         {
-            std::lock_guard<std::mutex> lk(worker_mu_);
+            std::scoped_lock lk(worker_mu_);
             worker_cmd_ = WorkerCmd::idle;
             worker_fsync_done_ = false;
         }
@@ -250,7 +251,7 @@ void FileSink::start_worker() noexcept {
 
                 // Signal completion.
                 {
-                    std::lock_guard<std::mutex> done_lk(worker_mu_);
+                    std::scoped_lock done_lk(worker_mu_);
                     worker_fsync_done_ = true;
                 }
                 worker_done_cv_.notify_one();
@@ -266,7 +267,7 @@ void FileSink::stop_worker() noexcept {
     if (!fsync_worker_.joinable()) return;
     try {
         {
-            std::lock_guard<std::mutex> lk(worker_mu_);
+            std::scoped_lock lk(worker_mu_);
             worker_cmd_ = WorkerCmd::stop;
         }
         worker_cv_.notify_one();
@@ -338,6 +339,7 @@ void FileSink::rotate() noexcept {
         }
 
         // 4. Open a fresh live file ("wb" = create/truncate, binary).
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) -- closed with std::fclose
         stream_ = std::fopen(live_path_.string().c_str(), "wb");
         if (stream_ != nullptr) {
             fd_ = stream_fd(stream_);

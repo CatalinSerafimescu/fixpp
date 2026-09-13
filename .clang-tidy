@@ -121,6 +121,11 @@ WarningsAsErrors: "*"
 # surfaced during 011-tls-policy gate-b prep.
 HeaderFilterRegex: "include/fixpp/.*|include/fix/.*"
 
+# #413: the C-ABI headers are C (no `enum class`) and byte-frozen by
+# tools/capi_freeze.sha256 (0->1 GA), so neither a fix nor an inline NOLINT can land
+# there -- both change the frozen bytes. Their diagnostics are unactionable by design.
+ExcludeHeaderFilterRegex: "include/fix/c_api(\\.h|/.*)"
+
 CheckOptions:
   - key: modernize-use-default-member-init.UseAssignment
     value: "true"

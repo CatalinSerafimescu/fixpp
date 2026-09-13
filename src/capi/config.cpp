@@ -33,6 +33,7 @@ fixpp_error_t fixpp_engine_config_create(fixpp_engine_config_t** out_cfg) {
     }
     *out_cfg = nullptr;
     try {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) -- C-ABI handle
         *out_cfg = new fixpp_engine_config{};
         return FIXPP_ERR_OK;
     } catch (...) {
@@ -60,7 +61,7 @@ fixpp_error_t fixpp_engine_config_set_realtime_clock(fixpp_engine_config_t* cfg)
 }
 
 void fixpp_engine_config_destroy(fixpp_engine_config_t* cfg) {
-    delete cfg;  // NULL-safe; never-throws (trivial members)
+    delete cfg;  // NOLINT(cppcoreguidelines-owning-memory) NULL-safe; never throws
 }
 
 // ── Session-config builder ──────────────────────────────────────────────────
@@ -71,6 +72,7 @@ fixpp_error_t fixpp_session_config_create(fixpp_session_config_t** out_cfg) {
     }
     *out_cfg = nullptr;
     try {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) -- C-ABI handle
         auto* h = new fixpp_session_config{};
         // Default in-memory store so a session is functional with no store
         // setter (v1.0 exposes none; data-model E-3 "engine defaults"). Use the
@@ -137,6 +139,8 @@ fixpp_error_t fixpp_session_config_set_role(fixpp_session_config_t* cfg, fixpp_s
         case FIXPP_ROLE_ACCEPTOR:
             cfg->cfg.role = fixpp::session::session_role::acceptor;
             return FIXPP_ERR_OK;
+        default:
+            break;
     }
     return FIXPP_ERR_CAPI_CONFIG_INVALID;  // out-of-range cast (FFI bypass)
 }
@@ -181,6 +185,8 @@ fixpp_error_t fixpp_session_config_set_security(fixpp_session_config_t* cfg,
             cfg->cfg.security_profile.k = fixpp::session::SecurityProfile::kind::insecure_plain_tcp;
 #pragma clang diagnostic pop
             return FIXPP_ERR_OK;
+        default:
+            break;
     }
     return FIXPP_ERR_CAPI_CONFIG_INVALID;  // out-of-range cast
 }
@@ -238,6 +244,8 @@ fixpp_error_t fixpp_session_config_set_reset_seqnum_policy(fixpp_session_config_
         case FIXPP_RESET_SEQNUM_UNILATERAL:
             cfg->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::unilateral;
             return FIXPP_ERR_OK;
+        default:
+            break;
     }
     return FIXPP_ERR_CAPI_CONFIG_INVALID;  // out-of-range cast (FFI bypass)
 }
@@ -271,7 +279,7 @@ fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg,
 }
 
 void fixpp_session_config_destroy(fixpp_session_config_t* cfg) {
-    delete cfg;  // NULL-safe; never-throws
+    delete cfg;  // NOLINT(cppcoreguidelines-owning-memory) NULL-safe; never throws
 }
 
 }  // extern "C"

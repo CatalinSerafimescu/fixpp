@@ -41,9 +41,9 @@ namespace fixpp::session {
 // noexcept + zero-alloc (Article XV.1). Default-constructed {} emits none of
 // 383/464/384 (FR-012 baseline). Emission logic lands per-story.
 struct logon_advertise_options {
-    std::optional<std::uint32_t> max_message_size{};            // 383, emit when set
-    bool test_message_indicator = false;                        // 464=Y when true
-    std::span<const supported_msg_type> supported_msg_types{};  // 384 group; empty ⇒ omit
+    std::optional<std::uint32_t> max_message_size;            // 383, emit when set
+    bool test_message_indicator = false;                      // 464=Y when true
+    std::span<const supported_msg_type> supported_msg_types;  // 384 group; empty ⇒ omit
 };
 
 // ── Logon (35=A) ─────────────────────────────────────────────────────────────

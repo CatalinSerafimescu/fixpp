@@ -645,8 +645,8 @@ void OrchestraLoaderState::expand_field_list(
                 delim_cap->path.pop_back();
                 if (captured != 0) {
                     delim_cap->out.push_back(detail::CapturedDelim{
-                        detail::make_group_ctx_delim(delim_cap->path, no_tag, captured),
-                        delim_cap->path});
+                        .rec = detail::make_group_ctx_delim(delim_cap->path, no_tag, captured),
+                        .full_path = delim_cap->path});
                 }
                 // 083 T036 (FR-006 / C-6.1), symmetric with xml_loader.cpp:
                 // `captured == 0` means this group emitted no first member, so

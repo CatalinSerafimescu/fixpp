@@ -86,9 +86,9 @@ GroupInstance::~GroupInstance() = default;
 
 GroupInstance::GroupInstance(GroupInstance&&) noexcept = default;
 
-GroupInstance& GroupInstance::operator=(GroupInstance&&) noexcept =
-    default;  // LCOV_EXCL_LINE — move-assign fires only on vector reallocation of GroupInstance;
-              // not exercised in current test corpus
+// Move-assign fires only on vector reallocation of GroupInstance; not exercised in
+// the current test corpus.
+GroupInstance& GroupInstance::operator=(GroupInstance&&) noexcept = default;  // LCOV_EXCL_LINE
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -96,10 +96,7 @@ GroupInstance& GroupInstance::operator=(GroupInstance&&) noexcept =
 static constexpr uint16_t kFramingTags[] = {8, 9, 34, 49, 52, 56, 10};
 
 static bool is_framing_tag(uint16_t tag) noexcept {
-    for (auto t : kFramingTags) {
-        if (t == tag) return true;
-    }
-    return false;
+    return std::ranges::any_of(kFramingTags, [tag](uint16_t t) { return t == tag; });
 }
 
 // Frame-cap for commit serialization (~3800 B, per `Session::send()`'s threshold).
@@ -155,10 +152,8 @@ static bool is_group_collision(const fixpp_msg* h,
                                const std::pmr::vector<AccumulatorEntry>& entries,
                                uint16_t tag) noexcept {
     if (h->dict_ && h->dict_->group_first_field(tag) != 0) return true;
-    for (const auto& e : entries) {
-        if (e.tag == tag && e.is_group) return true;
-    }
-    return false;
+    return std::ranges::any_of(
+        entries, [tag](const AccumulatorEntry& e) { return e.tag == tag && e.is_group; });
 }
 
 // Validate tag against the dictionary for a given msg_type and setter flavour.
@@ -304,14 +299,14 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* sessio
 
         // Construct the OutboundAccumulator over the per-message arena (owned by
         // fixpp_msg); all set_*/commit allocations carve from it (zero-global-heap).
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) -- deleted in fixpp_msg_destroy
         auto* acc = new OutboundAccumulator{h->arena_resource_.get()};
         acc->msg_type.assign(mt.data(), mt.size());
         h->accumulator = acc;
 
         *msg_out = reinterpret_cast<fixpp_msg_t*>(h);
         return FIXPP_ERR_OK;
-    } catch (
-        ...) {  // LCOV_EXCL_LINE — OOM/new-failure during arena creation; untestable in unit tests
+    } catch (...) {  // LCOV_EXCL_LINE — OOM/new-failure creating the arena; untestable
         return FIXPP_ERR_CAPI_CONFIG_INVALID;  // LCOV_EXCL_LINE
     }  // LCOV_EXCL_LINE
 }
@@ -343,7 +338,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg) {
     // The OutboundAccumulator is heap-allocated over the per-message arena; delete
     // it FIRST (its pmr members deallocate to arena_resource_, still alive here).
     // For inbound/clone handles, accumulator is nullptr — safe to delete nullptr.
-    delete h->accumulator;
+    delete h->accumulator;  // NOLINT(cppcoreguidelines-owning-memory)
     h->accumulator = nullptr;
 
     // Free the per-message arena AFTER the accumulator (resource before its backing
@@ -432,7 +427,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
         // new_delete (graceful degrade if arena is exhausted, never null).
         // Destruction order: fixpp_msg_destroy resets owned_view_ BEFORE
         // arena_resource_, so MessageView destructs into a live arena.
-        std::unique_ptr<fixpp_msg> clone{new fixpp_msg{}};
+        auto clone = std::make_unique<fixpp_msg>();
         constexpr std::size_t kCursorHeadroom = 4096;
         std::size_t clone_arena_size = frame_len + kCursorHeadroom;
         clone->arena_buf_ = std::make_unique<std::byte[]>(clone_arena_size);
@@ -716,8 +711,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
     auto& entries = h->accumulator->entries;
     // Erase the entry with `tag` if present (idempotent: absent → no-op).
-    auto it = std::find_if(entries.begin(), entries.end(),
-                           [tag](const AccumulatorEntry& e) { return e.tag == tag; });
+    auto it =
+        std::ranges::find_if(entries, [tag](const AccumulatorEntry& e) { return e.tag == tag; });
     if (it != entries.end()) {
         entries.erase(it);
     }
