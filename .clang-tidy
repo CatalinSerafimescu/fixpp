@@ -124,7 +124,10 @@ HeaderFilterRegex: "include/fixpp/.*|include/fix/.*"
 # #413: the C-ABI headers are C (no `enum class`) and byte-frozen by
 # tools/capi_freeze.sha256 (0->1 GA), so neither a fix nor an inline NOLINT can land
 # there -- both change the frozen bytes. Their diagnostics are unactionable by design.
-ExcludeHeaderFilterRegex: "include/fix/c_api(\\.h|/.*)"
+# Generated headers under <build>/_codegen/include/fixpp/ also match the filter above;
+# they are fixpp-codegen output with byte-identity baselines, so a finding there is
+# fixed in the emitter (tools/codegen/), never in the output.
+ExcludeHeaderFilterRegex: "include/fix/c_api(\\.h|/.*)|/_codegen/"
 
 CheckOptions:
   - key: modernize-use-default-member-init.UseAssignment
