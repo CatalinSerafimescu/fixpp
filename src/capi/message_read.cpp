@@ -458,10 +458,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_field_decimal(const fixpp_group_t
         [&byte_span, &scratch]() { return fixpp::decimal_t::parse(byte_span, &scratch); });
     if (!res) {  // LCOV_EXCL_LINE — trap_throw outer failure fires only on OOM (exception from
                  // parse); unreachable in unit tests
-        auto e = res.error();  // LCOV_EXCL_LINE
-        if (e == fixpp::core::error::decimal_precision_loss)
-            return FIXPP_ERR_DECIMAL_PRECISION_LOSS;  // LCOV_EXCL_LINE
-        return FIXPP_ERR_DECIMAL_INVALID;             // LCOV_EXCL_LINE
+        auto e = res.error();                                 // LCOV_EXCL_LINE
+        if (e == fixpp::core::error::decimal_precision_loss)  // LCOV_EXCL_LINE
+            return FIXPP_ERR_DECIMAL_PRECISION_LOSS;          // LCOV_EXCL_LINE
+        return FIXPP_ERR_DECIMAL_INVALID;                     // LCOV_EXCL_LINE
     }  // LCOV_EXCL_LINE
     if (!(*res)) {
         auto e = (*res).error();
