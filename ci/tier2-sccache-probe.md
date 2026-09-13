@@ -183,7 +183,7 @@ is a known rough edge; it is not in play here.
 
 ### 3. Launcher-vs-Conan ordering — made unrepresentable, not merely ordered
 
-`tier1.yml:392-404` records the trap: a **job-level** `CMAKE_{C,CXX}_COMPILER_LAUNCHER` makes
+`tier1.yml`'s coverage-job `env:` block records the trap: a **job-level** `CMAKE_{C,CXX}_COMPILER_LAUNCHER` makes
 `conan install --build=missing` run a dependency's compiler probe through the launcher, and a
 launcher not yet on `PATH` fails that probe with **exit 127**. `abseil/20260107.1` made it concrete
 on Tier 1; the same fix later landed on Tier 3 ([#177]).
@@ -255,7 +255,7 @@ own issue; it is deliberately not bundled here.
 reason: a key the two sides compute differently is silently a permanent MISS).
 
 Explicitly **not** the GHA backend that `mozilla-actions/sccache-action` enables by default.
-`tier2.yml:203-208` records that the `actions/cache` Conan step was *deliberately deleted* from this
+`tier2.yml`'s *"the `actions/cache` Conan step that used to sit HERE is gone"* note records it was *deliberately deleted* from this
 lane: it wrote ~790 MB per PR into the repo-wide **10 GB** Actions-cache pool, under a
 `refs/pull/<n>/merge` scope nothing can read once the PR closes. `SCCACHE_GHA_ENABLED=true` would put
 this lane straight back into that pool with a larger payload.
@@ -439,7 +439,7 @@ alongside it, or if `windows-msvc-release` acquired a debug-info flag it does no
 This exists because every claim sccache rests on is invisible from the outside. Moving this lane to
 the **Visual Studio generator** would silently drop the launcher — `CMAKE_<LANG>_COMPILER_LAUNCHER` is
 honored by Ninja/Makefiles and *ignored* by the VS generator, which is the only reason this is
-wireable here at all (`CMakePresets.json:9`). A preset change restoring `/Zi` would do the same. Both
+wireable here at all (`CMakePresets.json`'s `_base` pins `"generator": "Ninja"`). A preset change restoring `/Zi` would do the same. Both
 turn the cache into a 0%-hit no-op on a lane that still reports green.
 
 **Proven non-vacuous:** run against the *unfixed* tree (the local sandbox's `main` build), the three
