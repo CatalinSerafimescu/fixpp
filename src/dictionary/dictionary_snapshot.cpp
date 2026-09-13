@@ -40,7 +40,10 @@ std::shared_ptr<const table_view> shared_dictionary_view(
         return nullptr;
     }
     table_view const* p = &snap->view();
-    return {std::move(snap), p};  // aliasing ctor
+    // Spelled out on purpose: tools/check_dictionary_snapshot_exclusivity.sh (G2)
+    // counts this exact constructor spelling; a braced return hides the site.
+    // NOLINTNEXTLINE(modernize-return-braced-init-list)
+    return std::shared_ptr<const table_view>(std::move(snap), p);  // aliasing ctor
 }
 
 }  // namespace fixpp::dict
