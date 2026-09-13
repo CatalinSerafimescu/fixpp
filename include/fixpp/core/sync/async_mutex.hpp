@@ -915,6 +915,8 @@ enum class async_mutex_seam_phase : std::uint8_t {
     unlock_pre_grant_cas_fifo,
 };
 
+// A test seam is mutable by design: tests install a hook, production leaves it null.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 inline void (*async_mutex_test_seam)(async_mutex_seam_phase) noexcept = nullptr;
 #endif
 

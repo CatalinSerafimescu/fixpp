@@ -90,13 +90,13 @@ public:
     // constrained template SFINAE-rejects it. Explicit forwarding closes the
     // gap (seam 21 — survive erasure into any_io_executor for co_spawn).
     template <class U>
-    U query(asio::execution::context_as_t<U> /*prop*/) const noexcept {
+    [[nodiscard]] U query(asio::execution::context_as_t<U> /*prop*/) const noexcept {
         return asio::query(inner_, asio::execution::context_as<U>);
     }
 
     template <class Property>
         requires asio::can_query_v<asio::any_io_executor, Property>
-    auto query(Property p) const
+    [[nodiscard]] auto query(Property p) const
         noexcept(asio::is_nothrow_query_v<asio::any_io_executor, Property>) {
         return asio::query(inner_, p);
     }
