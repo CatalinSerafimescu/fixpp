@@ -439,7 +439,7 @@ TEST(EnumGoldenParity, MatchesQuickFixOnAssertedRowsAndRecordsDivergences) {
 
     for (auto const& row : rows) {
         SCOPED_TRACE(testing::Message() << "row " << row.id << " (" << row.note << ")");
-        const auto* const it =
+        auto const it =
             std::ranges::find_if(kRowSpecs, [&](RowSpec const& s) { return s.id == row.id; });
         ASSERT_NE(it, kRowSpecs.end()) << "no RowSpec for golden row id " << row.id;
 
