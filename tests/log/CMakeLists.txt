@@ -53,6 +53,13 @@ add_executable(log_alloc_test test_compile_cutoff_zero_alloc.cpp)
 target_compile_definitions(log_alloc_test PRIVATE
   FIXPP_LOG_MIN_LEVEL=3   # warn (Level::warn == 3)
 )
+# fixpp_log exports FIXPP_LOG_MIN_LEVEL PUBLIC, so this target sees both definitions
+# and the later (=3) wins -- the override IS the property under test. Say so, so
+# FIXPP_WERROR does not turn the expected redefinition into an error (#417).
+target_compile_options(log_alloc_test PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/wd4005>
+  $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wno-macro-redefined>
+)
 target_link_libraries(log_alloc_test PRIVATE
   fixpp_log
   GTest::gtest

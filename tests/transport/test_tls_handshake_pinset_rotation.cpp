@@ -122,11 +122,11 @@ TEST(PinsetRotationContract, TwoSnapshotsIndependent) {
     auto fp1 = make_fp(std::byte{0x11});
     auto fp2 = make_fp(std::byte{0x22});
 
-    ps.add(make_cert(fp1, "CN=cert1.example.com"));
+    ASSERT_TRUE(ps.add(make_cert(fp1, "CN=cert1.example.com")).has_value());
     auto s1 = ps.snapshot();
 
-    ps.add(make_cert(fp2, "CN=cert2.example.com"));
-    ps.remove(fp1);
+    ASSERT_TRUE(ps.add(make_cert(fp2, "CN=cert2.example.com")).has_value());
+    ASSERT_TRUE(ps.remove(fp1).has_value());
     auto s2 = ps.snapshot();
 
     ASSERT_NE(s1, nullptr);

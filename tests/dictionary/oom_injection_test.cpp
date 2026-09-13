@@ -60,7 +60,7 @@ TEST_F(OomInjection, EarlyAllocateFailsBecomesXmlOomError) {
     EXPECT_THROW(
         {
             try {
-                fixpp::dict::XmlLoader{}.load_from_string(xml_text_, &fail);
+                (void)fixpp::dict::XmlLoader{}.load_from_string(xml_text_, &fail);
             } catch (fixpp::dict::xml_oom_error const& e) {
                 EXPECT_EQ(e.code(), fixpp::core::error::dict_xml_oom);
                 throw;  // re-throw so EXPECT_THROW sees it
@@ -82,7 +82,7 @@ TEST_F(OomInjection, MidAllocateFailsBecomesXmlOomError) {
                                                    /*fail_on_call_n=*/10};
 
     try {
-        fixpp::dict::XmlLoader{}.load_from_string(xml_text_, &fail);
+        (void)fixpp::dict::XmlLoader{}.load_from_string(xml_text_, &fail);
         FAIL() << "expected dict::xml_oom_error but load_from_string returned";
     } catch (fixpp::dict::xml_oom_error const& e) {
         // AC-L9: correct typed exception.
@@ -110,7 +110,7 @@ TEST_F(OomInjection, NoFailMeansNoThrow) {
     fixpp::test_support::failing_pmr_resource fail{&upstream,
                                                    /*fail_on_call_n=*/0};
 
-    EXPECT_NO_THROW(fixpp::dict::XmlLoader{}.load_from_string(xml_text_, &fail));
+    EXPECT_NO_THROW((void)fixpp::dict::XmlLoader{}.load_from_string(xml_text_, &fail));
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ TEST_F(OomInjection, BadAllocDoesNotEscape) {
                                                    /*fail_on_call_n=*/1};
 
     try {
-        fixpp::dict::XmlLoader{}.load_from_string(xml_text_, &fail);
+        (void)fixpp::dict::XmlLoader{}.load_from_string(xml_text_, &fail);
         FAIL() << "expected throw";
     } catch (fixpp::dict::xml_oom_error const& e) {
         // AC-L9 + AC-P2 satisfied: PMR failure surfaced as xml_oom_error.
