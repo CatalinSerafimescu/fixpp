@@ -1410,7 +1410,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
             cb_r = invoke_callback_safe([&]() { engine_.application->onCreate(create_id); });
         }  // cs drops here — in_dispatch_ = false
         if (!cb_r) {
-            co_await close(fixpp::session::close_mode::terminal);
+            (void)co_await close(fixpp::session::close_mode::terminal);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
     }
@@ -2810,7 +2810,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // 019 T016: if onLogon threw, terminal-close the session.
             if (lifecycle_cb_threw_) {
                 lifecycle_cb_threw_ = false;
-                co_await close(fixpp::session::close_mode::terminal);
+                (void)co_await close(fixpp::session::close_mode::terminal);
                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
             }
             // 029 T010 / gate-b/r1 — PERSIST: acceptor Logon in-seq → durable advance.
@@ -2998,7 +2998,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
-                        co_await close(close_mode::terminal);
+                        (void)co_await close(close_mode::terminal);
                         co_return std::unexpected(cb_r.error());
                     }
                     if (!cb_r) {
@@ -3319,7 +3319,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 });
                             if (!cb_r) {
                                 if (cb_r.error() == fixpp::core::error::app_callback_threw) {
-                                    co_await close(close_mode::terminal);
+                                    (void)co_await close(close_mode::terminal);
                                     co_return std::unexpected(cb_r.error());
                                 }
                                 // fromApp reject on redeliver: drop (no BusinessMessageReject
@@ -3347,7 +3347,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                                  : engine_.application->fromApp(mv, sid);
                                 });
                             if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
-                                co_await close(close_mode::terminal);
+                                (void)co_await close(close_mode::terminal);
                                 co_return std::unexpected(cb_r.error());
                             }
                         }
@@ -3390,7 +3390,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 return engine_.application->fromAdmin(mv, sid);
                             });
                         if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
-                            co_await close(close_mode::terminal);
+                            (void)co_await close(close_mode::terminal);
                             co_return std::unexpected(cb_r.error());
                         }
                     }
@@ -3587,7 +3587,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         });
                     if (!cb_r) {
                         if (cb_r.error() == fixpp::core::error::app_callback_threw) {
-                            co_await close(close_mode::terminal);
+                            (void)co_await close(close_mode::terminal);
                             co_return std::unexpected(cb_r.error());
                         }
                         // fromAdmin reject → session Reject(35=3). (INV-4; D4)
@@ -3777,7 +3777,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
                     if (!cb_r) {
                         if (cb_r.error() == fixpp::core::error::app_callback_threw) {
-                            co_await close(close_mode::terminal);
+                            (void)co_await close(close_mode::terminal);
                             co_return std::unexpected(cb_r.error());
                         }
                         // fromApp reject → BusinessMessageReject(35=j). (D4; FR-005)
@@ -3813,7 +3813,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                     });
                                 if (!cb_r) {
                                     if (cb_r.error() == fixpp::core::error::app_callback_threw) {
-                                        co_await close(close_mode::terminal);
+                                        (void)co_await close(close_mode::terminal);
                                         co_return std::unexpected(
                                             fixpp::core::error::app_callback_threw);
                                     }
@@ -4257,7 +4257,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // 019 T016: if onLogon threw, terminal-close the session.
             if (lifecycle_cb_threw_) {
                 lifecycle_cb_threw_ = false;
-                co_await close(fixpp::session::close_mode::terminal);
+                (void)co_await close(fixpp::session::close_mode::terminal);
                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
             }
 
@@ -4795,7 +4795,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         });
         if (!cb_r) {
             if (cb_r.error() == fixpp::core::error::app_callback_threw) {
-                co_await close(close_mode::terminal);
+                (void)co_await close(close_mode::terminal);
                 co_return std::unexpected(cb_r.error());
             }
             // toApp veto (app_do_not_send) or other error → drop, return error.
